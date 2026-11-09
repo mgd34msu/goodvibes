@@ -2264,7 +2264,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.telegram.webhookSecret",
     "type": "string",
     "default": "",
-    "description": "Telegram webhook secret token used to verify inbound callbacks"
+    "description": "Manual Telegram webhook secret for deployments without managed registration. The native daemon automatically manages its own webhook registration credential."
   },
   {
     "key": "surfaces.telegram.defaultChatId",
@@ -3539,7 +3539,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "update.releasesUrl",
     "type": "string",
     "default": "https://github.com/mgd34msu/goodvibes/releases/latest",
-    "description": "GitHub releases/latest URL for the daemon complete native cohort and source manifest. Exact historical default feeds migrate to goodvibes-jev; explicit custom feeds remain unchanged. A daemon update does not replace sibling product executables"
+    "description": "GitHub releases/latest URL for a complete GoodVibes monorepo suite. Exact historical default feeds migrate to goodvibes; explicit custom feeds remain unchanged. Native suite updates replace installed sibling programs and configured release WebUI/browser support together"
   },
   {
     "key": "update.rollbackAfterFailedStarts",
@@ -3829,6 +3829,19 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "validationHint": "integer in [1000, 3600000]"
   },
   {
+    "key": "judgment.volumeMonitor",
+    "type": "object",
+    "default": {
+      "budgets": [],
+      "intervalMs": 60000,
+      "windowMs": 3600000,
+      "limit": 10000,
+      "enabled": false
+    },
+    "description": "Local decision call-volume alerts. Set enabled:true and budgets:[{name:\"All decisions\",maxLogicalDecisions:1000,maxWireAttempts:2000}]. Optional battery/site restrict each budget; windowMs defaults to one hour, intervalMs to one minute, limit to 10000 log entries. Alerts report usage without calling models or stopping work. Disabled settings retain the optional GOODVIBES_JUDGMENT_MONITOR file override.",
+    "validationHint": "object with enabled and up to 100 budgets; enabled monitoring needs at least one budget"
+  },
+  {
     "key": "judgment.policy",
     "type": "enum",
     "default": "Default - On",
@@ -3843,8 +3856,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "judgment.endpoint",
     "type": "string",
     "default": "",
-    "description": "System One endpoint the engine asks for judgments; empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model",
-    "validationHint": "empty, or an http(s) URL"
+    "description": "System One endpoint the engine asks for judgments; empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model. Choose credential references explicitly when changing destinations; embedded credentials, query strings and fragments are refused",
+    "validationHint": "empty, or an http(s) URL without embedded credentials, query or fragment"
   },
   {
     "key": "judgment.keySource",
@@ -4144,7 +4157,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "tools.outputSchemaFingerprints",
     "type": "boolean",
     "default": false,
-    "description": "Append _meta.outputSchemaFingerprint (SHA-256 of sorted result key names) and _meta.schemaShapeId to results from the find, analyze, and inspect tools, enabling schema drift detection. Default off."
+    "description": "Append _meta.outputSchemaFingerprint (exact sorted result key names) and _meta.schemaShapeId to results from the find, analyze, and inspect tools, enabling schema drift detection. Default off."
   },
   {
     "key": "telemetry.otelMode",
@@ -4837,7 +4850,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "output-schema-fingerprint",
     "name": "Output Schema Fingerprints",
-    "description": "Appends `_meta.outputSchemaFingerprint` (SHA-256 of sorted result key names) and `_meta.schemaShapeId` (canonical mode identifier) to tool results from the find, analyze, and inspect tools. Enables schema drift detection and diagnostic fingerprint surfaces. Disable to omit fingerprint metadata.",
+    "description": "Appends `_meta.outputSchemaFingerprint` (exact sorted result key names) and `_meta.schemaShapeId` (canonical mode identifier) to tool results from the find, analyze, and inspect tools. Enables schema drift detection and diagnostic fingerprint surfaces. Disable to omit fingerprint metadata.",
     "domain": "tools",
     "enablement": {
       "key": "tools.outputSchemaFingerprints",

@@ -51,7 +51,8 @@
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                 },
                 "fileIndex": {
                   "type": "integer",
@@ -124,7 +125,8 @@
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                 },
                 "fileIndex": {
                   "type": "integer",
@@ -198,9 +200,6 @@
             "type": "string"
           }
         },
-        "digest": {
-          "type": "string"
-        },
         "source": {
           "type": "string",
           "enum": [
@@ -217,7 +216,6 @@
       },
       "required": [
         "paths",
-        "digest",
         "source",
         "errors"
       ],
@@ -2567,111 +2565,272 @@
       ]
     },
     "inputSnapshot": {
-      "type": "object",
-      "properties": {
-        "version": {
-          "const": 1
-        },
-        "id": {
-          "type": "string"
-        },
-        "sourceRoot": {
-          "type": "string"
-        },
-        "sourceIdentity": {
-          "type": "string"
-        },
-        "gitIdentity": {
-          "type": "string"
-        },
-        "ownerHead": {
-          "type": "string"
-        },
-        "ownerRef": {
-          "type": "string"
-        },
-        "indexFingerprint": {
-          "type": "string"
-        },
-        "inputTree": {
-          "type": "string"
-        },
-        "inputCommit": {
-          "type": "string"
-        },
-        "capturedAt": {
-          "type": "number"
-        },
-        "dirty": {
-          "type": "boolean"
-        },
-        "exclusions": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "files": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "file",
-                  "symlink",
-                  "missing"
-                ]
-              },
-              "mode": {
-                "type": "string",
-                "enum": [
-                  "100644",
-                  "100755",
-                  "120000",
-                  "0"
-                ]
-              },
-              "oid": {
-                "type": "string"
-              },
-              "digest": {
-                "type": "string"
-              },
-              "identity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "id": {
+              "type": "string"
+            },
+            "sourceRoot": {
+              "type": "string"
+            },
+            "sourceIdentity": {
+              "type": "string"
+            },
+            "gitIdentity": {
+              "type": "string"
+            },
+            "ownerHead": {
+              "type": "string"
+            },
+            "ownerRef": {
+              "type": "string"
+            },
+            "indexFingerprint": {
+              "type": "string"
+            },
+            "inputTree": {
+              "type": "string"
+            },
+            "inputCommit": {
+              "type": "string"
+            },
+            "capturedAt": {
+              "type": "number"
+            },
+            "dirty": {
+              "type": "boolean"
+            },
+            "exclusions": {
+              "type": "array",
+              "items": {
                 "type": "string"
               }
             },
-            "required": [
-              "path",
-              "kind",
-              "mode"
-            ],
-            "additionalProperties": false
-          }
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "file",
+                      "symlink",
+                      "missing"
+                    ]
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "100644",
+                      "100755",
+                      "120000",
+                      "0"
+                    ]
+                  },
+                  "oid": {
+                    "type": "string"
+                  },
+                  "identity": {
+                    "type": "string"
+                  },
+                  "digest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path",
+                  "kind",
+                  "mode"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "version",
+            "id",
+            "sourceRoot",
+            "sourceIdentity",
+            "gitIdentity",
+            "ownerHead",
+            "ownerRef",
+            "indexFingerprint",
+            "inputTree",
+            "inputCommit",
+            "capturedAt",
+            "dirty",
+            "exclusions",
+            "files"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 2
+            },
+            "id": {
+              "type": "string"
+            },
+            "sourceRoot": {
+              "type": "string"
+            },
+            "sourceIdentity": {
+              "type": "string"
+            },
+            "gitIdentity": {
+              "type": "string"
+            },
+            "ownerHead": {
+              "type": "string"
+            },
+            "ownerRef": {
+              "type": "string"
+            },
+            "indexFingerprint": {
+              "type": "string"
+            },
+            "inputTree": {
+              "type": "string"
+            },
+            "inputCommit": {
+              "type": "string"
+            },
+            "capturedAt": {
+              "type": "number"
+            },
+            "dirty": {
+              "type": "boolean"
+            },
+            "exclusions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "missing"
+                      },
+                      "mode": {
+                        "const": "0"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "kind",
+                      "mode"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "file"
+                      },
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "100644",
+                          "100755"
+                        ]
+                      },
+                      "oid": {
+                        "type": "string"
+                      },
+                      "identity": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "kind",
+                      "mode",
+                      "oid",
+                      "identity"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "symlink"
+                      },
+                      "mode": {
+                        "const": "120000"
+                      },
+                      "oid": {
+                        "type": "string"
+                      },
+                      "identity": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "kind",
+                      "mode",
+                      "oid",
+                      "identity"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "version",
+            "id",
+            "sourceRoot",
+            "sourceIdentity",
+            "gitIdentity",
+            "ownerHead",
+            "ownerRef",
+            "indexFingerprint",
+            "inputTree",
+            "inputCommit",
+            "capturedAt",
+            "dirty",
+            "exclusions",
+            "files"
+          ],
+          "additionalProperties": false
         }
-      },
-      "required": [
-        "version",
-        "id",
-        "sourceRoot",
-        "sourceIdentity",
-        "gitIdentity",
-        "ownerHead",
-        "ownerRef",
-        "indexFingerprint",
-        "inputTree",
-        "inputCommit",
-        "capturedAt",
-        "dirty",
-        "exclusions",
-        "files"
-      ],
-      "additionalProperties": false
+      ]
     },
     "id": {
       "type": "string"
@@ -2748,6 +2907,12 @@
     "baseline": {
       "type": "object",
       "properties": {
+        "version": {
+          "type": "number",
+          "enum": [
+            2
+          ]
+        },
         "head": {
           "anyOf": [
             {
@@ -3653,20 +3818,40 @@
                 "reviewedFiles": {
                   "type": "array",
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "path": {
-                        "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "sha256": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "sha256"
+                        ],
+                        "additionalProperties": false
                       },
-                      "sha256": {
-                        "type": "string"
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "observationId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "observationId"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "path",
-                      "sha256"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 }
               },
@@ -3677,8 +3862,7 @@
                 "goal",
                 "quality",
                 "result",
-                "decisionIds",
-                "evidenceDigest"
+                "decisionIds"
               ],
               "additionalProperties": false
             }
@@ -3689,6 +3873,12 @@
           "baseline": {
             "type": "object",
             "properties": {
+              "version": {
+                "type": "number",
+                "enum": [
+                  2
+                ]
+              },
               "head": {
                 "anyOf": [
                   {
@@ -4500,20 +4690,40 @@
                 "reviewedFiles": {
                   "type": "array",
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "path": {
-                        "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "sha256": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "sha256"
+                        ],
+                        "additionalProperties": false
                       },
-                      "sha256": {
-                        "type": "string"
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "observationId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "observationId"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "path",
-                      "sha256"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 }
               },
@@ -4524,8 +4734,7 @@
                 "goal",
                 "quality",
                 "result",
-                "decisionIds",
-                "evidenceDigest"
+                "decisionIds"
               ],
               "additionalProperties": false
             }
@@ -4613,6 +4822,12 @@
           "baseline": {
             "type": "object",
             "properties": {
+              "version": {
+                "type": "number",
+                "enum": [
+                  2
+                ]
+              },
               "head": {
                 "anyOf": [
                   {
@@ -5762,20 +5977,40 @@
                       "reviewedFiles": {
                         "type": "array",
                         "items": {
-                          "type": "object",
-                          "properties": {
-                            "path": {
-                              "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                },
+                                "sha256": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "sha256"
+                              ],
+                              "additionalProperties": false
                             },
-                            "sha256": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                },
+                                "observationId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "observationId"
+                              ],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": [
-                            "path",
-                            "sha256"
-                          ],
-                          "additionalProperties": false
+                          ]
                         }
                       }
                     },
@@ -5786,8 +6021,7 @@
                       "goal",
                       "quality",
                       "result",
-                      "decisionIds",
-                      "evidenceDigest"
+                      "decisionIds"
                     ],
                     "additionalProperties": false
                   }
@@ -5875,6 +6109,12 @@
                 "baseline": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "head": {
                       "anyOf": [
                         {
@@ -7024,20 +7264,40 @@
           "reviewedFiles": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "path": {
-                  "type": "string"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "sha256": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "sha256"
+                  ],
+                  "additionalProperties": false
                 },
-                "sha256": {
-                  "type": "string"
+                {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "observationId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "observationId"
+                  ],
+                  "additionalProperties": false
                 }
-              },
-              "required": [
-                "path",
-                "sha256"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
@@ -7048,8 +7308,7 @@
           "goal",
           "quality",
           "result",
-          "decisionIds",
-          "evidenceDigest"
+          "decisionIds"
         ],
         "additionalProperties": false
       }

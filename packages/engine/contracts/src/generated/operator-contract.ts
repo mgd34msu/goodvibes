@@ -4469,7 +4469,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "kind",
                 "mimeType",
                 "sizeBytes",
-                "sha256",
                 "createdAt",
                 "metadata"
               ],
@@ -4594,7 +4593,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "kind",
                 "mimeType",
                 "sizeBytes",
-                "sha256",
                 "createdAt",
                 "metadata"
               ],
@@ -4705,7 +4703,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "kind",
                   "mimeType",
                   "sizeBytes",
-                  "sha256",
                   "createdAt",
                   "metadata"
                 ],
@@ -4871,7 +4868,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "items": {
                 "type": "object",
                 "properties": {
-                  "tokenFingerprint": {
+                  "id": {
                     "type": "string"
                   },
                   "username": {
@@ -4882,7 +4879,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   }
                 },
                 "required": [
-                  "tokenFingerprint",
+                  "id",
                   "username",
                   "expiresAt"
                 ],
@@ -6340,6 +6337,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           },
                           "staggerMs": {
                             "type": "number"
+                          },
+                          "staggerPhase": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
                           }
                         },
                         "required": [
@@ -7082,6 +7084,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     },
                     "staggerMs": {
                       "type": "number"
+                    },
+                    "staggerPhase": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4294967295
                     }
                   },
                   "required": [
@@ -8093,6 +8100,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           },
                           "staggerMs": {
                             "type": "number"
+                          },
+                          "staggerPhase": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
                           }
                         },
                         "required": [
@@ -8973,6 +8985,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     },
                     "staggerMs": {
                       "type": "number"
+                    },
+                    "staggerPhase": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4294967295
                     }
                   },
                   "required": [
@@ -9474,6 +9491,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     },
                     "staggerMs": {
                       "type": "number"
+                    },
+                    "staggerPhase": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4294967295
                     }
                   },
                   "required": [
@@ -14836,6 +14858,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     },
                     "staggerMs": {
                       "type": "number"
+                    },
+                    "staggerPhase": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4294967295
                     }
                   },
                   "required": [
@@ -15828,6 +15855,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           },
                           "staggerMs": {
                             "type": "number"
+                          },
+                          "staggerPhase": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
                           }
                         },
                         "required": [
@@ -23191,6 +23223,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "outputSchema": {
           "type": "object",
           "properties": {
+            "wireReference": {
+              "type": "string"
+            },
             "version": {
               "type": "number"
             },
@@ -23282,6 +23317,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "items": {
                 "type": "object",
                 "properties": {
+                  "wireReference": {
+                    "type": "string"
+                  },
                   "version": {
                     "type": "number"
                   },
@@ -23372,6 +23410,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
+            "wireReference": {
+              "type": "string"
+            },
             "version": {
               "type": "number"
             },
@@ -23440,6 +23481,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "draft": {
               "type": "object",
               "properties": {
+                "wireReference": {
+                  "type": "string"
+                },
                 "version": {
                   "type": "number"
                 },
@@ -26927,7 +26971,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 },
                 "nativeRevision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                 },
                 "unifiedDiff": {
                   "type": "string"
@@ -28471,6 +28516,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "content": {
                     "type": "string"
                   },
+                  "contentRevision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
                   "attachments": {
                     "type": "array",
                     "items": {
@@ -28549,7 +28599,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "kind",
                         "mimeType",
                         "sizeBytes",
-                        "sha256",
                         "createdAt",
                         "metadata"
                       ],
@@ -29184,6 +29233,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "content": {
                     "type": "string"
                   },
+                  "contentRevision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
                   "attachments": {
                     "type": "array",
                     "items": {
@@ -29262,7 +29316,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "kind",
                         "mimeType",
                         "sizeBytes",
-                        "sha256",
                         "createdAt",
                         "metadata"
                       ],
@@ -30609,7 +30662,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -30682,7 +30736,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -30756,9 +30811,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string"
                   }
                 },
-                "digest": {
-                  "type": "string"
-                },
                 "source": {
                   "type": "string",
                   "enum": [
@@ -30775,7 +30827,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               },
               "required": [
                 "paths",
-                "digest",
                 "source",
                 "errors"
               ],
@@ -33125,111 +33176,272 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               ]
             },
             "inputSnapshot": {
-              "type": "object",
-              "properties": {
-                "version": {
-                  "const": 1
-                },
-                "id": {
-                  "type": "string"
-                },
-                "sourceRoot": {
-                  "type": "string"
-                },
-                "sourceIdentity": {
-                  "type": "string"
-                },
-                "gitIdentity": {
-                  "type": "string"
-                },
-                "ownerHead": {
-                  "type": "string"
-                },
-                "ownerRef": {
-                  "type": "string"
-                },
-                "indexFingerprint": {
-                  "type": "string"
-                },
-                "inputTree": {
-                  "type": "string"
-                },
-                "inputCommit": {
-                  "type": "string"
-                },
-                "capturedAt": {
-                  "type": "number"
-                },
-                "dirty": {
-                  "type": "boolean"
-                },
-                "exclusions": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "files": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "path": {
-                        "type": "string"
-                      },
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "file",
-                          "symlink",
-                          "missing"
-                        ]
-                      },
-                      "mode": {
-                        "type": "string",
-                        "enum": [
-                          "100644",
-                          "100755",
-                          "120000",
-                          "0"
-                        ]
-                      },
-                      "oid": {
-                        "type": "string"
-                      },
-                      "digest": {
-                        "type": "string"
-                      },
-                      "identity": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "const": 1
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "sourceRoot": {
+                      "type": "string"
+                    },
+                    "sourceIdentity": {
+                      "type": "string"
+                    },
+                    "gitIdentity": {
+                      "type": "string"
+                    },
+                    "ownerHead": {
+                      "type": "string"
+                    },
+                    "ownerRef": {
+                      "type": "string"
+                    },
+                    "indexFingerprint": {
+                      "type": "string"
+                    },
+                    "inputTree": {
+                      "type": "string"
+                    },
+                    "inputCommit": {
+                      "type": "string"
+                    },
+                    "capturedAt": {
+                      "type": "number"
+                    },
+                    "dirty": {
+                      "type": "boolean"
+                    },
+                    "exclusions": {
+                      "type": "array",
+                      "items": {
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "path",
-                      "kind",
-                      "mode"
-                    ],
-                    "additionalProperties": false
-                  }
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "file",
+                              "symlink",
+                              "missing"
+                            ]
+                          },
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "100644",
+                              "100755",
+                              "120000",
+                              "0"
+                            ]
+                          },
+                          "oid": {
+                            "type": "string"
+                          },
+                          "identity": {
+                            "type": "string"
+                          },
+                          "digest": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "kind",
+                          "mode"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "id",
+                    "sourceRoot",
+                    "sourceIdentity",
+                    "gitIdentity",
+                    "ownerHead",
+                    "ownerRef",
+                    "indexFingerprint",
+                    "inputTree",
+                    "inputCommit",
+                    "capturedAt",
+                    "dirty",
+                    "exclusions",
+                    "files"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "const": 2
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "sourceRoot": {
+                      "type": "string"
+                    },
+                    "sourceIdentity": {
+                      "type": "string"
+                    },
+                    "gitIdentity": {
+                      "type": "string"
+                    },
+                    "ownerHead": {
+                      "type": "string"
+                    },
+                    "ownerRef": {
+                      "type": "string"
+                    },
+                    "indexFingerprint": {
+                      "type": "string"
+                    },
+                    "inputTree": {
+                      "type": "string"
+                    },
+                    "inputCommit": {
+                      "type": "string"
+                    },
+                    "capturedAt": {
+                      "type": "number"
+                    },
+                    "dirty": {
+                      "type": "boolean"
+                    },
+                    "exclusions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "const": "missing"
+                              },
+                              "mode": {
+                                "const": "0"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "kind",
+                              "mode"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "const": "file"
+                              },
+                              "mode": {
+                                "type": "string",
+                                "enum": [
+                                  "100644",
+                                  "100755"
+                                ]
+                              },
+                              "oid": {
+                                "type": "string"
+                              },
+                              "identity": {
+                                "type": "string"
+                              },
+                              "digest": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "kind",
+                              "mode",
+                              "oid",
+                              "identity"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "const": "symlink"
+                              },
+                              "mode": {
+                                "const": "120000"
+                              },
+                              "oid": {
+                                "type": "string"
+                              },
+                              "identity": {
+                                "type": "string"
+                              },
+                              "digest": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "kind",
+                              "mode",
+                              "oid",
+                              "identity"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "id",
+                    "sourceRoot",
+                    "sourceIdentity",
+                    "gitIdentity",
+                    "ownerHead",
+                    "ownerRef",
+                    "indexFingerprint",
+                    "inputTree",
+                    "inputCommit",
+                    "capturedAt",
+                    "dirty",
+                    "exclusions",
+                    "files"
+                  ],
+                  "additionalProperties": false
                 }
-              },
-              "required": [
-                "version",
-                "id",
-                "sourceRoot",
-                "sourceIdentity",
-                "gitIdentity",
-                "ownerHead",
-                "ownerRef",
-                "indexFingerprint",
-                "inputTree",
-                "inputCommit",
-                "capturedAt",
-                "dirty",
-                "exclusions",
-                "files"
-              ],
-              "additionalProperties": false
+              ]
             },
             "id": {
               "type": "string"
@@ -33306,6 +33518,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "baseline": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "head": {
                   "anyOf": [
                     {
@@ -34211,20 +34429,40 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "reviewedFiles": {
                           "type": "array",
                           "items": {
-                            "type": "object",
-                            "properties": {
-                              "path": {
-                                "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "type": "string"
+                                  },
+                                  "sha256": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "path",
+                                  "sha256"
+                                ],
+                                "additionalProperties": false
                               },
-                              "sha256": {
-                                "type": "string"
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "type": "string"
+                                  },
+                                  "observationId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "path",
+                                  "observationId"
+                                ],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": [
-                              "path",
-                              "sha256"
-                            ],
-                            "additionalProperties": false
+                            ]
                           }
                         }
                       },
@@ -34235,8 +34473,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "goal",
                         "quality",
                         "result",
-                        "decisionIds",
-                        "evidenceDigest"
+                        "decisionIds"
                       ],
                       "additionalProperties": false
                     }
@@ -34247,6 +34484,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "baseline": {
                     "type": "object",
                     "properties": {
+                      "version": {
+                        "type": "number",
+                        "enum": [
+                          2
+                        ]
+                      },
                       "head": {
                         "anyOf": [
                           {
@@ -35058,20 +35301,40 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "reviewedFiles": {
                           "type": "array",
                           "items": {
-                            "type": "object",
-                            "properties": {
-                              "path": {
-                                "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "type": "string"
+                                  },
+                                  "sha256": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "path",
+                                  "sha256"
+                                ],
+                                "additionalProperties": false
                               },
-                              "sha256": {
-                                "type": "string"
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "type": "string"
+                                  },
+                                  "observationId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "path",
+                                  "observationId"
+                                ],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": [
-                              "path",
-                              "sha256"
-                            ],
-                            "additionalProperties": false
+                            ]
                           }
                         }
                       },
@@ -35082,8 +35345,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "goal",
                         "quality",
                         "result",
-                        "decisionIds",
-                        "evidenceDigest"
+                        "decisionIds"
                       ],
                       "additionalProperties": false
                     }
@@ -35171,6 +35433,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "baseline": {
                     "type": "object",
                     "properties": {
+                      "version": {
+                        "type": "number",
+                        "enum": [
+                          2
+                        ]
+                      },
                       "head": {
                         "anyOf": [
                           {
@@ -36320,20 +36588,40 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "reviewedFiles": {
                                 "type": "array",
                                 "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "path": {
-                                      "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "path": {
+                                          "type": "string"
+                                        },
+                                        "sha256": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "path",
+                                        "sha256"
+                                      ],
+                                      "additionalProperties": false
                                     },
-                                    "sha256": {
-                                      "type": "string"
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "path": {
+                                          "type": "string"
+                                        },
+                                        "observationId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "path",
+                                        "observationId"
+                                      ],
+                                      "additionalProperties": false
                                     }
-                                  },
-                                  "required": [
-                                    "path",
-                                    "sha256"
-                                  ],
-                                  "additionalProperties": false
+                                  ]
                                 }
                               }
                             },
@@ -36344,8 +36632,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "goal",
                               "quality",
                               "result",
-                              "decisionIds",
-                              "evidenceDigest"
+                              "decisionIds"
                             ],
                             "additionalProperties": false
                           }
@@ -36433,6 +36720,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "baseline": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "head": {
                               "anyOf": [
                                 {
@@ -37582,20 +37875,40 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "reviewedFiles": {
                     "type": "array",
                     "items": {
-                      "type": "object",
-                      "properties": {
-                        "path": {
-                          "type": "string"
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "sha256": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "sha256"
+                          ],
+                          "additionalProperties": false
                         },
-                        "sha256": {
-                          "type": "string"
+                        {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "observationId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "observationId"
+                          ],
+                          "additionalProperties": false
                         }
-                      },
-                      "required": [
-                        "path",
-                        "sha256"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   }
                 },
@@ -37606,8 +37919,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "goal",
                   "quality",
                   "result",
-                  "decisionIds",
-                  "evidenceDigest"
+                  "decisionIds"
                 ],
                 "additionalProperties": false
               }
@@ -38105,7 +38417,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               },
                               "revision": {
                                 "type": "string",
-                                "pattern": "^[a-f0-9]{64}$"
+                                "maxLength": 200,
+                                "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                               },
                               "fileIndex": {
                                 "type": "integer",
@@ -38178,7 +38491,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               },
                               "revision": {
                                 "type": "string",
-                                "pattern": "^[a-f0-9]{64}$"
+                                "maxLength": 200,
+                                "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                               },
                               "fileIndex": {
                                 "type": "integer",
@@ -38252,9 +38566,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "string"
                         }
                       },
-                      "digest": {
-                        "type": "string"
-                      },
                       "source": {
                         "type": "string",
                         "enum": [
@@ -38271,7 +38582,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     },
                     "required": [
                       "paths",
-                      "digest",
                       "source",
                       "errors"
                     ],
@@ -40621,111 +40931,272 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     ]
                   },
                   "inputSnapshot": {
-                    "type": "object",
-                    "properties": {
-                      "version": {
-                        "const": 1
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "sourceRoot": {
-                        "type": "string"
-                      },
-                      "sourceIdentity": {
-                        "type": "string"
-                      },
-                      "gitIdentity": {
-                        "type": "string"
-                      },
-                      "ownerHead": {
-                        "type": "string"
-                      },
-                      "ownerRef": {
-                        "type": "string"
-                      },
-                      "indexFingerprint": {
-                        "type": "string"
-                      },
-                      "inputTree": {
-                        "type": "string"
-                      },
-                      "inputCommit": {
-                        "type": "string"
-                      },
-                      "capturedAt": {
-                        "type": "number"
-                      },
-                      "dirty": {
-                        "type": "boolean"
-                      },
-                      "exclusions": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "files": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "path": {
-                              "type": "string"
-                            },
-                            "kind": {
-                              "type": "string",
-                              "enum": [
-                                "file",
-                                "symlink",
-                                "missing"
-                              ]
-                            },
-                            "mode": {
-                              "type": "string",
-                              "enum": [
-                                "100644",
-                                "100755",
-                                "120000",
-                                "0"
-                              ]
-                            },
-                            "oid": {
-                              "type": "string"
-                            },
-                            "digest": {
-                              "type": "string"
-                            },
-                            "identity": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "version": {
+                            "const": 1
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "sourceRoot": {
+                            "type": "string"
+                          },
+                          "sourceIdentity": {
+                            "type": "string"
+                          },
+                          "gitIdentity": {
+                            "type": "string"
+                          },
+                          "ownerHead": {
+                            "type": "string"
+                          },
+                          "ownerRef": {
+                            "type": "string"
+                          },
+                          "indexFingerprint": {
+                            "type": "string"
+                          },
+                          "inputTree": {
+                            "type": "string"
+                          },
+                          "inputCommit": {
+                            "type": "string"
+                          },
+                          "capturedAt": {
+                            "type": "number"
+                          },
+                          "dirty": {
+                            "type": "boolean"
+                          },
+                          "exclusions": {
+                            "type": "array",
+                            "items": {
                               "type": "string"
                             }
                           },
-                          "required": [
-                            "path",
-                            "kind",
-                            "mode"
-                          ],
-                          "additionalProperties": false
-                        }
+                          "files": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "file",
+                                    "symlink",
+                                    "missing"
+                                  ]
+                                },
+                                "mode": {
+                                  "type": "string",
+                                  "enum": [
+                                    "100644",
+                                    "100755",
+                                    "120000",
+                                    "0"
+                                  ]
+                                },
+                                "oid": {
+                                  "type": "string"
+                                },
+                                "identity": {
+                                  "type": "string"
+                                },
+                                "digest": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "kind",
+                                "mode"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "version",
+                          "id",
+                          "sourceRoot",
+                          "sourceIdentity",
+                          "gitIdentity",
+                          "ownerHead",
+                          "ownerRef",
+                          "indexFingerprint",
+                          "inputTree",
+                          "inputCommit",
+                          "capturedAt",
+                          "dirty",
+                          "exclusions",
+                          "files"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "version": {
+                            "const": 2
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "sourceRoot": {
+                            "type": "string"
+                          },
+                          "sourceIdentity": {
+                            "type": "string"
+                          },
+                          "gitIdentity": {
+                            "type": "string"
+                          },
+                          "ownerHead": {
+                            "type": "string"
+                          },
+                          "ownerRef": {
+                            "type": "string"
+                          },
+                          "indexFingerprint": {
+                            "type": "string"
+                          },
+                          "inputTree": {
+                            "type": "string"
+                          },
+                          "inputCommit": {
+                            "type": "string"
+                          },
+                          "capturedAt": {
+                            "type": "number"
+                          },
+                          "dirty": {
+                            "type": "boolean"
+                          },
+                          "exclusions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "files": {
+                            "type": "array",
+                            "items": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "path": {
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "const": "missing"
+                                    },
+                                    "mode": {
+                                      "const": "0"
+                                    }
+                                  },
+                                  "required": [
+                                    "path",
+                                    "kind",
+                                    "mode"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "path": {
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "const": "file"
+                                    },
+                                    "mode": {
+                                      "type": "string",
+                                      "enum": [
+                                        "100644",
+                                        "100755"
+                                      ]
+                                    },
+                                    "oid": {
+                                      "type": "string"
+                                    },
+                                    "identity": {
+                                      "type": "string"
+                                    },
+                                    "digest": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "path",
+                                    "kind",
+                                    "mode",
+                                    "oid",
+                                    "identity"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "path": {
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "const": "symlink"
+                                    },
+                                    "mode": {
+                                      "const": "120000"
+                                    },
+                                    "oid": {
+                                      "type": "string"
+                                    },
+                                    "identity": {
+                                      "type": "string"
+                                    },
+                                    "digest": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "path",
+                                    "kind",
+                                    "mode",
+                                    "oid",
+                                    "identity"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "version",
+                          "id",
+                          "sourceRoot",
+                          "sourceIdentity",
+                          "gitIdentity",
+                          "ownerHead",
+                          "ownerRef",
+                          "indexFingerprint",
+                          "inputTree",
+                          "inputCommit",
+                          "capturedAt",
+                          "dirty",
+                          "exclusions",
+                          "files"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "version",
-                      "id",
-                      "sourceRoot",
-                      "sourceIdentity",
-                      "gitIdentity",
-                      "ownerHead",
-                      "ownerRef",
-                      "indexFingerprint",
-                      "inputTree",
-                      "inputCommit",
-                      "capturedAt",
-                      "dirty",
-                      "exclusions",
-                      "files"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   "id": {
                     "type": "string"
@@ -40802,6 +41273,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "baseline": {
                     "type": "object",
                     "properties": {
+                      "version": {
+                        "type": "number",
+                        "enum": [
+                          2
+                        ]
+                      },
                       "head": {
                         "anyOf": [
                           {
@@ -41707,20 +42184,40 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "reviewedFiles": {
                                 "type": "array",
                                 "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "path": {
-                                      "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "path": {
+                                          "type": "string"
+                                        },
+                                        "sha256": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "path",
+                                        "sha256"
+                                      ],
+                                      "additionalProperties": false
                                     },
-                                    "sha256": {
-                                      "type": "string"
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "path": {
+                                          "type": "string"
+                                        },
+                                        "observationId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "path",
+                                        "observationId"
+                                      ],
+                                      "additionalProperties": false
                                     }
-                                  },
-                                  "required": [
-                                    "path",
-                                    "sha256"
-                                  ],
-                                  "additionalProperties": false
+                                  ]
                                 }
                               }
                             },
@@ -41731,8 +42228,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "goal",
                               "quality",
                               "result",
-                              "decisionIds",
-                              "evidenceDigest"
+                              "decisionIds"
                             ],
                             "additionalProperties": false
                           }
@@ -41743,6 +42239,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "baseline": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "head": {
                               "anyOf": [
                                 {
@@ -42554,20 +43056,40 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "reviewedFiles": {
                                 "type": "array",
                                 "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "path": {
-                                      "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "path": {
+                                          "type": "string"
+                                        },
+                                        "sha256": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "path",
+                                        "sha256"
+                                      ],
+                                      "additionalProperties": false
                                     },
-                                    "sha256": {
-                                      "type": "string"
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "path": {
+                                          "type": "string"
+                                        },
+                                        "observationId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "path",
+                                        "observationId"
+                                      ],
+                                      "additionalProperties": false
                                     }
-                                  },
-                                  "required": [
-                                    "path",
-                                    "sha256"
-                                  ],
-                                  "additionalProperties": false
+                                  ]
                                 }
                               }
                             },
@@ -42578,8 +43100,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "goal",
                               "quality",
                               "result",
-                              "decisionIds",
-                              "evidenceDigest"
+                              "decisionIds"
                             ],
                             "additionalProperties": false
                           }
@@ -42667,6 +43188,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "baseline": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "head": {
                               "anyOf": [
                                 {
@@ -43816,20 +44343,40 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "reviewedFiles": {
                                       "type": "array",
                                       "items": {
-                                        "type": "object",
-                                        "properties": {
-                                          "path": {
-                                            "type": "string"
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "path": {
+                                                "type": "string"
+                                              },
+                                              "sha256": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "path",
+                                              "sha256"
+                                            ],
+                                            "additionalProperties": false
                                           },
-                                          "sha256": {
-                                            "type": "string"
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "path": {
+                                                "type": "string"
+                                              },
+                                              "observationId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "path",
+                                              "observationId"
+                                            ],
+                                            "additionalProperties": false
                                           }
-                                        },
-                                        "required": [
-                                          "path",
-                                          "sha256"
-                                        ],
-                                        "additionalProperties": false
+                                        ]
                                       }
                                     }
                                   },
@@ -43840,8 +44387,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "goal",
                                     "quality",
                                     "result",
-                                    "decisionIds",
-                                    "evidenceDigest"
+                                    "decisionIds"
                                   ],
                                   "additionalProperties": false
                                 }
@@ -43929,6 +44475,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "baseline": {
                                 "type": "object",
                                 "properties": {
+                                  "version": {
+                                    "type": "number",
+                                    "enum": [
+                                      2
+                                    ]
+                                  },
                                   "head": {
                                     "anyOf": [
                                       {
@@ -45078,20 +45630,40 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "reviewedFiles": {
                           "type": "array",
                           "items": {
-                            "type": "object",
-                            "properties": {
-                              "path": {
-                                "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "type": "string"
+                                  },
+                                  "sha256": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "path",
+                                  "sha256"
+                                ],
+                                "additionalProperties": false
                               },
-                              "sha256": {
-                                "type": "string"
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "type": "string"
+                                  },
+                                  "observationId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "path",
+                                  "observationId"
+                                ],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": [
-                              "path",
-                              "sha256"
-                            ],
-                            "additionalProperties": false
+                            ]
                           }
                         }
                       },
@@ -45102,8 +45674,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "goal",
                         "quality",
                         "result",
-                        "decisionIds",
-                        "evidenceDigest"
+                        "decisionIds"
                       ],
                       "additionalProperties": false
                     }
@@ -45705,7 +46276,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -45778,7 +46350,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -45852,9 +46425,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "type": "string"
                       }
                     },
-                    "digest": {
-                      "type": "string"
-                    },
                     "source": {
                       "type": "string",
                       "enum": [
@@ -45871,7 +46441,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "required": [
                     "paths",
-                    "digest",
                     "source",
                     "errors"
                   ],
@@ -48221,111 +48790,272 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   ]
                 },
                 "inputSnapshot": {
-                  "type": "object",
-                  "properties": {
-                    "version": {
-                      "const": 1
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "sourceRoot": {
-                      "type": "string"
-                    },
-                    "sourceIdentity": {
-                      "type": "string"
-                    },
-                    "gitIdentity": {
-                      "type": "string"
-                    },
-                    "ownerHead": {
-                      "type": "string"
-                    },
-                    "ownerRef": {
-                      "type": "string"
-                    },
-                    "indexFingerprint": {
-                      "type": "string"
-                    },
-                    "inputTree": {
-                      "type": "string"
-                    },
-                    "inputCommit": {
-                      "type": "string"
-                    },
-                    "capturedAt": {
-                      "type": "number"
-                    },
-                    "dirty": {
-                      "type": "boolean"
-                    },
-                    "exclusions": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "files": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "path": {
-                            "type": "string"
-                          },
-                          "kind": {
-                            "type": "string",
-                            "enum": [
-                              "file",
-                              "symlink",
-                              "missing"
-                            ]
-                          },
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "100644",
-                              "100755",
-                              "120000",
-                              "0"
-                            ]
-                          },
-                          "oid": {
-                            "type": "string"
-                          },
-                          "digest": {
-                            "type": "string"
-                          },
-                          "identity": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "const": 1
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "sourceRoot": {
+                          "type": "string"
+                        },
+                        "sourceIdentity": {
+                          "type": "string"
+                        },
+                        "gitIdentity": {
+                          "type": "string"
+                        },
+                        "ownerHead": {
+                          "type": "string"
+                        },
+                        "ownerRef": {
+                          "type": "string"
+                        },
+                        "indexFingerprint": {
+                          "type": "string"
+                        },
+                        "inputTree": {
+                          "type": "string"
+                        },
+                        "inputCommit": {
+                          "type": "string"
+                        },
+                        "capturedAt": {
+                          "type": "number"
+                        },
+                        "dirty": {
+                          "type": "boolean"
+                        },
+                        "exclusions": {
+                          "type": "array",
+                          "items": {
                             "type": "string"
                           }
                         },
-                        "required": [
-                          "path",
-                          "kind",
-                          "mode"
-                        ],
-                        "additionalProperties": false
-                      }
+                        "files": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "file",
+                                  "symlink",
+                                  "missing"
+                                ]
+                              },
+                              "mode": {
+                                "type": "string",
+                                "enum": [
+                                  "100644",
+                                  "100755",
+                                  "120000",
+                                  "0"
+                                ]
+                              },
+                              "oid": {
+                                "type": "string"
+                              },
+                              "identity": {
+                                "type": "string"
+                              },
+                              "digest": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "kind",
+                              "mode"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "id",
+                        "sourceRoot",
+                        "sourceIdentity",
+                        "gitIdentity",
+                        "ownerHead",
+                        "ownerRef",
+                        "indexFingerprint",
+                        "inputTree",
+                        "inputCommit",
+                        "capturedAt",
+                        "dirty",
+                        "exclusions",
+                        "files"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "const": 2
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "sourceRoot": {
+                          "type": "string"
+                        },
+                        "sourceIdentity": {
+                          "type": "string"
+                        },
+                        "gitIdentity": {
+                          "type": "string"
+                        },
+                        "ownerHead": {
+                          "type": "string"
+                        },
+                        "ownerRef": {
+                          "type": "string"
+                        },
+                        "indexFingerprint": {
+                          "type": "string"
+                        },
+                        "inputTree": {
+                          "type": "string"
+                        },
+                        "inputCommit": {
+                          "type": "string"
+                        },
+                        "capturedAt": {
+                          "type": "number"
+                        },
+                        "dirty": {
+                          "type": "boolean"
+                        },
+                        "exclusions": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "files": {
+                          "type": "array",
+                          "items": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "const": "missing"
+                                  },
+                                  "mode": {
+                                    "const": "0"
+                                  }
+                                },
+                                "required": [
+                                  "path",
+                                  "kind",
+                                  "mode"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "const": "file"
+                                  },
+                                  "mode": {
+                                    "type": "string",
+                                    "enum": [
+                                      "100644",
+                                      "100755"
+                                    ]
+                                  },
+                                  "oid": {
+                                    "type": "string"
+                                  },
+                                  "identity": {
+                                    "type": "string"
+                                  },
+                                  "digest": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "path",
+                                  "kind",
+                                  "mode",
+                                  "oid",
+                                  "identity"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "const": "symlink"
+                                  },
+                                  "mode": {
+                                    "const": "120000"
+                                  },
+                                  "oid": {
+                                    "type": "string"
+                                  },
+                                  "identity": {
+                                    "type": "string"
+                                  },
+                                  "digest": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "path",
+                                  "kind",
+                                  "mode",
+                                  "oid",
+                                  "identity"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "id",
+                        "sourceRoot",
+                        "sourceIdentity",
+                        "gitIdentity",
+                        "ownerHead",
+                        "ownerRef",
+                        "indexFingerprint",
+                        "inputTree",
+                        "inputCommit",
+                        "capturedAt",
+                        "dirty",
+                        "exclusions",
+                        "files"
+                      ],
+                      "additionalProperties": false
                     }
-                  },
-                  "required": [
-                    "version",
-                    "id",
-                    "sourceRoot",
-                    "sourceIdentity",
-                    "gitIdentity",
-                    "ownerHead",
-                    "ownerRef",
-                    "indexFingerprint",
-                    "inputTree",
-                    "inputCommit",
-                    "capturedAt",
-                    "dirty",
-                    "exclusions",
-                    "files"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 "id": {
                   "type": "string"
@@ -48402,6 +49132,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "baseline": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "head": {
                       "anyOf": [
                         {
@@ -49307,20 +50043,40 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "reviewedFiles": {
                               "type": "array",
                               "items": {
-                                "type": "object",
-                                "properties": {
-                                  "path": {
-                                    "type": "string"
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "path": {
+                                        "type": "string"
+                                      },
+                                      "sha256": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "path",
+                                      "sha256"
+                                    ],
+                                    "additionalProperties": false
                                   },
-                                  "sha256": {
-                                    "type": "string"
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "path": {
+                                        "type": "string"
+                                      },
+                                      "observationId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "path",
+                                      "observationId"
+                                    ],
+                                    "additionalProperties": false
                                   }
-                                },
-                                "required": [
-                                  "path",
-                                  "sha256"
-                                ],
-                                "additionalProperties": false
+                                ]
                               }
                             }
                           },
@@ -49331,8 +50087,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "goal",
                             "quality",
                             "result",
-                            "decisionIds",
-                            "evidenceDigest"
+                            "decisionIds"
                           ],
                           "additionalProperties": false
                         }
@@ -49343,6 +50098,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "baseline": {
                         "type": "object",
                         "properties": {
+                          "version": {
+                            "type": "number",
+                            "enum": [
+                              2
+                            ]
+                          },
                           "head": {
                             "anyOf": [
                               {
@@ -50154,20 +50915,40 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "reviewedFiles": {
                               "type": "array",
                               "items": {
-                                "type": "object",
-                                "properties": {
-                                  "path": {
-                                    "type": "string"
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "path": {
+                                        "type": "string"
+                                      },
+                                      "sha256": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "path",
+                                      "sha256"
+                                    ],
+                                    "additionalProperties": false
                                   },
-                                  "sha256": {
-                                    "type": "string"
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "path": {
+                                        "type": "string"
+                                      },
+                                      "observationId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "path",
+                                      "observationId"
+                                    ],
+                                    "additionalProperties": false
                                   }
-                                },
-                                "required": [
-                                  "path",
-                                  "sha256"
-                                ],
-                                "additionalProperties": false
+                                ]
                               }
                             }
                           },
@@ -50178,8 +50959,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "goal",
                             "quality",
                             "result",
-                            "decisionIds",
-                            "evidenceDigest"
+                            "decisionIds"
                           ],
                           "additionalProperties": false
                         }
@@ -50267,6 +51047,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "baseline": {
                         "type": "object",
                         "properties": {
+                          "version": {
+                            "type": "number",
+                            "enum": [
+                              2
+                            ]
+                          },
                           "head": {
                             "anyOf": [
                               {
@@ -51416,20 +52202,40 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   "reviewedFiles": {
                                     "type": "array",
                                     "items": {
-                                      "type": "object",
-                                      "properties": {
-                                        "path": {
-                                          "type": "string"
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "path": {
+                                              "type": "string"
+                                            },
+                                            "sha256": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "path",
+                                            "sha256"
+                                          ],
+                                          "additionalProperties": false
                                         },
-                                        "sha256": {
-                                          "type": "string"
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "path": {
+                                              "type": "string"
+                                            },
+                                            "observationId": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "path",
+                                            "observationId"
+                                          ],
+                                          "additionalProperties": false
                                         }
-                                      },
-                                      "required": [
-                                        "path",
-                                        "sha256"
-                                      ],
-                                      "additionalProperties": false
+                                      ]
                                     }
                                   }
                                 },
@@ -51440,8 +52246,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   "goal",
                                   "quality",
                                   "result",
-                                  "decisionIds",
-                                  "evidenceDigest"
+                                  "decisionIds"
                                 ],
                                 "additionalProperties": false
                               }
@@ -51529,6 +52334,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "baseline": {
                               "type": "object",
                               "properties": {
+                                "version": {
+                                  "type": "number",
+                                  "enum": [
+                                    2
+                                  ]
+                                },
                                 "head": {
                                   "anyOf": [
                                     {
@@ -52678,20 +53489,40 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "reviewedFiles": {
                         "type": "array",
                         "items": {
-                          "type": "object",
-                          "properties": {
-                            "path": {
-                              "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                },
+                                "sha256": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "sha256"
+                              ],
+                              "additionalProperties": false
                             },
-                            "sha256": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                },
+                                "observationId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "observationId"
+                              ],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": [
-                            "path",
-                            "sha256"
-                          ],
-                          "additionalProperties": false
+                          ]
                         }
                       }
                     },
@@ -52702,8 +53533,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "goal",
                       "quality",
                       "result",
-                      "decisionIds",
-                      "evidenceDigest"
+                      "decisionIds"
                     ],
                     "additionalProperties": false
                   }
@@ -54466,7 +55296,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "kind",
                         "mimeType",
                         "sizeBytes",
-                        "sha256",
                         "createdAt",
                         "contentPath",
                         "metadata"
@@ -55159,7 +55988,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "kind",
                         "mimeType",
                         "sizeBytes",
-                        "sha256",
                         "createdAt",
                         "contentPath",
                         "metadata"
@@ -61931,6 +62759,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "minLength": 1,
                   "maxLength": 256
                 },
+                "owner": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "pairing-token"
+                    },
+                    "principalId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "tokenId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "scopes": {
+                      "maxItems": 256,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "principalId",
+                    "tokenId",
+                    "authorityId",
+                    "authorityRevision",
+                    "scopes"
+                  ],
+                  "additionalProperties": false
+                },
                 "workspaceRevision": {
                   "type": "string",
                   "minLength": 1,
@@ -62118,6 +62993,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 256
+                  },
+                  "owner": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "pairing-token"
+                      },
+                      "principalId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "tokenId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityRevision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "scopes": {
+                        "maxItems": 256,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "principalId",
+                      "tokenId",
+                      "authorityId",
+                      "authorityRevision",
+                      "scopes"
+                    ],
+                    "additionalProperties": false
                   },
                   "workspaceRevision": {
                     "type": "string",
@@ -62588,6 +63510,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "minLength": 1,
                   "maxLength": 256
                 },
+                "owner": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "pairing-token"
+                    },
+                    "principalId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "tokenId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "scopes": {
+                      "maxItems": 256,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "principalId",
+                    "tokenId",
+                    "authorityId",
+                    "authorityRevision",
+                    "scopes"
+                  ],
+                  "additionalProperties": false
+                },
                 "workspaceRevision": {
                   "type": "string",
                   "minLength": 1,
@@ -62775,6 +63744,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 256
+                  },
+                  "owner": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "pairing-token"
+                      },
+                      "principalId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "tokenId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityRevision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "scopes": {
+                        "maxItems": 256,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "principalId",
+                      "tokenId",
+                      "authorityId",
+                      "authorityRevision",
+                      "scopes"
+                    ],
+                    "additionalProperties": false
                   },
                   "workspaceRevision": {
                     "type": "string",
@@ -63300,6 +64316,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "minLength": 1,
                   "maxLength": 256
                 },
+                "owner": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "pairing-token"
+                    },
+                    "principalId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "tokenId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "scopes": {
+                      "maxItems": 256,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "principalId",
+                    "tokenId",
+                    "authorityId",
+                    "authorityRevision",
+                    "scopes"
+                  ],
+                  "additionalProperties": false
+                },
                 "workspaceRevision": {
                   "type": "string",
                   "minLength": 1,
@@ -63487,6 +64550,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 256
+                  },
+                  "owner": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "pairing-token"
+                      },
+                      "principalId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "tokenId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityRevision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "scopes": {
+                        "maxItems": 256,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "principalId",
+                      "tokenId",
+                      "authorityId",
+                      "authorityRevision",
+                      "scopes"
+                    ],
+                    "additionalProperties": false
                   },
                   "workspaceRevision": {
                     "type": "string",
@@ -63915,6 +65025,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "minLength": 1,
                   "maxLength": 256
                 },
+                "owner": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "pairing-token"
+                    },
+                    "principalId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "tokenId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "scopes": {
+                      "maxItems": 256,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "principalId",
+                    "tokenId",
+                    "authorityId",
+                    "authorityRevision",
+                    "scopes"
+                  ],
+                  "additionalProperties": false
+                },
                 "workspaceRevision": {
                   "type": "string",
                   "minLength": 1,
@@ -64102,6 +65259,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 256
+                  },
+                  "owner": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "pairing-token"
+                      },
+                      "principalId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "tokenId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityRevision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "scopes": {
+                        "maxItems": 256,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "principalId",
+                      "tokenId",
+                      "authorityId",
+                      "authorityRevision",
+                      "scopes"
+                    ],
+                    "additionalProperties": false
                   },
                   "workspaceRevision": {
                     "type": "string",
@@ -64572,6 +65776,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "minLength": 1,
                   "maxLength": 256
                 },
+                "owner": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "pairing-token"
+                    },
+                    "principalId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "tokenId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "scopes": {
+                      "maxItems": 256,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "principalId",
+                    "tokenId",
+                    "authorityId",
+                    "authorityRevision",
+                    "scopes"
+                  ],
+                  "additionalProperties": false
+                },
                 "workspaceRevision": {
                   "type": "string",
                   "minLength": 1,
@@ -64759,6 +66010,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 256
+                  },
+                  "owner": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "pairing-token"
+                      },
+                      "principalId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "tokenId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityRevision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "scopes": {
+                        "maxItems": 256,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "principalId",
+                      "tokenId",
+                      "authorityId",
+                      "authorityRevision",
+                      "scopes"
+                    ],
+                    "additionalProperties": false
                   },
                   "workspaceRevision": {
                     "type": "string",
@@ -65196,6 +66494,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "minLength": 1,
                   "maxLength": 256
                 },
+                "owner": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "pairing-token"
+                    },
+                    "principalId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "tokenId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "scopes": {
+                      "maxItems": 256,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "principalId",
+                    "tokenId",
+                    "authorityId",
+                    "authorityRevision",
+                    "scopes"
+                  ],
+                  "additionalProperties": false
+                },
                 "workspaceRevision": {
                   "type": "string",
                   "minLength": 1,
@@ -65383,6 +66728,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 256
+                  },
+                  "owner": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "pairing-token"
+                      },
+                      "principalId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "tokenId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityRevision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "scopes": {
+                        "maxItems": 256,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "principalId",
+                      "tokenId",
+                      "authorityId",
+                      "authorityRevision",
+                      "scopes"
+                    ],
+                    "additionalProperties": false
                   },
                   "workspaceRevision": {
                     "type": "string",
@@ -65853,6 +67245,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "minLength": 1,
                   "maxLength": 256
                 },
+                "owner": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "pairing-token"
+                    },
+                    "principalId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "tokenId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "authorityRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "scopes": {
+                      "maxItems": 256,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "principalId",
+                    "tokenId",
+                    "authorityId",
+                    "authorityRevision",
+                    "scopes"
+                  ],
+                  "additionalProperties": false
+                },
                 "workspaceRevision": {
                   "type": "string",
                   "minLength": 1,
@@ -66040,6 +67479,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 256
+                  },
+                  "owner": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "pairing-token"
+                      },
+                      "principalId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "tokenId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "authorityRevision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "scopes": {
+                        "maxItems": 256,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "principalId",
+                      "tokenId",
+                      "authorityId",
+                      "authorityRevision",
+                      "scopes"
+                    ],
+                    "additionalProperties": false
                   },
                   "workspaceRevision": {
                     "type": "string",
@@ -66345,7 +67831,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "batteryVersion": {
                   "type": "number",
                   "enum": [
-                    1
+                    2
                   ]
                 },
                 "input": {
@@ -66370,9 +67856,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minimum": 1,
                       "maximum": 1000000
                     },
-                    "contentDigest": {
+                    "contentRevision": {
                       "type": "string",
-                      "pattern": "^[0-9a-f]{64}$"
+                      "minLength": 1,
+                      "maxLength": 256
                     },
                     "cursor": {
                       "type": "integer",
@@ -66386,7 +67873,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "messageId",
                     "start",
                     "end",
-                    "contentDigest",
+                    "contentRevision",
                     "cursor"
                   ],
                   "additionalProperties": false
@@ -67055,7 +68542,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "batteryVersion": {
                   "type": "number",
                   "enum": [
-                    1
+                    2
                   ]
                 },
                 "input": {
@@ -67080,9 +68567,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "minimum": 1,
                       "maximum": 1000000
                     },
-                    "contentDigest": {
+                    "contentRevision": {
                       "type": "string",
-                      "pattern": "^[0-9a-f]{64}$"
+                      "minLength": 1,
+                      "maxLength": 256
                     }
                   },
                   "required": [
@@ -67090,7 +68578,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "messageId",
                     "start",
                     "end",
-                    "contentDigest"
+                    "contentRevision"
                   ],
                   "additionalProperties": false
                 }
@@ -67131,7 +68619,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "batteryVersion": {
                       "type": "number",
                       "enum": [
-                        1
+                        2
                       ]
                     },
                     "status": {
@@ -67347,7 +68835,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "batteryVersion": {
                       "type": "number",
                       "enum": [
-                        1
+                        2
                       ]
                     },
                     "status": {
@@ -71200,7 +72688,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "batteryVersion": {
                       "type": "number",
                       "enum": [
-                        1
+                        2
                       ]
                     },
                     "status": {
@@ -71423,7 +72911,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "batteryVersion": {
                       "type": "number",
                       "enum": [
-                        1
+                        2
                       ]
                     },
                     "status": {
@@ -77617,6 +79105,30 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "artifactDeleteCandidates": {
               "type": "number"
             },
+            "artifactCleanup": {
+              "type": "object",
+              "properties": {
+                "referenced": {
+                  "type": "number"
+                },
+                "held": {
+                  "type": "number"
+                },
+                "unavailable": {
+                  "type": "number"
+                },
+                "skipped": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "referenced",
+                "held",
+                "unavailable",
+                "skipped"
+              ],
+              "additionalProperties": false
+            },
             "deletedArtifacts": {
               "type": "number"
             },
@@ -77634,6 +79146,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "dryRun",
             "deleted",
             "artifactDeleteCandidates",
+            "artifactCleanup",
             "deletedArtifacts",
             "preservedArtifacts",
             "artifactsDeleted"
@@ -84818,6 +86331,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           },
                           "issueCount": {
                             "type": "number"
+                          },
+                          "provenance": {
+                            "type": "string",
+                            "enum": [
+                              "classic"
+                            ]
+                          },
+                          "semanticEnrichment": {
+                            "type": "string",
+                            "enum": [
+                              "attempted",
+                              "not-evaluated"
+                            ]
                           }
                         },
                         "required": [
@@ -84847,6 +86373,61 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "failed": {
                             "type": "number"
                           },
+                          "captured": {
+                            "type": "number"
+                          },
+                          "capturePartial": {
+                            "type": "number"
+                          },
+                          "captureFailed": {
+                            "type": "number"
+                          },
+                          "compilationHeld": {
+                            "type": "number"
+                          },
+                          "compilationFailed": {
+                            "type": "number"
+                          },
+                          "outcomes": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "canonicalUri": {
+                                  "type": "string"
+                                },
+                                "sourceId": {
+                                  "type": "string"
+                                },
+                                "capture": {
+                                  "type": "string",
+                                  "enum": [
+                                    "completed",
+                                    "partial",
+                                    "failed"
+                                  ]
+                                },
+                                "compilation": {
+                                  "type": "string",
+                                  "enum": [
+                                    "completed",
+                                    "held",
+                                    "failed",
+                                    "not-attempted"
+                                  ]
+                                },
+                                "error": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "canonicalUri",
+                                "capture",
+                                "compilation"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
                           "profileCount": {
                             "type": "number"
                           },
@@ -84875,6 +86456,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "artifactId": {
                                   "type": "string"
+                                },
+                                "sourceId": {
+                                  "type": "string"
                                 }
                               },
                               "required": [
@@ -84883,6 +86467,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               ],
                               "additionalProperties": false
                             }
+                          },
+                          "preservedUnscopedSourceIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "note": {
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -85373,6 +86966,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "issueCount": {
                           "type": "number"
+                        },
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "classic"
+                          ]
+                        },
+                        "semanticEnrichment": {
+                          "type": "string",
+                          "enum": [
+                            "attempted",
+                            "not-evaluated"
+                          ]
                         }
                       },
                       "required": [
@@ -85402,6 +87008,61 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "failed": {
                           "type": "number"
                         },
+                        "captured": {
+                          "type": "number"
+                        },
+                        "capturePartial": {
+                          "type": "number"
+                        },
+                        "captureFailed": {
+                          "type": "number"
+                        },
+                        "compilationHeld": {
+                          "type": "number"
+                        },
+                        "compilationFailed": {
+                          "type": "number"
+                        },
+                        "outcomes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "canonicalUri": {
+                                "type": "string"
+                              },
+                              "sourceId": {
+                                "type": "string"
+                              },
+                              "capture": {
+                                "type": "string",
+                                "enum": [
+                                  "completed",
+                                  "partial",
+                                  "failed"
+                                ]
+                              },
+                              "compilation": {
+                                "type": "string",
+                                "enum": [
+                                  "completed",
+                                  "held",
+                                  "failed",
+                                  "not-attempted"
+                                ]
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "canonicalUri",
+                              "capture",
+                              "compilation"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
                         "profileCount": {
                           "type": "number"
                         },
@@ -85430,6 +87091,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               },
                               "artifactId": {
                                 "type": "string"
+                              },
+                              "sourceId": {
+                                "type": "string"
                               }
                             },
                             "required": [
@@ -85438,6 +87102,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             ],
                             "additionalProperties": false
                           }
+                        },
+                        "preservedUnscopedSourceIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "note": {
+                          "type": "string"
                         }
                       },
                       "required": [
@@ -87209,7 +88882,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "kind",
                 "mimeType",
                 "sizeBytes",
-                "sha256",
                 "createdAt",
                 "metadata"
               ],
@@ -87401,6 +89073,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "artifactCreated": {
               "type": "boolean"
+            },
+            "preservedUnscopedSourceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "note": {
+              "type": "string"
             }
           },
           "required": [
@@ -89234,6 +90915,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "staggerMs": {
                           "type": "number"
+                        },
+                        "staggerPhase": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 4294967295
                         }
                       },
                       "required": [
@@ -89412,6 +91098,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "staggerMs": {
                           "type": "number"
+                        },
+                        "staggerPhase": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 4294967295
                         }
                       },
                       "required": [
@@ -89597,6 +91288,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     },
                     "staggerMs": {
                       "type": "number"
+                    },
+                    "staggerPhase": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4294967295
                     }
                   },
                   "required": [
@@ -89719,6 +91415,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "staggerMs": {
                           "type": "number"
+                        },
+                        "staggerPhase": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 4294967295
                         }
                       },
                       "required": [
@@ -89896,6 +91597,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           },
                           "staggerMs": {
                             "type": "number"
+                          },
+                          "staggerPhase": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
                           }
                         },
                         "required": [
@@ -101246,7 +102952,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "kind",
                     "mimeType",
                     "sizeBytes",
-                    "sha256",
                     "createdAt",
                     "metadata"
                   ],
@@ -101477,7 +103182,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "kind",
                     "mimeType",
                     "sizeBytes",
-                    "sha256",
                     "createdAt",
                     "metadata"
                   ],
@@ -102369,7 +104073,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "kind",
                     "mimeType",
                     "sizeBytes",
-                    "sha256",
                     "createdAt",
                     "metadata"
                   ],
@@ -109397,7 +111100,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "payments.checkout.begin",
         "title": "Buy What Is In This Checkout",
-        "description": "Run a purchase against an open browser page, end to end: the caller reports the checkout's line items, tax, fees and delivery options AS STRINGS plus the refs of the card, address, delivery and place-order controls, and the daemon does the rest. It parses every amount into integer minor units with its own parser (refusing anything ambiguous rather than guessing), checks the cart against what was actually asked for, refuses a recurring charge, runs the taint gate, applies the daily item budget, the per-purchase ceiling and the overage pool, walks the shipping ladder down one rung at a time when the pool cannot cover the preferred tier, sends ONE notice to the configured command-authority channels and runs the window, above budget an approval where silence denies, within budget a veto where silence proceeds, then fills the stored shipping and billing addresses, types the stored card, submits once, records the purchase, debits the budget and reports the completed purchase. Nothing here knows any merchant's markup: the caller identifies the controls on whatever page it is looking at. Every number the owner is shown is re-rendered from the integers this daemon parsed, never from merchant text, and no response field can carry card material.",
+        "description": "Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. The paired owner must have authorized the exact merchant/item/amount through payments.checkout.approve. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.",
         "category": "payments",
         "source": "builtin",
         "access": "admin",
@@ -109415,6 +111118,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
+            "requestId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            },
             "sessionId": {
               "type": "string"
             },
@@ -109616,10 +111323,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "boolean"
             },
             "requestedMax": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^\\d+(?:\\.\\d{1,3})?$",
+              "description": "Owner-requested maximum for the entire purchase, including tax, mandatory fees and delivery. Supply one non-negative decimal amount in the configured budget currency, such as 20.00, without grouping, currency symbols or prose. Precision must fit that currency. Exceeding it requires a new explicit approval; silence never raises it."
             }
           },
           "required": [
+            "requestId",
             "sessionId",
             "pageId",
             "merchantDomain",
@@ -109842,6 +111552,600 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "payments.purchase.approve",
+        "title": "Approve This Purchase",
+        "description": "Approve an above-budget purchase or explicitly acknowledge an in-budget purchase using the exact live purchase and window references. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. The same inbox also consumes authenticated channel replies. A stale, answered or expired window refuses; this never submits directly or overrides budget, merchant, page or address checks.",
+        "category": "payments",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:payments"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/payments/purchase/approve"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "purchaseId": {
+              "type": "string"
+            },
+            "windowId": {
+              "type": "string"
+            },
+            "confirm": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "purchaseId",
+            "windowId",
+            "confirm"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "purchaseId": {
+              "type": "string"
+            },
+            "windowId": {
+              "type": "string"
+            },
+            "accepted": {
+              "type": "boolean"
+            },
+            "answer": {
+              "type": "string",
+              "enum": [
+                "approve",
+                "deny",
+                "acknowledge",
+                "object"
+              ]
+            }
+          },
+          "required": [
+            "purchaseId",
+            "windowId",
+            "accepted",
+            "answer"
+          ],
+          "additionalProperties": false
+        },
+        "dangerous": true,
+        "invokable": true
+      },
+      {
+        "id": "payments.purchase.cancel",
+        "title": "Stop This Purchase",
+        "description": "Stop an admitted checkout using its exact purchaseId and operationId, or object to a live window using purchaseId and windowId. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. Stopping is a request, not proof that an order was undone; inspect final status and merchant history if submission may have begun. No automatic retry.",
+        "category": "payments",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:payments"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/payments/purchase/cancel"
+        },
+        "inputSchema": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "purchaseId": {
+                  "type": "string"
+                },
+                "windowId": {
+                  "type": "string"
+                },
+                "confirm": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "purchaseId",
+                "windowId",
+                "confirm"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "purchaseId": {
+                  "type": "string"
+                },
+                "operationId": {
+                  "type": "string"
+                },
+                "confirm": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "purchaseId",
+                "operationId",
+                "confirm"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "outputSchema": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "purchaseId": {
+                  "type": "string"
+                },
+                "windowId": {
+                  "type": "string"
+                },
+                "accepted": {
+                  "type": "boolean"
+                },
+                "answer": {
+                  "type": "string",
+                  "enum": [
+                    "approve",
+                    "deny",
+                    "acknowledge",
+                    "object"
+                  ]
+                }
+              },
+              "required": [
+                "purchaseId",
+                "windowId",
+                "accepted",
+                "answer"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "purchaseId": {
+                  "type": "string"
+                },
+                "operationId": {
+                  "type": "string"
+                },
+                "accepted": {
+                  "const": true,
+                  "type": "boolean"
+                },
+                "mayHaveSubmitted": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "purchaseId",
+                "operationId",
+                "accepted",
+                "mayHaveSubmitted"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "dangerous": true,
+        "invokable": true
+      },
+      {
+        "id": "payments.purchase.deny",
+        "title": "Deny This Purchase",
+        "description": "Refuse the pending purchase using the exact live purchase and window references. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. The same inbox also consumes authenticated channel replies. A stale, answered or expired window refuses; this never submits directly or overrides budget, merchant, page or address checks.",
+        "category": "payments",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:payments"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/payments/purchase/deny"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "purchaseId": {
+              "type": "string"
+            },
+            "windowId": {
+              "type": "string"
+            },
+            "confirm": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "purchaseId",
+            "windowId",
+            "confirm"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "purchaseId": {
+              "type": "string"
+            },
+            "windowId": {
+              "type": "string"
+            },
+            "accepted": {
+              "type": "boolean"
+            },
+            "answer": {
+              "type": "string",
+              "enum": [
+                "approve",
+                "deny",
+                "acknowledge",
+                "object"
+              ]
+            }
+          },
+          "required": [
+            "purchaseId",
+            "windowId",
+            "accepted",
+            "answer"
+          ],
+          "additionalProperties": false
+        },
+        "dangerous": true,
+        "invokable": true
+      },
+      {
+        "id": "payments.purchase.reconcile",
+        "title": "Record the Merchant Order Finding",
+        "description": "After inspecting the merchant’s order history, explicitly record whether this exact uncertain or unverified checkout placed an order. Requires current paired admin authority, write:payments, confirm: true and inspectedMerchantHistory: true. The saved finding cannot be changed by a retry. Settles only original purchase/budget bookkeeping after its actual executor has drained; never submits or resumes an order. Missing local receipts never imply no charge. A no-order finding releases an original unspent hold but never credits already committed spend.",
+        "category": "payments",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:payments"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/payments/purchase/reconcile"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "purchaseId": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "purchased",
+                "not-purchased"
+              ]
+            },
+            "inspectedMerchantHistory": {
+              "type": "boolean",
+              "const": true
+            },
+            "confirm": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "purchaseId",
+            "operationId",
+            "outcome",
+            "inspectedMerchantHistory",
+            "confirm"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "purchaseId": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "accepted",
+                "running",
+                "cancelling",
+                "completed",
+                "refused",
+                "cancelled",
+                "attention",
+                "interrupted",
+                "uncertain",
+                "failed"
+              ]
+            },
+            "phase": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "deciding",
+                    "awaiting-window",
+                    "arming-payment",
+                    "submit-pending",
+                    "submitted"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "createdAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "updatedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "outcome": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "totalMinorUnits": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "currency": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Z]{3}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "purchaseId",
+            "operationId",
+            "state",
+            "phase",
+            "createdAtMs",
+            "updatedAtMs",
+            "outcome",
+            "totalMinorUnits",
+            "currency"
+          ],
+          "additionalProperties": false
+        },
+        "dangerous": true,
+        "invokable": true
+      },
+      {
+        "id": "payments.purchase.status",
+        "title": "Purchase Operations and Windows",
+        "description": "Read durable checkout operation status and actual live approval/veto windows. Optionally select one purchase, including after reconnect or restart. An accepted operation is not a completed purchase; uncertain submissions must be checked with the merchant and are never automatically retried. Reading does not extend a deadline or resume execution. Complete purchase records are available through payments.purchases.list.",
+        "category": "payments",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "read:payments"
+        ],
+        "http": {
+          "method": "GET",
+          "path": "/api/payments/purchase/status"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "purchaseId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "windows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "purchaseId": {
+                    "type": "string"
+                  },
+                  "windowId": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "approval",
+                      "veto"
+                    ]
+                  },
+                  "notice": {
+                    "type": "string"
+                  },
+                  "deadlineMs": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "purchaseId",
+                  "windowId",
+                  "kind",
+                  "notice",
+                  "deadlineMs"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 256
+            },
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "purchaseId": {
+                    "type": "string"
+                  },
+                  "operationId": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "accepted",
+                      "running",
+                      "cancelling",
+                      "completed",
+                      "refused",
+                      "cancelled",
+                      "attention",
+                      "interrupted",
+                      "uncertain",
+                      "failed"
+                    ]
+                  },
+                  "phase": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "deciding",
+                          "awaiting-window",
+                          "arming-payment",
+                          "submit-pending",
+                          "submitted"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "createdAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "updatedAtMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8640000000000000
+                  },
+                  "outcome": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "totalMinorUnits": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "currency": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "purchaseId",
+                  "operationId",
+                  "state",
+                  "phase",
+                  "createdAtMs",
+                  "updatedAtMs",
+                  "outcome",
+                  "totalMinorUnits",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 356
+            }
+          },
+          "required": [
+            "windows",
+            "operations"
+          ],
+          "additionalProperties": false
+        },
+        "invokable": true
+      },
+      {
         "id": "payments.purchases.list",
         "title": "List Purchases",
         "description": "The purchase audit ledger: what was bought, from which merchant registrable domain, how much (item, tax, fees and delivery separately), which budget pool each part drew on, which delivery tier was requested and which was actually used, whether the shipping ladder stepped it down, which window ran and how it ended, which command-authority channel answered, and the outcome. Reconcilable against a card statement. Never contains a card number, expiry or CVV. A refund is recorded here for reconciliation and credits no pool, a refund on day five refilling day five would be permission to buy again that nobody granted.",
@@ -109914,6 +112218,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "totalMinorUnits": {
                     "type": "number"
+                  },
+                  "requestedMaximumMinorUnits": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "shippingTierRequested": {
                     "type": "string"
@@ -110038,6 +112347,53 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "total": {
               "type": "number"
+            },
+            "reconciliations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "purchaseId": {
+                    "type": "string"
+                  },
+                  "operationId": {
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "purchased",
+                      "not-purchased"
+                    ]
+                  },
+                  "principalId": {
+                    "type": "string"
+                  },
+                  "atMs": {
+                    "type": "number"
+                  },
+                  "merchantDomain": {
+                    "type": "string"
+                  },
+                  "totalMinorUnits": {
+                    "type": "number"
+                  },
+                  "currency": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "purchaseId",
+                  "operationId",
+                  "outcome",
+                  "principalId",
+                  "atMs",
+                  "merchantDomain",
+                  "totalMinorUnits",
+                  "currency"
+                ],
+                "additionalProperties": false
+              }
             }
           },
           "required": [
@@ -113616,9 +115972,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "endpointOrigin": {
                   "type": "string"
                 },
-                "endpointHash": {
-                  "type": "string"
-                },
                 "createdAt": {
                   "type": "number"
                 },
@@ -113636,7 +115989,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "id",
                 "principalId",
                 "endpointOrigin",
-                "endpointHash",
                 "createdAt"
               ],
               "additionalProperties": false
@@ -113725,9 +116077,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "endpointOrigin": {
                     "type": "string"
                   },
-                  "endpointHash": {
-                    "type": "string"
-                  },
                   "createdAt": {
                     "type": "number"
                   },
@@ -113745,7 +116094,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "id",
                   "principalId",
                   "endpointOrigin",
-                  "endpointHash",
                   "createdAt"
                 ],
                 "additionalProperties": false
@@ -113823,9 +116171,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "endpointOrigin": {
                   "type": "string"
                 },
-                "endpointHash": {
-                  "type": "string"
-                },
                 "createdAt": {
                   "type": "number"
                 },
@@ -113843,7 +116188,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "id",
                 "principalId",
                 "endpointOrigin",
-                "endpointHash",
                 "createdAt"
               ],
               "additionalProperties": false
@@ -123001,7 +125345,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "nativeRevision": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "maxLength": 200,
+              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
             },
             "unifiedDiff": {
               "type": "string"
@@ -136423,6 +138768,182 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "watchers.triggers.migrate",
+        "title": "Migrate triggers after closing older instances",
+        "description": "Explicitly acknowledge that older GoodVibes instances are closed, then migrate and start this surface’s original trigger supervisor. The acknowledgement is an operator statement, not OS liveness proof.",
+        "category": "watchers",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "write:watchers"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "olderInstancesClosed": {
+              "type": "boolean",
+              "const": true
+            },
+            "confirm": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "olderInstancesClosed",
+            "confirm"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "migrated": {
+              "type": "boolean",
+              "const": true
+            },
+            "status": {
+              "type": "object",
+              "properties": {
+                "ownership": {
+                  "type": "string",
+                  "enum": [
+                    "local",
+                    "other-process",
+                    "migration-required",
+                    "unclaimed"
+                  ]
+                },
+                "migrationRequired": {
+                  "type": "boolean"
+                },
+                "records": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label",
+                      "kind",
+                      "state"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ownership",
+                "migrationRequired",
+                "records",
+                "message"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "migrated",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "dangerous": true,
+        "invokable": true
+      },
+      {
+        "id": "watchers.triggers.status",
+        "title": "Inspect trigger execution and migration",
+        "description": "Read the original surface trigger supervisor and affected record summaries without claiming execution ownership or migrating saved state.",
+        "category": "watchers",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "read:watchers"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "ownership": {
+              "type": "string",
+              "enum": [
+                "local",
+                "other-process",
+                "migration-required",
+                "unclaimed"
+              ]
+            },
+            "migrationRequired": {
+              "type": "boolean"
+            },
+            "records": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "label",
+                  "kind",
+                  "state"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ownership",
+            "migrationRequired",
+            "records",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        "invokable": true
+      },
+      {
         "id": "watchers.update",
         "title": "Update Watcher",
         "description": "Update an existing watcher. (Renamed from watchers.patch in the 1.0.0 core-verb rename, canonical verb is update, not patch.)",
@@ -141013,6 +143534,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       "continuation": {
                                         "type": "object",
                                         "properties": {
+                                          "version": {
+                                            "type": "number",
+                                            "enum": [
+                                              2
+                                            ]
+                                          },
                                           "sessionId": {
                                             "type": "string",
                                             "minLength": 1,
@@ -141020,7 +143547,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                           },
                                           "revision": {
                                             "type": "string",
-                                            "pattern": "^[a-f0-9]{64}$"
+                                            "maxLength": 200,
+                                            "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                                           },
                                           "selectedDiff": {
                                             "anyOf": [
@@ -141035,7 +143563,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                   },
                                                   "revision": {
                                                     "type": "string",
-                                                    "pattern": "^[a-f0-9]{64}$"
+                                                    "maxLength": 200,
+                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                                   },
                                                   "fileIndex": {
                                                     "type": "integer",
@@ -141112,7 +143641,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                   },
                                                   "revision": {
                                                     "type": "string",
-                                                    "pattern": "^[a-f0-9]{64}$"
+                                                    "maxLength": 200,
+                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                                   },
                                                   "fileIndex": {
                                                     "type": "integer",
@@ -141291,6 +143821,43 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       "inputId",
                                       "sessionId",
                                       "extraction"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "version": {
+                                        "type": "number",
+                                        "enum": [
+                                          3
+                                        ]
+                                      },
+                                      "sourceId": {
+                                        "type": "string",
+                                        "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                      },
+                                      "sourceRevision": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "inputId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200
+                                      },
+                                      "sessionId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200
+                                      }
+                                    },
+                                    "required": [
+                                      "version",
+                                      "sourceId",
+                                      "sourceRevision",
+                                      "inputId",
+                                      "sessionId"
                                     ],
                                     "additionalProperties": false
                                   }
@@ -141796,6 +144363,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         "continuation": {
                                           "type": "object",
                                           "properties": {
+                                            "version": {
+                                              "type": "number",
+                                              "enum": [
+                                                2
+                                              ]
+                                            },
                                             "sessionId": {
                                               "type": "string",
                                               "minLength": 1,
@@ -141803,7 +144376,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                             },
                                             "revision": {
                                               "type": "string",
-                                              "pattern": "^[a-f0-9]{64}$"
+                                              "maxLength": 200,
+                                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                                             },
                                             "selectedDiff": {
                                               "anyOf": [
@@ -141818,7 +144392,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                     },
                                                     "revision": {
                                                       "type": "string",
-                                                      "pattern": "^[a-f0-9]{64}$"
+                                                      "maxLength": 200,
+                                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                                     },
                                                     "fileIndex": {
                                                       "type": "integer",
@@ -141895,7 +144470,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                     },
                                                     "revision": {
                                                       "type": "string",
-                                                      "pattern": "^[a-f0-9]{64}$"
+                                                      "maxLength": 200,
+                                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                                     },
                                                     "fileIndex": {
                                                       "type": "integer",
@@ -142074,6 +144650,43 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         "inputId",
                                         "sessionId",
                                         "extraction"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "version": {
+                                          "type": "number",
+                                          "enum": [
+                                            3
+                                          ]
+                                        },
+                                        "sourceId": {
+                                          "type": "string",
+                                          "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                        },
+                                        "sourceRevision": {
+                                          "type": "string",
+                                          "pattern": "^[a-f0-9]{64}$"
+                                        },
+                                        "inputId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 200
+                                        },
+                                        "sessionId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 200
+                                        }
+                                      },
+                                      "required": [
+                                        "version",
+                                        "sourceId",
+                                        "sourceRevision",
+                                        "inputId",
+                                        "sessionId"
                                       ],
                                       "additionalProperties": false
                                     }
@@ -142408,6 +145021,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                             "continuation": {
                                               "type": "object",
                                               "properties": {
+                                                "version": {
+                                                  "type": "number",
+                                                  "enum": [
+                                                    2
+                                                  ]
+                                                },
                                                 "sessionId": {
                                                   "type": "string",
                                                   "minLength": 1,
@@ -142415,7 +145034,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                 },
                                                 "revision": {
                                                   "type": "string",
-                                                  "pattern": "^[a-f0-9]{64}$"
+                                                  "maxLength": 200,
+                                                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                                                 },
                                                 "selectedDiff": {
                                                   "anyOf": [
@@ -142430,7 +145050,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                         },
                                                         "revision": {
                                                           "type": "string",
-                                                          "pattern": "^[a-f0-9]{64}$"
+                                                          "maxLength": 200,
+                                                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                                         },
                                                         "fileIndex": {
                                                           "type": "integer",
@@ -142507,7 +145128,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                         },
                                                         "revision": {
                                                           "type": "string",
-                                                          "pattern": "^[a-f0-9]{64}$"
+                                                          "maxLength": 200,
+                                                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                                         },
                                                         "fileIndex": {
                                                           "type": "integer",
@@ -142686,6 +145308,43 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                             "inputId",
                                             "sessionId",
                                             "extraction"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "version": {
+                                              "type": "number",
+                                              "enum": [
+                                                3
+                                              ]
+                                            },
+                                            "sourceId": {
+                                              "type": "string",
+                                              "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                            },
+                                            "sourceRevision": {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "inputId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 200
+                                            },
+                                            "sessionId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 200
+                                            }
+                                          },
+                                          "required": [
+                                            "version",
+                                            "sourceId",
+                                            "sourceRevision",
+                                            "inputId",
+                                            "sessionId"
                                           ],
                                           "additionalProperties": false
                                         }
@@ -143184,6 +145843,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                               "continuation": {
                                                 "type": "object",
                                                 "properties": {
+                                                  "version": {
+                                                    "type": "number",
+                                                    "enum": [
+                                                      2
+                                                    ]
+                                                  },
                                                   "sessionId": {
                                                     "type": "string",
                                                     "minLength": 1,
@@ -143191,7 +145856,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                   },
                                                   "revision": {
                                                     "type": "string",
-                                                    "pattern": "^[a-f0-9]{64}$"
+                                                    "maxLength": 200,
+                                                    "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                                                   },
                                                   "selectedDiff": {
                                                     "anyOf": [
@@ -143206,7 +145872,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                           },
                                                           "revision": {
                                                             "type": "string",
-                                                            "pattern": "^[a-f0-9]{64}$"
+                                                            "maxLength": 200,
+                                                            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                                           },
                                                           "fileIndex": {
                                                             "type": "integer",
@@ -143283,7 +145950,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                           },
                                                           "revision": {
                                                             "type": "string",
-                                                            "pattern": "^[a-f0-9]{64}$"
+                                                            "maxLength": 200,
+                                                            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                                           },
                                                           "fileIndex": {
                                                             "type": "integer",
@@ -143462,6 +146130,43 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                               "inputId",
                                               "sessionId",
                                               "extraction"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "version": {
+                                                "type": "number",
+                                                "enum": [
+                                                  3
+                                                ]
+                                              },
+                                              "sourceId": {
+                                                "type": "string",
+                                                "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                              },
+                                              "sourceRevision": {
+                                                "type": "string",
+                                                "pattern": "^[a-f0-9]{64}$"
+                                              },
+                                              "inputId": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 200
+                                              },
+                                              "sessionId": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 200
+                                              }
+                                            },
+                                            "required": [
+                                              "version",
+                                              "sourceId",
+                                              "sourceRevision",
+                                              "inputId",
+                                              "sessionId"
                                             ],
                                             "additionalProperties": false
                                           }
@@ -144316,6 +147021,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -144323,7 +147034,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -144338,7 +147050,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -144375,7 +147088,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -144507,6 +147221,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -144514,7 +147234,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -144529,7 +147250,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -144566,7 +147288,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -144717,6 +147440,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -144724,7 +147453,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -144739,7 +147469,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -144776,7 +147507,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -144833,6 +147565,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -144840,7 +147578,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -144855,7 +147594,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -144932,7 +147672,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -145118,6 +147859,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -145125,7 +147872,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -145140,7 +147888,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -145177,7 +147926,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -145324,6 +148074,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -145331,7 +148087,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -145346,7 +148103,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -145383,7 +148141,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -145523,6 +148282,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -145530,7 +148295,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -145545,7 +148311,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -145582,7 +148349,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -145714,6 +148482,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -145721,7 +148495,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -145736,7 +148511,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -145773,7 +148549,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -145943,6 +148720,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "continuation": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "sessionId": {
                               "type": "string",
                               "minLength": 1,
@@ -145950,7 +148733,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -145965,7 +148749,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -146042,7 +148827,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -146338,6 +149124,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -146345,7 +149137,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -146360,7 +149153,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -146397,7 +149191,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -146529,6 +149324,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -146536,7 +149337,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -146551,7 +149353,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -146588,7 +149391,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -146739,6 +149543,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -146746,7 +149556,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -146761,7 +149572,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -146798,7 +149610,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -146855,6 +149668,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -146862,7 +149681,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -146877,7 +149697,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -146954,7 +149775,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -147140,6 +149962,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -147147,7 +149975,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -147162,7 +149991,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -147199,7 +150029,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -147346,6 +150177,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -147353,7 +150190,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -147368,7 +150206,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -147405,7 +150244,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -147545,6 +150385,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -147552,7 +150398,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -147567,7 +150414,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -147604,7 +150452,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -147736,6 +150585,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -147743,7 +150598,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -147758,7 +150614,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -147795,7 +150652,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -147965,6 +150823,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "continuation": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "sessionId": {
                               "type": "string",
                               "minLength": 1,
@@ -147972,7 +150836,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -147987,7 +150852,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -148064,7 +150930,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -148295,7 +151162,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -148332,7 +151200,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -148483,6 +151352,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -148490,7 +151365,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -148505,7 +151381,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -148542,7 +151419,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -148674,6 +151552,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -148681,7 +151565,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -148696,7 +151581,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -148733,7 +151619,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -148884,6 +151771,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -148891,7 +151784,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -148906,7 +151800,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -148943,7 +151838,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -149000,6 +151896,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -149007,7 +151909,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -149022,7 +151925,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -149099,7 +152003,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -149285,6 +152190,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -149292,7 +152203,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -149307,7 +152219,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -149344,7 +152257,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -149491,6 +152405,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -149498,7 +152418,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -149513,7 +152434,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -149550,7 +152472,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -149690,6 +152613,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -149697,7 +152626,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -149712,7 +152642,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -149749,7 +152680,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -149881,6 +152813,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -149888,7 +152826,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -149903,7 +152842,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -149940,7 +152880,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -150110,6 +153051,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "continuation": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "sessionId": {
                               "type": "string",
                               "minLength": 1,
@@ -150117,7 +153064,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -150132,7 +153080,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -150209,7 +153158,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -150501,6 +153451,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "continuation": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "sessionId": {
                               "type": "string",
                               "minLength": 1,
@@ -150508,7 +153464,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -150523,7 +153480,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -150560,7 +153518,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -150692,6 +153651,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "continuation": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "sessionId": {
                               "type": "string",
                               "minLength": 1,
@@ -150699,7 +153664,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -150714,7 +153680,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -150751,7 +153718,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -150902,6 +153870,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "continuation": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "sessionId": {
                               "type": "string",
                               "minLength": 1,
@@ -150909,7 +153883,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -150924,7 +153899,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -150961,7 +153937,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -151018,6 +153995,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -151025,7 +154008,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -151040,7 +154024,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -151117,7 +154102,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -151303,6 +154289,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "continuation": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "sessionId": {
                               "type": "string",
                               "minLength": 1,
@@ -151310,7 +154302,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -151325,7 +154318,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -151362,7 +154356,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -151509,6 +154504,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "continuation": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "sessionId": {
                               "type": "string",
                               "minLength": 1,
@@ -151516,7 +154517,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -151531,7 +154533,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -151568,7 +154571,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -151708,6 +154712,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "continuation": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "sessionId": {
                               "type": "string",
                               "minLength": 1,
@@ -151715,7 +154725,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -151730,7 +154741,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -151767,7 +154779,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -151899,6 +154912,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "continuation": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "sessionId": {
                               "type": "string",
                               "minLength": 1,
@@ -151906,7 +154925,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -151921,7 +154941,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -151958,7 +154979,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -152128,6 +155150,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "continuation": {
                               "type": "object",
                               "properties": {
+                                "version": {
+                                  "type": "number",
+                                  "enum": [
+                                    2
+                                  ]
+                                },
                                 "sessionId": {
                                   "type": "string",
                                   "minLength": 1,
@@ -152135,7 +155163,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                                 },
                                 "selectedDiff": {
                                   "anyOf": [
@@ -152150,7 +155179,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         },
                                         "revision": {
                                           "type": "string",
-                                          "pattern": "^[a-f0-9]{64}$"
+                                          "maxLength": 200,
+                                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                         },
                                         "fileIndex": {
                                           "type": "integer",
@@ -152227,7 +155257,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         },
                                         "revision": {
                                           "type": "string",
-                                          "pattern": "^[a-f0-9]{64}$"
+                                          "maxLength": 200,
+                                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                         },
                                         "fileIndex": {
                                           "type": "integer",
@@ -152540,6 +155571,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -152547,7 +155584,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -152562,7 +155600,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -152599,7 +155638,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -152731,6 +155771,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -152738,7 +155784,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -152753,7 +155800,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -152790,7 +155838,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -152941,6 +155990,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -152948,7 +156003,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -152963,7 +156019,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -153000,7 +156057,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -153057,6 +156115,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -153064,7 +156128,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -153079,7 +156144,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -153156,7 +156222,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -153342,6 +156409,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -153349,7 +156422,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -153364,7 +156438,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -153401,7 +156476,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -153548,6 +156624,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -153555,7 +156637,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -153570,7 +156653,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -153607,7 +156691,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -153747,6 +156832,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -153754,7 +156845,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -153769,7 +156861,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -153806,7 +156899,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -153938,6 +157032,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -153945,7 +157045,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -153960,7 +157061,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -153997,7 +157099,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -154167,6 +157270,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "continuation": {
                           "type": "object",
                           "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                2
+                              ]
+                            },
                             "sessionId": {
                               "type": "string",
                               "minLength": 1,
@@ -154174,7 +157283,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -154189,7 +157299,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -154266,7 +157377,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -154746,6 +157858,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   "continuation": {
                                     "type": "object",
                                     "properties": {
+                                      "version": {
+                                        "type": "number",
+                                        "enum": [
+                                          2
+                                        ]
+                                      },
                                       "sessionId": {
                                         "type": "string",
                                         "minLength": 1,
@@ -154753,7 +157871,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       },
                                       "revision": {
                                         "type": "string",
-                                        "pattern": "^[a-f0-9]{64}$"
+                                        "maxLength": 200,
+                                        "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                                       },
                                       "selectedDiff": {
                                         "anyOf": [
@@ -154768,7 +157887,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                               },
                                               "revision": {
                                                 "type": "string",
-                                                "pattern": "^[a-f0-9]{64}$"
+                                                "maxLength": 200,
+                                                "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                               },
                                               "fileIndex": {
                                                 "type": "integer",
@@ -154845,7 +157965,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                               },
                                               "revision": {
                                                 "type": "string",
-                                                "pattern": "^[a-f0-9]{64}$"
+                                                "maxLength": 200,
+                                                "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                               },
                                               "fileIndex": {
                                                 "type": "integer",
@@ -155024,6 +158145,43 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   "inputId",
                                   "sessionId",
                                   "extraction"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "version": {
+                                    "type": "number",
+                                    "enum": [
+                                      3
+                                    ]
+                                  },
+                                  "sourceId": {
+                                    "type": "string",
+                                    "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                  },
+                                  "sourceRevision": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  },
+                                  "inputId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "sessionId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  }
+                                },
+                                "required": [
+                                  "version",
+                                  "sourceId",
+                                  "sourceRevision",
+                                  "inputId",
+                                  "sessionId"
                                 ],
                                 "additionalProperties": false
                               }
@@ -155536,37 +158694,72 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "additionalProperties": false
                     },
                     "source": {
-                      "type": "object",
-                      "properties": {
-                        "version": {
-                          "type": "number",
-                          "enum": [
-                            1
-                          ]
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                1
+                              ]
+                            },
+                            "sourceId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "sourceRevision": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "sessionId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "sourceId",
+                            "sourceRevision",
+                            "sessionId"
+                          ],
+                          "additionalProperties": false
                         },
-                        "sourceId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 200
-                        },
-                        "sourceRevision": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 200
-                        },
-                        "sessionId": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 200
+                        {
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                3
+                              ]
+                            },
+                            "sourceId": {
+                              "type": "string",
+                              "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                            },
+                            "sourceRevision": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "sessionId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "sourceId",
+                            "sourceRevision",
+                            "sessionId"
+                          ],
+                          "additionalProperties": false
                         }
-                      },
-                      "required": [
-                        "version",
-                        "sourceId",
-                        "sourceRevision",
-                        "sessionId"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "goal": {
                       "type": "string",
@@ -155767,37 +158960,72 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "additionalProperties": false
                 },
                 "source": {
-                  "type": "object",
-                  "properties": {
-                    "version": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            1
+                          ]
+                        },
+                        "sourceId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "sourceRevision": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "sourceId",
+                        "sourceRevision",
+                        "sessionId"
+                      ],
+                      "additionalProperties": false
                     },
-                    "sourceId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 200
-                    },
-                    "sourceRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 200
-                    },
-                    "sessionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 200
+                    {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            3
+                          ]
+                        },
+                        "sourceId": {
+                          "type": "string",
+                          "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                        },
+                        "sourceRevision": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "sourceId",
+                        "sourceRevision",
+                        "sessionId"
+                      ],
+                      "additionalProperties": false
                     }
-                  },
-                  "required": [
-                    "version",
-                    "sourceId",
-                    "sourceRevision",
-                    "sessionId"
-                  ],
-                  "additionalProperties": false
+                  ]
                 },
                 "goal": {
                   "type": "string",
@@ -159399,7 +162627,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "kind",
                   "mimeType",
                   "sizeBytes",
-                  "sha256",
                   "createdAt",
                   "contentPath",
                   "metadata"
@@ -159447,10 +162674,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       }
     ],
     "schemaCoverage": {
-      "methods": 542,
-      "typedInputs": 542,
+      "methods": 549,
+      "typedInputs": 549,
       "genericInputs": 0,
-      "typedOutputs": 542,
+      "typedOutputs": 549,
       "genericOutputs": 0
     },
     "eventCoverage": {
@@ -159459,10 +162686,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       "withWireEvents": 34
     },
     "validationCoverage": {
-      "methods": 542,
-      "validated": 534,
+      "methods": 549,
+      "validated": 540,
       "skippedGeneric": 0,
-      "skippedUntyped": 8
+      "skippedUntyped": 9
     }
   },
   "peer": {

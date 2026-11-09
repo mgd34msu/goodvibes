@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `542`
+- Methods: `549`
 - Events: `34`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -4314,7 +4314,6 @@ Store a file or attachment artifact for later delivery, analysis, or knowledge i
         "kind",
         "mimeType",
         "sizeBytes",
-        "sha256",
         "createdAt",
         "metadata"
       ],
@@ -4434,7 +4433,6 @@ Return metadata for a stored artifact.
         "kind",
         "mimeType",
         "sizeBytes",
-        "sha256",
         "createdAt",
         "metadata"
       ],
@@ -4549,7 +4547,6 @@ Return stored artifact metadata for files and attachments.
           "kind",
           "mimeType",
           "sizeBytes",
-          "sha256",
           "createdAt",
           "metadata"
         ],
@@ -4727,7 +4724,7 @@ Return local auth posture, users, and sessions.
       "items": {
         "type": "object",
         "properties": {
-          "tokenFingerprint": {
+          "id": {
             "type": "string"
           },
           "username": {
@@ -4738,7 +4735,7 @@ Return local auth posture, users, and sessions.
           }
         },
         "required": [
-          "tokenFingerprint",
+          "id",
           "username",
           "expiresAt"
         ],
@@ -6218,6 +6215,11 @@ Return the automation integration snapshot.
                   },
                   "staggerMs": {
                     "type": "number"
+                  },
+                  "staggerPhase": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4294967295
                   }
                 },
                 "required": [
@@ -6961,6 +6963,11 @@ Create a durable automation job.
             },
             "staggerMs": {
               "type": "number"
+            },
+            "staggerPhase": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
             }
           },
           "required": [
@@ -7975,6 +7982,11 @@ Return automation jobs and recent runs. Without ?limit/?cursor returns { jobs: [
                   },
                   "staggerMs": {
                     "type": "number"
+                  },
+                  "staggerPhase": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4294967295
                   }
                 },
                 "required": [
@@ -8852,6 +8864,11 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
             },
             "staggerMs": {
               "type": "number"
+            },
+            "staggerPhase": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
             }
           },
           "required": [
@@ -9358,6 +9375,11 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
             },
             "staggerMs": {
               "type": "number"
+            },
+            "staggerPhase": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
             }
           },
           "required": [
@@ -14740,6 +14762,11 @@ Create a schedule record.
             },
             "staggerMs": {
               "type": "number"
+            },
+            "staggerPhase": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
             }
           },
           "required": [
@@ -15747,6 +15774,11 @@ Return schedule records.
                   },
                   "staggerMs": {
                     "type": "number"
+                  },
+                  "staggerPhase": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4294967295
                   }
                 },
                 "required": [
@@ -23302,6 +23334,9 @@ Return a single daemon-mirrored channel draft by id, or a notFound marker.
 {
   "type": "object",
   "properties": {
+    "wireReference": {
+      "type": "string"
+    },
     "version": {
       "type": "number"
     },
@@ -23397,6 +23432,9 @@ Return daemon-mirrored channel drafts for cross-device sync. Webhook values are 
       "items": {
         "type": "object",
         "properties": {
+          "wireReference": {
+            "type": "string"
+          },
           "version": {
             "type": "number"
           },
@@ -23486,6 +23524,9 @@ Mirror a channel draft to the daemon-side store. Webhook values must be redacted
 {
   "type": "object",
   "properties": {
+    "wireReference": {
+      "type": "string"
+    },
     "version": {
       "type": "number"
     },
@@ -23559,6 +23600,9 @@ Mirror a channel draft to the daemon-side store. Webhook values must be redacted
     "draft": {
       "type": "object",
       "properties": {
+        "wireReference": {
+          "type": "string"
+        },
         "version": {
           "type": "number"
         },
@@ -27156,7 +27200,8 @@ Diff two checkpoints, or one checkpoint against the live working tree when `b` i
         },
         "nativeRevision": {
           "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
+          "maxLength": 200,
+          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
         },
         "unifiedDiff": {
           "type": "string"
@@ -28778,6 +28823,11 @@ Return the message list for a companion-chat session.
           "content": {
             "type": "string"
           },
+          "contentRevision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
           "attachments": {
             "type": "array",
             "items": {
@@ -28856,7 +28906,6 @@ Return the message list for a companion-chat session.
                 "kind",
                 "mimeType",
                 "sizeBytes",
-                "sha256",
                 "createdAt",
                 "metadata"
               ],
@@ -29515,6 +29564,11 @@ Return a companion-chat session record together with its full message history.
           "content": {
             "type": "string"
           },
+          "contentRevision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
           "attachments": {
             "type": "array",
             "items": {
@@ -29593,7 +29647,6 @@ Return a companion-chat session record together with its full message history.
                 "kind",
                 "mimeType",
                 "sizeBytes",
-                "sha256",
                 "createdAt",
                 "metadata"
               ],
@@ -30998,7 +31051,8 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                 },
                 "fileIndex": {
                   "type": "integer",
@@ -31071,7 +31125,8 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                 },
                 "fileIndex": {
                   "type": "integer",
@@ -31145,9 +31200,6 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
             "type": "string"
           }
         },
-        "digest": {
-          "type": "string"
-        },
         "source": {
           "type": "string",
           "enum": [
@@ -31164,7 +31216,6 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
       },
       "required": [
         "paths",
-        "digest",
         "source",
         "errors"
       ],
@@ -33514,111 +33565,272 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
       ]
     },
     "inputSnapshot": {
-      "type": "object",
-      "properties": {
-        "version": {
-          "const": 1
-        },
-        "id": {
-          "type": "string"
-        },
-        "sourceRoot": {
-          "type": "string"
-        },
-        "sourceIdentity": {
-          "type": "string"
-        },
-        "gitIdentity": {
-          "type": "string"
-        },
-        "ownerHead": {
-          "type": "string"
-        },
-        "ownerRef": {
-          "type": "string"
-        },
-        "indexFingerprint": {
-          "type": "string"
-        },
-        "inputTree": {
-          "type": "string"
-        },
-        "inputCommit": {
-          "type": "string"
-        },
-        "capturedAt": {
-          "type": "number"
-        },
-        "dirty": {
-          "type": "boolean"
-        },
-        "exclusions": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "files": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "file",
-                  "symlink",
-                  "missing"
-                ]
-              },
-              "mode": {
-                "type": "string",
-                "enum": [
-                  "100644",
-                  "100755",
-                  "120000",
-                  "0"
-                ]
-              },
-              "oid": {
-                "type": "string"
-              },
-              "digest": {
-                "type": "string"
-              },
-              "identity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "id": {
+              "type": "string"
+            },
+            "sourceRoot": {
+              "type": "string"
+            },
+            "sourceIdentity": {
+              "type": "string"
+            },
+            "gitIdentity": {
+              "type": "string"
+            },
+            "ownerHead": {
+              "type": "string"
+            },
+            "ownerRef": {
+              "type": "string"
+            },
+            "indexFingerprint": {
+              "type": "string"
+            },
+            "inputTree": {
+              "type": "string"
+            },
+            "inputCommit": {
+              "type": "string"
+            },
+            "capturedAt": {
+              "type": "number"
+            },
+            "dirty": {
+              "type": "boolean"
+            },
+            "exclusions": {
+              "type": "array",
+              "items": {
                 "type": "string"
               }
             },
-            "required": [
-              "path",
-              "kind",
-              "mode"
-            ],
-            "additionalProperties": false
-          }
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "file",
+                      "symlink",
+                      "missing"
+                    ]
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "100644",
+                      "100755",
+                      "120000",
+                      "0"
+                    ]
+                  },
+                  "oid": {
+                    "type": "string"
+                  },
+                  "identity": {
+                    "type": "string"
+                  },
+                  "digest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path",
+                  "kind",
+                  "mode"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "version",
+            "id",
+            "sourceRoot",
+            "sourceIdentity",
+            "gitIdentity",
+            "ownerHead",
+            "ownerRef",
+            "indexFingerprint",
+            "inputTree",
+            "inputCommit",
+            "capturedAt",
+            "dirty",
+            "exclusions",
+            "files"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 2
+            },
+            "id": {
+              "type": "string"
+            },
+            "sourceRoot": {
+              "type": "string"
+            },
+            "sourceIdentity": {
+              "type": "string"
+            },
+            "gitIdentity": {
+              "type": "string"
+            },
+            "ownerHead": {
+              "type": "string"
+            },
+            "ownerRef": {
+              "type": "string"
+            },
+            "indexFingerprint": {
+              "type": "string"
+            },
+            "inputTree": {
+              "type": "string"
+            },
+            "inputCommit": {
+              "type": "string"
+            },
+            "capturedAt": {
+              "type": "number"
+            },
+            "dirty": {
+              "type": "boolean"
+            },
+            "exclusions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "missing"
+                      },
+                      "mode": {
+                        "const": "0"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "kind",
+                      "mode"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "file"
+                      },
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "100644",
+                          "100755"
+                        ]
+                      },
+                      "oid": {
+                        "type": "string"
+                      },
+                      "identity": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "kind",
+                      "mode",
+                      "oid",
+                      "identity"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "symlink"
+                      },
+                      "mode": {
+                        "const": "120000"
+                      },
+                      "oid": {
+                        "type": "string"
+                      },
+                      "identity": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "kind",
+                      "mode",
+                      "oid",
+                      "identity"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "version",
+            "id",
+            "sourceRoot",
+            "sourceIdentity",
+            "gitIdentity",
+            "ownerHead",
+            "ownerRef",
+            "indexFingerprint",
+            "inputTree",
+            "inputCommit",
+            "capturedAt",
+            "dirty",
+            "exclusions",
+            "files"
+          ],
+          "additionalProperties": false
         }
-      },
-      "required": [
-        "version",
-        "id",
-        "sourceRoot",
-        "sourceIdentity",
-        "gitIdentity",
-        "ownerHead",
-        "ownerRef",
-        "indexFingerprint",
-        "inputTree",
-        "inputCommit",
-        "capturedAt",
-        "dirty",
-        "exclusions",
-        "files"
-      ],
-      "additionalProperties": false
+      ]
     },
     "id": {
       "type": "string"
@@ -33695,6 +33907,12 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
     "baseline": {
       "type": "object",
       "properties": {
+        "version": {
+          "type": "number",
+          "enum": [
+            2
+          ]
+        },
         "head": {
           "anyOf": [
             {
@@ -34600,20 +34818,40 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                 "reviewedFiles": {
                   "type": "array",
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "path": {
-                        "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "sha256": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "sha256"
+                        ],
+                        "additionalProperties": false
                       },
-                      "sha256": {
-                        "type": "string"
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "observationId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "observationId"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "path",
-                      "sha256"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 }
               },
@@ -34624,8 +34862,7 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                 "goal",
                 "quality",
                 "result",
-                "decisionIds",
-                "evidenceDigest"
+                "decisionIds"
               ],
               "additionalProperties": false
             }
@@ -34636,6 +34873,12 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
           "baseline": {
             "type": "object",
             "properties": {
+              "version": {
+                "type": "number",
+                "enum": [
+                  2
+                ]
+              },
               "head": {
                 "anyOf": [
                   {
@@ -35447,20 +35690,40 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                 "reviewedFiles": {
                   "type": "array",
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "path": {
-                        "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "sha256": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "sha256"
+                        ],
+                        "additionalProperties": false
                       },
-                      "sha256": {
-                        "type": "string"
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "observationId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "observationId"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "path",
-                      "sha256"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 }
               },
@@ -35471,8 +35734,7 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                 "goal",
                 "quality",
                 "result",
-                "decisionIds",
-                "evidenceDigest"
+                "decisionIds"
               ],
               "additionalProperties": false
             }
@@ -35560,6 +35822,12 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
           "baseline": {
             "type": "object",
             "properties": {
+              "version": {
+                "type": "number",
+                "enum": [
+                  2
+                ]
+              },
               "head": {
                 "anyOf": [
                   {
@@ -36709,20 +36977,40 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                       "reviewedFiles": {
                         "type": "array",
                         "items": {
-                          "type": "object",
-                          "properties": {
-                            "path": {
-                              "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                },
+                                "sha256": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "sha256"
+                              ],
+                              "additionalProperties": false
                             },
-                            "sha256": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                },
+                                "observationId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "observationId"
+                              ],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": [
-                            "path",
-                            "sha256"
-                          ],
-                          "additionalProperties": false
+                          ]
                         }
                       }
                     },
@@ -36733,8 +37021,7 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                       "goal",
                       "quality",
                       "result",
-                      "decisionIds",
-                      "evidenceDigest"
+                      "decisionIds"
                     ],
                     "additionalProperties": false
                   }
@@ -36822,6 +37109,12 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                 "baseline": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "head": {
                       "anyOf": [
                         {
@@ -37971,20 +38264,40 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
           "reviewedFiles": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "path": {
-                  "type": "string"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "sha256": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "sha256"
+                  ],
+                  "additionalProperties": false
                 },
-                "sha256": {
-                  "type": "string"
+                {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "observationId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "observationId"
+                  ],
+                  "additionalProperties": false
                 }
-              },
-              "required": [
-                "path",
-                "sha256"
-              ],
-              "additionalProperties": false
+              ]
             }
           }
         },
@@ -37995,8 +38308,7 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
           "goal",
           "quality",
           "result",
-          "decisionIds",
-          "evidenceDigest"
+          "decisionIds"
         ],
         "additionalProperties": false
       }
@@ -38498,7 +38810,8 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                       },
                       "revision": {
                         "type": "string",
-                        "pattern": "^[a-f0-9]{64}$"
+                        "maxLength": 200,
+                        "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                       },
                       "fileIndex": {
                         "type": "integer",
@@ -38571,7 +38884,8 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                       },
                       "revision": {
                         "type": "string",
-                        "pattern": "^[a-f0-9]{64}$"
+                        "maxLength": 200,
+                        "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                       },
                       "fileIndex": {
                         "type": "integer",
@@ -38645,9 +38959,6 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                   "type": "string"
                 }
               },
-              "digest": {
-                "type": "string"
-              },
               "source": {
                 "type": "string",
                 "enum": [
@@ -38664,7 +38975,6 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
             },
             "required": [
               "paths",
-              "digest",
               "source",
               "errors"
             ],
@@ -41014,111 +41324,272 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
             ]
           },
           "inputSnapshot": {
-            "type": "object",
-            "properties": {
-              "version": {
-                "const": 1
-              },
-              "id": {
-                "type": "string"
-              },
-              "sourceRoot": {
-                "type": "string"
-              },
-              "sourceIdentity": {
-                "type": "string"
-              },
-              "gitIdentity": {
-                "type": "string"
-              },
-              "ownerHead": {
-                "type": "string"
-              },
-              "ownerRef": {
-                "type": "string"
-              },
-              "indexFingerprint": {
-                "type": "string"
-              },
-              "inputTree": {
-                "type": "string"
-              },
-              "inputCommit": {
-                "type": "string"
-              },
-              "capturedAt": {
-                "type": "number"
-              },
-              "dirty": {
-                "type": "boolean"
-              },
-              "exclusions": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "files": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "path": {
-                      "type": "string"
-                    },
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "file",
-                        "symlink",
-                        "missing"
-                      ]
-                    },
-                    "mode": {
-                      "type": "string",
-                      "enum": [
-                        "100644",
-                        "100755",
-                        "120000",
-                        "0"
-                      ]
-                    },
-                    "oid": {
-                      "type": "string"
-                    },
-                    "digest": {
-                      "type": "string"
-                    },
-                    "identity": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "const": 1
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "sourceRoot": {
+                    "type": "string"
+                  },
+                  "sourceIdentity": {
+                    "type": "string"
+                  },
+                  "gitIdentity": {
+                    "type": "string"
+                  },
+                  "ownerHead": {
+                    "type": "string"
+                  },
+                  "ownerRef": {
+                    "type": "string"
+                  },
+                  "indexFingerprint": {
+                    "type": "string"
+                  },
+                  "inputTree": {
+                    "type": "string"
+                  },
+                  "inputCommit": {
+                    "type": "string"
+                  },
+                  "capturedAt": {
+                    "type": "number"
+                  },
+                  "dirty": {
+                    "type": "boolean"
+                  },
+                  "exclusions": {
+                    "type": "array",
+                    "items": {
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "path",
-                    "kind",
-                    "mode"
-                  ],
-                  "additionalProperties": false
-                }
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "file",
+                            "symlink",
+                            "missing"
+                          ]
+                        },
+                        "mode": {
+                          "type": "string",
+                          "enum": [
+                            "100644",
+                            "100755",
+                            "120000",
+                            "0"
+                          ]
+                        },
+                        "oid": {
+                          "type": "string"
+                        },
+                        "identity": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "kind",
+                        "mode"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "version",
+                  "id",
+                  "sourceRoot",
+                  "sourceIdentity",
+                  "gitIdentity",
+                  "ownerHead",
+                  "ownerRef",
+                  "indexFingerprint",
+                  "inputTree",
+                  "inputCommit",
+                  "capturedAt",
+                  "dirty",
+                  "exclusions",
+                  "files"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "const": 2
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "sourceRoot": {
+                    "type": "string"
+                  },
+                  "sourceIdentity": {
+                    "type": "string"
+                  },
+                  "gitIdentity": {
+                    "type": "string"
+                  },
+                  "ownerHead": {
+                    "type": "string"
+                  },
+                  "ownerRef": {
+                    "type": "string"
+                  },
+                  "indexFingerprint": {
+                    "type": "string"
+                  },
+                  "inputTree": {
+                    "type": "string"
+                  },
+                  "inputCommit": {
+                    "type": "string"
+                  },
+                  "capturedAt": {
+                    "type": "number"
+                  },
+                  "dirty": {
+                    "type": "boolean"
+                  },
+                  "exclusions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "const": "missing"
+                            },
+                            "mode": {
+                              "const": "0"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "kind",
+                            "mode"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "const": "file"
+                            },
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "100644",
+                                "100755"
+                              ]
+                            },
+                            "oid": {
+                              "type": "string"
+                            },
+                            "identity": {
+                              "type": "string"
+                            },
+                            "digest": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "kind",
+                            "mode",
+                            "oid",
+                            "identity"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "const": "symlink"
+                            },
+                            "mode": {
+                              "const": "120000"
+                            },
+                            "oid": {
+                              "type": "string"
+                            },
+                            "identity": {
+                              "type": "string"
+                            },
+                            "digest": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "kind",
+                            "mode",
+                            "oid",
+                            "identity"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "version",
+                  "id",
+                  "sourceRoot",
+                  "sourceIdentity",
+                  "gitIdentity",
+                  "ownerHead",
+                  "ownerRef",
+                  "indexFingerprint",
+                  "inputTree",
+                  "inputCommit",
+                  "capturedAt",
+                  "dirty",
+                  "exclusions",
+                  "files"
+                ],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "version",
-              "id",
-              "sourceRoot",
-              "sourceIdentity",
-              "gitIdentity",
-              "ownerHead",
-              "ownerRef",
-              "indexFingerprint",
-              "inputTree",
-              "inputCommit",
-              "capturedAt",
-              "dirty",
-              "exclusions",
-              "files"
-            ],
-            "additionalProperties": false
+            ]
           },
           "id": {
             "type": "string"
@@ -41195,6 +41666,12 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
           "baseline": {
             "type": "object",
             "properties": {
+              "version": {
+                "type": "number",
+                "enum": [
+                  2
+                ]
+              },
               "head": {
                 "anyOf": [
                   {
@@ -42100,20 +42577,40 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                       "reviewedFiles": {
                         "type": "array",
                         "items": {
-                          "type": "object",
-                          "properties": {
-                            "path": {
-                              "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                },
+                                "sha256": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "sha256"
+                              ],
+                              "additionalProperties": false
                             },
-                            "sha256": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                },
+                                "observationId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "observationId"
+                              ],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": [
-                            "path",
-                            "sha256"
-                          ],
-                          "additionalProperties": false
+                          ]
                         }
                       }
                     },
@@ -42124,8 +42621,7 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                       "goal",
                       "quality",
                       "result",
-                      "decisionIds",
-                      "evidenceDigest"
+                      "decisionIds"
                     ],
                     "additionalProperties": false
                   }
@@ -42136,6 +42632,12 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                 "baseline": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "head": {
                       "anyOf": [
                         {
@@ -42947,20 +43449,40 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                       "reviewedFiles": {
                         "type": "array",
                         "items": {
-                          "type": "object",
-                          "properties": {
-                            "path": {
-                              "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                },
+                                "sha256": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "sha256"
+                              ],
+                              "additionalProperties": false
                             },
-                            "sha256": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                },
+                                "observationId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "observationId"
+                              ],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": [
-                            "path",
-                            "sha256"
-                          ],
-                          "additionalProperties": false
+                          ]
                         }
                       }
                     },
@@ -42971,8 +43493,7 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                       "goal",
                       "quality",
                       "result",
-                      "decisionIds",
-                      "evidenceDigest"
+                      "decisionIds"
                     ],
                     "additionalProperties": false
                   }
@@ -43060,6 +43581,12 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                 "baseline": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "head": {
                       "anyOf": [
                         {
@@ -44209,20 +44736,40 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                             "reviewedFiles": {
                               "type": "array",
                               "items": {
-                                "type": "object",
-                                "properties": {
-                                  "path": {
-                                    "type": "string"
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "path": {
+                                        "type": "string"
+                                      },
+                                      "sha256": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "path",
+                                      "sha256"
+                                    ],
+                                    "additionalProperties": false
                                   },
-                                  "sha256": {
-                                    "type": "string"
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "path": {
+                                        "type": "string"
+                                      },
+                                      "observationId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "path",
+                                      "observationId"
+                                    ],
+                                    "additionalProperties": false
                                   }
-                                },
-                                "required": [
-                                  "path",
-                                  "sha256"
-                                ],
-                                "additionalProperties": false
+                                ]
                               }
                             }
                           },
@@ -44233,8 +44780,7 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                             "goal",
                             "quality",
                             "result",
-                            "decisionIds",
-                            "evidenceDigest"
+                            "decisionIds"
                           ],
                           "additionalProperties": false
                         }
@@ -44322,6 +44868,12 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                       "baseline": {
                         "type": "object",
                         "properties": {
+                          "version": {
+                            "type": "number",
+                            "enum": [
+                              2
+                            ]
+                          },
                           "head": {
                             "anyOf": [
                               {
@@ -45471,20 +46023,40 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                 "reviewedFiles": {
                   "type": "array",
                   "items": {
-                    "type": "object",
-                    "properties": {
-                      "path": {
-                        "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "sha256": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "sha256"
+                        ],
+                        "additionalProperties": false
                       },
-                      "sha256": {
-                        "type": "string"
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "observationId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "observationId"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "path",
-                      "sha256"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 }
               },
@@ -45495,8 +46067,7 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                 "goal",
                 "quality",
                 "result",
-                "decisionIds",
-                "evidenceDigest"
+                "decisionIds"
               ],
               "additionalProperties": false
             }
@@ -46106,7 +46677,8 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -46179,7 +46751,8 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -46253,9 +46826,6 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                 "type": "string"
               }
             },
-            "digest": {
-              "type": "string"
-            },
             "source": {
               "type": "string",
               "enum": [
@@ -46272,7 +46842,6 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
           },
           "required": [
             "paths",
-            "digest",
             "source",
             "errors"
           ],
@@ -48622,111 +49191,272 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
           ]
         },
         "inputSnapshot": {
-          "type": "object",
-          "properties": {
-            "version": {
-              "const": 1
-            },
-            "id": {
-              "type": "string"
-            },
-            "sourceRoot": {
-              "type": "string"
-            },
-            "sourceIdentity": {
-              "type": "string"
-            },
-            "gitIdentity": {
-              "type": "string"
-            },
-            "ownerHead": {
-              "type": "string"
-            },
-            "ownerRef": {
-              "type": "string"
-            },
-            "indexFingerprint": {
-              "type": "string"
-            },
-            "inputTree": {
-              "type": "string"
-            },
-            "inputCommit": {
-              "type": "string"
-            },
-            "capturedAt": {
-              "type": "number"
-            },
-            "dirty": {
-              "type": "boolean"
-            },
-            "exclusions": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "files": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "path": {
-                    "type": "string"
-                  },
-                  "kind": {
-                    "type": "string",
-                    "enum": [
-                      "file",
-                      "symlink",
-                      "missing"
-                    ]
-                  },
-                  "mode": {
-                    "type": "string",
-                    "enum": [
-                      "100644",
-                      "100755",
-                      "120000",
-                      "0"
-                    ]
-                  },
-                  "oid": {
-                    "type": "string"
-                  },
-                  "digest": {
-                    "type": "string"
-                  },
-                  "identity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "const": 1
+                },
+                "id": {
+                  "type": "string"
+                },
+                "sourceRoot": {
+                  "type": "string"
+                },
+                "sourceIdentity": {
+                  "type": "string"
+                },
+                "gitIdentity": {
+                  "type": "string"
+                },
+                "ownerHead": {
+                  "type": "string"
+                },
+                "ownerRef": {
+                  "type": "string"
+                },
+                "indexFingerprint": {
+                  "type": "string"
+                },
+                "inputTree": {
+                  "type": "string"
+                },
+                "inputCommit": {
+                  "type": "string"
+                },
+                "capturedAt": {
+                  "type": "number"
+                },
+                "dirty": {
+                  "type": "boolean"
+                },
+                "exclusions": {
+                  "type": "array",
+                  "items": {
                     "type": "string"
                   }
                 },
-                "required": [
-                  "path",
-                  "kind",
-                  "mode"
-                ],
-                "additionalProperties": false
-              }
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "file",
+                          "symlink",
+                          "missing"
+                        ]
+                      },
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "100644",
+                          "100755",
+                          "120000",
+                          "0"
+                        ]
+                      },
+                      "oid": {
+                        "type": "string"
+                      },
+                      "identity": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "kind",
+                      "mode"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "version",
+                "id",
+                "sourceRoot",
+                "sourceIdentity",
+                "gitIdentity",
+                "ownerHead",
+                "ownerRef",
+                "indexFingerprint",
+                "inputTree",
+                "inputCommit",
+                "capturedAt",
+                "dirty",
+                "exclusions",
+                "files"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "const": 2
+                },
+                "id": {
+                  "type": "string"
+                },
+                "sourceRoot": {
+                  "type": "string"
+                },
+                "sourceIdentity": {
+                  "type": "string"
+                },
+                "gitIdentity": {
+                  "type": "string"
+                },
+                "ownerHead": {
+                  "type": "string"
+                },
+                "ownerRef": {
+                  "type": "string"
+                },
+                "indexFingerprint": {
+                  "type": "string"
+                },
+                "inputTree": {
+                  "type": "string"
+                },
+                "inputCommit": {
+                  "type": "string"
+                },
+                "capturedAt": {
+                  "type": "number"
+                },
+                "dirty": {
+                  "type": "boolean"
+                },
+                "exclusions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "const": "missing"
+                          },
+                          "mode": {
+                            "const": "0"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "kind",
+                          "mode"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "const": "file"
+                          },
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "100644",
+                              "100755"
+                            ]
+                          },
+                          "oid": {
+                            "type": "string"
+                          },
+                          "identity": {
+                            "type": "string"
+                          },
+                          "digest": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "kind",
+                          "mode",
+                          "oid",
+                          "identity"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "const": "symlink"
+                          },
+                          "mode": {
+                            "const": "120000"
+                          },
+                          "oid": {
+                            "type": "string"
+                          },
+                          "identity": {
+                            "type": "string"
+                          },
+                          "digest": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "kind",
+                          "mode",
+                          "oid",
+                          "identity"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "version",
+                "id",
+                "sourceRoot",
+                "sourceIdentity",
+                "gitIdentity",
+                "ownerHead",
+                "ownerRef",
+                "indexFingerprint",
+                "inputTree",
+                "inputCommit",
+                "capturedAt",
+                "dirty",
+                "exclusions",
+                "files"
+              ],
+              "additionalProperties": false
             }
-          },
-          "required": [
-            "version",
-            "id",
-            "sourceRoot",
-            "sourceIdentity",
-            "gitIdentity",
-            "ownerHead",
-            "ownerRef",
-            "indexFingerprint",
-            "inputTree",
-            "inputCommit",
-            "capturedAt",
-            "dirty",
-            "exclusions",
-            "files"
-          ],
-          "additionalProperties": false
+          ]
         },
         "id": {
           "type": "string"
@@ -48803,6 +49533,12 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
         "baseline": {
           "type": "object",
           "properties": {
+            "version": {
+              "type": "number",
+              "enum": [
+                2
+              ]
+            },
             "head": {
               "anyOf": [
                 {
@@ -49708,20 +50444,40 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                     "reviewedFiles": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "path": {
-                            "type": "string"
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "sha256": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "sha256"
+                            ],
+                            "additionalProperties": false
                           },
-                          "sha256": {
-                            "type": "string"
+                          {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "observationId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "observationId"
+                            ],
+                            "additionalProperties": false
                           }
-                        },
-                        "required": [
-                          "path",
-                          "sha256"
-                        ],
-                        "additionalProperties": false
+                        ]
                       }
                     }
                   },
@@ -49732,8 +50488,7 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                     "goal",
                     "quality",
                     "result",
-                    "decisionIds",
-                    "evidenceDigest"
+                    "decisionIds"
                   ],
                   "additionalProperties": false
                 }
@@ -49744,6 +50499,12 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
               "baseline": {
                 "type": "object",
                 "properties": {
+                  "version": {
+                    "type": "number",
+                    "enum": [
+                      2
+                    ]
+                  },
                   "head": {
                     "anyOf": [
                       {
@@ -50555,20 +51316,40 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                     "reviewedFiles": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "path": {
-                            "type": "string"
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "sha256": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "sha256"
+                            ],
+                            "additionalProperties": false
                           },
-                          "sha256": {
-                            "type": "string"
+                          {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "observationId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "observationId"
+                            ],
+                            "additionalProperties": false
                           }
-                        },
-                        "required": [
-                          "path",
-                          "sha256"
-                        ],
-                        "additionalProperties": false
+                        ]
                       }
                     }
                   },
@@ -50579,8 +51360,7 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                     "goal",
                     "quality",
                     "result",
-                    "decisionIds",
-                    "evidenceDigest"
+                    "decisionIds"
                   ],
                   "additionalProperties": false
                 }
@@ -50668,6 +51448,12 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
               "baseline": {
                 "type": "object",
                 "properties": {
+                  "version": {
+                    "type": "number",
+                    "enum": [
+                      2
+                    ]
+                  },
                   "head": {
                     "anyOf": [
                       {
@@ -51817,20 +52603,40 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                           "reviewedFiles": {
                             "type": "array",
                             "items": {
-                              "type": "object",
-                              "properties": {
-                                "path": {
-                                  "type": "string"
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "path": {
+                                      "type": "string"
+                                    },
+                                    "sha256": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "path",
+                                    "sha256"
+                                  ],
+                                  "additionalProperties": false
                                 },
-                                "sha256": {
-                                  "type": "string"
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "path": {
+                                      "type": "string"
+                                    },
+                                    "observationId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "path",
+                                    "observationId"
+                                  ],
+                                  "additionalProperties": false
                                 }
-                              },
-                              "required": [
-                                "path",
-                                "sha256"
-                              ],
-                              "additionalProperties": false
+                              ]
                             }
                           }
                         },
@@ -51841,8 +52647,7 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                           "goal",
                           "quality",
                           "result",
-                          "decisionIds",
-                          "evidenceDigest"
+                          "decisionIds"
                         ],
                         "additionalProperties": false
                       }
@@ -51930,6 +52735,12 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                     "baseline": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "head": {
                           "anyOf": [
                             {
@@ -53079,20 +53890,40 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
               "reviewedFiles": {
                 "type": "array",
                 "items": {
-                  "type": "object",
-                  "properties": {
-                    "path": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "sha256": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "sha256"
+                      ],
+                      "additionalProperties": false
                     },
-                    "sha256": {
-                      "type": "string"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "observationId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "observationId"
+                      ],
+                      "additionalProperties": false
                     }
-                  },
-                  "required": [
-                    "path",
-                    "sha256"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               }
             },
@@ -53103,8 +53934,7 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
               "goal",
               "quality",
               "result",
-              "decisionIds",
-              "evidenceDigest"
+              "decisionIds"
             ],
             "additionalProperties": false
           }
@@ -54898,7 +55728,6 @@ Return recent surface messages published through the control plane.
                 "kind",
                 "mimeType",
                 "sizeBytes",
-                "sha256",
                 "createdAt",
                 "contentPath",
                 "metadata"
@@ -55600,7 +56429,6 @@ Return the current control-plane gateway snapshot.
                 "kind",
                 "mimeType",
                 "sizeBytes",
-                "sha256",
                 "createdAt",
                 "contentPath",
                 "metadata"
@@ -62645,6 +63473,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
           "minLength": 1,
           "maxLength": 256
         },
+        "owner": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "pairing-token"
+            },
+            "principalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "tokenId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "scopes": {
+              "maxItems": 256,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "principalId",
+            "tokenId",
+            "authorityId",
+            "authorityRevision",
+            "scopes"
+          ],
+          "additionalProperties": false
+        },
         "workspaceRevision": {
           "type": "string",
           "minLength": 1,
@@ -62832,6 +63707,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "owner": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "pairing-token"
+              },
+              "principalId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "tokenId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "scopes": {
+                "maxItems": 256,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "principalId",
+              "tokenId",
+              "authorityId",
+              "authorityRevision",
+              "scopes"
+            ],
+            "additionalProperties": false
           },
           "workspaceRevision": {
             "type": "string",
@@ -63302,6 +64224,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
           "minLength": 1,
           "maxLength": 256
         },
+        "owner": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "pairing-token"
+            },
+            "principalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "tokenId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "scopes": {
+              "maxItems": 256,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "principalId",
+            "tokenId",
+            "authorityId",
+            "authorityRevision",
+            "scopes"
+          ],
+          "additionalProperties": false
+        },
         "workspaceRevision": {
           "type": "string",
           "minLength": 1,
@@ -63489,6 +64458,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "owner": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "pairing-token"
+              },
+              "principalId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "tokenId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "scopes": {
+                "maxItems": 256,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "principalId",
+              "tokenId",
+              "authorityId",
+              "authorityRevision",
+              "scopes"
+            ],
+            "additionalProperties": false
           },
           "workspaceRevision": {
             "type": "string",
@@ -64014,6 +65030,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
           "minLength": 1,
           "maxLength": 256
         },
+        "owner": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "pairing-token"
+            },
+            "principalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "tokenId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "scopes": {
+              "maxItems": 256,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "principalId",
+            "tokenId",
+            "authorityId",
+            "authorityRevision",
+            "scopes"
+          ],
+          "additionalProperties": false
+        },
         "workspaceRevision": {
           "type": "string",
           "minLength": 1,
@@ -64201,6 +65264,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "owner": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "pairing-token"
+              },
+              "principalId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "tokenId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "scopes": {
+                "maxItems": 256,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "principalId",
+              "tokenId",
+              "authorityId",
+              "authorityRevision",
+              "scopes"
+            ],
+            "additionalProperties": false
           },
           "workspaceRevision": {
             "type": "string",
@@ -64629,6 +65739,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
           "minLength": 1,
           "maxLength": 256
         },
+        "owner": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "pairing-token"
+            },
+            "principalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "tokenId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "scopes": {
+              "maxItems": 256,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "principalId",
+            "tokenId",
+            "authorityId",
+            "authorityRevision",
+            "scopes"
+          ],
+          "additionalProperties": false
+        },
         "workspaceRevision": {
           "type": "string",
           "minLength": 1,
@@ -64816,6 +65973,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "owner": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "pairing-token"
+              },
+              "principalId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "tokenId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "scopes": {
+                "maxItems": 256,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "principalId",
+              "tokenId",
+              "authorityId",
+              "authorityRevision",
+              "scopes"
+            ],
+            "additionalProperties": false
           },
           "workspaceRevision": {
             "type": "string",
@@ -65286,6 +66490,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
           "minLength": 1,
           "maxLength": 256
         },
+        "owner": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "pairing-token"
+            },
+            "principalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "tokenId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "scopes": {
+              "maxItems": 256,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "principalId",
+            "tokenId",
+            "authorityId",
+            "authorityRevision",
+            "scopes"
+          ],
+          "additionalProperties": false
+        },
         "workspaceRevision": {
           "type": "string",
           "minLength": 1,
@@ -65473,6 +66724,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "owner": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "pairing-token"
+              },
+              "principalId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "tokenId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "scopes": {
+                "maxItems": 256,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "principalId",
+              "tokenId",
+              "authorityId",
+              "authorityRevision",
+              "scopes"
+            ],
+            "additionalProperties": false
           },
           "workspaceRevision": {
             "type": "string",
@@ -65910,6 +67208,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
           "minLength": 1,
           "maxLength": 256
         },
+        "owner": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "pairing-token"
+            },
+            "principalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "tokenId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "scopes": {
+              "maxItems": 256,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "principalId",
+            "tokenId",
+            "authorityId",
+            "authorityRevision",
+            "scopes"
+          ],
+          "additionalProperties": false
+        },
         "workspaceRevision": {
           "type": "string",
           "minLength": 1,
@@ -66097,6 +67442,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "owner": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "pairing-token"
+              },
+              "principalId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "tokenId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "scopes": {
+                "maxItems": 256,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "principalId",
+              "tokenId",
+              "authorityId",
+              "authorityRevision",
+              "scopes"
+            ],
+            "additionalProperties": false
           },
           "workspaceRevision": {
             "type": "string",
@@ -66567,6 +67959,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
           "minLength": 1,
           "maxLength": 256
         },
+        "owner": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "pairing-token"
+            },
+            "principalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "tokenId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "scopes": {
+              "maxItems": 256,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "principalId",
+            "tokenId",
+            "authorityId",
+            "authorityRevision",
+            "scopes"
+          ],
+          "additionalProperties": false
+        },
         "workspaceRevision": {
           "type": "string",
           "minLength": 1,
@@ -66754,6 +68193,53 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "owner": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "pairing-token"
+              },
+              "principalId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "tokenId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "scopes": {
+                "maxItems": 256,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "principalId",
+              "tokenId",
+              "authorityId",
+              "authorityRevision",
+              "scopes"
+            ],
+            "additionalProperties": false
           },
           "workspaceRevision": {
             "type": "string",
@@ -67064,7 +68550,7 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
         "batteryVersion": {
           "type": "number",
           "enum": [
-            1
+            2
           ]
         },
         "input": {
@@ -67089,9 +68575,10 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
               "minimum": 1,
               "maximum": 1000000
             },
-            "contentDigest": {
+            "contentRevision": {
               "type": "string",
-              "pattern": "^[0-9a-f]{64}$"
+              "minLength": 1,
+              "maxLength": 256
             },
             "cursor": {
               "type": "integer",
@@ -67105,7 +68592,7 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "messageId",
             "start",
             "end",
-            "contentDigest",
+            "contentRevision",
             "cursor"
           ],
           "additionalProperties": false
@@ -67774,7 +69261,7 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
         "batteryVersion": {
           "type": "number",
           "enum": [
-            1
+            2
           ]
         },
         "input": {
@@ -67799,9 +69286,10 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
               "minimum": 1,
               "maximum": 1000000
             },
-            "contentDigest": {
+            "contentRevision": {
               "type": "string",
-              "pattern": "^[0-9a-f]{64}$"
+              "minLength": 1,
+              "maxLength": 256
             }
           },
           "required": [
@@ -67809,7 +69297,7 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "messageId",
             "start",
             "end",
-            "contentDigest"
+            "contentRevision"
           ],
           "additionalProperties": false
         }
@@ -67855,7 +69343,7 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "batteryVersion": {
               "type": "number",
               "enum": [
-                1
+                2
               ]
             },
             "status": {
@@ -68071,7 +69559,7 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "batteryVersion": {
               "type": "number",
               "enum": [
-                1
+                2
               ]
             },
             "status": {
@@ -71924,7 +73412,7 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "batteryVersion": {
               "type": "number",
               "enum": [
-                1
+                2
               ]
             },
             "status": {
@@ -72147,7 +73635,7 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "batteryVersion": {
               "type": "number",
               "enum": [
-                1
+                2
               ]
             },
             "status": {
@@ -78409,6 +79897,30 @@ Clear one Home Assistant Home Graph knowledge space after callers export any dia
     "artifactDeleteCandidates": {
       "type": "number"
     },
+    "artifactCleanup": {
+      "type": "object",
+      "properties": {
+        "referenced": {
+          "type": "number"
+        },
+        "held": {
+          "type": "number"
+        },
+        "unavailable": {
+          "type": "number"
+        },
+        "skipped": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "referenced",
+        "held",
+        "unavailable",
+        "skipped"
+      ],
+      "additionalProperties": false
+    },
     "deletedArtifacts": {
       "type": "number"
     },
@@ -78426,6 +79938,7 @@ Clear one Home Assistant Home Graph knowledge space after callers export any dia
     "dryRun",
     "deleted",
     "artifactDeleteCandidates",
+    "artifactCleanup",
     "deletedArtifacts",
     "preservedArtifacts",
     "artifactsDeleted"
@@ -85701,6 +87214,19 @@ Return recent knowledge job runs.
                   },
                   "issueCount": {
                     "type": "number"
+                  },
+                  "provenance": {
+                    "type": "string",
+                    "enum": [
+                      "classic"
+                    ]
+                  },
+                  "semanticEnrichment": {
+                    "type": "string",
+                    "enum": [
+                      "attempted",
+                      "not-evaluated"
+                    ]
                   }
                 },
                 "required": [
@@ -85730,6 +87256,61 @@ Return recent knowledge job runs.
                   "failed": {
                     "type": "number"
                   },
+                  "captured": {
+                    "type": "number"
+                  },
+                  "capturePartial": {
+                    "type": "number"
+                  },
+                  "captureFailed": {
+                    "type": "number"
+                  },
+                  "compilationHeld": {
+                    "type": "number"
+                  },
+                  "compilationFailed": {
+                    "type": "number"
+                  },
+                  "outcomes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "canonicalUri": {
+                          "type": "string"
+                        },
+                        "sourceId": {
+                          "type": "string"
+                        },
+                        "capture": {
+                          "type": "string",
+                          "enum": [
+                            "completed",
+                            "partial",
+                            "failed"
+                          ]
+                        },
+                        "compilation": {
+                          "type": "string",
+                          "enum": [
+                            "completed",
+                            "held",
+                            "failed",
+                            "not-attempted"
+                          ]
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "canonicalUri",
+                        "capture",
+                        "compilation"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
                   "profileCount": {
                     "type": "number"
                   },
@@ -85758,6 +87339,9 @@ Return recent knowledge job runs.
                         },
                         "artifactId": {
                           "type": "string"
+                        },
+                        "sourceId": {
+                          "type": "string"
                         }
                       },
                       "required": [
@@ -85766,6 +87350,15 @@ Return recent knowledge job runs.
                       ],
                       "additionalProperties": false
                     }
+                  },
+                  "preservedUnscopedSourceIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "note": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -86261,6 +87854,19 @@ Queue or run a structured knowledge maintenance job.
                 },
                 "issueCount": {
                   "type": "number"
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "classic"
+                  ]
+                },
+                "semanticEnrichment": {
+                  "type": "string",
+                  "enum": [
+                    "attempted",
+                    "not-evaluated"
+                  ]
                 }
               },
               "required": [
@@ -86290,6 +87896,61 @@ Queue or run a structured knowledge maintenance job.
                 "failed": {
                   "type": "number"
                 },
+                "captured": {
+                  "type": "number"
+                },
+                "capturePartial": {
+                  "type": "number"
+                },
+                "captureFailed": {
+                  "type": "number"
+                },
+                "compilationHeld": {
+                  "type": "number"
+                },
+                "compilationFailed": {
+                  "type": "number"
+                },
+                "outcomes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "canonicalUri": {
+                        "type": "string"
+                      },
+                      "sourceId": {
+                        "type": "string"
+                      },
+                      "capture": {
+                        "type": "string",
+                        "enum": [
+                          "completed",
+                          "partial",
+                          "failed"
+                        ]
+                      },
+                      "compilation": {
+                        "type": "string",
+                        "enum": [
+                          "completed",
+                          "held",
+                          "failed",
+                          "not-attempted"
+                        ]
+                      },
+                      "error": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "canonicalUri",
+                      "capture",
+                      "compilation"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
                 "profileCount": {
                   "type": "number"
                 },
@@ -86318,6 +87979,9 @@ Queue or run a structured knowledge maintenance job.
                       },
                       "artifactId": {
                         "type": "string"
+                      },
+                      "sourceId": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -86326,6 +87990,15 @@ Queue or run a structured knowledge maintenance job.
                     ],
                     "additionalProperties": false
                   }
+                },
+                "preservedUnscopedSourceIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "note": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -88121,7 +89794,6 @@ Render and persist a markdown/wiki projection as a derived artifact.
         "kind",
         "mimeType",
         "sizeBytes",
-        "sha256",
         "createdAt",
         "metadata"
       ],
@@ -88313,6 +89985,15 @@ Render and persist a markdown/wiki projection as a derived artifact.
     },
     "artifactCreated": {
       "type": "boolean"
+    },
+    "preservedUnscopedSourceIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "note": {
+      "type": "string"
     }
   },
   "required": [
@@ -90190,6 +91871,11 @@ Enable or disable a managed knowledge schedule.
                 },
                 "staggerMs": {
                   "type": "number"
+                },
+                "staggerPhase": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
                 }
               },
               "required": [
@@ -90372,6 +92058,11 @@ Return a single managed knowledge schedule.
                 },
                 "staggerMs": {
                   "type": "number"
+                },
+                "staggerPhase": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
                 }
               },
               "required": [
@@ -90556,6 +92247,11 @@ Create or update a managed schedule for a knowledge maintenance job.
             },
             "staggerMs": {
               "type": "number"
+            },
+            "staggerPhase": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
             }
           },
           "required": [
@@ -90683,6 +92379,11 @@ Create or update a managed schedule for a knowledge maintenance job.
                 },
                 "staggerMs": {
                   "type": "number"
+                },
+                "staggerPhase": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
                 }
               },
               "required": [
@@ -90864,6 +92565,11 @@ Return managed schedules for background knowledge maintenance jobs.
                   },
                   "staggerMs": {
                     "type": "number"
+                  },
+                  "staggerPhase": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4294967295
                   }
                 },
                 "required": [
@@ -102333,7 +104039,6 @@ Analyze an image, audio file, video artifact, or document through the unified mu
             "kind",
             "mimeType",
             "sizeBytes",
-            "sha256",
             "createdAt",
             "metadata"
           ],
@@ -102564,7 +104269,6 @@ Analyze an image, audio file, video artifact, or document through the unified mu
             "kind",
             "mimeType",
             "sizeBytes",
-            "sha256",
             "createdAt",
             "metadata"
           ],
@@ -103471,7 +105175,6 @@ Persist a multimodal analysis result as an artifact and ingest it into the struc
             "kind",
             "mimeType",
             "sizeBytes",
-            "sha256",
             "createdAt",
             "metadata"
           ],
@@ -110731,7 +112434,7 @@ Configured cards, as METADATA ONLY: id, label, brand, last four digits, whether 
 
 #### `payments.checkout.begin`
 
-Run a purchase against an open browser page, end to end: the caller reports the checkout's line items, tax, fees and delivery options AS STRINGS plus the refs of the card, address, delivery and place-order controls, and the daemon does the rest. It parses every amount into integer minor units with its own parser (refusing anything ambiguous rather than guessing), checks the cart against what was actually asked for, refuses a recurring charge, runs the taint gate, applies the daily item budget, the per-purchase ceiling and the overage pool, walks the shipping ladder down one rung at a time when the pool cannot cover the preferred tier, sends ONE notice to the configured command-authority channels and runs the window, above budget an approval where silence denies, within budget a veto where silence proceeds, then fills the stored shipping and billing addresses, types the stored card, submits once, records the purchase, debits the budget and reports the completed purchase. Nothing here knows any merchant's markup: the caller identifies the controls on whatever page it is looking at. Every number the owner is shown is re-rendered from the integers this daemon parsed, never from merchant text, and no response field can carry card material.
+Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. The paired owner must have authorized the exact merchant/item/amount through payments.checkout.approve. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.
 
 - Title: `Buy What Is In This Checkout`
 - Source: `builtin`
@@ -110749,6 +112452,10 @@ Run a purchase against an open browser page, end to end: the caller reports the 
 {
   "type": "object",
   "properties": {
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    },
     "sessionId": {
       "type": "string"
     },
@@ -110950,10 +112657,13 @@ Run a purchase against an open browser page, end to end: the caller reports the 
       "type": "boolean"
     },
     "requestedMax": {
-      "type": "string"
+      "type": "string",
+      "pattern": "^\\d+(?:\\.\\d{1,3})?$",
+      "description": "Owner-requested maximum for the entire purchase, including tax, mandatory fees and delivery. Supply one non-negative decimal amount in the configured budget currency, such as 20.00, without grouping, currency symbols or prose. Precision must fit that currency. Exceeding it requires a new explicit approval; silence never raises it."
     }
   },
   "required": [
+    "requestId",
     "sessionId",
     "pageId",
     "merchantDomain",
@@ -111184,6 +112894,616 @@ Have the daemon type the stored card into the payment fields of an open browser 
 }
 ```
 
+#### `payments.purchase.approve`
+
+Approve an above-budget purchase or explicitly acknowledge an in-budget purchase using the exact live purchase and window references. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. The same inbox also consumes authenticated channel replies. A stale, answered or expired window refuses; this never submits directly or overrides budget, merchant, page or address checks.
+
+- Title: `Approve This Purchase`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/payments/purchase/approve`
+- Scopes: `write:payments`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "purchaseId": {
+      "type": "string"
+    },
+    "windowId": {
+      "type": "string"
+    },
+    "confirm": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "purchaseId",
+    "windowId",
+    "confirm"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "purchaseId": {
+      "type": "string"
+    },
+    "windowId": {
+      "type": "string"
+    },
+    "accepted": {
+      "type": "boolean"
+    },
+    "answer": {
+      "type": "string",
+      "enum": [
+        "approve",
+        "deny",
+        "acknowledge",
+        "object"
+      ]
+    }
+  },
+  "required": [
+    "purchaseId",
+    "windowId",
+    "accepted",
+    "answer"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `payments.purchase.cancel`
+
+Stop an admitted checkout using its exact purchaseId and operationId, or object to a live window using purchaseId and windowId. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. Stopping is a request, not proof that an order was undone; inspect final status and merchant history if submission may have begun. No automatic retry.
+
+- Title: `Stop This Purchase`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/payments/purchase/cancel`
+- Scopes: `write:payments`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "purchaseId": {
+          "type": "string"
+        },
+        "windowId": {
+          "type": "string"
+        },
+        "confirm": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "purchaseId",
+        "windowId",
+        "confirm"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "purchaseId": {
+          "type": "string"
+        },
+        "operationId": {
+          "type": "string"
+        },
+        "confirm": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "purchaseId",
+        "operationId",
+        "confirm"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}
+```
+
+##### Output schema
+
+```json
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "purchaseId": {
+          "type": "string"
+        },
+        "windowId": {
+          "type": "string"
+        },
+        "accepted": {
+          "type": "boolean"
+        },
+        "answer": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "deny",
+            "acknowledge",
+            "object"
+          ]
+        }
+      },
+      "required": [
+        "purchaseId",
+        "windowId",
+        "accepted",
+        "answer"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "purchaseId": {
+          "type": "string"
+        },
+        "operationId": {
+          "type": "string"
+        },
+        "accepted": {
+          "const": true,
+          "type": "boolean"
+        },
+        "mayHaveSubmitted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "purchaseId",
+        "operationId",
+        "accepted",
+        "mayHaveSubmitted"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}
+```
+
+#### `payments.purchase.deny`
+
+Refuse the pending purchase using the exact live purchase and window references. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. The same inbox also consumes authenticated channel replies. A stale, answered or expired window refuses; this never submits directly or overrides budget, merchant, page or address checks.
+
+- Title: `Deny This Purchase`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/payments/purchase/deny`
+- Scopes: `write:payments`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "purchaseId": {
+      "type": "string"
+    },
+    "windowId": {
+      "type": "string"
+    },
+    "confirm": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "purchaseId",
+    "windowId",
+    "confirm"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "purchaseId": {
+      "type": "string"
+    },
+    "windowId": {
+      "type": "string"
+    },
+    "accepted": {
+      "type": "boolean"
+    },
+    "answer": {
+      "type": "string",
+      "enum": [
+        "approve",
+        "deny",
+        "acknowledge",
+        "object"
+      ]
+    }
+  },
+  "required": [
+    "purchaseId",
+    "windowId",
+    "accepted",
+    "answer"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `payments.purchase.reconcile`
+
+After inspecting the merchant’s order history, explicitly record whether this exact uncertain or unverified checkout placed an order. Requires current paired admin authority, write:payments, confirm: true and inspectedMerchantHistory: true. The saved finding cannot be changed by a retry. Settles only original purchase/budget bookkeeping after its actual executor has drained; never submits or resumes an order. Missing local receipts never imply no charge. A no-order finding releases an original unspent hold but never credits already committed spend.
+
+- Title: `Record the Merchant Order Finding`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/payments/purchase/reconcile`
+- Scopes: `write:payments`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "purchaseId": {
+      "type": "string"
+    },
+    "operationId": {
+      "type": "string"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "purchased",
+        "not-purchased"
+      ]
+    },
+    "inspectedMerchantHistory": {
+      "type": "boolean",
+      "const": true
+    },
+    "confirm": {
+      "type": "boolean",
+      "const": true
+    }
+  },
+  "required": [
+    "purchaseId",
+    "operationId",
+    "outcome",
+    "inspectedMerchantHistory",
+    "confirm"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "purchaseId": {
+      "type": "string"
+    },
+    "operationId": {
+      "type": "string"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "running",
+        "cancelling",
+        "completed",
+        "refused",
+        "cancelled",
+        "attention",
+        "interrupted",
+        "uncertain",
+        "failed"
+      ]
+    },
+    "phase": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "deciding",
+            "awaiting-window",
+            "arming-payment",
+            "submit-pending",
+            "submitted"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "createdAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "updatedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "outcome": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "totalMinorUnits": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "currency": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "purchaseId",
+    "operationId",
+    "state",
+    "phase",
+    "createdAtMs",
+    "updatedAtMs",
+    "outcome",
+    "totalMinorUnits",
+    "currency"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `payments.purchase.status`
+
+Read durable checkout operation status and actual live approval/veto windows. Optionally select one purchase, including after reconnect or restart. An accepted operation is not a completed purchase; uncertain submissions must be checked with the merchant and are never automatically retried. Reading does not extend a deadline or resume execution. Complete purchase records are available through payments.purchases.list.
+
+- Title: `Purchase Operations and Windows`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/payments/purchase/status`
+- Scopes: `read:payments`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "purchaseId": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "windows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "purchaseId": {
+            "type": "string"
+          },
+          "windowId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "approval",
+              "veto"
+            ]
+          },
+          "notice": {
+            "type": "string"
+          },
+          "deadlineMs": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "purchaseId",
+          "windowId",
+          "kind",
+          "notice",
+          "deadlineMs"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 256
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "purchaseId": {
+            "type": "string"
+          },
+          "operationId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "running",
+              "cancelling",
+              "completed",
+              "refused",
+              "cancelled",
+              "attention",
+              "interrupted",
+              "uncertain",
+              "failed"
+            ]
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "deciding",
+                  "awaiting-window",
+                  "arming-payment",
+                  "submit-pending",
+                  "submitted"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAtMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8640000000000000
+          },
+          "updatedAtMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8640000000000000
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "totalMinorUnits": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "purchaseId",
+          "operationId",
+          "state",
+          "phase",
+          "createdAtMs",
+          "updatedAtMs",
+          "outcome",
+          "totalMinorUnits",
+          "currency"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 356
+    }
+  },
+  "required": [
+    "windows",
+    "operations"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `payments.purchases.list`
 
 The purchase audit ledger: what was bought, from which merchant registrable domain, how much (item, tax, fees and delivery separately), which budget pool each part drew on, which delivery tier was requested and which was actually used, whether the shipping ladder stepped it down, which window ran and how it ended, which command-authority channel answered, and the outcome. Reconcilable against a card statement. Never contains a card number, expiry or CVV. A refund is recorded here for reconciliation and credits no pool, a refund on day five refilling day five would be permission to buy again that nobody granted.
@@ -111261,6 +113581,11 @@ The purchase audit ledger: what was bought, from which merchant registrable doma
           },
           "totalMinorUnits": {
             "type": "number"
+          },
+          "requestedMaximumMinorUnits": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           },
           "shippingTierRequested": {
             "type": "string"
@@ -111385,6 +113710,53 @@ The purchase audit ledger: what was bought, from which merchant registrable doma
     },
     "total": {
       "type": "number"
+    },
+    "reconciliations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "purchaseId": {
+            "type": "string"
+          },
+          "operationId": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "purchased",
+              "not-purchased"
+            ]
+          },
+          "principalId": {
+            "type": "string"
+          },
+          "atMs": {
+            "type": "number"
+          },
+          "merchantDomain": {
+            "type": "string"
+          },
+          "totalMinorUnits": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "purchaseId",
+          "operationId",
+          "outcome",
+          "principalId",
+          "atMs",
+          "merchantDomain",
+          "totalMinorUnits",
+          "currency"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [
@@ -115069,9 +117441,6 @@ Store a browser Push subscription (endpoint capability URL + p256dh/auth keys) f
         "endpointOrigin": {
           "type": "string"
         },
-        "endpointHash": {
-          "type": "string"
-        },
         "createdAt": {
           "type": "number"
         },
@@ -115089,7 +117458,6 @@ Store a browser Push subscription (endpoint capability URL + p256dh/auth keys) f
         "id",
         "principalId",
         "endpointOrigin",
-        "endpointHash",
         "createdAt"
       ],
       "additionalProperties": false
@@ -115195,9 +117563,6 @@ none
           "endpointOrigin": {
             "type": "string"
           },
-          "endpointHash": {
-            "type": "string"
-          },
           "createdAt": {
             "type": "number"
           },
@@ -115215,7 +117580,6 @@ none
           "id",
           "principalId",
           "endpointOrigin",
-          "endpointHash",
           "createdAt"
         ],
         "additionalProperties": false
@@ -115302,9 +117666,6 @@ Reconcile-on-open: the client presents its device identity (deviceId) and its CU
         "endpointOrigin": {
           "type": "string"
         },
-        "endpointHash": {
-          "type": "string"
-        },
         "createdAt": {
           "type": "number"
         },
@@ -115322,7 +117683,6 @@ Reconcile-on-open: the client presents its device identity (deviceId) and its CU
         "id",
         "principalId",
         "endpointOrigin",
-        "endpointHash",
         "createdAt"
       ],
       "additionalProperties": false
@@ -124745,7 +127105,8 @@ Return the aggregate workspace file changes a session made, joined over its sess
     },
     "nativeRevision": {
       "type": "string",
-      "pattern": "^[a-f0-9]{64}$"
+      "maxLength": 200,
+      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
     },
     "unifiedDiff": {
       "type": "string"
@@ -138375,6 +140736,199 @@ Stop a watcher instance.
 }
 ```
 
+#### `watchers.triggers.migrate`
+
+Explicitly acknowledge that older GoodVibes instances are closed, then migrate and start this surface’s original trigger supervisor. The acknowledgement is an operator statement, not OS liveness proof.
+
+- Title: `Migrate triggers after closing older instances`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:watchers`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "olderInstancesClosed": {
+      "type": "boolean",
+      "const": true
+    },
+    "confirm": {
+      "type": "boolean",
+      "const": true
+    }
+  },
+  "required": [
+    "olderInstancesClosed",
+    "confirm"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "migrated": {
+      "type": "boolean",
+      "const": true
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "ownership": {
+          "type": "string",
+          "enum": [
+            "local",
+            "other-process",
+            "migration-required",
+            "unclaimed"
+          ]
+        },
+        "migrationRequired": {
+          "type": "boolean"
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "kind",
+              "state"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ownership",
+        "migrationRequired",
+        "records",
+        "message"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "migrated",
+    "status"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `watchers.triggers.status`
+
+Read the original surface trigger supervisor and affected record summaries without claiming execution ownership or migrating saved state.
+
+- Title: `Inspect trigger execution and migration`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:watchers`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ownership": {
+      "type": "string",
+      "enum": [
+        "local",
+        "other-process",
+        "migration-required",
+        "unclaimed"
+      ]
+    },
+    "migrationRequired": {
+      "type": "boolean"
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "kind",
+          "state"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "ownership",
+    "migrationRequired",
+    "records",
+    "message"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `watchers.update`
 
 Update an existing watcher. (Renamed from watchers.patch in the 1.0.0 core-verb rename, canonical verb is update, not patch.)
@@ -142983,6 +145537,12 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                               "continuation": {
                                 "type": "object",
                                 "properties": {
+                                  "version": {
+                                    "type": "number",
+                                    "enum": [
+                                      2
+                                    ]
+                                  },
                                   "sessionId": {
                                     "type": "string",
                                     "minLength": 1,
@@ -142990,7 +145550,8 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                   },
                                   "revision": {
                                     "type": "string",
-                                    "pattern": "^[a-f0-9]{64}$"
+                                    "maxLength": 200,
+                                    "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                                   },
                                   "selectedDiff": {
                                     "anyOf": [
@@ -143005,7 +145566,8 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                           },
                                           "revision": {
                                             "type": "string",
-                                            "pattern": "^[a-f0-9]{64}$"
+                                            "maxLength": 200,
+                                            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                           },
                                           "fileIndex": {
                                             "type": "integer",
@@ -143082,7 +145644,8 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                           },
                                           "revision": {
                                             "type": "string",
-                                            "pattern": "^[a-f0-9]{64}$"
+                                            "maxLength": 200,
+                                            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                           },
                                           "fileIndex": {
                                             "type": "integer",
@@ -143261,6 +145824,43 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                               "inputId",
                               "sessionId",
                               "extraction"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "version": {
+                                "type": "number",
+                                "enum": [
+                                  3
+                                ]
+                              },
+                              "sourceId": {
+                                "type": "string",
+                                "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                              },
+                              "sourceRevision": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "inputId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "sessionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              }
+                            },
+                            "required": [
+                              "version",
+                              "sourceId",
+                              "sourceRevision",
+                              "inputId",
+                              "sessionId"
                             ],
                             "additionalProperties": false
                           }
@@ -143766,6 +146366,12 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                 "continuation": {
                                   "type": "object",
                                   "properties": {
+                                    "version": {
+                                      "type": "number",
+                                      "enum": [
+                                        2
+                                      ]
+                                    },
                                     "sessionId": {
                                       "type": "string",
                                       "minLength": 1,
@@ -143773,7 +146379,8 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                     },
                                     "revision": {
                                       "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
+                                      "maxLength": 200,
+                                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                                     },
                                     "selectedDiff": {
                                       "anyOf": [
@@ -143788,7 +146395,8 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                             },
                                             "revision": {
                                               "type": "string",
-                                              "pattern": "^[a-f0-9]{64}$"
+                                              "maxLength": 200,
+                                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                             },
                                             "fileIndex": {
                                               "type": "integer",
@@ -143865,7 +146473,8 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                             },
                                             "revision": {
                                               "type": "string",
-                                              "pattern": "^[a-f0-9]{64}$"
+                                              "maxLength": 200,
+                                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                             },
                                             "fileIndex": {
                                               "type": "integer",
@@ -144044,6 +146653,43 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                 "inputId",
                                 "sessionId",
                                 "extraction"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "version": {
+                                  "type": "number",
+                                  "enum": [
+                                    3
+                                  ]
+                                },
+                                "sourceId": {
+                                  "type": "string",
+                                  "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                },
+                                "sourceRevision": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "inputId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "sessionId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "required": [
+                                "version",
+                                "sourceId",
+                                "sourceRevision",
+                                "inputId",
+                                "sessionId"
                               ],
                               "additionalProperties": false
                             }
@@ -144378,6 +147024,12 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                     "continuation": {
                                       "type": "object",
                                       "properties": {
+                                        "version": {
+                                          "type": "number",
+                                          "enum": [
+                                            2
+                                          ]
+                                        },
                                         "sessionId": {
                                           "type": "string",
                                           "minLength": 1,
@@ -144385,7 +147037,8 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                         },
                                         "revision": {
                                           "type": "string",
-                                          "pattern": "^[a-f0-9]{64}$"
+                                          "maxLength": 200,
+                                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                                         },
                                         "selectedDiff": {
                                           "anyOf": [
@@ -144400,7 +147053,8 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                                 },
                                                 "revision": {
                                                   "type": "string",
-                                                  "pattern": "^[a-f0-9]{64}$"
+                                                  "maxLength": 200,
+                                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                                 },
                                                 "fileIndex": {
                                                   "type": "integer",
@@ -144477,7 +147131,8 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                                 },
                                                 "revision": {
                                                   "type": "string",
-                                                  "pattern": "^[a-f0-9]{64}$"
+                                                  "maxLength": 200,
+                                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                                 },
                                                 "fileIndex": {
                                                   "type": "integer",
@@ -144656,6 +147311,43 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                     "inputId",
                                     "sessionId",
                                     "extraction"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "version": {
+                                      "type": "number",
+                                      "enum": [
+                                        3
+                                      ]
+                                    },
+                                    "sourceId": {
+                                      "type": "string",
+                                      "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                    },
+                                    "sourceRevision": {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{64}$"
+                                    },
+                                    "inputId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    },
+                                    "sessionId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    }
+                                  },
+                                  "required": [
+                                    "version",
+                                    "sourceId",
+                                    "sourceRevision",
+                                    "inputId",
+                                    "sessionId"
                                   ],
                                   "additionalProperties": false
                                 }
@@ -145154,6 +147846,12 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                       "continuation": {
                                         "type": "object",
                                         "properties": {
+                                          "version": {
+                                            "type": "number",
+                                            "enum": [
+                                              2
+                                            ]
+                                          },
                                           "sessionId": {
                                             "type": "string",
                                             "minLength": 1,
@@ -145161,7 +147859,8 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                           },
                                           "revision": {
                                             "type": "string",
-                                            "pattern": "^[a-f0-9]{64}$"
+                                            "maxLength": 200,
+                                            "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                                           },
                                           "selectedDiff": {
                                             "anyOf": [
@@ -145176,7 +147875,8 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                                   },
                                                   "revision": {
                                                     "type": "string",
-                                                    "pattern": "^[a-f0-9]{64}$"
+                                                    "maxLength": 200,
+                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                                   },
                                                   "fileIndex": {
                                                     "type": "integer",
@@ -145253,7 +147953,8 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                                   },
                                                   "revision": {
                                                     "type": "string",
-                                                    "pattern": "^[a-f0-9]{64}$"
+                                                    "maxLength": 200,
+                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                                   },
                                                   "fileIndex": {
                                                     "type": "integer",
@@ -145432,6 +148133,43 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                       "inputId",
                                       "sessionId",
                                       "extraction"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "version": {
+                                        "type": "number",
+                                        "enum": [
+                                          3
+                                        ]
+                                      },
+                                      "sourceId": {
+                                        "type": "string",
+                                        "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                      },
+                                      "sourceRevision": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "inputId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200
+                                      },
+                                      "sessionId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200
+                                      }
+                                    },
+                                    "required": [
+                                      "version",
+                                      "sourceId",
+                                      "sourceRevision",
+                                      "inputId",
+                                      "sessionId"
                                     ],
                                     "additionalProperties": false
                                   }
@@ -146286,6 +149024,12 @@ Start the single initial semantic admission of captured conversation text. Repla
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -146293,7 +149037,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -146308,7 +149053,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -146345,7 +149091,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -146477,6 +149224,12 @@ Start the single initial semantic admission of captured conversation text. Repla
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -146484,7 +149237,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -146499,7 +149253,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -146536,7 +149291,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -146687,6 +149443,12 @@ Start the single initial semantic admission of captured conversation text. Repla
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -146694,7 +149456,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -146709,7 +149472,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -146746,7 +149510,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -146803,6 +149568,12 @@ Start the single initial semantic admission of captured conversation text. Repla
         "continuation": {
           "type": "object",
           "properties": {
+            "version": {
+              "type": "number",
+              "enum": [
+                2
+              ]
+            },
             "sessionId": {
               "type": "string",
               "minLength": 1,
@@ -146810,7 +149581,8 @@ Start the single initial semantic admission of captured conversation text. Repla
             },
             "revision": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "maxLength": 200,
+              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
             },
             "selectedDiff": {
               "anyOf": [
@@ -146825,7 +149597,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -146902,7 +149675,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -147088,6 +149862,12 @@ Start the single initial semantic admission of captured conversation text. Repla
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -147095,7 +149875,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -147110,7 +149891,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -147147,7 +149929,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -147294,6 +150077,12 @@ Start the single initial semantic admission of captured conversation text. Repla
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -147301,7 +150090,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -147316,7 +150106,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -147353,7 +150144,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -147493,6 +150285,12 @@ Start the single initial semantic admission of captured conversation text. Repla
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -147500,7 +150298,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -147515,7 +150314,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -147552,7 +150352,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -147684,6 +150485,12 @@ Start the single initial semantic admission of captured conversation text. Repla
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -147691,7 +150498,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -147706,7 +150514,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -147743,7 +150552,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -147913,6 +150723,12 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -147920,7 +150736,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -147935,7 +150752,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -148012,7 +150830,8 @@ Start the single initial semantic admission of captured conversation text. Repla
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -148308,6 +151127,12 @@ Persist a terminal intake cancellation before work admission. If admission alrea
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -148315,7 +151140,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -148330,7 +151156,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -148367,7 +151194,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -148499,6 +151327,12 @@ Persist a terminal intake cancellation before work admission. If admission alrea
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -148506,7 +151340,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -148521,7 +151356,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -148558,7 +151394,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -148709,6 +151546,12 @@ Persist a terminal intake cancellation before work admission. If admission alrea
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -148716,7 +151559,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -148731,7 +151575,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -148768,7 +151613,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -148825,6 +151671,12 @@ Persist a terminal intake cancellation before work admission. If admission alrea
         "continuation": {
           "type": "object",
           "properties": {
+            "version": {
+              "type": "number",
+              "enum": [
+                2
+              ]
+            },
             "sessionId": {
               "type": "string",
               "minLength": 1,
@@ -148832,7 +151684,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
             },
             "revision": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "maxLength": 200,
+              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
             },
             "selectedDiff": {
               "anyOf": [
@@ -148847,7 +151700,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -148924,7 +151778,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -149110,6 +151965,12 @@ Persist a terminal intake cancellation before work admission. If admission alrea
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -149117,7 +151978,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -149132,7 +151994,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -149169,7 +152032,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -149316,6 +152180,12 @@ Persist a terminal intake cancellation before work admission. If admission alrea
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -149323,7 +152193,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -149338,7 +152209,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -149375,7 +152247,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -149515,6 +152388,12 @@ Persist a terminal intake cancellation before work admission. If admission alrea
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -149522,7 +152401,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -149537,7 +152417,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -149574,7 +152455,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -149706,6 +152588,12 @@ Persist a terminal intake cancellation before work admission. If admission alrea
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -149713,7 +152601,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -149728,7 +152617,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -149765,7 +152655,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -149935,6 +152826,12 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -149942,7 +152839,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -149957,7 +152855,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -150034,7 +152933,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -150260,7 +153160,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                 },
                 "fileIndex": {
                   "type": "integer",
@@ -150297,7 +153198,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                 },
                 "fileIndex": {
                   "type": "integer",
@@ -150453,6 +153355,12 @@ Persist exact original conversation text and unsupported-source disclosures on t
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -150460,7 +153368,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -150475,7 +153384,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -150512,7 +153422,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -150644,6 +153555,12 @@ Persist exact original conversation text and unsupported-source disclosures on t
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -150651,7 +153568,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -150666,7 +153584,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -150703,7 +153622,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -150854,6 +153774,12 @@ Persist exact original conversation text and unsupported-source disclosures on t
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -150861,7 +153787,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -150876,7 +153803,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -150913,7 +153841,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -150970,6 +153899,12 @@ Persist exact original conversation text and unsupported-source disclosures on t
         "continuation": {
           "type": "object",
           "properties": {
+            "version": {
+              "type": "number",
+              "enum": [
+                2
+              ]
+            },
             "sessionId": {
               "type": "string",
               "minLength": 1,
@@ -150977,7 +153912,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
             },
             "revision": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "maxLength": 200,
+              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
             },
             "selectedDiff": {
               "anyOf": [
@@ -150992,7 +153928,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -151069,7 +154006,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -151255,6 +154193,12 @@ Persist exact original conversation text and unsupported-source disclosures on t
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -151262,7 +154206,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -151277,7 +154222,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -151314,7 +154260,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -151461,6 +154408,12 @@ Persist exact original conversation text and unsupported-source disclosures on t
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -151468,7 +154421,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -151483,7 +154437,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -151520,7 +154475,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -151660,6 +154616,12 @@ Persist exact original conversation text and unsupported-source disclosures on t
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -151667,7 +154629,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -151682,7 +154645,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -151719,7 +154683,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -151851,6 +154816,12 @@ Persist exact original conversation text and unsupported-source disclosures on t
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -151858,7 +154829,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -151873,7 +154845,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -151910,7 +154883,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -152080,6 +155054,12 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -152087,7 +155067,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -152102,7 +155083,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -152179,7 +155161,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -152471,6 +155454,12 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -152478,7 +155467,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -152493,7 +155483,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -152530,7 +155521,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -152662,6 +155654,12 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -152669,7 +155667,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -152684,7 +155683,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -152721,7 +155721,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -152872,6 +155873,12 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -152879,7 +155886,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -152894,7 +155902,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -152931,7 +155940,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -152988,6 +155998,12 @@ Read the current conversation intake or immutable admitted-work receipt by origi
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -152995,7 +156011,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -153010,7 +156027,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -153087,7 +156105,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -153273,6 +156292,12 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -153280,7 +156305,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -153295,7 +156321,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -153332,7 +156359,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -153479,6 +156507,12 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -153486,7 +156520,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -153501,7 +156536,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -153538,7 +156574,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -153678,6 +156715,12 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -153685,7 +156728,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -153700,7 +156744,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -153737,7 +156782,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -153869,6 +156915,12 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -153876,7 +156928,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -153891,7 +156944,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -153928,7 +156982,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -154098,6 +157153,12 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "continuation": {
                       "type": "object",
                       "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -154105,7 +157166,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -154120,7 +157182,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -154197,7 +157260,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                                 },
                                 "revision": {
                                   "type": "string",
-                                  "pattern": "^[a-f0-9]{64}$"
+                                  "maxLength": 200,
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -154510,6 +157574,12 @@ Explicitly recover captured conversation admission with a fresh semantic operati
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -154517,7 +157587,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -154532,7 +157603,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -154569,7 +157641,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -154701,6 +157774,12 @@ Explicitly recover captured conversation admission with a fresh semantic operati
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -154708,7 +157787,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -154723,7 +157803,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -154760,7 +157841,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -154911,6 +157993,12 @@ Explicitly recover captured conversation admission with a fresh semantic operati
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -154918,7 +158006,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -154933,7 +158022,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -154970,7 +158060,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -155027,6 +158118,12 @@ Explicitly recover captured conversation admission with a fresh semantic operati
         "continuation": {
           "type": "object",
           "properties": {
+            "version": {
+              "type": "number",
+              "enum": [
+                2
+              ]
+            },
             "sessionId": {
               "type": "string",
               "minLength": 1,
@@ -155034,7 +158131,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
             },
             "revision": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "maxLength": 200,
+              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
             },
             "selectedDiff": {
               "anyOf": [
@@ -155049,7 +158147,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -155126,7 +158225,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -155312,6 +158412,12 @@ Explicitly recover captured conversation admission with a fresh semantic operati
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -155319,7 +158425,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -155334,7 +158441,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -155371,7 +158479,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -155518,6 +158627,12 @@ Explicitly recover captured conversation admission with a fresh semantic operati
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -155525,7 +158640,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -155540,7 +158656,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -155577,7 +158694,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -155717,6 +158835,12 @@ Explicitly recover captured conversation admission with a fresh semantic operati
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -155724,7 +158848,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -155739,7 +158864,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -155776,7 +158902,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -155908,6 +159035,12 @@ Explicitly recover captured conversation admission with a fresh semantic operati
             "continuation": {
               "type": "object",
               "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    2
+                  ]
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -155915,7 +159048,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 },
                 "revision": {
                   "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
+                  "maxLength": 200,
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -155930,7 +159064,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -155967,7 +159102,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         },
                         "revision": {
                           "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
+                          "maxLength": 200,
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -156137,6 +159273,12 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "continuation": {
                   "type": "object",
                   "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        2
+                      ]
+                    },
                     "sessionId": {
                       "type": "string",
                       "minLength": 1,
@@ -156144,7 +159286,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                     },
                     "revision": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "maxLength": 200,
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -156159,7 +159302,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -156236,7 +159380,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                             },
                             "revision": {
                               "type": "string",
-                              "pattern": "^[a-f0-9]{64}$"
+                              "maxLength": 200,
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -156718,6 +159863,12 @@ Read the selected host project ledger, without mutation authority or allowedActi
                           "continuation": {
                             "type": "object",
                             "properties": {
+                              "version": {
+                                "type": "number",
+                                "enum": [
+                                  2
+                                ]
+                              },
                               "sessionId": {
                                 "type": "string",
                                 "minLength": 1,
@@ -156725,7 +159876,8 @@ Read the selected host project ledger, without mutation authority or allowedActi
                               },
                               "revision": {
                                 "type": "string",
-                                "pattern": "^[a-f0-9]{64}$"
+                                "maxLength": 200,
+                                "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
                               },
                               "selectedDiff": {
                                 "anyOf": [
@@ -156740,7 +159892,8 @@ Read the selected host project ledger, without mutation authority or allowedActi
                                       },
                                       "revision": {
                                         "type": "string",
-                                        "pattern": "^[a-f0-9]{64}$"
+                                        "maxLength": 200,
+                                        "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                       },
                                       "fileIndex": {
                                         "type": "integer",
@@ -156817,7 +159970,8 @@ Read the selected host project ledger, without mutation authority or allowedActi
                                       },
                                       "revision": {
                                         "type": "string",
-                                        "pattern": "^[a-f0-9]{64}$"
+                                        "maxLength": 200,
+                                        "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
                                       },
                                       "fileIndex": {
                                         "type": "integer",
@@ -156996,6 +160150,43 @@ Read the selected host project ledger, without mutation authority or allowedActi
                           "inputId",
                           "sessionId",
                           "extraction"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "version": {
+                            "type": "number",
+                            "enum": [
+                              3
+                            ]
+                          },
+                          "sourceId": {
+                            "type": "string",
+                            "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                          },
+                          "sourceRevision": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "inputId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          }
+                        },
+                        "required": [
+                          "version",
+                          "sourceId",
+                          "sourceRevision",
+                          "inputId",
+                          "sessionId"
                         ],
                         "additionalProperties": false
                       }
@@ -157508,37 +160699,72 @@ Look up an immutable native submission receipt by the original request ID on the
               "additionalProperties": false
             },
             "source": {
-              "type": "object",
-              "properties": {
-                "version": {
-                  "type": "number",
-                  "enum": [
-                    1
-                  ]
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "sourceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "sourceRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "sourceId",
+                    "sourceRevision",
+                    "sessionId"
+                  ],
+                  "additionalProperties": false
                 },
-                "sourceId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 200
-                },
-                "sourceRevision": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 200
-                },
-                "sessionId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 200
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        3
+                      ]
+                    },
+                    "sourceId": {
+                      "type": "string",
+                      "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                    },
+                    "sourceRevision": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "sourceId",
+                    "sourceRevision",
+                    "sessionId"
+                  ],
+                  "additionalProperties": false
                 }
-              },
-              "required": [
-                "version",
-                "sourceId",
-                "sourceRevision",
-                "sessionId"
-              ],
-              "additionalProperties": false
+              ]
             },
             "goal": {
               "type": "string",
@@ -157739,37 +160965,72 @@ Persist one bounded explicit-source goal and ordered criteria on the selected au
           "additionalProperties": false
         },
         "source": {
-          "type": "object",
-          "properties": {
-            "version": {
-              "type": "number",
-              "enum": [
-                1
-              ]
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    1
+                  ]
+                },
+                "sourceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "sourceRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "version",
+                "sourceId",
+                "sourceRevision",
+                "sessionId"
+              ],
+              "additionalProperties": false
             },
-            "sourceId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
-            "sourceRevision": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
-            "sessionId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    3
+                  ]
+                },
+                "sourceId": {
+                  "type": "string",
+                  "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                },
+                "sourceRevision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "version",
+                "sourceId",
+                "sourceRevision",
+                "sessionId"
+              ],
+              "additionalProperties": false
             }
-          },
-          "required": [
-            "version",
-            "sourceId",
-            "sourceRevision",
-            "sessionId"
-          ],
-          "additionalProperties": false
+          ]
         },
         "goal": {
           "type": "string",
@@ -161282,7 +164543,6 @@ Out-of-band control-plane surface messages for operators and connected clients.
           "kind",
           "mimeType",
           "sizeBytes",
-          "sha256",
           "createdAt",
           "contentPath",
           "metadata"

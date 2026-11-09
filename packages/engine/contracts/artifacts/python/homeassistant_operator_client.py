@@ -506,6 +506,7 @@ class HomeassistantHomeGraphResetOutput(TypedDict, total=True):
     dryRun: bool
     deleted: Mapping[str, Any]
     artifactDeleteCandidates: float
+    artifactCleanup: Mapping[str, Any]
     deletedArtifacts: float
     preservedArtifacts: float
     artifactsDeleted: bool

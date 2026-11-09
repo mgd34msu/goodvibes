@@ -6,12 +6,12 @@
 
 # Command Reference
 
-GoodVibes ships **161** built-in slash commands across **75** categories. Every command below is generated directly from the command registry, so this list is always complete and current. Type a command in the composer prefixed with `/`, or press `Ctrl+K` (or run `/palette`) to search them all in the command palette.
+GoodVibes ships **162** built-in slash commands across **75** categories. Every command below is generated directly from the command registry, so this list is always complete and current. Type a command in the composer prefixed with `/`, or press `Ctrl+K` (or run `/palette`) to search them all in the command palette.
 
 ## Categories
 
 - [Agents](#agents): 1
-- [Automation](#automation): 1
+- [Automation](#automation): 2
 - [Branches](#branches): 3
 - [Channels](#channels): 1
 - [Check-in](#check-in): 1
@@ -97,6 +97,7 @@ GoodVibes ships **161** built-in slash commands across **75** categories. Every 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `/graph` | None | `<workstreamId>` | Show a workstream's task graph: nodes, edges, states, and pool posture |
+| `/triggers` | None | `[status\|migrate [--older-instances-closed]]` | Inspect this surface’s supervised triggers and explicitly migrate older trigger state |
 
 ## Branches
 
@@ -110,7 +111,7 @@ GoodVibes ships **161** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/channel` | `/channels` | `[pair [surface]\|status\|routes\|delivery\|policy\|profiles [list\|get\|set\|delete]] [--json]` | Pair channels and inspect routes, delivery strategies, ingress policies, and per-channel profile bindings |
+| `/channel` | `/channels` | `[pair [surface]\|telegram-cursor\|status\|routes\|delivery\|policy\|profiles [list\|get\|set\|delete]] [--json]` | Pair channels and inspect routes, delivery strategies, ingress policies, and per-channel profile bindings |
 
 ## Check-in
 
@@ -272,7 +273,7 @@ GoodVibes ships **161** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/local-auth` | `/auth-local` | `[review\|panel\|add-user <username> <password> [roles]\|delete-user <username>\|rotate-password <username> <password>\|revoke-session <token-or-fingerprint>\|clear-bootstrap-file]` | Inspect and manage local daemon/listener auth users, sessions, and bootstrap credentials |
+| `/local-auth` | `/auth-local` | `[review\|panel\|add-user <username> <password> [roles]\|delete-user <username>\|rotate-password <username> <password>\|revoke-session <session-id-or-token>\|clear-bootstrap-file]` | Inspect and manage local daemon/listener auth users, sessions, and bootstrap credentials |
 
 ## Local Providers
 
@@ -374,7 +375,7 @@ GoodVibes ships **161** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/payments` | None | `/payments [card]` | Payment card on file for daemon-initiated purchases (card entry is masked input) |
+| `/payments` | None | `/payments [card\|status\|pending]` | Payment card setup and pending purchase approval/veto windows |
 
 ## Permissions
 

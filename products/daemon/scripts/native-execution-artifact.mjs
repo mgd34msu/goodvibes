@@ -70,7 +70,7 @@ export function retainNativeExecutionFiles(root, members, { directoryRevisions =
     for (const file of retained) {
       const full = join(root, file.path);
       assert.equal(observe(full, root, directoryRevisions).identity, file.identity, 'Retained native execution owner changed');
-      assert.equal(digest(readFileSync(full)), file.sha256, 'Retained native execution bytes changed');
+      assert(readFileSync(full).equals(file.bytes), 'Retained native execution bytes changed');
       assert.equal(observe(full, root, directoryRevisions).identity, file.identity, 'Retained native execution owner changed during verification');
     }
   };

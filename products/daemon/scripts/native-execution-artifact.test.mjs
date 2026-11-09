@@ -93,3 +93,13 @@ test('source target retirement and invalid SQLite supplier refuse instead of red
     writeFileSync(path, JSON.stringify(config)); assert.throws(() => verifyNativeExecutionArtifact(f.product, f.source));
   }
 });
+
+test('retained payload bytes cannot change behind an unchanged source manifest', () => {
+  const f = fixture('linux-x64'), verified = verifyNativeExecutionArtifact(f.product, f.source);
+  const original = verified.retained.files[0];
+  const before = readFileSync(join(f.root, original.path));
+  verified.retained.assertCurrent(); verified.retained.assertCurrent();
+  original.bytes.fill(0);
+  assert.deepEqual(readFileSync(join(f.root, original.path)), before);
+  assert.throws(() => verified.retained.assertCurrent(), /Retained native execution bytes changed/);
+});

@@ -380,7 +380,7 @@ test('production registry decisions cannot pin a Jev version', async () => {
 test('source discovery includes executable JavaScript boundaries and excludes their test fixtures', () => {
   const sources = judgmentSourceFiles();
   expect(sources).toContain('products/daemon/scripts/boot-smoke-reading.mjs');
-  expect(sources).toContain('products/tui/bin/launcher-support.js');
+  expect(sources).toContain('products/tui/scripts/postinstall.js');
   expect(sources).toContain('products/webui/public/sw.js');
   expect(sources).not.toContain('products/daemon/scripts/boot-smoke-reading.test.mjs');
 });

@@ -15,8 +15,6 @@
  *   - scripts/publish-platform-packages.ts  (publishes each package)
  *   - scripts/release.ts                     (keeps versions in lockstep)
  *
- * bin/launcher-support.js duplicates the name mapping (it is plain JS shipped
- * in the tarball and cannot import this TS module); keep the two in sync.
  */
 
 export interface PlatformPackage {

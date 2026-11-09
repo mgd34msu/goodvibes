@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { ArtifactStore } from '../sdk/src/platform/artifacts/index.js';
 import { refreshHomeGraphDevicePassport } from '../sdk/src/platform/knowledge/home-graph/generated-pages.js';
-import { buildHomeGraphMetadata, homeGraphNodeId } from '../sdk/src/platform/knowledge/home-graph/helpers.js';
+import { buildHomeGraphMetadata } from '../sdk/src/platform/knowledge/home-graph/helpers.js';
 import { runHomeGraphSyncSelfImprovementPump } from '../sdk/src/platform/knowledge/home-graph/sync-self-improvement.js';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 
@@ -119,7 +119,7 @@ describe('Home Graph sync self-improvement cancellation', () => {
     const installationId = 'house-1';
     const deviceId = 'lg-tv';
     const device = await seedHomeAssistantObservation(store, {
-      id: homeGraphNodeId(spaceId, 'ha_device', deviceId),
+      id: 'hg-node-7466e94df6c6ad23dfd9190f',
       kind: 'ha_device',
       slug: 'lg-tv',
       title: 'LG TV',
@@ -131,13 +131,14 @@ describe('Home Graph sync self-improvement cancellation', () => {
         deviceId,
       }),
     });
-    const passportId = homeGraphNodeId(spaceId, 'ha_device_passport', deviceId);
+    let passportId = ''; // Captured from the actual new publication, not rebuilt from its body.
     const controller = new AbortController();
     const abortingStore = store;
     const publish = abortingStore.applyPreparedIngest.bind(abortingStore);
     abortingStore.applyPreparedIngest = (input, prepareGraph, options) => publish(input, async stage => {
       const graph = await prepareGraph(stage);
-      expect(graph.nodes.some(node => node.id === passportId)).toBe(true);
+      const passport = graph.nodes.find(node => node.kind === 'ha_device_passport');
+      expect(passport).toBeDefined(); passportId = passport!.id!;
       expect(graph.edges.some(edge => edge.fromId === passportId && edge.toId === device.id)).toBe(true);
       expect(store.getNode(passportId)).toBeNull();
       controller.abort();
@@ -177,7 +178,7 @@ describe('Home Graph sync self-improvement cancellation', () => {
     const installationId = 'house-1';
     const deviceId = 'lg-tv';
     const device = await seedHomeAssistantObservation(store, {
-      id: homeGraphNodeId(spaceId, 'ha_device', deviceId),
+      id: 'hg-node-7466e94df6c6ad23dfd9190f',
       kind: 'ha_device',
       slug: 'lg-tv',
       title: 'LG TV',

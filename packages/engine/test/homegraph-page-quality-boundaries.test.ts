@@ -18,7 +18,7 @@ import {
   generateHomeGraphRoomPage,
   refreshHomeGraphDevicePassport,
 } from '../sdk/src/platform/knowledge/home-graph/generated-pages.js';
-import { buildHomeGraphMetadata, homeGraphNodeId, homeGraphSourceId } from '../sdk/src/platform/knowledge/home-graph/helpers.js';
+import { buildHomeGraphMetadata, homeGraphSourceId } from '../sdk/src/platform/knowledge/home-graph/helpers.js';
 import { renderRoomPage } from '../sdk/src/platform/knowledge/home-graph/rendering.js';
 import { readHomeGraphState } from '../sdk/src/platform/knowledge/home-graph/state.js';
 import type { HomeGraphAskResult } from '../sdk/src/platform/knowledge/home-graph/types.js';
@@ -114,12 +114,12 @@ async function fixture() {
   const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
   await store.init();
   const area = await seedHomeAssistantObservation(store, {
-    id: homeGraphNodeId(spaceId, 'ha_area', areaId), kind: 'ha_area', slug: areaId,
+    id: 'hg-node-47046541190b2b3bf5b27094', kind: 'ha_area', slug: areaId,
     title: 'Living Room', status: 'active',
     metadata: metadata({ homeAssistant: { objectId: areaId, objectKind: 'area' } }),
   });
   const device = await seedHomeAssistantObservation(store, {
-    id: homeGraphNodeId(spaceId, 'ha_device', deviceId), kind: 'ha_device', slug: deviceId,
+    id: 'hg-node-076dfc2909d18f15462d4429', kind: 'ha_device', slug: deviceId,
     title: 'Reference device', status: 'active',
     metadata: metadata({ homeAssistant: { objectId: deviceId, objectKind: 'device' } }),
   });
@@ -381,7 +381,6 @@ describe('Home Graph page quality persistence boundaries', () => {
           const sourceId = homeGraphSourceId(spaceId, 'generated-page', canonicalValue);
           expect(context.store.getSourceSnapshot({ id: sourceId }).source).toBeNull();
           expect(context.store.listNodesInSpace(spaceId).filter(node => node.kind === 'ha_device_passport')).toEqual([]);
-          expect(context.store.getRecordSnapshot('node', homeGraphNodeId(spaceId, 'ha_device_passport', deviceId)).record).toBeNull();
           expect(context.artifactStore.list()).toEqual([]);
         }
       } finally { artifactWrite.mockRestore(); await writer.close(); }

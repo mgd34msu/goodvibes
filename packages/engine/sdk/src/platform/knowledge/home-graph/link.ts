@@ -1,3 +1,5 @@
+import { createHomeGraphNodeIdentityPlanner, prepareHomeGraphNodeIdentity } from './node-identity-plan.js';
+import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
 import { isClassicOperation } from '../../runtime/decision-policy.js';
 import { upsertObservedKnowledgeNode } from '../store-node-observation.js';
 import { snapshotNodeInput } from '../activation/projection.js';
@@ -8,7 +10,6 @@ import { isActiveKnowledgeEdge } from '../projection-utils.js';
 import {
   belongsToSpace,
   buildHomeGraphMetadata,
-  homeGraphNodeId,
   nodeKindForHomeGraphObject,
   targetToReference,
 } from './helpers.js';
@@ -90,9 +91,9 @@ function resolveExistingHomeGraphTarget(
   const existing = store.getNode(ref.id);
   if (existing && belongsToSpace(existing, spaceId)) return { kind: 'node', id: existing.id, record: existing };
   const kind = ref.nodeKind ?? nodeKindForHomeGraphObject(target.kind as never);
-  const deterministic = store.getNode(homeGraphNodeId(spaceId, kind, ref.id));
-  return deterministic && belongsToSpace(deterministic, spaceId)
-    ? { kind: 'node', id: deterministic.id, record: deterministic }
+  const saved = createHomeGraphNodeIdentityPlanner(store).lookup({ spaceId, kind, objectId: ref.id });
+  return saved
+    ? { kind: 'node', id: saved.id, record: saved }
     : null;
 }
 
@@ -181,20 +182,20 @@ async function ensureHomeGraphLinkTarget(
     category: 'not_found', source: 'runtime', recoverable: false,
   });
   const kind = ref.nodeKind ?? nodeKindForHomeGraphObject(target.kind as never);
-  const deterministicId = homeGraphNodeId(spaceId, kind, ref.id);
-  const deterministic = store.getNode(deterministicId);
-  if (deterministic && belongsToSpace(deterministic, spaceId)) {
-    return { kind: 'node', id: deterministic.id, record: deterministic };
-  }
+  const identities = createHomeGraphNodeIdentityPlanner(store);
+  const identity = prepareHomeGraphNodeIdentity(identities, store, { spaceId, kind, objectId: ref.id });
+  const saved = identities.lookup(identity.selector);
+  if (saved) return { kind: 'node', id: saved.id, record: saved };
   const nodeInput: KnowledgeNodeUpsertInput = {
-    id: ref.id.startsWith('hg-node-') ? ref.id : deterministicId,
+    id: identity.id,
     kind,
-    slug: `${spaceId.replace(/[^a-z0-9]+/gi, '-')}-${kind}-${target.id.replace(/[^a-z0-9]+/gi, '-')}`,
+    slug: identity.slug,
     title: target.title ?? target.id,
     aliases: [target.id],
     confidence: 60,
     metadata: buildHomeGraphMetadata(spaceId, installationId, {
-      homeAssistant: { installationId, objectKind: kind, objectId: target.id },
+      homeGraphIdentityVersion: 1, homeGraphIdentitySpace: homeGraphIdentitySpace(spaceId),
+      homeAssistant: { installationId, objectKind: kind, objectId: identity.objectId },
       // Marks a node the link itself materialized, so unlink can cleanly remove it
       // (and only it) on reversal.
       linkCreated: true,
@@ -203,7 +204,7 @@ async function ensureHomeGraphLinkTarget(
   };
   const evidence = snapshotNodeInput(target);
   const node = isClassicOperation()
-    ? await upsertObservedKnowledgeNode(store, nodeInput, 'link-declaration', evidence, () => target)
+    ? await upsertObservedKnowledgeNode(store, nodeInput, 'link-declaration', evidence, () => { identity.assertCurrent(); return target; })
     : await store.upsertNode(nodeInput);
   return { kind: 'node', id: node.id, record: node };
 }

@@ -1,4 +1,6 @@
-import { captureSnapshotGroups, currentSnapshotMembership, storedSnapshotGroups, type CapturedSnapshotGroups } from './snapshot-groups.js';
+import { createHomeGraphNodeIdentityPlanner, prepareHomeGraphNodeIdentity, type HomeGraphNodeIdentityPlanner } from './node-identity-plan.js';
+import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
+import { captureSnapshotGroups, currentSnapshotMembership, storedSnapshotGroups, snapshotGroups, type CapturedSnapshotGroups } from './snapshot-groups.js';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { knowledgeClockIso, knowledgeRawRepresentation, retainKnowledgeRepresentation } from '../store-record-representation.js';
 import { captureGeneratedKnowledgeSourceUpdate, registerGeneratedKnowledgeSourceReferences } from '../source-structural-references.js';
@@ -16,7 +18,6 @@ import {
   buildHomeGraphMetadata,
   buildHomeGraphNodeInput,
   edgeIsActive,
-  homeGraphNodeId,
   homeGraphObjectId,
   nodeKindForHomeGraphObject,
   homeGraphSourceId,
@@ -59,6 +60,16 @@ export async function runHomeGraphSnapshotSync(input: {
     await store.init();
     // Validate saved membership before any snapshot prefix is mutated.
     for (const node of store.listNodesInSpace(spaceId)) if (SNAPSHOT_NODE_KINDS.has(node.kind) && readRecord(node.metadata.homeAssistant).installationId === installationId) storedSnapshotGroups(node);
+    const nodeIdentities = createHomeGraphNodeIdentityPlanner(store);
+    // One native read frame prepares existing tuples/absence for the pass.
+    store.assertRecordSnapshotFrame(() => {
+      prepareHomeGraphNodeIdentity(nodeIdentities, store, { spaceId, kind: 'ha_home', objectId: snapshot.homeId ?? installationId });
+      for (const [group, kind] of snapshotGroups) for (const object of snapshotMembership.snapshot[group] ?? []) {
+        const nodeKind = nodeKindForHomeGraphObject(kind);
+        prepareHomeGraphNodeIdentity(nodeIdentities, store, { spaceId, kind: nodeKind, objectId: homeGraphObjectId(nodeKind, object) });
+      }
+      return undefined;
+    });
     const captured = await store.batch(async () => {
       const capturedAt = snapshot.capturedAt ?? Date.now();
       const sourceId = homeGraphSourceId(spaceId, 'snapshot', String(capturedAt));
@@ -83,12 +94,12 @@ export async function runHomeGraphSnapshotSync(input: {
         ? retainKnowledgeRepresentation(sourceInput, { ...knowledgeRawRepresentation(sourceInput), lastCrawledAt: knowledgeClockIso(capturedAt) })
         : sourceInput);
       registerGeneratedKnowledgeSourceReferences(store, source, { id: sourceId, canonicalUri });
-      const home = await upsertHomeNode(store, spaceId, installationId, snapshot);
+      const home = await upsertHomeNode(store, spaceId, installationId, snapshot, nodeIdentities);
       const beforeState = readHomeGraphState(store, spaceId);
       const beforeNodeIds = new Set(beforeState.nodes.map((node) => node.id));
       const beforeEdgeIds = new Set(beforeState.edges.map((edge) => edge.id));
       const activeSnapshotNodeIds = new Set([home.id]);
-      const counts = await upsertSnapshotObjects(store, spaceId, installationId, snapshotMembership, home.id, source.id, activeSnapshotNodeIds);
+      const counts = await upsertSnapshotObjects(store, spaceId, installationId, snapshotMembership, home.id, source.id, activeSnapshotNodeIds, nodeIdentities);
       await retireMissingSnapshotRecords(store, spaceId, installationId, source.id, activeSnapshotNodeIds, snapshotMembership);
       return { source, home, beforeNodeIds, beforeEdgeIds, groups: counts };
     });
@@ -166,20 +177,23 @@ async function upsertHomeNode(
   spaceId: string,
   installationId: string,
   input: HomeGraphSnapshotInput,
+  identities: HomeGraphNodeIdentityPlanner,
 ): Promise<KnowledgeNodeRecord> {
+  const identity = prepareHomeGraphNodeIdentity(identities, store, { spaceId, kind: 'ha_home', objectId: input.homeId ?? installationId });
   return upsertObservedKnowledgeNode(store, {
-    id: homeGraphNodeId(spaceId, 'ha_home', input.homeId ?? installationId),
+    id: identity.id,
     kind: 'ha_home',
-    slug: `${spaceId.replace(/[^a-z0-9]+/gi, '-')}-home`,
+    slug: identity.slug,
     title: input.title ?? 'Home Assistant',
     summary: 'Home Assistant installation captured in the GoodVibes Home Graph.',
     aliases: [installationId],
     status: 'active',
     confidence: 100,
     metadata: buildHomeGraphMetadata(spaceId, installationId, {
-      homeAssistant: { installationId, objectKind: 'home', objectId: input.homeId ?? installationId },
+      homeGraphIdentityVersion: 1, homeGraphIdentitySpace: homeGraphIdentitySpace(spaceId),
+      homeAssistant: { installationId, objectKind: 'home', objectId: identity.objectId },
     }),
-  }, 'home-assistant-snapshot', input, () => input);
+  }, 'home-assistant-snapshot', input, () => { identity.assertCurrent(); return input; });
 }
 
 async function upsertSnapshotObjects(
@@ -190,6 +204,7 @@ async function upsertSnapshotObjects(
   homeNodeId: string,
   sourceId: string,
   activeNodeIds: Set<string>,
+  identities: HomeGraphNodeIdentityPlanner,
 ): Promise<HomeGraphSyncResult['counts']> {
   const input = captured.snapshot;
   const counts = {
@@ -208,14 +223,16 @@ async function upsertSnapshotObjects(
     for (const [index, rawObject] of (objects ?? []).entries()) {
       await yieldEvery(index, 16);
       const object = normalizeHomeGraphObjectInput(kind, rawObject);
-      const baseInput = buildHomeGraphNodeInput(spaceId, installationId, kind, object);
+      const nodeKind = nodeKindForHomeGraphObject(kind);
+      const identity = prepareHomeGraphNodeIdentity(identities, store, { spaceId, kind: nodeKind, objectId: homeGraphObjectId(nodeKind, object) });
+      const baseInput = buildHomeGraphNodeInput(spaceId, installationId, kind, object, identity);
       const previous = store.getNode(baseInput.id);
       const membership = previous ? currentSnapshotMembership(captured, previous)
         : [...(captured.members.get(nodeKindForHomeGraphObject(kind))?.get(homeGraphObjectId(nodeKindForHomeGraphObject(kind), object)) ?? [])];
       const nodeInput = { ...baseInput, metadata: buildHomeGraphMetadata(spaceId, installationId, { ...baseInput.metadata,
         homeAssistant: { ...readRecord(baseInput.metadata.homeAssistant), snapshotGroups: membership } }) };
       const node = await upsertObservedKnowledgeNode(store, { ...nodeInput, sourceId, status: 'active', confidence: 90 },
-        'home-assistant-snapshot', store.getSource(sourceId), () => store.getSource(sourceId));
+        'home-assistant-snapshot', store.getSource(sourceId), () => { identity.assertCurrent(); return store.getSource(sourceId); });
       activeNodeIds.add(node.id);
       await store.upsertEdge({
         fromKind: 'node',
@@ -225,7 +242,7 @@ async function upsertSnapshotObjects(
         relation: 'source_for',
         metadata: buildHomeGraphMetadata(spaceId, installationId),
       });
-      await linkHomeGraphSnapshotObjectReferences(store, { spaceId, installationId, node, object });
+      await linkHomeGraphSnapshotObjectReferences(store, { spaceId, installationId, node, object }, identities);
       if (node.kind === 'ha_integration') {
         await upsertIntegrationDocumentationCandidates(store, spaceId, installationId, node, object);
       }

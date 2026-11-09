@@ -1,3 +1,4 @@
+import { createHomeGraphNodeIdentityIndexes, HomeGraphIdentityHeldError, type HomeGraphNodeSelector } from './store-homegraph-node-selector.js';
 import { createSemanticNodeIdentityIndex, type SemanticNodeSelector, type SemanticIssueSelector } from './store-semantic-node-selector.js';
 import { createSemanticFactIdentityIndex, SemanticIdentityHeldError, type SemanticFactSelector } from './store-semantic-fact-selector.js';
 import { savedGeneratedProjectionIdentity, projectionIdentityParams, KnowledgeProjectionIdentityHeldError, type GeneratedProjectionIdentity } from './store-generated-projection-selector.js';
@@ -7,7 +8,7 @@ import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeRecordAdmissionHeldError, knowledgeEdgeSnapshotFromRows, knowledgeRecordGenerationFromRows, knowledgeRecordSnapshotFromRows, type KnowledgeRecordSnapshot } from './store-record-snapshot.js';
 import { sameKnowledgeRecord, captureKnowledgeStoreInput, copyKnowledgeRepresentation, prepareKnowledgeOwnedClocks } from './store-record-representation.js';
 import { captureOwnedJson, JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { validateCurrentKnowledgeSchema, validateKnowledgeSchemaV12, validateKnowledgeSchemaV13, validateKnowledgeSchemaV14 } from './store-current-schema-validation.js';
+import { validateCurrentKnowledgeSchema, validateKnowledgeSchemaV12, validateKnowledgeSchemaV13, validateKnowledgeSchemaV14, validateKnowledgeSchemaV15 } from './store-current-schema-validation.js';
 import { createKnowledgeNodeContentRevisions } from './store-node-content-revisions.js';
 import { createKnowledgeNodeActivationCache } from './store-node-activation-cache.js';
 import { createGeneratedProjectionIdentityIndex } from './store-generated-projection-selector.js';
@@ -185,6 +186,7 @@ interface NativeArtifactReferenceStore {
   readonly pathSlot: PropertyDescriptor;
 }
 const nativeArtifactReferenceStores = new WeakMap<KnowledgeStore, NativeArtifactReferenceStore>();
+const nativeHomeGraphNodeRead = SQLiteStore.prototype.readHomeGraphNodeCandidates;
 const nativeArtifactReferenceRead = SQLiteStore.prototype.withArtifactReferenceReads;
 const nativeArtifactReferenceSubscribe = SQLiteStore.prototype.subscribeArtifactReferenceClean;
 const homeGraphSnapshotGroupWriters = new WeakMap<KnowledgeStore,
@@ -269,9 +271,10 @@ export class KnowledgeStore {
     this.declareNativeSettlementFormat = declareNativeData ? () => declareNativeData('native-settlements-v2') : undefined;
     this.beforeSemanticNodeWrite = record => {
       if (record.metadata.semanticIdentityVersion === 1) assertKnowledgeWriteCurrent(() => declareNativeData?.('knowledge-semantic-identities-v1'));
+      if (record.metadata.homeGraphIdentityVersion === 1) assertKnowledgeWriteCurrent(() => declareNativeData?.('homegraph-object-identities-v1'));
     };
     this.declareSemanticSourceFormat = declareNativeData ? () => declareNativeData('knowledge-semantic-source-revisions-v2') : undefined;
-    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v15'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
+    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v16'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
     nativePublicationApply(nativePublicationSet, nativeArtifactReferenceStores, [this, Object.freeze({
       sqlite: this.sqlite, path: this.dbPath,
       sqliteSlot: Object.freeze(Object.getOwnPropertyDescriptor(this, 'sqlite')!),
@@ -655,6 +658,31 @@ export class KnowledgeStore {
       return undefined;
     });
     return Object.freeze(candidates);
+  }
+
+  /** Actual current owned tuples for mutation bookkeeping, including pending
+   * native writes. It cannot issue persisted semantic evidence or permissions. */
+  getHomeGraphNodeCandidates(selector: HomeGraphNodeSelector): readonly KnowledgeNodeRecord[] {
+    const core: NativeArtifactReferenceStore | undefined = nativePublicationApply(nativePublicationGet, nativeArtifactReferenceStores, [this]);
+    if (!core || this.closed) throw new HomeGraphIdentityHeldError('stale');
+    const check = () => {
+      for (const [name, original] of [['sqlite', core.sqliteSlot], ['dbPath', core.pathSlot]] as const) {
+        const actual = Object.getOwnPropertyDescriptor(this, name);
+        if (!actual || !('value' in actual) || actual.value !== original.value || actual.configurable !== original.configurable
+          || actual.writable !== original.writable || actual.enumerable !== original.enumerable) throw new HomeGraphIdentityHeldError('stale');
+      }
+      if (this.closed || Object.hasOwn(core.sqlite, 'readHomeGraphNodeCandidates') || Object.getOwnPropertyDescriptor(SQLiteStore.prototype, 'readHomeGraphNodeCandidates')?.value !== nativeHomeGraphNodeRead) throw new HomeGraphIdentityHeldError('stale');
+    };
+    check(); const result = (nativePublicationApply(nativeHomeGraphNodeRead, core.sqlite, [selector]) as ReturnType<SQLiteStore['exec']>)[0]; check();
+    const candidates: KnowledgeNodeRecord[] = [];
+    for (const values of result?.values ?? []) {
+      if (!result) throw new HomeGraphIdentityHeldError('stale');
+      const snapshot = knowledgeRecordSnapshotFromRows('node', [{ columns: result.columns, values: [values] }]);
+      const record = snapshot.record ? this.nodes.get(snapshot.record.id) : undefined;
+      if (!record || !snapshot.record || !snapshot.generation || !sameKnowledgeRecord(record, snapshot.record)) throw new HomeGraphIdentityHeldError('stale');
+      candidates.push(record);
+    }
+    check(); return Object.freeze(candidates);
   }
 
   getSemanticNodeCandidates(selector: SemanticNodeSelector): readonly KnowledgeNodeRecord[] {
@@ -1650,6 +1678,11 @@ export class KnowledgeStore {
         { toVersion: 15, migrate: db => {
           validateKnowledgeSchemaV14(db);
           createSemanticNodeIdentityIndex(db);
+          validateKnowledgeSchemaV15(db);
+        } },
+        { toVersion: 16, migrate: db => {
+          validateKnowledgeSchemaV15(db);
+          createHomeGraphNodeIdentityIndexes(db);
           validateCurrentKnowledgeSchema(db);
         } },
       ],

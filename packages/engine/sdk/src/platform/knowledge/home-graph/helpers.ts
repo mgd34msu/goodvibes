@@ -1,3 +1,5 @@
+import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
+import type { HomeGraphNodeIdentity } from './node-identity-plan.js';
 import { HomeGraphObjectIdentityError } from './identity-errors.js';
 import { createHash } from 'node:crypto';
 import type {
@@ -83,10 +85,6 @@ export function homeGraphSourceId(spaceId: string, kind: string, value: string):
   return `hg-src-${stableHash(`${spaceId}:${kind}:${value}`)}`;
 }
 
-export function homeGraphNodeId(spaceId: string, kind: string, objectId: string): string {
-  return `hg-node-${stableHash(`${spaceId}:${kind}:${objectId}`)}`;
-}
-
 export function homeGraphIssueId(spaceId: string, code: string, subjectId: string): string {
   return `hg-issue-${stableHash(`${spaceId}:${code}:${subjectId}`)}`;
 }
@@ -115,6 +113,7 @@ export function buildHomeGraphNodeInput(
   installationId: string,
   kind: HomeGraphObjectKind | HomeGraphNodeKind,
   object: HomeGraphObjectInput,
+  identity: HomeGraphNodeIdentity,
 ): {
   readonly id: string;
   readonly kind: KnowledgeNodeKind;
@@ -135,18 +134,20 @@ export function buildHomeGraphNodeInput(
     object.name,
   ]);
   return {
-    id: homeGraphNodeId(spaceId, nodeKind, objectId),
+    id: identity.id,
     kind: nodeKind,
-    slug: `${normalizeSpaceComponent(spaceId)}-${nodeKind}-${normalizeSpaceComponent(objectId)}`,
+    slug: identity.slug,
     title,
     ...(buildObjectSummary(object) ? { summary: buildObjectSummary(object) } : {}),
     aliases,
     metadata: buildHomeGraphMetadata(spaceId, installationId, {
       ...(object.metadata ?? {}),
+      homeGraphIdentityVersion: 1,
+      homeGraphIdentitySpace: homeGraphIdentitySpace(spaceId),
       homeAssistant: {
         installationId,
         objectKind,
-        objectId,
+        objectId: identity.objectId,
         ...(object.entityId ? { entityId: object.entityId } : {}),
         ...(object.deviceId ? { deviceId: object.deviceId } : {}),
         ...(object.areaId ? { areaId: object.areaId } : {}),

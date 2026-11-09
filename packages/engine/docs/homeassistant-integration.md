@@ -154,6 +154,12 @@ its group and position before any snapshot source or graph record is written.
 Existing saved anonymous records remain available; new input bodies are not
 hashed into invented identities.
 
+Saved Home Assistant object identifiers choose existing Home Graph records even
+when display names change. Existing node IDs and URLs remain stable. New records
+receive opaque IDs once when they are created; inspecting a missing object does
+not create it. If several saved records claim the same object, the update holds
+and preserves those records instead of choosing one or replacing them.
+
 Snapshot groups are partial updates: an omitted group retains its existing
 objects and original evidence source. Supplying an empty group retires only that
 group's missing members. `helpers` imports helper entities and reports

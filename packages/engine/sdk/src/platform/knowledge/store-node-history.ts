@@ -1,3 +1,4 @@
+import { assertHomeGraphNodeIdentityWrite } from './store-homegraph-node-selector.js';
 import { knowledgeClockIso, knowledgeRawRepresentation, retainKnowledgeRepresentation } from './store-record-representation.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
@@ -26,6 +27,7 @@ export function knowledgeNodeRow(record: KnowledgeNodeRecord): [{ columns: strin
 }
 
 export function writeKnowledgeNodeRow(sqlite: Pick<SQLiteStore, 'run' | 'exec'>, record: KnowledgeNodeRecord): ReturnType<SQLiteStore['exec']> {
+  assertHomeGraphNodeIdentityWrite(sqlite, record);
   const rows = knowledgeNodeRow(record);
   sqlite.run(`
     INSERT INTO knowledge_nodes (

@@ -144,6 +144,8 @@ describe('native generated projection scope and saved identity', () => {
     database.run('DROP INDEX idx_knowledge_edges_artifact_target_reference');
     database.run('DROP INDEX idx_knowledge_nodes_semantic_fact_identity');
     database.run('DROP INDEX idx_knowledge_nodes_semantic_role_scope');
+    database.run('DROP INDEX idx_knowledge_nodes_homegraph_object');
+    database.run('DROP INDEX idx_knowledge_nodes_homegraph_object_v1');
     database.run('PRAGMA user_version=13'); database.close();
     const migrated = item.open(); await migrated.init();
     expect(migrated.getSourceGeneration(source.id)).toBe(generation);
@@ -153,7 +155,7 @@ describe('native generated projection scope and saved identity', () => {
     await migrated.close();
     const check = new Database(item.dbPath, { readonly: true });
     try {
-      expect(check.query('PRAGMA user_version').get()).toEqual({ user_version: 15 });
+      expect(check.query('PRAGMA user_version').get()).toEqual({ user_version: 16 });
       expect(check.query("SELECT name FROM sqlite_schema WHERE name='idx_knowledge_sources_generated_projection_identity'").get()).not.toBeNull();
     } finally { check.close(); }
   });

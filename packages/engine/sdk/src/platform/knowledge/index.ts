@@ -259,6 +259,7 @@ export type { PlanningSourceIdentity } from './store-planning-source-selector.js
 export type { GeneratedProjectionIdentity } from './store-generated-projection-selector.js';
 export type { SemanticFactSelector } from './store-semantic-fact-selector.js';
 export type { SemanticNodeSelector, SemanticIssueSelector } from './store-semantic-node-selector.js';
+export type { HomeGraphNodeSelector } from './store-homegraph-node-selector.js';
 export { SemanticIdentityHeldError } from './store-semantic-fact-selector.js';
 export { KnowledgeProjectionIdentityHeldError } from './store-generated-projection-selector.js';
 export type { KnowledgeGuardedNodeIssueWrites } from './store-node-issue-writes.js';

@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Match Home Graph objects by their saved space, kind and original object ID,
+  preserving existing IDs and URLs across renames and restarts. New nodes use
+  full opaque IDs; missing-object reads create nothing. Snapshot links and
+  device passports use the same identities, and ambiguous saved matches hold.
+
 - Count retention space only after a selected original file is removed. Failed
   age deletions remain in the size budget; failed unlinks no longer stop later
   cleanup early. Preserve replaced directories and aliased, linked or foreign

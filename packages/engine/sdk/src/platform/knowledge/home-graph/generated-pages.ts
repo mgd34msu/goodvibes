@@ -1,3 +1,5 @@
+import { createHomeGraphNodeIdentityPlanner, prepareHomeGraphNodeIdentity } from './node-identity-plan.js';
+import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
 import { isClassicOperation, requireDecisionFeature } from '../../runtime/decision-policy.js';
 import { retainGeneratedFactRecordReferences } from '../generated-fact-record-references.js';
 import { createSemanticFactIdentityPlanner } from '../semantic/identity-plan.js';
@@ -27,7 +29,6 @@ import {
   buildHomeGraphMetadata,
   edgeIsActive,
   factSourceIds,
-  homeGraphNodeId,
   homeGraphSourceId,
   isGeneratedPageSource,
   namespacedCanonicalUri,
@@ -271,6 +272,10 @@ async function refreshHomeGraphDevicePassportNow(
       operation: 'homegraph.refreshDevicePassport',
     });
   }
+  const deviceObjectId = readHomeAssistantMetadataString(device, 'objectId', 'deviceId') ?? device.id;
+  const passportIdentity = prepareHomeGraphNodeIdentity(createHomeGraphNodeIdentityPlanner(store), store, {
+    spaceId, kind: 'ha_device_passport', objectId: deviceObjectId, aliases: [...new Set([input.deviceId, device.id])],
+  });
   const entities = state.nodes.filter((node) => (
     node.kind === 'ha_entity' && state.edges.some((edge) => (
       edgeIsActive(edge)
@@ -358,8 +363,9 @@ async function refreshHomeGraphDevicePassportNow(
   const qualityGuards: Array<() => void> = [];
   const missingFields = await missingDevicePassportFields(device, sources, semanticFacts, { entities, signal: context.signal, assertCurrent: assertPageCurrent, retainCurrent: check => qualityGuards.push(check) });
   const markdown = renderDevicePassportPage({ spaceId, device, entities, sources, issues, missingFields, semanticFacts, factPlan });
-  const passportId = homeGraphNodeId(spaceId, 'ha_device_passport', input.deviceId);
+  const passportId = passportIdentity.id;
   const assertPublicationCurrent = () => {
+    passportIdentity.assertCurrent();
     for (const check of qualityGuards) check();
     throwIfAborted(context.signal);
     assertCallerCurrent?.();
@@ -373,14 +379,15 @@ async function refreshHomeGraphDevicePassportNow(
   const passportInput = prepareObservedKnowledgeNodeInput(store, {
       id: passportId,
       kind: 'ha_device_passport',
-      slug: `${device.slug}-passport`,
+      slug: passportIdentity.slug,
       title: `${device.title} passport`,
       summary: `Living device profile for ${device.title}.`,
       aliases: [`${device.title} passport`],
       status: 'active',
       confidence: 80,
       metadata: buildHomeGraphMetadata(spaceId, installationId, {
-        homeAssistant: { installationId, objectKind: 'device_passport', objectId: input.deviceId },
+        homeGraphIdentityVersion: 1, homeGraphIdentitySpace: homeGraphIdentitySpace(spaceId),
+        homeAssistant: { installationId, objectKind: 'device_passport', objectId: passportIdentity.objectId },
         deviceId: input.deviceId,
         missingFields,
         // Artifact reuse compares the actual markdown bytes. A refresh clock
@@ -410,7 +417,7 @@ async function refreshHomeGraphDevicePassportNow(
       markdown,
       projectionKind: 'device-passport',
       assertCurrent: assertPublicationCurrent,
-      canonicalValue: `device-passport:${input.deviceId}`,
+      canonicalValue: `device-passport:${passportIdentity.objectId}`,
       title: `${device.title} passport`,
       summary: `Living device profile for ${device.title}.`,
       tags: ['homeassistant', 'home-graph', 'generated-page', 'device-passport'],

@@ -1,3 +1,4 @@
+import { validateHomeGraphNodeIdentityIndexes } from './store-homegraph-node-selector.js';
 import { validateSemanticNodeIdentityIndex } from './store-semantic-node-selector.js';
 import { validateSemanticFactIdentityIndex } from './store-semantic-fact-selector.js';
 import { validateKnowledgeRowRevisions } from './store-row-revisions.js';
@@ -40,8 +41,14 @@ export function validateKnowledgeSchemaV14(db: Pick<SqlDatabase, 'exec'>): void 
 }
 
 
-/** Complete current schema checks, shared with the closed native read plan. */
-export function validateCurrentKnowledgeSchema(db: Pick<SqlDatabase, 'exec'>): void {
+/** Original v15 includes actual semantic-role selectors. */
+export function validateKnowledgeSchemaV15(db: Pick<SqlDatabase, 'exec'>): void {
   validateKnowledgeSchemaV14(db);
   validateSemanticNodeIdentityIndex(db);
+}
+
+/** Current v16 adds Home Graph exact object tuple selectors without rewriting rows. */
+export function validateCurrentKnowledgeSchema(db: Pick<SqlDatabase, 'exec'>): void {
+  validateKnowledgeSchemaV15(db);
+  validateHomeGraphNodeIdentityIndexes(db);
 }

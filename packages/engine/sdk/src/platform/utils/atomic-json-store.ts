@@ -672,12 +672,20 @@ export function quarantineCorruptFile(filePath: string, options: QuarantineOptio
 /** Reclaim only an aged, recognized native temp whose recorded writer is
  * proven dead. Return its bytes only after exact physical deletion. */
 function cleanupStaleTempFile(dir: string, filePath: string, name: string, staleBefore: number,
-  assertCurrent: () => void, onEffect: (() => void) | undefined): number | undefined {
+  assertCurrent: () => void, onEffect: (() => void) | undefined, legacyPidTimestamp = false): number | undefined {
   const prefix = `${basename(filePath)}.tmp-`;
-  if (basename(name) !== name || !name.startsWith(prefix)) return undefined;
+  if (basename(name) !== name) return undefined;
   // Current writer PID/sequence/UUID suffix, or the actual earlier PID-only
   // format. A coincidental '.json.tmp-' substring is not a native receipt.
-  const writer = /^([1-9]\d*)(?:-[0-9a-z]+-[0-9a-f]{8})?$/.exec(name.slice(prefix.length));
+  let writer = name.startsWith(prefix)
+    ? /^([1-9]\d*)(?:-[0-9a-z]+-[0-9a-f]{8})?$/.exec(name.slice(prefix.length)) : null;
+  if (!writer && legacyPidTimestamp && name.startsWith(`${basename(filePath)}.`)) {
+    // Explicit orchestration-store compatibility only. Its released writer
+    // used <snapshot.json>.<pid>.<Date.now()>.tmp, never an arbitrary *.tmp.
+    const earlier = /^([1-9]\d*)\.(\d+)\.tmp$/.exec(name.slice(basename(filePath).length + 1));
+    const timestamp = earlier ? Number(earlier[2]) : NaN;
+    if (Number.isSafeInteger(timestamp) && timestamp >= 0 && timestamp <= staleBefore) writer = earlier;
+  }
   if (!writer) return undefined;
   const pid = Number(writer[1]); if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
   try { process.kill(pid, 0); return undefined; }
@@ -704,13 +712,15 @@ function cleanupStaleTempFile(dir: string, filePath: string, name: string, stale
 export function reapOwnedAtomicTempFile(filePath: string, temporaryName: string, options: {
   readonly now?: number;
   readonly minimumAgeMs?: number;
+  /** Only stores whose actual old writer used <file>.<pid>.<timestamp>.tmp. */
+  readonly legacyPidTimestamp?: boolean;
 } = {}): number | undefined {
   const now = options.now ?? Date.now(), minimumAge = Math.max(STALE_TEMP_FILE_MIN_AGE_MS, options.minimumAgeMs ?? STALE_TEMP_FILE_MIN_AGE_MS);
   if (!Number.isFinite(now) || !Number.isFinite(minimumAge)) throw new Error('Invalid atomic temporary-file cleanup clock');
   const absolute = isAbsolute(filePath) ? filePath : `${process.cwd()}${sep}${filePath}`;
   const parent = prepareAtomicDirectory(dirname(absolute), () => {}, undefined, false);
   parent.assertCurrent();
-  return cleanupStaleTempFile(parent.canonical, join(parent.canonical, basename(absolute)), temporaryName, now - minimumAge, () => parent.assertCurrent(), undefined);
+  return cleanupStaleTempFile(parent.canonical, join(parent.canonical, basename(absolute)), temporaryName, now - minimumAge, () => parent.assertCurrent(), undefined, options.legacyPidTimestamp === true);
 }
 
 /** Opportunistic publication cleanup shares the same closed leaf selector. */

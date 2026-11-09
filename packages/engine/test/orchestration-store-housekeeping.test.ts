@@ -533,7 +533,7 @@ describe('orchestration snapshot housekeeping', () => {
     writeFileSync(join(dir, 'ws-a.json'), '', 'utf-8');
 
     expect(loadWorkstreamSnapshot(root, 'ws-a')).toBeNull();
-    expect(existsSync(join(dir, 'ws-a.json.unrecognized'))).toBe(true);
+    expect(readdirSync(dir).filter(name => name.startsWith('ws-a.json.') && name.endsWith('.unrecognized'))).toHaveLength(1);
     expect(existsSync(join(dir, 'ws-a.json'))).toBe(false);
   });
 
@@ -550,14 +550,14 @@ describe('orchestration snapshot housekeeping', () => {
     writeFileSync(join(dir, 'ws-a.json'), full.slice(0, Math.floor(full.length / 2)), 'utf-8');
 
     expect(loadWorkstreamSnapshot(root, 'ws-a')).toBeNull();
-    expect(existsSync(join(dir, 'ws-a.json.unrecognized'))).toBe(true);
+    expect(readdirSync(dir).filter(name => name.startsWith('ws-a.json.') && name.endsWith('.unrecognized'))).toHaveLength(1);
   });
 
   test('writeWorkstreamSnapshot is atomic: no temp file survives and the snapshot reloads', () => {
     const root = scratch('ws-atomic-');
     writeWorkstreamSnapshot(root, makeWorkstream('ws-atomic', 'passed'), []);
 
-    expect(readdirSync(orchestrationDir(root)).filter((entry) => entry.endsWith('.tmp'))).toEqual([]);
+    expect(readdirSync(orchestrationDir(root)).filter((entry) => entry.endsWith('.tmp') || entry.includes('.json.tmp-'))).toEqual([]);
     expect(loadWorkstreamSnapshot(root, 'ws-atomic')?.workstream.id).toBe('ws-atomic');
   });
 
@@ -628,7 +628,12 @@ describe('orchestration snapshot housekeeping', () => {
     const root = scratch('ws-temp-');
     const dir = orchestrationDir(root);
     mkdirSync(dir, { recursive: true });
-    const stale = join(dir, 'ws-a.json.999.1.tmp');
+    const stale = join(dir, 'ws-a.json.999999.1.tmp');
+    const originalKill = process.kill;
+    spies.push(spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (pid === 999999) throw Object.assign(new Error('fixture proven dead'), { code: 'ESRCH' });
+      return originalKill(pid, signal);
+    }));
     writeFileSync(stale, '{"partial":', 'utf-8');
     const staleSeconds = (NOW - 2 * 60 * 60 * 1000) / 1000;
     utimesSync(stale, staleSeconds, staleSeconds);

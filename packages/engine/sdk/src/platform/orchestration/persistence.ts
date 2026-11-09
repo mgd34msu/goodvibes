@@ -4,13 +4,16 @@
  * Persistence (see CHANGELOG 0.38.0): serializes a workstream into a
  * schema-versioned snapshot, rejects a snapshot written by a newer schema, and
  * imports one back. Writes to `.goodvibes/orchestration/<workstreamId>.json`.
- * Writes are debounced (250ms) and a snapshot that cannot be read is
- * quarantined as `<path>.unrecognized` rather than deleted.
+ * Writes are debounced (250ms). Unrecognized corrupt snapshots retain their
+ * original bytes under a unique `.unrecognized` name; newer formats stay put.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { writeFileAtomic, reapOwnedAtomicTempFile, captureExistingDirectory } from '../utils/atomic-json-store.js';
+import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import {
   CURRENT_WORKSTREAM_SCHEMA_VERSION,
   type OrchestrationEvent,
@@ -18,7 +21,6 @@ import {
   type SerializedWorkItem,
   type SerializedWorkstream,
   type WorkItem,
-  type WorkItemState,
   type Workstream,
   type WorkstreamSnapshot,
 } from './types.js';
@@ -45,9 +47,8 @@ const QUARANTINE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_QUARANTINE_FILES = 20;
 
 /**
- * Age TTL for temp files left behind by an interrupted atomic write. An hour
- * is far beyond any real write (milliseconds), so anything older is crash
- * litter from a dead process rather than an in-flight write by a live one.
+ * Minimum age for recognized native temporary files. Age alone never proves
+ * abandonment: cleanup also requires a proven-dead writer and original file.
  */
 const STALE_TEMP_MAX_AGE_MS = 60 * 60 * 1000;
 
@@ -97,14 +98,22 @@ export function serializeWorkstreamSnapshot(workstream: Workstream, completedRes
  * schemaVersion) is rejected (fail closed)
  * rather than partially trusted.
  */
+function parseSnapshotJson(json: string): unknown {
+  try { return JSON.parse(json) as unknown; }
+  catch { logger.error('orchestration persistence: invalid snapshot JSON'); return undefined; }
+}
+
+function isFutureSnapshot(raw: unknown): boolean {
+  return raw !== null && typeof raw === 'object' && 'schemaVersion' in raw
+    && typeof raw.schemaVersion === 'number' && raw.schemaVersion > CURRENT_WORKSTREAM_SCHEMA_VERSION;
+}
+
 export function deserializeWorkstreamSnapshot(json: string): WorkstreamSnapshot | null {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(json);
-  } catch (error) {
-    logger.error('orchestration persistence: JSON parse failed', { error: summarizeError(error) });
-    return null;
-  }
+  return snapshotValue(parseSnapshotJson(json));
+}
+
+function snapshotValue(raw: unknown): WorkstreamSnapshot | null {
+  if (raw === undefined) return null;
   if (raw === null || typeof raw !== 'object') {
     logger.warn('orchestration persistence: invalid snapshot JSON, not an object');
     return null;
@@ -144,30 +153,38 @@ const SAFE_NAMESPACE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export function orchestrationDir(location: SnapshotRoot): string {
   if (typeof location === 'string') return join(location, '.goodvibes', 'orchestration');
   if (!SAFE_NAMESPACE.test(location.namespace) || location.namespace.includes('..')) {
-    throw new RangeError(`orchestration snapshot namespace must be one plain path segment: ${JSON.stringify(location.namespace)}`);
+    throw new RangeError('orchestration snapshot namespace must be one plain path segment');
   }
   return join(location.root, '.goodvibes', 'orchestration', location.namespace);
 }
 
 function snapshotPath(projectRoot: SnapshotRoot, workstreamId: string): string {
+  if (typeof workstreamId !== 'string' || /[/\\\0]/.test(workstreamId)) throw new RangeError('workstream snapshot id must be one path segment');
   return join(orchestrationDir(projectRoot), `${workstreamId}.json`);
 }
 
 /** Read + quarantine-on-corrupt (never throws, never crashes the caller on a bad file). */
 export function loadWorkstreamSnapshot(projectRoot: SnapshotRoot, workstreamId: string): WorkstreamSnapshot | null {
-  const path = snapshotPath(projectRoot, workstreamId);
+  let path: string;
+  try { path = snapshotPath(projectRoot, workstreamId); }
+  catch { logger.warn('orchestration persistence: invalid snapshot location refused'); return null; }
   if (!existsSync(path)) return null;
-  let text: string;
-  try {
-    text = readFileSync(path, 'utf-8');
-  } catch (error) {
+  let source: ReturnType<typeof readFileObservation>, parent: ReturnType<typeof captureExistingDirectory>;
+  try { parent = captureExistingDirectory(dirname(path)); source = readFileObservation(path); parent.assertCurrent(); }
+  catch (error) {
     logger.warn('orchestration persistence: snapshot read failed', { path, error: summarizeError(error) });
     return null;
   }
-  const snapshot = deserializeWorkstreamSnapshot(text);
+  const raw = parseSnapshotJson(source.bytes.toString('utf8'));
+  const snapshot = snapshotValue(raw);
+  // A newer reader owns this valid future envelope. Never quarantine it as
+  // corrupt, or let a later old writer replace it with an empty older state.
+  if (snapshot === null && isFutureSnapshot(raw)) return null;
   if (snapshot === null) {
-    const quarantinePath = `${path}.unrecognized`;
+    const quarantinePath = `${path}.${opaqueUuid()}${QUARANTINE_SUFFIX}`;
     try {
+      parent.assertCurrent();
+      if (fileObservationIdentity(path) !== source.physical) return null;
       renameSync(path, quarantinePath);
       logger.warn('orchestration persistence: quarantined unrecognized snapshot', { path, quarantinePath });
     } catch (error) {
@@ -200,23 +217,41 @@ export function listSnapshotWorkstreamIds(projectRoot: SnapshotRoot, options?: S
   }
 }
 
+// Only the actual owner object reuses its successfully read/published version
+// observation. Copies/imports have no frame; changed native files are reread.
+const snapshotWriteFrames = new WeakMap<Workstream, { readonly path: string; readonly physical: string }>();
+const currentSnapshotPhysical = (path: string): string | null => {
+  try { return fileObservationIdentity(path); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+};
+
 export function writeWorkstreamSnapshot(projectRoot: SnapshotRoot, workstream: Workstream, completedResults: readonly PhaseResult[]): void {
+  let path: string;
+  try { path = snapshotPath(projectRoot, workstream.id); }
+  catch { logger.warn('orchestration persistence: invalid snapshot location refused'); return; }
   const json = serializeWorkstreamSnapshot(workstream, completedResults);
   if (json === null) return;
-  const path = snapshotPath(projectRoot, workstream.id);
-  // Temp-file-plus-rename: a crash mid-write can only leave a stray temp file
-  // (aged out by the reap below), never a torn snapshot. Without this, a crash
-  // during the write destroys the snapshot outright, the next load quarantines
-  // the wreckage, which is self-healing but has already LOST the workstream.
-  // The pid+timestamp suffix keeps two writing processes off one temp path.
-  const tempPath = `${path}.${process.pid}.${Date.now()}${TEMP_SUFFIX}`;
   try {
-    mkdirSync(orchestrationDir(projectRoot), { recursive: true });
-    writeFileSync(tempPath, json, 'utf-8');
-    renameSync(tempPath, path);
+    let physical = currentSnapshotPhysical(path);
+    const cached = snapshotWriteFrames.get(workstream);
+    if (physical !== null && (cached?.path !== path || cached.physical !== physical)) {
+      const source = readFileObservation(path), raw = parseSnapshotJson(source.bytes.toString('utf8'));
+      if (isFutureSnapshot(raw)) throw new Error('A newer workstream snapshot requires a newer reader');
+      if (snapshotValue(raw) === null) throw new Error('An unreadable workstream snapshot must be preserved');
+      physical = source.physical;
+    }
+    const assertCurrent = () => { if (currentSnapshotPhysical(path) !== physical) throw new Error('Original workstream snapshot changed'); };
+    assertCurrent();
+    let publication: string | undefined;
+    writeFileAtomic(path, json, { assertCurrent, cleanupStaleTemps: false, onEffect(published) {
+      if (published) publication = fileObservationIdentity(path);
+    } });
+    // A callback observation becomes a reusable version frame only after the
+    // original writer confirms its staged image through the complete return.
+    if (publication === undefined || fileObservationIdentity(path) !== publication) throw new Error('Original snapshot publication changed');
+    snapshotWriteFrames.set(workstream, { path, physical: publication });
   } catch (error) {
-    logger.error('orchestration persistence: snapshot write failed', { path, error: summarizeError(error) });
-    removeFile(tempPath);
+    logger.error('orchestration persistence: snapshot write failed; original preserved', { path, error: summarizeError(error) });
   }
 }
 
@@ -266,34 +301,31 @@ const EMPTY_REAP_SUMMARY: OrchestrationSnapshotReapSummary = {
 };
 
 /** A workstream is finished when no item can still move. Mirrors engine.isTerminalWorkstream. */
-function isTerminalItemSet(items: readonly { readonly state: WorkItemState }[]): boolean {
+function isTerminalItemSet(items: readonly unknown[]): boolean {
   // An item-less workstream can never run, so it counts as finished rather
   // than pinning a snapshot in the store forever.
-  return items.every((item) => item.state === 'passed' || item.state === 'failed');
-}
-
-/** Delete a file, treating ENOENT as success (another process may have reaped it first). Returns bytes freed. */
-function removeFile(path: string): number {
-  let size = 0;
-  try {
-    size = statSync(path).size;
-  } catch {
-    return 0;
-  }
-  try {
-    unlinkSync(path);
-    return size;
-  } catch (error) {
-    const code = (error as { code?: string }).code;
-    if (code === 'ENOENT') return 0;
-    logger.warn('orchestration persistence: failed to remove file during housekeeping', { path, error: summarizeError(error) });
-    return 0;
-  }
+  return items.every(item => item !== null && typeof item === 'object' && 'state' in item
+    && (item.state === 'passed' || item.state === 'failed'));
 }
 
 interface DatedFile {
   readonly path: string;
   readonly at: number;
+  readonly physical: string;
+  readonly size: number;
+}
+
+/** Removal is successful only for this original selected leaf and parent.
+ * Missing/replaced/unavailable files are not successful reclamations. */
+function removeFile(selected: DatedFile, assertParent: () => void): number | undefined {
+  try {
+    assertParent();
+    if (fileObservationIdentity(selected.path) !== selected.physical) return undefined;
+    unlinkSync(selected.path); return selected.size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') logger.warn('orchestration persistence: original file was not removed', { path: selected.path });
+    return undefined;
+  }
 }
 
 /**
@@ -310,9 +342,10 @@ export function reapOrchestrationSnapshots(projectRoot: SnapshotRoot, options?: 
   if (!existsSync(dir)) return EMPTY_REAP_SUMMARY;
   const now = options?.now ?? Date.now();
 
-  let entries: string[];
+  let entries: string[], directory: ReturnType<typeof captureExistingDirectory>;
   try {
-    entries = readdirSync(dir);
+    directory = captureExistingDirectory(dir);
+    entries = readdirSync(dir); directory.assertCurrent();
   } catch (error) {
     logger.warn('orchestration persistence: failed to list snapshot directory for housekeeping', { dir, error: summarizeError(error) });
     return EMPTY_REAP_SUMMARY;
@@ -324,31 +357,31 @@ export function reapOrchestrationSnapshots(projectRoot: SnapshotRoot, options?: 
   let bytesReclaimed = 0;
 
   for (const entry of entries) {
+    try { directory.assertCurrent(); } catch { break; }
     const path = join(dir, entry);
 
-    if (entry.endsWith(TEMP_SUFFIX)) {
-      let mtimeMs: number;
-      try {
-        mtimeMs = statSync(path).mtimeMs;
-      } catch {
-        continue;
-      }
-      if (now - mtimeMs > STALE_TEMP_MAX_AGE_MS) {
-        const freed = removeFile(path);
-        if (!existsSync(path)) {
-          staleTempRemoved += 1;
-          bytesReclaimed += freed;
-        }
+    const temporaryBase = /^(.*\.json)\.tmp-/.exec(entry)?.[1]
+      ?? /^(.*\.json)\.[0-9]+\.[0-9]+\.tmp$/.exec(entry)?.[1];
+    if (temporaryBase !== undefined || entry.endsWith(TEMP_SUFFIX)) {
+      if (temporaryBase !== undefined) {
+        try {
+          const freed = reapOwnedAtomicTempFile(join(dir, temporaryBase), entry, { now, minimumAgeMs: STALE_TEMP_MAX_AGE_MS, legacyPidTimestamp: true });
+          if (freed !== undefined) { staleTempRemoved += 1; bytesReclaimed += freed; }
+        } catch { /* Unknown physical ownership preserves the listed file. */ }
       }
       continue;
     }
 
     if (entry.endsWith(QUARANTINE_SUFFIX)) {
       try {
-        quarantined.push({ path, at: statSync(path).mtimeMs });
-      } catch {
-        // Vanished between readdir and stat: another process already reaped it.
-      }
+        const source = readFileObservation(path); directory.assertCurrent();
+        let raw: unknown;
+        try { raw = JSON.parse(source.bytes.toString('utf8')) as unknown; } catch { /* Ordinary corrupt forensic snapshot. */ }
+        if (isFutureSnapshot(raw)) continue;
+        const at = statSync(path).mtimeMs;
+        if (fileObservationIdentity(path) !== source.physical) continue;
+        quarantined.push({ path, at, physical: source.physical, size: source.bytes.byteLength });
+      } catch { /* Unavailable or replaced original is left untouched. */ }
       continue;
     }
 
@@ -356,32 +389,30 @@ export function reapOrchestrationSnapshots(projectRoot: SnapshotRoot, options?: 
 
     const workstreamId = entry.slice(0, -'.json'.length);
     if (options?.isRunning?.(workstreamId) === true) continue;
+    try { directory.assertCurrent(); } catch { break; }
 
     // Decide terminal-ness by CONTENT: a snapshot that does not parse or does
     // not validate is left alone here so loadWorkstreamSnapshot can quarantine
     // it with its existing disclosure, rather than being deleted outright.
-    let text: string;
-    try {
-      text = readFileSync(path, 'utf-8');
-    } catch {
-      continue;
-    }
-    const snapshot = deserializeWorkstreamSnapshot(text);
+    let source: ReturnType<typeof readFileObservation>;
+    try { source = readFileObservation(path); directory.assertCurrent(); }
+    catch { continue; }
+    const snapshot = deserializeWorkstreamSnapshot(source.bytes.toString('utf8'));
     if (snapshot === null) continue;
     // deserializeWorkstreamSnapshot validates the envelope, not every field, so
     // the item list is re-checked here rather than assumed.
     const items: unknown = snapshot.workstream.items;
-    if (!Array.isArray(items) || !isTerminalItemSet(items as readonly { readonly state: WorkItemState }[])) continue;
+    if (!Array.isArray(items) || !isTerminalItemSet(items)) continue;
     const writtenAt = typeof snapshot.writtenAt === 'number' && Number.isFinite(snapshot.writtenAt) ? snapshot.writtenAt : 0;
-    terminal.push({ path, at: writtenAt });
+    terminal.push({ path, at: writtenAt, physical: source.physical, size: source.bytes.byteLength });
   }
 
   let terminalExpired = 0;
   const withinTtl: DatedFile[] = [];
   for (const file of terminal) {
     if (now - file.at > TERMINAL_SNAPSHOT_MAX_AGE_MS) {
-      bytesReclaimed += removeFile(file.path);
-      terminalExpired += 1;
+      const removed = removeFile(file, () => directory.assertCurrent());
+      if (removed !== undefined) { bytesReclaimed += removed; terminalExpired += 1; }
       continue;
     }
     withinTtl.push(file);
@@ -391,8 +422,8 @@ export function reapOrchestrationSnapshots(projectRoot: SnapshotRoot, options?: 
   if (withinTtl.length > MAX_TERMINAL_SNAPSHOTS) {
     const oldestFirst = [...withinTtl].sort((a, b) => a.at - b.at);
     for (const file of oldestFirst.slice(0, withinTtl.length - MAX_TERMINAL_SNAPSHOTS)) {
-      bytesReclaimed += removeFile(file.path);
-      terminalOverCap += 1;
+      const removed = removeFile(file, () => directory.assertCurrent());
+      if (removed !== undefined) { bytesReclaimed += removed; terminalOverCap += 1; }
     }
   }
 
@@ -400,8 +431,8 @@ export function reapOrchestrationSnapshots(projectRoot: SnapshotRoot, options?: 
   const quarantineWithinTtl: DatedFile[] = [];
   for (const file of quarantined) {
     if (now - file.at > QUARANTINE_MAX_AGE_MS) {
-      bytesReclaimed += removeFile(file.path);
-      quarantineExpired += 1;
+      const removed = removeFile(file, () => directory.assertCurrent());
+      if (removed !== undefined) { bytesReclaimed += removed; quarantineExpired += 1; }
       continue;
     }
     quarantineWithinTtl.push(file);
@@ -411,8 +442,8 @@ export function reapOrchestrationSnapshots(projectRoot: SnapshotRoot, options?: 
   if (quarantineWithinTtl.length > MAX_QUARANTINE_FILES) {
     const oldestFirst = [...quarantineWithinTtl].sort((a, b) => a.at - b.at);
     for (const file of oldestFirst.slice(0, quarantineWithinTtl.length - MAX_QUARANTINE_FILES)) {
-      bytesReclaimed += removeFile(file.path);
-      quarantineOverCap += 1;
+      const removed = removeFile(file, () => directory.assertCurrent());
+      if (removed !== undefined) { bytesReclaimed += removed; quarantineOverCap += 1; }
     }
   }
 

@@ -206,7 +206,7 @@ export interface ContractReapSummary {
 export interface ContractStoreOptions {
   readonly projectRoot: string;
   /** Actual installed native owner; declare its reader floor before writes. */
-  readonly beforeWrite?: (() => void) | undefined;
+  readonly beforeWrite?: ((contract?: Contract) => void) | undefined;
   /** Clock seam for tests. */
   readonly now?: (() => number) | undefined;
   /** Debounce for event-triggered writes; defaults to 250 ms. */
@@ -255,7 +255,7 @@ export class ContractStore {
   private readonly now: () => number;
   private readonly debounceMs: number;
   private readonly sweepIntervalMs: number;
-  private readonly beforeWrite: (() => void) | undefined;
+  private readonly beforeWrite: ((contract?: Contract) => void) | undefined;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: ContractStoreOptions) {
@@ -276,8 +276,8 @@ export class ContractStore {
   }
 
   /** Also used by the runner's first atomic durable-admission checkpoint. */
-  prepareCheckpointWrite(): void {
-    const result: unknown = this.beforeWrite?.();
+  prepareCheckpointWrite(contract?: Contract): void {
+    const result: unknown = this.beforeWrite?.(contract);
     if (result !== undefined) { drainOwned(result); throw new Error('Contract checkpoint publication requires a synchronous native owner'); }
   }
 
@@ -310,7 +310,7 @@ export class ContractStore {
     const path = contractPath(this.projectRoot, contract.id);
     try {
       this.assertStoredVersion(contract.id);
-      this.prepareCheckpointWrite();
+      this.prepareCheckpointWrite(contract);
       if (contract.durableAdmission !== undefined) new DurableContractAdmissions(this.projectRoot).update(contract.durableAdmission, json);
       writeFileAtomic(path, json);
       if (contract.durableAdmission !== undefined) {

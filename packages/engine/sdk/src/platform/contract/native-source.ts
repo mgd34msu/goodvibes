@@ -8,6 +8,8 @@ import type { Contract, ContractView, Criterion, NativeContractSource } from './
 
 const SOURCE_KEYS = ['sourceId', 'sourceRevision', 'inputRevision', 'criteriaId', 'criteriaRevision', 'goal', 'criteria'];
 const REFERENCE_KEYS = ['sourceId', 'sourceRevision', 'inputRevision', 'criteriaId', 'criteriaRevision'] as const;
+const nativeApply = Reflect.apply, nativeWeakHas = WeakSet.prototype.has, nativeWeakAdd = WeakSet.prototype.add;
+const verifiedHistoricalContinuations = new WeakSet<NativeConversationContinuation>();
 
 /** Validates, detaches and freezes a complete host-owned native source. Never infers missing criteria. */
 export function captureNativeContractSource(value: unknown): NativeContractSource {
@@ -32,7 +34,14 @@ export function captureNativeContractSource(value: unknown): NativeContractSourc
     criteria.push(item.value);
   }
   const continuation = Object.hasOwn(source, 'continuation') ? captureNativeConversationContinuation(source['continuation']) : undefined;
-  if (continuation && continuation.revision !== createHash('sha256').update(canonicalNativeConversationContinuation(continuation.sessionId, continuation.messages, continuation.selectedDiff)).digest('hex')) throw new Error('Invalid native continuation revision');
+  // Historical contexts carry a standalone transcript commitment. Fresh v2
+  // contexts are part of the complete, validated intake source commitment;
+  // their opaque snapshot label is never a transcript checksum or authority.
+  if (continuation && continuation.version !== 2 && !nativeApply(nativeWeakHas, verifiedHistoricalContinuations, [continuation])) {
+    if (continuation.revision !== createHash('sha256').update(canonicalNativeConversationContinuation(continuation.sessionId, continuation.messages, continuation.selectedDiff)).digest('hex')) throw new Error('Invalid native continuation revision');
+    // The strict constructor's exact immutable object, never a copied JSON flag.
+    nativeApply(nativeWeakAdd, verifiedHistoricalContinuations, [continuation]);
+  }
   return Object.freeze({
     ...(continuation ? { continuation } : {}),
     sourceId: source['sourceId'] as string,
@@ -59,7 +68,7 @@ export function nativeContractSourceData(source: NativeContractSource) {
   const { continuation, ...original } = source;
   const selectedDiff = continuation?.selectedDiff;
   return { ...original, criteria: [...source.criteria], ...(continuation ? { continuation: {
-    sessionId: continuation.sessionId, revision: continuation.revision, messages: continuation.messages.map(message => ({ ...message })),
+    ...(continuation.version === 2 ? { version: 2 as const } : {}), sessionId: continuation.sessionId, revision: continuation.revision, messages: continuation.messages.map(message => ({ ...message })),
     ...(selectedDiff ? { selectedDiff: selectedDiff.kind === 'session'
       ? { ...selectedDiff, provenance: { ...selectedDiff.provenance } }
       : { ...selectedDiff, provenance: { ...selectedDiff.provenance } } } : {}),

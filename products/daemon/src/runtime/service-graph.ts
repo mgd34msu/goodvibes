@@ -731,9 +731,9 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
         if (!nativeContinuationOwner) throw new Error('Native hosted continuation owner unavailable');
         return nativeContinuationOwner.capture(sessionId, principalId, selectedDiff);
       },
-      assertCurrent: (context, principalId) => {
+      assertCurrent: (context, principalId, source) => {
         if (!nativeContinuationOwner) throw new Error('Native hosted continuation owner unavailable');
-        nativeContinuationOwner.assertCurrent(context, principalId);
+        nativeContinuationOwner.assertCurrent(context, principalId, source);
       },
     };
     const nativeIntake = createNativeConversationIntakeHost({ projectRoot: workingDirectory, projectId: projectPlanningProjectId,

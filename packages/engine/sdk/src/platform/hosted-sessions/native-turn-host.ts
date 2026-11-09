@@ -41,7 +41,7 @@ interface NativeTurnOwnership {
   done: Promise<void>;
 }
 export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & {
-  readonly manager: Pick<HostedSessionManager, 'create' | 'deliverNative' | 'cancelNative' | 'kill' | 'get' | 'captureNativeContinuation' | 'assertNativeContinuation' | 'waitForNativeAvailability'>;
+  readonly manager: Pick<HostedSessionManager, 'create' | 'deliverNative' | 'cancelNative' | 'kill' | 'get' | 'captureNativeContinuation' | 'assertNativeContinuation' | 'waitForNativeAvailability'> & Partial<Pick<HostedSessionManager, 'withNativeContinuationDiff'>>;
   readonly broker: Pick<SharedSessionBroker, 'reserveNativeTurnInput' | 'getInputsSince' | 'settleNativeTurnInput'>;
   readonly journal?: NativeHostedTurnJournal;
 }) {
@@ -110,16 +110,22 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
         const selectedDiff = captureNativeSelectedDiffContext({ ...selection, unifiedDiff: selectNativeDiffHunk(diff.unifiedDiff, selection.fileIndex, selection.hunkIndex),
           provenance: selection.kind === 'session' ? { kind: 'session', sessionId, baselineCheckpointId: diff.from, latestCheckpointId: diff.to }
             : { kind: 'workspace', baselineId: diff.from, to: 'WORKING' } });
-        context = captureNativeConversationContinuation({ ...context, selectedDiff,
-          revision: createHash('sha256').update(canonicalNativeConversationContinuation(sessionId, context.messages, selectedDiff)).digest('hex') });
+        if (deps.manager.withNativeContinuationDiff) context = deps.manager.withNativeContinuationDiff(context, selectedDiff);
+        else {
+          if (context.version === 2) throw new NativeHostedTurnError('unavailable');
+          // Only historical embedded managers without v2 native issuance use
+          // their original content-bound continuation protocol.
+          context = captureNativeConversationContinuation({ ...context, selectedDiff,
+            revision: createHash('sha256').update(canonicalNativeConversationContinuation(sessionId, context.messages, selectedDiff)).digest('hex') });
+        }
       }
       assertSession(sessionId, principalId);
       deps.manager.assertNativeContinuation(context);
       return context;
     },
-    assertCurrent(context, principalId) {
+    assertCurrent(context, principalId, source) {
       assertSession(context.sessionId, principalId);
-      deps.manager.assertNativeContinuation(context);
+      deps.manager.assertNativeContinuation(context, source);
     },
   };
   deps.installContinuationOwner?.(continuation);

@@ -1,7 +1,12 @@
 import type { GatePresetName } from '../gate/presets.js';
 import type { FailureReadOptions } from '@goodvibes-jev/engine/errors';
 import { createHash } from 'node:crypto';
-import { captureNativeConversationContinuation, canonicalNativeConversationContinuation, type NativeConversationContinuation } from '../workflow/work-ledger/native-continuation-context.js';
+import { captureNativeConversationContinuation, canonicalNativeConversationContinuation, createNativeContinuationSnapshotOwner, type NativeConversationContinuation } from '../workflow/work-ledger/native-continuation-context.js';
+import { isDeepStrictEqual } from 'node:util';
+import { isValidatedNativeConversationCapture, validatedNativeCaptureContinuation, type NativeConversationCapture } from '../workflow/work-ledger/native-intake-types.js';
+import type { NativeSelectedDiffContext } from '../workflow/work-ledger/native-diff-context.js';
+const nativeContinuationApply = Reflect.apply, NativeContinuationOwnerMap = WeakMap;
+const nativeContinuationGet = WeakMap.prototype.get, nativeContinuationSet = WeakMap.prototype.set;
 import { readNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
 /**
  * manager.ts, the hosted-session engine: lifecycle, policy, durability.
@@ -635,7 +640,7 @@ export class HostedSessionManager {
       || !live.runtime) throw new Error('Native hosted broker identity mismatch');
     if (source.continuation) {
       if (source.continuation.sessionId !== sessionId) throw new Error('Native continuation session mismatch');
-      this.assertNativeContinuation(source.continuation);
+      this.assertNativeContinuation(source.continuation, permit);
     }
     if (!this.nativeCheckpoints.has(sessionId)) this.checkpointNative(live);
     await live.runtime.submitNative(permit, input.id, input.correlationId);
@@ -656,10 +661,16 @@ export class HostedSessionManager {
   private readonly nativeCheckpoints = new Map<string, NativeConversationContinuation | null>();
   private readonly nativeCheckpointWrites = new Map<string, { readonly context: NativeConversationContinuation; readonly done: Promise<void> }>();
 
+  private readonly nativeContinuationOwners = new NativeContinuationOwnerMap<LiveSession, ReturnType<typeof createNativeContinuationSnapshotOwner>>();
+  private continuationOwner(live: LiveSession) {
+    let owner = nativeContinuationApply(nativeContinuationGet, this.nativeContinuationOwners, [live]) as ReturnType<typeof createNativeContinuationSnapshotOwner> | undefined;
+    if (!owner) { owner = createNativeContinuationSnapshotOwner(); nativeContinuationApply(nativeContinuationSet, this.nativeContinuationOwners, [live, owner]); }
+    return owner;
+  }
+
   private snapshotNative(live: LiveSession): NativeConversationContinuation {
     const messages = this.history(live);
-    const revision = createHash('sha256').update(canonicalNativeConversationContinuation(live.record.id, messages)).digest('hex');
-    const context = captureNativeConversationContinuation({ sessionId: live.record.id, revision, messages });
+    const context = this.continuationOwner(live).capture(live.record.id, messages);
     return context;
   }
 
@@ -717,15 +728,31 @@ export class HostedSessionManager {
     return context;
   }
 
-  assertNativeContinuation(value: NativeConversationContinuation): void {
+  assertNativeContinuation(value: NativeConversationContinuation, origin?: NativeConversationCapture | NativeConversationTurnPermit): void {
     const context = captureNativeConversationContinuation(value);
     const live = this.requireLive(context.sessionId);
-    if (!live.runtime || createHash('sha256').update(canonicalNativeConversationContinuation(context.sessionId, context.messages, context.selectedDiff)).digest('hex') !== context.revision) {
-      throw new Error('Native continuation context changed');
+    let proven = this.continuationOwner(live).owns(context);
+    if (!proven && origin) {
+      if (isValidatedNativeConversationCapture(origin)) proven = validatedNativeCaptureContinuation(origin, context);
+      else { try { proven = isDeepStrictEqual(readNativeConversationTurnPermit(origin).continuation, context); } catch { /* A copied/foreign permit cannot provide the source. */ } }
+    }
+    // Legacy bare contexts retain their original wire-content verification.
+    // V2 needs actual native issuance or validated saved source/turn ownership;
+    // a public version flag and matching transcript alone cannot mint it.
+    if (!live.runtime || (context.version === 2 ? !proven : !proven && createHash('sha256').update(canonicalNativeConversationContinuation(context.sessionId, context.messages, context.selectedDiff)).digest('hex') !== context.revision)) {
+      throw new Error('Native continuation context changed or its original source is unavailable');
     }
     const current = this.history(live);
     if (current.length < context.messages.length || context.messages.some((message, index) =>
       message.role !== current[index]?.role || message.content !== current[index]?.content)) throw new Error('Native continuation prefix changed');
+  }
+
+  /** Actual selected-diff derivation keeps the original native transcript
+   * owner; arbitrary data/copies cannot become this live session's snapshot. */
+  withNativeContinuationDiff(value: NativeConversationContinuation, selectedDiff: NativeSelectedDiffContext): NativeConversationContinuation {
+    const context = captureNativeConversationContinuation(value), live = this.requireLive(context.sessionId);
+    this.assertNativeContinuation(context);
+    return this.continuationOwner(live).withSelectedDiff(context, selectedDiff);
   }
 
   /** Host FIFO waits for actual runtime ownership, never ordinary queue acceptance. */

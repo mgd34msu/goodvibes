@@ -7,12 +7,13 @@ import type { AutonomousContinuation } from '../../gate/autonomous-decision.js';
 import { nativeConversationDecisionBinding, NATIVE_CONVERSATION_MAX_PROPOSALS, type NativeConversationCapture, type NativeConversationDecision } from './native-intake-types.js';
 import { NATIVE_INTAKE_DECISION_SITE } from './native-intake-decisions.js';
 
+/** Old saved decision-log site/catalog protocol only; fresh v2 labels use no digest. */
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function nativeIntakeContinuationCatalog(record: NativeConversationCapture) {
-  const repair: AutonomousContinuation = { ref: { kind: 'revise-action', id: hash({ sourceId: record.sourceId, operation: 'propose-requirements' }), revision: hash({ generation: record.generation, spent: record.proposalsSpent }) },
+  const repair: AutonomousContinuation = { ref: { kind: 'revise-action', id: record.version === 2 ? record.sourceId + ':repair' : hash({ sourceId: record.sourceId, operation: 'propose-requirements' }), revision: record.version === 2 ? `g${record.generation.toString(36)}:p${record.proposalsSpent.toString(36)}` : hash({ generation: record.generation, spent: record.proposalsSpent }) },
     description: 'Repair the proposed original requirement ranges within the remaining bounded proposal budget; never change the source.',
     input: { proposalsSpent: record.proposalsSpent, limit: NATIVE_CONVERSATION_MAX_PROPOSALS } };
-  const resolve: AutonomousContinuation = { ref: { kind: 'gather-evidence', id: hash({ sourceId: record.sourceId, operation: 'resolve-original-source' }), revision: record.sourceRevision },
+  const resolve: AutonomousContinuation = { ref: { kind: 'gather-evidence', id: record.version === 2 ? record.sourceId + ':resolve' : hash({ sourceId: record.sourceId, operation: 'resolve-original-source' }), revision: record.sourceRevision },
     description: 'Hold this input because answering it requires specific source material that is missing or unsupported. This stops the conversation; use only when the missing material is necessary to handle the message.',
     input: { unsupportedSources: record.unsupportedSources.map(source => ({ kind: source.kind, label: source.label })), supportedSource: 'Complete immutable text in the input part only' } };
   const continuations = [resolve, ...(record.route === 'contract' && record.unsupportedSources.length === 0 && record.proposalsSpent < NATIVE_CONVERSATION_MAX_PROPOSALS ? [repair] : [])];
@@ -23,7 +24,7 @@ export function nativeIntakeFinalBinding(record: NativeConversationCapture) {
 }
 /** Deterministic attribution permits bounded lookup without scanning unrelated source histories. */
 export function nativeIntakeDecisionSite(record: NativeConversationCapture): string {
-  return `${NATIVE_INTAKE_DECISION_SITE}:${hash(nativeIntakeFinalBinding(record))}`;
+  return record.version === 2 ? `${NATIVE_INTAKE_DECISION_SITE}:v2:${record.sourceId}:${nativeIntakeFinalBinding(record).actionRevision}` : `${NATIVE_INTAKE_DECISION_SITE}:${hash(nativeIntakeFinalBinding(record))}`;
 }
 export type NativeIntakeDecisionRecovery = { readonly kind: 'none' } | { readonly kind: 'partial' } | { readonly kind: 'recorded'; readonly entry: NativeConversationDecision };
 export function recoverNativeIntakeDecision(record: NativeConversationCapture, log: Pick<DecisionLog, 'get' | 'query'>): NativeIntakeDecisionRecovery {

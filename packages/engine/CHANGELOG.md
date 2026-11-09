@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- Replace repeated native conversational-intake identity and transcript hashing
+  with opaque labels and exact original-source comparisons. Saved source and
+  requirement-range commitments still bind replay; existing saved identities
+  remain readable. New capture and contract-context writes establish their
+  installed-reader floor before publication, and unsupported future captures
+  are preserved and refused.
+
 - Inbox scoring and custom label interpretation follow the authorized configured
   decision model and its fallbacks. Saved receipts identify the requested model,
   answering target and resolved model; unavailable results invent no model.

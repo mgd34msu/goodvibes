@@ -25,6 +25,8 @@ import { installHostedSessionReadings } from './_helpers/hosted-session-readings
 import { currentExecutionModeOwner } from '../sdk/src/platform/gate/execution-context.ts';
 import { nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema } from '../sdk/src/platform/hosted-sessions/native-turn-wire.ts';
 import { SESSION_GATE_PRESET_NAMES } from '../sdk/src/platform/gate/presets.ts';
+import { createNativeConversationCapture, parseNativeConversationCapture } from '../sdk/src/platform/workflow/work-ledger/native-intake-types.ts';
+import { captureNativeConversationContinuation } from '../sdk/src/platform/workflow/work-ledger/native-continuation-context.ts';
 
 const exactText = '  Answer café e\u0301 🧭\r\n\tPreserve this source.  ';
 const cleanups: (() => Promise<void>)[] = [];
@@ -117,7 +119,8 @@ async function fixture(options: {
     manager: {
       get: (sessionId: string) => manager.get(sessionId),
       captureNativeContinuation: (sessionId: string) => manager.captureNativeContinuation(sessionId),
-      assertNativeContinuation: (context: Parameters<HostedSessionManager['assertNativeContinuation']>[0]) => manager.assertNativeContinuation(context),
+      assertNativeContinuation: (...args: Parameters<HostedSessionManager['assertNativeContinuation']>) => manager.assertNativeContinuation(...args),
+      withNativeContinuationDiff: (...args: Parameters<HostedSessionManager['withNativeContinuationDiff']>) => manager.withNativeContinuationDiff(...args),
       waitForNativeAvailability: (sessionId: string, signal: AbortSignal) => manager.waitForNativeAvailability(sessionId, signal),
       create: async (input: Parameters<HostedSessionManager['create']>[0], ownership?: Parameters<HostedSessionManager['create']>[1]) => { counts.creates++; await options.beforeCreate?.(); return manager.create(input, ownership); },
       deliverNative: async (sessionId: string, brokerInputId: string, permit: NativeConversationTurnPermit) => {
@@ -873,12 +876,30 @@ test('visible cancelled broker memory cannot certify cancellation while strict t
 
 
 describe('native-owned session continuations', () => {
+  test('actual manager accepts saved-source continuity and exact live prefix without treating an opaque public revision as a permit', async () => {
+    const f = await fixture(), initial = snapshot(await f.host.start(f.request, f.authority, f.access));
+    await f.settled();
+    const context = await f.host.continuation.capture(initial.sessionId!, 'owned-principal');
+    expect(context.version).toBe(2); expect(context.revision).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+    const copied = captureNativeConversationContinuation(structuredClone(context));
+    expect(() => f.manager.assertNativeContinuation(copied)).toThrow('original source');
+    const capture = createNativeConversationCapture({ projectId: 'project', principalId: 'owned-principal', inputId: 'followup', requestId: 'followup-request',
+      text: 'Explain the prior answer.', continuation: copied, unsupportedSources: [], sessionId: 'native-session',
+      owner: { authorityId: 'owned-principal', authorityRevision: 'owned-token', authorityScopes: [...NATIVE_HOSTED_TURN_SCOPES], scopeId: 'scope', scopeRevision: 'scope-1', projectRoot: f.workspace },
+      generation: 1, state: 'captured', stage: null, route: null, reason: null, proposalsSpent: 0, proposal: null, decisions: [], association: null });
+    const restored = parseNativeConversationCapture(structuredClone(capture));
+    expect(() => f.manager.assertNativeContinuation(copied, restored)).not.toThrow();
+    expect(() => f.manager.assertNativeContinuation(copied, structuredClone(restored))).toThrow('original source');
+    const rewritten = captureNativeConversationContinuation({ ...copied, messages: [{ role: 'assistant', content: 'Rewritten prefix.' }] });
+    expect(() => f.manager.assertNativeContinuation(rewritten, restored)).toThrow();
+    expect(() => f.manager.assertNativeContinuation({ ...context, revision: 'a'.repeat(36) }, restored)).toThrow();
+  });
   async function continuation(f: Awaited<ReturnType<typeof fixture>>, sessionId: string, name: string) {
     const context = await f.host.continuation.capture(sessionId, 'owned-principal');
     const next: NativeConversationTurnSource = { ...f.source, requestId: `request-${name}`,
       text: `  ${name} café e\u0301 🧭\nKeep exact whitespace.  `,
       sourceRef: { ...f.source.sourceRef, inputId: `input-${name}`, sourceId: `source-${name}`, sourceRevision: `revision-${name}`,
-        continuation: { sessionId, revision: context.revision } }, continuation: context };
+        continuation: { ...(context.version === 2 ? { version: 2 as const } : {}), sessionId, revision: context.revision } }, continuation: context };
     f.addSource(next);
     return { source: next, context, request: { projectId: next.projectId, inputId: next.sourceRef.inputId, sourceRevision: next.sourceRef.sourceRevision } };
   }

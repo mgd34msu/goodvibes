@@ -78,6 +78,19 @@ test('standalone admission preserves its recorded original-source judgment envel
   }
 });
 
+test('two actual intake hosts racing first capture adopt the one persisted opaque source without minting a replay identity', async () => {
+  const f = await fixture(), other = createNativeConversationIntakeHost(f.deps);
+  cleanups.push(() => other.close());
+  const [first, second] = await Promise.all([f.capture(), other.capture(f.original, f.authority)]);
+  expect(first).toEqual(second); expect(first.sourceRef.sourceId).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+  expect(await other.capture(f.original, f.authority)).toEqual(first);
+  expect(f.fake.requests).toEqual([]); expect(f.proposals()).toBe(0);
+  const result = await other.admit(f.target(first), f.authority);
+  expect(result.kind).toBe('work');
+  expect(await f.host.resume(f.target(first), f.authority)).toEqual(result);
+  expect((await (await f.store.openWorkLedgerStorage('project')).read()).works).toHaveLength(1);
+});
+
 test('Classic authenticated intake survives duplicate admission and restart without a model or fabricated act', async () => {
   await withDecisionModelPolicy(() => 'Classic - Off', async () => {
     const f = await fixture();

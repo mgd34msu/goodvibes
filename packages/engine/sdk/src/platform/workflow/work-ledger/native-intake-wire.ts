@@ -57,7 +57,7 @@ export const nativeConversationIntakeResultSchema = union([
     'Classic admission must describe an ordinary conversation or its cancellation')
   .refine(value => {
     const continuation = value.kind === 'turn' ? value.continuation : value.kind === 'work' ? value.receipt.source.continuation : value.sourceRef.continuation;
-    return JSON.stringify(continuation ? { sessionId: continuation.sessionId, revision: continuation.revision, ...(continuation.selectedDiff ? { selectedDiff: 'unifiedDiff' in continuation.selectedDiff ? nativeSelectedDiffSelector(nativeSelectedDiffContextSchema.parse(continuation.selectedDiff)) : continuation.selectedDiff } : {}) } : null) === JSON.stringify(value.sourceRef.continuation ?? null);
+    return JSON.stringify(continuation ? { ...(continuation.version === 2 ? { version: 2 as const } : {}), sessionId: continuation.sessionId, revision: continuation.revision, ...(continuation.selectedDiff ? { selectedDiff: 'unifiedDiff' in continuation.selectedDiff ? nativeSelectedDiffSelector(nativeSelectedDiffContextSchema.parse(continuation.selectedDiff)) : continuation.selectedDiff } : {}) } : null) === JSON.stringify(value.sourceRef.continuation ?? null);
   }, 'Continuation source binding mismatch')
   .refine(value => bounded(value, NATIVE_CONVERSATION_INTAKE_MAX_RESPONSE_BYTES), 'Intake result exceeds byte limit');
 export const nativeConversationIntakeLookupResultSchema = union([

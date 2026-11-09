@@ -16,7 +16,7 @@ import type { NativeRequirementProposer } from './native-intake-proposer.js';
 import { nativeIntakeContinuationCatalog, nativeIntakeDecisionSite, recoverNativeIntakeDecision } from './native-intake-recovery.js';
 export { createNativeRequirementProposer } from './native-intake-proposer.js';
 export type { NativeRequirementProposer, NativeRequirementProposalRequest } from './native-intake-proposer.js';
-import { NATIVE_CONVERSATION_MAX_PROPOSALS, NATIVE_CONVERSATION_MAX_DECISIONS, nativeConversationSourceId, nativeConversationSourceRevision,
+import { NATIVE_CONVERSATION_MAX_PROPOSALS, NATIVE_CONVERSATION_MAX_DECISIONS, createNativeConversationCapture,
   nativeConversationProposalRevision, parseNativeConversationCapture, type NativeConversationCapture, type NativeConversationKey,
   nativeConversationDecisionBinding, type NativeConversationStorage } from './native-intake-types.js';
 import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeLookupRequestSchema,
@@ -32,7 +32,7 @@ export class NativeConversationIntakeError extends Error {
 export interface NativeConversationContinuationOwner {
   capture(sessionId: string, principalId: string, selectedDiff?: NativeSelectedDiffSelector): Promise<NativeConversationContinuation>;
   /** Synchronous publication fence: same owner/workspace and exact captured transcript prefix. */
-  assertCurrent(context: NativeConversationContinuation, principalId: string): void;
+  assertCurrent(context: NativeConversationContinuation, principalId: string, source?: NativeConversationCapture): void;
 }
 export interface NativeConversationIntakeOptions {
   readonly signal?: AbortSignal;
@@ -95,10 +95,11 @@ export function createNativeConversationIntakeHost(deps: {
   function assertContinuation(record: NativeConversationCapture): void {
     if (!record.continuation) return;
     if (!deps.continuation) throw new NativeConversationIntakeError('unavailable');
-    deps.continuation.assertCurrent(record.continuation, record.principalId);
+    deps.continuation.assertCurrent(record.continuation, record.principalId, record);
   }
-  function load(key: NativeConversationKey, authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions, revision?: string): NativeConversationCapture {
-    const record = deps.storage.current(key);
+  function load(key: NativeConversationKey, authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions, revision?: string, original?: NativeConversationCapture): NativeConversationCapture {
+    const value = deps.storage.current(original ?? key);
+    const record = value === null ? null : parseNativeConversationCapture(value, original);
     if (!record) throw new NativeConversationIntakeError('not-found');
     inspect(record, authority, options);
     if (revision !== undefined && revision !== record.sourceRevision) throw new NativeConversationIntakeError('stale');
@@ -142,7 +143,7 @@ export function createNativeConversationIntakeHost(deps: {
     const common = { projectId: record.projectId, requestId: record.requestId,
       sourceRef: { version: 1 as const, inputId: record.inputId, sourceId: record.sourceId, sourceRevision: record.sourceRevision, sessionId: record.sessionId,
         ...(record.classic ? { classic: record.classic } : {}),
-        ...(record.continuation ? { continuation: { sessionId: record.continuation.sessionId, revision: record.continuation.revision, ...(record.continuation.selectedDiff ? { selectedDiff: nativeSelectedDiffSelector(record.continuation.selectedDiff) } : {}) } } : {}) } };
+        ...(record.continuation ? { continuation: { ...(record.continuation.version === 2 ? { version: 2 as const } : {}), sessionId: record.continuation.sessionId, revision: record.continuation.revision, ...(record.continuation.selectedDiff ? { selectedDiff: nativeSelectedDiffSelector(record.continuation.selectedDiff) } : {}) } } : {}) } };
     switch (record.state) {
       case 'captured': return { kind: 'captured', ...common };
       case 'processing': return { kind: 'processing', ...common, stage: record.stage ?? 'routing', recovery: deliveries.get(keyId(record))?.generation === record.generation ? 'pending' : 'required' };
@@ -163,13 +164,13 @@ export function createNativeConversationIntakeHost(deps: {
     }
   }
   async function run(key: NativeConversationKey, revision: string, authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions,
-    controller: AbortController, resuming: boolean): Promise<NativeConversationIntakeResult> {
-    let record = load(key, authority, options, revision);
+    controller: AbortController, resuming: boolean, original: NativeConversationCapture): Promise<NativeConversationIntakeResult> {
+    let record = load(key, authority, options, revision, original);
     if (terminal(record) || record.state === 'blocked' || record.state === 'refused' || (!resuming && record.state !== 'captured')) return projection(record);
     assertContinuation(record);
     const signal = AbortSignal.any([lifetime.signal, controller.signal, ...(options.signal ? [options.signal] : [])]);
     signal.throwIfAborted();
-    record = await withOwners(record, authority, options, assertOwners => deps.storage.transaction(key, original => {
+    record = await withOwners(record, authority, options, assertOwners => deps.storage.transaction(record, original => {
       assertOwners(); signal.throwIfAborted(); assertContinuation(record);
       if (!original || original.generation !== record.generation || terminal(original)) throw new NativeConversationIntakeError('conflict');
       let current = original;
@@ -191,26 +192,26 @@ export function createNativeConversationIntakeHost(deps: {
           else if (decision.outcome === 'revise' && catalog.continuations.includes(catalog.repair) && isDeepStrictEqual(decision.next, catalog.repair.ref)) change = { stage: 'extracting', proposal: null };
           else if (decision.outcome === 'act') change = { stage: 'checking' }; // Resume freshly evaluates; never replay act.
           else throw new NativeConversationIntakeError('recovery-required');
-          current = parseNativeConversationCapture({ ...current, ...change, decisions });
+          current = parseNativeConversationCapture({ ...current, ...change, decisions }, record);
         }
       }
       if (current.state === 'blocked' || current.state === 'refused') return { next: isDeepStrictEqual(current, original) ? null : current, value: current };
-      const next = parseNativeConversationCapture({ ...current, generation: current.generation + 1, state: 'processing', stage: 'routing', reason: null });
+      const next = parseNativeConversationCapture({ ...current, generation: current.generation + 1, state: 'processing', stage: 'routing', reason: null }, record);
       return { next, value: next };
     }));
     if (record.state !== 'processing') return projection(record);
     const generation = record.generation; const delivery = deliveries.get(keyId(key)); if (delivery) delivery.generation = generation;
     const assertCurrent = () => {
       decisionModelPolicyState();
-      signal.throwIfAborted(); const current = load(key, authority, options, revision); assertContinuation(current);
+      signal.throwIfAborted(); const current = load(key, authority, options, revision, record); assertContinuation(current);
       if (current.generation !== generation || current.state !== 'processing') throw new NativeConversationIntakeError('stale');
     };
     const watch = setInterval(() => { try { assertCurrent(); } catch (error) { controller.abort(error); } }, 50); watch.unref?.();
     async function update(change: Partial<NativeConversationCapture>) {
-      record = await withOwners(record, authority, options, assertOwners => deps.storage.transaction(key, current => {
+      record = await withOwners(record, authority, options, assertOwners => deps.storage.transaction(record, current => {
         assertOwners(); assertCurrent();
         if (!current || current.generation !== generation) throw new NativeConversationIntakeError('stale');
-        const next = parseNativeConversationCapture({ ...current, ...change }); return { next, value: next };
+        const next = parseNativeConversationCapture({ ...current, ...change }, record); return { next, value: next };
       }));
     }
     async function classicConversation(): Promise<NativeConversationIntakeResult> {
@@ -278,17 +279,17 @@ export function createNativeConversationIntakeHost(deps: {
         }
         if (record.unsupportedSources.length) throw new NativeConversationIntakeError('unavailable');
         if (routeEvidence.route !== 'contract') {
-          await withOwners(record, authority, options, assertOwners => deps.storage.transaction(key, current => {
+          await withOwners(record, authority, options, assertOwners => deps.storage.transaction(record, current => {
             assertOwners(); assertCurrent(); result.autonomous.recordClaim(); assertRecorded(result.autonomous);
             if (!current || current.generation !== generation) throw new NativeConversationIntakeError('stale');
-            const next = parseNativeConversationCapture({ ...current, state: 'turn', stage: null, decisions }); record = next; return { next, value: undefined };
+            const next = parseNativeConversationCapture({ ...current, state: 'turn', stage: null, decisions }, record); record = next; return { next, value: undefined };
           }));
           return projection(record);
         }
         if (!requirements?.criteria.length || !record.proposal) throw new NativeConversationIntakeError('unavailable');
         await update({ stage: 'deciding', decisions });
         await publish(record, result.autonomous, requirements.criteria, authority, options, signal, assertCurrent);
-        return projection(load(key, authority, options, revision));
+        return projection(load(key, authority, options, revision, record));
       }
     } catch (error) {
       signal.throwIfAborted(); assertCurrent();
@@ -310,7 +311,7 @@ export function createNativeConversationIntakeHost(deps: {
     }, (current, event) => {
       decision.recordClaim(); assertCurrent(); assertRecorded(decision);
       return parseNativeConversationCapture({ ...current, state: 'associated', stage: null,
-        association: { workId: event.workId, attemptId: event.attemptId, ledgerRevision: event.sequence } });
+        association: { workId: event.workId, attemptId: event.attemptId, ledgerRevision: event.sequence } }, record);
     });
     const ledger = createWorkLedger({ projectId: deps.projectId, storage, clock: { now: Date.now, newId: kind => `${kind}-${randomUUID()}` } });
     const actor = ledger.authority.issueActor({ actorId: record.principalId, projectId: deps.projectId, role: 'coordinator' });
@@ -331,11 +332,11 @@ export function createNativeConversationIntakeHost(deps: {
     const parsed = nativeConversationIntakeTransitionRequestSchema.safeParse(input);
     if (!parsed.success) return Promise.reject(new NativeConversationIntakeError('invalid'));
     const key = keyOf(parsed.data.inputId, authority); const existing = deliveries.get(keyId(key));
-    load(key, authority, options, parsed.data.sourceRevision);
-    if (existing) return existing.promise.then(value => { owner(authority, options); return value; });
+    const original = load(key, authority, options, parsed.data.sourceRevision);
+    if (existing) return existing.promise.then(value => { load(key, authority, options, parsed.data.sourceRevision, original); return value; });
     const controller = new AbortController();
-    const promise = track(() => run(key, parsed.data.sourceRevision, authority, options, controller, resuming)).then(async result => {
-      inspect(load(key, authority, options), authority, options); return nativeConversationIntakeResultSchema.parse(result);
+    const promise = track(() => run(key, parsed.data.sourceRevision, authority, options, controller, resuming, original)).then(async result => {
+      load(key, authority, options, parsed.data.sourceRevision, original); return nativeConversationIntakeResultSchema.parse(result);
     });
     const delivery = { controller, promise }; deliveries.set(keyId(key), delivery);
     void promise.then(() => { if (deliveries.get(keyId(key)) === delivery) deliveries.delete(keyId(key)); }, () => { if (deliveries.get(keyId(key)) === delivery) deliveries.delete(keyId(key)); });
@@ -355,7 +356,7 @@ export function createNativeConversationIntakeHost(deps: {
           && isDeepStrictEqual(existing.unsupportedSources, original.unsupportedSources) && existing.continuation?.sessionId === selection?.sessionId
           && isDeepStrictEqual(existing.continuation?.selectedDiff ? nativeSelectedDiffSelector(existing.continuation.selectedDiff) : undefined, selection?.selectedDiff);
         // Replayed capture retains its original checkpoint even when later turns appended.
-        const prior = deps.storage.current(key);
+        const priorValue = deps.storage.current(key), prior = priorValue === null ? null : parseNativeConversationCapture(priorValue);
         if (prior) { inspect(prior, authority, options); if (!matches(prior)) throw new NativeConversationIntakeError('request-conflict'); return projection(prior); }
         const captureKey = keyId(key);
         const pending = captures.get(captureKey);
@@ -371,16 +372,20 @@ export function createNativeConversationIntakeHost(deps: {
           if (continuation && (continuation.sessionId !== selection?.sessionId || !isDeepStrictEqual(continuation.selectedDiff ? nativeSelectedDiffSelector(continuation.selectedDiff) : undefined, selection?.selectedDiff))) throw new NativeConversationIntakeError('stale');
           options.signal?.throwIfAborted();
           const source = { ...original, ...(continuation ? { continuation } : {}) };
-          const record = parseNativeConversationCapture({ version: 1, projectId: deps.projectId, principalId: current.identity.principalId,
-            ...source, sourceId: nativeConversationSourceId(deps.projectId, current.identity.principalId, source.inputId), sourceRevision: nativeConversationSourceRevision(source),
+          const record = createNativeConversationCapture({ projectId: deps.projectId, principalId: current.identity.principalId,
+            ...source,
             sessionId: deps.sessionId, owner: current.facts, generation: 1, state: 'captured', stage: null, route: null, reason: null,
             proposalsSpent: 0, proposal: null, decisions: [], association: null });
-          const stored = await withOwners(record, authority, options, assertCurrent => deps.storage.transaction(record, existing => {
+          // Before initial publication another host may have captured this same
+          // input. Adopt its already-persisted identity only after exact replay
+          // matching; the unpublished candidate is not its original-source fence.
+          const stored = await withOwners(record, authority, options, assertCurrent => deps.storage.transaction(key, existing => {
             assertCurrent(); options.signal?.throwIfAborted();
             if (existing) {
-              inspect(existing, authority, options);
-              if (!matches(existing)) throw new NativeConversationIntakeError('request-conflict');
-              return { next: null, value: existing };
+              const capturedExisting = parseNativeConversationCapture(existing);
+              inspect(capturedExisting, authority, options);
+              if (!matches(capturedExisting)) throw new NativeConversationIntakeError('request-conflict');
+              return { next: null, value: capturedExisting };
             }
             assertContinuation(record); return { next: record, value: record };
           }));
@@ -396,7 +401,8 @@ export function createNativeConversationIntakeHost(deps: {
       const parsed = nativeConversationIntakeLookupRequestSchema.safeParse(input);
       if (!parsed.success) return Promise.reject(new NativeConversationIntakeError('invalid'));
       return track(async () => { options.signal?.throwIfAborted(); owner(authority, options);
-        const record = deps.storage.current(keyOf(parsed.data.inputId, authority)); if (!record) return { kind: 'not-found' };
+        const value = deps.storage.current(keyOf(parsed.data.inputId, authority)); if (value === null) return { kind: 'not-found' };
+        const record = parseNativeConversationCapture(value);
         inspect(record, authority, options); const result = await projection(record); inspect(record, authority, options); return result;
       });
     },
@@ -409,10 +415,10 @@ export function createNativeConversationIntakeHost(deps: {
         const key = keyOf(parsed.data.inputId, authority); const record = load(key, authority, options, parsed.data.sourceRevision);
         const delivery = deliveries.get(keyId(key)); let validated = false;
         try {
-          const result = await withOwners(record, authority, options, assertCurrent => deps.storage.transaction(key, current => {
+          const result = await withOwners(record, authority, options, assertCurrent => deps.storage.transaction(record, current => {
             assertCurrent(); if (!current) throw new NativeConversationIntakeError('not-found'); inspect(current, authority, options); validated = true;
             if (terminal(current)) return { next: null, value: current };
-            const next = parseNativeConversationCapture({ ...current, generation: current.generation + 1, state: 'cancelled', stage: null });
+            const next = parseNativeConversationCapture({ ...current, generation: current.generation + 1, state: 'cancelled', stage: null }, record);
             return { next, value: next };
           }));
           if (result.state === 'cancelled') { delivery?.controller.abort(); if (delivery) await Promise.allSettled([delivery.promise]); }

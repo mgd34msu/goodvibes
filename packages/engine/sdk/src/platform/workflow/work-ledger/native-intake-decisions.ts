@@ -111,6 +111,8 @@ function readSession(input: NativeIntakeReadInput, records: RecordedRead[] = [],
     // Re-scanning its envelope would reinterpret host UUIDs and hashes as user payment material.
     const checked = request.context?.site === finalSite ? request.state : snapshotJudgmentInput(request.state);
     const state = { input: checked, originalSource: { text, sourceRevision, sourceIssues, ...(continuation ? { conversationContext, ...(selectedDiffContext ? { selectedDiffContext } : {}) } : {}) }, binding: metadata.binding } as unknown as EntryType;
+    // This compares the exact actual wire request to DecisionLog.stateHash;
+    // a borrowed port cannot merely supply somebody else's recorded id.
     const expected = { stateHash: hashState(state), context: canonicalJson(request.context as unknown as EntryType), questions: canonicalJson(request.questions as unknown as EntryType) };
     beforeAttempt();
     const result = await basePort.ask({ ...request, state, beforeAttempt, ...(signal ? { signal } : {}),
@@ -229,7 +231,7 @@ export async function decideNativeIntake(request: NativeIntakeDecisionInput): Pr
   }
   owned.assertCurrent();
   const finalSite = input.decisionSite ?? NATIVE_INTAKE_DECISION_SITE;
-  if (finalSite !== NATIVE_INTAKE_DECISION_SITE && !/^work-ledger\.native-intake\.admission:[a-f0-9]{64}$/.test(finalSite)) throw new JudgmentError('invalid-request', 'Invalid native intake decision attribution');
+  if (finalSite !== NATIVE_INTAKE_DECISION_SITE && !/^work-ledger\.native-intake\.admission:(?:[a-f0-9]{64}|v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}:(?:publish-work|ordinary-turn):g[a-z0-9]{1,11}:p[0-3]:(?:none|[a-f0-9]{64}))$/.test(finalSite)) throw new JudgmentError('invalid-request', 'Invalid native intake decision attribution');
   const session = readSession(input, [...owned.records], finalSite);
   const requirements = input.requirements === undefined ? undefined : validateNativeRequirementProposal(input.text, input.sourceRevision, input.requirements.proposal);
   const hostState = snapshotJudgmentInput(input.state ?? null) as EntryType;
@@ -275,7 +277,9 @@ export async function decideNativeIntake(request: NativeIntakeDecisionInput): Pr
       + 'Act only on the offered operation. Never invent requirements, replace omitted source, fall back from an uncertain route, ask a human for approval, or treat provider availability as an external condition. Revise and defer select only offered host-owned references; a resumed or revised operation requires a fresh decision.',
     actionDescription: route === 'turn' ? 'Send this complete message to the conversation model for a reply. The recorded route is settled and the message needs no missing source material.' : 'Admit this exact captured input and its ordered source-slice requirements as native work.',
     binding: session.binding, state: { source: sourceState, route: routeState, fidelity: fidelityState, coverage: coverageEvidence, problems, host: hostState } as unknown as EntryType,
-    evidence: [{ id: 'native-intake-source', revision: input.sourceRevision }, { id: 'native-intake-requirements', revision: hashState(sourceState) }, ...(input.evidence ?? [])],
+    // The final action already names the exact source/proposal commitment.
+    // Hashing its expanded semantic presentation adds no independent binding.
+    evidence: [{ id: 'native-intake-source', revision: input.sourceRevision }, { id: 'native-intake-requirements', revision: session.binding.actionRevision }, ...(input.evidence ?? [])],
     supportingDecisionIds: supportIds, continuations: input.continuations, conditions: input.conditions,
     allowAct: input.allowAct && route !== undefined && requirementsSettled, assertCurrent: session.active,
     ...(input.signal ? { signal: input.signal } : {}),

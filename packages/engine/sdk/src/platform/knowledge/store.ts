@@ -200,6 +200,7 @@ export class KnowledgeStore {
   private closed = false;
   private closePromise: Promise<void> | undefined;
   private readonly nativeConversationStorage = new Map<string, NativeConversationStorage>();
+  private readonly declareNativeConversationFormat: (() => void) | undefined;
   private readonly ledgerStorage = new Map<string, KnowledgeWorkLedgerStorage>();
   private initPromise: Promise<void> | null = null;
   private readonly sources = new Map<string, KnowledgeSourceRecord>();
@@ -226,6 +227,7 @@ export class KnowledgeStore {
     // Configuration supplied by a caller cannot turn coordination off.
     const nativeDataWriter = config.nativeDataWriter ?? config.configManager?.getNativeDataWriter?.();
     const declareNativeData = nativeDataWriter?.declare.bind(nativeDataWriter);
+    this.declareNativeConversationFormat = declareNativeData ? () => declareNativeData('native-conversation-captures-v2') : undefined;
     this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v12') });
     nativePublicationApply(nativePublicationAdd, nativeNodePublicationOwners, [this]);
     void this.init().catch((error: unknown) => {
@@ -280,7 +282,7 @@ export class KnowledgeStore {
     if (this.closed) throw new Error('KnowledgeStore is closed');
     let storage = this.nativeConversationStorage.get(projectId);
     if (!storage) {
-      storage = createNativeConversationStorage(this.sqlite, projectId, () => this.refreshSnapshot());
+      storage = createNativeConversationStorage(this.sqlite, projectId, () => this.refreshSnapshot(), this.declareNativeConversationFormat);
       this.nativeConversationStorage.set(projectId, storage);
     }
     return storage;

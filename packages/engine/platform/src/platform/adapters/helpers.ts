@@ -40,6 +40,8 @@ export function verifySha256HmacSignature(
   prefix = 'sha256=',
 ): boolean {
   if (!secret || !signatureHeader.startsWith(prefix)) return false;
+  const digest = signatureHeader.slice(prefix.length);
+  if (digest.length !== 64 || !/^[0-9a-f]+$/.test(digest)) return false;
   const expected = `${prefix}${createHmac('sha256', secret).update(rawBody).digest('hex')}`;
   return constantTimeEquals(expected, signatureHeader);
 }

@@ -89,7 +89,11 @@ export function gateOutcome(result: QualityGateResult): GateResultOutcome {
 function unknownResult(result: QualityGateResult, reason: string): QualityGateResult {
   const existing = invalidatedGates.get(result);
   if (existing) return existing;
-  const revised: QualityGateResult = { ...result, outcome: 'unverified', passed: false, reason };
+  const revised: QualityGateResult = { ...result, outcome: 'unverified', passed: false, reason,
+    // Earlier receipts omitted this field. Preserve the same native defaults
+    // rather than turning their missing obligation into an optional check.
+    ...(result.required === undefined && (result.gate === 'test' || result.completion?.kind === 'assertions') ? { required: true } : {}),
+  };
   const current = liveGateInputs.get(result);
   if (current) liveGateInputs.set(revised, current);
   invalidatedGates.set(result, revised);
@@ -111,9 +115,9 @@ export function refreshGateResults(results: readonly QualityGateResult[] | undef
   return (results ?? []).map(result => {
     const invalidated = invalidatedGates.get(result);
     if (invalidated) return invalidated;
-    if (!result.provenance || gateOutcome(result) !== 'passed') return result;
+    if (gateOutcome(result) !== 'passed') return result;
     const capture = liveGateInputs.get(result);
-    if (!capture) return unknownResult(result, 'historical-check-requires-current-execution');
+    if (!result.provenance || !capture) return unknownResult(result, 'historical-check-requires-current-execution');
     try {
       if (!captures.has(capture)) captures.set(capture, capture());
       const current = captures.get(capture);

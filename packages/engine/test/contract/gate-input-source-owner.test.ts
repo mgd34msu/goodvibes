@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -76,4 +77,37 @@ test('excluded runtime outputs do not retire a running check and symlinked sourc
   fs.renameSync(join(directory, 'nested'), join(directory, '.goodvibes', 'original'));
   fs.symlinkSync(join(directory, '.goodvibes', 'original'), join(directory, 'nested'));
   expect(() => captureGateInput(directory, original)).toThrow();
+});
+
+
+// Regression source intentionally unrun during the coding-first pass.
+test('tracked nested-directory deletions remain observable without restoring removed files', () => {
+  execFileSync('git', ['init', directory], { stdio: 'pipe' });
+  fs.mkdirSync(join(directory, 'removed', 'nested'), { recursive: true });
+  fs.writeFileSync(join(directory, 'removed', 'nested', 'source.ts'), 'Tracked source');
+  execFileSync('git', ['-C', directory, 'add', 'removed/nested/source.ts'], { stdio: 'pipe' });
+  const original = captureGateInput(directory);
+  fs.rmSync(join(directory, 'removed'), { recursive: true });
+  const deleted = captureGateInput(directory, original);
+  expect(deleted.source).not.toBe(original.source);
+  expect(captureGateInput(directory, deleted).source).toBe(deleted.source);
+  expect(fs.existsSync(join(directory, 'removed'))).toBe(false);
+  fs.mkdirSync(join(directory, 'removed', 'nested'), { recursive: true });
+  fs.writeFileSync(join(directory, 'removed', 'nested', 'source.ts'), 'Tracked source');
+  expect(captureGateInput(directory, deleted).source).not.toBe(deleted.source);
+});
+
+
+test('a tracked directory replaced by a regular file is a stable changed tree with missing descendants', () => {
+  execFileSync('git', ['init', directory], { stdio: 'pipe' });
+  fs.mkdirSync(join(directory, 'replaced'));
+  fs.writeFileSync(join(directory, 'replaced', 'source.ts'), 'Tracked source');
+  execFileSync('git', ['-C', directory, 'add', 'replaced/source.ts'], { stdio: 'pipe' });
+  const original = captureGateInput(directory);
+  fs.rmSync(join(directory, 'replaced'), { recursive: true }); fs.writeFileSync(join(directory, 'replaced'), 'Current regular file');
+  const current = captureGateInput(directory, original);
+  expect(current.source).not.toBe(original.source);
+  expect(captureGateInput(directory, current).source).toBe(current.source);
+  fs.writeFileSync(join(directory, 'replaced'), 'Changed regular file');
+  expect(captureGateInput(directory, current).source).not.toBe(current.source);
 });

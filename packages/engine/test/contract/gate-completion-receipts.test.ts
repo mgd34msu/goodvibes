@@ -240,3 +240,25 @@ test('a changed configured command cannot receive a receipt from the previous pl
   if (result.discarded) throw new Error('unexpected cancellation');
   expect(result.check.result).not.toBe('pass');
 });
+
+
+// Regression source intentionally unrun during the coding-first pass.
+test('pre-provenance historical test booleans retain their required obligation instead of authorizing a pass', async () => {
+  const historical = [{ gate: 'test', passed: true, output: 'Historical success', durationMs: 1 }];
+  const refreshed = refreshGateResults(historical);
+  expect(refreshed[0]).toMatchObject({ outcome: 'unverified', passed: false, required: true, reason: 'historical-check-requires-current-execution' });
+  expect(historical[0]?.passed).toBe(true);
+  const result = await judge(historical);
+  if (result.discarded) throw new Error('Unexpected cancellation');
+  expect(result.check.result).not.toBe('pass'); expect(result.check.problems).toContain('unshown');
+});
+
+test('historical assertion receipts missing required/provenance cannot downgrade the native assertion default', async () => {
+  const current = await run([{ name: 'acceptance', command: protocol(), enabled: true, verification: 'assertions' }]);
+  const historical = structuredClone(current);
+  for (const result of historical) { delete result.provenance; delete result.required; }
+  expect(refreshGateResults(historical)[0]).toMatchObject({ outcome: 'unverified', required: true, reason: 'historical-check-requires-current-execution' });
+  const result = await judge(historical);
+  if (result.discarded) throw new Error('Unexpected cancellation');
+  expect(result.check.result).not.toBe('pass');
+});

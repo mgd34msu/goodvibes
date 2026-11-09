@@ -77,15 +77,31 @@ export function captureGateInput(cwd: string, previous?: GateSourceInputIdentity
     const parts = path.split('/');
     if (parts.some(part => !part || part === '.' || part === '..') || path.includes('\\'))
       throw new Error('Gate source path is not a relative physical file');
+    let missingParent = false;
     for (let index = 1; index < parts.length; index++) {
       const parent = join(root, ...parts.slice(0, index));
-      const stat = lstatSync(parent, { bigint: true });
-      if (!stat.isDirectory()) throw new Error('Gate source parent is not a physical directory');
+      let stat: BigIntStats;
+      try { stat = lstatSync(parent, { bigint: true }); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        const retained = directories.get(parent);
+        if (retained !== undefined && retained !== 'missing') throw new Error('Gate source parent changed during capture');
+        directories.set(parent, 'missing'); missingParent = true; break;
+      }
+      if (!stat.isDirectory()) {
+        if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Gate source parent is not a physical directory');
+        // Git can retain cached descendants after their directory becomes a
+        // regular file. They are missing inputs, not permission to follow links.
+        const identity = `file:${fileIdentity(stat)}`, retained = directories.get(parent);
+        if (retained !== undefined && retained !== identity) throw new Error('Gate source parent changed during capture');
+        directories.set(parent, identity); missingParent = true; break;
+      }
       const identity = directoryIdentity(stat);
       const retained = directories.get(parent);
       if (retained !== undefined && retained !== identity) throw new Error('Gate source parent changed during capture');
       directories.set(parent, identity);
     }
+    if (missingParent) { entries.push(JSON.stringify([path, 'missing'])); continue; }
     const absolute = join(root, path);
     let before;
     try { before = lstatSync(absolute, { bigint: true }); }
@@ -112,8 +128,11 @@ export function captureGateInput(cwd: string, previous?: GateSourceInputIdentity
   }
   if (JSON.stringify(paths) !== JSON.stringify(sourcePaths(root))) throw new Error('Gate source membership changed during capture');
   for (const [directory, expected] of directories) {
-    const stat = lstatSync(directory, { bigint: true });
-    if (!stat.isDirectory() || directoryIdentity(stat) !== expected) throw new Error('Gate source directory changed during capture');
+    const stat = lstatSync(directory, { bigint: true, throwIfNoEntry: false });
+    const matches = expected === 'missing' ? stat === undefined
+      : expected.startsWith('file:') ? stat?.isFile() === true && !stat.isSymbolicLink() && `file:${fileIdentity(stat)}` === expected
+      : stat?.isDirectory() === true && directoryIdentity(stat) === expected;
+    if (!matches) throw new Error('Gate source directory changed during capture');
     entries.push(JSON.stringify([directory, expected]));
   }
   if (realpathSync(cwd) !== root) throw new Error('Gate source root changed during capture');

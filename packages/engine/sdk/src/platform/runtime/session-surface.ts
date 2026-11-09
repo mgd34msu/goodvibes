@@ -1,7 +1,9 @@
 /** SDK-owned platform module. This implementation is maintained in goodvibes-sdk. */
 
 import { join } from 'node:path';
-import { requireSurfaceRoot, resolveSurfaceDirectory, sanitizeSessionIdSegment } from './surface-root.js';
+import { requireSurfaceRoot, resolveSurfaceDirectory } from './surface-root.js';
+import type { NativeDataWriteOwner } from './native-reader-compatibility.js';
+import { createRecoveryPathResolver } from './recovery-path.js';
 import { runSessionSurfaceMigration } from './session-migration.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -14,6 +16,8 @@ import { summarizeError } from '../utils/error-display.js';
  * writer in that product threads through instead of re-deriving paths per call.
  */
 export interface SurfaceIdentity {
+  /** Admitted installation publisher; restricts downgrade before opaque recovery files. */
+  readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
   /** Single path segment identifying the product, e.g. 'tui' | 'agent'. Validated by requireSurfaceRoot: throws if omitted, empty, or not a single segment. */
   readonly surfaceRoot: string;
   /** Project root all per-project state (sessions, recovery, checkpoints) is anchored to. */
@@ -54,7 +58,9 @@ export interface SessionSurface {
   readonly stateDir: string;
   /** `<workingDirectory>/.goodvibes/<surfaceRoot>/checkpoints` */
   readonly checkpointsDir: string;
-  /** `recoveryDir/recovery-<sanitized sessionId>.jsonl`, the per-session crash-recovery snapshot path. */
+  /** Current saved path; safe IDs retain their filename. Opaque suggestions
+   * before first publication are local to this owner; the writer coordinates
+   * the final path and subsequent lookups use the actual saved header. */
   recoveryFile(sessionId: string): string;
 }
 
@@ -83,6 +89,7 @@ export function createSessionSurface(identity: SurfaceIdentity): SessionSurface 
   const sessionsDir = resolveSurfaceDirectory(workingDirectory, surfaceRoot, 'sessions');
   const recoveryDir = resolveSurfaceDirectory(workingDirectory, surfaceRoot, 'recovery');
 
+  const recoveryFile = createRecoveryPathResolver(recoveryDir, identity.nativeDataWriter);
   const surface: SessionSurface = {
     surfaceRoot,
     workingDirectory,
@@ -93,9 +100,7 @@ export function createSessionSurface(identity: SurfaceIdentity): SessionSurface 
     recoveryDir,
     stateDir: resolveSurfaceDirectory(workingDirectory, surfaceRoot, 'state'),
     checkpointsDir: resolveSurfaceDirectory(workingDirectory, surfaceRoot, 'checkpoints'),
-    recoveryFile(sessionId: string): string {
-      return join(recoveryDir, `recovery-${sanitizeSessionIdSegment(sessionId)}.jsonl`);
-    },
+    recoveryFile,
   };
 
   // One-time, idempotent, marker-guarded migration from the pre-surface

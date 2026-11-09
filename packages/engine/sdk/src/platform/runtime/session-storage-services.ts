@@ -17,6 +17,7 @@
  * unscoped fallback on first use, so a mistake here fails at boot rather than
  * six months later as missing state.
  */
+import type { NativeDataWriteOwner } from './native-reader-compatibility.js';
 import { SessionManager } from '../sessions/index.js';
 import { createSessionSurface, type SessionSurface } from './session-surface.js';
 
@@ -26,6 +27,7 @@ export interface SessionStorageServices {
 }
 
 export function createSessionStorageServices(input: {
+  readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
   /** The owning product's storage scope, the `<surfaceRoot>` path segment. */
   readonly surfaceRoot: string;
   readonly workingDirectory: string;
@@ -34,6 +36,7 @@ export function createSessionStorageServices(input: {
   // Also performs the one-time migration of pre-surface state (pointer
   // copy-forward, journal moves) into the scoped location.
   const surface = createSessionSurface({
+    nativeDataWriter: input.nativeDataWriter,
     surfaceRoot: input.surfaceRoot,
     workingDirectory: input.workingDirectory,
     homeDirectory: input.homeDirectory,

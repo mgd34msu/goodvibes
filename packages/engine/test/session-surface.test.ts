@@ -60,7 +60,7 @@ describe('createSessionSurface', () => {
   test('recoveryFile sanitizes the session id into a safe filename segment', () => {
     const surface = createSessionSurface(identity());
     const path = surface.recoveryFile('has/slash');
-    expect(path.startsWith(join(surface.recoveryDir, 'recovery-has_slash-'))).toBe(true);
+    expect(path.startsWith(join(surface.recoveryDir, 'recovery-opaque-'))).toBe(true);
     expect(path.endsWith('.jsonl')).toBe(true);
     // No separator survives into the filename, that is the whole point.
     expect(path.slice(surface.recoveryDir.length + 1).includes('/')).toBe(false);
@@ -83,8 +83,8 @@ describe('createSessionSurface', () => {
     const fromSlash = surface.recoveryFile('a/b');
     const fromUnderscore = surface.recoveryFile('a_b');
     expect(fromSlash).not.toBe(fromUnderscore);
-    // ...and each id is stable across calls (the discriminator is a digest of
-    // the raw id, not a random value).
+    // The declared owner keeps an unpublished label stable across calls.
+    // Once published, the actual saved header owns the filename binding.
     expect(surface.recoveryFile('a/b')).toBe(fromSlash);
   });
 

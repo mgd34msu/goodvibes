@@ -773,6 +773,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const workingDirectory = options.workingDir;
   const homeDirectory = options.homeDirectory;
   const surface = createSessionSurface({
+    nativeDataWriter: options.configManager.getNativeDataWriter(),
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
     workingDirectory,
     homeDirectory,

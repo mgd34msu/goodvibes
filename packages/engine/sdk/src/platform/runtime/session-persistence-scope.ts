@@ -21,7 +21,8 @@ import { SessionManager, sanitizeSessionName } from '../sessions/manager.js';
 import { logger } from '../utils/logger.js';
 import type { SessionReturnContextSummary } from './session-return-context.js';
 import type { ConversationTitleSource } from '../core/conversation.js';
-import { resolveScopedDirectory, resolveSharedDirectory, sanitizeSessionIdSegment } from './surface-root.js';
+import { resolveScopedDirectory, resolveSharedDirectory } from './surface-root.js';
+import { recoveryFilePath } from './recovery-path.js';
 import type { SessionSurface } from './session-surface.js';
 
 export type SessionSnapshot = {
@@ -36,8 +37,8 @@ export type SessionSnapshot = {
 
 /**
  * Legacy per-call scope: `workingDirectory` / `homeDirectory` / `surfaceRoot`
- * resolved independently on every call. Kept working byte-for-byte unchanged
- * (an omitted `surfaceRoot` still silently falls back to the shared, unscoped
+ * resolved independently on every call. Existing saved filenames are retained
+ * by their original headers (an omitted `surfaceRoot` still silently falls back to the shared, unscoped
  * `.goodvibes/` directory), this is the compat path. Every call through this
  * shape emits a one-time-per-process deprecation warning recommending a
  * `SessionSurface` instead. `surface` is declared here only so it can be typed
@@ -227,16 +228,6 @@ export function getRecoveryDir(homeDirectory: string, surfaceRoot?: string): str
 }
 
 /**
- * Restrict a session id to a safe single filename segment (no path traversal).
- * Delegates to the shared helper in surface-root.ts so the legacy path here
- * and `SessionSurface.recoveryFile` (session-surface.ts) always produce
- * byte-identical filenames for the same session id.
- */
-function sanitizeRecoverySessionId(sessionId: string): string {
-  return sanitizeSessionIdSegment(sessionId);
-}
-
-/**
  * The legacy, home-anchored, fully UNSCOPED shared recovery directory
  * (`~/.goodvibes/recovery/`, no surfaceRoot segment at all), the oldest
  * layout, predating even the surfaceRoot-scoped `getRecoveryDir` above. It
@@ -252,15 +243,16 @@ export function legacySharedRecoveryDir(surface: SessionSurface): string {
 
 /** The legacy shared per-session recovery file path for `sessionId` (see legacySharedRecoveryDir). */
 export function legacySharedRecoveryFile(surface: SessionSurface, sessionId: string): string {
-  const safe = sanitizeRecoverySessionId(sessionId);
-  return join(legacySharedRecoveryDir(surface), `${RECOVERY_FILE_PREFIX}${safe}${RECOVERY_FILE_SUFFIX}`);
+  return recoveryFilePath(legacySharedRecoveryDir(surface), sessionId);
 }
 
 /**
  * The recovery snapshot path for a specific session:
- * `<scope>/recovery/recovery-<sessionId>.jsonl`.
+ * Safe IDs keep their existing filenames; arbitrary IDs are private opaque
+ * labels bound by the original saved header. Before any publication an opaque
+ * suggestion is process-local: writeRecoveryFile coordinates the final path.
+ * Resolve again when accessing an existing snapshot.
  */
 export function getRecoveryFilePath(homeDirectory: string, sessionId: string, surfaceRoot?: string): string {
-  const safe = sanitizeRecoverySessionId(sessionId);
-  return join(getRecoveryDir(homeDirectory, surfaceRoot), `${RECOVERY_FILE_PREFIX}${safe}${RECOVERY_FILE_SUFFIX}`);
+  return recoveryFilePath(getRecoveryDir(homeDirectory, surfaceRoot), sessionId);
 }

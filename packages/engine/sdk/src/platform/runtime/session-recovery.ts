@@ -33,19 +33,15 @@
  */
 
 import {
-  closeSync,
   existsSync,
-  mkdirSync,
-  openSync,
   readdirSync,
-  readFileSync,
-  readSync,
-  renameSync,
   statSync,
   unlinkSync,
-  writeFileSync,
 } from 'fs';
-import { dirname, join } from 'path';
+import { join } from 'path';
+import { writeFileAtomic } from '../utils/atomic-json-store.js';
+import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
+import { publishRecoveryPath, readRecoveryHeaderObservation, recoveryPathResolver, RECOVERY_HEADER_LIMIT } from './recovery-path.js';
 
 import { logger } from '../utils/logger.js';
 import { loadedReturnContext, type SessionReturnContextSummary } from './session-return-context.js';
@@ -144,12 +140,12 @@ function pickRecoverySnapshotPath(
 }
 
 /** Delete one specific snapshot file. A missing file is fine; nothing else is touched. */
-function deleteRecoverySnapshotAt(path: string): void {
+function deleteRecoverySnapshotAt(path: string, expected?: string): boolean {
   try {
-    unlinkSync(path);
-  } catch {
-    // missing file is fine
-  }
+    const original = expected ?? fileObservationIdentity(path);
+    if (fileObservationIdentity(path) !== original) return false;
+    unlinkSync(path); return true;
+  } catch { return false; }
 }
 
 export function writeRecoveryFile(
@@ -160,7 +156,6 @@ export function writeRecoveryFile(
 ): void {
   try {
     if (!snapshot.messages.length) return;
-    const recoveryFile = resolveRecoveryFilePath(options, sessionId);
     const lines: string[] = [];
     lines.push(JSON.stringify({ type: 'meta', sessionId, title, timestamp: Date.now() }));
     if (snapshot.titleSource || snapshot.returnContext) {
@@ -176,10 +171,12 @@ export function writeRecoveryFile(
     for (const message of snapshot.messages) {
       lines.push(JSON.stringify({ type: 'message', ...message }));
     }
-    const tmpPath = recoveryFile + '.tmp';
-    mkdirSync(dirname(recoveryFile), { recursive: true });
-    writeFileSync(tmpPath, lines.join('\n') + '\n', 'utf-8');
-    renameSync(tmpPath, recoveryFile);
+    if (Buffer.byteLength(lines[0]!, 'utf8') > RECOVERY_HEADER_LIMIT) throw new Error('Recovery header exceeds its supported limit');
+    const directory = resolveRecoveryDirPath(options);
+    const resolve = isSurfaceOptions(options) ? requireSurface(options).recoveryFile : recoveryPathResolver(directory);
+    publishRecoveryPath(directory, sessionId, resolve, (path, assertCurrent) => {
+      writeFileAtomic(path, `${lines.join('\n')}\n`, { assertCurrent, cleanupStaleTemps: false });
+    });
   } catch (error) {
     logger.warn('[Recovery] Write failed', { error: summarizeError(error) });
   }
@@ -208,13 +205,17 @@ export function deleteRecoveryFile(options?: SessionPersistenceOptions, sessionI
   try {
     if (sessionId) {
       try {
-        unlinkSync(resolveRecoveryFilePath(options, sessionId));
+        const path = resolveRecoveryFilePath(options, sessionId);
+        const selected = readRecoveryMetaObservation(path);
+        if (selected.info.sessionId === sessionId) deleteRecoverySnapshotAt(path, selected.physical);
       } catch {
         // missing file is fine
       }
       if (isSurfaceOptions(options)) {
         try {
-          unlinkSync(legacySharedRecoveryFile(requireSurface(options), sessionId));
+          const path = legacySharedRecoveryFile(requireSurface(options), sessionId);
+          const selected = readRecoveryMetaObservation(path);
+          if (selected.info.sessionId === sessionId) deleteRecoverySnapshotAt(path, selected.physical);
         } catch {
           // missing file is fine, most of the time nothing lives here
         }
@@ -224,7 +225,7 @@ export function deleteRecoveryFile(options?: SessionPersistenceOptions, sessionI
     const dir = resolveRecoveryDirPath(options);
     for (const entry of listRecoveryFiles(dir)) {
       try {
-        unlinkSync(entry.path);
+        deleteRecoverySnapshotAt(entry.path);
       } catch {
         // missing file is fine
       }
@@ -235,24 +236,15 @@ export function deleteRecoveryFile(options?: SessionPersistenceOptions, sessionI
 }
 
 /** Read the first-line meta of a recovery file into a RecoveryFileInfo. */
-function readRecoveryMeta(recoveryFile: string): RecoveryFileInfo | null {
-  const fd = openSync(recoveryFile, 'r');
-  const buf = Buffer.alloc(4096);
-  const bytesRead = readSync(fd, buf, 0, 4096, 0);
-  closeSync(fd);
-  const firstLine = buf.toString('utf-8', 0, bytesRead).split('\n')[0];
-  const meta = JSON.parse(firstLine!) as {
-    title?: string | undefined;
-    timestamp?: number | undefined;
-    sessionId?: string | undefined;
-    returnContext?: SessionReturnContextSummary | undefined;
-  };
-  return {
-    title: meta.title ?? '',
-    timestamp: meta.timestamp ?? 0,
-    sessionId: meta.sessionId ?? '',
-    returnContext: loadedReturnContext(meta.returnContext),
-  };
+function readRecoveryMetaObservation(recoveryFile: string): { readonly info: RecoveryFileInfo; readonly physical: string; readonly mtimeMs: number } {
+  const { header: meta, physical, mtimeMs } = readRecoveryHeaderObservation(recoveryFile);
+  if (meta['type'] !== 'meta') throw new Error('Invalid recovery header');
+  return { physical, mtimeMs, info: {
+    title: typeof meta['title'] === 'string' ? meta['title'] : '',
+    timestamp: typeof meta['timestamp'] === 'number' ? meta['timestamp'] : 0,
+    sessionId: typeof meta['sessionId'] === 'string' ? meta['sessionId'] : '',
+    returnContext: loadedReturnContext(meta['returnContext']),
+  } };
 }
 
 /**
@@ -371,9 +363,9 @@ export function checkRecoveryForSession(surface: SessionSurface, sessionId: stri
   try {
     const path = pickRecoverySnapshotPath(options, sessionId);
     if (!path) return null;
-    const snapshotMtimeMs = statSync(path).mtimeMs;
-    if (isSupersededByOwnStore(resolveSessionsDirPath(options), sessionId, snapshotMtimeMs)) return null;
-    return readRecoveryMeta(path);
+    const { info, mtimeMs } = readRecoveryMetaObservation(path);
+    if (isSupersededByOwnStore(resolveSessionsDirPath(options), sessionId, mtimeMs)) return null;
+    return info.sessionId === sessionId ? info : null;
   } catch (error) {
     logger.warn('[Recovery] Per-session check failed', { error: summarizeError(error) });
     return null;
@@ -393,7 +385,7 @@ export function checkRecoveryForSession(surface: SessionSurface, sessionId: stri
  */
 function findLiveRecoveryCandidate(
   options?: SessionPersistenceOptions,
-): { path: string; info: RecoveryFileInfo } | null {
+): { path: string; info: RecoveryFileInfo; physical: string } | null {
   try {
     const sessionsDir = resolveSessionsDirPath(options);
     // One clock read for the whole scan, so two candidates a millisecond apart
@@ -403,16 +395,17 @@ function findLiveRecoveryCandidate(
       // Newest-first; the first snapshot that no live writer is maintaining
       // and its own session has not already superseded is the one to offer.
       if (isActivelyRefreshed(entry.mtimeMs, nowMs, LIVE_REFRESH_WINDOW_MS)) continue;
-      let info: RecoveryFileInfo | null;
+      let selected: ReturnType<typeof readRecoveryMetaObservation>;
       try {
-        info = readRecoveryMeta(entry.path);
+        selected = readRecoveryMetaObservation(entry.path);
       } catch {
         // Unreadable/partial snapshot, skip to the next candidate.
         continue;
       }
-      if (!info) continue;
-      if (isSupersededByOwnStore(sessionsDir, info.sessionId, entry.mtimeMs)) continue;
-      return { path: entry.path, info };
+      const { info, physical, mtimeMs } = selected;
+      if (isActivelyRefreshed(mtimeMs, nowMs, LIVE_REFRESH_WINDOW_MS)) continue;
+      if (isSupersededByOwnStore(sessionsDir, info.sessionId, mtimeMs)) continue;
+      return { path: entry.path, info, physical };
     }
     return null;
   } catch (error) {
@@ -422,44 +415,34 @@ function findLiveRecoveryCandidate(
 }
 
 /** Parse a recovery snapshot file's contents into a SessionSnapshot. Throws on any read/parse failure, callers wrap this in their own try/catch. */
-function parseRecoveryFile(recoveryFile: string): SessionSnapshot {
-  const raw = readFileSync(recoveryFile, 'utf-8');
-  const lines = raw.split('\n').filter(Boolean);
-  if (lines.length < 2) return { messages: [] };
-  return {
-    title: (() => {
-      try {
-        const metaLine = JSON.parse(lines[0]!) as {
-          title?: string | undefined;
-          titleSource?: ConversationTitleSource | undefined;
-          returnContext?: SessionReturnContextSummary | undefined;
-        };
-        return metaLine.title;
-      } catch {
-        return undefined;
-      }
-    })(),
-    titleSource: (() => {
-      try {
-        const metaLine = JSON.parse(lines[0]!) as { titleSource?: ConversationTitleSource };
-        return metaLine.titleSource;
-      } catch {
-        return undefined;
-      }
-    })(),
-    returnContext: (() => {
-      try {
-        const metaLine = JSON.parse(lines[0]!) as { returnContext?: unknown };
-        return loadedReturnContext(metaLine.returnContext);
-      } catch {
-        return undefined;
-      }
-    })(),
-    messages: lines.slice(1).map((line) => {
-      const { type: _type, ...rest } = JSON.parse(line) as { type: string } & Record<string, unknown>;
-      return rest;
-    }),
+interface RecoverySnapshotObservation {
+  readonly snapshot: SessionSnapshot;
+  readonly physical: string;
+}
+
+function parseRecoveryFile(recoveryFile: string, expectedSessionId?: string, expectedPhysical?: string): RecoverySnapshotObservation {
+  const source = readFileObservation(recoveryFile);
+  if (expectedPhysical !== undefined && source.physical !== expectedPhysical) throw new Error('Recovery snapshot changed');
+  let text: string;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(source.bytes); }
+  catch { throw new Error('Invalid recovery snapshot'); }
+  const lines = text.split('\n').filter(Boolean);
+  const parse = (line: string): Record<string, unknown> => {
+    let value: unknown;
+    try { value = JSON.parse(line); } catch { throw new Error('Invalid recovery snapshot'); }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid recovery snapshot');
+    return value as Record<string, unknown>;
   };
+  const meta = parse(lines[0] ?? '');
+  if (meta['type'] !== 'meta') throw new Error('Invalid recovery header');
+  if (expectedSessionId !== undefined && meta['sessionId'] !== expectedSessionId) throw new Error('Recovery snapshot belongs to another session');
+  const snapshot: SessionSnapshot = {
+    title: typeof meta['title'] === 'string' ? meta['title'] : undefined,
+    titleSource: meta['titleSource'] as ConversationTitleSource | undefined,
+    returnContext: loadedReturnContext(meta['returnContext']),
+    messages: lines.slice(1).map(line => { const { type: _type, ...message } = parse(line); return message; }),
+  };
+  return { snapshot, physical: source.physical };
 }
 
 /**
@@ -481,13 +464,13 @@ export function loadRecoveryConversation(options?: SessionPersistenceOptions, se
     return null;
   }
   if (!recoveryFile) return null;
-  return loadRecoveryConversationAt(recoveryFile);
+  return loadRecoveryConversationAt(recoveryFile, sessionId)?.snapshot ?? null;
 }
 
 /** Parse one specific snapshot file, converting any read/parse failure into null (never throws). */
-function loadRecoveryConversationAt(recoveryFile: string): SessionSnapshot | null {
+function loadRecoveryConversationAt(recoveryFile: string, expectedSessionId?: string, expectedPhysical?: string): RecoverySnapshotObservation | null {
   try {
-    return parseRecoveryFile(recoveryFile);
+    return parseRecoveryFile(recoveryFile, expectedSessionId, expectedPhysical);
   } catch (error) {
     logger.warn('[Recovery] Load failed', { error: summarizeError(error) });
     return null;
@@ -537,9 +520,10 @@ export function autoRestoreRecovery(
 ): RecoveryRestoreResult | null {
   const candidate = findLiveRecoveryCandidate(options);
   if (!candidate) return null;
-  const { path, info } = candidate;
-  const snapshot = loadRecoveryConversationAt(path);
-  if (!snapshot || snapshot.messages.length === 0) return null;
+  const { path, info, physical } = candidate;
+  const loaded = loadRecoveryConversationAt(path, info.sessionId, physical);
+  if (!loaded || loaded.snapshot.messages.length === 0) return null;
+  const { snapshot } = loaded;
   const receipt = recoveryReceiptText(info, snapshot.messages.length);
   if (receipts) {
     try {
@@ -552,7 +536,7 @@ export function autoRestoreRecovery(
   // restored (never a directory sweep, and never a path re-derived from the
   // meta's session id, which a snapshot with an empty/foreign id would not
   // resolve back to).
-  deleteRecoverySnapshotAt(path);
+  deleteRecoverySnapshotAt(path, loaded.physical);
   return { snapshot, info, receipt };
 }
 
@@ -595,12 +579,12 @@ export function consumeRecovery(surface: SessionSurface, sessionId?: string): Re
     return { snapshot: null, consumed: false };
   }
   if (!path) return { snapshot: null, consumed: false };
-  const snapshot = loadRecoveryConversationAt(path);
-  if (!snapshot) {
+  const loaded = loadRecoveryConversationAt(path, sessionId);
+  if (!loaded) {
     return { snapshot: null, consumed: false };
   }
-  deleteRecoverySnapshotAt(path);
-  return { snapshot, consumed: true };
+  const consumed = deleteRecoverySnapshotAt(path, loaded.physical);
+  return { snapshot: loaded.snapshot, consumed };
 }
 
 /** The outcome of the prompted "no, and remove it" recovery flow (`removeRecoveryPoint`). */
@@ -625,6 +609,9 @@ export function removeRecoveryPoint(surface: SessionSurface, sessionId?: string)
   const options: SessionPersistenceOptions = { surface };
   const path = pickRecoverySnapshotPath(options, sessionId);
   if (!path) return { removed: false };
-  deleteRecoverySnapshotAt(path);
-  return { removed: true };
+  try {
+    const selected = readRecoveryMetaObservation(path);
+    if (sessionId !== undefined && selected.info.sessionId !== sessionId) return { removed: false };
+    return { removed: deleteRecoverySnapshotAt(path, selected.physical) };
+  } catch { return { removed: false }; }
 }

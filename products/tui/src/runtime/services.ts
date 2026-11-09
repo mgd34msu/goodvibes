@@ -142,6 +142,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const homeDirectory = options.homeDirectory;
   // Built before anything that touches session state, see session-storage-services.ts.
   const { surface, sessionManager } = createSessionStorageServices({
+    nativeDataWriter: options.configManager.getNativeDataWriter(),
     workingDirectory,
     homeDirectory,
     surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,

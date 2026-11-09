@@ -1,7 +1,8 @@
 import { JEV_DECISION_SCHEMA } from '@goodvibes-jev/judgment/decisions';
-import { array, boolean, literal, union, enum as enumSchema, number, strictObject, string, toJSONSchema, type z } from 'zod/v4';
+import { array, boolean, literal, union, enum as enumSchema, number, strictObject, string, type z } from 'zod/v4';
 import { ledgerWorkSchema, ledgerAttemptSchema, ledgerEvidenceSchema, workLedgerReadEventSchema, ledgerEventSchema, legacyWorkLedgerManifestSchema } from '../workflow/work-ledger/types.js';
 import { methodDescriptor, type GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { workLedgerJsonSchema as json, LEGACY_WORK_LEDGER_MANIFEST_JSON_SCHEMA as manifestJsonSchema } from './work-ledger-json-schema.js';
 
 /** Dedicated capability. Never reuse fleet, workspace, or generic event scopes. */
 export const WORK_LEDGER_READ_SCOPE = 'read:work-ledger';
@@ -28,22 +29,13 @@ export const workLedgerHistoryPageSchema = strictObject({
   hasMore: boolean(), events: array(workLedgerReadEventSchema).max(WORK_LEDGER_HISTORY_PAGE_SIZE),
 });
 export type WorkLedgerHistoryPage = z.infer<typeof workLedgerHistoryPageSchema>;
-// Structural transport shape; complete-source canonical validation runs on the host.
-const manifestJsonSchema = { type: 'object' as const, additionalProperties: true };
-const json = (schema: z.ZodType): Record<string, unknown> => toJSONSchema(schema, {
-  override({ zodSchema, jsonSchema }) {
-    if (Object.is(zodSchema, legacyWorkLedgerManifestSchema)) Object.assign(jsonSchema, manifestJsonSchema);
-    if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
-  },
-});
-
 export const builtinGatewayWorkLedgerMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'workLedger.prepareLegacyImport', title: 'Prepare Legacy Work Import', category: 'work-ledger',
     description: 'Capture bounded complete legacy sources on the selected authoritative host. Preparation does not write or grant execution authority.',
     access: 'admin', scopes: [WORK_LEDGER_READ_SCOPE, 'read:knowledge'], metadata: { requiresFreshOperatorAuth: true },
     http: { method: 'POST', path: '/api/work-ledger/legacy-import/prepare' },
-    inputSchema: json(strictObject({ projectId, sourceIds: array(string().min(1).max(200)).min(1).max(500) })),
+    inputSchema: json(strictObject({ projectId, sourceIds: array(string().min(1).max(200)).min(1).max(500) }), 'input'),
     outputSchema: json(union([
       strictObject({ kind: literal('prepared'), manifest: legacyWorkLedgerManifestSchema }),
       strictObject({ kind: literal('blocked'), code: string(), reason: string() }),
@@ -69,7 +61,7 @@ export const builtinGatewayWorkLedgerMethodDescriptors: readonly GatewayMethodDe
     access: 'admin', scopes: [WORK_LEDGER_READ_SCOPE],
     metadata: { requiresFreshOperatorAuth: true },
     http: { method: 'GET', path: '/api/work-ledger/snapshot' },
-    inputSchema: json(strictObject({ projectId })), outputSchema: json(workLedgerReadSnapshotSchema),
+    inputSchema: json(strictObject({ projectId }), 'input'), outputSchema: json(workLedgerReadSnapshotSchema),
   }),
   methodDescriptor({
     id: 'workLedger.history', title: 'Read Native Work Ledger History', category: 'work-ledger',
@@ -77,7 +69,7 @@ export const builtinGatewayWorkLedgerMethodDescriptors: readonly GatewayMethodDe
     access: 'admin', scopes: [WORK_LEDGER_READ_SCOPE],
     metadata: { requiresFreshOperatorAuth: true },
     http: { method: 'GET', path: '/api/work-ledger/history' },
-    inputSchema: json(strictObject({ projectId, afterSequence: sequence, throughSequence: sequence.optional() })),
+    inputSchema: json(strictObject({ projectId, afterSequence: sequence, throughSequence: sequence.optional() }), 'input'),
     outputSchema: json(workLedgerHistoryPageSchema),
   }),
 ];

@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Project the known legacy work-import manifest transform into its transport
+  schema before Zod rejects it. Contract generation and product imports work
+  while the host retains complete manifest validation and rejects unrelated
+  unrepresentable transforms.
+
 - Validate the decision response inside its request-ID wrapper. Valid backend
   answers are no longer rejected as malformed envelopes; request correlation
   and answer validation remain intact.

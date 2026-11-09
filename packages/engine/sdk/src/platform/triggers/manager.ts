@@ -16,7 +16,7 @@ import { readFailureTransience, type FailureTransience } from '../integrations/d
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { runExtract, toObservation } from './extract.js';
-import { createActionGrant, verifyGrant, type RegisterGrantInput } from './grants.js';
+import { captureRegisteredGrantAction, createActionGrant, verifyGrant, type RegisterGrantInput } from './grants.js';
 import {
   buildCancelledTermination,
   buildDaemonRestartTermination,
@@ -264,7 +264,7 @@ export class TriggerManager {
   registerGrant(input: RegisterGrantInput): TriggerActionGrant {
     this.requireEnabled('register an action grant');
     this.load();
-    const grant = createActionGrant({ ...input, now: input.now ?? this.now() });
+    const grant = createActionGrant({ ...input, now: input.now ?? this.now() }, this.grants.get(input.id));
     this.grants.set(grant.id, grant);
     this.persist();
     return grant;
@@ -280,11 +280,11 @@ export class TriggerManager {
   async create(input: unknown): Promise<TriggerRecord> {
     this.requireEnabled('create a trigger');
     this.load();
-    const definition = validateDefinition(input);
-    if (this.records.has(definition.id)) {
-      throw new Error(`A trigger with id "${definition.id}" already exists.`);
+    const validated = validateDefinition(input);
+    if (this.records.has(validated.id)) {
+      throw new Error(`A trigger with id "${validated.id}" already exists.`);
     }
-    this.assertActionIsFireable(definition.action);
+    const definition = { ...validated, action: this.captureFireableAction(validated.action) };
 
     const now = this.now();
     let record: TriggerRecord = {
@@ -317,12 +317,9 @@ export class TriggerManager {
    * that does not exist would sit there looking healthy until the moment it
    * mattered, so the pin is verified while a person is still present.
    */
-  private assertActionIsFireable(action: TriggerFireAction): void {
-    if (action.kind !== 'action-grant') return;
-    const verification = verifyGrant([...this.grants.values()], action.grantId, action.digest);
-    if (!verification.ok) {
-      throw new Error(`Cannot create this trigger: ${verification.reason}`);
-    }
+  private captureFireableAction(action: TriggerFireAction): TriggerFireAction {
+    if (action.kind !== 'action-grant') return action;
+    return captureRegisteredGrantAction([...this.grants.values()], action);
   }
 
   list(): TriggerRecord[] {
@@ -600,7 +597,7 @@ export class TriggerManager {
         ...(action.model !== undefined ? { model: action.model } : {}),
       });
     }
-    const verification = verifyGrant([...this.grants.values()], action.grantId, action.digest);
+    const verification = verifyGrant([...this.grants.values()], action.grantId, action.digest, action.approvedAction);
     if (!verification.ok) {
       throw new Error(verification.reason);
     }

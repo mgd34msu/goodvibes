@@ -227,19 +227,29 @@ export interface AgentTurnAction {
 
 /**
  * Runs a pre-registered action grant. The grant was written down and confirmed
- * while a person was present; the digest is recomputed at fire time and must
- * match byte for byte. There is deliberately no "compose a shell command now"
+ * while a person was present; the pinned revision and exact approved action
+ * must still match at fire time. There is deliberately no "compose a shell command now"
  * action, that is the one path with no person in the loop.
  */
 export interface ActionGrantAction {
   readonly kind: 'action-grant';
   readonly grantId: string;
   readonly digest: string;
+  /** Captured by the native manager from the registered approval, never trusted
+   * from caller input. Independent from the mutable registry record. */
+  readonly approvedAction?: TriggerApprovedAction;
+}
+
+export interface TriggerApprovedAction {
+  readonly version: 1;
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly cwd: string | null;
 }
 
 export type TriggerFireAction = AgentTurnAction | ActionGrantAction;
 
-/** A pre-registered, digest-pinned action, confirmed at creation time. */
+/** A pre-registered action, pinned to its exact owner-confirmed contents. */
 export interface TriggerActionGrant {
   readonly id: string;
   readonly description: string;
@@ -250,6 +260,9 @@ export interface TriggerActionGrant {
   readonly confirmedAt: number;
   readonly confirmedBy: string;
   readonly digest: string;
+  /** Fresh grants retain only fields already present above. The opaque digest
+   * is a revision, not a content checksum. Absent only on earlier saved grants. */
+  readonly approvedAction?: TriggerApprovedAction;
 }
 
 // ─── Definitions ──────────────────────────────────────────────────────────────

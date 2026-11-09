@@ -12,9 +12,10 @@
  *     instead of the trigger silently evaporating
  *   - `bg_output` returns output for a process that is still RUNNING
  */
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import * as crypto from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ProcessManager } from '../sdk/src/platform/tools/shared/process-manager.ts';
@@ -23,6 +24,9 @@ import {
   buildTermination,
   computeGrantDigest,
   createActionGrant,
+  captureRegisteredGrantAction,
+  loadTriggerSnapshot,
+  saveTriggerSnapshot,
   decideOnExitRecovery,
   renderOnExitPrompt,
   StreamLineProcessor,
@@ -32,6 +36,7 @@ import {
   type TrackedProcessRef,
   type TriggerActionExecutor,
   type TriggerProcessHost,
+  type TriggerActionGrant,
 } from '../sdk/src/platform/triggers/index.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
@@ -351,7 +356,7 @@ describe('daemon restart', () => {
 });
 
 describe('action grants', () => {
-  test('a grant is digest-pinned and verified at fire time', () => {
+  test('a grant is pinned to its exact approved action and verified at fire time', () => {
     const grant = createActionGrant({
       id: 'restart-svc',
       description: 'Restart the build agent service',
@@ -360,16 +365,137 @@ describe('action grants', () => {
       confirmedBy: 'mike',
       now: 1_000,
     });
-    expect(verifyGrant([grant], 'restart-svc', grant.digest).ok).toBe(true);
+    const pin = captureRegisteredGrantAction([grant], { kind: 'action-grant', grantId: grant.id, digest: grant.digest });
+    expect(verifyGrant([grant], 'restart-svc', grant.digest, pin.approvedAction).ok).toBe(true);
     expect(verifyGrant([grant], 'missing', grant.digest).ok).toBe(false);
 
     const tampered = { ...grant, args: ['--user', 'restart', 'something-else'] };
-    const result = verifyGrant([tampered], 'restart-svc', grant.digest);
+    const result = verifyGrant([tampered], 'restart-svc', grant.digest, pin.approvedAction);
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.reason).toContain('modified after it was confirmed');
   });
 
-  test('the digest covers the command, args and cwd: nothing else', () => {
+  test('fresh approvals and restored approval checks do no action-checksum work', () => {
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      const args = ['all'];
+      const grant = createActionGrant({ id: 'compile', description: 'Compile', command: 'make', args, cwd: '/a', confirmedBy: 'owner' });
+      const pin = captureRegisteredGrantAction([grant], { kind: 'action-grant', grantId: grant.id, digest: grant.digest });
+      expect(grant.digest).toMatch(/^grant-revision-v1:[a-p]{32}$/);
+      args[0] = 'foreign';
+      const restored = JSON.parse(JSON.stringify(grant)) as TriggerActionGrant;
+      for (let i = 0; i < 10; i++) expect(verifyGrant([restored], grant.id, grant.digest, pin.approvedAction).ok).toBe(true);
+      expect(verifyGrant([restored], grant.id, grant.digest).ok).toBe(false);
+      expect(verifyGrant([{ ...restored, command: 'other' }], grant.id, grant.digest, pin.approvedAction).ok).toBe(false);
+      expect(verifyGrant([{ ...restored, args: ['clean'] }], grant.id, grant.digest, pin.approvedAction).ok).toBe(false);
+      expect(verifyGrant([{ ...restored, cwd: '/b' }], grant.id, grant.digest, pin.approvedAction).ok).toBe(false);
+      const missing = { ...restored }; Reflect.deleteProperty(missing, 'approvedAction');
+      expect(verifyGrant([missing], grant.id, grant.digest).ok).toBe(false);
+      const unsupported = JSON.parse(JSON.stringify(restored)) as TriggerActionGrant;
+      if (!unsupported.approvedAction) throw new Error('Missing saved approval');
+      Reflect.set(unsupported.approvedAction, 'version', 2);
+      expect(verifyGrant([unsupported], grant.id, grant.digest).ok).toBe(false);
+      expect(hash).not.toHaveBeenCalled();
+    } finally { hash.mockRestore(); }
+  });
+
+  test('reconfirming metadata preserves a valid pin, while changing the approved action retires it across restart', () => {
+    const path = tempStore(), first = managerWith(new FakeProcessHost(), new RecordingExecutor(), path, 'boot-1');
+    const input = { id: 'compile', description: 'Compile', command: 'make', args: ['all'], confirmedBy: 'owner' };
+    const initial = first.registerGrant(input);
+    const originalPin = captureRegisteredGrantAction([initial], { kind: 'action-grant', grantId: initial.id, digest: initial.digest });
+    const updated = first.registerGrant({ ...input, description: 'Compile the project', confirmedBy: 'owner again' });
+    expect(updated.digest).toBe(initial.digest);
+    expect(updated.approvedAction).toEqual(initial.approvedAction);
+    const restarted = managerWith(new FakeProcessHost(), new RecordingExecutor(), path, 'boot-2');
+    expect(verifyGrant(restarted.listGrants(), initial.id, initial.digest, originalPin.approvedAction).ok).toBe(true);
+    const changed = restarted.registerGrant({ ...input, args: ['clean'] });
+    expect(changed.digest).not.toBe(initial.digest);
+    expect(verifyGrant(restarted.listGrants(), initial.id, initial.digest, originalPin.approvedAction).ok).toBe(false);
+    const final = managerWith(new FakeProcessHost(), new RecordingExecutor(), path, 'boot-3');
+    expect(verifyGrant(final.listGrants(), initial.id, initial.digest, originalPin.approvedAction).ok).toBe(false);
+    const changedPin = captureRegisteredGrantAction([changed], { kind: 'action-grant', grantId: changed.id, digest: changed.digest });
+    expect(verifyGrant(final.listGrants(), changed.id, changed.digest, changedPin.approvedAction).ok).toBe(true);
+  });
+
+  test('an admitted executor retains the checked action across later registry mutation', () => {
+    const original = createActionGrant({ id: 'compile', description: 'Compile', command: 'make', args: ['all'], cwd: '/a', confirmedBy: 'owner' });
+    const grant = JSON.parse(JSON.stringify(original)) as TriggerActionGrant;
+    const pin = captureRegisteredGrantAction([grant], { kind: 'action-grant', grantId: grant.id, digest: grant.digest });
+    const verified = verifyGrant([grant], grant.id, grant.digest, pin.approvedAction);
+    if (!verified.ok) throw new Error('Missing original admission');
+    Reflect.set(grant, 'command', 'foreign'); Reflect.set(grant.args, '0', 'clean'); Reflect.set(grant, 'cwd', '/b');
+    expect(verified.grant.command).toBe('make'); expect(verified.grant.args).toEqual(['all']); expect(verified.grant.cwd).toBe('/a');
+    expect(verified.grant).not.toBe(grant); expect(verified.grant.args).not.toBe(grant.args);
+    expect(Object.isFrozen(verified.grant)).toBe(true); expect(Object.isFrozen(verified.grant.args)).toBe(true);
+  });
+
+  test('an independently fixed published grant pin still fires its original pinned trigger after reconfirmation', async () => {
+    const old: TriggerActionGrant = { id: 'old-compile', description: 'Published approval', command: 'make', args: ['all'], cwd: '/a',
+      createdAt: 1000, confirmedAt: 1000, confirmedBy: 'owner',
+      digest: '68c22546806379ca18e20a432dd6353ef37bb85a7363254c0c16861d0d0bb76d' };
+    const path = tempStore();
+    saveTriggerSnapshot(path, { daemonBootId: 'old-boot', triggers: [], grants: [old], eventLog: [], now: 1000 });
+    const host = new FakeProcessHost(), executor = new RecordingExecutor();
+    const manager = managerWith(host, executor, path, 'new-boot');
+    expect(verifyGrant(manager.listGrants(), old.id, old.digest).ok).toBe(true);
+    expect(verifyGrant([{ ...old, args: ['clean'] }], old.id, old.digest).ok).toBe(false);
+    const fresh = manager.registerGrant({ id: 'new-approval', description: 'Another approved action', command: 'make', args: ['check'], confirmedBy: 'owner' });
+    const freshPin = captureRegisteredGrantAction([fresh], { kind: 'action-grant', grantId: fresh.id, digest: fresh.digest });
+    await manager.create({ ...onExitDefinition, action: { kind: 'action-grant', grantId: old.id, digest: old.digest } });
+    const confirmed = manager.registerGrant({ id: old.id, description: 'Same published action', command: old.command, args: old.args,
+      cwd: old.cwd, confirmedBy: 'owner again' });
+    expect(confirmed.digest).toBe(old.digest); expect(confirmed.approvedAction).toBeUndefined();
+    expect(verifyGrant(manager.listGrants(), old.id, old.digest).ok).toBe(true);
+    host.finish({ exitCode: 0 }); await manager.pollProcesses();
+    expect(executor.grants).toEqual([old.id]);
+    expect(manager.history('nightly-build').filter(run => run.outcome === 'fired')).toHaveLength(1);
+    const restarted = managerWith(new FakeProcessHost(), new RecordingExecutor(), path, 'third-boot');
+    expect(verifyGrant(restarted.listGrants(), old.id, old.digest).ok).toBe(true);
+    expect(verifyGrant(restarted.listGrants(), fresh.id, fresh.digest, freshPin.approvedAction).ok).toBe(true);
+  });
+
+  test.each(['unchanged', 'changed'] as const)('actual on-exit fire respects the originally pinned action after %s registration', async state => {
+    const host = new FakeProcessHost(), executor = new RecordingExecutor(), manager = managerWith(host, executor, tempStore(), 'boot');
+    const input = { id: 'compile', description: 'Compile', command: 'make', args: ['all'], confirmedBy: 'owner' };
+    const grant = manager.registerGrant(input);
+    await manager.create({ ...onExitDefinition, action: { kind: 'action-grant', grantId: grant.id, digest: grant.digest } });
+    manager.registerGrant({ ...input, description: 'Reconfirmed action', args: state === 'changed' ? ['clean'] : ['all'] });
+    host.finish({ exitCode: 0 }); await manager.pollProcesses();
+    expect(executor.grants).toEqual(state === 'changed' ? [] : [grant.id]);
+    expect(manager.history('nightly-build').some(run => run.outcome === (state === 'changed' ? 'failed' : 'fired'))).toBe(true);
+  });
+
+  test.each(['command', 'args', 'cwd'] as const)('an independent trigger pin survives registry %s plus local-copy edits and refuses after restart', async field => {
+    const path = tempStore(), host = new FakeProcessHost(), executor = new RecordingExecutor();
+    const manager = managerWith(host, executor, path, 'boot-1');
+    const args = ['all'], forged = { version: 1, command: 'unapproved', args: ['foreign'], cwd: '/foreign' };
+    const grant = manager.registerGrant({ id: 'compile', description: 'Compile', command: 'make', args, cwd: '/a', confirmedBy: 'owner' });
+    const record = await manager.create({ ...onExitDefinition,
+      action: { kind: 'action-grant', grantId: grant.id, digest: grant.digest, approvedAction: forged } });
+    const action = record.definition.action;
+    if (action.kind !== 'action-grant' || !action.approvedAction) throw new Error('Missing native trigger pin');
+    expect(action.approvedAction).toEqual({ version: 1, command: 'make', args: ['all'], cwd: '/a' });
+    expect(action.approvedAction).not.toBe(grant.approvedAction);
+    expect(action.approvedAction.args).not.toBe(grant.args);
+    expect(Object.isFrozen(action.approvedAction)).toBe(true); expect(Object.isFrozen(action.approvedAction.args)).toBe(true);
+    args[0] = 'caller mutation'; forged.args[0] = 'another caller mutation';
+    expect(action.approvedAction.args).toEqual(['all']);
+    const snapshot = loadTriggerSnapshot(path).snapshot;
+    if (!snapshot) throw new Error('Missing original persisted trigger');
+    const saved = snapshot.grants.find(value => value.id === grant.id);
+    if (!saved?.approvedAction) throw new Error('Missing original registry approval');
+    const replacement = field === 'args' ? ['clean'] : field === 'cwd' ? '/b' : 'other-command';
+    Reflect.set(saved, field, replacement); Reflect.set(saved.approvedAction, field, replacement);
+    saveTriggerSnapshot(path, { ...snapshot, now: 1001 });
+    const restarted = managerWith(new FakeProcessHost(), executor, path, 'boot-2');
+    restarted.load(); await restarted.pollProcesses();
+    expect(executor.grants).toEqual([]);
+    const history = restarted.history('nightly-build');
+    expect(history.some(run => run.outcome === 'failed' && run.detail?.includes('approved for this trigger'))).toBe(true);
+  });
+
+  test('published saved-format checksum compatibility covers command, args and cwd', () => {
     const a = computeGrantDigest({ command: 'make', args: ['all'], cwd: '/a' });
     expect(computeGrantDigest({ command: 'make', args: ['all'], cwd: '/a' })).toBe(a);
     expect(computeGrantDigest({ command: 'make', args: ['clean'], cwd: '/a' })).not.toBe(a);

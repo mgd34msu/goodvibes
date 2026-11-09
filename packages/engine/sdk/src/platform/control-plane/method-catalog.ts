@@ -1,3 +1,4 @@
+import { builtinTriggerSupervisorMethodDescriptors } from './method-catalog-trigger-supervisor.js';
 import { builtinDelegatedInboundMethodDescriptors } from './method-catalog-delegated-inbound.js';
 import { builtinGatewayNativeHostedTurnMethodDescriptors } from './method-catalog-native-hosted-turn.js';
 import { builtinGatewayNativeConversationIntakeMethodDescriptors } from './method-catalog-native-intake.js';
@@ -146,6 +147,7 @@ const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
   ...builtinGatewayControlMethodDescriptors,
   ...builtinBrowserJudgmentMethodDescriptors,
   ...builtinGatewayChannelMethodDescriptors,
+  ...builtinTriggerSupervisorMethodDescriptors,
   ...builtinGatewayChannelTestMethodDescriptors,
   ...builtinGatewayCostMethodDescriptors,
   ...builtinGatewayPermissionRuleMethodDescriptors,

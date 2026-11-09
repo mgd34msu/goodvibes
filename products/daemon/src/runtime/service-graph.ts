@@ -630,6 +630,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     let ciNativeContinuationOwner: NonNullable<Parameters<typeof attachWsOnlyGatewayVerbHandlers>[1]['ciNativeContinuationOwner']> | undefined;
     let ciAutoWatchObserver: ((tool: string, args: Record<string, unknown>, success: boolean) => void) | undefined;
     attachWsOnlyGatewayVerbHandlers(gatewayMethods, {
+      triggerSupervisor: triggerManager,
       // The surface segment every control-plane store path is built from
       // (SDK control-plane-store-paths.ts). Required, not defaulted: a default
       // is what let these stores write to the unscoped orphan directory.

@@ -1,3 +1,4 @@
+import { TriggerRecoverySettings } from '../../TriggerRecoverySettings';
 /**
  * The smaller settings sections. Each one gathers the panels that used to sit
  * on the Admin and Providers pages (or were their own page) and the config
@@ -200,6 +201,7 @@ export function NetworkSection() {
 export function AllSettingsSection() {
   return (
     <>
+      <TriggerRecoverySettings />
       <SectionConfig id="all" emptyText="Every setting the daemon reports has a home in another section." />
       <RawConfigEditor />
     </>

@@ -201,10 +201,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     id: 'all',
     label: 'Advanced',
     page: 'general',
-    description: 'Every other daemon setting, and a raw editor for keys the schema does not know.',
+    description: 'Supervised trigger recovery, other daemon settings, and a raw editor for keys the schema does not know.',
     namespaces: [],
-    keywords: ['all settings', 'config', 'raw', 'key', 'schema'],
-    items: ['Advanced: unschema\'d keys'],
+    keywords: ['triggers', 'supervision', 'migration', 'all settings', 'config', 'raw', 'key', 'schema'],
+    items: ['Supervised trigger recovery', 'Advanced: unschema\'d keys'],
   },
   {
     id: 'about',

@@ -1,3 +1,4 @@
+import { registerTriggerCommands } from './commands/trigger-supervisor.ts';
 import { registerWorkPlanRuntimeCommands } from './commands/workplan-runtime.ts';
 import type { CommandRegistry } from './command-registry.ts';
 import type { CommandContext } from './command-registry.ts';
@@ -68,6 +69,7 @@ function registerAgentMemoryCommand(registry: CommandRegistry): void {
  */
 export function registerBuiltinCommands(registry: CommandRegistry): void {
   registerShellCoreCommands(registry);
+  registerTriggerCommands(registry);
   registerAgentWorkspaceRuntimeCommands(registry);
   registerWorkPlanRuntimeCommands(registry);
   registerLegacyWorkLedgerImportCommands(registry);

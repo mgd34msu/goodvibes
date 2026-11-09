@@ -53,6 +53,12 @@ afterEach(() => {
 });
 
 describe('useConfirm', () => {
+  test('unmount resolves a pending original confirmation as cancelled instead of retaining its waiter', async () => {
+    const answer = ask({ title: 'Pending owner action?' });
+    flushSync(() => root.render(null));
+    expect(await answer).toBe(false); expect(dialog()).toBeNull();
+  });
+
   test('renders nothing until ask() is called', () => {
     expect(dialog()).toBeNull();
   });

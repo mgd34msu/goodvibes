@@ -123,6 +123,7 @@ export type PlanRuntimeService = (subcommand: string, args: string[]) => {
 };
 
 export interface CommandOpsShellServices {
+  triggerSupervisor?: import('../triggers/operator.js').TriggerOperatorSupervisor | undefined;
   agentManager?: ShellAgentManagerService | undefined;
   acpManager?: ShellAcpManagerService | undefined;
   automationManager?: ShellAutomationManagerRuntimeService | undefined;
@@ -140,6 +141,7 @@ export function createShellOpsServices(
   options: CreateShellOpsServicesOptions,
 ): CommandOpsShellServices {
   const {
+    triggerSupervisor,
     agentManager,
     acpManager,
     automationManager,
@@ -152,6 +154,7 @@ export function createShellOpsServices(
   } = options;
 
   return {
+    triggerSupervisor,
     agentManager,
     acpManager,
     automationManager,

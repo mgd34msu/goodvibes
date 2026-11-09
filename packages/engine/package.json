@@ -1129,6 +1129,11 @@
       "types": "./sdk/dist/platform/tools/exec/sandbox.d.ts",
       "import": "./sdk/dist/platform/tools/exec/sandbox.js"
     },
+    "./sdk/platform/triggers/browser": {
+      "bun": "./sdk/src/platform/triggers/operator-view.ts",
+      "types": "./sdk/dist/platform/triggers/operator-view.d.ts",
+      "import": "./sdk/dist/platform/triggers/operator-view.js"
+    },
     "./sdk/platform/triggers": {
       "bun": "./sdk/src/platform/triggers/index.ts",
       "types": "./sdk/dist/platform/triggers/index.d.ts",
@@ -2418,6 +2423,11 @@
       "bun": "./terminal-shell/src/payment-window-command.ts",
       "types": "./terminal-shell/dist/payment-window-command.d.ts",
       "import": "./terminal-shell/dist/payment-window-command.js"
+    },
+    "./terminal-shell/trigger-supervisor-command": {
+      "bun": "./terminal-shell/src/trigger-supervisor-command.ts",
+      "types": "./terminal-shell/dist/trigger-supervisor-command.d.ts",
+      "import": "./terminal-shell/dist/trigger-supervisor-command.js"
     },
     "./terminal-shell/telegram-cursor-command": {
       "bun": "./terminal-shell/src/telegram-cursor-command.ts",

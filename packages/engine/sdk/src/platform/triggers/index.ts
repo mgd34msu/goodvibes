@@ -21,3 +21,6 @@ export * from './manager-streams.js';
 // RuntimeServices needs these to construct a working TriggerManager rather than
 // re-implementing the hosts.
 export * from './hosts.js';
+
+export * from './operator.js';
+export * from './operator-view.js';

@@ -17,7 +17,7 @@
  * the action for an ordinary confirm and on Cancel for a destructive one, and
  * returns to the opener on close.
  */
-import { useCallback, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { Button } from './Button';
 import { Dialog } from './Dialog';
 
@@ -105,6 +105,7 @@ export interface ConfirmController {
 export function useConfirm(): ConfirmController {
   const [request, setRequest] = useState<ConfirmRequest | null>(null);
   const resolverRef = useRef<((confirmed: boolean) => void) | null>(null);
+  useEffect(() => () => { const resolve = resolverRef.current; resolverRef.current = null; resolve?.(false); }, []);
 
   const settle = useCallback((confirmed: boolean) => {
     const resolve = resolverRef.current;

@@ -1,3 +1,4 @@
+import { readTriggerOperatorStatus, readTriggerMigrationResult } from '@goodvibes-jev/engine/sdk/platform/triggers/browser';
 import {
   createBrowserKnowledgeSdk,
   forSession,
@@ -2592,6 +2593,11 @@ export const sdk = {
     // scope for the fleet depth this brief asks for (fleet is a live-process READER,
     // not a watcher-authoring surface).
     watchers: {
+      triggers: {
+        status: async () => readTriggerOperatorStatus(await requestJson('/api/control-plane/methods/watchers.triggers.status/invoke', { method: 'POST', body: { body: {} }, interpretRefusal: false })),
+        migrate: async (input: { readonly olderInstancesClosed: true; readonly confirm: true }) =>
+          readTriggerMigrationResult(await requestJson('/api/control-plane/methods/watchers.triggers.migrate/invoke', { method: 'POST', body: { body: input }, interpretRefusal: false })),
+      },
       stop: (watcherId: string) =>
         invokeOperator<'watchers.stop', WatcherActionResult>('watchers.stop', { watcherId }),
     },

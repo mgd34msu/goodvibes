@@ -1,3 +1,4 @@
+import { registerTriggerCommands } from './commands/trigger-supervisor.ts';
 import { registerHostPairingCommands } from './commands/host-pairing.ts';
 import { CommandRegistry } from './command-registry.ts';
 import type { SlashCommand } from './command-registry.ts';
@@ -107,6 +108,7 @@ export interface BuiltinCommandGroup {
  * label can never drift between the two.
  */
 export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
+  { category: 'Automation', register: registerTriggerCommands },
   { category: 'Shell & Session', register: registerShellCoreCommands },
   { category: 'Shell & Session', register: registerPaletteRuntimeCommands },
   { category: 'Configuration', register: registerConfigCommand },

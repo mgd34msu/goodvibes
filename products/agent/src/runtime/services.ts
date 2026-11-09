@@ -1,3 +1,4 @@
+import { registerTriggerSupervisorGatewayMethods } from '@goodvibes-jev/engine/sdk/platform/control-plane';
 import { registerTerminalKnowledgeCleanup } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { createTerminalMemoryAdmission } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { join } from 'node:path';
@@ -1824,6 +1825,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     // this agent's to fire.
     sessionIsLive: (sessionId: string) => hostedSessions.hosts(sessionId),
   });
+
+  registerTriggerSupervisorGatewayMethods(gatewayMethods, triggerManager);
 
   const processRegistry = createArchivableFleetRegistry({
     agentManager,

@@ -1,3 +1,5 @@
+import { registerTriggerSupervisorGatewayMethods } from './trigger-supervisor.js';
+import type { TriggerOperatorSupervisor } from '../../triggers/operator.js';
 /**
  * routes/register-gateway-verb-groups.ts
  *
@@ -113,6 +115,7 @@ import { controlPlaneStorePath } from '../control-plane-store-paths.js';
 import { legacyWorkspaceRegisterPath, sharedWorkspaceRegisterPath } from '../../workspace/registration/shared-register-path.js';
 
 export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps, BrowserCompositionDeps {
+  readonly triggerSupervisor?: TriggerOperatorSupervisor | undefined;
   /** SecretsManager (get/set), VAPID keypair custody lives here, never in config. */
   readonly secretsManager: VapidSecretStore;
   /** Filled with the owner profile store and occasions service below, which is what lets the `profile` capture tool write. Absent in a host with no agent tools. */
@@ -364,6 +367,7 @@ function toFleetNotice(event: FleetEvent): FleetNotice {
 
 export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: GatewayVerbGroupDeps): void {
   registerFleetCheckpointsSearchGatewayMethods(catalog, deps);
+  if (deps.triggerSupervisor) registerTriggerSupervisorGatewayMethods(catalog, deps.triggerSupervisor);
 
   // fleet.conflicts.*, a conflict row's one action: spawn a seeded resolution
   // session inside the kept tree (the CI fix-session machinery) and reclaim

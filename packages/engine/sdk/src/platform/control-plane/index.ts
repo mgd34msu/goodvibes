@@ -219,3 +219,5 @@ export type { OwnerApprovalGuard, RaisedOwnerApproval, ResolveOwnerApprovalInput
 export { prepareGatewayScopePolicyOwner, completeGatewayScopePolicyBootstrap, waitForGatewayScopePolicyBootstrap } from './scope-policy-bootstrap.js';
 export { composeOccasions } from './routes/occasions-composition.js';
 export type { OccasionsComposition, OccasionsCompositionDeps } from './routes/occasions-composition.js';
+
+export { registerTriggerSupervisorGatewayMethods } from './routes/trigger-supervisor.js';

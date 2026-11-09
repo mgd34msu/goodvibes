@@ -696,6 +696,9 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     }),
   };
 
+  // Operator recovery always addresses this runtime's actual surface supervisor.
+  ctx.commandContext.ops.triggerSupervisor = services.triggerManager;
+
   // ── Phase 12b: Operator Control Plane wiring (capability-gated); store and
   // task manager exist unconditionally so pre-gate tasks stay visible. ───────
   ctx.commandContext.ops.acpManager = acpManager;

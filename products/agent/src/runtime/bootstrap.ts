@@ -744,6 +744,9 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     }),
   };
 
+  // Operator recovery always addresses this runtime's actual surface supervisor.
+  ctx.commandContext.ops.triggerSupervisor = services.triggerManager;
+
   // Wire exit from options if provided; otherwise main.ts binds the operator route.
   if (options?.exit) {
     ctx.commandContext.exit = options.exit;

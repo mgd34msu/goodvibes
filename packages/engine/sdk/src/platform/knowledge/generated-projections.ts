@@ -1,3 +1,4 @@
+import { observeKnowledgeValue } from './local-value-observation.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { knowledgeClockIso, knowledgeClockNumber, knowledgeRawRepresentation, retainKnowledgeRepresentation, sameKnowledgeRecord } from './store-record-representation.js';
 import { KnowledgeSourceQualityHeldError } from './source-quality.js';
@@ -112,23 +113,23 @@ async function materializeProjectionOwned(
   const oldOriginal = oldArtifact ? observePreviousGeneratedArtifact(artifactStore, oldArtifact.id) : undefined;
   const supersededOriginal = oldArtifact && readRecord(oldArtifact.metadata).generatedKnowledgePage === true ? oldOriginal : undefined;
   let artifactAssertion: (() => void) | undefined;
-  const originalSourceVersion = JSON.stringify(existing);
+  const originalSource = observeKnowledgeValue(existing);
   const target = input.target;
   const readTarget = () => !target ? null : target.kind === 'node' ? input.store.getNode(target.id)
     : target.kind === 'source' ? input.store.getSource(target.id) : input.artifactStore.getRecord(target.id);
-  const originalTarget = readTarget(), targetVersion = JSON.stringify(originalTarget);
+  const originalTarget = readTarget(), targetObservation = observeKnowledgeValue(originalTarget);
   const readLinked = () => !target ? undefined : input.store.edgesFor('source', input.sourceId).find((edge) =>
     edge.toKind === target.kind && edge.toId === target.id && edge.relation === (target.relation ?? 'source_for'));
-  const originalLinked = readLinked(), linkedVersion = JSON.stringify(originalLinked);
-  const outputState = () => JSON.stringify({ sourceId: input.sourceId, sourceType: input.sourceType, connectorId: input.connectorId,
+  const originalLinked = readLinked(), linkedObservation = observeKnowledgeValue(originalLinked);
+  const outputState = () => ({ sourceId: input.sourceId, sourceType: input.sourceType, connectorId: input.connectorId,
     canonicalUri: input.canonicalUri, title: input.title, summary: input.summary, tags: input.tags, filename: input.filename,
     markdown: input.markdown, projectionKind: input.projectionKind, metadata: input.metadata, sourceMetadata: input.sourceMetadata,
     artifactMetadata: input.artifactMetadata, edgeMetadata: input.edgeMetadata, target: input.target });
-  const outputVersion = outputState();
+  const outputObservation = observeKnowledgeValue(outputState());
   const stale = () => { throw new KnowledgeSourceQualityHeldError('stale'); };
   const checkInputCurrent = () => {
     throwIfAborted(signal);
-    if (authority && (input.store !== store || input.artifactStore !== artifactStore || input.assertCurrent !== authority || input.signal !== signal || outputState() !== outputVersion)) stale();
+    if (authority && (input.store !== store || input.artifactStore !== artifactStore || input.assertCurrent !== authority || input.signal !== signal || !outputObservation.matches(outputState()))) stale();
   };
   const checkOwner = () => {
     throwIfAborted(signal);
@@ -138,12 +139,12 @@ async function materializeProjectionOwned(
     assertSynchronousProjectionGuard(artifactAssertion);
     if (graph?.assertCurrent !== graphAssertion) stale();
     checkInputCurrent();
-    if (authority && (readTarget() !== originalTarget || JSON.stringify(readTarget()) !== targetVersion)) stale();
+    if (authority && (readTarget() !== originalTarget || !targetObservation.matches(readTarget()))) stale();
   };
   const check = () => {
     checkOwner();
-    if (authority && (input.store.getSource(input.sourceId) !== existing || JSON.stringify(input.store.getSource(input.sourceId)) !== originalSourceVersion
-      || readLinked() !== originalLinked || JSON.stringify(readLinked()) !== linkedVersion)) stale();
+    if (authority && (input.store.getSource(input.sourceId) !== existing || !originalSource.matches(input.store.getSource(input.sourceId))
+      || readLinked() !== originalLinked || !linkedObservation.matches(readLinked()))) stale();
   };
   check();
   const stagedTarget = target?.kind === 'node' && graph?.nodes.some(node => node.id === target.id);
@@ -263,7 +264,7 @@ async function materializeProjectionOwned(
           const persistedTarget = target.kind === 'node' ? store.getRecordSnapshot('node', target.id).record
             : store.getSourceSnapshot({ id: target.id }).source;
           if (readTarget() !== committedTarget || !persistedTarget || !sameKnowledgeRecord(committedTarget, persistedTarget)) stale();
-        } else if (readTarget() !== originalTarget || JSON.stringify(readTarget()) !== targetVersion) stale();
+        } else if (readTarget() !== originalTarget || !targetObservation.matches(readTarget())) stale();
       }
       // The graph owner was checked synchronously before the complete commit.
       // Its original read set intentionally changes when those rows publish.
@@ -313,14 +314,14 @@ async function materializeProjectionOwned(
   if (!source) throw new Error(`Generated projection '${input.sourceId}' did not persist a source record.`);
   if (!reusedArtifact && supersededOriginal && supersededOriginal.id !== artifact.id) {
     const publishedTarget = readTarget();
-    const publishedValues = JSON.stringify({ source, linked, nodes, target: publishedTarget });
+    const publishedValues = observeKnowledgeValue({ source, linked, nodes, target: publishedTarget });
     const published = store.captureSourcePublication();
     await cleanOriginalGeneratedArtifact(store, supersededOriginal);
     checkInputCurrent();
     assertSynchronousProjectionGuard(artifactAssertion);
     published();
     if (store.getSource(source.id) !== source || (edgeInput && readLinked() !== linked) || readTarget() !== publishedTarget
-      || JSON.stringify({ source, linked, nodes, target: readTarget() }) !== publishedValues) stale();
+      || !publishedValues.matches({ source, linked, nodes, target: readTarget() })) stale();
   }
   return {
     artifact,
@@ -346,7 +347,7 @@ function observePreviousGeneratedArtifact(store: ArtifactStore, id: string): Art
 async function cleanOriginalGeneratedArtifact(store: KnowledgeStore, original: ArtifactOriginalObservation): Promise<void> {
   try {
     const result = await store.cleanupUnreferencedArtifact(original);
-    if (result === 'held' || result === 'unavailable') logger.warn('Generated knowledge artifact cleanup is pending; the original artifact was preserved.', { artifactId: original.id, reason: result });
+    if (result === 'held' || result === 'unavailable') logger.debug('Generated knowledge artifact cleanup is pending; the original artifact was preserved.', { artifactId: original.id, reason: result });
   } catch {
     logger.warn('Generated knowledge artifact cleanup could not be confirmed; the original artifact was preserved.', { artifactId: original.id });
   }

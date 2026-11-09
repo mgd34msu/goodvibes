@@ -9,7 +9,7 @@ import { knowledgeIngestGuard } from './ingest-preparation.js';
 import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
 import { stableText } from './store-schema.js';
 import { prepareStagedObservedKnowledgeNodeInput, type KnowledgeObservationOrigin } from './store-node-observation.js';
-import { supportHash } from './semantic/verification/projection.js';
+import { observeKnowledgeValue } from './local-value-observation.js';
 import {
   emitKnowledgeCompileCompleted,
   emitKnowledgeExtractionCompleted,
@@ -64,11 +64,13 @@ export async function finalizeKnowledgeIngestedSource(
   const { preparedExtraction, signal, ...values } = input;
   input = { ...snapshotNodeInput(values), preparedExtraction, signal };
   await context.store.init();
-  const retainedRecord = supportHash(context.artifactStore.getRecord(input.artifactId));
+  const recordBeforeCanonicalization = context.artifactStore.getRecord(input.artifactId);
+  if (!recordBeforeCanonicalization) throw new KnowledgeExtractionJudgmentHoldError();
+  const retainedRecord = observeKnowledgeValue(recordBeforeCanonicalization);
   const sourceCurrent = knowledgeIngestGuard(context, input.sourceId, undefined, signal);
   const canonicalUri = await uris.canonicalize(context.artifactStore.getRecord(input.artifactId)?.sourceUri ?? '');
   sourceCurrent(); uris.assertCurrent(); ownership.assertCurrent?.();
-  if (supportHash(context.artifactStore.getRecord(input.artifactId)) !== retainedRecord) throw new KnowledgeExtractionJudgmentHoldError();
+  if (!retainedRecord.matches(context.artifactStore.getRecord(input.artifactId))) throw new KnowledgeExtractionJudgmentHoldError();
   const canonicalCurrent = knowledgeIngestGuard(context, input.sourceId, canonicalUri ?? undefined, signal);
   const assertCurrent = () => { ownership.assertCurrent?.(); assertKnowledgeIngestUriOperation(context, uris, input.sourceId, input.artifactId); sourceCurrent(); canonicalCurrent(); };
   assertCurrent();
@@ -212,8 +214,8 @@ export async function compileKnowledgeSource(
 /** Caller snapshots must still describe retained evidence before gaining observation authority. */
 function knowledgeCompileGuard(context: KnowledgeIngestContext, source: KnowledgeSourceRecord,
   extraction: KnowledgeExtractionRecord | null | undefined, signal?: AbortSignal): () => void {
-  if (supportHash(source) !== supportHash(context.store.getSource(source.id))
-    || (extraction && supportHash(extraction) !== supportHash(context.store.getExtractionBySourceId(source.id)))) {
+  if (!observeKnowledgeValue(source).matches(context.store.getSource(source.id))
+    || (extraction && !observeKnowledgeValue(extraction).matches(context.store.getExtractionBySourceId(source.id)))) {
     throw new KnowledgeEntityAliasHoldError();
   }
   const check = knowledgeIngestGuard(context, source.id, source.canonicalUri, signal);

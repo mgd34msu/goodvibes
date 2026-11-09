@@ -5,7 +5,7 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { JudgmentInputError, judgmentInputProblem } from '../sdk/src/platform/gate/judgment-input.js';
-import { supportHash } from '../sdk/src/platform/knowledge/semantic/verification/projection.js';
+import { supportHash, createSupportOriginalValues, projectSupportInput, originalSupportValues, releaseOriginalSupportValues } from '../sdk/src/platform/knowledge/semantic/verification/projection.js';
 import { prepareGeneratedFactSupport, KnowledgeGeneratedFactSupportHeldError, type GeneratedFactSupportInput, type GeneratedFactSupportHoldReason } from '../sdk/src/platform/knowledge/semantic/verification/generated-fact-support.js';
 import { registry } from '../sdk/src/platform/knowledge/semantic/verification/judgment-registry.js';
 import { generatedFactFieldSupport, generatedFactSubjectAttachment } from '../sdk/src/platform/knowledge/semantic/verification/batteries.js';
@@ -294,4 +294,17 @@ test('proxy outer request collection is refused before length/prototype/descript
   const fake = readings(); let traps = 0;
   const inputs = new Proxy([input()], { get(target, key, receiver) { traps++; return Reflect.get(target, key, receiver); }, getPrototypeOf(target) { traps++; return Reflect.getPrototypeOf(target); }, ownKeys(target) { traps++; return Reflect.ownKeys(target); } });
   await held(prepareGeneratedFactSupport(inputs), 'malformed'); expect(traps).toBe(0); expect(fake.requests).toHaveLength(0);
+});
+
+// UNRUN original snapshot reuse is pass-local and value-checked, not raw-ref trust.
+test('many claims share one original source version only after exact current comparison', () => {
+  const originals = createSupportOriginalValues(), item = input(), first = projectSupportInput(item, undefined, originals);
+  const duplicate = projectSupportInput({ ...item, claim: { ...item.claim, title: 'Another claim over the same evidence' } }, undefined, originals);
+  expect(originalSupportValues(first).source).toBe(originalSupportValues(duplicate).source);
+  expect(originalSupportValues(first).extraction).toBe(originalSupportValues(duplicate).extraction);
+  expect(originalSupportValues(first).subjects[0]).toBe(originalSupportValues(duplicate).subjects[0]);
+  item.source.metadata.privateInternalField = 'changed on the same original source object';
+  expect(() => projectSupportInput(item, undefined, originals)).toThrow(KnowledgeGeneratedFactSupportHeldError);
+  originals.clear(); releaseOriginalSupportValues(first); releaseOriginalSupportValues(duplicate);
+  expect(() => originalSupportValues(first)).toThrow(KnowledgeGeneratedFactSupportHeldError);
 });

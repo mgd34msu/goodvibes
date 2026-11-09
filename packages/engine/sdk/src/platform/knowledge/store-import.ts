@@ -3,7 +3,7 @@ import { captureKnowledgeStoreInput, copyKnowledgeRepresentation } from './store
 import type { SQLiteStore } from '../state/sqlite-store.js';
 import { activationSourceIds } from './activation/projection.js';
 import { KnowledgeNodeActivationHeldError as Held, type KnowledgeNodeActivationOptions } from './activation/types.js';
-import { supportHash } from './semantic/verification/projection.js';
+import { observeKnowledgeValue } from './local-value-observation.js';
 import { findKnowledgeEdge, prepareKnowledgeEdgeRecord, writeKnowledgeEdgeRow } from './store-edge-writes.js';
 import { prepareKnowledgeExtractionRecord, prepareKnowledgeSourceRecord, writeKnowledgeExtractionRow, writeKnowledgeSourceRow } from './store-evidence-writes.js';
 import { assertPreparedNodeWrites, markPreparedNodeWritten, preparedNodeWrites, prepareNodeActivationPass, type NodeMutationDraft } from './store-node-activation.js';
@@ -66,8 +66,8 @@ export async function applyKnowledgeImport(store: KnowledgeStore, view: Knowledg
   options: KnowledgeNodeActivationOptions, prepareGraph?: PrepareKnowledgeImportGraph, onCommitted?: () => void): Promise<KnowledgeImportReceipt> {
   const checks: (() => void)[] = [];
   function watch(read: () => unknown): void {
-    const expected = supportHash(read() ?? null);
-    checks.push(() => { if (supportHash(read() ?? null) !== expected) throw new Held('stale'); });
+    const expected = observeKnowledgeValue(read() ?? null);
+    checks.push(() => { if (!expected.matches(read() ?? null)) throw new Held('stale'); });
   }
   function assertEvidenceCurrent(): void {
     if (options.signal?.aborted) throw new Held('aborted');
@@ -120,8 +120,8 @@ export async function applyKnowledgeImport(store: KnowledgeStore, view: Knowledg
   }
   // A retained observation may close over a source absent from the node's source IDs.
   // Imported JSON cannot prove that hidden dependency survived changed evidence.
-  const invalidatesRetainedObservations = sourceWrites.some((record) => supportHash(record) !== supportHash(view.sources.get(record.id) ?? null))
-    || extractionWrites.some((record) => supportHash(record) !== supportHash(view.extractions.get(record.id) ?? null));
+  const invalidatesRetainedObservations = sourceWrites.some((record) => !observeKnowledgeValue(record).matches(view.sources.get(record.id) ?? null))
+    || extractionWrites.some((record) => !observeKnowledgeValue(record).matches(view.extractions.get(record.id) ?? null));
   const stage = { assertCurrent, invalidatesRetainedObservations, evidenceFor: (record: KnowledgeNodeRecord) => activationSourceIds(record).map((id) => ({ id,
     source: sources.get(id) ?? null, extraction: extractionFor(extractions, id) })) };
   const prepared = await prepareNodeActivationPass(store, drafts, options, floor, scope, stage);

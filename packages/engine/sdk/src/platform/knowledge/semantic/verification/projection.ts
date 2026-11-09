@@ -1,3 +1,4 @@
+import { observeKnowledgeValue, type KnowledgeValueObservation } from '../../local-value-observation.js';
 import { types as nodeTypes } from 'node:util';
 import { captureOwnedJson } from '../../../gate/judgment-input.js';
 import { projectKnowledgeSourceReferences } from '../../source-structural-references.js';
@@ -74,6 +75,26 @@ const HINT_KEYS = new Set(['id', 'kind', 'title']);
 
 interface OriginalSupportValues { readonly source: unknown; readonly extraction: unknown; readonly claim: unknown; readonly subjects: readonly unknown[] }
 const supportOriginals = new WeakMap<object, OriginalSupportValues>();
+/** Share one detached version only after matching its complete current data.
+ * The maps belong to one synchronous reader pass and are cleared before I/O. */
+export function createSupportOriginalValues() {
+  const sources = new Map<string, KnowledgeValueObservation>(), extractions = new Map<string, KnowledgeValueObservation>();
+  const subjects = new Map<string, KnowledgeValueObservation>(), claims = new Map<string, KnowledgeValueObservation[]>();
+  const oneVersion = (map: Map<string, KnowledgeValueObservation>, id: string, value: unknown): unknown => {
+    const known = map.get(id);
+    if (known) { if (!known.matches(value)) throw new Held('stale'); return known.snapshot; }
+    const original = observeKnowledgeValue(value); map.set(id, original); return original.snapshot;
+  };
+  return { capture(input: GeneratedFactSupportInput): OriginalSupportValues {
+    const existing = claims.get(input.claim.id) ?? [], same = existing.find(original => original.matches(input.claim));
+    const claim = same ?? observeKnowledgeValue(input.claim);
+    if (!same) { existing.push(claim); claims.set(input.claim.id, existing); }
+    return Object.freeze({ source: oneVersion(sources, input.source.id, input.source),
+      extraction: oneVersion(extractions, input.extraction!.id, input.extraction), claim: claim.snapshot,
+      subjects: Object.freeze(input.subjects.map(subject => oneVersion(subjects, subject.id, subject))) });
+  }, clear(): void { sources.clear(); extractions.clear(); subjects.clear(); claims.clear(); } };
+}
+
 /** Comparison data for this exact detached projection's lifetime only. It is
  * never joins model/public serialization, persisted metadata or native
  * publication authority. */
@@ -85,7 +106,7 @@ export function originalSupportValues(projection: object): OriginalSupportValues
 }
 
 /** Produces only explicit evidence and identity fields; arbitrary metadata never leaves this boundary. */
-export function projectSupportInput(input: GeneratedFactSupportInput, labels?: SupportReferenceLabels) {
+export function projectSupportInput(input: GeneratedFactSupportInput, labels?: SupportReferenceLabels, originals?: ReturnType<typeof createSupportOriginalValues>) {
   assertPlainSnapshot(input);
   if (!record(input) || !text(input.spaceId) || input.spaceId !== input.spaceId.trim()
     || !record(input.source) || !record(input.claim) || !Array.isArray(input.subjects)) throw new Held('malformed');
@@ -169,7 +190,7 @@ export function projectSupportInput(input: GeneratedFactSupportInput, labels?: S
   };
   const projection = freezeSupport({ ...snapshot, spaceId, claimId: claim.id, sourceId: source.id,
     extractionId: extraction.id, extractionUpdatedAt: extraction.updatedAt });
-  supportOriginals.set(projection, Object.freeze({ source: captureOwnedJson(source), extraction: captureOwnedJson(extraction),
+  supportOriginals.set(projection, originals ? originals.capture(input) : Object.freeze({ source: captureOwnedJson(source), extraction: captureOwnedJson(extraction),
     claim: captureOwnedJson(claim), subjects: Object.freeze(input.subjects.map(subject => captureOwnedJson(subject))) }));
   return projection;
 }

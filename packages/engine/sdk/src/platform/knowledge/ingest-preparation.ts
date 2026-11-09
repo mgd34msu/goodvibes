@@ -1,7 +1,7 @@
 import { snapshotNodeInput } from './activation/projection.js';
 import { KnowledgeEntityAliasHoldError } from './entity-aliases.js';
 import type { KnowledgeIngestContext } from './ingest-context.js';
-import { supportHash } from './semantic/verification/projection.js';
+import { observeKnowledgeValue } from './local-value-observation.js';
 import { prepareKnowledgeSourceRecord } from './store-evidence-writes.js';
 import type { KnowledgeSourceRecord, KnowledgeSourceUpsertInput } from './types.js';
 
@@ -16,8 +16,8 @@ export function knowledgeIngestGuard(context: KnowledgeIngestContext, sourceId: 
   canonicalUri?: string, signal?: AbortSignal): () => void {
   const read = () => ({ source: context.store.getSource(sourceId), extraction: context.store.getExtractionBySourceId(sourceId),
     canonicalSource: canonicalUri ? context.store.getSourceByCanonicalUri(canonicalUri)?.id : undefined });
-  const expected = supportHash(read());
+  const expected = observeKnowledgeValue(read());
   return () => {
-    if (signal?.aborted || supportHash(read()) !== expected) throw new KnowledgeEntityAliasHoldError();
+    if (signal?.aborted || !expected.matches(read())) throw new KnowledgeEntityAliasHoldError();
   };
 }

@@ -1,5 +1,5 @@
 import { types as nodeTypes } from 'node:util';
-import { knowledgeRecordVersion, sameKnowledgeRecord } from '../../store-record-representation.js';
+import { sameKnowledgeRecord } from '../../store-record-representation.js';
 import { requireSemanticKnowledge } from '../../decision-policy.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { knowledgeClockIso } from '../../store-record-representation.js';
@@ -7,7 +7,7 @@ import { createSupportReferenceLabels } from './structural-references.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JsonValue, JudgmentPort } from '@goodvibes-jev/judgment';
 import { generatedFactFieldSupport, generatedFactSubjectAttachment } from './batteries.js';
-import { freezeSupport, projectSupportInput, originalSupportValues, releaseOriginalSupportValues, type ProjectedSupportInput } from './projection.js';
+import { freezeSupport, projectSupportInput, createSupportOriginalValues, originalSupportValues, releaseOriginalSupportValues, type ProjectedSupportInput } from './projection.js';
 import { GENERATED_FACT_SUPPORT_LIMITS as LIMITS, KnowledgeGeneratedFactSupportHeldError as Held,
   type GeneratedFactSupportInput, type GeneratedFactSupportOptions, type GeneratedFactSupportPlan, type GeneratedFactSupportReceipt } from './types.js';
 export * from './types.js';
@@ -94,28 +94,30 @@ export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFact
   // No port is even acquired until every selected input has passed privacy and
   // identity checks. In particular, a protected late field cannot leak early ones.
   let projectionBytes = 0;
-  const referenceLabels = createSupportReferenceLabels();
-  const projections = inputs.map((input) => {
-    const projection = projectSupportInput(input, referenceLabels);
+  const referenceLabels = createSupportReferenceLabels(), originalValues = createSupportOriginalValues();
+  let projections: ProjectedSupportInput[];
+  try { projections = inputs.map((input) => {
+    const projection = projectSupportInput(input, referenceLabels, originalValues);
     projectionBytes += new TextEncoder().encode(JSON.stringify(projection)).byteLength;
     if (projectionBytes > maxBytes) throw new Held('budget');
     return projection;
-  });
+  }); } finally { originalValues.clear(); }
   versionsAgree(projections);
+  for (const projection of projections) releaseOriginalSupportValues(projection);
   const jobs: RequestPlan[] = [], requestsByKey = new Map<string, number>(), parts = new Map<string, number>();
-  // Exact component encodings are local to this bounded pass. Only their small
-  // ordinals join request keys; nothing enters receipts, IDs or model payloads.
-  const part = (value: unknown): number => {
-    const encoded = knowledgeRecordVersion(value), known = parts.get(encoded);
+  // Full original versions already agreed above. Private ID tuples only
+  // distinguish their actual owners; no whole source/metadata serialization is
+  // needed again for request deduplication. These pass-local keys never leave.
+  const part = (value: string): number => {
+    const known = parts.get(value);
     if (known !== undefined) return known;
-    const next = parts.size; parts.set(encoded, next); return next;
+    const next = parts.size; parts.set(value, next); return next;
   };
   let bytes = 0;
   const planRequests = projections.map((input) => freezeSupport(requestPlans(input)).map((request) => {
-    const original = originalSupportValues(input);
-    const subjectIndex = request.subjectId === undefined ? -1 : input.subjects.findIndex(subject => subject.originalId === request.subjectId);
-    const key = JSON.stringify([part(request.state), part(original.claim), part(original.source), part(original.extraction),
-      subjectIndex === -1 ? null : part(original.subjects[subjectIndex])]);
+    const key = JSON.stringify([request.attachment, part(`wire:${JSON.stringify(request.state)}`),
+      part(`id:${input.claimId}`), part(`id:${input.sourceId}`), part(`id:${input.extractionId}`),
+      request.subjectId === undefined ? null : part(`id:${request.subjectId}`)]);
     const previous = requestsByKey.get(key);
     if (previous !== undefined) return previous;
     if (jobs.length >= maxRequests) throw new Held('budget');
@@ -129,7 +131,6 @@ export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFact
     return index;
   }));
   parts.clear(); requestsByKey.clear();
-  for (const projection of projections) releaseOriginalSupportValues(projection);
   if (options.signal?.aborted) throw new Held('aborted');
   if (jobs.length === 0) return Object.freeze([]);
 

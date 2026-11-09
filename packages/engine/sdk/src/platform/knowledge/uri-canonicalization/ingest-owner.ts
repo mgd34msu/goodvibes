@@ -2,7 +2,7 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
 import type { KnowledgeIngestContext, KnowledgeIngestOwnership } from '../ingest-context.js';
 import { knowledgeIngestGuard } from '../ingest-preparation.js';
-import { supportHash } from '../semantic/verification/projection.js';
+import { observeKnowledgeValue } from '../local-value-observation.js';
 import { createKnowledgeUriCanonicalizer, KnowledgeUriCanonicalizationHeldError as Held, type KnowledgeUriCanonicalizer } from './reader.js';
 
 /** Retain the actual consumed host slots without invoking a replacement getter. */
@@ -145,8 +145,8 @@ export function createKnowledgeIngestUriCanonicalizer(context: KnowledgeIngestCo
       if (state.phase !== 'reserved' || typeof artifactId !== 'string' || artifactId.length === 0) throw new Held('stale');
       const record = artifacts.getRecord(artifactId);
       if (!record || record.id !== artifactId) throw new Held('stale');
-      const retained = supportHash(record);
-      assertArtifactCurrent = () => { if (supportHash(artifacts.getRecord(artifactId)) !== retained) throw new Held('stale'); };
+      const retained = observeKnowledgeValue(record);
+      assertArtifactCurrent = () => { if (!retained.matches(artifacts.getRecord(artifactId))) throw new Held('stale'); };
       assertArtifactCurrent(); operation.state = { phase: 'attached', sourceId: state.sourceId, artifactId };
     },
   });

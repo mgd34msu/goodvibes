@@ -364,6 +364,10 @@ export async function verifyNativeWorkExecution(options: {
       // later microtask can change what the battery reads after provenance capture.
       const borrowed = await options.port.ask(forwarded);
       const result = freeze(structuredClone(captureOwnedJson(borrowed, nodeTypes.isProxy))) as typeof borrowed;
+      if (!result.decisionId) {
+        active();
+        throw new Error('Native decision provenance is missing or mismatched');
+      }
       // Actual recorded results already bind this exact input. A borrowed copy
       // cannot inherit that provenance: compare its actual forwarded input to
       // the independent log once, then still compare questions/answers below.

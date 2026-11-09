@@ -206,9 +206,9 @@ test('privately initialized native orphan restores completed readiness independe
 
 
 test('generated namespace avoids card-shaped path material without relaxing user path guards', () => {
-  const namespace = 'ctr-797d133b';
-  const digest = createHash('sha256').update(namespace).digest('hex');
-  expect(digest).toBe('75888a99b1bb430d24ec6e5252254e24cc576655375279564e8a22060a15fff8');
+  // Exact earlier path captured for ctr-797d133b. This test screens those
+  // bytes; separate migration tests below exercise the actual old formatter.
+  const digest = '75888a99b1bb430d24ec6e5252254e24cc576655375279564e8a22060a15fff8';
   const root = '/tmp/namespace-regression';
   const legacy = join(root, '.goodvibes', '.worktrees', 'ws-ns', digest, 'g1', 'u1', 'src', 'csv.ts');
   const oldBoundary = judgmentInputBoundary('read', { path: legacy }, root);

@@ -2,11 +2,11 @@
  * Unit tests for the crypto adapter.
  *
  * Verifies that the Web Crypto adapter (used in React Native / browser)
- * produces outputs consistent with the Node.js crypto adapter.
- * Both adapters must produce identical results for the same inputs.
+ * matches an independent standard S256 answer. Random encodings also retain
+ * the same output shape as the Node.js crypto adapter.
  */
 
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
 import {
   createSha256Hash,
@@ -25,11 +25,10 @@ describe('crypto-adapter (Web Crypto implementation)', () => {
       expect(result).not.toMatch(/[+/=]/);
     });
 
-    test('matches node:crypto SHA-256 output for known input', async () => {
-      const input = 'pkce-verifier-test-string';
-      const nodeDigest = createHash('sha256').update(input).digest('base64url');
-      const webDigest = await createSha256Hash(input);
-      expect(webDigest).toBe(nodeDigest);
+    test('matches the independent SHA-256 abc known answer in S256 base64url form', async () => {
+      // Standard SHA-256 abc answer, encoded only: no second digest oracle.
+      const expected = Buffer.from('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', 'hex').toString('base64url');
+      expect(await createSha256Hash('abc')).toBe(expected);
     });
 
     test('is deterministic for identical inputs', async () => {

@@ -13,11 +13,11 @@ test('actual capture hashes the saved logical index once; owner rechecks retain 
     const snapshot = await captureContractInput(root);
     const files = snapshot.files.filter(file => file.kind !== 'missing').length;
     // SHA-1 files still carry their recorded strong byte commitments. This
-    // budget excludes those two complete file passes and counts only the index.
-    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(2 * files + 1);
+    // budget includes one complete file pass plus the saved logical index.
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(files + 1);
     hashing.mockClear();
     await assertContractInputOwner(snapshot);
-    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(files + 1);
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
     // A public copy cannot borrow capture's private original to skip checking
     // its changed persisted commitment.
     await expect(assertContractInputOwner({ ...snapshot, indexFingerprint: '0'.repeat(64) })).rejects.toThrow('index changed');
@@ -40,7 +40,9 @@ test('index flag changes after the saved commitment check still refuse at the en
       }
     });
     try {
-      await expect(assertContractInputOwner(snapshot, controller.signal)).rejects.toThrow('changed during recheck');
+      // A checkpoint copy has no warm native physical observations. Its first
+      // full saved-index check runs before the injected logical mutation.
+      await expect(assertContractInputOwner(structuredClone(snapshot), controller.signal)).rejects.toThrow('changed during recheck');
       expect(changed).toBe(true);
     } finally { interrupt.mockRestore(); hashing.mockRestore(); }
     await expect(assertContractInputOwner(snapshot)).rejects.toThrow('index changed');
@@ -62,7 +64,7 @@ test('an incidental index rewrite still compares the whole saved logical state i
       }
     });
     try {
-      await assertContractInputOwner(snapshot, controller.signal);
+      await assertContractInputOwner(structuredClone(snapshot), controller.signal);
       expect(rewritten).toBe(true);
       const files = snapshot.files.filter(file => file.kind !== 'missing').length;
       // The physical change alone triggers exactly one extra full comparison.

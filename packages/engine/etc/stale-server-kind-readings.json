@@ -3,58 +3,52 @@
   "model": "jev-latest",
   "readings": {
     "docs/browser-integration.md": {
-      "sha256": "2f5c8f34c4d2c61814ce79e1607e121b9d6db7786f69757a5386562ef33807cf",
+      "sha256": "452150e606d33220bf36b0d2b5b6df25b164a70fe702c9357fdc3c9e6a64657f",
       "verdict": "no",
       "outcome": "act",
-      "probability": 0.03
+      "probability": 0.01
     },
     "docs/error-handling.md": {
-      "sha256": "1917f05db95c4f65c6d71066f6fe22552a8375b46f1b280b8da40452fdf68466",
+      "sha256": "dc932b6e0255eeb7e5de286f863a7c3c7819cf005b5ee47d4e7115e34656d2c9",
       "verdict": "no",
       "outcome": "act",
-      "probability": 0.02
+      "probability": 0.01
     },
     "docs/error-kinds.md": {
-      "sha256": "73b03717d3c656a5f6e44351f6408971c03f20f0e22983979283a46eb324a45a",
+      "sha256": "b497d5dadc545e6ecb6a873f6afe5b82a26ff01d999a22673face7bae7e82976",
       "verdict": "no",
       "outcome": "act",
-      "probability": 0.02
+      "probability": 0.01
     },
     "docs/expo-integration.md": {
-      "sha256": "205a9ef09fe107127be71d643989711ebe0195ea60f1acfdbc9689e5780bdd20",
+      "sha256": "81d288ac6f46d28770c0bc558c4d1e8e7562e906491894c71bd3e339e7ca8bcb",
       "verdict": "no",
       "outcome": "act",
-      "probability": 0.02
+      "probability": 0.01
     },
     "docs/react-native-integration.md": {
-      "sha256": "afb4b44525e31959bd7dafa1b2462b1607c5312f2fe1c075802edbb33ac75a66",
+      "sha256": "20c150d89f22b91b687cf3921ce7171c667bd0be20b0c00a9ab712cc4e2dae15",
       "verdict": "no",
       "outcome": "act",
-      "probability": 0.03
+      "probability": 0.01
     },
     "docs/web-ui-integration.md": {
-      "sha256": "dbc8263cf34f288faf675ed52c52a80b4b363bbc90344a4109c5bd26e77efee2",
+      "sha256": "3a8004dd58a0d7f0c1c21fa87d539f536db6a64d878832a360bbff3977f92725",
       "verdict": "no",
       "outcome": "act",
-      "probability": 0.02
+      "probability": 0.01
     },
     "test/workers-wrangler/wrangler.test.ts": {
-      "sha256": "581b9c5be4b9743b50b60d9e080024031123d8420ef5805feb2057fce919e6a2",
-      "verdict": "no",
-      "outcome": "act",
-      "probability": 0.03
-    },
-    "test/workers/SETUP.md": {
-      "sha256": "de30d2cbc852bb3d7b6ff8fc1d2988da6b49eeecb766392c32547943aa93415f",
+      "sha256": "eb27ac21586ca4017bb4513cb2d75a0198a4437b20f2327bc5fa0a336b0c0dcf",
       "verdict": "no",
       "outcome": "act",
       "probability": 0.02
     },
     "test/workers/workers.test.ts": {
-      "sha256": "f96164bbb053452e438c01ca4cac9aa7ae8697f2ad14861e63021c4070841273",
+      "sha256": "1bb887616a8a42d5f818501028922df955f4193d953d0b47d0570f7795613749",
       "verdict": "no",
       "outcome": "act",
-      "probability": 0.02
+      "probability": 0.03
     }
   }
 }

@@ -19,17 +19,26 @@ function operatorReviewed(issue: KnowledgeIssueRecord): boolean {
   return Boolean(review && typeof review === 'object' && !Array.isArray(review)
     && typeof (review as Record<string, unknown>).action === 'string');
 }
+const applyLegacy = Reflect.apply, getLegacy = WeakMap.prototype.get, setLegacy = WeakMap.prototype.set;
+const legacyExpectations = new WeakMap<KnowledgeIssueRecord, { readonly spaceId: string; readonly code: string; readonly nodeId: string; readonly id: string }>();
 /** Only the precise legacy generator footprint can be reconciled into its intended namespace. */
 export function isLegacyHomeGraphQualityIssue(issue: KnowledgeIssueRecord, spaceId: string): boolean {
-  return issue.metadata.namespace === spaceId && getKnowledgeSpaceId(issue) === spaceId
+  const code = issue.code, nodeId = issue.nodeId;
+  if (!(issue.metadata.namespace === spaceId && getKnowledgeSpaceId(issue) === spaceId
     && issue.metadata.generated === true && issue.metadata.homeGraph === true
-    && ['homegraph.device.missing_manual', 'homegraph.device.unknown_battery'].includes(issue.code)
-    && typeof issue.nodeId === 'string' && issue.sourceId === undefined && issue.metadata.subjectId === issue.nodeId
-    // Actual earlier saved codec only: this distinguishes a known prior plain-
-    // namespace generator from unrelated issues in that same namespace. It is
-    // not authentication or review authority. Current/opaque rows never hash.
-    && /^hg-issue-[0-9a-f]{24}$/.test(issue.id)
-    && issue.id === `hg-issue-${createHash('sha256').update(`${spaceId}:${issue.code}:${issue.nodeId}`).digest('hex').slice(0,24)}`;
+    && ['homegraph.device.missing_manual', 'homegraph.device.unknown_battery'].includes(code)
+    && typeof nodeId === 'string' && issue.sourceId === undefined && issue.metadata.subjectId === nodeId
+    && /^hg-issue-[0-9a-f]{24}$/.test(issue.id))) return false;
+  // Cache only the old recipe's expectation on this actual row object. Every
+  // call still checks the complete footprint above and compares the current ID;
+  // no cached classification or authorization outcome survives a field change.
+  // Native indexed selectors return the same original row to repeated guards.
+  let expected = applyLegacy(getLegacy, legacyExpectations, [issue]) as { readonly spaceId: string; readonly code: string; readonly nodeId: string; readonly id: string } | undefined;
+  if (!expected || expected.spaceId !== spaceId || expected.code !== code || expected.nodeId !== nodeId) {
+    expected = { spaceId, code, nodeId, id: `hg-issue-${createHash('sha256').update(`${spaceId}:${code}:${nodeId}`).digest('hex').slice(0,24)}` };
+    applyLegacy(setLegacy, legacyExpectations, [issue, expected]);
+  }
+  return issue.id === expected.id;
 }
 /** Ordinary namespace replacement, never operator authority; no await between final guard and commit. */
 export function commitGuardedKnowledgeIssueReplacement(view: IssueReplacementView,

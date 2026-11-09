@@ -241,6 +241,32 @@ for (const copied of [false, true]) test(`intake reuses only the actual recorded
   } finally { hash.mockRestore(); }
 });
 
+test('an absent borrowed decision ID has no fallback state-commitment consumer', async () => {
+  using log = new SqliteDecisionLog(':memory:'); const fake = answers(), recorded = withDecisionLog(fake.port, log);
+  const port: JudgmentPort = { ...recorded, ask: request => fake.port.ask(request) };
+  let assertions = 0;
+  const hashing = spyOn(Bun.CryptoHasher, 'hash');
+  try {
+    await expect(readNativeIntakeRoute({ ...input(port, log), assertCurrent() { assertions++; } })).rejects.toMatchObject({ kind: 'unrecorded' });
+    expect(fake.requests).toHaveLength(1); expect(log.query()).toHaveLength(0);
+    expect(assertions).toBeGreaterThan(1);
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+  } finally { hashing.mockRestore(); }
+});
+
+test('a duplicate borrowed decision ID refuses before computing a discarded fallback commitment', async () => {
+  using log = new SqliteDecisionLog(':memory:'); const fake = answers(), recorded = withDecisionLog(fake.port, log);
+  const routeEvidence = await readNativeIntakeRoute(input(recorded, log));
+  const port: JudgmentPort = { ...recorded, async ask(request) { return { ...await fake.port.ask(request), decisionId: routeEvidence.decisionId }; } };
+  const hashing = spyOn(Bun.CryptoHasher, 'hash');
+  try {
+    await expect(decideNativeIntake({ ...input(port, log), routeEvidence, requirements: requirements(), allowAct: true,
+      continuations: [repair], conditions: [] })).rejects.toMatchObject({ kind: 'unrecorded' });
+    expect(fake.requests).toHaveLength(2); expect(log.query()).toHaveLength(1);
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+  } finally { hashing.mockRestore(); }
+});
+
 test('a custom port cannot mutate the original source before its recorded-input comparison', async () => {
   using log = new SqliteDecisionLog(':memory:'); const fake = answers(), recorded = withDecisionLog(fake.port, log); let immutable = false;
   const selected: JudgmentPort = { ...recorded, async ask(request) {

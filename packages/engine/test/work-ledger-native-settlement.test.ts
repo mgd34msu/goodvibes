@@ -12,7 +12,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonicalJson, SqliteDecisionLog, withDecisionLog, createSystemOnePort, DEFAULT_MODEL, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
 import { createNativeWorkExecutionHost } from '../platform/src/platform/workflow/work-ledger/native-execution.js';
@@ -560,6 +560,30 @@ test('independent quality and exact recorded state are required even when every 
   const second = await g.host.start(g.target, g.authority); const contract = await completed(g.harness, second.admission.contractId);
   copied = contract.units[0]!.checks.at(-1)!.decisionIds[0];
   await expect(g.host.settle(g.key, g.authority)).rejects.toThrow('provenance'); expect(g.storage.current(g.key).ledger.evidence).toHaveLength(0);
+});
+
+test('native verifier never hashes a new borrowed wire state when its result cannot name a recorded decision', async () => {
+  const f = await fixture(); const started = await f.host.start(f.target, f.authority);
+  await completed(f.harness, started.admission.contractId);
+  const original = f.storage.current(f.key).record!;
+  const fake = fakePort(() => noulAnswer(0.01));
+  const attemptedStates = new Set<string>();
+  const port: JudgmentPort = { ...f.hostOptions.port, async ask(request) {
+    attemptedStates.add(canonicalJson(request.state));
+    return fake.port.ask(request);
+  } };
+  const hashing = spyOn(Bun.CryptoHasher, 'hash');
+  try {
+    await expect(verifyNativeWorkExecution({ execution: original, runner: f.harness.runner, port,
+      decisionLog: f.log, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
+      signal: new AbortController().signal, assertCurrent() {} })).rejects.toThrow('provenance');
+    expect(attemptedStates.size).toBeGreaterThan(0);
+    // Older source/output/receipt verifications have their own commitments.
+    // Only these exact new forwarded judge states lacked any possible reader.
+    expect(hashing.mock.calls.filter(([algorithm, state]) => algorithm === 'sha256'
+      && typeof state === 'string' && attemptedStates.has(state))).toHaveLength(0);
+    expect(f.storage.current(f.key).ledger.evidence).toHaveLength(0);
+  } finally { hashing.mockRestore(); }
 });
 
 test('a freshly reconstructed terminal runner verifies without restoring an execution owner or replaying effects', async () => {

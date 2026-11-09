@@ -1,8 +1,10 @@
 import { markCapturedInputPath } from './input-authority.js';
+import { retainOwnedJson, type RetainedOwnedJson } from '../gate/judgment-input.js';
 /** Local, content-addressed contract input. Membership grants no read or transmission permission. */
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { constants, type BigIntStats, type Dirent } from 'node:fs';
+import { constants, lstatSync, type BigIntStats, type Dirent } from 'node:fs';
+import { types as nodeTypes } from 'node:util';
 import { chmod, lstat, mkdir, mkdtemp, open, opendir, readlink, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir, uptime } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -58,6 +60,19 @@ export interface CaptureContractInputOptions {
 function contentDigest(data: Buffer): string { return createHash('sha256').update(data).digest('hex'); }
 function identity(stat: BigIntStats): string { return `${stat.dev}:${stat.ino}:${stat.mode}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`; }
 function directoryIdentity(stat: BigIntStats): string { return `${stat.dev}:${stat.ino}`; }
+interface InputFileObservation {
+  readonly file: ContractInputFile;
+  readonly size: number;
+  readonly assertCurrent: () => void;
+}
+interface InputOwnerObservation {
+  readonly metadata: RetainedOwnedJson;
+  readonly files: Map<string, InputFileObservation>;
+  index: string | undefined;
+}
+// Physical proof belongs to this exact admitted receipt only. No source bytes
+// are retained; copied/restored JSON must independently check its saved hashes.
+const inputOwnerObservations = new WeakMap<ContractInputSnapshot, InputOwnerObservation>();
 function safePath(path: string): boolean {
   return path.length > 0 && !isAbsolute(path) && !path.includes('\\') && !path.includes('\0') && path.split('/').every((part) => part !== '' && part !== '.' && part !== '..');
 }
@@ -174,6 +189,30 @@ async function directories(root: string, path: string): Promise<string[]> {
   }
   return result;
 }
+function retainFileObservation(root: string, file: ContractInputFile, parents: readonly string[], before: BigIntStats): InputFileObservation {
+  const retained = Object.freeze({ ...file }), path = retained.path;
+  const expected = identity(before), absolute = join(root, path);
+  const assertCurrent = () => {
+    try {
+      let current = root, index = 0;
+      for (const part of ['.', ...path.split('/').slice(0, -1)]) {
+        current = resolve(current, part);
+        const stat = lstatSync(current, { bigint: true });
+        if (!stat.isDirectory() || stat.isSymbolicLink() || directoryIdentity(stat) !== parents[index++])
+          throw new ContractInputOwnerChangedError('file', `contract input owner parent changed: ${path}`);
+      }
+      if (identity(lstatSync(absolute, { bigint: true })) !== expected)
+        throw new ContractInputOwnerChangedError('file', `contract input owner changed: ${path}`);
+    } catch (error) {
+      if (error instanceof ContractInputOwnerChangedError) throw error;
+      // Missing/unreadable original leaves or parents cannot be mistaken for
+      // an unrelated runtime fault merely because this was a warm check.
+      throw new ContractInputOwnerChangedError('file', `contract input original owner is unavailable: ${path}`);
+    }
+  };
+  assertCurrent();
+  return { file: retained, size: Number(before.size), assertCurrent };
+}
 async function readEntry(root: string, path: string, options: {
   readonly signal?: AbortSignal | undefined;
   readonly objectFormat: 'sha1' | 'sha256';
@@ -181,7 +220,10 @@ async function readEntry(root: string, path: string, options: {
   readonly verifyContentDigest: boolean;
   readonly knownObjects?: ReadonlySet<string> | undefined;
   readonly verified?: Map<string, ContractInputFile> | undefined;
+  readonly observations?: Map<string, InputFileObservation> | undefined;
 }): Promise<{ readonly file: ContractInputFile; readonly data?: Buffer; readonly size: number }> {
+  const observed = options.observations?.get(path);
+  if (observed) { observed.assertCurrent(); return { file: observed.file, size: observed.size }; }
   let parents: string[];
   try { parents = await directories(root, path); }
   catch (error) {
@@ -249,6 +291,7 @@ async function readEntry(root: string, path: string, options: {
   }
   if (identity(await lstat(absolute, { bigint: true })) !== identity(before) || JSON.stringify(await directories(root, path)) !== JSON.stringify(parents)) throw new Error(`contract input replaced while reading: ${path}`);
   const file = { path, kind, mode, oid, ...(strongDigest === undefined ? {} : { digest: strongDigest }), identity: identity(before) };
+  if (options.observations) options.observations.set(path, retainFileObservation(root, file, parents, before));
   options.verified?.set(path, file);
   return { file, ...(data ? { data } : {}), size: Number(before.size) };
 }
@@ -307,11 +350,12 @@ async function capture(root: string, options: CaptureContractInputOptions): Prom
   const alternateIndex = join(temporary, 'index');
   try {
     const files: ContractInputFile[] = [];
+    const observations = new Map<string, InputFileObservation>();
     const links = new Map<string, string>();
     let bytes = 0;
     for (const path of selected) {
       check();
-      const entry = await readEntry(root, path, { signal, objectFormat: format, knownObjects, storeObjects: true, verifyContentDigest: format === 'sha1' });
+      const entry = await readEntry(root, path, { signal, objectFormat: format, knownObjects, storeObjects: true, verifyContentDigest: format === 'sha1', observations });
       bytes += entry.size;
       if (options.maxBytes !== undefined && bytes > options.maxBytes) throw new Error('contract input exceeds byte bound selected by caller');
       if (entry.file.kind === 'symlink') links.set(path, entry.data!.toString());
@@ -329,10 +373,13 @@ async function capture(root: string, options: CaptureContractInputOptions): Prom
     // Encode generated opaque IDs without numeric runs; the privacy floor still
     // evaluates every original/captured path and must not be relaxed for UUIDs.
     const receipt: ContractInputSnapshot = { version: 2, id: randomUUID().replace(/[0-9]/g, (digit) => String.fromCharCode(107 + Number(digit))), sourceRoot: root, sourceIdentity, gitIdentity, ownerHead, ownerRef, indexFingerprint: index, inputTree, inputCommit, capturedAt: Date.now(), dirty, exclusions: [...CONTRACT_INPUT_EXCLUSIONS], files };
+    inputOwnerObservations.set(receipt, { metadata: retainOwnedJson(receipt, nodeTypes.isProxy), files: observations, index: originalIndex });
     check();
     await assertContractInputOwnerOriginal(receipt, signal, originalIndex);
     if (await indexIdentity(root) !== originalIndex) throw new Error('contract input index replaced during capture');
     check();
+    inputOwnerObservations.get(receipt)!.metadata.assertCurrent();
+    for (const observation of observations.values()) observation.assertCurrent();
     return receipt;
   } finally { await rm(temporary, { recursive: true, force: true }); }
 }
@@ -355,6 +402,14 @@ export async function assertContractInputOwner(snapshot: ContractInputSnapshot, 
  * incidental rewrite with the same staged entries/flags remains acceptable.
  */
 async function assertContractInputOwnerOriginal(snapshot: ContractInputSnapshot, signal?: AbortSignal, capturedIndex?: string): Promise<void> {
+  const observation = inputOwnerObservations.get(snapshot) ?? {
+    metadata: retainOwnedJson(snapshot, nodeTypes.isProxy), files: new Map<string, InputFileObservation>(), index: undefined,
+  };
+  observation.metadata.assertCurrent();
+  const original = snapshot;
+  // Use the exact detached metadata throughout awaits, then require every
+  // original slot to remain unchanged before retaining or reusing the proof.
+  snapshot = observation.metadata.snapshot as ContractInputSnapshot;
   const root = snapshot.sourceRoot;
   signal?.throwIfAborted();
   await assertOwnerGitIdle(root, signal);
@@ -370,7 +425,8 @@ async function assertContractInputOwnerOriginal(snapshot: ContractInputSnapshot,
     selectedIndex = current;
     return true;
   };
-  if (capturedIndex === undefined || capturedIndex !== selectedIndex) {
+  const retainedIndex = capturedIndex ?? observation.index;
+  if (retainedIndex === undefined || retainedIndex !== selectedIndex) {
     if (indexFingerprint(readLogicalIndex(root)) !== snapshot.indexFingerprint || await indexIdentity(root) !== selectedIndex)
       throw new ContractInputOwnerChangedError('index', 'contract input owner index changed');
   }
@@ -379,7 +435,7 @@ async function assertContractInputOwnerOriginal(snapshot: ContractInputSnapshot,
   const format = objectFormat(root);
   for (const file of snapshot.files) {
     signal?.throwIfAborted();
-    const current = (await readEntry(root, file.path, { signal, objectFormat: format, verifyContentDigest: snapshot.version === 1 || format === 'sha1' })).file;
+    const current = (await readEntry(root, file.path, { signal, objectFormat: format, verifyContentDigest: snapshot.version === 1 || format === 'sha1', observations: observation.files })).file;
     if (current.kind !== file.kind || current.mode !== file.mode || current.oid !== file.oid
       || (file.digest !== undefined && current.digest !== file.digest) || current.identity !== file.identity)
       throw new ContractInputOwnerChangedError('file', `contract input owner changed: ${file.path}`);
@@ -387,6 +443,12 @@ async function assertContractInputOwnerOriginal(snapshot: ContractInputSnapshot,
   signal?.throwIfAborted();
   await assertOwnerGitIdle(root, signal);
   if (await repositoryIdentity(root) !== snapshot.gitIdentity || directoryIdentity(await lstat(root, { bigint: true })) !== snapshot.sourceIdentity || !await indexMatches() || gitText(root, ['rev-parse', 'HEAD']) !== snapshot.ownerHead || gitText(root, ['rev-parse', '--abbrev-ref', 'HEAD']) !== snapshot.ownerRef || JSON.stringify(paths(root, snapshot.exclusions)) !== JSON.stringify(snapshot.files.map((file) => file.path))) throw new Error('contract input owner changed during recheck');
+  observation.metadata.assertCurrent();
+  // An earlier file can change while a later asynchronous check is running.
+  // Finish with the original complete physical readset, without another read.
+  for (const file of observation.files.values()) file.assertCurrent();
+  observation.index = selectedIndex;
+  inputOwnerObservations.set(original, observation);
 }
 
 /** Historical readers retain the recorded repository identity without requiring live owner files/HEAD. */

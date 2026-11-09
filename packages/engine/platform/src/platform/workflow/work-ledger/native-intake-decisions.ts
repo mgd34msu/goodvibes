@@ -142,13 +142,19 @@ function readSession(input: NativeIntakeReadInput, records: RecordedRead[] = [],
     const borrowed = await basePort.ask(forwarded);
     const captured = captureStrictJudgmentJson(borrowed, () => new JudgmentError('invalid-response', 'Native intake requires plain recorded response data'));
     const result = reuseObservedJudgmentResult(borrowed, captured);
+    const decisionId = result.decisionId;
+    if (!decisionId || records.some(record => record.id === decisionId)) {
+      // Preserve the original owner/attempt fence even when this result cannot
+      // possibly name a new saved reading. There is no commitment consumer.
+      beforeAttempt();
+      throw new JudgmentError('unrecorded', 'Native intake requires a fresh recorded judgment');
+    }
     // Only an actual recorded original may reuse its exact input commitment.
     // A custom/copy result must independently bind this captured input to the
     // real log once; a copied public decisionId cannot acquire provenance.
     const stateHash = recordedJudgmentInputHash(borrowed, forwarded) ?? hashState(state);
     beforeAttempt();
-    if (!result.decisionId || records.some(record => record.id === result.decisionId)) throw new JudgmentError('unrecorded', 'Native intake requires a fresh recorded judgment');
-    const record = { id: result.decisionId, stateHash, ...expected, answers: canonicalJson(result.answers as unknown as EntryType) };
+    const record = { id: decisionId, stateHash, ...expected, answers: canonicalJson(result.answers as unknown as EntryType) };
     assertRecorded(decisionLog, record); records.push(Object.freeze(record));
     return result;
   } };

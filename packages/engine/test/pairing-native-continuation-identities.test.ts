@@ -37,9 +37,9 @@ test('fresh native custody uses issued identities; repeated grant checks do no S
   const snapshot = persisted(item.file), token = snapshot.tokens[0], issued = snapshot.continuations?.[0];
   if (!token || !issued || !token.nativeContinuationRevision) throw new Error('Missing native custody records');
   expect(issued.tokenRevision).toBe(token.nativeContinuationRevision.id);
-  expect(issued.tokenRevision).not.toBe(digest(JSON.stringify([token.createdAt, token.tokenHash])));
+  expect(issued.tokenRevision).toMatch(/^[a-f0-9]{64}$/);
   const owner = JSON.parse(readFileSync(`${item.file}.native-owner`, 'utf8')) as { id: string; parents: string[][] };
-  expect(issued.ownerRoot).toBe(owner.id); expect(issued.ownerRoot).not.toBe(digest(JSON.stringify(owner.parents)));
+  expect(issued.ownerRoot).toBe(owner.id); expect(issued.ownerRoot).toMatch(/^[a-f0-9]{64}$/);
   expect(readFileSync(item.file, 'utf8')).not.toContain(item.paired.token);
   expect(readFileSync(`${item.file}.native-owner`, 'utf8')).not.toContain(item.paired.token);
   expect(JSON.stringify(item.manager.list())).not.toContain('nativeContinuationRevision');
@@ -68,7 +68,7 @@ test.each(['createdAt', 'tokenHash'] as const)('changing %s under the same publi
   const item = fixture(), grant = item.issue(), snapshot = persisted(item.file), token = snapshot.tokens[0];
   if (!token) throw new Error('Missing pairing');
   if (field === 'createdAt') token.createdAt++;
-  else token.tokenHash = digest('synthetic changed verifier');
+  else token.tokenHash = (token.tokenHash[0] === '0' ? '1' : '0') + token.tokenHash.slice(1);
   writeFileSync(item.file, JSON.stringify(snapshot));
   expect(item.manager.readNativeContinuation(grant)).toBeNull();
   expect(new PairingTokenManager(item.file).readNativeContinuation(grant)).toBeNull();

@@ -21,6 +21,7 @@
  * path with no branch of its own.
  */
 import { join } from 'node:path';
+import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 import type { DeviceAutonomousOwner, DeviceAdmission } from './device-autonomous.js';
 import {
   DEVICE_CAPABILITY_CONTRACT_VERSION,
@@ -109,6 +110,7 @@ export interface DeviceApprovalBridge {
 }
 
 export interface DevicePostureRuntimeOptions {
+  readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
   readonly transport: DevicePeerTransport;
   readonly autonomous?: DeviceAutonomousOwner | undefined;
   readonly approvals: DeviceApprovalBridge;
@@ -315,8 +317,10 @@ export function createDevicePostureRuntime(options: DevicePostureRuntimeOptions)
     },
   });
 
+  const declareNativeData = options.nativeDataWriter?.declare.bind(options.nativeDataWriter);
   const artifacts = new DeviceCaptureArtifactStore(join(stateDirectory, 'captures'), {
     policy: () => readDeviceArtifactPolicy(config),
+    ...(declareNativeData ? { beforeObservationWrite: () => declareNativeData('device-capture-observations-v2') } : {}),
   });
 
   const housekeeper = new DeviceHousekeeper({

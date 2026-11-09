@@ -79,6 +79,7 @@ export function createDevicePostureServices(options: DevicePostureCompositionOpt
     transport: options.distributedRuntime,
     approvals: options.approvals,
     config: options.configManager,
+    nativeDataWriter: options.configManager.getNativeDataWriter?.(),
     ...(nativeDeviceRecoveryObserver ? { observeRecovery: nativeDeviceRecoveryObserver } : {}),
     stateDirectory: options.stateDirectory,
     actor: DAEMON_DEVICE_ACTOR,

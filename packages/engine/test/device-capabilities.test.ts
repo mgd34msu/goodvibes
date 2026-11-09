@@ -444,16 +444,16 @@ describe('capture artifacts', () => {
     expect((await store.list()).length).toBe(0);
   });
 
-  test('a file with no index record is reaped as an orphan', async () => {
+  test('a file with no original pending custody proof is preserved for inspection', async () => {
     const store = new DeviceCaptureArtifactStore(join(root, 'captures'));
     await store.retain({
       nodeId: 'node-a', capabilityId: 'device.screen.capture', kind: 'image',
       mediaType: 'image/png', bytes: new Uint8Array([1]),
     });
-    writeFileSync(join(store.getDirectory(), 'orphan.png'), Buffer.from([7, 7]));
+    writeFileSync(join(store.getDirectory(), '11111111-1111-4111-9111-111111111111.png'), Buffer.from([7, 7]));
     const report = await store.sweep();
-    expect(report.removed.map((entry) => entry.reason)).toContain('orphan-file');
-    expect(existsSync(join(store.getDirectory(), 'orphan.png'))).toBe(false);
+    expect(report.removed.map((entry) => entry.reason)).not.toContain('orphan-file');
+    expect(existsSync(join(store.getDirectory(), '11111111-1111-4111-9111-111111111111.png'))).toBe(true);
   });
 
   test('a capture from a request is retained under the configured retention window', async () => {

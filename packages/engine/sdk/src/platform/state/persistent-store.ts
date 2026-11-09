@@ -294,6 +294,10 @@ export class PersistentStore<T extends Record<string, unknown>> {
       const handle = await fs.open(tmpPath, 'wx', FILE_MODE);
       try {
         options.onEffect?.(); assertCurrent();
+        // Set the actual created descriptor: an unusually restrictive umask
+        // must not publish an unreadable mode000 state file.
+        await handle.chmod(FILE_MODE);
+        assertCurrent();
         await handle.writeFile(content, 'utf-8');
         assertCurrent();
         await handle.sync();

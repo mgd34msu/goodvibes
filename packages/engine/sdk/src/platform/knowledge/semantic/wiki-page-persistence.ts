@@ -5,7 +5,7 @@ import type { KnowledgeSemanticExtraction, KnowledgeSemanticFactInput } from './
 import { semanticHash, semanticMetadata, semanticSlug } from './utils.js';
 
 export function prepareWikiPageNodeInput(
-  source: KnowledgeSourceRecord, semantic: KnowledgeSemanticExtraction, spaceId: string, textHash: string,
+  source: KnowledgeSourceRecord, semantic: KnowledgeSemanticExtraction, spaceId: string,
 ): KnowledgeNodeUpsertInput | undefined {
   const markdown = semantic.wikiPage?.markdown ?? renderDeterministicWikiPage(source, semantic.facts);
   if (!markdown.trim()) return undefined;
@@ -23,7 +23,7 @@ export function prepareWikiPageNodeInput(
       markdown,
       sourceId: source.id,
       extractor: semantic.extractor,
-      textHash,
+      textHash: undefined,
     }),
   };
 }

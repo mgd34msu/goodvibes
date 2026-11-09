@@ -6,6 +6,8 @@ import { repairProfileValueCandidates } from './repair-profile/reader.js';
 import { prepareKnowledgeExtractionValueReading } from './extraction-value/reader.js';
 import { guardKnowledgeEdgeInput } from '../store-edge-writes.js';
 import { captureKnowledgeSourceReferences, knowledgeSourceJudgmentUris, projectKnowledgeSourceReferences, prepareGeneratedKnowledgeNodeIdentity } from '../source-structural-references.js';
+import { retainGeneratedFactRecordReferences } from '../generated-fact-record-references.js';
+import { captureSemanticSourceRevision, semanticSourceIsCurrent, semanticSourceRevisionMetadata } from './source-revisions.js';
 import { createSemanticNodeSlugPlanner } from './node-slug.js';
 import { prepareObservedKnowledgeNodeInput } from '../store-node-observation.js';
 import { KnowledgeRecordAdmissionHeldError } from '../store-record-snapshot.js';
@@ -43,7 +45,6 @@ import {
   semanticMetadata,
   semanticSlug,
   sourceKnowledgeSpace,
-  sourceSemanticHash,
   sourceSemanticText,
   splitSentences,
   uniqueStrings,
@@ -98,21 +99,21 @@ export async function enrichKnowledgeSource(
   const structural = projectKnowledgeSourceReferences(source, extraction, captureKnowledgeSourceReferences(context.store, source, extraction));
   const generationSource = { id: structural?.sourceId ?? source.id, title: source.title, sourceType: source.sourceType, tags: source.tags,
     uri: uris.canonicalUri ?? uris.sourceUri ?? uris.url, provenance: sourceRankingContent(source).claimedProvenance };
-  const textHash = sourceSemanticHash(source, extraction);
+  const sourceCurrent = semanticSourceIsCurrent(context.store, source, extraction);
   const existingSemantic = readRecord(context.store.getSemanticEnrichmentState(source.id)?.metadata);
   const currentExtractor = readString(existingSemantic.extractor);
-  const shouldUpgradeDeterministic = Boolean(context.llm && existingSemantic.textHash === textHash && currentExtractor !== 'llm');
+  const shouldUpgradeDeterministic = Boolean(context.llm && sourceCurrent && currentExtractor !== 'llm');
   const scopeSelection = await prepareKnowledgeScopeSelection(context.store, { includeAllSpaces: true },
     { signal: options.signal, shouldStop: options.shouldStop, kinds: ['source'], sourceIds: [source.id] });
   generationGuard.watch('enrichment-source-scope', () => { scopeSelection.assertCurrent(); return true; });
   if (!scopeSelection.source(source)) {
     generationGuard.assertCurrent();
-    await markSourceSemanticState(context.store, source, textHash, {
+    await markSourceSemanticState(context.store, source, extraction, {
       skippedReason: 'source is outside active knowledge scope',
     }, generationGuard.assertCurrent);
     return emptyResult(source, true, 'source is outside active knowledge scope');
   }
-  if (!options.force && existingSemantic.textHash === textHash && !shouldUpgradeDeterministic) {
+  if (!options.force && sourceCurrent && !shouldUpgradeDeterministic) {
     return emptyResult(source, true, 'semantic enrichment is current');
   }
   // Admit the complete original source, extraction and candidates before any
@@ -146,10 +147,10 @@ export async function enrichKnowledgeSource(
     const retired = await persistSemanticExtraction(context.store, source, extraction, {
       extractor: 'deterministic', entities: [], facts: [], relations: [], gaps: [], wikiPage: { markdown: '' },
     }, { knowledgeSpaceId: spaceId, signal: options.signal, shouldStop: options.shouldStop,
-      textHash, assertCurrent: extractionValue.assertCurrent });
+      assertCurrent: extractionValue.assertCurrent });
     const assertRetirementCurrent = semanticPersistenceGuards.get(retired)!;
     assertRetirementCurrent();
-    await markSourceSemanticState(context.store, source, textHash, {
+    await markSourceSemanticState(context.store, source, extraction, {
       skippedReason: 'source states no concrete fact worth a semantic extraction attempt',
     }, assertRetirementCurrent);
     assertRetirementCurrent();
@@ -166,13 +167,12 @@ export async function enrichKnowledgeSource(
     knowledgeSpaceId: spaceId,
     signal: options.signal,
     shouldStop: options.shouldStop,
-    textHash,
     assertCurrent: extractionValue.assertCurrent,
   });
   assertSemanticWriteAllowed(options.signal, options.shouldStop);
   const assertPersistenceCurrent = semanticPersistenceGuards.get(persisted)!;
   assertPersistenceCurrent();
-  await markSourceSemanticState(context.store, source, textHash, {
+  await markSourceSemanticState(context.store, source, extraction, {
     extractor: semantic.extractor,
     factCount: persisted.facts.length,
     entityCount: persisted.entities.length,
@@ -317,7 +317,6 @@ async function persistSemanticExtraction(
   semantic: KnowledgeSemanticExtraction,
   options: {
     readonly knowledgeSpaceId?: string | undefined;
-    readonly textHash: string;
     readonly assertCurrent?: (() => void) | undefined;
     readonly signal?: AbortSignal | undefined;
     readonly shouldStop?: (() => boolean) | undefined;
@@ -364,7 +363,7 @@ async function persistSemanticExtraction(
         sourceId: source.id,
         extractionId: extraction?.id,
         extractor: semantic.extractor,
-        textHash: options.textHash,
+        textHash: undefined,
       }),
   })).map(nodeSlug);
   const entityIds = new Set(entityPlans.map((entity) => entity.id));
@@ -442,15 +441,15 @@ async function persistSemanticExtraction(
     virtualSupport.set(draft.factId, supportMetadata);
     const plan = { ...draft, supportMetadata, primarySourceId: await draft.resolve() };
     guard.assertCurrent(); assertQualityCurrent();
-    factPlans.push({ ...plan, nodeInput: nodeSlug(enrichmentFactNodeInput(plan, spaceId, extraction, semantic, options.textHash)) });
+    factPlans.push({ ...plan, nodeInput: nodeSlug(enrichmentFactNodeInput(plan, spaceId, extraction, semantic)) });
   }
   const applySupersession = await resolveSupersession();
   guard.assertCurrent(); assertQualityCurrent();
   const gapPlans = semantic.gaps.map((gap) => ({ gap, nodeInput: prepareObservedKnowledgeNodeInput(store, nodeSlug(enrichmentGapNodeInput(gap, source,
-    extraction, semantic, spaceId, options.textHash, store.getNode(`sem-gap-${semanticHash(spaceId, source.id, gap.question)}`))), 'research-task', { source, extraction },
+    extraction, semantic, spaceId, store.getNode(`sem-gap-${semanticHash(spaceId, source.id, gap.question)}`))), 'research-task', { source, extraction },
       () => ({ source: store.getSource(source.id), extraction: store.getExtractionBySourceId(source.id) })),
   }));
-  const wikiDraft = prepareWikiPageNodeInput(source, semantic, spaceId, options.textHash);
+  const wikiDraft = prepareWikiPageNodeInput(source, semantic, spaceId);
   for (const { gap } of gapPlans) nativeNodeId('sem-gap', spaceId, source.id, gap.question);
   if (wikiDraft) nativeNodeId('sem-page', spaceId, source.id);
   const wikiInput = wikiDraft ? nodeSlug(wikiDraft) : undefined;
@@ -473,7 +472,9 @@ async function persistSemanticExtraction(
     assertSemanticWriteAllowed(options.signal, options.shouldStop);
     assertQualityCurrent();
     const { factLinkedObjects, supportMetadata } = plan;
+    const previous = store.getNode(plan.factId) ?? undefined;
     const node = await store.upsertPreparedNode(activation, activationIndex++);
+    retainGeneratedFactRecordReferences(store, node, support.plans(plan.supportKey), previous, plan.factIdentity);
     facts.push(node);
     await linkSourceToNode(store, source.id, node.id, 'supports_fact', spaceId, semantic.extractor, { generatedFactSupport: supportMetadata }, assertQualityCurrent);
     await linkFactToSourceLinkedObjects(store, source.id, node, factLinkedObjects, spaceId, semantic.extractor, supportMetadata, assertQualityCurrent);
@@ -524,17 +525,21 @@ async function persistSemanticExtraction(
 async function markSourceSemanticState(
   store: KnowledgeStore,
   source: KnowledgeSourceRecord,
-  textHash: string,
+  extraction: KnowledgeExtractionRecord,
   details: Record<string, unknown>,
   assertCurrent: () => void = () => {},
 ): Promise<void> {
   // Derived bookkeeping in its own record, not the append-only source row. (Invariant 1.)
+  assertCurrent();
+  // Capture only after this pass has proved its actual final source/extraction
+  // owners. Never adopt a replacement just because it carries a newer revision.
+  const sourceRevision = captureSemanticSourceRevision(store, source, extraction);
+  assertCurrent();
   const enrichedAt = Date.now();
   await store.upsertSemanticEnrichmentState(guardKnowledgeSemanticStateInput({
     sourceId: source.id,
-    textHash,
     enrichedAt,
-    metadata: { textHash, enrichedAt, ...details },
+    metadata: { ...semanticSourceRevisionMetadata(sourceRevision), enrichedAt, ...details },
   }, assertCurrent));
 }
 

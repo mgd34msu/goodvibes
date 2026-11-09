@@ -68,6 +68,7 @@ import type {
 import {
   createSchema,
   KNOWLEDGE_SCHEMA_VERSION,
+  mapSemanticEnrichmentStateRow,
   nowMs,
   stableText,
   uniq,
@@ -1029,6 +1030,22 @@ export class KnowledgeStore {
 
   getSemanticEnrichmentState(sourceId: string): KnowledgeSemanticEnrichmentStateRecord | null {
     return this.semanticEnrichmentStates.get(sourceId) ?? null;
+  }
+
+  /** Saved enrichment metadata can skip work only when its complete native
+   * SQL row still matches the original cached record. */
+  getSemanticEnrichmentStateSnapshot(sourceId: string): KnowledgeSemanticEnrichmentStateRecord | null {
+    let current: KnowledgeSemanticEnrichmentStateRecord | null = null;
+    this.assertRecordSnapshotFrame(() => {
+      const result = this.sqlite.readPersistedSemanticEnrichmentState(sourceId)[0];
+      const values = result?.values[0];
+      const cached = this.semanticEnrichmentStates.get(sourceId) ?? null;
+      const saved = result && values ? mapSemanticEnrichmentStateRow(result.columns, values) : null;
+      if (!sameKnowledgeRecord(cached, saved)) throw new SemanticIdentityHeldError('stale');
+      current = cached;
+      return undefined;
+    });
+    return current;
   }
 
   async upsertSemanticEnrichmentState(input: {

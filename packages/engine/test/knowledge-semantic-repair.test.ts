@@ -404,8 +404,8 @@ describe('semantic knowledge/wiki enrichment: web repair and subject links', () 
     const facts = store.listNodes(100).filter((node) => node.kind === 'fact' && node.metadata.extractor === 'repair-promotion');
     expect(facts).toHaveLength(4);
     const display = facts.find((fact) => fact.title === 'Display and picture specifications')!;
-    expect(display.id).toBe('sem-fact-4998499605872f68');
-    expect(judgmentInputProblem({ id: display.id })).toBe('card-material');
+    expect(display.id).toMatch(/^sem-fact-[a-p-]+$/);
+    expect(judgmentInputProblem({ id: display.id })).toBeUndefined();
     expect(JSON.stringify(answerReadings.requests)).not.toContain(display.id);
     const answer = await semantic.answer({
       knowledgeSpaceId: spaceId,

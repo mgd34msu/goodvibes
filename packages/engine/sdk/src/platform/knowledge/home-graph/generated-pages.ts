@@ -1,5 +1,6 @@
 import { isClassicOperation, requireDecisionFeature } from '../../runtime/decision-policy.js';
 import { retainGeneratedFactRecordReferences } from '../generated-fact-record-references.js';
+import { createSemanticFactIdentityPlanner } from '../semantic/identity-plan.js';
 import { rankHomeGraphPageCandidates, HomeGraphPagePriorityHeldError } from './page-priority.js';
 import { prioritySubject } from './pages.js';
 import { knowledgeClockIso } from '../store-record-representation.js';
@@ -311,15 +312,18 @@ async function refreshHomeGraphDevicePassportNow(
     signal: context.signal,
   });
   let assertFactQualityCurrent = () => {};
+  const factIdentities = createSemanticFactIdentityPlanner(store);
   const initialPreparedProfileFacts = await prepareSourceLinkedRepairProfileFacts(
     pageProfileFacts.map((fact) => devicePageProfileFactInput(store, spaceId, installationId, device, fact)),
-    { signal: context.signal, assertCurrent: () => assertFactQualityCurrent() },
+    { signal: context.signal, assertCurrent: () => assertFactQualityCurrent(), identityPlanner: factIdentities },
   );
   throwIfAborted(context.signal);
   // Judge the final prepared source set and claim, including merged support.
   // Intermediate writes for the same claim are acknowledged against this plan.
-  const proposedFacts = uniqueNodesById(initialPreparedProfileFacts.plans.map((plan) => {
-    const original = pageProfileFacts.find((fact) => fact.node.id === plan.factId)!.node;
+  const proposedFacts = uniqueNodesById(initialPreparedProfileFacts.plans.map((plan, index) => {
+    // Prepared plans preserve input order. The native pass owns their stable
+    // identities; provisional profiles never mint a second guessed identifier.
+    const original = pageProfileFacts[index]!.node;
     return { ...original, ...repairProfileNodeInput(plan), id: plan.factId } as KnowledgeNodeRecord;
   }));
   const candidateFacts = uniqueNodesById([
@@ -341,12 +345,12 @@ async function refreshHomeGraphDevicePassportNow(
   assertFactQualityCurrent = assertPageCurrent;
   const semanticFacts = candidateFacts.filter((fact) => factPlan.accepts(fact));
   const acceptedIds = new Set(semanticFacts.map((fact) => fact.id));
-  const acceptedProfiles = pageProfileFacts.filter((fact) => acceptedIds.has(fact.node.id));
+  const acceptedProfiles = pageProfileFacts.filter((_fact, index) => acceptedIds.has(initialPreparedProfileFacts.plans[index]!.factId));
   const preparedProfileFacts = acceptedProfiles.length === pageProfileFacts.length
     ? initialPreparedProfileFacts
     : await prepareSourceLinkedRepairProfileFacts(
       acceptedProfiles.map((fact) => devicePageProfileFactInput(store, spaceId, installationId, device, fact)),
-      { signal: context.signal, assertCurrent: () => assertFactQualityCurrent() },
+      { signal: context.signal, assertCurrent: () => assertFactQualityCurrent(), identityPlanner: factIdentities },
     );
   const scopedNodeIds = new Set([device.id, ...entities.map((node) => node.id)]);
   const issues = filterDevicePassportIssues(issuesForScope(state.issues, state.edges, scopedNodeIds, sources), sources);

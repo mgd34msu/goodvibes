@@ -1,3 +1,4 @@
+import { readExactSemanticIds, readExactSemanticId } from '../store-semantic-fact-selector.js';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { createRepairSubjectSelectionReader } from './repair-subject-selection/reader.js';
 import { repairProfileSubject } from './repair-profile.js';
@@ -7,8 +8,9 @@ import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeExtractionRecord, KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
 import type { KnowledgeSemanticFactInput } from './types.js';
 import type { SemanticPrimarySourcePlanner, SemanticWriteGuard } from './primary-source-plan.js';
+import { prepareGeneratedFactIdentity } from '../generated-fact-record-references.js';
+import { createSemanticFactIdentityPlanner } from './identity-plan.js';
 import { exactKnowledgeIds, type GeneratedFactWritePlanner } from './fact-support-write-plan.js';
-import { readString, readStringArray, semanticFactId } from './utils.js';
 
 export async function prepareEnrichmentFactDrafts(input: {
   readonly signal?: AbortSignal | undefined;
@@ -26,6 +28,7 @@ export async function prepareEnrichmentFactDrafts(input: {
   readonly support: GeneratedFactWritePlanner;
 }) {
   const { spaceId, source, extraction, guard, primary, support } = input;
+  const factIdentities = createSemanticFactIdentityPlanner(input.store);
   const virtualSources = new Map<string, readonly string[]>();
   const originalExtractions = new Map([[source.id, extraction]]);
   const proposedIds = new Set(input.proposedEntities.map((subject) => subject.id));
@@ -60,12 +63,13 @@ export async function prepareEnrichmentFactDrafts(input: {
     const sourceLinkedObjectIds = factLinkedObjects.map((node) => node.id);
     const sourceTargetHints = factLinkedObjects.map((node) => ({ id: node.id, kind: node.kind, title: node.title }));
     const targetHints = fact.targetHints?.length ? fact.targetHints : sourceTargetHints;
-    const factId = semanticFactId({ spaceId, kind: fact.kind, title: fact.title,
-      value: fact.value, summary: fact.summary, subjectIds: sourceLinkedObjectIds, fallbackScope: source.id });
+    const factIdentity = prepareGeneratedFactIdentity(input.store, { spaceId, kind: fact.kind, title: fact.title,
+      value: fact.value, summary: fact.summary ?? fact.value ?? fact.evidence, subjectIds: sourceLinkedObjectIds, fallbackScope: source.id }, factIdentities);
+    const factId = factIdentity.id;
     const existingFact = guard.node(factId);
     const sourceIds = exactKnowledgeIds([
-      ...(virtualSources.get(factId) ?? readStringArray(existingFact?.metadata.sourceIds)),
-      readString(existingFact?.metadata.sourceId), existingFact?.sourceId, source.id,
+      ...(virtualSources.get(factId) ?? readExactSemanticIds(existingFact?.metadata.sourceIds)),
+      readExactSemanticId(existingFact?.metadata.sourceId), existingFact?.sourceId, source.id,
     ]);
     virtualSources.set(factId, sourceIds);
     const subjects = [...new Map([...factLinkedObjects, ...entitySubjects].map((subject) => [subject.id, subject])).values()];
@@ -76,10 +80,11 @@ export async function prepareEnrichmentFactDrafts(input: {
       value: fact.value, evidence: fact.evidence, subjects: factLinkedObjects.map(({ id, title, kind }) => ({ id, title, kind })),
       targetHints: fact.targetHints,
     }, sourceIds);
-    drafts.push({ fact, factId, existingFact, factLinkedObjects, sourceLinkedObjectIds, targetHints, sourceIds,
+    drafts.push({ fact, factId, factIdentity, existingFact, factLinkedObjects, sourceLinkedObjectIds, targetHints, sourceIds,
       supportKey, resolve, entitySubjectIds: new Set(entitySubjects.map((subject) => subject.id)) });
   }
   guard.watch('enrichment-fact-subject-readings', () => { reader.assertCurrent(); return true; });
+  guard.watch('enrichment-fact-identities', () => { factIdentities.assertCurrent(); return true; });
   return drafts;
 }
 function factClaim(id: string, fact: KnowledgeSemanticFactInput) {

@@ -4,7 +4,7 @@ import type { KnowledgeExtractionRecord, KnowledgeNodeRecord, KnowledgeSourceRec
 import { deriveRepairProfileFactPass, repairProfileSourceText, repairProfileSubject, type RepairProfileFact } from '../semantic/repair-profile.js';
 import { captureKnowledgeSourceReferences } from '../source-structural-references.js';
 import { createSemanticWriteGuard } from '../semantic/primary-source-plan.js';
-import { semanticFactId, semanticSlug } from '../semantic/utils.js';
+import { semanticSlug } from '../semantic/utils.js';
 import type { SourceLinkedRepairProfileFactInput } from '../semantic/self-improvement-promotion.js';
 import { buildHomeGraphMetadata } from './helpers.js';
 import type { HomeGraphPageSourceReader } from './page-quality.js';
@@ -18,7 +18,7 @@ function throwIfAborted(signal?: AbortSignal): void {
 }
 
 export interface DevicePageProfileFactPlan {
-  readonly node: Omit<KnowledgeNodeRecord, 'confidence'>;
+  readonly node: Omit<KnowledgeNodeRecord, 'confidence' | 'id'>;
   readonly source: KnowledgeSourceRecord;
   readonly extraction: KnowledgeExtractionRecord;
   readonly title: string;
@@ -66,18 +66,8 @@ export async function buildDevicePageProfileFacts(input: {
       const subjectIds = [input.device.id];
       const sourceIds = [source.id];
       const now = Date.now();
-      const factId = semanticFactId({
-        spaceId: input.spaceId,
-        kind: profileFact.kind,
-        title: profileFact.title,
-        value: profileFact.value,
-        summary: profileFact.summary,
-        subjectIds,
-        fallbackScope: source.id,
-      });
       facts.push({
         node: {
-          id: factId,
           kind: 'fact',
           slug: semanticSlug(`${input.spaceId}-${profileFact.title}-${profileFact.summary}-${source.id}`),
           title: profileFact.title,

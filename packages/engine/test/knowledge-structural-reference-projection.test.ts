@@ -7,13 +7,13 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, scoreAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { judgmentInputProblem, JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { semanticFactId } from '../sdk/src/platform/knowledge/semantic/utils.js';
+import { historicalSemanticFactId } from './_helpers/historical-semantic-identity.js';
 import { prepareSourceLinkedRepairProfileFacts } from '../sdk/src/platform/knowledge/semantic/self-improvement-promotion.js';
 import { prepareGeneratedFactSupport, KnowledgeGeneratedFactSupportHeldError, type GeneratedFactSupportInput } from '../sdk/src/platform/knowledge/semantic/verification/generated-fact-support.js';
 import { withEngineGeneratedSupportReferences } from '../sdk/src/platform/knowledge/semantic/verification/structural-references.js';
 
 const spaceId = 'support-test';
-const actualClaimId = semanticFactId({ spaceId, kind: 'specification', title: 'HDMI ports', value: 'four hdmi ports', subjectIds: ['synthetic-repro-subject-767'] });
+const actualClaimId = historicalSemanticFactId({ spaceId, kind: 'specification', title: 'HDMI ports', value: 'four hdmi ports', subjectIds: ['synthetic-repro-subject-767'] });
 // A synthetic protected-shaped label tests path specificity; it is not a card.
 const generatedSubjectId = 'sem-entity-4111111111111111';
 let previous: JudgmentPort | undefined;

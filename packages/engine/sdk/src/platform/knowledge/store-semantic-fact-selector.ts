@@ -18,6 +18,18 @@ export const exactSemanticIds = (ids: readonly string[]): string[] => {
   if (ids.some(id => typeof id !== 'string' || id.length === 0)) throw new SemanticIdentityHeldError('malformed');
   return [...new Set(ids)].sort();
 };
+/** Relationship identifiers are exact saved values, never display-normalized. */
+export function readExactSemanticIds(value: unknown): readonly string[] {
+  if (value === undefined) return [];
+  const captured = captureStrictJudgmentJson(value);
+  if (!Array.isArray(captured) || captured.some(id => typeof id !== 'string' || !id)) throw new SemanticIdentityHeldError('malformed');
+  return [...new Set(captured as string[])];
+}
+export function readExactSemanticId(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !value) throw new SemanticIdentityHeldError('malformed');
+  return value;
+}
 export function semanticFactSelector(input: { readonly spaceId: string; readonly kind: string; readonly title: string;
   readonly summary?: string | undefined; readonly value?: string | undefined; readonly subjectIds?: readonly string[] | undefined; readonly fallbackScope?: string | undefined }): SemanticFactSelector {
   const value = captureStrictJudgmentJson(input), subjectIds = exactSemanticIds(value.subjectIds ?? []);

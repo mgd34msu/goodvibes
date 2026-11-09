@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- Keep exact Unicode, punctuation, case, qualifiers and subject sets when reusing
+  semantic facts. New facts use full opaque IDs; existing facts keep their saved
+  ID only after an exact stored claim and scope match. Ambiguous historical
+  origins and unknown identity formats remain held. Device profile pages use
+  their actual prepared fact identities through selection and publication.
+  Enrichment freshness uses original saved source/extraction revisions; old text
+  commitments are read only for actual historical cache records.
+
 - Preserve shared artifacts during HomeGraph resets and failed multimodal
   writeback. Cleanup now checks original files and saved references across all
   configured knowledge stores, with separate counts for retained candidates.

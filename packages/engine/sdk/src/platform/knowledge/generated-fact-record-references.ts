@@ -2,12 +2,13 @@ import { isDeepStrictEqual } from 'node:util';
 import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
 import { knowledgeClockIso, sameKnowledgeRecord } from './store-record-representation.js';
 import { captureNativeGeneratedFactPlanReferences } from './semantic/fact-support-write-plan.js';
-import { semanticFactId } from './semantic/utils.js';
+import { createSemanticFactIdentityPlanner, prepareSemanticFactIdentity, type PlannedSemanticFactIdentity, type SemanticFactIdentityPlanner } from './semantic/identity-plan.js';
+import { semanticFactIdentityMetadata, type semanticFactSelector } from './store-semantic-fact-selector.js';
 import { KnowledgeGeneratedFactSupportHeldError as Held, type GeneratedFactSupportPlan, type GeneratedFactSupportReceipt } from './semantic/verification/types.js';
 import { hasKnowledgeNodePublication, knowledgeNodePublicationGeneration, type KnowledgeStore } from './store.js';
 import type { KnowledgeNodeRecord } from './types.js';
 
-const nativeApply = Reflect.apply;
+const nativeApply = Reflect.apply, nativeFreeze = Object.freeze;
 const nativeWeakMapGet = WeakMap.prototype.get, nativeWeakMapSet = WeakMap.prototype.set;
 function privateMapGet<K extends object, V>(map: WeakMap<K, V>, key: K): V | undefined {
   return nativeApply(nativeWeakMapGet, map, [key]);
@@ -28,14 +29,15 @@ interface NativeFactRecord {
   readonly assertSourcesCurrent: () => void;
 }
 const records = new WeakMap<KnowledgeNodeRecord, NativeFactRecord>();
-export interface GeneratedFactIdentity { readonly id: string; }
-const identities = new WeakMap<GeneratedFactIdentity, { readonly store: KnowledgeStore; readonly id: string }>();
+export interface GeneratedFactIdentity { readonly id: string; readonly metadata: Readonly<Record<string, unknown>>; assertCurrent(): void; }
+const identities = new WeakMap<GeneratedFactIdentity, { readonly store: KnowledgeStore; readonly id: string; readonly assertCurrent: () => void }>();
 
 /** Invoke the existing native identity constructor; no supplied ID is admitted. */
-export function prepareGeneratedFactIdentity(store: KnowledgeStore, input: Parameters<typeof semanticFactId>[0]): GeneratedFactIdentity {
-  const id = semanticFactId(captureStrictJudgmentJson(input));
-  const identity = Object.freeze({ id });
-  privateMapSet(identities, identity, Object.freeze({ store, id }));
+export function prepareGeneratedFactIdentity(store: KnowledgeStore, input: Parameters<typeof semanticFactSelector>[0], planner: SemanticFactIdentityPlanner = createSemanticFactIdentityPlanner(store)): GeneratedFactIdentity {
+  const planned: PlannedSemanticFactIdentity = prepareSemanticFactIdentity(planner, store, input), id = planned.id;
+  const metadata = semanticFactIdentityMetadata(planned.selector); if (Array.isArray(metadata.subjectIds)) nativeFreeze(metadata.subjectIds);
+  const identity = nativeFreeze({ id, metadata: nativeFreeze(metadata), assertCurrent: planned.assertCurrent });
+  privateMapSet(identities, identity, nativeFreeze({ store, id, assertCurrent: planned.assertCurrent }));
   return identity;
 }
 
@@ -53,6 +55,7 @@ export function retainGeneratedFactRecordReferences(store: KnowledgeStore, recor
   if (prior && (prior.store !== store || previous?.id !== record.id || !sameKnowledgeRecord(prior.original, previous))) throw new Held('stale');
   const generated = identity ? privateMapGet(identities, identity) : undefined;
   if (identity && (!generated || generated.store !== store || generated.id !== record.id)) throw new Held('stale');
+  generated?.assertCurrent();
   if (!generated && !prior) throw new Held('stale');
   for (const plan of native) plan.assertCurrent();
   const generation = knowledgeNodePublicationGeneration(store, record, previous);

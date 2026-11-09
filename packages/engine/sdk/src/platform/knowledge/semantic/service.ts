@@ -19,8 +19,9 @@ import type {
   KnowledgeSemanticSelfImproveInput,
   KnowledgeSemanticSelfImproveResult,
 } from './types.js';
-import { readRecord, readString, readStringArray, sourceSemanticHash } from './utils.js';
+import { readRecord, readString, readStringArray } from './utils.js';
 import { uniqueStrings } from './utils.js';
+import { semanticSourceIsCurrent } from './source-revisions.js';
 import { runKnowledgeSemanticSelfImprovement } from './self-improvement.js';
 import {
   BackgroundSelfImproveScheduler,
@@ -706,7 +707,7 @@ function sourceNeedsLlmUpgrade(store: KnowledgeStore, source: KnowledgeSourceRec
   const extraction = store.getExtractionBySourceId(source.id);
   if (!extraction) return false;
   const existingSemantic = readRecord(store.getSemanticEnrichmentState(source.id)?.metadata);
-  return existingSemantic.textHash !== sourceSemanticHash(source, extraction)
+  return !semanticSourceIsCurrent(store, source, extraction)
     || readString(existingSemantic.extractor) !== 'llm';
 }
 

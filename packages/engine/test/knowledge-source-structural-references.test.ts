@@ -23,7 +23,7 @@ import { createKnowledgePageSourceReader } from '../sdk/src/platform/knowledge/s
 import { rankHomeGraphPageCandidates } from '../sdk/src/platform/knowledge/home-graph/page-priority.js';
 import { sourceRankingContent } from '../sdk/src/platform/knowledge/semantic/answer-source-ranking.js';
 import { enrichKnowledgeSource } from '../sdk/src/platform/knowledge/semantic/enrichment.js';
-import { sourceSemanticHash } from '../sdk/src/platform/knowledge/semantic/utils.js';
+import { semanticSourceIsCurrent } from '../sdk/src/platform/knowledge/semantic/source-revisions.js';
 import { prepareAnswerGapUniverse } from '../sdk/src/platform/knowledge/semantic/answer-gaps.js';
 
 const spaceId = 'homeassistant:house';
@@ -327,17 +327,18 @@ describe('fresh generated source and extraction references', () => {
     second.extraction.metadata.origin = 'changed after producer mint';
     expect(() => captureKnowledgeSourceReferences(second.store, second.source, second.extraction)).toThrow(KnowledgeGeneratedFactSupportHeldError);
   });
-  test('actual minted-URI enrichment minimizes generation input while keeping original semantic hash and receipts', async () => {
+  test('actual minted-URI enrichment minimizes generation input while binding original saved revisions and receipts', async () => {
     const fake = readings(); const { store, source, extraction } = await fixture('00001af0');
-    const originalHash = sourceSemanticHash(source, extraction); const prompts: string[] = [];
+    const prompts: string[] = [];
     const result = await enrichKnowledgeSource({ store, llm: { async completeText() { throw new Error('Unexpected text generation in enrichment fixture'); }, async completeJson(input) {
       prompts.push(input.prompt); return { facts: [{ kind: 'specification', title: 'AC-7 ports', summary: 'AC-7 has four HDMI ports.', evidence: 'AC-7 has four HDMI ports.', confidence: 12 }], entities: [], relations: [], gaps: [] };
     } } }, source, { force: true, knowledgeSpaceId: spaceId });
     expect(prompts).toHaveLength(1); expect(JSON.stringify(prompts)).not.toContain(source.canonicalUri!);
     expect(JSON.stringify(prompts)).not.toContain(source.id); expect(JSON.stringify(prompts)).toContain('four HDMI ports');
     expect(result.facts.length).toBeGreaterThan(0); expect(result.facts.every((fact) => fact.status === 'active')).toBe(true);
-    expect(store.getSemanticEnrichmentState(source.id)!.metadata.textHash).toBe(originalHash);
-    expect(sourceSemanticHash(store.getSource(source.id)!, store.getExtractionBySourceId(source.id))).toBe(originalHash);
+    expect(store.getSemanticEnrichmentState(source.id)!.metadata.textHash).toBeUndefined();
+    expect(store.getSemanticEnrichmentState(source.id)!.metadata.semanticSourceVersion).toBe(2);
+    expect(semanticSourceIsCurrent(store, store.getSource(source.id)!, store.getExtractionBySourceId(source.id)!)).toBe(true);
     expect(JSON.stringify(fake.requests)).not.toContain(source.canonicalUri!);
   });
   test('real protected semantic content is never hidden by a structural capsule', async () => {

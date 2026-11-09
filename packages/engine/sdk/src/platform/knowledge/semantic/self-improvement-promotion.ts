@@ -1,3 +1,5 @@
+import { observeKnowledgeValue } from '../local-value-observation.js';
+import { readExactSemanticIds, readExactSemanticId } from '../store-semantic-fact-selector.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { assertKnowledgeRecordAdmissions, assertKnowledgeRecordContainers, KnowledgeRecordAdmissionHeldError, prepareKnowledgeRecordAdmission } from '../store-record-snapshot.js';
 import { captureOwnedJson, retainOwnedJson } from '../../gate/judgment-input.js';
@@ -40,6 +42,7 @@ import { prepareRepairProfileWriteData, repairProfileNodeInput } from './repair-
 import { prepareRepairFactScoring, type RepairFactScoringReading } from './repair-fact-scoring/reader.js';
 import { prepareRepairProfileRequirement } from './repair-profile-requirement/reader.js';
 import { prepareSelfImprovementAssessment } from './self-improvement-assessment/plan.js';
+import { assertSemanticFactIdentityPlanner, createSemanticFactIdentityPlanner, type SemanticFactIdentityPlanner } from './identity-plan.js';
 import { KnowledgeGeneratedFactSupportHeldError, type GeneratedFactSupportPlan } from './verification/types.js';
 import {
   normalizeWhitespace,
@@ -48,7 +51,6 @@ import {
   readStringArray,
   semanticMetadata,
   sourceSemanticText,
-  uniqueStrings,
 } from './utils.js';
 
 export interface SelfImprovePromotionContext {
@@ -207,7 +209,7 @@ async function promoteRepairSourcesWithinBudget(
     }
   }
   assertSemanticWriteAllowed(signal, context.shouldStop);
-  const promotionSourceIds = processedSourceIds.length > 0 ? uniqueStrings(processedSourceIds) : sourceIds;
+  const promotionSourceIds = processedSourceIds.length > 0 ? exactKnowledgeIds(processedSourceIds) : sourceIds;
   if (processedSourceIds.length === 0) await promote(sourceIds);
   let finalUsefulness: Awaited<ReturnType<typeof countUsable>>;
   if (sufficientCount && completedLinkSourceIds
@@ -460,11 +462,11 @@ export interface PreparedSourceLinkedRepairProfileFacts {
 /** Resolve the entire pass before opening a batch. write() performs no judgments. */
 export async function prepareSourceLinkedRepairProfileFacts(
   inputs: readonly SourceLinkedRepairProfileFactInput[],
-  options: { readonly signal?: AbortSignal | undefined; readonly shouldStop?: (() => boolean) | undefined; readonly assertCurrent?: (() => void) | undefined } = {},
+  options: { readonly signal?: AbortSignal | undefined; readonly shouldStop?: (() => boolean) | undefined; readonly assertCurrent?: (() => void) | undefined; readonly identityPlanner?: SemanticFactIdentityPlanner | undefined } = {},
 ): Promise<PreparedSourceLinkedRepairProfileFacts> {
-  const signal = options.signal, shouldStop = options.shouldStop, callerCurrent = options.assertCurrent;
+  const signal = options.signal, shouldStop = options.shouldStop, callerCurrent = options.assertCurrent, originalIdentityPlanner = options.identityPlanner;
   const assertOriginalOptions = () => {
-    if (options.signal !== signal || options.shouldStop !== shouldStop || options.assertCurrent !== callerCurrent) throw new KnowledgeRepairSourceAuthorityHeldError('stale');
+    if (options.signal !== signal || options.shouldStop !== shouldStop || options.assertCurrent !== callerCurrent || options.identityPlanner !== originalIdentityPlanner) throw new KnowledgeRepairSourceAuthorityHeldError('stale');
     assertSemanticWriteAllowed(signal, shouldStop);
   };
   const assertCallerCurrent = () => {
@@ -481,11 +483,11 @@ export async function prepareSourceLinkedRepairProfileFacts(
   if (!store) return { plans: [], assertCurrent() {}, async write(): Promise<KnowledgeNodeRecord[]> { return []; } };
   const originalInputs = inputs.map((original) => {
     const { store: _store, metadataBuilder: _builder, ...data } = original;
-    const retained = retainOwnedJson(data), version = JSON.stringify(retained.snapshot);
+    const retained = retainOwnedJson(data), observed = observeKnowledgeValue(retained.snapshot);
     return () => {
       retained.assertCurrent();
       const { store: _currentStore, metadataBuilder: _currentBuilder, ...currentData } = original;
-      if (JSON.stringify(captureOwnedJson(currentData)) !== version) throw new KnowledgeRepairSourceAuthorityHeldError('stale');
+      if (!observed.matches(currentData)) throw new KnowledgeRepairSourceAuthorityHeldError('stale');
     };
   });
   const originalStores = inputs.map(input => input.store), originalBuilders = inputs.map(input => input.metadataBuilder);
@@ -496,8 +498,10 @@ export async function prepareSourceLinkedRepairProfileFacts(
     for (const assertCurrent of originalInputs) { try { assertCurrent(); } catch { throw new KnowledgeRepairSourceAuthorityHeldError('stale'); } }
   };
   const guard = createSemanticWriteGuard(store, signal, shouldStop);
+  const factIdentities = originalIdentityPlanner ?? createSemanticFactIdentityPlanner(store);
+  assertSemanticFactIdentityPlanner(factIdentities, store);
   guard.watch('original-repair-fact-inputs', () => { assertInputsCurrent(); return true; });
-  const planningGuard = { ...guard, assertCurrent() { assertCallerCurrent(); guard.assertCurrent(); } };
+  const planningGuard = { ...guard, assertCurrent() { assertCallerCurrent(); guard.assertCurrent(); factIdentities.assertCurrent(); } };
   const planner = createSemanticPrimarySourcePlanner(store, planningGuard, signal);
   const support = createGeneratedFactWritePlanner(store, planningGuard, { signal });
   const virtualSources = new Map<string, readonly string[]>();
@@ -512,12 +516,12 @@ export async function prepareSourceLinkedRepairProfileFacts(
     for (const subject of input.subjects) guard.node(subject.id, subject);
     const subjectIds = input.subjects.map((subject) => subject.id);
     const factIdentity = prepareGeneratedFactIdentity(store, { spaceId: input.spaceId, kind: input.classification.kind,
-      title: input.title, value: input.classification.value, summary: input.summary, subjectIds, fallbackScope: input.source.id });
+      title: input.title, value: input.classification.value, summary: input.summary, subjectIds, fallbackScope: input.source.id }, factIdentities);
     const factId = factIdentity.id;
     const existingFact = guard.node(factId);
     const sourceIds = exactKnowledgeIds([
-      ...(virtualSources.get(factId) ?? readStringArray(existingFact?.metadata.sourceIds)),
-      readString(existingFact?.metadata.sourceId), existingFact?.sourceId, input.source.id,
+      ...(virtualSources.get(factId) ?? readExactSemanticIds(existingFact?.metadata.sourceIds)),
+      readExactSemanticId(existingFact?.metadata.sourceId), existingFact?.sourceId, input.source.id,
     ]);
     virtualSources.set(factId, sourceIds);
     const supportKey = support.add(input.spaceId, {
@@ -606,20 +610,20 @@ export async function prepareSourceLinkedRepairProfileFacts(
     if (!scoring || scoring.reference !== scoringInputs[index]?.reference) throw new KnowledgeRepairFactUsefulnessHeldError('malformed');
     const supportPlans = Object.freeze([...support.plans(supportKey)]);
     const writeData = freezePlanData(prepareRepairProfileWriteData(input, primarySourceId, sourceIds,
-      supportPlans, virtualSupport.get(factId) ?? existingFact?.metadata.generatedFactSupport, scoring));
+      supportPlans, virtualSupport.get(factId) ?? existingFact?.metadata.generatedFactSupport, scoring, factIdentity.metadata));
     virtualSupport.set(factId, writeData.factMetadata.generatedFactSupport);
     plans.push(Object.freeze({ input, factId, sourceIds: Object.freeze([...sourceIds]), primarySourceId, writeData, scoring,
       supportPlans, factIdentity, previousFact: existingFact ?? undefined }));
   }
   const assertScoringCurrent = () => { assertInputsCurrent(); scoringPlan.assertCurrent(); };
-  const assertActivationCurrent = () => { assertCallerCurrent(); assertScoringCurrent(); };
+  const assertActivationCurrent = () => { assertCallerCurrent(); assertScoringCurrent(); factIdentities.assertCurrent(); };
   const nodeSlug = createSemanticNodeSlugPlanner(store);
   guard.assertCurrent(); assertScoringCurrent();
   const activation = await store.prepareNodeWrites(plans.map(repairProfileNodeInput).map(nodeSlug), { signal, requireAccepted: true, assertCurrent: assertActivationCurrent });
   guard.assertCurrent(); scoringPlan.assertCurrent();
   return {
     plans: Object.freeze(plans),
-    assertCurrent: () => { store.assertRecordSnapshotFrame(() => { assertOriginalOptions(); guard.assertCurrent(); assertScoringCurrent(); store.assertPreparedNodeWrites(activation); }); },
+    assertCurrent: () => { store.assertRecordSnapshotFrame(() => { assertOriginalOptions(); guard.assertCurrent(); assertScoringCurrent(); factIdentities.assertCurrent(); store.assertPreparedNodeWrites(activation); }); },
     async write(observer?: RepairProfileWriteObserver): Promise<KnowledgeNodeRecord[]> {
       // Callers may have awaited other prepared work since this plan resolved.
       // Validate once at entry, before this pass intentionally changes its rows.
@@ -628,7 +632,7 @@ export async function prepareSourceLinkedRepairProfileFacts(
       for (const [index, plan] of plans.entries()) {
         assertOriginalOptions();
         facts.push(await writeResolvedSourceLinkedRepairProfileFact(plan, observer,
-          () => { assertCallerCurrent(); assertScoringCurrent(); }, () => store.upsertPreparedNode(activation, index)));
+          () => { assertCallerCurrent(); assertScoringCurrent(); factIdentities.assertCurrent(); }, () => store.upsertPreparedNode(activation, index)));
       }
       return facts;
     },
@@ -713,7 +717,7 @@ async function linkPromotedFactsToRepairSubjects(
   const candidates = [...new Map(sourceIds.flatMap((sourceId) => [
     ...factsForSource(sourceId, graph.edges, graph.nodesById),
     ...[...graph.nodesById.values()].filter((node) => node.kind === 'fact' && node.status === 'active'
-      && exactKnowledgeIds([node.sourceId, readString(node.metadata.sourceId), ...readStringArray(node.metadata.sourceIds)]).includes(sourceId)),
+      && exactKnowledgeIds([node.sourceId, readExactSemanticId(node.metadata.sourceId), ...readExactSemanticIds(node.metadata.sourceIds)]).includes(sourceId)),
   ]).map((fact) => [fact.id, fact])).values()].filter(isRepairFactKind);
   const prepared = await prepareRepairUsefulness({ store, spaceId, gap, subjects, candidates, guard, reader });
   await writeSupportedRepairSubjectLinks({ store, spaceId, gap, sourceIds, subjects, signal, shouldStop,
@@ -771,7 +775,7 @@ async function repairSourceFactCandidates(store: KnowledgeStore, spaceId: string
     const ids = countSourcesByFactId.get(edge.toId) ?? new Set<string>(); ids.add(edge.fromId); countSourcesByFactId.set(edge.toId, ids);
   }
   const facts = [...graph.nodesById.values()].filter(node => node.kind === 'fact' && node.status === 'active' && isRepairFactKind(node)
-    && (linked.has(node.id) || exactKnowledgeIds([node.sourceId, readString(node.metadata.sourceId), ...readStringArray(node.metadata.sourceIds)])
+    && (linked.has(node.id) || exactKnowledgeIds([node.sourceId, readExactSemanticId(node.metadata.sourceId), ...readExactSemanticIds(node.metadata.sourceIds)])
       .some(id => sources.has(id)) || factSourceIds(node, countSourcesByFactId).some(id => sources.has(id))));
   graph.assertCurrent(); return { facts, assertCurrent: graph.assertCurrent };
 }
@@ -787,16 +791,16 @@ async function linkedRepairSubjects(
     nodeIds: store.listNodesInSpace(spaceId).filter(node => node.kind !== 'fact').map(node => node.id) });
   const edges = graph.edges;
   const nodesById = graph.nodesById;
-  const sourceIds = uniqueStrings([
+  const sourceIds = exactKnowledgeIds([
     gap.sourceId,
-    ...readStringArray(gap.metadata.sourceIds),
+    ...readExactSemanticIds(gap.metadata.sourceIds),
     ...edges
       .filter((edge) => edge.toKind === 'node' && edge.toId === gap.id && edge.fromKind === 'source')
       .map((edge) => edge.fromId),
   ]);
   const guard = captureRepairSubjectReadSet(store, gap, evidenceSourceIds, signal, shouldStop);
   const selected = await canonicalRepairSubjectNodes({ store, spaceId, context: { gap }, signal, shouldStop,
-    evidenceSources: uniqueStrings([...sourceIds, ...evidenceSourceIds]).map(id => store.getSource(id))
+    evidenceSources: exactKnowledgeIds([...sourceIds, ...evidenceSourceIds]).map(id => store.getSource(id))
       .filter((source): source is KnowledgeSourceRecord => source !== null),
     text: `${gap.title} ${gap.summary ?? ''}`,
     objectProfiles,
@@ -838,9 +842,9 @@ async function countUsableRepairFacts(
     .filter(isRepairFactKind)
     .filter((node) => {
       if (subjectIds.size === 0) return true;
-      const linkedIds = uniqueStrings([
-        ...readStringArray(node.metadata.linkedObjectIds),
-        ...readStringArray(node.metadata.subjectIds),
+      const linkedIds = exactKnowledgeIds([
+        ...readExactSemanticIds(node.metadata.linkedObjectIds),
+        ...readExactSemanticIds(node.metadata.subjectIds),
       ]);
       return linkedIds.some((id) => subjectIds.has(id));
     });
@@ -852,9 +856,9 @@ function factSourceIds(
   fact: KnowledgeNodeRecord,
   sourceIdsByFactId: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
 ): string[] {
-  return uniqueStrings([
-    ...readStringArray(fact.metadata.sourceIds),
-    readString(fact.metadata.sourceId),
+  return exactKnowledgeIds([
+    ...readExactSemanticIds(fact.metadata.sourceIds),
+    readExactSemanticId(fact.metadata.sourceId),
     fact.sourceId,
     ...(sourceIdsByFactId.get(fact.id) ?? []),
   ]);

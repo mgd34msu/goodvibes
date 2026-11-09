@@ -15,7 +15,8 @@ import { createSemanticPrimarySourcePlanner, createSemanticWriteGuard } from '..
 import { KnowledgeSourceQualityHeldError } from '../sdk/src/platform/knowledge/source-quality.js';
 import type { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../sdk/src/platform/knowledge/types.js';
-import { semanticFactId, semanticHash } from '../sdk/src/platform/knowledge/semantic/utils.js';
+import { historicalSemanticFactId } from './_helpers/historical-semantic-identity.js';
+import { semanticHash } from '../sdk/src/platform/knowledge/semantic/utils.js';
 import type { KnowledgeSemanticFactInput, KnowledgeSemanticLlm } from '../sdk/src/platform/knowledge/semantic/types.js';
 import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
 import { repairUsefulFixtureReading } from './_helpers/repair-profile-fixture-readings.js';
@@ -73,7 +74,7 @@ async function addSource(store: KnowledgeStore, id: string, subjectId: string, s
 }
 function claim(title: string): KnowledgeSemanticFactInput { return { kind: 'note', title, summary: `${title} claim supported by the synthetic reference.`, evidence: `${title} evidence`, confidence: 90 }; }
 async function seedFact(store: KnowledgeStore, subject: KnowledgeNodeRecord, fact: KnowledgeSemanticFactInput, sources: readonly KnowledgeSourceRecord[]) {
-  const id = semanticFactId({ spaceId, kind: fact.kind, title: fact.title, summary: fact.summary, value: fact.value, subjectIds: [subject.id], fallbackScope: sources[0]!.id });
+  const id = historicalSemanticFactId({ spaceId, kind: fact.kind, title: fact.title, summary: fact.summary, value: fact.value, subjectIds: [subject.id], fallbackScope: sources[0]!.id });
   const originalPort = installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);
   const node = await store.upsertNode({ id, kind: 'fact', slug: id, title: fact.title, summary: fact.summary, status: 'active', sourceId: sources[0]!.id, metadata: { knowledgeSpaceId: spaceId, semanticKind: 'fact', extractor: 'llm', factKind: fact.kind, subjectIds: [subject.id], sourceIds: sources.map((source) => source.id) } });
   installJudgmentPort(originalPort);
@@ -212,7 +213,7 @@ describe('primary source persistence preplanning', () => {
     await store.upsertSource({ ...source, metadata: { ...source.metadata, sourceDiscovery: { linkedObjectIds: [entityId] } } });
     const current = store.getSource(source.id)!; const fact = claim('Collision claim');
     await enrich(store, current, [fact], [{ title: 'Collision', confidence: 90 }]);
-    const id = semanticFactId({ spaceId, kind: fact.kind, title: fact.title, summary: fact.summary, subjectIds: [], fallbackScope: source.id });
+    const id = historicalSemanticFactId({ spaceId, kind: fact.kind, title: fact.title, summary: fact.summary, subjectIds: [], fallbackScope: source.id });
     expect(store.getNode(id)?.metadata.subjectIds).toBeUndefined();
     expect(store.getNode(entityId)?.metadata.semanticKind).toBe('entity');
   });

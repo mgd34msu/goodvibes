@@ -54,26 +54,6 @@ export function semanticHash(...parts: readonly unknown[]): string {
   return hash.digest('hex').slice(0, 16);
 }
 
-export function semanticFactId(input: {
-  readonly spaceId: string;
-  readonly kind: string;
-  readonly title: string;
-  readonly value?: string | undefined;
-  readonly summary?: string | undefined;
-  readonly subjectIds?: readonly string[] | undefined;
-  readonly fallbackScope?: string | undefined;
-}): string {
-  const subjectScope = uniqueStrings(input.subjectIds ?? []).sort().join('|');
-  const scope = subjectScope || normalizeWhitespace(input.fallbackScope ?? '');
-  return `sem-fact-${semanticHash(
-    normalizeKnowledgeSpaceId(input.spaceId),
-    input.kind,
-    canonicalFactText(input.title),
-    canonicalFactText(input.value ?? input.summary ?? ''),
-    scope,
-  )}`;
-}
-
 export function semanticSlug(value: string): string {
   return value
     .trim()
@@ -81,14 +61,6 @@ export function semanticSlug(value: string): string {
     .replace(/[^a-z0-9_.:-]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 120) || 'knowledge';
-}
-
-function canonicalFactText(value: string): string {
-  return normalizeWhitespace(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/^(?:the|this|these|a|an)\s+/, '')
-    .trim();
 }
 
 export function clampText(value: string | undefined, limit: number): string {
@@ -177,7 +149,9 @@ export function sourceSemanticText(source: KnowledgeSourceRecord, extraction?: K
   ]).join('\n\n');
 }
 
-export function sourceSemanticHash(source: KnowledgeSourceRecord, extraction?: KnowledgeExtractionRecord | null): string {
+/** Only an actual saved unversioned enrichment state compares this historical
+ * text commitment. Fresh revision bindings never hash source text. */
+export function historicalSourceSemanticHash(source: KnowledgeSourceRecord, extraction?: KnowledgeExtractionRecord | null): string {
   return semanticHash(
     source.contentHash,
     source.updatedAt,

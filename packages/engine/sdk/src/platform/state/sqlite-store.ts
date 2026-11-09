@@ -1362,6 +1362,13 @@ export class SQLiteStore {
     catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
   }
 
+  readPersistedSemanticEnrichmentState(sourceId: string): ReturnType<SqlDatabase['exec']> {
+    try {
+      if (typeof sourceId !== 'string' || !sourceId) throw new TypeError('SQLiteStore: invalid semantic state selector');
+      return this.readPrivatePersistedRows('SELECT * FROM knowledge_semantic_enrichment_state WHERE source_id = ? LIMIT 1', [sourceId]);
+    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  }
+
   readPersistedSemanticFactCandidates(selector: SemanticFactSelector): ReturnType<SqlDatabase['exec']> {
     try { return this.readPrivatePersistedRows(semanticFactCandidateSql, semanticFactCandidateParams(selector)); }
     catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }

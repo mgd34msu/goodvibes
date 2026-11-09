@@ -7,7 +7,7 @@ type EnrichmentFactPlan = Awaited<ReturnType<typeof prepareEnrichmentFactDrafts>
   readonly primarySourceId: string; readonly supportMetadata: unknown;
 };
 export function enrichmentFactNodeInput(plan: EnrichmentFactPlan, spaceId: string,
-  extraction: KnowledgeExtractionRecord | null, semantic: KnowledgeSemanticExtraction, textHash: string,
+  extraction: KnowledgeExtractionRecord | null, semantic: KnowledgeSemanticExtraction,
 ): KnowledgeNodeUpsertInput {
   const { fact, factId, factLinkedObjects, sourceLinkedObjectIds, targetHints, sourceIds, primarySourceId, supportMetadata } = plan;
   return {
@@ -36,14 +36,14 @@ export function enrichmentFactNodeInput(plan: EnrichmentFactPlan, spaceId: strin
         sourceIds,
         extractionId: extraction?.id,
         extractor: semantic.extractor,
-        textHash,
+        textHash: undefined, ...plan.factIdentity.metadata,
       }),
     };
 }
 
 export function enrichmentGapNodeInput(gap: KnowledgeSemanticGapInput, source: KnowledgeSourceRecord,
   extraction: KnowledgeExtractionRecord | null, semantic: KnowledgeSemanticExtraction, spaceId: string,
-  textHash: string, existing: KnowledgeNodeRecord | null,
+  existing: KnowledgeNodeRecord | null,
 ): KnowledgeNodeUpsertInput {
   const id = `sem-gap-${semanticHash(spaceId, source.id, gap.question)}`;
   return {
@@ -61,7 +61,7 @@ export function enrichmentGapNodeInput(gap: KnowledgeSemanticGapInput, source: K
         sourceId: source.id,
         extractionId: extraction?.id,
         extractor: semantic.extractor,
-        textHash,
+        textHash: undefined,
         repairStatus: readString(existing?.metadata.repairStatus) ?? 'open',
         visibility: 'refinement',
         displayRole: 'knowledge-gap',

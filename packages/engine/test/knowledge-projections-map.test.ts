@@ -16,7 +16,7 @@ import { prepareKnowledgeScopeSelection } from '../sdk/src/platform/knowledge/sc
 import { KnowledgeService } from '../sdk/src/platform/knowledge/service.js';
 import { knowledgeSpaceMetadata } from '../sdk/src/platform/knowledge/spaces.js';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { semanticFactId } from '../sdk/src/platform/knowledge/semantic/utils.js';
+import { createSemanticFactIdentityPlanner } from '../sdk/src/platform/knowledge/semantic/identity-plan.js';
 import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '../sdk/src/platform/state/index.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.js';
@@ -698,8 +698,9 @@ describe('knowledge generated projections and maps', () => {
     expect(markdown).not.toContain('RAW PAGE TABLE SHOULD NOT RENDER');
   });
 
-  test('canonical semantic fact ids are source-independent when a subject is known', () => {
-    const first = semanticFactId({
+  test('one native semantic pass reuses exact known-subject claims across sources', async () => {
+    const { store } = createStores(); await store.init(); const planner = createSemanticFactIdentityPlanner(store);
+    const first = planner.prepare({
       spaceId: 'homeassistant:house-1',
       kind: 'specification',
       title: 'Audio capabilities',
@@ -707,7 +708,7 @@ describe('knowledge generated projections and maps', () => {
       subjectIds: ['device-tv'],
       fallbackScope: 'source-a',
     });
-    const second = semanticFactId({
+    const second = planner.prepare({
       spaceId: 'homeassistant:house-1',
       kind: 'specification',
       title: 'Audio capabilities',
@@ -716,7 +717,7 @@ describe('knowledge generated projections and maps', () => {
       fallbackScope: 'source-b',
     });
 
-    expect(second).toBe(first);
+    expect(second.id).toBe(first.id);
   });
 
   test('filters base knowledge maps with multi-select facets before layout', async () => {

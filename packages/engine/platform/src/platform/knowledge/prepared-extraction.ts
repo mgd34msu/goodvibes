@@ -1,4 +1,5 @@
 import { createKnowledgeExtractionOwner } from './extraction-ownership.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeIngestOwnership } from './ingest-context.js';
 import { isDeepStrictEqual } from 'node:util';
 import { snapshotNodeInput } from './activation/projection.js';
@@ -44,7 +45,15 @@ export async function prepareKnowledgeExtraction(
     owner.assertCurrent();
     const readRetained = () => ({ source: context.store.getSource(sourceId), extraction: context.store.getExtractionBySourceId(sourceId) });
     const retained = snapshotNodeInput(readRetained());
-    const content = await context.artifactStore.readContent(artifactId);
+    let content: Awaited<ReturnType<typeof context.artifactStore.readContent>>;
+    try { content = await context.artifactStore.readContent(artifactId); }
+    catch (error) {
+      // Original artifact/record custody can retire before the first read as
+      // well as after it. It is an admission hold, never a parse failure or a
+      // source of borrowed filesystem/private diagnostics for consumers.
+      drainOwned(error);
+      throw new KnowledgeExtractionJudgmentHoldError();
+    }
     owner.assertCurrent();
     const record = snapshotNodeInput(content.record);
     const { buffer } = content;

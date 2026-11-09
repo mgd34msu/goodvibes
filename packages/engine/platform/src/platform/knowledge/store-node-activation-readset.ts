@@ -2,14 +2,15 @@
  * checked once, and later native writer versions plus original data descriptors
  * retire stale model results without rehashing or recopying source bodies. */
 import { isDeepStrictEqual } from 'node:util';
-import type { SqlDatabase, PersistedKnowledgeRecordSelector } from '../state/sqlite-store.js';
+import { captureSQLiteActivationPublication, type SQLiteStore, type PersistedKnowledgeRecordSelector } from '../state/sqlite-store.js';
 import type { KnowledgeStore } from './store.js';
 import type { KnowledgeNodeRecord } from './types.js';
 import { KnowledgeNodeActivationHeldError as Held } from './activation/types.js';
 import { observeKnowledgeValue } from './local-value-observation.js';
 import { knowledgeRowGenerationFromRows } from './store-row-revisions.js';
 
-interface OriginalRow { readonly selector: PersistedKnowledgeRecordSelector; generation: string | null; current: (() => boolean) | undefined; }
+interface OriginalRow { readonly selector: PersistedKnowledgeRecordSelector; generation: string | null; current: (() => boolean) | undefined;
+  write?: { readonly generation: string; readonly state: () => 'pending' | 'published' } | undefined; }
 export class KnowledgeActivationReadset {
   private readonly rows = new Map<string, OriginalRow>();
   private readonly sourceIds = new Set<string>();
@@ -59,7 +60,15 @@ export class KnowledgeActivationReadset {
     this.store.assertRecordSnapshotFrame(() => {
       const entries = [...this.rows.values()];
       const actual = this.store.getRecordGenerations(entries.map(row => row.selector));
-      if (entries.some((row, index) => row.generation !== actual[index])) throw new Held('stale');
+      for (const [index, row] of entries.entries()) {
+        const write = row.write;
+        if (!write || write.state() === 'pending') {
+          if (row.generation !== actual[index]) throw new Held('stale');
+        } else {
+          if (write.generation !== actual[index]) throw new Held('stale');
+          row.generation = write.generation;
+        }
+      }
       const state = this.store.getNodeActivationState(anchor, [...this.sourceIds].map(id => ({ kind: 'source' as const, id })), null);
       for (const source of state.dependencies.evidence) if (source.extractionId !== this.extractions.get(source.sourceId)) throw new Held('stale');
       // A future per-row cache written during I/O is preserved, not replaced by
@@ -70,11 +79,12 @@ export class KnowledgeActivationReadset {
   }
   /** Only the actual original native row writer advances its own node. Source
    * and extraction baselines never adopt unrelated changes during a pass. */
-  written(nodeId: string, record: KnowledgeNodeRecord, sqlite: Pick<SqlDatabase, 'exec'>): void {
+  written(nodeId: string, record: KnowledgeNodeRecord, sqlite: SQLiteStore): void {
     const row = this.rows.get(this.key('node', nodeId));
     if (!row || !Object.isFrozen(record)) throw new Held('stale');
     const native = sqlite.exec('SELECT gv_revision FROM knowledge_nodes WHERE id = ? LIMIT 1', [nodeId]);
-    row.generation = knowledgeRowGenerationFromRows(native);
-    if (row.generation === null) throw new Held('stale');
+    const generation = knowledgeRowGenerationFromRows(native);
+    if (generation === null) throw new Held('stale');
+    if (generation !== row.generation) row.write = { generation, state: captureSQLiteActivationPublication(sqlite, nodeId, generation) };
   }
 }

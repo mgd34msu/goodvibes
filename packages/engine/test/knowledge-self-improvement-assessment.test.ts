@@ -413,8 +413,10 @@ test('native assessment preserves canonical metadata with native structural refe
   const facts: unknown = Object.getOwnPropertyDescriptor(request.state, 'facts')?.value;
   if (!Array.isArray(subjects) || subjects.length !== 1 || !Array.isArray(facts) || facts.length !== 1) throw new Error('Missing complete native candidates');
   expect(Object.getOwnPropertyDescriptor(subjects[0], 'content')?.value).toEqual(originalSubject);
-  const expectedFact = { ...originalFact, nodeActivation: { ...originalFact.nodeActivation, evidenceHash: 'activation-evidence-reference' } };
-  expect(Object.getOwnPropertyDescriptor(facts[0], 'content')?.value).toEqual(expectedFact);
+  // Current activation receipts use the stored dependency reference. Do not
+  // invent the removed evidenceHash field in a fresh native projection.
+  expect(Object.hasOwn(originalFact.nodeActivation, 'evidenceHash')).toBe(false);
+  expect(Object.getOwnPropertyDescriptor(facts[0], 'content')?.value).toEqual(originalFact);
   expect(snapshot(item.store)).toBe(before);
   result.assertCurrent();
 });

@@ -2,7 +2,7 @@ import { KnowledgeActivationReadset } from './store-node-activation-readset.js';
 import { isDeepStrictEqual } from 'node:util';
 import { knowledgeDecisionStamp, knowledgeRawRepresentation } from './store-record-representation.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
-import type { SqlDatabase } from '../state/sqlite-store.js';
+import type { SqlDatabase, SQLiteStore } from '../state/sqlite-store.js';
 import { readKnowledgeActivationDependencies, writeKnowledgeActivationCache } from './store-node-activation-cache.js';
 import { sameKnowledgeRecord } from './store-record-representation.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
@@ -295,7 +295,7 @@ export function preparedNodeWrites(store: KnowledgeStore, token: KnowledgePrepar
   }
   return nodes;
 }
-export function markPreparedNodeWritten(token: KnowledgePreparedNodeWrites, index: number, sqlite?: Pick<SqlDatabase, 'exec' | 'run'>): boolean {
+export function markPreparedNodeWritten(token: KnowledgePreparedNodeWrites, index: number, sqlite?: SQLiteStore): boolean {
   const pass = prepared.get(token)!, draft = pass.nodes[index]!;
   pass.written.add(index); pass.committed.set(draft.record.id, draft.record);
   if (sqlite) pass.readset.written(draft.record.id, draft.record, sqlite);

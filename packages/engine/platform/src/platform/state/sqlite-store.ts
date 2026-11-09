@@ -1227,7 +1227,16 @@ const expectedRecordReadsets = new WeakMap<object, {
 }>();
 
 const artifactReferenceObservation = SQLiteStorePersistence.prototype.observationIdentity;
+let captureActivationPublication: (store: SQLiteStore, nodeId: string, generation: string) => () => 'pending' | 'published';
+/** Internal activation bookkeeping only. Pending local writes never become
+ * persisted semantic evidence or an exemption from original source checks. */
+export function captureSQLiteActivationPublication(store: SQLiteStore, nodeId: string, generation: string): () => 'pending' | 'published' {
+  return captureActivationPublication(store, nodeId, generation);
+}
 export class SQLiteStore {
+  #activationPublication: Readonly<{ physical: string | undefined }> = nativeFreeze({ physical: undefined });
+  #activationPublicationFailures = 0;
+  static { captureActivationPublication = (store, nodeId, generation) => store.#captureActivationPublication(nodeId, generation); }
   readonly #artifactReferencePath: string | null;
   #validatedNativeSchema: {
     readonly persistence: SQLiteStorePersistence;
@@ -1276,6 +1285,33 @@ export class SQLiteStore {
       const descriptor = nativeGetDescriptor(this, field);
       if (descriptor) nativeDefineProperty(this, field, { ...descriptor, enumerable: false });
     }
+  }
+
+  #captureActivationPublication(nodeId: string, generation: string): () => 'pending' | 'published' {
+    const db = this.getDb(), persistence = this.persistence, engine = this.sqlEngine, epoch = this.imageEpoch;
+    const publication = this.#activationPublication, failures = this.#activationPublicationFailures;
+    const pending = this.saveBatchDepth > 0, physical = persistence?.observationIdentity();
+    const assertLocal = () => {
+      if (this.db !== db || this.persistence !== persistence || this.sqlEngine !== engine || this.imageEpoch !== epoch
+        || this.fenced || this.#activationPublicationFailures !== failures) throw new SQLiteObservationRetiredError();
+      const original = engine && privateMapGet(nativeEngineIdentities, engine), state = privateMapGet(ownedDatabases, db);
+      if (!engine || !original?.statement || !state || state.inFlight || !nativeMethodsMatch(engine, state.raw)
+        || !nativeExecutionDependenciesMatch(original.statement, state.raw)) throw new SQLiteObservationRetiredError();
+      assertNativeEngineIdentity(engine);
+      const rows = nativeApply(original.methods.exec, state.raw, ['SELECT gv_revision FROM knowledge_nodes WHERE id = ? LIMIT 1', [nodeId]]);
+      if (knowledgeRowGenerationFromRows(rows) !== generation) throw new SQLiteObservationRetiredError();
+    };
+    assertLocal();
+    return () => {
+      assertLocal();
+      // An ephemeral owner reads its genuine local image; no disk durability is
+      // claimed. Persistent owners must observe an actual acknowledged save.
+      if (!persistence) return 'published';
+      const current = persistence.observationIdentity();
+      if (pending && this.saveBatchDepth > 0 && this.#activationPublication === publication && current === physical) return 'pending';
+      if (this.#activationPublication !== publication && current === this.#activationPublication.physical) return 'published';
+      throw new SQLiteObservationRetiredError();
+    };
   }
 
   private assertInitialReadCurrent(): void {
@@ -2091,22 +2127,28 @@ export class SQLiteStore {
     if (this.persistence) {
       // Capture at admission. Later same-handle writes may already be queued;
       // they must not change which image this particular save publishes.
-      const data = this.db.export();
-      const cleanContent = this.readCleanContent(this.db);
+      let data: Uint8Array, cleanContent: string | null;
+      try { data = this.db.export(); cleanContent = this.readCleanContent(this.db); }
+      catch (error) { this.#activationPublicationFailures += 1; throw error; }
       const epoch = this.imageEpoch;
       return this.enqueue(async () => {
-        const release = await this.persistence!.lock();
+        let release: (() => void) | undefined;
         try {
+          release = await this.persistence!.lock();
           this.getDb();
           if (this.imageEpoch !== epoch) {
             throw new Error('SQLiteStore: persisted state changed; captured image was superseded');
           }
           this.beforePersistentWrite();
           this.persistence!.writeIfCurrent(data);
+          this.#activationPublication = nativeFreeze({ physical: this.persistence!.observationIdentity() });
           this.cleanContent = cleanContent;
           this.cleanBytes = this.persistence ? null : data;
           return true;
-        } finally { try { release(); } catch { this.fenced = true; } }
+        } catch (error) {
+          this.#activationPublicationFailures += 1;
+          throw error;
+        } finally { try { release?.(); } catch { this.fenced = true; } }
       }).then(saved => { if (saved) this.notifyArtifactReferenceClean(); return saved; });
     }
 

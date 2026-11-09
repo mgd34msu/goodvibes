@@ -20,17 +20,20 @@ import { knowledgeIngestErrorReadings } from './_helpers/knowledge-ingest-error-
 
 let previous: JudgmentPort | undefined;
 let root: string;
+const stores: KnowledgeStore[] = [];
 beforeEach(() => {
   previous = installJudgmentPort(undefined);
   root = mkdtempSync(join(tmpdir(), 'knowledge-regular-ingest-hold-'));
 });
-afterEach(() => {
+afterEach(async () => {
   installJudgmentPort(previous);
+  await Promise.all(stores.splice(0).map(store => store.close()));
   rmSync(root, { recursive: true, force: true });
 });
 
 function context() {
   const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  stores.push(store);
   const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
   return {
     store, artifactStore, connectorRegistry: new KnowledgeConnectorRegistry(),
@@ -140,6 +143,22 @@ test('ordinary parse failures retain the failed-record path', async () => {
   expect(result.source.crawlError).toContain('PDF extraction failed');
   expect(ctx.store.getExtractionBySourceId(result.source.id)).toBeNull();
   expect(ctx.artifactStore.getRecord(artifact.id)).not.toBeNull();
+});
+
+test('a rejected artifact read holds without exposing private failure details or publishing an extraction', async () => {
+  const ctx = context(), fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port);
+  const artifact = await ctx.artifactStore.create({ kind: 'document', filename: 'manual.txt', text: 'Original document.' });
+  const source = await ctx.store.upsertSource({ connectorId: 'manual', sourceType: 'document', title: 'Retained source', status: 'indexed' });
+  const uris = createKnowledgeIngestUriCanonicalizer(ctx); uris.reserveSource(source.id); uris.attachArtifact(artifact.id);
+  const before = ctx.store.status(), calls = fake.requests.length;
+  const read = spyOn(ctx.artifactStore, 'readContent').mockRejectedValue(new Error('PRIVATE_ORIGINAL_ARTIFACT_PATH'));
+  let error: unknown;
+  try { await prepareKnowledgeExtraction(ctx, source.id, artifact.id, uris); } catch (caught) { error = caught; }
+  finally { read.mockRestore(); }
+  expect(error).toBeInstanceOf(KnowledgeExtractionJudgmentHoldError);
+  expect(String(error)).not.toContain('PRIVATE_ORIGINAL_ARTIFACT_PATH');
+  expect(ctx.store.status()).toEqual(before); expect(ctx.store.getExtractionBySourceId(source.id)).toBeNull();
+  expect(ctx.store.getSource(source.id)).toEqual(source); expect(fake.requests).toHaveLength(calls);
 });
 
 

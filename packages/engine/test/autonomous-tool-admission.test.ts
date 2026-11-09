@@ -1,8 +1,8 @@
 import { RuntimeEventBus, type ToolEvent } from '../sdk/src/platform/runtime/events/index.ts';
 import { decideAutonomousTool as publicSelector } from '@goodvibes-jev/engine/sdk/platform/permissions';
 import { decideAutonomousTool } from '../sdk/src/platform/permissions/autonomous.ts';
-import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { withDecisionLog, SqliteDecisionLog, createSystemOnePort, DEFAULT_MODEL, hashState, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { withDecisionLog, SqliteDecisionLog, createSystemOnePort, DEFAULT_MODEL, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateReadingsPort, forgetGateReadings } from './_helpers/gate-readings.ts';
@@ -56,6 +56,74 @@ function fixture(gate: GateOptions = {}, store: UserPermissionRuleStore | null =
   return { deps, manager, registry, executed, state, config, changeDirectory: () => { directory = '/synthetic/changed'; } };
 }
 const run = (deps: ToolExecutionDeps, input = args(), id = 'call-1') => executeToolCalls(deps, 'turn-1', [{ id, name: 'exec', arguments: input }]);
+
+test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s retains one compact replay source across batches and new deps objects', async mode => {
+  const f = fixture({}, null, false, mode);
+  const prepare = spyOn(f.manager, 'autonomousPreparation');
+  try {
+    expect((await run(f.deps))[0]?.success).toBe(true);
+    const source = prepare.mock.calls[0]?.[0];
+    expect(source).toMatch(/^[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/);
+    await expect(run({ ...f.deps })).rejects.toThrow('claimed');
+    await expect(run({ ...f.deps }, { commands: [{ cmd: 'a different action under the same call' }] })).rejects.toThrow('claimed');
+    expect(new Set(prepare.mock.calls.map(call => call[0]))).toEqual(new Set([source]));
+    expect(f.executed).toEqual([args()]);
+  } finally { prepare.mockRestore(); }
+});
+
+test.each(['session', 'turn', 'call'] as const)('changing only the %s protocol reference admits a distinct invocation', async component => {
+  const f = fixture({}, null, false, 'yolo');
+  expect((await run(f.deps))[0]?.success).toBe(true);
+  const deps = { ...f.deps, sessionId: component === 'session' ? 'another-session' : f.deps.sessionId };
+  const result = await executeToolCalls(deps, component === 'turn' ? 'another-turn' : 'turn-1', [
+    { id: component === 'call' ? 'another-call' : 'call-1', name: 'exec', arguments: args() },
+  ]);
+  expect(result[0]?.success).toBe(true);
+  expect(f.executed).toHaveLength(2);
+});
+
+test('nested tuple identity has no delimiter collisions and different managers retain independent claims', async () => {
+  const f = fixture({}, null, false, 'yolo');
+  for (const [sessionId, turn] of [['session:part', 'turn'], ['session', 'part:turn']] as const) {
+    expect((await executeToolCalls({ ...f.deps, sessionId }, turn, [{ id: 'same-call', name: 'exec', arguments: args() }]))[0]?.success).toBe(true);
+  }
+  expect(f.executed).toHaveLength(2);
+  const other = fixture({}, null, false, 'yolo');
+  expect((await run(f.deps))[0]?.success).toBe(true);
+  expect((await run(other.deps))[0]?.success).toBe(true);
+  expect(other.executed).toHaveLength(1);
+});
+
+test('concurrent replay while an admitted effect is running cannot execute again', async () => {
+  const f = fixture({}, null, false, 'yolo');
+  let entered!: () => void, release!: () => void;
+  const active = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let executions = 0;
+  f.registry.register({ definition: { name: 'hold', description: 'Held fixture effect', parameters: { type: 'object' } },
+    execute: async () => { executions++; entered(); await held; return { success: true }; } });
+  const call = () => executeToolCalls({ ...f.deps }, 'held-turn', [{ id: 'held-call', name: 'hold', arguments: {} }]);
+  const first = call();
+  try {
+    await Promise.race([active, first.then(() => { throw new Error('Held fixture returned before entering its effect'); })]);
+    await expect(call()).rejects.toThrow('claimed');
+  } finally { release(); }
+  expect((await first)[0]?.success).toBe(true);
+  await expect(call()).rejects.toThrow('claimed');
+  expect(executions).toBe(1);
+});
+
+test('cancelling a claimed execution does not widen retry authority through a new turn signal', async () => {
+  const f = fixture({}, null, false, 'yolo');
+  const controller = new AbortController();
+  let executions = 0;
+  f.registry.register({ definition: { name: 'cancel_after_effect', description: 'Cancellation fixture', parameters: { type: 'object' } },
+    execute: async () => { executions++; controller.abort(new Error('owning turn cancelled')); return { success: true }; } });
+  const call = { id: 'cancelled-call', name: 'cancel_after_effect', arguments: {} };
+  await expect(executeToolCalls({ ...f.deps, turnSignal: controller.signal }, 'cancelled-turn', [call])).rejects.toThrow('owning turn cancelled');
+  await expect(executeToolCalls({ ...f.deps, turnSignal: new AbortController().signal }, 'cancelled-turn', [call])).rejects.toThrow('claimed');
+  expect(executions).toBe(1);
+});
 
 test.each(['safe-owner', 'safe-jev'] as const)('%s halts the tool batch after decision target exhaustion with zero effects', async mode => {
   let attempts = 0;

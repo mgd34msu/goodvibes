@@ -3,7 +3,7 @@ import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { currentExecutionMode, isYoloExecution, withExecutionMode } from '../gate/execution-context.js';
-import { hashState } from '@goodvibes-jev/judgment';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { captureAutonomousChoices, type AutonomousToolSource } from '../permissions/autonomous.js';
 import { UnknownPreparedToolError } from '../tools/preparation-error.js';
 import type { PreparedToolCall } from '../tools/registry.js';
@@ -43,6 +43,30 @@ import { withCostOriginAsync, mcpServerOfToolName } from '../runtime/cost/cost-o
 type HookDispatcherLike = {
   fire(event: HookEvent): Promise<HookResult>;
 };
+
+// Replay identity belongs to the actual permission manager, just like its
+// autonomousClaims/autonomousEpochs. Retain only protocol references, never
+// requests or arguments. No eviction: forgetting a claimed tuple would permit
+// it to execute again in a later batch. The WeakMap releases the full history
+// when the manager itself becomes unreachable.
+const autonomousInvocationSources = new WeakMap<object, Map<string, Map<string, Map<string, string>>>>();
+
+function autonomousInvocationSource(manager: object, session: string, turn: string, call: string): string {
+  // Admit the original references before lookup, even on an existing tuple.
+  // A generated opaque ref must never conceal unsafe caller identity input.
+  if (!isYoloExecution()) captureAutonomousChoices({ resumeConditions: [
+    { id: session, revision: turn }, { id: call, revision: 'tool-call' },
+  ] });
+  let sessions = autonomousInvocationSources.get(manager);
+  if (!sessions) { sessions = new Map(); autonomousInvocationSources.set(manager, sessions); }
+  let turns = sessions.get(session);
+  if (!turns) { turns = new Map(); sessions.set(session, turns); }
+  let calls = turns.get(turn);
+  if (!calls) { calls = new Map(); turns.set(turn, calls); }
+  let source = calls.get(call);
+  if (!source) { source = opaqueUuid(); calls.set(call, source); }
+  return source;
+}
 
 /**
  * Prefers `checkDetailed()` (carries `modifiedArgs` for per-hunk edit
@@ -189,15 +213,7 @@ async function executeToolCallsInMode(
     // retained only for pre-existing duck-typed test/embedding implementations.
     const autonomous = typeof deps.permissionManager.admitAutonomous === 'function'
       && typeof deps.toolRegistry.prepareCall === 'function';
-    const sourceIdentity = { session: deps.sessionId, turn: turnId, call: call.id };
-    // These are protocol references, never the request or tool arguments. Use
-    // the existing typed-reference privacy checks before hashing: UUID digit
-    // runs are not payment-card input. Non-identity content still fails closed.
-    if (!isYoloExecution()) captureAutonomousChoices({ resumeConditions: [
-      { id: sourceIdentity.session, revision: sourceIdentity.turn },
-      { id: sourceIdentity.call, revision: 'tool-call' },
-    ] });
-    const sourceId = hashState(sourceIdentity);
+    const sourceId = autonomous ? autonomousInvocationSource(deps.permissionManager, deps.sessionId, turnId, call.id) : '';
     const sourceOf = deps.autonomousSource;
     if (autonomous && !sourceOf) throw new Error('Autonomous execution requires the host source goal and criteria');
     const earlyCallSignal = autonomous ? deps.toolCallSignals?.open(call.id) : undefined;

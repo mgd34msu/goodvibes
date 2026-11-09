@@ -7,13 +7,22 @@
  */
 import { createHash } from 'node:crypto';
 
-/** First `hexChars` hexadecimal characters of the UTF-8 SHA-256 digest. */
+/** First `hexChars` hexadecimal characters of the UTF-8 SHA-256 digest.
+ * @deprecated Published sender-format helper. New local identities and equality
+ * checks should retain their actual owner or values instead of using this.
+ */
 export function sha256First(input: string, hexChars: number): string {
   const digest = createHash('sha256').update(input, 'utf-8').digest('hex');
   return digest.slice(0, Math.max(0, hexChars));
 }
 
-/** Stable 16-hex-character sender token; not an anonymization guarantee. */
+/** Existing stable sender commitment in persisted inbox rows and route rules.
+ * The mapper releases raw provider IDs/addresses after projection. A durable
+ * UUID registry would retain those originals; a reversible encoding would put
+ * them in the inbox. Keep this bounded commitment for sender matching without
+ * retaining that additional private data. It neither authorizes a sender nor
+ * prevents guessing a low-entropy address: it is not anonymization.
+ */
 export function digestSender(senderExternalId: string): string {
   return sha256First(senderExternalId, 16);
 }

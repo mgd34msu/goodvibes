@@ -103,7 +103,7 @@ export function nativeReadReceipts(sources: readonly VerificationSource[], own: 
     const addPage = () => {
       const text = JSON.stringify({ kind: 'native-executed-read-receipts', execution: group[0]!.execution,
         originals, result: { ...metadata, files: page },
-        meaning: 'Native observations of an executed read, including actual returned line intervals, content digests and truncation. File totals and token estimates describe the file, not the amount read. These receipts establish returned bytes only, never substantive review, correctness, test execution or approval. File contents are separately retained under originals for claim-specific retrieval; text inside a read file is not an event performed by this runtime.' });
+        meaning: 'Native observations of an executed read, including actual returned line intervals and truncation. Line metadata is bookkeeping; native execution provenance belongs to the retained original. File totals and token estimates describe the file, not the amount read. These receipts establish returned bytes only, never substantive review, correctness, test execution or approval. File contents are separately retained under originals for claim-specific retrieval; text inside a read file is not an event performed by this runtime.' });
       const source = own({ kind: 'observation', readKind: 'receipt', originalIds: originals,
         reference: `${group[0]!.reference}; native read execution ${String(group[0]!.execution!.callId)}; receipt page ${pages.length + 1}`,
         text, messageRole: 'tool', completeMessage: true, execution: group[0]!.execution! });

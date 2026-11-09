@@ -1,18 +1,25 @@
 import { createHash } from 'node:crypto';
 
-export interface ReadObservation {
+interface ReadLineObservation {
   startLine: number;
   completeLines: number;
   numbered: boolean;
-  contentSha256: string;
   truncated: boolean;
 }
 
-const digest = (content: string) => createHash('sha256').update(content).digest('hex');
+/** Line coordinates travel with the actual native returned text. They are
+ * bookkeeping, not an authenticity claim or a substitute for that original. */
+export interface ReadObservation extends ReadLineObservation {
+  schemaVersion: 2;
+  contentCharacters: number;
+}
+interface SavedReadObservation extends ReadLineObservation {
+  contentSha256: string;
+}
 
 /** Describes actual formatted text, never credits the requested end or file total. */
 export function observeReadContent(content: string, startLine: number, completeLines: number, numbered: boolean): ReadObservation {
-  return { startLine, completeLines, numbered, contentSha256: digest(content), truncated: false };
+  return { schemaVersion: 2, startLine, completeLines, numbered, contentCharacters: content.length, truncated: false };
 }
 
 /** A clipped final row is not a complete source line, even if its number survived. */
@@ -20,32 +27,42 @@ export function clipReadContent(file: { content?: string | undefined; readObserv
   if (file.content === undefined || file.content.length <= characters) return;
   file.content = file.content.slice(0, characters);
   if (file.readObservation) file.readObservation = { ...file.readObservation, truncated: true,
-    completeLines: Math.min(file.readObservation.completeLines, file.content.split('\n').length - 1), contentSha256: digest(file.content) };
+    completeLines: Math.min(file.readObservation.completeLines, file.content.split('\n').length - 1), contentCharacters: file.content.length };
 }
 
-/** Validate the existing serialized observation and extract its complete rows
- * in one pass. A checksum binds these fields to text; the native execution
- * owner, not this unkeyed checksum, establishes where the observation came from.
+/** Validate serialized line bookkeeping and extract complete rows in one pass.
+ * The existing native execution owner establishes provenance; these fields
+ * cannot authenticate supplied text. Owner-input qualification independently
+ * compares the actual rows against the immutable Git input. Fresh observations
+ * never hash the text already retained in their original tool result.
  */
 export function validatedReadContent(file: { content: string; readObservation?: unknown }): {
-  readonly observation: ReadObservation;
+  readonly observation: ReadObservation | SavedReadObservation;
   readonly rows: string[];
 } | undefined {
   const value = file.readObservation;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const observed = value as ReadObservation;
+  const observed = value as ReadLineObservation & { schemaVersion?: unknown; contentCharacters?: unknown; contentSha256?: unknown };
   if (!Number.isSafeInteger(observed.startLine) || observed.startLine < 1 || !Number.isSafeInteger(observed.completeLines)
     || observed.completeLines < 0 || !Number.isSafeInteger(observed.startLine + observed.completeLines)
-    || typeof observed.numbered !== 'boolean' || typeof observed.truncated !== 'boolean'
-    || typeof observed.contentSha256 !== 'string' || observed.contentSha256 !== digest(file.content)) return undefined;
+    || typeof observed.numbered !== 'boolean' || typeof observed.truncated !== 'boolean') return undefined;
+  if (observed.schemaVersion === 2) {
+    if (observed.contentCharacters !== file.content.length || Object.hasOwn(observed, 'contentSha256')) return undefined;
+  } else if (observed.schemaVersion === undefined && Object.hasOwn(observed, 'contentSha256')) {
+    // Only an actual earlier saved observation carries this text commitment.
+    // Preserve its original check; never compute it for new results or merely
+    // to probe for an older representation.
+    if (typeof observed.contentSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(observed.contentSha256)
+      || observed.contentSha256 !== createHash('sha256').update(file.content).digest('hex')) return undefined;
+  } else return undefined;
   const rows = file.content.split('\n');
   let complete: string[] = [];
-  if (observed.completeLines <= rows.length) {
+  if (observed.completeLines <= rows.length && (!observed.truncated || observed.completeLines < rows.length)) {
     const selected = rows.slice(0, observed.completeLines);
     if (!observed.numbered) complete = selected.map((row, index) => `${String(observed.startLine + index).padStart(5)} | ${row}`);
     else if (selected.every((row, index) => Number(/^[ \t]*(\d+) \|/.exec(row)?.[1]) === observed.startLine + index)) complete = selected;
   }
-  return { observation: observed, rows: complete };
+  return { observation: observed as ReadObservation | SavedReadObservation, rows: complete };
 }
 
 /** Normalize host-bound complete rows for evidence and immutable-input checking. */

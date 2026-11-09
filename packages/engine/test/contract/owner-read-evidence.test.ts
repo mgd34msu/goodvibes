@@ -55,6 +55,17 @@ test('host-bound plain owner returns still require a match to immutable original
   expect(JSON.stringify(f.read(f.contract, 'source.ts:2-3'))).not.toContain('WRONG');
 });
 
+// Line/length metadata is not an authenticity certificate. A same-length
+// supplied body must still match the actual immutable owner-input rows.
+test('new line metadata cannot qualify same-length substituted owner source text', () => {
+  const f = fixture(), original = 'first\nsecond';
+  const readObservation = observeReadContent(original, 1, 2, false);
+  f.messages[2]!.content = JSON.stringify({ success: true, files: [{ path: 'source.ts', extract: 'lines',
+    content: 'FIRST\nSECOND', readObservation }] });
+  writeFileSync(f.saved, f.messages.map(message => JSON.stringify(message)).join('\n') + '\n');
+  expect(f.read(f.contract, 'source.ts:1-2')).toMatchObject({ sourceReads: [] });
+});
+
 test('a live recovery snapshot contributes real reads without inventing operations from assertions', () => {
   const f = fixture();
   writeFileSync(join(f.surface, 'recovery/recovery-user-original.jsonl'), [

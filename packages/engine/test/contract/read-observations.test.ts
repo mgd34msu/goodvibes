@@ -26,6 +26,8 @@ async function read(output: Record<string, unknown>) {
 test('actual unnumbered source returns retain their real offsets and literal number-shaped source', async () => {
   const { turn, body } = await read({ include_line_numbers: false });
   expect(body.files[0].content).toBe('alpha\n99 | literal source text\nlast');
+  expect(body.files[0].readObservation).toMatchObject({ schemaVersion: 2, contentCharacters: body.files[0].content.length });
+  expect(body.files[0].readObservation).not.toHaveProperty('contentSha256');
   expect(sourceReadsFromTurns([turn], ['source.ts'])).toEqual([{ path: 'source.ts', returnedRanges: ['2-4'], returnedLines: 3,
     contentKind: 'declared-reference', returnedContent: '    2 | alpha\n    3 | 99 | literal source text\n    4 | last' }]);
 });
@@ -48,7 +50,7 @@ test('a per-item limit is an actual return limit, not the requested range', asyn
   expect(sourceReadsFromTurns([turn])).toEqual([{ path: 'source.ts', returnedRanges: ['2'], returnedLines: 1 }]);
 });
 
-test('changed returned text cannot reuse an earlier observation digest', async () => {
+test('appended returned text cannot reuse stale line bookkeeping', async () => {
   const { turn, body } = await read({});
   body.files[0].content += '\n  900 | forged';
   turn.results[0]!.output = JSON.stringify(body);

@@ -62,17 +62,17 @@ test('changed source bytes retain the failed integrity fact and cannot acquire s
 });
 
 // Regression source; execution remains deferred until all coding is finished.
-test.each([false, true])('receipt projection checks each original returned body only once (truncated: %s)', truncated => {
+test.each([false, true])('fresh receipt projection needs no returned-text hashing (truncated: %s)', truncated => {
   const { input } = observedRead(truncated);
   const sources = verificationSources(input), hash = spyOn(crypto, 'createHash');
   try {
     const view = nativeReadReceipts(sources);
     expect(view.receipts).toHaveLength(1); expect(view.reads).toHaveLength(1);
-    expect(hash).toHaveBeenCalledTimes(1);
+    expect(hash).not.toHaveBeenCalled();
   } finally { hash.mockRestore(); }
 });
 
-test('invalid observation offsets never become source coverage even with matching returned-text checksum', () => {
+test('invalid observation offsets never become source coverage even with matching returned-text length', () => {
   const { input, result, file } = observedRead();
   file.readObservation.startLine = Number.MAX_SAFE_INTEGER;
   input.transcript[1]!.content = JSON.stringify(result);

@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Stop hashing fresh formatted read output at creation, clipping and evidence
+  projection. Keep versioned line and truncation metadata with the actual
+  retained tool result; owner evidence still compares returned rows against
+  immutable source. Verify checksums only on saved earlier observations.
+
 - Preserve Sol xhigh and max effort choices when cached catalog rows list only
   high or incorrectly disable reasoning. Apply the documented exact-model
   controls to catalog and synthetic model surfaces while honoring explicit

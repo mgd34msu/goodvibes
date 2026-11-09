@@ -49,3 +49,10 @@ reference or the empty setting; unsupported machine-specific secret references
 report guidance to use the encrypted credential setting. Incoming public literal
 credentials are refused before they can enter config/replica storage. A credential
 revision marker also cannot contain a raw value disguised as secret metadata.
+
+Incoming authenticated group handlers admit at most 32 concurrent operations.
+When that limit is occupied, additional datagrams are dropped before deferred
+work is created; existing snapshot and periodic anti-entropy requests recover
+loss. A value-free overload diagnostic is limited to once per minute. Entered
+operations remain owned and drain on stop or membership change. Explicit
+operator membership operations are outside this incoming traffic budget.

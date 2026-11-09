@@ -19,6 +19,7 @@
  * the two commands that fix it. Half-starting, joining the multicast group and
  * broadcasting unsigned, is the outcome this explicitly avoids.
  */
+import { ClusterIngressWork } from './ingress-work.js';
 import { ConfigReplicationPrivacyError } from './config-replication-privacy.js';
 import { GroupConfigChanges, GroupConfigChangeRetiredError } from './group-config-changes.js';
 import { GroupStateOwner } from './group-state-owner.js';
@@ -158,8 +159,10 @@ export class ClusterGroupRuntime {
   private membershipTransition = false;
   private replication: ConfigReplicationService | null = null;
   private readonly configChanges: GroupConfigChanges;
+  private readonly incoming: ClusterIngressWork;
 
   constructor(private readonly options: ClusterGroupRuntimeOptions) {
+    this.incoming = new ClusterIngressWork(options.logger, () => options.clock.monotonicNow());
     this.stateOwner = new GroupStateOwner(options.stateDirectory, [GROUP_STATE_FILENAME, GROUP_REPLICA_FILENAME]);
     this.periodic = new ClusterPeriodicTasks(options.clock, options.logger);
     // Built here, not in start(), because the composition root needs
@@ -238,6 +241,7 @@ export class ClusterGroupRuntime {
   stop(): Promise<void> {
     if (this.stopping) return this.stopping;
     this.runtimeStopping = true;
+    this.incoming.close();
     this.configChanges.stop();
     this.networkStarted = false;
     this.membershipOperations.stop();
@@ -270,6 +274,7 @@ export class ClusterGroupRuntime {
     }
     await this.router.ensureStarted();
     signal.throwIfAborted();
+    this.incoming.open();
     this.networkStarted = true;
     this.configChanges.start();
     this.admissions.start();
@@ -284,6 +289,8 @@ export class ClusterGroupRuntime {
   }
 
   private async stopOwned(): Promise<void> {
+    this.incoming.close();
+    await this.incoming.join();
     this.configChanges.stop();
     await this.configChanges.join();
     this.admissions.stop('the daemon shut down before the group answered');
@@ -366,19 +373,19 @@ export class ClusterGroupRuntime {
 
   /** Re-read key material and roster from their stores. */
   async reloadMaterial(signal?: AbortSignal): Promise<void> {
-    if (this.membershipOperations.busy || this.materialWork.size > 0 || this.groupWork.size > 0) throw new ClusterMembershipOperationError('not-sent');
+    if (this.membershipOperations.busy || this.materialWork.size > 0 || this.groupWork.size > 0 || this.incoming.status.active > 0) throw new ClusterMembershipOperationError('not-sent');
     this.stateOwner.assertCurrent();
     const revision = this.membershipRevision;
     const observation = await observeGroupKeyMaterial(this.options.secrets, this.options.logger);
     signal?.throwIfAborted();
     this.stateOwner.assertCurrent();
-    if (this.runtimeStopping || revision !== this.membershipRevision || this.membershipOperations.busy || this.materialWork.size > 0 || this.groupWork.size > 0) throw new ClusterMembershipOperationError('abandoned');
+    if (this.runtimeStopping || revision !== this.membershipRevision || this.membershipOperations.busy || this.materialWork.size > 0 || this.groupWork.size > 0 || this.incoming.status.active > 0) throw new ClusterMembershipOperationError('abandoned');
     const material = observation.material;
     const state = material ? loadGroupState(this.options.stateDirectory, material.groupId, this.options.clock.now(), this.options.logger) : null;
     const savedReplica = material ? loadReplicaDocument(this.options.stateDirectory, value => readConfigReplicaDocument(value, isReplicatedConfigPath), this.options.logger) : null;
     this.stateOwner.assertCurrent();
     signal?.throwIfAborted();
-    if (this.runtimeStopping || revision !== this.membershipRevision || this.membershipOperations.busy || this.materialWork.size > 0 || this.groupWork.size > 0) throw new ClusterMembershipOperationError('abandoned');
+    if (this.runtimeStopping || revision !== this.membershipRevision || this.membershipOperations.busy || this.materialWork.size > 0 || this.groupWork.size > 0 || this.incoming.status.active > 0) throw new ClusterMembershipOperationError('abandoned');
     this.admissions.abandon('the stored membership was reloaded');
     this.unreadableMaterial = observation.unreadable;
     this.material = material; this.state = state; this.membershipRevision += 1;
@@ -392,6 +399,7 @@ export class ClusterGroupRuntime {
     // original file intact; only a real current-group write replaces that slot.
     if (material && this.replication) this.replication.adopt(savedReplica?.groupId === material.groupId
       ? savedReplica : createConfigReplicaDocument(material.groupId));
+    if (this.networkStarted && !this.runtimeStopping && this.membershipOperations.available && !this.membershipTransition) { this.incoming.open(); this.configChanges.resume(); }
   }
 
   /** Operator work reserves one cancellable owner before its first await. */
@@ -438,17 +446,18 @@ export class ClusterGroupRuntime {
   private async beginMembershipTransition(owner: ClusterMembershipOperation): Promise<void> {
     this.membershipOperations.assert(owner);
     this.membershipTransition = true;
+    this.incoming.close();
     this.configChanges.suspend();
     this.admissions.stop('this machine is changing its group membership');
     // Drain BEFORE entering the material queue: an old handler may itself be
     // waiting for a queued material write. Holding the queue here would deadlock.
-    await Promise.all([this.admissions.join(), this.configChanges.join(), this.drainGroupWork(), this.periodic.join()]);
+    await Promise.all([this.admissions.join(), this.incoming.join(), this.configChanges.join(), this.drainGroupWork(), this.periodic.join()]);
     this.membershipOperations.assert(owner);
   }
 
   private endMembershipTransition(): void {
     this.membershipTransition = false;
-    if (this.networkStarted && this.membershipOperations.available && !this.runtimeStopping) { this.admissions.start(); this.configChanges.resume(); }
+    if (this.networkStarted && this.membershipOperations.available && !this.runtimeStopping) { this.incoming.open(); this.admissions.start(); this.configChanges.resume(); }
   }
 
   private persistenceUnknown(): ClusterMembershipOperationError {
@@ -850,7 +859,7 @@ export class ClusterGroupRuntime {
 
   private onGroupMessage(envelope: ClusterEnvelope): void {
     if (this.runtimeStopping || this.membershipTransition || !this.membershipOperations.available) return;
-    void this.runGroupWork(() => this.handleGroupMessage(envelope));
+    this.incoming.admit(() => this.runGroupWork(() => this.handleGroupMessage(envelope)));
   }
 
   private async handleGroupMessage(envelope: ClusterEnvelope): Promise<void> {

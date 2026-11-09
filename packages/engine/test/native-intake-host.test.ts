@@ -11,7 +11,7 @@ import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-po
 import { nativeConversationIntakeCaptureRequestSchema } from '../sdk/src/platform/workflow/work-ledger/native-intake-wire.js';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
-import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
+import { PairingTokenManager, PairingTokenStoreBusyError } from '../sdk/src/platform/pairing/pairing-token-store.js';
 import { WorkspaceRegistrationStore } from '../sdk/src/platform/workspace/registration/store.js';
 import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
@@ -81,14 +81,30 @@ test('standalone admission preserves its recorded original-source judgment envel
 test('two actual intake hosts racing first capture adopt the one persisted opaque source without minting a replay identity', async () => {
   const f = await fixture(), other = createNativeConversationIntakeHost(f.deps);
   cleanups.push(() => other.close());
-  const [first, second] = await Promise.all([f.capture(), other.capture(f.original, f.authority)]);
-  expect(first).toEqual(second); expect(first.sourceRef.sourceId).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+  const results = await Promise.allSettled([f.capture(), other.capture(f.original, f.authority)]);
+  const accepted = results.filter(result => result.status === 'fulfilled'), busy = results.filter(result => result.status === 'rejected');
+  expect(accepted).toHaveLength(1); expect(busy).toHaveLength(1);
+  expect(busy[0]!.reason).toBeInstanceOf(PairingTokenStoreBusyError);
+  expect(busy[0]!.reason).toMatchObject({ code: 'PAIRING_TOKEN_STORE_BUSY' });
+  const first = accepted[0]!.value;
+  expect(first.sourceRef.sourceId).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+  const saved = f.storage.current({ principalId: f.principalId, inputId: f.original.inputId });
+  expect(saved?.sourceId).toBe(first.sourceRef.sourceId);
+  // The native authority lock intentionally does not wait or retry. An
+  // explicit new delivery after the winner drains adopts the saved source.
+  const retryHost = results[0]!.status === 'rejected' ? f.host : other;
+  expect(await retryHost.capture(f.original, f.authority)).toEqual(first);
   expect(await other.capture(f.original, f.authority)).toEqual(first);
+  expect(f.storage.current({ principalId: f.principalId, inputId: f.original.inputId })).toEqual(saved);
+  expect(f.authority.current()?.principalId).toBe(f.principalId);
   expect(f.fake.requests).toEqual([]); expect(f.proposals()).toBe(0);
   const result = await other.admit(f.target(first), f.authority);
-  expect(result.kind).toBe('work');
+  expect(result.kind).toBe('work'); const reads = f.fake.requests.length;
   expect(await f.host.resume(f.target(first), f.authority)).toEqual(result);
-  expect((await (await f.store.openWorkLedgerStorage('project')).read()).works).toHaveLength(1);
+  expect(f.fake.requests).toHaveLength(reads); expect(f.proposals()).toBe(1);
+  const ledger = readWorkLedgerState(await (await f.store.openWorkLedgerStorage('project')).read(), 'project');
+  expect(ledger.works).toHaveLength(1); expect(ledger.attempts).toHaveLength(1);
+  expect(ledger.history.filter(event => event.type === 'submit_native')).toHaveLength(1);
 });
 
 test('Classic authenticated intake survives duplicate admission and restart without a model or fabricated act', async () => {

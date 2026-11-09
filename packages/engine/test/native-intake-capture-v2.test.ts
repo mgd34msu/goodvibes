@@ -150,7 +150,7 @@ test('v2 continuation snapshot provenance stays private while contract and publi
   expect(validatedNativeCaptureContinuation(structuredClone(restored), context)).toBe(false);
   const source = captureNativeContractSource({ sourceId: original.sourceId, sourceRevision: original.sourceRevision, inputRevision: original.sourceRevision,
     criteriaId: 'criteria', criteriaRevision: '1', goal: original.text, criteria: [original.text], continuation: context });
-  expect(nativeContractSourceData(source).continuation).toEqual(context);
+  expect<unknown>(nativeContractSourceData(source).continuation).toEqual(context);
   const publicResult = { kind: 'turn', projectId: original.projectId, requestId: original.requestId, route: 'answer', text: original.text, continuation: context,
     sourceRef: { version: 1, inputId: original.inputId, sourceId: original.sourceId, sourceRevision: original.sourceRevision, sessionId: original.sessionId,
       continuation: { version: 2, sessionId: context.sessionId, revision: context.revision } } };
@@ -181,10 +181,12 @@ test('an unsupported future saved capture is refused and preserved without downg
     db.run('UPDATE native_conversation_captures SET format_version = 3');
     const { writeFileSync } = await import('node:fs'); writeFileSync(path, db.export());
   } finally { db.close(); }
-  const bytes = readFileSync(path), reopened = await open(path);
-  expect(() => reopened.storage.current(original)).toThrow();
-  await expect(reopened.storage.transaction(original, () => ({ next: original, value: undefined }))).rejects.toMatchObject({ code: 'future-version' });
-  expect(readFileSync(path)).toEqual(bytes);
+  const bytes = readFileSync(path), declared: string[] = [];
+  // Full native schema admission refuses before exposing storage methods. The
+  // helper registers the failed KnowledgeStore for its normal owned cleanup.
+  await expect(open(path, format => { declared.push(format); })).rejects.toMatchObject({ code: 'future-version' });
+  expect(declared).toEqual([]);
+  expect(readFileSync(path).equals(bytes)).toBe(true);
 });
 
 test('a supposedly synchronous native floor callback cannot leak an asynchronous failed declaration past publication', async () => {

@@ -57,6 +57,7 @@ import { nativeHostedConversationOwner } from './native-hosted-conversation-comp
  */
 import { createClientRuntimeServices } from '@goodvibes-jev/engine/sdk/platform/runtime/client-services';
 import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
+import { createShellPathService } from '@goodvibes-jev/engine/sdk/platform/runtime/shell';
 import { createLaunchTolerantProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
 import type { DaemonHostedSessionsOptions } from '@goodvibes-jev/engine/sdk/platform/daemon';
 import type {
@@ -134,7 +135,11 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
   return {
     nativeConversation: nativeHostedConversationOwner(services.gatewayMethods),
     floorFactory: async ({ workspaceRoot }): Promise<HostedWorkspaceFloor> => {
+      const taskGraphPath = createShellPathService({ workingDirectory: workspaceRoot, homeDirectory: services.homeDirectory })
+        .resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'sessions', 'task-graph.json');
+      const sessionOrchestration = services.sessionOrchestration.borrowForGraphPath(taskGraphPath);
       const floor = createClientRuntimeServices({
+        sessionOrchestration,
         judgment: services.judgment,
         configManager: services.configManager,
         // The daemon's own bus: a hosted turn's stream events reach the

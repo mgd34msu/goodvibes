@@ -310,6 +310,9 @@ export type ClientOnlyServiceMember =
 export type ClientRuntimeServicesFromHost = Omit<ClientRuntimeServices, ClientOnlyServiceMember>;
 
 export interface ClientRuntimeServicesOptions {
+  /** Same-project nested runtime borrows the composing host's actual graph
+   * owner. Its source binding must match; only the host disposes that owner. */
+  readonly sessionOrchestration?: CrossSessionTaskRegistry | undefined;
   readonly nativeDataWriter?: import('./native-reader-compatibility.js').NativeDataWriteOwner | undefined;
   /** A nested workspace borrows its host's recorded owner for the host lifetime.
    * Closing this workspace must neither replace that port nor close its log. */
@@ -417,8 +420,15 @@ export function createClientRuntimeServices(options: ClientRuntimeServicesOption
   const workingDirectory = options.workingDir;
   const homeDirectory = options.homeDirectory;
   const surfaceRoot = requireSurfaceRoot(options.surfaceRoot, 'ClientRuntimeServicesOptions surfaceRoot');
+  const configManager = options.configManager;
+  const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
+  const taskGraphPath = shellPaths.resolveProjectPath(surfaceRoot, 'sessions', 'task-graph.json');
+  const borrowedSessionOrchestration = options.sessionOrchestration;
+  if (borrowedSessionOrchestration && borrowedSessionOrchestration.borrowForGraphPath(taskGraphPath) !== borrowedSessionOrchestration) {
+    throw new Error('Borrowed cross-session task graph belongs to another workspace');
+  }
 
-  // Single-writer claim FIRST, before anything opens a file under the home: a
+  // Single-writer claim before anything mutates a file under the home: a
   // refusal has to happen before this process has started writing, not after.
   // Throws SurfaceHomeInUseError, whose message names the holding pid.
   if (options.homeSingleWriter === 'claim') {
@@ -426,8 +436,6 @@ export function createClientRuntimeServices(options: ClientRuntimeServicesOption
     disposalScope.registry.add('surface home claim', () => claim.release());
   }
 
-  const configManager = options.configManager;
-  const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
   const featureFlags = resolveRuntimeFeatureFlags({ configManager, featureFlags: options.featureFlags });
   const runtimeDispatch = createDomainDispatch(options.runtimeStore);
 
@@ -535,8 +543,8 @@ export function createClientRuntimeServices(options: ClientRuntimeServicesOption
 
   const sessionManager = new SessionManager(workingDirectory, { surfaceRoot });
   const isSessionLive = options.isSessionLive ?? ((): boolean => true);
-  const sessionOrchestration = new CrossSessionTaskRegistry(
-    shellPaths.resolveProjectPath(surfaceRoot, 'sessions', 'task-graph.json'),
+  const sessionOrchestration = borrowedSessionOrchestration ?? new CrossSessionTaskRegistry(
+    taskGraphPath,
     { sessionExists: (sessionId: string) => isSessionLive(sessionId) },
   );
 
@@ -611,7 +619,7 @@ export function createClientRuntimeServices(options: ClientRuntimeServicesOption
     config: { subscribe: (key, cb) => configManager.subscribe(key as never, cb as never) },
     bus: options.runtimeBus,
   }));
-  disposalScope.registry.add('cross-session task registry', () => sessionOrchestration.dispose());
+  if (!borrowedSessionOrchestration) disposalScope.registry.add('cross-session task registry', () => sessionOrchestration.dispose());
   disposalScope.registry.add('agent orchestrator', () => agents.agentOrchestrator.dispose());
   disposalScope.registry.add('hosted agent runs', () => { cancelAllAgentRuns(agents.agentManager); });
   disposalScope.registry.add('contract runner', () => contracts.dispose());

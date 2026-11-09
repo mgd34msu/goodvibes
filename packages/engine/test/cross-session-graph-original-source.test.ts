@@ -64,6 +64,22 @@ test('another current-version graph writer retires stale local memory instead of
   first.linkTask(ref('next')); first.flush(); expect(owner(f.path).getAllRefs().map(entry => entry.taskId).sort()).toEqual(['next', 'winning']);
 });
 
+test('borrowing selects only the same original graph, including an existing parent alias and absent child directories', () => {
+  const f = fixture(), selected = join(f.root, 'workspace'); mkdirSync(selected);
+  const alias = join(f.root, 'alias'); symlinkSync(selected, alias);
+  const path = join(selected, 'sessions', 'graph.json'), registry = owner(path);
+  expect(registry.borrowForGraphPath(path)).toBe(registry);
+  expect(registry.borrowForGraphPath(join(alias, 'sessions', 'graph.json'))).toBe(registry);
+  expect(registry.borrowForGraphPath(join(selected, 'other', 'graph.json'))).toBeUndefined();
+  expect(registry.borrowForGraphPath(join(selected, 'sessions', 'different.json'))).toBeUndefined();
+  expect(existsSync(join(selected, 'sessions'))).toBe(false);
+  registry.linkTask(ref('shared')); registry.flush();
+  const bytes = readFileSync(path, 'utf8'); writeFileSync(path, future());
+  expect(() => registry.borrowForGraphPath(path)).toThrow(CrossSessionGraphUnavailableError);
+  expect(registry.getAllRefs().map(value => value.taskId)).toEqual(['shared']);
+  expect(readFileSync(path, 'utf8')).not.toBe(bytes);
+});
+
 test('a source changed inside the owner-existence callback cannot be hydrated or reap-published', () => {
   const f = fixture(), seed = owner(f.path); seed.linkTask({ ...ref(), updatedAt: Date.now() - 2 * 24 * 60 * 60 * 1000 }); seed.flush(); seed.dispose();
   const bytes = future(); let changed = false;

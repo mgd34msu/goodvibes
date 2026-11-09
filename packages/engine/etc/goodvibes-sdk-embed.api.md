@@ -144,7 +144,6 @@ export function createEmbeddedSession(options: EmbedSessionOptions): Promise<Emb
 
 // @public
 export class DaemonServer {
-    // Warning: (ae-forgotten-export) The symbol "DaemonConfig" needs to be exported by the entry point embed.d.ts
     constructor(config?: DaemonConfig);
     get approvals(): ApprovalBroker;
     get boundHost(): string;
@@ -157,6 +156,8 @@ export class DaemonServer {
         at: number;
     }[];
     get contracts(): RuntimeServices['contractOperator'];
+    // Warning: (ae-forgotten-export) The symbol "DaemonConfig" needs to be exported by the entry point embed.d.ts
+    static create(config?: DaemonConfig): Promise<DaemonServer>;
     // Warning: (ae-forgotten-export) The symbol "DaemonDangerConfig" needs to be exported by the entry point embed.d.ts
     enable(dangerConfig: DaemonDangerConfig, token?: string): boolean;
     get eventBus(): RuntimeEventBus;

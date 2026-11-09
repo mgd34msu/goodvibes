@@ -57,3 +57,15 @@ export function writeNativeInstallationFixture(prefix: string, version: string, 
     checksumManifest: Object.entries(assets).map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join(''),
   };
 }
+
+/** Explicit current-reader variant. These are still inert original fixtures,
+ * not compiled capability probes; historical v1 callers remain unchanged. */
+export function writeNativeReaderInstallationFixture(prefix: string, version: string, arch: 'x64' | 'arm64' = 'x64') {
+  const original = writeNativeInstallationFixture(prefix, version, arch);
+  const artifact: Extract<DaemonCiArtifact, { schema: 2 }> = { ...original.receipt.artifact, schema: 2, readers: nativeReaderCapabilities(version) };
+  const receipt: DaemonInstallationReceipt = { ...original.receipt, artifact };
+  const target = original.targets.at(-1);
+  if (!target) throw new Error('Native fixture installation receipt is missing');
+  writeFileSync(target.path, JSON.stringify(receipt)); chmodSync(target.path, 0o644);
+  return { ...original, receipt };
+}

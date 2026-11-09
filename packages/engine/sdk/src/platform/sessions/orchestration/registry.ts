@@ -25,7 +25,7 @@
 import { lstatSync, renameSync, unlinkSync } from 'node:fs';
 import { captureExistingDirectory, writeFileAtomic } from '../../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation, type FileObservation } from '../../utils/file-observation.js';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { logger } from '../../utils/logger.js';
 import { SessionTaskGraph } from './graph.js';
 import type {
@@ -56,6 +56,26 @@ export class CrossSessionGraphUnavailableError extends Error {
   }
 }
 const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
+
+/** Resolve existing parent aliases, never the selected graph leaf. A graph's
+ * ordinary parent may not have been created yet; retain the exact missing
+ * suffix rather than create a directory merely to select an existing owner. */
+function canonicalGraphPath(path: string): string {
+  let directory = dirname(resolve(path));
+  const suffix = [basename(path)];
+  for (;;) {
+    try {
+      const parent = captureExistingDirectory(directory);
+      parent.assertCurrent();
+      return join(parent.canonical, ...suffix);
+    } catch (error) {
+      if (!missing(error)) throw error;
+      const next = dirname(directory);
+      if (next === directory) throw error;
+      suffix.unshift(basename(directory)); directory = next;
+    }
+  }
+}
 
 export type { CrossSessionGraphReapSummary } from './registry-housekeeping.js';
 
@@ -133,6 +153,17 @@ export class CrossSessionTaskRegistry {
       }, sweepIntervalMs);
       this._sweepTimer.unref?.();
     }
+  }
+
+  /** A nested runtime may borrow this actual owner for the same selected
+   * graph. It must not dispose it: the composing host drains all borrowers
+   * before its own final flush. Copies and a different workspace never supply
+   * this class's private original source or become a replacement owner. */
+  public borrowForGraphPath(graphPath: string): CrossSessionTaskRegistry | undefined {
+    this._assertCurrent();
+    const same = canonicalGraphPath(this._graphPath) === canonicalGraphPath(graphPath);
+    this._assertCurrent();
+    return same ? this : undefined;
   }
 
   // ── Task ref operations ───────────────────────────────────────────────────────

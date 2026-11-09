@@ -1971,7 +1971,7 @@ export { forSession as forSessionRuntime }
 export const FOUNDATION_METADATA: {
     readonly productId: "goodvibes";
     readonly productVersion: "3.1.2";
-    readonly operatorMethodCount: 542;
+    readonly operatorMethodCount: 549;
     readonly operatorEventCount: 34;
     readonly peerEndpointCount: 6;
 };
@@ -2883,6 +2883,7 @@ export const ListProviderModelsResponseSchema: z.ZodObject<{
                     fallback: "fallback";
                     family: "family";
                 }>;
+                effectiveByRequested: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>>;
             }, z.core.$strict>>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
@@ -2909,7 +2910,7 @@ export const LocalAuthStatusResponseSchema: z.ZodObject<{
         roles: z.ZodArray<z.ZodString>;
     }, z.core.$strict>>;
     sessions: z.ZodArray<z.ZodObject<{
-        tokenFingerprint: z.ZodString;
+        id: z.ZodString;
         username: z.ZodString;
         expiresAt: z.ZodNumber;
     }, z.core.$strict>>;
@@ -3054,6 +3055,7 @@ export const ModelReasoningOptionsSchema: z.ZodObject<{
         fallback: "fallback";
         family: "family";
     }>;
+    effectiveByRequested: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>>;
 }, z.core.$strict>;
 
 // @public
@@ -3115,7 +3117,7 @@ export function openServerSentEventStream(transport: HttpTransport, pathOrUrl: s
 export const OPERATOR_CONTRACT: OperatorContractManifest;
 
 // @public (undocumented)
-export const OPERATOR_METHOD_IDS: readonly ["accounts.snapshot", "acp.agents.list", "acp.sessions.create", "approvals.approve", "approvals.cancel", "approvals.claim", "approvals.deny", "approvals.list", "approvals.raise", "artifacts.content.get", "artifacts.create", "artifacts.get", "artifacts.list", "automation.heartbeat.list", "automation.heartbeat.run", "automation.integration.snapshot", "automation.jobs.create", "automation.jobs.delete", "automation.jobs.disable", "automation.jobs.enable", "automation.jobs.list", "automation.jobs.run", "automation.jobs.update", "automation.runs.cancel", "automation.runs.get", "automation.runs.list", "automation.runs.retry", "automation.schedules.create", "automation.schedules.delete", "automation.schedules.disable", "automation.schedules.enable", "automation.schedules.list", "automation.schedules.run", "browser.click", "browser.extract", "browser.history.back", "browser.history.forward", "browser.navigate", "browser.press", "browser.provision", "browser.readText", "browser.screenshot", "browser.scroll", "browser.select", "browser.sessions.attach", "browser.sessions.close", "browser.sessions.launch", "browser.sessions.list", "browser.sessions.release", "browser.snapshot", "browser.status", "browser.tabs.close", "browser.tabs.create", "browser.tabs.list", "browser.tabs.switch", "browser.type", "browser.waitFor", "calendar.events.create", "calendar.events.get", "calendar.events.list", "calendar.ics.export", "calendar.ics.import", "channels.accounts.action.default", "channels.accounts.action.named", "channels.accounts.get", "channels.accounts.list", "channels.accounts.surface.list", "channels.actions.invoke", "channels.actions.list", "channels.actions.surface.list", "channels.agent_tools.list", "channels.agent_tools.surface.list", "channels.allowlist.edit", "channels.allowlist.resolve", "channels.authorize", "channels.capabilities.list", "channels.capabilities.surface.list", "channels.directory.query", "channels.doctor.get", "channels.drafts.delete", "channels.drafts.get", "channels.drafts.list", "channels.drafts.save", "channels.inbox.list", "channels.lifecycle.get", "channels.policies.audit", "channels.policies.list", "channels.policies.update", "channels.profiles.delete", "channels.profiles.get", "channels.profiles.list", "channels.profiles.set", "channels.repairs.list", "channels.routing.assign", "channels.routing.delete", "channels.routing.list", "channels.setup.get", "channels.status", "channels.targets.resolve", "channels.test.send", "channels.tools.invoke", "channels.tools.list", "channels.tools.surface.list", "checkin.config.get", "checkin.config.set", "checkin.receipts.list", "checkin.run", "checkpoints.create", "checkpoints.diff", "checkpoints.list", "checkpoints.restore", "checkpoints.restorePreview", "checkpoints.revertHunk", "checkpoints.revertHunkPreview", "ci.status", "ci.watches.create", "ci.watches.delete", "ci.watches.list", "ci.watches.run", "companion.chat.events.stream", "companion.chat.messages.create", "companion.chat.messages.edit", "companion.chat.messages.list", "companion.chat.messages.retry", "companion.chat.messages.steer", "companion.chat.sessions.close", "companion.chat.sessions.create", "companion.chat.sessions.delete", "companion.chat.sessions.get", "companion.chat.sessions.list", "companion.chat.sessions.update", "companion.chat.turns.cancel", "config.get", "config.set", "continuity.snapshot", "contracts.cancel", "contracts.get", "contracts.list", "contracts.reply", "contracts.start", "control.auth.current", "control.auth.login", "control.clients.list", "control.contract", "control.events.catalog", "control.events.stream", "control.messages.list", "control.methods.get", "control.methods.list", "control.snapshot", "control.status", "control.web", "cost.attribution.get", "credentials.delete", "credentials.get", "credentials.set", "deliveries.get", "deliveries.list", "devices.artifacts.list", "devices.artifacts.read", "devices.capability.request", "devices.grants.list", "devices.grants.revoke", "devices.housekeeping.run", "devices.nodes.list", "email.draft.create", "email.expectation.cancel", "email.expectation.list", "email.expectation.open", "email.inbound.status", "email.inbox.list", "email.inbox.read", "email.send", "flags.graduation.report", "fleet.archive", "fleet.archiveFinished", "fleet.archived.list", "fleet.attempts.judge", "fleet.attempts.list", "fleet.attempts.pick", "fleet.conflicts.list", "fleet.conflicts.resolve", "fleet.graph.get", "fleet.list", "fleet.observed.steer", "fleet.snapshot", "fleet.unarchive", "health.snapshot", "homeassistant.homeGraph.askHomeGraph", "homeassistant.homeGraph.browse", "homeassistant.homeGraph.export", "homeassistant.homeGraph.generateHomeGraphPacket", "homeassistant.homeGraph.generateRoomPage", "homeassistant.homeGraph.import", "homeassistant.homeGraph.ingestHomeGraphArtifact", "homeassistant.homeGraph.ingestHomeGraphNote", "homeassistant.homeGraph.ingestHomeGraphUrl", "homeassistant.homeGraph.linkHomeGraphKnowledge", "homeassistant.homeGraph.listHomeGraphIssues", "homeassistant.homeGraph.map", "homeassistant.homeGraph.pages.list", "homeassistant.homeGraph.refinement.run", "homeassistant.homeGraph.refinement.task.cancel", "homeassistant.homeGraph.refinement.task.get", "homeassistant.homeGraph.refinement.tasks.list", "homeassistant.homeGraph.refreshDevicePassport", "homeassistant.homeGraph.reindex", "homeassistant.homeGraph.reset", "homeassistant.homeGraph.reviewHomeGraphFact", "homeassistant.homeGraph.sources.list", "homeassistant.homeGraph.status", "homeassistant.homeGraph.syncHomeGraph", "homeassistant.homeGraph.unlinkHomeGraphKnowledge", "inbound.telegram.cancel", "inbound.telegram.configure", "inbound.telegram.decide", "inbound.telegram.list", "inbound.telegram.read", "inbound.telegram.revoke", "inbound.telegram.status", "intelligence.snapshot", "judgment.battery.run", "knowledge.ask", "knowledge.candidate.decide", "knowledge.candidate.get", "knowledge.candidates.list", "knowledge.connector.doctor", "knowledge.connector.get", "knowledge.connectors.list", "knowledge.extraction.get", "knowledge.extractions.list", "knowledge.graphql.execute", "knowledge.graphql.schema", "knowledge.ingest.artifact", "knowledge.ingest.bookmarks", "knowledge.ingest.browserHistory", "knowledge.ingest.connector", "knowledge.ingest.url", "knowledge.ingest.urls", "knowledge.issue.review", "knowledge.issues.list", "knowledge.item.get", "knowledge.job-runs.list", "knowledge.job.get", "knowledge.job.run", "knowledge.jobs.list", "knowledge.lint", "knowledge.map", "knowledge.nodes.list", "knowledge.packet", "knowledge.projection.materialize", "knowledge.projection.render", "knowledge.projections.list", "knowledge.refinement.run", "knowledge.refinement.task.cancel", "knowledge.refinement.task.get", "knowledge.refinement.tasks.list", "knowledge.reindex", "knowledge.report.get", "knowledge.reports.list", "knowledge.schedule.delete", "knowledge.schedule.enable", "knowledge.schedule.get", "knowledge.schedule.save", "knowledge.schedules.list", "knowledge.search", "knowledge.source.extraction.get", "knowledge.sources.list", "knowledge.status", "knowledge.usage.list", "local_auth.bootstrap.delete", "local_auth.sessions.delete", "local_auth.status", "local_auth.users.create", "local_auth.users.delete", "local_auth.users.password.rotate", "mcp.config.get", "mcp.config.reload", "mcp.servers.list", "mcp.servers.remove", "mcp.servers.reveal", "mcp.servers.upsert", "mcp.tools.list", "media.analyze", "media.generate", "media.providers.list", "media.transform", "memory.consolidation.receipts", "memory.doctor", "memory.embeddings.default.set", "memory.projections.get", "memory.projections.list", "memory.records.add", "memory.records.delete", "memory.records.export", "memory.records.get", "memory.records.import", "memory.records.links.add", "memory.records.links.list", "memory.records.list", "memory.records.search", "memory.records.search-semantic", "memory.records.update", "memory.records.update-review", "memory.review-queue", "memory.vector.rebuild", "memory.vector.stats", "models.current.get", "models.current.set", "models.list", "multimodal.analyze", "multimodal.packet", "multimodal.providers.list", "multimodal.status", "multimodal.writeback", "occasions.acknowledge", "occasions.answer", "occasions.confirm", "occasions.conflict.resolve", "occasions.gifts", "occasions.interview.answer", "occasions.interview.get", "occasions.interview.record", "occasions.list", "occasions.pending", "occasions.plans.confirm", "occasions.plans.list", "occasions.plans.propose", "occasions.propose", "occasions.remove", "occasions.state", "occasions.sweep", "ops.memory.get", "pairing.handoff.complete", "pairing.handoff.create", "pairing.posture.get", "pairing.tokens.create", "pairing.tokens.delete", "pairing.tokens.list", "pairing.tokens.migrate", "pairing.tokens.rename", "pairing.tokens.revokeShared", "panels.list", "panels.open", "payments.budget.status", "payments.cards.create", "payments.cards.delete", "payments.cards.list", "payments.checkout.begin", "payments.checkout.fillCard", "payments.purchases.list", "permissions.rules.delete", "permissions.rules.list", "power.keepAwake.set", "power.status.get", "principals.create", "principals.delete", "principals.get", "principals.list", "principals.resolve", "principals.update", "profile.append", "profile.forget", "profile.get", "profile.person", "profile.provenance", "profile.read", "profile.set", "profile.status", "profile.undo", "projectPlanning.decisions.list", "projectPlanning.decisions.record", "projectPlanning.evaluate", "projectPlanning.language.get", "projectPlanning.language.upsert", "projectPlanning.state.get", "projectPlanning.state.upsert", "projectPlanning.status", "projectPlanning.workPlan.clearCompleted", "projectPlanning.workPlan.snapshot", "projectPlanning.workPlan.task.create", "projectPlanning.workPlan.task.delete", "projectPlanning.workPlan.task.get", "projectPlanning.workPlan.task.status", "projectPlanning.workPlan.task.update", "projectPlanning.workPlan.tasks.list", "projectPlanning.workPlan.tasks.reorder", "providers.get", "providers.list", "providers.usage.get", "push.subscriptions.create", "push.subscriptions.delete", "push.subscriptions.list", "push.subscriptions.reconcile", "push.subscriptions.verify", "push.vapid.get", "quota.fanout.get", "quota.snapshot.get", "relay.pairing.mint", "relay.reachability.get", "remote.node_host.contract", "remote.pair.requests.approve", "remote.pair.requests.list", "remote.pair.requests.reject", "remote.peers.disconnect", "remote.peers.invoke", "remote.peers.list", "remote.peers.token.revoke", "remote.peers.token.rotate", "remote.snapshot", "remote.work.cancel", "remote.work.list", "review.snapshot", "rewind.apply", "rewind.conversation.host.register", "rewind.conversation.host.release", "rewind.conversation.hosts.list", "rewind.conversation.requests.answer", "rewind.conversation.requests.take", "rewind.plan", "routes.bindings.create", "routes.bindings.delete", "routes.bindings.list", "routes.bindings.update", "routes.snapshot", "runtime.metrics.get", "scheduler.capacity", "security.settings", "services.install", "services.restart", "services.start", "services.status", "services.stop", "services.uninstall", "sessions.changes.get", "sessions.close", "sessions.contextUsage.get", "sessions.create", "sessions.delete", "sessions.detach", "sessions.followUp", "sessions.get", "sessions.hosted.attach", "sessions.hosted.create", "sessions.hosted.detach", "sessions.hosted.kill", "sessions.hosted.list", "sessions.inputs.cancel", "sessions.inputs.deliver", "sessions.inputs.list", "sessions.integration.snapshot", "sessions.list", "sessions.messages.create", "sessions.messages.list", "sessions.permissionMode.get", "sessions.permissionMode.set", "sessions.queuedMessages.delete", "sessions.queuedMessages.edit", "sessions.queuedMessages.list", "sessions.register", "sessions.reopen", "sessions.search", "sessions.steer", "sessions.toolCalls.cancel", "sessions.turns.cancel", "settings.snapshot", "skills.create", "skills.delete", "skills.get", "skills.list", "skills.update", "stepup.challenge.mint", "stepup.credentials.register", "surfaces.list", "tailscale.get", "tailscale.serve.run", "tasks.cancel", "tasks.create", "tasks.get", "tasks.list", "tasks.retry", "tasks.status", "telemetry.errors.list", "telemetry.events.list", "telemetry.metrics.get", "telemetry.otlp.logs", "telemetry.otlp.metrics", "telemetry.otlp.traces", "telemetry.snapshot", "telemetry.stream", "telemetry.traces.list", "update.check", "update.status", "voice.local.install", "voice.local.status", "voice.providers.list", "voice.realtime.session", "voice.status", "voice.stt", "voice.tts", "voice.tts.stream", "voice.voices.list", "voice.wake.model.get", "voice.wake.provision", "voice.wake.status", "watchers.create", "watchers.delete", "watchers.list", "watchers.run", "watchers.start", "watchers.stop", "watchers.update", "web_search.providers.list", "web_search.query", "workLedger.execution.cancel", "workLedger.execution.resume", "workLedger.execution.start", "workLedger.execution.status", "workLedger.history", "workLedger.importLegacy", "workLedger.intake.admit", "workLedger.intake.cancel", "workLedger.intake.capture", "workLedger.intake.get", "workLedger.intake.resume", "workLedger.prepareLegacyImport", "workLedger.project", "workLedger.snapshot", "workLedger.submission.get", "workLedger.submit", "workLedger.turn.cancel", "workLedger.turn.session", "workLedger.turn.start", "workLedger.turn.startAgent", "workLedger.turn.status", "workspaces.registrations.add", "workspaces.registrations.list", "workspaces.registrations.remove", "workspaces.resolve", "worktrees.discard", "worktrees.setup.run", "worktrees.snapshot"];
+export const OPERATOR_METHOD_IDS: readonly ["accounts.snapshot", "acp.agents.list", "acp.sessions.create", "approvals.approve", "approvals.cancel", "approvals.claim", "approvals.deny", "approvals.list", "approvals.raise", "artifacts.content.get", "artifacts.create", "artifacts.get", "artifacts.list", "automation.heartbeat.list", "automation.heartbeat.run", "automation.integration.snapshot", "automation.jobs.create", "automation.jobs.delete", "automation.jobs.disable", "automation.jobs.enable", "automation.jobs.list", "automation.jobs.run", "automation.jobs.update", "automation.runs.cancel", "automation.runs.get", "automation.runs.list", "automation.runs.retry", "automation.schedules.create", "automation.schedules.delete", "automation.schedules.disable", "automation.schedules.enable", "automation.schedules.list", "automation.schedules.run", "browser.click", "browser.extract", "browser.history.back", "browser.history.forward", "browser.navigate", "browser.press", "browser.provision", "browser.readText", "browser.screenshot", "browser.scroll", "browser.select", "browser.sessions.attach", "browser.sessions.close", "browser.sessions.launch", "browser.sessions.list", "browser.sessions.release", "browser.snapshot", "browser.status", "browser.tabs.close", "browser.tabs.create", "browser.tabs.list", "browser.tabs.switch", "browser.type", "browser.waitFor", "calendar.events.create", "calendar.events.get", "calendar.events.list", "calendar.ics.export", "calendar.ics.import", "channels.accounts.action.default", "channels.accounts.action.named", "channels.accounts.get", "channels.accounts.list", "channels.accounts.surface.list", "channels.actions.invoke", "channels.actions.list", "channels.actions.surface.list", "channels.agent_tools.list", "channels.agent_tools.surface.list", "channels.allowlist.edit", "channels.allowlist.resolve", "channels.authorize", "channels.capabilities.list", "channels.capabilities.surface.list", "channels.directory.query", "channels.doctor.get", "channels.drafts.delete", "channels.drafts.get", "channels.drafts.list", "channels.drafts.save", "channels.inbox.list", "channels.lifecycle.get", "channels.policies.audit", "channels.policies.list", "channels.policies.update", "channels.profiles.delete", "channels.profiles.get", "channels.profiles.list", "channels.profiles.set", "channels.repairs.list", "channels.routing.assign", "channels.routing.delete", "channels.routing.list", "channels.setup.get", "channels.status", "channels.targets.resolve", "channels.test.send", "channels.tools.invoke", "channels.tools.list", "channels.tools.surface.list", "checkin.config.get", "checkin.config.set", "checkin.receipts.list", "checkin.run", "checkpoints.create", "checkpoints.diff", "checkpoints.list", "checkpoints.restore", "checkpoints.restorePreview", "checkpoints.revertHunk", "checkpoints.revertHunkPreview", "ci.status", "ci.watches.create", "ci.watches.delete", "ci.watches.list", "ci.watches.run", "companion.chat.events.stream", "companion.chat.messages.create", "companion.chat.messages.edit", "companion.chat.messages.list", "companion.chat.messages.retry", "companion.chat.messages.steer", "companion.chat.sessions.close", "companion.chat.sessions.create", "companion.chat.sessions.delete", "companion.chat.sessions.get", "companion.chat.sessions.list", "companion.chat.sessions.update", "companion.chat.turns.cancel", "config.get", "config.set", "continuity.snapshot", "contracts.cancel", "contracts.get", "contracts.list", "contracts.reply", "contracts.start", "control.auth.current", "control.auth.login", "control.clients.list", "control.contract", "control.events.catalog", "control.events.stream", "control.messages.list", "control.methods.get", "control.methods.list", "control.snapshot", "control.status", "control.web", "cost.attribution.get", "credentials.delete", "credentials.get", "credentials.set", "deliveries.get", "deliveries.list", "devices.artifacts.list", "devices.artifacts.read", "devices.capability.request", "devices.grants.list", "devices.grants.revoke", "devices.housekeeping.run", "devices.nodes.list", "email.draft.create", "email.expectation.cancel", "email.expectation.list", "email.expectation.open", "email.inbound.status", "email.inbox.list", "email.inbox.read", "email.send", "flags.graduation.report", "fleet.archive", "fleet.archiveFinished", "fleet.archived.list", "fleet.attempts.judge", "fleet.attempts.list", "fleet.attempts.pick", "fleet.conflicts.list", "fleet.conflicts.resolve", "fleet.graph.get", "fleet.list", "fleet.observed.steer", "fleet.snapshot", "fleet.unarchive", "health.snapshot", "homeassistant.homeGraph.askHomeGraph", "homeassistant.homeGraph.browse", "homeassistant.homeGraph.export", "homeassistant.homeGraph.generateHomeGraphPacket", "homeassistant.homeGraph.generateRoomPage", "homeassistant.homeGraph.import", "homeassistant.homeGraph.ingestHomeGraphArtifact", "homeassistant.homeGraph.ingestHomeGraphNote", "homeassistant.homeGraph.ingestHomeGraphUrl", "homeassistant.homeGraph.linkHomeGraphKnowledge", "homeassistant.homeGraph.listHomeGraphIssues", "homeassistant.homeGraph.map", "homeassistant.homeGraph.pages.list", "homeassistant.homeGraph.refinement.run", "homeassistant.homeGraph.refinement.task.cancel", "homeassistant.homeGraph.refinement.task.get", "homeassistant.homeGraph.refinement.tasks.list", "homeassistant.homeGraph.refreshDevicePassport", "homeassistant.homeGraph.reindex", "homeassistant.homeGraph.reset", "homeassistant.homeGraph.reviewHomeGraphFact", "homeassistant.homeGraph.sources.list", "homeassistant.homeGraph.status", "homeassistant.homeGraph.syncHomeGraph", "homeassistant.homeGraph.unlinkHomeGraphKnowledge", "inbound.telegram.cancel", "inbound.telegram.configure", "inbound.telegram.decide", "inbound.telegram.list", "inbound.telegram.read", "inbound.telegram.revoke", "inbound.telegram.status", "intelligence.snapshot", "judgment.battery.run", "knowledge.ask", "knowledge.candidate.decide", "knowledge.candidate.get", "knowledge.candidates.list", "knowledge.connector.doctor", "knowledge.connector.get", "knowledge.connectors.list", "knowledge.extraction.get", "knowledge.extractions.list", "knowledge.graphql.execute", "knowledge.graphql.schema", "knowledge.ingest.artifact", "knowledge.ingest.bookmarks", "knowledge.ingest.browserHistory", "knowledge.ingest.connector", "knowledge.ingest.url", "knowledge.ingest.urls", "knowledge.issue.review", "knowledge.issues.list", "knowledge.item.get", "knowledge.job-runs.list", "knowledge.job.get", "knowledge.job.run", "knowledge.jobs.list", "knowledge.lint", "knowledge.map", "knowledge.nodes.list", "knowledge.packet", "knowledge.projection.materialize", "knowledge.projection.render", "knowledge.projections.list", "knowledge.refinement.run", "knowledge.refinement.task.cancel", "knowledge.refinement.task.get", "knowledge.refinement.tasks.list", "knowledge.reindex", "knowledge.report.get", "knowledge.reports.list", "knowledge.schedule.delete", "knowledge.schedule.enable", "knowledge.schedule.get", "knowledge.schedule.save", "knowledge.schedules.list", "knowledge.search", "knowledge.source.extraction.get", "knowledge.sources.list", "knowledge.status", "knowledge.usage.list", "local_auth.bootstrap.delete", "local_auth.sessions.delete", "local_auth.status", "local_auth.users.create", "local_auth.users.delete", "local_auth.users.password.rotate", "mcp.config.get", "mcp.config.reload", "mcp.servers.list", "mcp.servers.remove", "mcp.servers.reveal", "mcp.servers.upsert", "mcp.tools.list", "media.analyze", "media.generate", "media.providers.list", "media.transform", "memory.consolidation.receipts", "memory.doctor", "memory.embeddings.default.set", "memory.projections.get", "memory.projections.list", "memory.records.add", "memory.records.delete", "memory.records.export", "memory.records.get", "memory.records.import", "memory.records.links.add", "memory.records.links.list", "memory.records.list", "memory.records.search", "memory.records.search-semantic", "memory.records.update", "memory.records.update-review", "memory.review-queue", "memory.vector.rebuild", "memory.vector.stats", "models.current.get", "models.current.set", "models.list", "multimodal.analyze", "multimodal.packet", "multimodal.providers.list", "multimodal.status", "multimodal.writeback", "occasions.acknowledge", "occasions.answer", "occasions.confirm", "occasions.conflict.resolve", "occasions.gifts", "occasions.interview.answer", "occasions.interview.get", "occasions.interview.record", "occasions.list", "occasions.pending", "occasions.plans.confirm", "occasions.plans.list", "occasions.plans.propose", "occasions.propose", "occasions.remove", "occasions.state", "occasions.sweep", "ops.memory.get", "pairing.handoff.complete", "pairing.handoff.create", "pairing.posture.get", "pairing.tokens.create", "pairing.tokens.delete", "pairing.tokens.list", "pairing.tokens.migrate", "pairing.tokens.rename", "pairing.tokens.revokeShared", "panels.list", "panels.open", "payments.budget.status", "payments.cards.create", "payments.cards.delete", "payments.cards.list", "payments.checkout.begin", "payments.checkout.fillCard", "payments.purchase.approve", "payments.purchase.cancel", "payments.purchase.deny", "payments.purchase.reconcile", "payments.purchase.status", "payments.purchases.list", "permissions.rules.delete", "permissions.rules.list", "power.keepAwake.set", "power.status.get", "principals.create", "principals.delete", "principals.get", "principals.list", "principals.resolve", "principals.update", "profile.append", "profile.forget", "profile.get", "profile.person", "profile.provenance", "profile.read", "profile.set", "profile.status", "profile.undo", "projectPlanning.decisions.list", "projectPlanning.decisions.record", "projectPlanning.evaluate", "projectPlanning.language.get", "projectPlanning.language.upsert", "projectPlanning.state.get", "projectPlanning.state.upsert", "projectPlanning.status", "projectPlanning.workPlan.clearCompleted", "projectPlanning.workPlan.snapshot", "projectPlanning.workPlan.task.create", "projectPlanning.workPlan.task.delete", "projectPlanning.workPlan.task.get", "projectPlanning.workPlan.task.status", "projectPlanning.workPlan.task.update", "projectPlanning.workPlan.tasks.list", "projectPlanning.workPlan.tasks.reorder", "providers.get", "providers.list", "providers.usage.get", "push.subscriptions.create", "push.subscriptions.delete", "push.subscriptions.list", "push.subscriptions.reconcile", "push.subscriptions.verify", "push.vapid.get", "quota.fanout.get", "quota.snapshot.get", "relay.pairing.mint", "relay.reachability.get", "remote.node_host.contract", "remote.pair.requests.approve", "remote.pair.requests.list", "remote.pair.requests.reject", "remote.peers.disconnect", "remote.peers.invoke", "remote.peers.list", "remote.peers.token.revoke", "remote.peers.token.rotate", "remote.snapshot", "remote.work.cancel", "remote.work.list", "review.snapshot", "rewind.apply", "rewind.conversation.host.register", "rewind.conversation.host.release", "rewind.conversation.hosts.list", "rewind.conversation.requests.answer", "rewind.conversation.requests.take", "rewind.plan", "routes.bindings.create", "routes.bindings.delete", "routes.bindings.list", "routes.bindings.update", "routes.snapshot", "runtime.metrics.get", "scheduler.capacity", "security.settings", "services.install", "services.restart", "services.start", "services.status", "services.stop", "services.uninstall", "sessions.changes.get", "sessions.close", "sessions.contextUsage.get", "sessions.create", "sessions.delete", "sessions.detach", "sessions.followUp", "sessions.get", "sessions.hosted.attach", "sessions.hosted.create", "sessions.hosted.detach", "sessions.hosted.kill", "sessions.hosted.list", "sessions.inputs.cancel", "sessions.inputs.deliver", "sessions.inputs.list", "sessions.integration.snapshot", "sessions.list", "sessions.messages.create", "sessions.messages.list", "sessions.permissionMode.get", "sessions.permissionMode.set", "sessions.queuedMessages.delete", "sessions.queuedMessages.edit", "sessions.queuedMessages.list", "sessions.register", "sessions.reopen", "sessions.search", "sessions.steer", "sessions.toolCalls.cancel", "sessions.turns.cancel", "settings.snapshot", "skills.create", "skills.delete", "skills.get", "skills.list", "skills.update", "stepup.challenge.mint", "stepup.credentials.register", "surfaces.list", "tailscale.get", "tailscale.serve.run", "tasks.cancel", "tasks.create", "tasks.get", "tasks.list", "tasks.retry", "tasks.status", "telemetry.errors.list", "telemetry.events.list", "telemetry.metrics.get", "telemetry.otlp.logs", "telemetry.otlp.metrics", "telemetry.otlp.traces", "telemetry.snapshot", "telemetry.stream", "telemetry.traces.list", "update.check", "update.status", "voice.local.install", "voice.local.status", "voice.providers.list", "voice.realtime.session", "voice.status", "voice.stt", "voice.tts", "voice.tts.stream", "voice.voices.list", "voice.wake.model.get", "voice.wake.provision", "voice.wake.status", "watchers.create", "watchers.delete", "watchers.list", "watchers.run", "watchers.start", "watchers.stop", "watchers.triggers.migrate", "watchers.triggers.status", "watchers.update", "web_search.providers.list", "web_search.query", "workLedger.execution.cancel", "workLedger.execution.resume", "workLedger.execution.start", "workLedger.execution.status", "workLedger.history", "workLedger.importLegacy", "workLedger.intake.admit", "workLedger.intake.cancel", "workLedger.intake.capture", "workLedger.intake.get", "workLedger.intake.resume", "workLedger.prepareLegacyImport", "workLedger.project", "workLedger.snapshot", "workLedger.submission.get", "workLedger.submit", "workLedger.turn.cancel", "workLedger.turn.session", "workLedger.turn.start", "workLedger.turn.startAgent", "workLedger.turn.status", "workspaces.registrations.add", "workspaces.registrations.list", "workspaces.registrations.remove", "workspaces.resolve", "worktrees.discard", "worktrees.setup.run", "worktrees.snapshot"];
 
 // @public
 export const OPERATOR_WORK_CANCEL_REASON = "cancelled by the requester";
@@ -3734,6 +3736,7 @@ export interface OperatorMethodInputMap {
             expression: string;
             timezone?: string;
             staggerMs?: number;
+            staggerPhase?: number;
         };
         model?: string;
         provider?: string;
@@ -4298,6 +4301,7 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "channels.drafts.save": ({
+        wireReference?: string;
         version: number;
         id: string;
         createdAt: string;
@@ -4664,6 +4668,7 @@ export interface OperatorMethodInputMap {
         title?: string;
         model?: string;
         provider?: string;
+        reasoningEffort?: null | "high" | "instant" | "low" | "max" | "medium" | "minimal" | "none" | "xhigh";
         systemPrompt?: string;
     } & {
         readonly [key: string]: unknown;
@@ -4687,6 +4692,7 @@ export interface OperatorMethodInputMap {
         title?: string;
         model?: string;
         provider?: string;
+        reasoningEffort?: null | "high" | "instant" | "low" | "max" | "medium" | "minimal" | "none" | "xhigh";
         systemPrompt?: string;
     } & {
         readonly [key: string]: unknown;
@@ -4698,6 +4704,8 @@ export interface OperatorMethodInputMap {
         provider: string;
     } | {
         systemPrompt: string;
+    } | {
+        reasoningEffort: null | "high" | "instant" | "low" | "max" | "medium" | "minimal" | "none" | "xhigh";
     });
     // (undocumented)
     "companion.chat.turns.cancel": ({
@@ -5408,13 +5416,13 @@ export interface OperatorMethodInputMap {
         protocolVersion: 1;
         requestId: string;
         battery: "webui.voice.speech-seams";
-        batteryVersion: 1;
+        batteryVersion: 2;
         input: {
             sessionId: string;
             messageId: string;
             start: number;
             end: number;
-            contentDigest: string;
+            contentRevision: string;
             cursor: number;
         };
     } | {
@@ -5518,13 +5526,13 @@ export interface OperatorMethodInputMap {
         protocolVersion: 1;
         requestId: string;
         battery: "webui.code.language";
-        batteryVersion: 1;
+        batteryVersion: 2;
         input: {
             sessionId: string;
             messageId: string;
             start: number;
             end: number;
-            contentDigest: string;
+            contentRevision: string;
         };
     };
     // (undocumented)
@@ -5912,6 +5920,7 @@ export interface OperatorMethodInputMap {
             expression: string;
             timezone?: string;
             staggerMs?: number;
+            staggerPhase?: number;
         };
         metadata?: ({} & {
             readonly [key: string]: ({} & {
@@ -6672,6 +6681,7 @@ export interface OperatorMethodInputMap {
     "payments.cards.list": {};
     // (undocumented)
     "payments.checkout.begin": {
+        requestId: string;
         sessionId: string;
         pageId: string;
         merchantDomain: string;
@@ -6725,6 +6735,40 @@ export interface OperatorMethodInputMap {
         })[];
         expirySeparator?: string;
         twoDigitYear?: boolean;
+    };
+    // (undocumented)
+    "payments.purchase.approve": {
+        purchaseId: string;
+        windowId: string;
+        confirm: boolean;
+    };
+    // (undocumented)
+    "payments.purchase.cancel": {
+        purchaseId: string;
+        windowId: string;
+        confirm: boolean;
+    } | {
+        purchaseId: string;
+        operationId: string;
+        confirm: boolean;
+    };
+    // (undocumented)
+    "payments.purchase.deny": {
+        purchaseId: string;
+        windowId: string;
+        confirm: boolean;
+    };
+    // (undocumented)
+    "payments.purchase.reconcile": {
+        purchaseId: string;
+        operationId: string;
+        outcome: "not-purchased" | "purchased";
+        inspectedMerchantHistory: true;
+        confirm: true;
+    };
+    // (undocumented)
+    "payments.purchase.status": {
+        purchaseId?: string;
     };
     // (undocumented)
     "payments.purchases.list": {
@@ -7942,6 +7986,13 @@ export interface OperatorMethodInputMap {
         watcherId: string;
     };
     // (undocumented)
+    "watchers.triggers.migrate": {
+        olderInstancesClosed: true;
+        confirm: true;
+    };
+    // (undocumented)
+    "watchers.triggers.status": {};
+    // (undocumented)
     "watchers.update": ({
         watcherId?: string;
         label?: string;
@@ -8818,7 +8869,7 @@ export interface OperatorMethodOutputMap {
             mimeType: string;
             filename?: string;
             sizeBytes: number;
-            sha256: string;
+            sha256?: string;
             createdAt: number;
             expiresAt?: number;
             sourceUri?: string;
@@ -8841,7 +8892,7 @@ export interface OperatorMethodOutputMap {
             mimeType: string;
             filename?: string;
             sizeBytes: number;
-            sha256: string;
+            sha256?: string;
             createdAt: number;
             expiresAt?: number;
             sourceUri?: string;
@@ -8864,7 +8915,7 @@ export interface OperatorMethodOutputMap {
             mimeType: string;
             filename?: string;
             sizeBytes: number;
-            sha256: string;
+            sha256?: string;
             createdAt: number;
             expiresAt?: number;
             sourceUri?: string;
@@ -9115,6 +9166,7 @@ export interface OperatorMethodOutputMap {
                 expression: string;
                 timezone?: string;
                 staggerMs?: number;
+                staggerPhase?: number;
             };
             nextRunAt?: number;
             lastRunAt?: number;
@@ -9160,6 +9212,7 @@ export interface OperatorMethodOutputMap {
             expression: string;
             timezone?: string;
             staggerMs?: number;
+            staggerPhase?: number;
         };
         execution: {
             prompt?: string;
@@ -9328,6 +9381,7 @@ export interface OperatorMethodOutputMap {
                 expression: string;
                 timezone?: string;
                 staggerMs?: number;
+                staggerPhase?: number;
             };
             execution: {
                 prompt?: string;
@@ -9488,6 +9542,7 @@ export interface OperatorMethodOutputMap {
             expression: string;
             timezone?: string;
             staggerMs?: number;
+            staggerPhase?: number;
         };
         execution: {
             prompt?: string;
@@ -10393,6 +10448,7 @@ export interface OperatorMethodOutputMap {
             expression: string;
             timezone?: string;
             staggerMs?: number;
+            staggerPhase?: number;
         };
         execution: {
             prompt?: string;
@@ -10561,6 +10617,7 @@ export interface OperatorMethodOutputMap {
                 expression: string;
                 timezone?: string;
                 staggerMs?: number;
+                staggerPhase?: number;
             };
             execution: {
                 prompt?: string;
@@ -11807,6 +11864,7 @@ export interface OperatorMethodOutputMap {
     };
     // (undocumented)
     "channels.drafts.get": ({
+        wireReference?: string;
         version?: number;
         id?: string;
         createdAt?: string;
@@ -11828,6 +11886,7 @@ export interface OperatorMethodOutputMap {
     // (undocumented)
     "channels.drafts.list": {
         drafts: readonly ({
+            wireReference?: string;
             version: number;
             id: string;
             createdAt: string;
@@ -11848,6 +11907,7 @@ export interface OperatorMethodOutputMap {
     // (undocumented)
     "channels.drafts.save": {
         draft: {
+            wireReference?: string;
             version: number;
             id: string;
             createdAt: string;
@@ -12562,6 +12622,7 @@ export interface OperatorMethodOutputMap {
             sessionId: string;
             role: "assistant" | "user";
             content: string;
+            contentRevision?: string;
             attachments: readonly (({
                 id: string;
                 artifactId: string;
@@ -12569,7 +12630,7 @@ export interface OperatorMethodOutputMap {
                 mimeType: string;
                 filename?: string;
                 sizeBytes: number;
-                sha256: string;
+                sha256?: string;
                 createdAt: number;
                 expiresAt?: number;
                 sourceUri?: string;
@@ -12616,6 +12677,7 @@ export interface OperatorMethodOutputMap {
         session: {
             id: string;
             kind: "companion-chat";
+            reasoningEffort?: null | "high" | "instant" | "low" | "max" | "medium" | "minimal" | "none" | "xhigh";
             title: string;
             model: null | string;
             provider: null | string;
@@ -12637,6 +12699,7 @@ export interface OperatorMethodOutputMap {
         session: {
             id: string;
             kind: "companion-chat";
+            reasoningEffort?: null | "high" | "instant" | "low" | "max" | "medium" | "minimal" | "none" | "xhigh";
             title: string;
             model: null | string;
             provider: null | string;
@@ -12652,6 +12715,7 @@ export interface OperatorMethodOutputMap {
             sessionId: string;
             role: "assistant" | "user";
             content: string;
+            contentRevision?: string;
             attachments: readonly (({
                 id: string;
                 artifactId: string;
@@ -12659,7 +12723,7 @@ export interface OperatorMethodOutputMap {
                 mimeType: string;
                 filename?: string;
                 sizeBytes: number;
-                sha256: string;
+                sha256?: string;
                 createdAt: number;
                 expiresAt?: number;
                 sourceUri?: string;
@@ -12684,6 +12748,7 @@ export interface OperatorMethodOutputMap {
         sessions: readonly ({
             id: string;
             kind: "companion-chat";
+            reasoningEffort?: null | "high" | "instant" | "low" | "max" | "medium" | "minimal" | "none" | "xhigh";
             title: string;
             model: null | string;
             provider: null | string;
@@ -12705,6 +12770,7 @@ export interface OperatorMethodOutputMap {
         session: {
             id: string;
             kind: "companion-chat";
+            reasoningEffort?: null | "high" | "instant" | "low" | "max" | "medium" | "minimal" | "none" | "xhigh";
             title: string;
             model: null | string;
             provider: null | string;
@@ -12868,7 +12934,6 @@ export interface OperatorMethodOutputMap {
         taskEvidence?: string;
         reviewInventory?: {
             paths: readonly string[];
-            digest: string;
             source: "filesystem" | "git";
             errors: readonly string[];
         };
@@ -13244,8 +13309,41 @@ export interface OperatorMethodOutputMap {
                 kind: "file" | "missing" | "symlink";
                 mode: "0" | "100644" | "100755" | "120000";
                 oid?: string;
-                digest?: string;
                 identity?: string;
+                digest?: string;
+            })[];
+        } | {
+            version: 2;
+            id: string;
+            sourceRoot: string;
+            sourceIdentity: string;
+            gitIdentity: string;
+            ownerHead: string;
+            ownerRef: string;
+            indexFingerprint: string;
+            inputTree: string;
+            inputCommit: string;
+            capturedAt: number;
+            dirty: boolean;
+            exclusions: readonly string[];
+            files: readonly ({
+                path: string;
+                kind: "missing";
+                mode: "0";
+            } | {
+                path: string;
+                kind: "file";
+                mode: "100644" | "100755";
+                oid: string;
+                identity: string;
+                digest?: string;
+            } | {
+                path: string;
+                kind: "symlink";
+                mode: "120000";
+                oid: string;
+                identity: string;
+                digest?: string;
             })[];
         };
         id: string;
@@ -13267,6 +13365,7 @@ export interface OperatorMethodOutputMap {
         worktreePath?: string;
         baseBranch?: string;
         baseline?: {
+            version?: 2;
             head: null | string;
             dirty: ({} & {
                 readonly [key: string]: null | string;
@@ -13427,14 +13526,18 @@ export interface OperatorMethodOutputMap {
                 problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                 qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                 decisionIds: readonly string[];
-                evidenceDigest: string;
+                evidenceDigest?: string;
                 reviewedFiles?: readonly ({
                     path: string;
                     sha256: string;
+                } | {
+                    path: string;
+                    observationId: string;
                 })[];
             })[];
             fixRounds: number;
             baseline?: {
+                version?: 2;
                 head: null | string;
                 dirty: ({} & {
                     readonly [key: string]: null | string;
@@ -13576,10 +13679,13 @@ export interface OperatorMethodOutputMap {
                 problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                 qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                 decisionIds: readonly string[];
-                evidenceDigest: string;
+                evidenceDigest?: string;
                 reviewedFiles?: readonly ({
                     path: string;
                     sha256: string;
+                } | {
+                    path: string;
+                    observationId: string;
                 })[];
             })[];
             nudges: readonly ({
@@ -13598,6 +13704,7 @@ export interface OperatorMethodOutputMap {
             transportRetries: number;
             touchedPaths: readonly string[];
             baseline?: {
+                version?: 2;
                 head: null | string;
                 dirty: ({} & {
                     readonly [key: string]: null | string;
@@ -13812,10 +13919,13 @@ export interface OperatorMethodOutputMap {
                     problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
-                    evidenceDigest: string;
+                    evidenceDigest?: string;
                     reviewedFiles?: readonly ({
                         path: string;
                         sha256: string;
+                    } | {
+                        path: string;
+                        observationId: string;
                     })[];
                 })[];
                 nudges: readonly ({
@@ -13834,6 +13944,7 @@ export interface OperatorMethodOutputMap {
                 transportRetries: number;
                 touchedPaths: readonly string[];
                 baseline?: {
+                    version?: 2;
                     head: null | string;
                     dirty: ({} & {
                         readonly [key: string]: null | string;
@@ -14031,10 +14142,13 @@ export interface OperatorMethodOutputMap {
             problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
             qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
             decisionIds: readonly string[];
-            evidenceDigest: string;
+            evidenceDigest?: string;
             reviewedFiles?: readonly ({
                 path: string;
                 sha256: string;
+            } | {
+                path: string;
+                observationId: string;
             })[];
         })[];
         fixRounds: number;
@@ -14146,7 +14260,6 @@ export interface OperatorMethodOutputMap {
             taskEvidence?: string;
             reviewInventory?: {
                 paths: readonly string[];
-                digest: string;
                 source: "filesystem" | "git";
                 errors: readonly string[];
             };
@@ -14522,8 +14635,41 @@ export interface OperatorMethodOutputMap {
                     kind: "file" | "missing" | "symlink";
                     mode: "0" | "100644" | "100755" | "120000";
                     oid?: string;
-                    digest?: string;
                     identity?: string;
+                    digest?: string;
+                })[];
+            } | {
+                version: 2;
+                id: string;
+                sourceRoot: string;
+                sourceIdentity: string;
+                gitIdentity: string;
+                ownerHead: string;
+                ownerRef: string;
+                indexFingerprint: string;
+                inputTree: string;
+                inputCommit: string;
+                capturedAt: number;
+                dirty: boolean;
+                exclusions: readonly string[];
+                files: readonly ({
+                    path: string;
+                    kind: "missing";
+                    mode: "0";
+                } | {
+                    path: string;
+                    kind: "file";
+                    mode: "100644" | "100755";
+                    oid: string;
+                    identity: string;
+                    digest?: string;
+                } | {
+                    path: string;
+                    kind: "symlink";
+                    mode: "120000";
+                    oid: string;
+                    identity: string;
+                    digest?: string;
                 })[];
             };
             id: string;
@@ -14545,6 +14691,7 @@ export interface OperatorMethodOutputMap {
             worktreePath?: string;
             baseBranch?: string;
             baseline?: {
+                version?: 2;
                 head: null | string;
                 dirty: ({} & {
                     readonly [key: string]: null | string;
@@ -14705,14 +14852,18 @@ export interface OperatorMethodOutputMap {
                     problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
-                    evidenceDigest: string;
+                    evidenceDigest?: string;
                     reviewedFiles?: readonly ({
                         path: string;
                         sha256: string;
+                    } | {
+                        path: string;
+                        observationId: string;
                     })[];
                 })[];
                 fixRounds: number;
                 baseline?: {
+                    version?: 2;
                     head: null | string;
                     dirty: ({} & {
                         readonly [key: string]: null | string;
@@ -14854,10 +15005,13 @@ export interface OperatorMethodOutputMap {
                     problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
-                    evidenceDigest: string;
+                    evidenceDigest?: string;
                     reviewedFiles?: readonly ({
                         path: string;
                         sha256: string;
+                    } | {
+                        path: string;
+                        observationId: string;
                     })[];
                 })[];
                 nudges: readonly ({
@@ -14876,6 +15030,7 @@ export interface OperatorMethodOutputMap {
                 transportRetries: number;
                 touchedPaths: readonly string[];
                 baseline?: {
+                    version?: 2;
                     head: null | string;
                     dirty: ({} & {
                         readonly [key: string]: null | string;
@@ -15090,10 +15245,13 @@ export interface OperatorMethodOutputMap {
                         problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                         qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                         decisionIds: readonly string[];
-                        evidenceDigest: string;
+                        evidenceDigest?: string;
                         reviewedFiles?: readonly ({
                             path: string;
                             sha256: string;
+                        } | {
+                            path: string;
+                            observationId: string;
                         })[];
                     })[];
                     nudges: readonly ({
@@ -15112,6 +15270,7 @@ export interface OperatorMethodOutputMap {
                     transportRetries: number;
                     touchedPaths: readonly string[];
                     baseline?: {
+                        version?: 2;
                         head: null | string;
                         dirty: ({} & {
                             readonly [key: string]: null | string;
@@ -15309,10 +15468,13 @@ export interface OperatorMethodOutputMap {
                 problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                 qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                 decisionIds: readonly string[];
-                evidenceDigest: string;
+                evidenceDigest?: string;
                 reviewedFiles?: readonly ({
                     path: string;
                     sha256: string;
+                } | {
+                    path: string;
+                    observationId: string;
                 })[];
             })[];
             fixRounds: number;
@@ -15433,7 +15595,6 @@ export interface OperatorMethodOutputMap {
             taskEvidence?: string;
             reviewInventory?: {
                 paths: readonly string[];
-                digest: string;
                 source: "filesystem" | "git";
                 errors: readonly string[];
             };
@@ -15809,8 +15970,41 @@ export interface OperatorMethodOutputMap {
                     kind: "file" | "missing" | "symlink";
                     mode: "0" | "100644" | "100755" | "120000";
                     oid?: string;
-                    digest?: string;
                     identity?: string;
+                    digest?: string;
+                })[];
+            } | {
+                version: 2;
+                id: string;
+                sourceRoot: string;
+                sourceIdentity: string;
+                gitIdentity: string;
+                ownerHead: string;
+                ownerRef: string;
+                indexFingerprint: string;
+                inputTree: string;
+                inputCommit: string;
+                capturedAt: number;
+                dirty: boolean;
+                exclusions: readonly string[];
+                files: readonly ({
+                    path: string;
+                    kind: "missing";
+                    mode: "0";
+                } | {
+                    path: string;
+                    kind: "file";
+                    mode: "100644" | "100755";
+                    oid: string;
+                    identity: string;
+                    digest?: string;
+                } | {
+                    path: string;
+                    kind: "symlink";
+                    mode: "120000";
+                    oid: string;
+                    identity: string;
+                    digest?: string;
                 })[];
             };
             id: string;
@@ -15832,6 +16026,7 @@ export interface OperatorMethodOutputMap {
             worktreePath?: string;
             baseBranch?: string;
             baseline?: {
+                version?: 2;
                 head: null | string;
                 dirty: ({} & {
                     readonly [key: string]: null | string;
@@ -15992,14 +16187,18 @@ export interface OperatorMethodOutputMap {
                     problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
-                    evidenceDigest: string;
+                    evidenceDigest?: string;
                     reviewedFiles?: readonly ({
                         path: string;
                         sha256: string;
+                    } | {
+                        path: string;
+                        observationId: string;
                     })[];
                 })[];
                 fixRounds: number;
                 baseline?: {
+                    version?: 2;
                     head: null | string;
                     dirty: ({} & {
                         readonly [key: string]: null | string;
@@ -16141,10 +16340,13 @@ export interface OperatorMethodOutputMap {
                     problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
-                    evidenceDigest: string;
+                    evidenceDigest?: string;
                     reviewedFiles?: readonly ({
                         path: string;
                         sha256: string;
+                    } | {
+                        path: string;
+                        observationId: string;
                     })[];
                 })[];
                 nudges: readonly ({
@@ -16163,6 +16365,7 @@ export interface OperatorMethodOutputMap {
                 transportRetries: number;
                 touchedPaths: readonly string[];
                 baseline?: {
+                    version?: 2;
                     head: null | string;
                     dirty: ({} & {
                         readonly [key: string]: null | string;
@@ -16377,10 +16580,13 @@ export interface OperatorMethodOutputMap {
                         problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                         qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                         decisionIds: readonly string[];
-                        evidenceDigest: string;
+                        evidenceDigest?: string;
                         reviewedFiles?: readonly ({
                             path: string;
                             sha256: string;
+                        } | {
+                            path: string;
+                            observationId: string;
                         })[];
                     })[];
                     nudges: readonly ({
@@ -16399,6 +16605,7 @@ export interface OperatorMethodOutputMap {
                     transportRetries: number;
                     touchedPaths: readonly string[];
                     baseline?: {
+                        version?: 2;
                         head: null | string;
                         dirty: ({} & {
                             readonly [key: string]: null | string;
@@ -16596,10 +16803,13 @@ export interface OperatorMethodOutputMap {
                 problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                 qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                 decisionIds: readonly string[];
-                evidenceDigest: string;
+                evidenceDigest?: string;
                 reviewedFiles?: readonly ({
                     path: string;
                     sha256: string;
+                } | {
+                    path: string;
+                    observationId: string;
                 })[];
             })[];
             fixRounds: number;
@@ -16898,7 +17108,7 @@ export interface OperatorMethodOutputMap {
                 mimeType: string;
                 filename?: string;
                 sizeBytes: number;
-                sha256: string;
+                sha256?: string;
                 createdAt: number;
                 expiresAt?: number;
                 sourceUri?: string;
@@ -17026,7 +17236,7 @@ export interface OperatorMethodOutputMap {
                 mimeType: string;
                 filename?: string;
                 sizeBytes: number;
-                sha256: string;
+                sha256?: string;
                 createdAt: number;
                 expiresAt?: number;
                 sourceUri?: string;
@@ -19156,6 +19366,12 @@ export interface OperatorMethodOutputMap {
             }) | boolean | null | number | readonly JsonValue[] | string;
         });
         artifactDeleteCandidates: number;
+        artifactCleanup: {
+            referenced: number;
+            held: number;
+            unavailable: number;
+            skipped: number;
+        };
         deletedArtifacts: number;
         preservedArtifacts: number;
         artifactsDeleted: boolean;
@@ -19455,6 +19671,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -19490,6 +19714,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -19571,6 +19803,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -19606,6 +19846,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -19687,6 +19935,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -19722,6 +19978,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -19803,6 +20067,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -19838,6 +20110,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -19919,6 +20199,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -19954,6 +20242,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -20035,6 +20331,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -20070,6 +20374,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -20151,6 +20463,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -20186,6 +20506,14 @@ export interface OperatorMethodOutputMap {
             };
             configurationId: string;
             ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
             workspaceRevision: string;
             approvalId: string;
             choices: {
@@ -20239,7 +20567,7 @@ export interface OperatorMethodOutputMap {
         protocolVersion: 1;
         requestId: string;
         battery: "webui.voice.speech-seams";
-        batteryVersion: 1;
+        batteryVersion: 2;
         status: "settled";
         value: {
             endOffsets: readonly number[];
@@ -20276,7 +20604,7 @@ export interface OperatorMethodOutputMap {
         protocolVersion: 1;
         requestId: string;
         battery: "webui.voice.speech-seams";
-        batteryVersion: 1;
+        batteryVersion: 2;
         status: "held";
         reason: "uncertain";
         readings: ({} & {
@@ -20959,7 +21287,7 @@ export interface OperatorMethodOutputMap {
         protocolVersion: 1;
         requestId: string;
         battery: "webui.code.language";
-        batteryVersion: 1;
+        batteryVersion: 2;
         status: "settled";
         value: {
             language: "bash" | "c" | "cpp" | "csharp" | "css" | "diff" | "dockerfile" | "go" | "ini" | "java" | "javascript" | "json" | "markdown" | "php" | "plaintext" | "python" | "ruby" | "rust" | "shell" | "sql" | "typescript" | "wasm" | "xml" | "yaml";
@@ -20995,7 +21323,7 @@ export interface OperatorMethodOutputMap {
         protocolVersion: 1;
         requestId: string;
         battery: "webui.code.language";
-        batteryVersion: 1;
+        batteryVersion: 2;
         status: "held";
         reason: "uncertain";
         readings: ({} & {
@@ -22058,18 +22386,35 @@ export interface OperatorMethodOutputMap {
             } | {
                 sourceCount: number;
                 issueCount: number;
+                provenance?: "classic";
+                semanticEnrichment?: "attempted" | "not-evaluated";
             } | {
                 refreshed: number;
             } | {
                 imported: number;
                 failed: number;
+                captured?: number;
+                capturePartial?: number;
+                captureFailed?: number;
+                compilationHeld?: number;
+                compilationFailed?: number;
+                outcomes?: readonly ({
+                    canonicalUri: string;
+                    sourceId?: string;
+                    capture: "completed" | "failed" | "partial";
+                    compilation: "completed" | "failed" | "held" | "not-attempted";
+                    error?: string;
+                })[];
                 profileCount: number;
                 errorCount: number;
             } | {
                 projections: readonly ({
                     targetId: string;
                     artifactId: string;
+                    sourceId?: string;
                 })[];
+                preservedUnscopedSourceIds?: readonly string[];
+                note?: string;
             } | ({
                 scanned: number;
                 enriched: number;
@@ -22155,18 +22500,35 @@ export interface OperatorMethodOutputMap {
             } | {
                 sourceCount: number;
                 issueCount: number;
+                provenance?: "classic";
+                semanticEnrichment?: "attempted" | "not-evaluated";
             } | {
                 refreshed: number;
             } | {
                 imported: number;
                 failed: number;
+                captured?: number;
+                capturePartial?: number;
+                captureFailed?: number;
+                compilationHeld?: number;
+                compilationFailed?: number;
+                outcomes?: readonly ({
+                    canonicalUri: string;
+                    sourceId?: string;
+                    capture: "completed" | "failed" | "partial";
+                    compilation: "completed" | "failed" | "held" | "not-attempted";
+                    error?: string;
+                })[];
                 profileCount: number;
                 errorCount: number;
             } | {
                 projections: readonly ({
                     targetId: string;
                     artifactId: string;
+                    sourceId?: string;
                 })[];
+                preservedUnscopedSourceIds?: readonly string[];
+                note?: string;
             } | ({
                 scanned: number;
                 enriched: number;
@@ -22504,7 +22866,7 @@ export interface OperatorMethodOutputMap {
             mimeType: string;
             filename?: string;
             sizeBytes: number;
-            sha256: string;
+            sha256?: string;
             createdAt: number;
             expiresAt?: number;
             sourceUri?: string;
@@ -22564,6 +22926,8 @@ export interface OperatorMethodOutputMap {
             readonly [key: string]: unknown;
         });
         artifactCreated?: boolean;
+        preservedUnscopedSourceIds?: readonly string[];
+        note?: string;
     } & {
         readonly [key: string]: unknown;
     });
@@ -22873,6 +23237,7 @@ export interface OperatorMethodOutputMap {
                 expression: string;
                 timezone?: string;
                 staggerMs?: number;
+                staggerPhase?: number;
             };
             lastRunAt?: number;
             nextRunAt?: number;
@@ -22906,6 +23271,7 @@ export interface OperatorMethodOutputMap {
                 expression: string;
                 timezone?: string;
                 staggerMs?: number;
+                staggerPhase?: number;
             };
             lastRunAt?: number;
             nextRunAt?: number;
@@ -22939,6 +23305,7 @@ export interface OperatorMethodOutputMap {
                 expression: string;
                 timezone?: string;
                 staggerMs?: number;
+                staggerPhase?: number;
             };
             lastRunAt?: number;
             nextRunAt?: number;
@@ -22972,6 +23339,7 @@ export interface OperatorMethodOutputMap {
                 expression: string;
                 timezone?: string;
                 staggerMs?: number;
+                staggerPhase?: number;
             };
             lastRunAt?: number;
             nextRunAt?: number;
@@ -23200,7 +23568,7 @@ export interface OperatorMethodOutputMap {
             roles: readonly string[];
         })[];
         sessions: readonly ({
-            tokenFingerprint: string;
+            id: string;
             username: string;
             expiresAt: number;
         })[];
@@ -24010,6 +24378,9 @@ export interface OperatorMethodOutputMap {
                 reasoningOptions?: {
                     levels: readonly string[];
                     source: "catalog" | "declared" | "fallback" | "family";
+                    effectiveByRequested?: ({} & {
+                        readonly [key: string]: null | string;
+                    });
                 };
             })[];
         })[];
@@ -24031,7 +24402,7 @@ export interface OperatorMethodOutputMap {
                 mimeType: string;
                 filename?: string;
                 sizeBytes: number;
-                sha256: string;
+                sha256?: string;
                 createdAt: number;
                 expiresAt?: number;
                 sourceUri?: string;
@@ -24083,7 +24454,7 @@ export interface OperatorMethodOutputMap {
                 mimeType: string;
                 filename?: string;
                 sizeBytes: number;
-                sha256: string;
+                sha256?: string;
                 createdAt: number;
                 expiresAt?: number;
                 sourceUri?: string;
@@ -24157,7 +24528,7 @@ export interface OperatorMethodOutputMap {
                 mimeType: string;
                 filename?: string;
                 sizeBytes: number;
-                sha256: string;
+                sha256?: string;
                 createdAt: number;
                 expiresAt?: number;
                 sourceUri?: string;
@@ -24753,6 +25124,65 @@ export interface OperatorMethodOutputMap {
         reason: null | string;
     };
     // (undocumented)
+    "payments.purchase.approve": {
+        purchaseId: string;
+        windowId: string;
+        accepted: boolean;
+        answer: "acknowledge" | "approve" | "deny" | "object";
+    };
+    // (undocumented)
+    "payments.purchase.cancel": {
+        purchaseId: string;
+        windowId: string;
+        accepted: boolean;
+        answer: "acknowledge" | "approve" | "deny" | "object";
+    } | {
+        purchaseId: string;
+        operationId: string;
+        accepted: true;
+        mayHaveSubmitted: boolean;
+    };
+    // (undocumented)
+    "payments.purchase.deny": {
+        purchaseId: string;
+        windowId: string;
+        accepted: boolean;
+        answer: "acknowledge" | "approve" | "deny" | "object";
+    };
+    // (undocumented)
+    "payments.purchase.reconcile": {
+        purchaseId: string;
+        operationId: string;
+        state: "accepted" | "attention" | "cancelled" | "cancelling" | "completed" | "failed" | "interrupted" | "refused" | "running" | "uncertain";
+        phase: null | "arming-payment" | "awaiting-window" | "deciding" | "submit-pending" | "submitted";
+        createdAtMs: number;
+        updatedAtMs: number;
+        outcome: null | string;
+        totalMinorUnits: null | number;
+        currency: null | string;
+    };
+    // (undocumented)
+    "payments.purchase.status": {
+        windows: readonly ({
+            purchaseId: string;
+            windowId: string;
+            kind: "approval" | "veto";
+            notice: string;
+            deadlineMs: number;
+        })[];
+        operations: readonly ({
+            purchaseId: string;
+            operationId: string;
+            state: "accepted" | "attention" | "cancelled" | "cancelling" | "completed" | "failed" | "interrupted" | "refused" | "running" | "uncertain";
+            phase: null | "arming-payment" | "awaiting-window" | "deciding" | "submit-pending" | "submitted";
+            createdAtMs: number;
+            updatedAtMs: number;
+            outcome: null | string;
+            totalMinorUnits: null | number;
+            currency: null | string;
+        })[];
+    };
+    // (undocumented)
     "payments.purchases.list": {
         purchases: readonly ({
             purchaseId: string;
@@ -24767,6 +25197,7 @@ export interface OperatorMethodOutputMap {
             feesMinorUnits: number;
             shippingMinorUnits: number;
             totalMinorUnits: number;
+            requestedMaximumMinorUnits?: number;
             shippingTierRequested: string;
             shippingTierUsed: string;
             steppedDown: boolean;
@@ -24786,6 +25217,16 @@ export interface OperatorMethodOutputMap {
             merchantDiscovered: boolean;
         })[];
         total: number;
+        reconciliations?: readonly ({
+            purchaseId: string;
+            operationId: string;
+            outcome: "not-purchased" | "purchased";
+            principalId: string;
+            atMs: number;
+            merchantDomain: string;
+            totalMinorUnits: number;
+            currency: string;
+        })[];
     };
     // (undocumented)
     "permissions.rules.delete": {
@@ -27068,7 +27509,6 @@ export interface OperatorMethodOutputMap {
             principalId: string;
             deviceId?: string;
             endpointOrigin: string;
-            endpointHash: string;
             createdAt: number;
             lastDeliveryAt?: number;
             lastOutcome?: string;
@@ -27087,7 +27527,6 @@ export interface OperatorMethodOutputMap {
             principalId: string;
             deviceId?: string;
             endpointOrigin: string;
-            endpointHash: string;
             createdAt: number;
             lastDeliveryAt?: number;
             lastOutcome?: string;
@@ -27101,7 +27540,6 @@ export interface OperatorMethodOutputMap {
             principalId: string;
             deviceId?: string;
             endpointOrigin: string;
-            endpointHash: string;
             createdAt: number;
             lastDeliveryAt?: number;
             lastOutcome?: string;
@@ -31059,6 +31497,33 @@ export interface OperatorMethodOutputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
+    "watchers.triggers.migrate": {
+        migrated: true;
+        status: {
+            ownership: "local" | "migration-required" | "other-process" | "unclaimed";
+            migrationRequired: boolean;
+            records: readonly ({
+                id: string;
+                label: string;
+                kind: string;
+                state: string;
+            })[];
+            message: string;
+        };
+    };
+    // (undocumented)
+    "watchers.triggers.status": {
+        ownership: "local" | "migration-required" | "other-process" | "unclaimed";
+        migrationRequired: boolean;
+        records: readonly ({
+            id: string;
+            label: string;
+            kind: string;
+            state: string;
+        })[];
+        message: string;
+    };
+    // (undocumented)
     "watchers.update": ({
         id: string;
         kind: string;
@@ -31714,6 +32179,7 @@ export interface OperatorMethodOutputMap {
                     inputId: string;
                     sessionId: string;
                     continuation?: {
+                        version?: 2;
                         sessionId: string;
                         revision: string;
                         selectedDiff?: {
@@ -31758,6 +32224,12 @@ export interface OperatorMethodOutputMap {
                         admissionDecisionId: string;
                         judgmentDecisionIds: readonly string[];
                     };
+                } | {
+                    version: 3;
+                    sourceId: string;
+                    sourceRevision: string;
+                    inputId: string;
+                    sessionId: string;
                 };
                 revision: number;
                 criteriaRevision: number;
@@ -31831,6 +32303,7 @@ export interface OperatorMethodOutputMap {
                     inputId: string;
                     sessionId: string;
                     continuation?: {
+                        version?: 2;
                         sessionId: string;
                         revision: string;
                         selectedDiff?: {
@@ -31875,6 +32348,12 @@ export interface OperatorMethodOutputMap {
                         admissionDecisionId: string;
                         judgmentDecisionIds: readonly string[];
                     };
+                } | {
+                    version: 3;
+                    sourceId: string;
+                    sourceRevision: string;
+                    inputId: string;
+                    sessionId: string;
                 };
                 revision: number;
                 criteriaRevision: number;
@@ -31916,6 +32395,7 @@ export interface OperatorMethodOutputMap {
                     inputId: string;
                     sessionId: string;
                     continuation?: {
+                        version?: 2;
                         sessionId: string;
                         revision: string;
                         selectedDiff?: {
@@ -31960,6 +32440,12 @@ export interface OperatorMethodOutputMap {
                         admissionDecisionId: string;
                         judgmentDecisionIds: readonly string[];
                     };
+                } | {
+                    version: 3;
+                    sourceId: string;
+                    sourceRevision: string;
+                    inputId: string;
+                    sessionId: string;
                 };
                 revision: number;
                 criteriaRevision: number;
@@ -32033,6 +32519,7 @@ export interface OperatorMethodOutputMap {
                     inputId: string;
                     sessionId: string;
                     continuation?: {
+                        version?: 2;
                         sessionId: string;
                         revision: string;
                         selectedDiff?: {
@@ -32077,6 +32564,12 @@ export interface OperatorMethodOutputMap {
                         admissionDecisionId: string;
                         judgmentDecisionIds: readonly string[];
                     };
+                } | {
+                    version: 3;
+                    sourceId: string;
+                    sourceRevision: string;
+                    inputId: string;
+                    sessionId: string;
                 };
                 revision: number;
                 criteriaRevision: number;
@@ -32186,6 +32679,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32218,6 +32712,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32252,6 +32747,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32271,6 +32767,7 @@ export interface OperatorMethodOutputMap {
         route: "answer" | "converse";
         text: string;
         continuation?: {
+            version?: 2;
             sessionId: string;
             revision: string;
             selectedDiff?: {
@@ -32319,6 +32816,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32353,6 +32851,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32386,6 +32885,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32418,6 +32918,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32459,6 +32960,7 @@ export interface OperatorMethodOutputMap {
                     end: number;
                 })[];
                 continuation?: {
+                    version?: 2;
                     sessionId: string;
                     revision: string;
                     selectedDiff?: {
@@ -32515,6 +33017,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32547,6 +33050,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32581,6 +33085,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32600,6 +33105,7 @@ export interface OperatorMethodOutputMap {
         route: "answer" | "converse";
         text: string;
         continuation?: {
+            version?: 2;
             sessionId: string;
             revision: string;
             selectedDiff?: {
@@ -32648,6 +33154,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32682,6 +33189,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32715,6 +33223,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32747,6 +33256,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32788,6 +33298,7 @@ export interface OperatorMethodOutputMap {
                     end: number;
                 })[];
                 continuation?: {
+                    version?: 2;
                     sessionId: string;
                     revision: string;
                     selectedDiff?: {
@@ -32844,6 +33355,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32876,6 +33388,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32910,6 +33423,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -32929,6 +33443,7 @@ export interface OperatorMethodOutputMap {
         route: "answer" | "converse";
         text: string;
         continuation?: {
+            version?: 2;
             sessionId: string;
             revision: string;
             selectedDiff?: {
@@ -32977,6 +33492,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33011,6 +33527,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33044,6 +33561,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33076,6 +33594,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33117,6 +33636,7 @@ export interface OperatorMethodOutputMap {
                     end: number;
                 })[];
                 continuation?: {
+                    version?: 2;
                     sessionId: string;
                     revision: string;
                     selectedDiff?: {
@@ -33173,6 +33693,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33205,6 +33726,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33239,6 +33761,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33258,6 +33781,7 @@ export interface OperatorMethodOutputMap {
         route: "answer" | "converse";
         text: string;
         continuation?: {
+            version?: 2;
             sessionId: string;
             revision: string;
             selectedDiff?: {
@@ -33306,6 +33830,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33340,6 +33865,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33373,6 +33899,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33405,6 +33932,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33446,6 +33974,7 @@ export interface OperatorMethodOutputMap {
                     end: number;
                 })[];
                 continuation?: {
+                    version?: 2;
                     sessionId: string;
                     revision: string;
                     selectedDiff?: {
@@ -33504,6 +34033,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33536,6 +34066,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33570,6 +34101,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33589,6 +34121,7 @@ export interface OperatorMethodOutputMap {
         route: "answer" | "converse";
         text: string;
         continuation?: {
+            version?: 2;
             sessionId: string;
             revision: string;
             selectedDiff?: {
@@ -33637,6 +34170,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33671,6 +34205,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33704,6 +34239,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33736,6 +34272,7 @@ export interface OperatorMethodOutputMap {
                 reason: "selected" | "unavailable";
             };
             continuation?: {
+                version?: 2;
                 sessionId: string;
                 revision: string;
                 selectedDiff?: {
@@ -33777,6 +34314,7 @@ export interface OperatorMethodOutputMap {
                     end: number;
                 })[];
                 continuation?: {
+                    version?: 2;
                     sessionId: string;
                     revision: string;
                     selectedDiff?: {
@@ -33856,6 +34394,7 @@ export interface OperatorMethodOutputMap {
                     inputId: string;
                     sessionId: string;
                     continuation?: {
+                        version?: 2;
                         sessionId: string;
                         revision: string;
                         selectedDiff?: {
@@ -33900,6 +34439,12 @@ export interface OperatorMethodOutputMap {
                         admissionDecisionId: string;
                         judgmentDecisionIds: readonly string[];
                     };
+                } | {
+                    version: 3;
+                    sourceId: string;
+                    sourceRevision: string;
+                    inputId: string;
+                    sessionId: string;
                 };
                 revision: number;
                 criteriaRevision: number;
@@ -33975,6 +34520,11 @@ export interface OperatorMethodOutputMap {
                 sourceId: string;
                 sourceRevision: string;
                 sessionId: string;
+            } | {
+                version: 3;
+                sourceId: string;
+                sourceRevision: string;
+                sessionId: string;
             };
             goal: string;
             criteria: readonly string[];
@@ -34000,6 +34550,11 @@ export interface OperatorMethodOutputMap {
             };
             source: {
                 version: 1;
+                sourceId: string;
+                sourceRevision: string;
+                sessionId: string;
+            } | {
+                version: 3;
                 sourceId: string;
                 sourceRevision: string;
                 sessionId: string;
@@ -35521,6 +36076,7 @@ export const ProviderModelEntrySchema: z.ZodObject<{
             fallback: "fallback";
             family: "family";
         }>;
+        effectiveByRequested: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
 
@@ -35579,6 +36135,7 @@ export const ProviderModelProviderSchema: z.ZodObject<{
                 fallback: "fallback";
                 family: "family";
             }>;
+            effectiveByRequested: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
@@ -37113,7 +37670,6 @@ export type TurnEvent =
     model: string;
     promptSummary: {
         length: number;
-        sha256: string;
         first100chars: string;
     } | string;
 }
@@ -37125,7 +37681,6 @@ export type TurnEvent =
     model: string;
     contentSummary: {
         length: number;
-        sha256: string;
         first100chars: string;
     } | string;
     toolCallCount: number;

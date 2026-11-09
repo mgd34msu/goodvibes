@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveInstalledDaemonUpdateArtifact } from '../../daemon/lifecycle.js';
-import { writeNativeInstallationFixture } from '../helpers/native-runtime-provenance.js';
+import { writeNativeInstallationFixture, writeNativeReaderInstallationFixture } from '../helpers/native-runtime-provenance.js';
 import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { DaemonServer, HttpListener, PlatformServiceManager } from '@goodvibes-jev/engine/sdk/platform/daemon';
 import { persistProviders, loadPersistedProviders, type DiscoveredServer } from '@goodvibes-jev/engine/sdk/platform/discovery';
@@ -13,6 +13,7 @@ import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/sdk/plat
 import { createRuntimeStore } from '@goodvibes-jev/engine/sdk/platform/runtime/store';
 import * as contractRuntime from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
+import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { createFeatureFlagManager, deriveFeatureStates, RuntimeEventBus } from '../../runtime/index.js';
 import { createDaemonHost, type DaemonHost, type DaemonHostFactories, type DaemonHostOptions } from '../../runtime/daemon-host.js';
 import { createDaemonBootOperations } from '../../runtime/boot-composition.js';
@@ -511,12 +512,51 @@ test('host preloads only its selected home/surface cache before real server and 
   expect(floors).toHaveLength(1);
   const floor = floors[0]!;
   expect(floor.services.providerRegistry.listDiscoveredServers()).toEqual([cached]);
+  const sharedGraph = fx.host.services!.sessionOrchestration;
+  expect(floor.services.sessionOrchestration).toBe(sharedGraph);
+  const now = Date.now();
+  floor.services.sessionOrchestration.linkTask({ sessionId: 'owned-graph-session', taskId: 'shared-task', title: 'Owned shared task',
+    status: 'running', createdAt: now, updatedAt: now });
+  expect(sharedGraph.getRef('owned-graph-session', 'shared-task')?.status).toBe('running');
   const reply = await floor.services.providerRegistry.require(cached.name).chat({ model: 'cached-model', messages: [{ role: 'user', content: 'owned synthetic request' }] });
   expect(reply.content).toBe('owned cached route'); expect(requests).toBe(1);
   seedCache(fx.homeDirectory, [cachedServer('later-cache')]);
   expect(floor.services.providerRegistry.listDiscoveredServers()).toEqual([cached]);
   expect(fx.host.services!.providerRegistry.listDiscoveredServers()).toEqual([cached]);
+  // Draining a borrowed floor must neither flush nor dispose the host's actual
+  // task graph. Its remaining owner can still mutate and durably publish it.
+  await floor.services.close();
+  expect(sharedGraph.propagateStatus('owned-graph-session', 'shared-task', 'completed')).toBe(true);
+  sharedGraph.flush();
+  const graphPath = fx.host.services!.shellPaths.resolveProjectPath('tui', 'sessions', 'task-graph.json');
   await fx.host.close();
+  expect(JSON.parse(readFileSync(graphPath, 'utf8')).refs['owned-graph-session:shared-task'].status).toBe('completed');
+});
+
+test('a hosted floor in another workspace retains its own task graph and drains it before the host', async () => {
+  const floors: HostedWorkspaceFloor[] = [];
+  const fx = fixture(undefined, { createServer(config) {
+    const hosted = config!.hostedSessions!;
+    return new DaemonServer({ ...config, hostedSessions: { ...hosted, async floorFactory(input) {
+      const floor = await hosted.floorFactory(input); floors.push(floor); return floor;
+    } } });
+  } });
+  await fx.host.start();
+  const workspace = join(fx.root, 'other-workspace'); mkdirSync(workspace);
+  const response = await fetch(`${fx.baseUrl}/api/control-plane/methods/sessions.hosted.create/invoke`, {
+    method: 'POST', headers: { Authorization: 'Bearer synthetic-host-token', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: { workspaceRoot: workspace, clientId: 'other-workspace-fixture', detachPolicy: 'survive' } }),
+  });
+  expect(response.status).toBe(200); expect(floors).toHaveLength(1);
+  const graph = floors[0]!.services.sessionOrchestration;
+  expect(graph).not.toBe(fx.host.services!.sessionOrchestration);
+  const now = Date.now();
+  graph.linkTask({ sessionId: 'other-session', taskId: 'other-task', title: 'Owned separate task', status: 'running', createdAt: now, updatedAt: now });
+  await floors[0]!.services.close();
+  expect(fx.host.services!.sessionOrchestration.getAllRefs()).toEqual([]);
+  const path = join(workspace, '.goodvibes', 'tui', 'sessions', 'task-graph.json');
+  const saved = readFileSync(path, 'utf8'); expect(saved).toContain('other-task');
+  await fx.host.close(); expect(readFileSync(path, 'utf8')).toBe(saved);
 });
 
 test.each(['absent', 'empty', 'invalid'] as const)('%s discovery cache preserves an already registered snapshot', async (cache) => {
@@ -949,10 +989,23 @@ function inertNativeHostServer(): NonNullable<DaemonHost['daemon']> {
 }
 
 for (const ending of ['drain', 'cancel'] as const) test(`configured native recovery ${ending} owns facade handover before ordinary host cleanup`, async () => {
+  const rollbackFailures: unknown[] = [];
+  const logError = logger.error.bind(logger);
+  keep(spyOn(logger, 'error').mockImplementation((message, details) => {
+    if (message === 'DaemonServer: automatic rollback failed; continuing the boot on the current build') rollbackFailures.push(details);
+    logError(message, details);
+  }));
   const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
-  const native = writeNativeInstallationFixture(makeOwnedTempDir('host-native-recovery'), '9.9.9-test', arch);
-  const previous = writeNativeInstallationFixture(makeOwnedTempDir('host-native-prior'), '9.9.8-test', arch);
+  const native = writeNativeReaderInstallationFixture(makeOwnedTempDir('host-native-recovery'), '9.9.9-test', arch);
+  const previous = writeNativeReaderInstallationFixture(makeOwnedTempDir('host-native-prior'), '9.9.8-test', arch);
   for (const [index, target] of native.targets.entries()) copyFileSync(previous.targets[index]!.path, target.path + '.previous');
+  // The actual suite rollback also owns its required browser-driver cohort.
+  // A daemon-only previous binary is no longer a complete suite fixture.
+  for (const [suffix, version] of [['', native.receipt.version], ['.previous', previous.receipt.version]] as const) {
+    const directory = join(native.execPath, '..', 'playwright-core' + suffix); mkdirSync(directory);
+    writeFileSync(join(directory, '.goodvibes-release.json'), JSON.stringify({ schema: 1, version }));
+    for (const file of ['package.json', 'index.js', 'cli.js']) writeFileSync(join(directory, file), '{}');
+  }
   writeFileSync(native.execPath, 'damaged current daemon');
   const artifact = resolveInstalledDaemonUpdateArtifact({ isOverridden: false }, native.options);
   expect(artifact).toBeDefined(); if (!artifact) throw new Error('Native recovery fixture admission missing');
@@ -962,6 +1015,10 @@ for (const ending of ['drain', 'cancel'] as const) test(`configured native recov
     installed: false, autostart: false, running: false, commandPreview: '', suggestedCommands: [] }));
   keep(spyOn(PlatformServiceManager.prototype, 'install').mockImplementation(() => { installs++; throw new Error('Unexpected real service installation'); }));
   const fx = fixture((runtime) => {
+    // This native fixture owns daemon+driver only. The source-development
+    // default static directory is a separate deployment, not its suite WebUI.
+    runtime.configManager.set('controlPlane.webui.bundleDir', '');
+    runtime.configManager.set('web.staticAssetsDir', '');
     const stop = runtime.sessionBroker.stop.bind(runtime.sessionBroker);
     keep(spyOn(runtime.sessionBroker, 'stop').mockImplementation(async () => { entered.resolve(); await release.promise; await stop(); }));
     const close = runtime.close;
@@ -975,7 +1032,7 @@ for (const ending of ['drain', 'cancel'] as const) test(`configured native recov
     failedStarts: 3, streakStartedAt: Date.now(), version: native.receipt.version }));
   const starting = fx.host.start(); const started = settled(starting);
   await entered.promise; await tick();
-  expect(started()).toBe(false); expect(graphCloses).toBe(0); expect(bootStarts).toBe(0);
+  expect(started(), JSON.stringify(rollbackFailures)).toBe(false); expect(graphCloses).toBe(0); expect(bootStarts).toBe(0);
   expect(fx.host.daemon?.isRunning).toBe(false);
   let closing: Promise<void> | undefined;
   if (ending === 'cancel') { closing = fx.host.close(); const closed = settled(closing); await tick(); expect(closed()).toBe(false); }
@@ -1009,11 +1066,11 @@ test('configured native host forwards only its complete retained installation an
 });
 
 test('actual native root publishes the imported payment-hold requirement through the full runtime and handler graph', async () => {
-  const native = writeNativeInstallationFixture(makeOwnedTempDir('host-payment-reader-floor'), '3.1.2', process.arch === 'arm64' ? 'arm64' : 'x64');
+  const native = writeNativeReaderInstallationFixture(makeOwnedTempDir('host-payment-reader-floor'), '3.1.2', process.arch === 'arm64' ? 'arm64' : 'x64');
   const artifact = resolveInstalledDaemonUpdateArtifact({ isOverridden: false }, native.options);
   if (!artifact) throw new Error('Native fixture admission missing');
   const fx = fixture(undefined, { createServer() { return inertNativeHostServer(); } }, { updateArtifact: artifact, hasOverriddenHome: false });
-  const directory = join(fx.homeDirectory, '.goodvibes', 'daemon', 'control-plane'); mkdirSync(directory, { recursive: true });
+  const directory = join(fx.homeDirectory, '.goodvibes', 'tui', 'control-plane'); mkdirSync(directory, { recursive: true });
   const now = Date.now();
   writeFileSync(join(directory, 'payments-budget.json'), JSON.stringify({ version: 2, spend: [], reservations: [{
     id: 'imported-checkout', dayKey: new Date(now).toISOString().slice(0, 10), createdAtMs: now, expiresAtMs: now + 60_000,

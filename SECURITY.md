@@ -144,7 +144,7 @@ Security-sensitive areas in this SDK include:
 
 ## Consumer guidance
 
-The full security model covers authentication modes, token management, secret handling, and daemon hardening. See [docs/security.md](./docs/security.md).
+The full security model covers authentication modes, token management, secret handling, and daemon hardening. See [docs/security.md](./packages/engine/docs/security.md).
 
 When building with this SDK:
 

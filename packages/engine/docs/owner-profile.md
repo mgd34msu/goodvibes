@@ -787,9 +787,8 @@ bullet is a new bullet, and the owner removes the old one to make it gone.
 
 `profile.forget` removes the line **and every `<!-- was: … -->` comment for that
 field**, then writes atomically. No tombstone, no `deleted:true` flag, no
-retention window. This follows
-`docs/decisions/2026-07-06-delete-means-delete.md`: a delete that leaves the
-record on disk is exactly the dishonesty that decision removed. The response says
+retention window. Deleting also removes the retained field history rather
+than hiding a record that is still stored. The response says
 `deleted: true` and names what went. Forgetting something that was not there
 reports that it was not there, it does not report success.
 

@@ -287,4 +287,4 @@ checkout and inspect the diff before continuing.
 These mechanics do not migrate saved updater settings, configure release-cut, publish, tag, commit,
 install or deploy anything. See [release preparation contracts](docs/cli-and-package-contracts.md#explicit-release-preparation).
 
-Historical upstream release notes are preserved in [the provenance-labelled archive](docs/history/README.md); they are not current product release claims.
+Current monorepo releases are documented in [release notes](../../docs/releases/). Historical upstream implementation notes are kept outside the published user documentation.

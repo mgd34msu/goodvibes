@@ -4,7 +4,7 @@
 
 This guide covers the security model of the GoodVibes daemon and SDK. It is intended for operators embedding the daemon, developers building surfaces, and anyone configuring authentication for production deployments.
 
-For vulnerability reporting, see [`SECURITY.md`](../SECURITY.md) at the repo root.
+For vulnerability reporting, see [`SECURITY.md`](../../../SECURITY.md) at the repo root.
 
 ---
 

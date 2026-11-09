@@ -3,7 +3,7 @@
 TypeScript SDK for building GoodVibes operator, peer, web, mobile, and daemon-connected apps with typed contracts, auth, realtime events, and transport layers.
 
 > **What this SDK is:** a client for the GoodVibes daemon. Not a direct provider SDK.
-> See [Getting Started](../../docs/getting-started.md) for the full walkthrough.
+> See [Getting Started](../docs/getting-started.md) for the full walkthrough.
 
 Install:
 
@@ -27,7 +27,7 @@ console.log(await sdk.operator.control.snapshot());
 
 Every supported import is an explicit subpath in the package `exports` map. The
 table below covers the primary ones; the complete, stability-leveled list is
-[public-surface.md](../../docs/public-surface.md).
+[public-surface.md](../docs/public-surface.md).
 
 | Entry point | Use it for |
 | --- | --- |

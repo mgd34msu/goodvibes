@@ -56,4 +56,4 @@ const heartbeat = await peer.peer.heartbeat({ capabilities: ['work'], version: '
 ## See also
 
 - Main SDK: [`@goodvibes-jev/engine/sdk`](../sdk/README.md)
-- [Getting Started](../../docs/getting-started.md)
+- [Getting Started](../docs/getting-started.md)

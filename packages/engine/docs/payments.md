@@ -18,10 +18,9 @@ bypass payment enablement, direct-owner origin, budgets, merchant checks, or the
 payment-specific approval and veto windows described below.
 
 A card turns a successful prompt injection from "sends an email" into "buys
-something". The platform has just spent a round hardening against exactly that
-(`docs/decisions/2026-07-27-daemon-refuses-derived-sends.md`), and this
-capability is the one place where that hardening has to hold with money on the
-other side of it. Read the security section before the feature sections.
+something". Content-taint protections therefore apply to payment authorization
+as well as other outward effects. Read the security section before the feature
+sections.
 
 ---
 
@@ -1476,9 +1475,8 @@ we are saying is that we ask rather than assume.
 one input.** An earlier version of this capability shipped a hardcoded
 allowlist of retailer domains, and that was rejected outright: the requirement
 was retailers *matching the profile*, not a list of retailers, and a list fails
-closed on every established retailer nobody thought to enumerate. See
-`docs/decisions/2026-07-27-a-discovered-merchant-is-graded-not-refused.md` for
-the full correction. What ships instead is `createModelMerchantJudge`
+closed on every established retailer nobody thought to enumerate. The recourse
+standard in §9.1.1 replaces that fixed-list rule. What ships instead is `createModelMerchantJudge`
 (`platform/payments/merchant-judge-model.ts`), a helper-model call made through
 `MerchantJudgePort`, invoked from `classifyMerchant` for every domain the owner
 has not already added or excluded.
@@ -1814,8 +1812,8 @@ Autonomous action is the entire point of the capability. The veto window rules
 that an in-budget purchase proceeds on silence, which means it completes with
 nobody present. A purchase that pauses to ask a human for a verification code is
 an attended purchase; removing the stored CVV would not make the feature safer,
-it would make it not exist. See
-`docs/decisions/2026-07-27-the-cvv-is-stored.md`.
+it would make unattended card entry unavailable. The stored-CVV policy and
+its limits are described in this section.
 
 **How it is held.** The CVV is written to the daemon secret store beside the card
 number, AES-256-GCM at rest under `~/.goodvibes/secrets.key`, with
@@ -2248,8 +2246,8 @@ any of them can be overturned by the owner, and none is a coin toss left in the
 code.
 
 1. **The CVV is stored (§9.5).** Owner ruling: the CVV is saved, full stop,
-   because it is required for autonomous action. Settled and closed, see
-   `docs/decisions/2026-07-27-the-cvv-is-stored.md`. `payments.cvvHandling`
+   because it is required for autonomous action, as described in §9.5.
+   `payments.cvvHandling`
    still ships as a real setting defaulting to `'stored'`; selecting `'prompt'`
    disables unattended purchasing and the surface says so at the moment of
    selection.
@@ -2278,8 +2276,7 @@ code.
    you can find" was refused by design: the blanket taint gate on the merchant
    was wrong. On an **owner-initiated** purchase, the merchant and checkout URL
    may derive from page content; the merchant standard then decides whether
-   silence proceeds or denies. See
-   `docs/decisions/2026-07-27-a-discovered-merchant-is-graded-not-refused.md`.
+   silence proceeds or denies (§9.1.1).
 9. **Content-initiated purchases remain refused absolutely (§9.1).** Unchanged
    by the above, and the reason it is safe: what relaxed is *who chooses the
    merchant*, never *who initiates*. There is still no owner-approval escape
@@ -2321,12 +2318,9 @@ code.
 
 ## 13. Related
 
-- `docs/decisions/2026-07-27-daemon-refuses-derived-sends.md`, the taint ruling
-  this capability inherits
-- `docs/decisions/2026-07-27-a-discovered-merchant-is-graded-not-refused.md`, the owner's override of the blanket merchant refusal, and the recourse standard
-  that replaced it
-- `docs/decisions/2026-07-27-payment-windows-are-deliberately-opposite.md`, why
-  the two windows must never be unified into one primitive
+- [Purchase origin and taint](#91-who-may-initiate-a-purchase-and-who-may-choose-the-merchant), the payment boundary for untrusted content
+- [Merchant recourse](#911-the-merchant-standard-recourse-not-recognisability), the standard for discovered merchants
+- [Approval and veto windows](#8-the-two-windows), their opposite timeout rules
 - `docs/security.md`, `SecretsManager`, storage policies, permission system
 - `docs/secrets.md`, the `goodvibes://secrets/...` reference form
 - `platform/security/content-taint.ts`, `untrusted-content.ts`,

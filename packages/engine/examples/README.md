@@ -20,7 +20,7 @@ Most examples read environment variables at startup:
 
 Keep example tokens local and never commit real credentials,
 tokens, cookies, or screenshots containing them.
-See the repository [security policy](../SECURITY.md) before adapting examples
+See the repository [security policy](../../../SECURITY.md) before adapting examples
 that handle credentials, pairing tokens, or daemon URLs.
 
 ## Quickstarts

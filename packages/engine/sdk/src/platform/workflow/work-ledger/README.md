@@ -58,10 +58,10 @@ work cannot be changed through legacy `revise`; historical source-less work
 retains its existing record editing behavior. Actor-scoped `lookupSubmission`
 returns the immutable original event after an acknowledgement is lost.
 
-KnowledgeStore schema 5 uses ledger format 2. Migration validates old command
+Ledger format 2 was introduced in KnowledgeStore schema 5. Migration validates old command
 replay/history before adding absent-source markers; it never synthesizes source
 authority for old records. Native execution and intent records are preserved.
-See [native submission](../../../../../../../docs/design/native-work-submission.md)
+See [native work ledger](../../../../../../../products/tui/docs/native-work-ledger.md)
 for the authenticated host/client and explicit execution boundary.
 
 ## Revision and receipt semantics

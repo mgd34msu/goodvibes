@@ -19,7 +19,7 @@ This surface is for:
 - dispatch operator, automation, session, task, or remote API calls
 - reuse shared daemon auth/error helpers
 
-See [Daemon Embedding](../../docs/daemon-embedding.md) for the full daemon surface, dispatchers, and the recommended embedding pattern.
+See [Daemon Embedding](../docs/daemon-embedding.md) for the full daemon surface, dispatchers, and the recommended embedding pattern.
 
 This package gives you reusable route modules, but your host still owns:
 - **request routing**: matching an incoming request to the handler this package builds for it.

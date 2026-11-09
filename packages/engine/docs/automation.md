@@ -80,8 +80,7 @@ runs at once, and how long its history is kept:
 > `automation.jobs.enable`. `patch`, `pause`, and `resume` are permanently
 > banned verb tails (`packages/engine/contracts/src/core-verbs.ts`) and cannot
 > reappear under any automation method id. See
-> [`packages/engine/contracts/src/core-verbs.ts`](../packages/contracts/src/core-verbs.ts)
-> and `docs/decisions/2026-07-06-core-verb-spec.md`.
+> [`packages/engine/contracts/src/core-verbs.ts`](../contracts/src/core-verbs.ts).
 
 ## Schedules
 

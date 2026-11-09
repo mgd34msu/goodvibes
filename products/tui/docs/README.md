@@ -70,9 +70,6 @@ This directory contains the current product documentation for `goodvibes-tui`.
 - Testing and validation
   What runs while you work, on every push, and before a release; the test layers; the end-to-end tests against the built binary.
 
-- [Local verification](verification/local-verification.md)
-  GoodVibes home audits, compiled CLI probes, and authenticated daemon probes against your own machine.
-
 - [Changelog](../CHANGELOG.md)
   Current release history. Older per-version release-note files remain under `docs/releases/` for historical releases, but `CHANGELOG.md` is the canonical current stream.
 

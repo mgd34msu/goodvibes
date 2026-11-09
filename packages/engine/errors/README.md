@@ -82,6 +82,6 @@ The exported fields are intended to replace fragile message parsing in client an
 
 ## Documentation
 
-- [SDK Error Kinds](../../docs/error-kinds.md): per-kind consumer reference
-- [Error Handling](../../docs/error-handling.md): handling patterns
-- [Error Architecture](../../docs/errors.md): internal source map
+- [SDK Error Kinds](../docs/error-kinds.md): per-kind consumer reference
+- [Error Handling](../docs/error-handling.md): handling patterns
+- [Error Architecture](../docs/errors.md): internal source map

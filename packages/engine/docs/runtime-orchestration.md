@@ -147,8 +147,8 @@ A contract is the unit of checked work. The contract runner
 `contract/runner.ts`) plans the work, runs it through sub-agents, and has Jev
 judge it while it runs. It replaces the retired write-review-fix-confirm loop:
 Jev reads the work continuously and nudges the sub-agent instead of running
-separate review and fix agents. The build design is
-`docs/design/contract-runner.md` at the repository root.
+separate review and fix agents. See [contract criteria](./contract-criteria.md)
+for criterion tracing, checking and review inventory.
 
 ### Where contracts start
 

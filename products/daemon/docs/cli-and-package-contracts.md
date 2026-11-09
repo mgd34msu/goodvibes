@@ -642,8 +642,9 @@ local cross-target builds are not proof of other-platform acceptance.
 explicit artifact root, absolute output filename, source and head commits bind
 the existing private manifest and exact target. It chooses no version, rebuilds
 nothing, generates no provenance for an unknown binary, and contacts no registry.
-See [local native installation](local-native-installation.md) for fixed x64/ARM64
-layouts, same-host checks and the narrower CI acquisition policy.
+The fixed Linux x64/ARM64 layouts require a complete same-host cohort;
+cross-target output alone does not establish native execution acceptance.
+For released application installation, see [installation instructions](../../../docs/installation.md).
 
 The gate verifies the existing CI manifest and canonical modes, captures only its
 five payloads plus the manifest, and checks those captured bytes again. It creates

@@ -63,7 +63,7 @@ const status = await operator.control.status();
 ## See also
 
 - Main SDK: [`@goodvibes-jev/engine/sdk`](../sdk/README.md)
-- [Getting Started](../../docs/getting-started.md)
+- [Getting Started](../docs/getting-started.md)
 
 
 ## Native work ledger reads

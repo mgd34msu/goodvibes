@@ -338,9 +338,26 @@ prepare_release() {
         fetch_release_asset "$_product-$PLATFORM_SUFFIX$_suffix"
       done
     fi
+    if [ "$_product" != goodvibes-daemon ] || [ "$os_tag" = macos ]; then
+      _client_reader="$_product-$PLATFORM_SUFFIX.reader-ci-artifact.json"
+      if awk -v name="$_client_reader" '$2 == name || $2 == "*"name { found=1 } END { exit !found }' "$WORKDIR/SHA256SUMS.txt"; then
+        fetch_release_asset "$_client_reader"
+      fi
+    fi
+  done
+  for _prepared_terminal in goodvibes goodvibes-agent goodvibes-daemon; do
+    [ "$_prepared_terminal" != goodvibes-agent ] || [ "$WITH_AGENT" = 1 ] || continue
+    [ "$_prepared_terminal" != goodvibes-daemon ] || [ "$os_tag" = macos ] || continue
+    if [ -f "$WORKDIR/$_prepared_terminal-$PLATFORM_SUFFIX.reader-ci-artifact.json" ]; then
+      require_client_reader_evidence "$_prepared_terminal"
+    fi
   done
   if [ "$os_tag" = linux ]; then fetch_release_asset "goodvibes-daemon-$PLATFORM_SUFFIX.ci-artifact.json"; fi
   if [ "$WITH_VECTOR" = 1 ] || [ "$os_tag" = linux ]; then fetch_release_asset "sqlite-vec-$VEC_OS-$arch_tag.$VEC_SUFFIX"; fi
+  if [ "$os_tag" = macos ]; then
+    fetch_release_asset "sqlite-darwin-$arch_tag.dylib"
+    fetch_release_asset "sqlite-darwin-$arch_tag.dylib.json"
+  fi
   fetch_release_asset browser-driver.tar.gz
   if [ "$WITH_WEBUI" = 1 ]; then fetch_release_asset "goodvibes-webui-bundle-${VERSION#v}.tar.gz"; fi
   # Validate required archive contents before any installed program is changed.
@@ -487,7 +504,7 @@ claim_release_install() {
   # An interrupted updater may have retained a companion slot even when its
   # primary claim is missing. Never overwrite that recovery evidence.
   for _idle_product in goodvibes-daemon goodvibes goodvibes-agent; do
-    for _idle_companion in '' .bun .bun.json .bun.LICENSE.md; do
+    for _idle_companion in '' .bun .bun.json .bun.LICENSE.md .readers.json; do
       for _idle_tail in .update-transaction .update-download .update-previous .rollback-exchange .incoming; do
         [ -n "$_idle_companion" ] || [ "$_idle_tail" != .update-transaction ] || continue
         _idle_path="$INSTALL_CLAIM_DIR/$_idle_product$_idle_companion$_idle_tail"
@@ -501,21 +518,94 @@ claim_release_install() {
       [ ! -e "$_idle_path" ] && [ ! -L "$_idle_path" ] || fail 'Retained companion transaction files require inspection before installation.'
     done
   done
+  if [ "$os_tag" = macos ]; then
+    for _sqlite_tail in '' .json; do
+      for _idle_tail in .update-transaction .update-download .update-previous .rollback-exchange .incoming; do
+        _idle_path="$INSTALL_CLAIM_DIR/lib/sqlite-darwin-$arch_tag/libsqlite3.dylib$_sqlite_tail$_idle_tail"
+        [ ! -e "$_idle_path" ] && [ ! -L "$_idle_path" ] || fail 'Retained SQLite runtime transaction files require inspection before installation.'
+      done
+    done
+  fi
+  assert_install_library_directory "sqlite-vec-${VEC_OS}-${arch_tag}"
+  if [ "$os_tag" = macos ]; then assert_install_library_directory "sqlite-darwin-$arch_tag"; fi
+}
+
+assert_install_library_directory() {
+  for _library_parent in "$INSTALL_DIR/lib" "$INSTALL_DIR/lib/$1"; do
+    [ ! -L "$_library_parent" ] || fail 'An installed native library directory is an alias; inspect it before replacing programs.'
+    [ ! -e "$_library_parent" ] || [ -d "$_library_parent" ] || fail 'An installed native library parent is not a directory.'
+  done
+}
+
+install_release_library_file() {
+  _library_asset=$1
+  _library_directory=$2
+  _library_name=$3
+  assert_install_claims
+  assert_install_library_directory "$_library_directory"
+  mkdir -p "$INSTALL_DIR/lib/$_library_directory"
+  assert_install_library_directory "$_library_directory"
+  _library_target="$INSTALL_DIR/lib/$_library_directory/$_library_name"
+  [ ! -e "$_library_target.incoming" ] && [ ! -L "$_library_target.incoming" ] || fail 'A retained native library stage requires inspection.'
+  (set -C; cat "$WORKDIR/$_library_asset" > "$_library_target.incoming") || fail 'Could not exclusively stage the native library.'
+  chmod 644 "$_library_target.incoming"
+  assert_install_claims
+  assert_install_library_directory "$_library_directory"
+  mv -f "$_library_target.incoming" "$_library_target"
+}
+
+# Reader descriptors are canonical JSON emitted by the native publisher after
+# its compiled metadata check. Both descriptor and cohort are independently
+# pinned by the same release checksum manifest. Require the exact program pin
+# before invoking its known metadata command; never probe an old binary whose
+# release did not publish affirmative reader evidence.
+require_client_reader_evidence() {
+  _evidence_product=$1
+  _evidence_asset="$_evidence_product-$PLATFORM_SUFFIX"
+  _evidence_file="$WORKDIR/$_evidence_asset.reader-ci-artifact.json"
+  [ -f "$_evidence_file" ] && [ ! -L "$_evidence_file" ] || fail "The selected $_evidence_product release has no reader evidence. The installed programs were kept."
+  case "$_evidence_product" in goodvibes) _evidence_package='@goodvibes-jev/tui' ;; goodvibes-agent) _evidence_package='@goodvibes-jev/agent' ;; goodvibes-daemon) _evidence_package='@goodvibes-jev/daemon' ;; *) fail 'Unsupported native reader evidence.' ;; esac
+  _evidence_target="$VEC_OS-$arch_tag"
+  awk -v package="$_evidence_package" -v version="${VERSION#v}" -v target="$_evidence_target" '
+    /^  "schema": 1,$/ { schema++ }
+    /^  "packageName": / { if ($0 == "  \"packageName\": \"" package "\",") name++ }
+    /^  "version": / { if ($0 == "  \"version\": \"" version "\",") release++ }
+    /^  "target": / { if ($0 == "  \"target\": \"" target "\",") host++ }
+    /^  "readers": \{$/ { readers++ }
+    END { exit !(schema==1 && name==1 && release==1 && host==1 && readers==1) }
+  ' "$_evidence_file" || fail "The selected $_evidence_product reader evidence does not name this release and platform. The installed programs were kept."
+  _evidence_members=''
+  if [ "$os_tag" = linux ]; then _evidence_members='.bun .bun.LICENSE.md .bun.json'; fi
+  for _evidence_suffix in '' $_evidence_members; do
+    _evidence_member="$_evidence_asset$_evidence_suffix"
+    _evidence_pin=$(awk -v wanted="$_evidence_member" '
+      /"path": / { name=$0; sub(/^.*"path": "/,"",name); sub(/",? *$/,"",name); selected=(name==wanted); next }
+      selected && /"sha256": / { pin=$0; sub(/^.*"sha256": "/,"",pin); sub(/",? *$/,"",pin); print pin; count++; selected=0 }
+      END { if (count != 1) exit 1 }
+    ' "$_evidence_file") || fail 'Reader evidence has a missing or ambiguous program pin.'
+    _evidence_expected=$(release_checksum "$_evidence_member") || fail 'Reader evidence names an unavailable release member.'
+    [ "$_evidence_pin" = "$_evidence_expected" ] || fail 'Reader evidence does not match the selected released program bytes. No installed program was replaced.'
+  done
 }
 
 check_release_reader() {
   assert_install_claims
   _reader_floor="$INSTALL_CLAIM_DIR/.goodvibes-reader-requirements.json"
   [ -e "$_reader_floor" ] || [ -L "$_reader_floor" ] || return 0
-  _reader_binary="$WORKDIR/goodvibes-daemon-$PLATFORM_SUFFIX"
-  chmod 755 "$_reader_binary"
-  if [ "$os_tag" = linux ]; then chmod 755 "$_reader_binary.bun"; fi
-  # This release’s own parser checks its compiled version. No installed binary,
-  # system interpreter, settings bootstrap or live service is needed.
-  _reader_receipt=$("$_reader_binary" check-install-reader "$INSTALL_CLAIM_DIR/goodvibes-daemon") || fail 'This release cannot confirm compatibility with the saved data. The installed programs were kept; choose a compatible newer release.'
-  assert_install_claims
+  # Every selected writer must confirm its own compiled reader support before
+  # the first suite replacement. A sibling daemon cannot attest another binary.
+  _reader_products="goodvibes goodvibes-daemon"
+  if [ "$WITH_AGENT" = 1 ]; then _reader_products="$_reader_products goodvibes-agent"; fi
   _reader_expected="{\"schema\":\"goodvibes.install.reader-check\",\"schemaVersion\":1,\"readerVersion\":\"${VERSION#v}\"}"
-  [ "$_reader_receipt" = "$_reader_expected" ] || fail 'The staged release did not return its matching reader capability. The installed programs were kept.'
+  for _reader_product in $_reader_products; do
+    if [ "$_reader_product" != goodvibes-daemon ] || [ "$os_tag" = macos ]; then require_client_reader_evidence "$_reader_product"; fi
+    _reader_binary="$WORKDIR/$_reader_product-$PLATFORM_SUFFIX"
+    chmod 755 "$_reader_binary"
+    if [ "$os_tag" = linux ]; then chmod 755 "$_reader_binary.bun"; fi
+    _reader_receipt=$("$_reader_binary" check-install-reader "$INSTALL_CLAIM_DIR/$_reader_product") || fail "The selected $_reader_product release cannot read the saved data. The installed programs were kept; choose a compatible newer release."
+    assert_install_claims
+    [ "$_reader_receipt" = "$_reader_expected" ] || fail "The selected $_reader_product did not confirm its matching compiled readers. The installed programs were kept."
+  done
 }
 
 install_release_binary() {
@@ -537,11 +627,29 @@ install_release_binary() {
   chmod 755 "$INSTALL_DIR/$_installed_binary.incoming"
   assert_install_claims
   mv -f "$INSTALL_DIR/$_installed_binary.incoming" "$INSTALL_DIR/$_installed_binary"
+  if [ "$_binary" != goodvibes-daemon ] || [ "$os_tag" = macos ]; then
+    _installed_readers="$INSTALL_DIR/$_installed_binary.readers.json"
+    if [ -f "$WORKDIR/$_binary_asset.reader-ci-artifact.json" ]; then
+      require_client_reader_evidence "$_binary"
+      cp "$WORKDIR/$_binary_asset.reader-ci-artifact.json" "$_installed_readers.incoming"
+      chmod 644 "$_installed_readers.incoming"
+      assert_install_claims
+      mv -f "$_installed_readers.incoming" "$_installed_readers"
+    elif [ -e "$_installed_readers" ] || [ -L "$_installed_readers" ]; then
+      # No old descriptor may describe a different newly installed executable.
+      assert_install_claims
+      rm -f "$_installed_readers"
+    fi
+  fi
   if [ "$_binary" = goodvibes-daemon ] && [ "$os_tag" = linux ]; then
     cp "$WORKDIR/daemon-installation.json" "$INSTALL_DIR/daemon-installation.json.incoming"
     chmod 644 "$INSTALL_DIR/daemon-installation.json.incoming"
     assert_install_claims
     mv -f "$INSTALL_DIR/daemon-installation.json.incoming" "$INSTALL_DIR/daemon-installation.json"
+  fi
+  if [ "$_binary" = goodvibes-daemon ] && [ "$os_tag" = macos ]; then
+    install_release_library_file "sqlite-darwin-$arch_tag.dylib" "sqlite-darwin-$arch_tag" libsqlite3.dylib
+    install_release_library_file "sqlite-darwin-$arch_tag.dylib.json" "sqlite-darwin-$arch_tag" libsqlite3.dylib.json
   fi
 }
 
@@ -1855,10 +1963,7 @@ install_sqlite_vec() {
   addon_dir="$INSTALL_DIR/lib/sqlite-vec-${VEC_OS}-${arch_tag}"
   addon_target="$addon_dir/vec0.${VEC_SUFFIX}"
 
-  assert_install_claims
-  mkdir -p "$addon_dir"
-  chmod 644 "$WORKDIR/$addon_asset"
-  mv -f "$WORKDIR/$addon_asset" "$addon_target"
+  install_release_library_file "$addon_asset" "sqlite-vec-${VEC_OS}-${arch_tag}" "vec0.${VEC_SUFFIX}"
   say "  installed  $addon_target"
 }
 
@@ -2704,7 +2809,7 @@ run_uninstall() {
   # PREVIOUS_FILE_SUFFIX contract). Leaving these behind was the same class of
   # miss the playwright-core.previous handling below already covers.
   for name in goodvibes goodvibes-daemon goodvibes-agent; do
-    for companion in .bun .bun.json .bun.LICENSE.md; do
+    for companion in .bun .bun.json .bun.LICENSE.md .readers.json; do
       for tail in '' .previous .incoming; do
         if [ -f "$INSTALL_DIR/$name$companion$tail" ]; then
           rm -f "$INSTALL_DIR/$name$companion$tail"
@@ -2726,12 +2831,24 @@ run_uninstall() {
     fi
   done
 
-  # sqlite-vec addon dirs the installer places under $INSTALL_DIR/lib.
-  for addon_dir in "$INSTALL_DIR"/lib/sqlite-vec-*; do
-    [ -d "$addon_dir" ] || continue
-    rm -rf "$addon_dir"
-    say "  removed    $addon_dir"
-    record_removed "$addon_dir"
+  # Remove only the known installed library leaves. An unrelated sibling in a
+  # native-library directory is not installer-owned and keeps that directory.
+  for _uninstall_target in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+    case "$_uninstall_target" in darwin-*) _uninstall_vec=vec0.dylib ;; *) _uninstall_vec=vec0.so ;; esac
+    for _uninstall_library in "sqlite-vec-$_uninstall_target/$_uninstall_vec" "sqlite-$_uninstall_target/libsqlite3.dylib" "sqlite-$_uninstall_target/libsqlite3.dylib.json"; do
+      _uninstall_parent="$INSTALL_DIR/lib/${_uninstall_library%/*}"
+      if [ -L "$INSTALL_DIR/lib" ] || [ -L "$_uninstall_parent" ]; then
+        record_kept "$_uninstall_parent (native library alias; not followed)"
+        continue
+      fi
+      for _uninstall_tail in '' .previous .incoming; do
+        _uninstall_leaf="$INSTALL_DIR/lib/$_uninstall_library$_uninstall_tail"
+        if [ -L "$_uninstall_leaf" ]; then record_kept "$_uninstall_leaf (not an installer-created regular library)"
+        elif [ -f "$_uninstall_leaf" ]; then rm -f "$_uninstall_leaf"; record_removed "$_uninstall_leaf"
+        fi
+      done
+      rmdir "$_uninstall_parent" 2>/dev/null || true
+    done
   done
   for native in "$INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX" "$INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX.bun" "$INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX.bun.json" "$INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX.bun.LICENSE.md" "$INSTALL_DIR/daemon-installation.json"; do
     for tail in '' .previous; do

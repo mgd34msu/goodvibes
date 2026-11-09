@@ -121,11 +121,12 @@ async function main() {
     const agent = join(repo, 'products/agent');
     verifyAgentCiArtifact(agent, sourceCommit);
     const agentManifest = JSON.parse(readFileSync(join(agent, 'dist/ci-artifact.json'), 'utf8'));
-    const agentOwner = retainNativeExecutionFiles(join(agent, 'dist'), [...agentManifest.files, { path: 'ci-artifact.json', mode: 0o644 }]);
+    const agentOwner = retainNativeExecutionFiles(join(agent, 'dist'), [...agentManifest.files, { path: 'ci-artifact.json', mode: 0o644 }, { path: 'reader-ci-artifact.json', mode: 0o644 }]);
     retained.push(agentOwner); verifyAgentCiArtifact(agent, sourceCommit); assertCurrent();
     for (const file of agentOwner.files) {
       if (file.path.startsWith('lib/')) continue;
-      put(file.path === 'ci-artifact.json' ? 'goodvibes-agent-linux-x64.ci-artifact.json' : file.path, file.bytes, file.mode);
+      put(file.path === 'ci-artifact.json' ? 'goodvibes-agent-linux-x64.ci-artifact.json'
+        : file.path === 'reader-ci-artifact.json' ? 'goodvibes-agent-linux-x64.reader-ci-artifact.json' : file.path, file.bytes, file.mode);
     }
     const addon = resolveSqliteVecArchive('linux', 'x64'); assert(addon, 'Agent native addon is unsupported');
     const agentAddon = agentOwner.files.find(file => file.path === addon.entryPath); assert(agentAddon, 'Agent native addon is absent');
@@ -138,16 +139,18 @@ async function main() {
     const tuiRestored = restore('tui-native-linux-x64', [
       { path: tuiBinary, mode: 0o755 }, { path: tuiBinary + '.bun', mode: 0o755 },
       { path: tuiBinary + '.bun.LICENSE.md', mode: 0o644 }, { path: tuiBinary + '.bun.json', mode: 0o644 },
-      { path: addon.entryPath, mode: 0o644 }, { path: 'ci-artifact.json', mode: 0o644 },
+      { path: addon.entryPath, mode: 0o644 }, { path: 'ci-artifact.json', mode: 0o644 }, { path: 'reader-ci-artifact.json', mode: 0o644 },
     ].map(member => ({ ...member, path: 'products/tui/dist/' + member.path })));
     const tui = join(tuiRestored.root, 'products/tui');
+    writeFileSync(join(tui, 'package.json'), readFileSync(join(repo, 'products/tui/package.json')), { flag: 'wx', mode: 0o644 });
     const tuiSource = { sourceCommit, sourceTree, headCommit: sourceCommit };
     await verifyTuiCiArtifact(tui, tuiSource);
     const tuiManifest = JSON.parse(readFileSync(join(tui, 'dist/ci-artifact.json'), 'utf8'));
-    const tuiOwner = retainNativeExecutionFiles(join(tui, 'dist'), [...tuiManifest.files, { path: 'ci-artifact.json', mode: 0o644 }]);
+    const tuiOwner = retainNativeExecutionFiles(join(tui, 'dist'), [...tuiManifest.files, { path: 'ci-artifact.json', mode: 0o644 }, { path: 'reader-ci-artifact.json', mode: 0o644 }]);
     retained.push(tuiOwner); await verifyTuiCiArtifact(tui, tuiSource); assertCurrent();
     const tuiAddon = resolveSqliteVecAsset('linux', 'x64'); assert(tuiAddon, 'TUI native addon is unsupported');
-    for (const file of tuiOwner.files) put(file.path === 'ci-artifact.json' ? 'goodvibes-linux-x64.ci-artifact.json' : file.path.startsWith('lib/') ? tuiAddon.assetName : file.path, file.bytes, file.mode);
+    for (const file of tuiOwner.files) put(file.path === 'ci-artifact.json' ? 'goodvibes-linux-x64.ci-artifact.json'
+      : file.path === 'reader-ci-artifact.json' ? 'goodvibes-linux-x64.reader-ci-artifact.json' : file.path.startsWith('lib/') ? tuiAddon.assetName : file.path, file.bytes, file.mode);
     assert(tuiOwner.files.find(file => file.path === addon.entryPath).bytes.equals(agentAddon.bytes), 'Product native addon suppliers differ');
 
     for (const target of ['linux-x64', 'linux-arm64']) {

@@ -4,6 +4,20 @@
 
 ### Fixed
 
+- Publish reader metadata for the actual native TUI and Agent build cohorts,
+  preserve it through CI archives, and install it beside each executable. Saved
+  reader requirements reject unsupported historical terminals before attempting
+  their unknown CLI commands.
+
+- Include the daemon's required macOS SQLite library and producer metadata in
+  suite release assets and installation. Stage native libraries in their
+  destination directory before renaming them, refuse aliased library parents,
+  and preserve unrelated library siblings during uninstall.
+
+- Use the same owned atomic writer for settings and other saved stores, while
+  retaining native mutation effect tracking and exact requested permissions.
+  Publication observers cannot silently replace the bytes being confirmed.
+
 - Preserve existing artifact content and metadata when creation collides or a
   producer fails. New artifacts use full opaque UUIDs; imported metadata cannot
   direct expiration or deletion at unrelated sibling files.

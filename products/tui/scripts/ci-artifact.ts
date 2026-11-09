@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { createReadStream, lstatSync, readFileSync, writeFileSync } from 'node:fs';
+import { createReadStream, lstatSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { writeFileAtomic } from '@goodvibes-jev/engine/sdk/platform/utils';
+import { recordTerminalReaderArtifact, retainTerminalReaderCohort, verifyTerminalReaderArtifact } from '@goodvibes-jev/engine/toolchain';
 
 const payloads = ['goodvibes-linux-x64', 'goodvibes-linux-x64.bun', 'goodvibes-linux-x64.bun.LICENSE.md', 'goodvibes-linux-x64.bun.json', 'lib/sqlite-vec-linux-x64/vec0.so'] as const;
 export interface TuiArtifactSource {
@@ -30,15 +32,26 @@ async function inspect(root: string, source: TuiArtifactSource) {
 
 /** Preserve the existing build's executable, Bun sidecar with notices, and native library, without rebuilding. */
 export async function recordTuiCiArtifact(root: string, source: TuiArtifactSource): Promise<void> {
-  writeFileSync(resolve(root, 'dist/ci-artifact.json'), `${JSON.stringify(await inspect(root, source), null, 2)}\n`);
+  const current = retainTerminalReaderCohort(resolve(root, 'dist'), '@goodvibes-jev/tui', 'linux-x64');
+  const artifact = await inspect(root, source);
+  const version = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).version as string;
+  recordTerminalReaderArtifact({ ...source, target: 'linux-x64', packageName: '@goodvibes-jev/tui', version,
+    directory: resolve(root, 'dist'), files: artifact.files, assertCurrent: current });
+  current();
+  writeFileAtomic(resolve(root, 'dist/ci-artifact.json'), `${JSON.stringify(artifact, null, 2)}\n`, { mode: 0o644, assertCurrent: current });
 }
 
 /** Verify restored payload bytes, modes, and exact checkout/PR provenance before execution. */
 export async function verifyTuiCiArtifact(root: string, source: TuiArtifactSource): Promise<void> {
+  const current = retainTerminalReaderCohort(resolve(root, 'dist'), '@goodvibes-jev/tui', 'linux-x64');
+  const artifact = await inspect(root, source);
   const stored: unknown = JSON.parse(readFileSync(resolve(root, 'dist/ci-artifact.json'), 'utf8'));
-  if (JSON.stringify(stored) !== JSON.stringify(await inspect(root, source))) {
+  if (JSON.stringify(stored) !== JSON.stringify(artifact)) {
     throw new Error('Restored TUI CI artifact differs from its source, payload or mode manifest');
   }
+  const version = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).version as string;
+  verifyTerminalReaderArtifact({ ...source, target: 'linux-x64', packageName: '@goodvibes-jev/tui', version,
+    directory: resolve(root, 'dist'), files: artifact.files, assertCurrent: current });
 }
 
 if (import.meta.main) {

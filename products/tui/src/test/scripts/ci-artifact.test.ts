@@ -5,12 +5,14 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, s
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { recordTuiCiArtifact, verifyTuiCiArtifact, type TuiArtifactSource } from '../../../scripts/ci-artifact.ts';
+import { nativeReaderCapabilities } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 
 const source: TuiArtifactSource = { sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40) };
 async function fixture(run: (root: string) => Promise<void>) {
   const root = mkdtempSync(join(tmpdir(), 'tui-ci-artifact-'));
   mkdirSync(join(root, 'dist/lib/sqlite-vec-linux-x64'), { recursive: true });
-  writeFileSync(join(root, 'dist/goodvibes-linux-x64'), 'synthetic executable\n', { mode: 0o755 });
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: '@goodvibes-jev/tui', version: '3.1.2', type: 'module' }));
+  writeFileSync(join(root, 'dist/goodvibes-linux-x64'), `#!/bin/sh\n[ "$1" = check-install-reader ] && [ "$2" = --describe ] || exit 2\nprintf '%s\\n' '${JSON.stringify(nativeReaderCapabilities('3.1.2'))}'\n`, { mode: 0o755 });
   writeFileSync(join(root, 'dist/goodvibes-linux-x64.bun'), 'synthetic ordinary runtime', { mode: 0o755 });
   writeFileSync(join(root, 'dist/goodvibes-linux-x64.bun.LICENSE.md'), 'synthetic runtime notices', { mode: 0o644 });
   writeFileSync(join(root, 'dist/goodvibes-linux-x64.bun.json'), 'synthetic runtime provenance', { mode: 0o644 });
@@ -26,7 +28,7 @@ test('a tar round trip preserves the exact source, binary, library and executabl
     ['goodvibes-linux-x64', 0o755], ['goodvibes-linux-x64.bun', 0o755], ['goodvibes-linux-x64.bun.LICENSE.md', 0o644], ['goodvibes-linux-x64.bun.json', 0o644], ['lib/sqlite-vec-linux-x64/vec0.so', 0o644],
   ]);
   const archive = join(root, 'output.tgz');
-  execFileSync('tar', ['-czf', archive, '-C', root, 'dist']);
+  execFileSync('tar', ['-czf', archive, '-C', root, 'dist', 'package.json']);
   const restored = join(root, 'restored');
   mkdirSync(restored);
   execFileSync('tar', ['-xzf', archive, '-C', restored]);
@@ -68,8 +70,9 @@ test('rejects lost execute mode, library mode changes, missing payloads and malf
 
 test('the CLI refuses another checkout or modified tracked source before recording provenance', () => fixture(async root => {
   mkdirSync(join(root, 'scripts'));
+  symlinkSync(resolve(import.meta.dir, '../../../../../node_modules'), join(root, 'node_modules'));
   writeFileSync(join(root, 'scripts/ci-artifact.ts'), readFileSync(resolve(import.meta.dir, '../../../scripts/ci-artifact.ts')));
-  writeFileSync(join(root, '.gitignore'), 'dist/\n');
+  writeFileSync(join(root, '.gitignore'), 'dist/\nnode_modules/\n');
   writeFileSync(join(root, 'source.txt'), 'committed source\n');
   const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
   git('init', '--quiet');

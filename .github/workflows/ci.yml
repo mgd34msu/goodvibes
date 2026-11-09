@@ -51,7 +51,8 @@ jobs:
             products/tui/dist/goodvibes-linux-x64.bun.LICENSE.md \
             products/tui/dist/goodvibes-linux-x64.bun.json \
             products/tui/dist/lib/sqlite-vec-linux-x64/vec0.so \
-            products/tui/dist/ci-artifact.json
+            products/tui/dist/ci-artifact.json \
+            products/tui/dist/reader-ci-artifact.json
       - name: Upload TUI native artifact
         if: hashFiles('products/tui/package.json') != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -194,7 +195,8 @@ jobs:
             products/agent/dist/goodvibes-agent-linux-x64.bun \
             products/agent/dist/goodvibes-agent-linux-x64.bun.LICENSE.md \
             products/agent/dist/goodvibes-agent-linux-x64.bun.json \
-            products/agent/dist/ci-artifact.json
+            products/agent/dist/ci-artifact.json \
+            products/agent/dist/reader-ci-artifact.json
       - name: Upload dist artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

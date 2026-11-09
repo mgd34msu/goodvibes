@@ -5,13 +5,19 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const [target, destination, tag] = process.argv.slice(2);
 assert(['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'].includes(target));
 assert(/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag));
 const root = process.cwd();
+// This coordinator may itself be retained outside the checkout by the workflow.
+// Reader evidence must come from the exact selected release source, not that
+// coordinator's former relative directory or a nearby installed engine.
+const { inspectTerminalReaderArtifact, retainTerminalReaderCohort } = await import(pathToFileURL(join(root, 'packages/engine/toolchain/src/lib/client-reader-artifact.ts')).href);
 const run = (command, args, cwd = root) => execFileSync(command, args, { cwd, stdio: ['ignore', 'pipe', 'inherit'], timeout: 300_000 }).toString().trim();
 const source = run('git', ['rev-parse', 'HEAD']);
+const sourceTree = run('git', ['rev-parse', 'HEAD^{tree}']);
 assert.equal(JSON.parse(readFileSync('package.json')).version, tag.slice(1));
 run('git', ['diff', '--exit-code', 'HEAD']);
 mkdirSync(destination, { recursive: true });
@@ -33,10 +39,26 @@ for (const [product, command, output] of [['tui', 'goodvibes', 'dist'], ['agent'
   const directory = join(root, 'products', product, output);
   const binary = join(directory, `${command}-${suffix}`);
   assert.equal(run(binary, ['--version']), `${command} ${tag.slice(1)}`);
+  const readerCurrent = product === 'daemon' && platform !== 'darwin' ? undefined : retainTerminalReaderCohort(directory, `@goodvibes-jev/${product}`, target);
   put(binary);
   if (platform === 'linux') for (const ending of ['.bun', '.bun.json', '.bun.LICENSE.md']) put(binary + ending);
+  if (readerCurrent) {
+    const names = [basename(binary), ...(platform === 'linux' ? ['.bun', '.bun.LICENSE.md', '.bun.json'].map(ending => basename(binary) + ending) : [])];
+    const artifact = inspectTerminalReaderArtifact({ directory, packageName: `@goodvibes-jev/${product}`, version: tag.slice(1),
+      target, sourceCommit: source, sourceTree, headCommit: source, assertCurrent: readerCurrent,
+      files: names.map(path => ({ path, ...files[path], mode: path === basename(binary) || path.endsWith('.bun') ? 0o755 : 0o644 })) });
+    readerCurrent();
+    const name = `${basename(binary)}.reader-ci-artifact.json`;
+    writeFileSync(join(destination, name), JSON.stringify(artifact, null, 2) + '\n', { flag: 'wx', mode: 0o644 });
+    const bytes = readFileSync(join(destination, name));
+    files[name] = { sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length };
+  }
   const extension = platform === 'linux' ? 'so' : 'dylib';
   put(join(directory, `lib/sqlite-vec-${target}/vec0.${extension}`), `sqlite-vec-${target}.${extension}`);
+  if (product === 'daemon' && platform === 'darwin') {
+    put(join(directory, `lib/sqlite-${target}/libsqlite3.dylib`), `sqlite-${target}.dylib`);
+    put(join(directory, `lib/sqlite-${target}/libsqlite3.dylib.json`), `sqlite-${target}.dylib.json`);
+  }
 }
 const addonStage = join(destination, '.addon');
 const addonRelative = `lib/sqlite-vec-${target}/vec0.${platform === 'linux' ? 'so' : 'dylib'}`;

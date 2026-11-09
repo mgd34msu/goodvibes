@@ -16,6 +16,14 @@ function readerArtifact() {
   const base = JSON.parse(readFileSync(join(assets, 'goodvibes-daemon-linux-x64.ci-artifact.json'), 'utf8'));
   return { ...base, schema: 2, readers: nativeReaderCapabilities(version) };
 }
+function terminalReaderArtifact(command: 'goodvibes' | 'goodvibes-agent') {
+  const asset = `${command}-linux-x64`;
+  return { schema: 1, packageName: command === 'goodvibes' ? '@goodvibes-jev/tui' : '@goodvibes-jev/agent', version, target: 'linux-x64',
+    sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'a'.repeat(40),
+    files: ['', '.bun', '.bun.LICENSE.md', '.bun.json'].map(ending => ({ path: asset + ending, sha256: digest(join(assets, asset + ending)),
+      mode: ending === '' || ending === '.bun' ? 0o755 : 0o644, size: statSync(join(assets, asset + ending)).size })),
+    readers: nativeReaderCapabilities(version) };
+}
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'goodvibes-release-install-'));
   assets = join(root, 'assets'); home = join(root, 'home with spaces');
@@ -35,6 +43,9 @@ beforeEach(() => {
       return { path, sha256: digest(file), mode: i < 2 ? 0o755 : 0o644, size: statSync(file).size };
     }) };
   writeFileSync(join(assets, 'goodvibes-daemon-linux-x64.ci-artifact.json'), JSON.stringify(artifact));
+  for (const command of ['goodvibes', 'goodvibes-agent'] as const) {
+    writeFileSync(join(assets, `${command}-linux-x64.reader-ci-artifact.json`), JSON.stringify(terminalReaderArtifact(command), null, 2) + '\n');
+  }
   const stage = join(root, 'stage'); mkdirSync(join(stage, 'playwright-core'), { recursive: true });
   for (const name of ['package.json', 'index.js', 'cli.js']) writeFileSync(join(stage, 'playwright-core', name), '{}');
   execFileSync('tar', ['-czf', join(assets, 'browser-driver.tar.gz'), '-C', stage, 'playwright-core']);
@@ -43,11 +54,12 @@ beforeEach(() => {
   writeChecksums();
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
-function run(uninstall = false, fault?: 'agent' | 'prefix') {
+function run(uninstall = false, fault?: 'agent' | 'prefix', platform?: 'darwin') {
   const script = resolve(import.meta.dir, 'install.sh');
   return spawnSync('sh', ['-c', `set -eu
     umask 077
     . "$1"
+    if [ "$FIXTURE_DARWIN" = 1 ]; then resolve_platform() { os_tag=macos; arch_tag=x64; VEC_OS=darwin; VEC_SUFFIX=dylib; PLATFORM_SUFFIX=macos-x64; }; fi
     fetch() { printf '%s\\n' "$1" >> "$FETCH_TRACE"; cp "$FIXTURE_ASSETS/\${1##*/}" "$2"; }
     setup_daemon_service() { :; }
     restart_running_daemon() { :; }
@@ -60,14 +72,49 @@ function run(uninstall = false, fault?: 'agent' | 'prefix') {
     env: { ...process.env, HOME: home, PATH: `${home}/bin:${process.env.PATH}`, GOODVIBES_INSTALL_SH_LIB: '1', GOODVIBES_VERSION: `v${version}`,
       GOODVIBES_INSTALL_DIR: join(home, 'bin'), GOODVIBES_WAKE_MODEL: '0', GOODVIBES_DAEMON_SERVICE: '0', GOODVIBES_RESTART_DAEMON: '0',
       GOODVIBES_UNINSTALL: uninstall ? '1' : '0', FIXTURE_REAL_BUN: process.execPath, FIXTURE_READER_CLI: resolve(import.meta.dir, 'test-helpers/check-install-reader.ts'),
-      FIXTURE_FAIL_AFTER_PROGRAMS: fault === 'agent' ? '1' : '0', FIXTURE_RETIRE_PREFIX: fault === 'prefix' ? '1' : '0',
+      FIXTURE_FAIL_AFTER_PROGRAMS: fault === 'agent' ? '1' : '0', FIXTURE_RETIRE_PREFIX: fault === 'prefix' ? '1' : '0', FIXTURE_DARWIN: platform === 'darwin' ? '1' : '0',
       FIXTURE_ASSETS: assets, FETCH_TRACE: join(root, 'fetches') } });
 }
+function darwinAssets() {
+  for (const command of ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']) {
+    const asset = `${command}-macos-x64`, payload = readFileSync(join(assets, `${command}-linux-x64`));
+    writeFileSync(join(assets, asset), payload);
+    const packageName = command === 'goodvibes' ? '@goodvibes-jev/tui' : command === 'goodvibes-daemon' ? '@goodvibes-jev/daemon' : '@goodvibes-jev/agent';
+    const descriptor = { schema: 1, packageName, version, target: 'darwin-x64', sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'a'.repeat(40),
+      files: [{ path: asset, sha256: digest(join(assets, asset)), mode: 0o755, size: payload.length }], readers: nativeReaderCapabilities(version) };
+    writeFileSync(join(assets, `${asset}.reader-ci-artifact.json`), JSON.stringify(descriptor, null, 2));
+  }
+  writeFileSync(join(assets, 'sqlite-vec-darwin-x64.dylib'), 'Fixture vector companion');
+  writeFileSync(join(assets, 'sqlite-darwin-x64.dylib'), 'Fixture compiled SQLite companion');
+  writeFileSync(join(assets, 'sqlite-darwin-x64.dylib.json'), JSON.stringify({ packageName: '@goodvibes-jev/daemon', daemonVersion: version }));
+  writeChecksums();
+}
+
+test('Darwin suite installs the required SQLite runtime and reader metadata and preserves unrelated library siblings on uninstall', () => {
+  darwinAssets();
+  const result = run(false, undefined, 'darwin'); expect(result.status, result.stderr).toBe(0);
+  const library = join(home, 'bin/lib/sqlite-darwin-x64/libsqlite3.dylib');
+  expect(readFileSync(library, 'utf8')).toBe('Fixture compiled SQLite companion');
+  expect(statSync(library).mode & 0o777).toBe(0o644); expect(existsSync(library + '.json')).toBe(true);
+  expect(JSON.parse(readFileSync(join(home, 'bin/goodvibes-daemon.readers.json'), 'utf8')).packageName).toBe('@goodvibes-jev/daemon');
+  const unrelated = join(home, 'bin/lib/sqlite-darwin-x64/owner-note.txt'); writeFileSync(unrelated, 'Owner retained file');
+  const removed = run(true, undefined, 'darwin'); expect(removed.status, removed.stderr).toBe(0);
+  expect(existsSync(library)).toBe(false); expect(existsSync(library + '.json')).toBe(false);
+  expect(readFileSync(unrelated, 'utf8')).toBe('Owner retained file');
+});
+
+test.each(['sqlite-darwin-x64.dylib', 'sqlite-darwin-x64.dylib.json'])('a missing Darwin companion %s refuses before replacing installed programs', asset => {
+  darwinAssets(); rmSync(join(assets, asset)); writeChecksums();
+  mkdirSync(join(home, 'bin')); writeFileSync(join(home, 'bin/goodvibes'), 'Original installation');
+  const result = run(false, undefined, 'darwin'); expect(result.status).not.toBe(0);
+  expect(readFileSync(join(home, 'bin/goodvibes'), 'utf8')).toBe('Original installation');
+});
 test('released suite installs all products, companions and native receipt without a build', () => {
   const result = run(); expect(result.status, result.stderr).toBe(0);
   for (const command of ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']) {
     expect(execFileSync(join(home, 'bin', command), ['--version'], {encoding:'utf8'}).trim()).toBe(`${command} ${version}`);
     for (const ending of ['.bun', '.bun.json', '.bun.LICENSE.md']) expect(existsSync(join(home, 'bin', command + ending))).toBe(true);
+    if (command !== 'goodvibes-daemon') expect(JSON.parse(readFileSync(join(home, 'bin', command + '.readers.json'), 'utf8')).readers).toEqual(nativeReaderCapabilities(version));
   }
   expect(existsSync(join(home, 'bin/playwright-core/cli.js'))).toBe(true);
   expect(existsSync(join(home, `bin/webui/${version}/index.html`))).toBe(true);
@@ -111,6 +158,26 @@ test('saved reader requirements reject an incompatible release before replacing 
   for (const [index, name] of programs.entries()) expect(readFileSync(join(home, 'bin', name))).toEqual(before[index]);
   expect(readFileSync(floor, 'utf8')).toBe(saved);
   expect(readdirSync(join(home, 'bin')).filter(name => /update-transaction|install-claim/.test(name))).toEqual([]);
+});
+
+test('a historical terminal without reader evidence is never probed when saved data has a reader floor', () => {
+  mkdirSync(join(home, 'bin')); writeFileSync(join(home, 'bin/goodvibes'), 'original installation');
+  const floor = join(home, 'bin/.goodvibes-reader-requirements.json');
+  writeFileSync(floor, JSON.stringify({ schema: 1, minimumReader: version, formats: ['knowledge-schema-v12'] }));
+  const invoked = join(root, 'historical-app-started');
+  writeFileSync(join(assets, 'goodvibes-linux-x64'), `#!/bin/sh\nprintf started > '${invoked}'\n`);
+  rmSync(join(assets, 'goodvibes-linux-x64.reader-ci-artifact.json')); writeChecksums();
+  const result = run();
+  expect(result.status).not.toBe(0); expect(result.stderr).toContain('has no reader evidence');
+  expect(existsSync(invoked)).toBe(false); expect(readFileSync(join(home, 'bin/goodvibes'), 'utf8')).toBe('original installation');
+});
+
+test('a reader descriptor for another payload is rejected before any installation replacement', () => {
+  mkdirSync(join(home, 'bin')); writeFileSync(join(home, 'bin/goodvibes'), 'original installation');
+  const candidate = terminalReaderArtifact('goodvibes'); candidate.files[0]!.sha256 = 'f'.repeat(64);
+  writeFileSync(join(assets, 'goodvibes-linux-x64.reader-ci-artifact.json'), JSON.stringify(candidate, null, 2)); writeChecksums();
+  const result = run(); expect(result.status).not.toBe(0); expect(result.stderr).toContain('does not match the selected released program bytes');
+  expect(readFileSync(join(home, 'bin/goodvibes'), 'utf8')).toBe('original installation');
 });
 
 test('compatible published descriptors preserve the old protocol and install the matching compiled reader evidence', () => {

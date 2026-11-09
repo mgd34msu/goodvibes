@@ -16,8 +16,12 @@ export interface TriageBinding {
   readonly inputHash: string;
   readonly battery: string;
   readonly batteryVersion: number;
-  /** Requested model or alias. */
-  readonly model: string;
+  /** v2 records configured/fallback attribution without a Jev-only assumption. */
+  readonly receiptVersion?: 2;
+  /** Requested model or alias; absent if no validated answer is available. */
+  readonly model?: string;
+  /** The actual configured target that answered, which may be a fallback. */
+  readonly targetModel?: string;
   /** Resolved response model, present when the request was answered. */
   readonly actualModel?: string;
 }
@@ -50,4 +54,5 @@ export interface RunInboxTriageOptions {
   readonly workingDirectory?: string;
   readonly dryRun?: boolean;
   readonly signal?: AbortSignal;
+  readonly beforeReceiptWrite?: (() => void) | undefined;
 }

@@ -37,10 +37,10 @@ export interface EmailDaemonInboxSourceFactories extends Omit<EmailDaemonInboxFa
 export function createEmailDaemonInboxSourceFactory(options: EmailDaemonInboxOptions,
   factories: EmailDaemonInboxSourceFactories = {}): DaemonInboxSourceFactory {
   const authority = options.triageAuthority;
-  return createEmailAccountFactory(options, factories, factories.createSource ?? ((context, source, owner, beforeIdentityWrite) =>
+  return createEmailAccountFactory(options, factories, factories.createSource ?? ((context, source, owner, beforeIdentityWrite, beforeReceiptWrite) =>
     createOwnedTriagedInboxSource(context, { ...source, providerId: 'email', accountScopeId: owner.scopeId,
       ...(owner.triageStoreFileName ? { triageStoreFileName: owner.triageStoreFileName } : {}),
-      beforeIdentityWrite,
+      beforeIdentityWrite, beforeReceiptWrite,
       acquireReadLease: () => owner.acquireReadLease(), ...(authority ? { authority } : {}),
     })));
 }
@@ -57,7 +57,7 @@ export function createEmailDaemonInboxFactory(options: EmailDaemonInboxOptions,
 function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: EmailDaemonInboxOptions,
   factories: Pick<EmailDaemonInboxFactories, 'createOwner' | 'eligibilityClock'>,
   register: (context: Parameters<DaemonInboxFactory>[0], options: Parameters<typeof registerInboxSurface>[1], owner: EmailInboxOwner,
-    beforeIdentityWrite: (() => void) | undefined) => T | Promise<T>,
+    beforeIdentityWrite: (() => void) | undefined, beforeReceiptWrite: (() => void) | undefined) => T | Promise<T>,
 ): (...args: Parameters<DaemonInboxFactory>) => Promise<T> {
   const triageTagging = options.triageTagging ? Object.freeze({ onReady: options.triageTagging.onReady }) : undefined;
   if (triageTagging && typeof triageTagging.onReady !== 'function') throw new Error('Triage tagging requires an explicit owner callback');
@@ -120,7 +120,7 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
           });
           return () => eligibility!.close();
         },
-      }, selectedOwner, controls.beforeInboxTriageIdentityWrite);
+      }, selectedOwner, controls.beforeInboxTriageIdentityWrite, controls.beforeInboxTriageReceiptWrite);
       constructed.resolve(surface);
     } catch {
       constructed.reject(new Error('Email inbox source construction failed'));

@@ -58,7 +58,7 @@ function fixture(provider: TriageTaggerOptions['provider'] = 'slack', options: {
 
 test('registered custom-tag decision declares negation, opaque and ambiguous calibration fixtures', () => {
   expect(triageTagMeaning.name).toBe('engine.intake.triage-tag-meaning');
-  expect(triageTagMeaning.version).toBe(1); expect(triageTagMeaning.model).toBe('jev-latest');
+  expect(triageTagMeaning.version).toBe(1); expect(triageTagMeaning.model).toBeUndefined();
   expect(triageTagMeaning.fixtures.map(f => f.expect.meaning)).toEqual(['spam', 'priority', 'normal', 'normal', 'unknown', 'unknown']);
   expect(Object.isFrozen(triageTagMeaning.items.meaning.question)).toBe(true);
 });

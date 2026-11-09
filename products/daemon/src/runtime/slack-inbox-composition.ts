@@ -43,10 +43,10 @@ export function createSlackDaemonInboxSourceFactory(
   factories: SlackDaemonInboxSourceFactories = {},
 ): DaemonInboxSourceFactory {
   const authority = options.triageAuthority;
-  return createSlackAccountFactory(options, factories, factories.createSource ?? ((context, source, owner, beforeIdentityWrite) =>
+  return createSlackAccountFactory(options, factories, factories.createSource ?? ((context, source, owner, beforeIdentityWrite, beforeReceiptWrite) =>
     createOwnedTriagedInboxSource(context, { ...source, providerId: 'slack', accountScopeId: owner.scopeId,
       ...(owner.triageStoreFileName ? { triageStoreFileName: owner.triageStoreFileName } : {}),
-      beforeIdentityWrite,
+      beforeIdentityWrite, beforeReceiptWrite,
       acquireReadLease: () => {
         if (!owner.acquireReadLease) throw new Error('Slack triage requires the native account read lease');
         return owner.acquireReadLease();
@@ -70,7 +70,7 @@ function createSlackAccountFactory<T extends InboxSurfaceRegistration>(
   options: SlackDaemonInboxOptions,
   factories: Pick<SlackDaemonInboxFactories, 'createOwner' | 'eligibilityClock'>,
   register: (context: Parameters<DaemonInboxFactory>[0], options: Parameters<typeof registerInboxSurface>[1], owner: SlackInboxOwner,
-    beforeIdentityWrite: (() => void) | undefined) => T | Promise<T>,
+    beforeIdentityWrite: (() => void) | undefined, beforeReceiptWrite: (() => void) | undefined) => T | Promise<T>,
   requireFinalProof: boolean,
 ): (...args: Parameters<DaemonInboxFactory>) => Promise<T> {
   const triageTagging = options.triageTagging ? Object.freeze({ onReady: options.triageTagging.onReady }) : undefined;
@@ -143,7 +143,7 @@ function createSlackAccountFactory<T extends InboxSurfaceRegistration>(
           });
           return () => eligibility!.close();
         },
-      }, owner, controls.beforeInboxTriageIdentityWrite);
+      }, owner, controls.beforeInboxTriageIdentityWrite, controls.beforeInboxTriageReceiptWrite);
       constructed.resolve(surface);
     } catch {
       constructed.reject(new Error('Slack inbox source construction failed'));

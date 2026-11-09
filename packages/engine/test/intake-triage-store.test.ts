@@ -10,7 +10,7 @@ import { loadSqlJsEngine, type SqlDatabase } from '../sdk/src/platform/state/sql
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 function binding(id: string, subject = 'Synthetic routine update') {
-  return { ...triageBinding(captureTriageInputs([{ id, surface: 'synthetic', subject }])[0]!), actualModel: 'jev-1.13.0' }; // Resolved model from the authored response, not a request pin.
+  return { ...triageBinding(captureTriageInputs([{ id, surface: 'synthetic', subject }])[0]!), model: 'jev-latest', actualModel: 'jev-1.13.0', targetModel: 'jev-latest' }; // Resolved model from the authored response, not a request pin.
 }
 
 function settled(id: string, subject?: string): TriageEvidence {
@@ -22,6 +22,7 @@ function settled(id: string, subject?: string): TriageEvidence {
 }
 
 function attempt(id: string, status: 'held' | 'unavailable', subject = 'Synthetic changed input'): TriageReceipt {
+  if (status === 'unavailable') return { ...triageBinding(captureTriageInputs([{ id, surface: 'synthetic', subject }])[0]!), status };
   return { ...binding(id, subject), status };
 }
 

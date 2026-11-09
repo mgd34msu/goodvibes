@@ -62,9 +62,14 @@ export function captureTriageInputs(items: readonly TriageInput[]): readonly Cap
       unread: (item['unread'] ?? false) as boolean });
   }));
 }
+/**
+ * Persisted exact-input commitment used only for receipt/enrichment matching.
+ * It avoids duplicating protected message previews in the receipt DB. It is
+ * dictionary-recoverable, not anonymization, secrecy, authority or a live fence.
+ */
 export function triageBinding(input: CapturedTriageInput): TriageBinding {
   return Object.freeze({ id: input.id, inputHash: createHash('sha256').update(JSON.stringify(input)).digest('hex'),
-    battery: inboxTriage.name, batteryVersion: inboxTriage.version, model: TRIAGE_MODEL });
+    battery: inboxTriage.name, batteryVersion: inboxTriage.version, receiptVersion: 2 });
 }
 const round = (p: number): number => Math.round(p * 100) / 100;
 export function labelToTag(label: TriageLabel): string {
@@ -85,15 +90,27 @@ export function checkTriageReceipt(value: unknown): TriageReceipt {
   const row = safe as Record<string, unknown>;
   if (typeof row['id'] !== 'string' || !row['id'].trim() || row['id'].length > 500
     || typeof row['inputHash'] !== 'string' || !/^[a-f0-9]{64}$/.test(row['inputHash'])
-    || row['battery'] !== inboxTriage.name || row['batteryVersion'] !== inboxTriage.version || (row['model'] !== TRIAGE_MODEL && (typeof row['model'] !== 'string' || !isPinnedJudgmentModel(row['model'])))) return invalid();
-  const model = row['model'] as string;
-  const actualModel = row['actualModel'];
-  if (actualModel !== undefined && (typeof actualModel !== 'string' || !matchesJudgmentModel(model, actualModel))) return invalid();
-  // Older version-named receipts remain historical evidence. New alias-based
-  // answers must retain the resolved model; an unavailable call has no answer.
-  if (model === TRIAGE_MODEL && row['status'] !== 'unavailable' && actualModel === undefined) return invalid();
+    || row['battery'] !== inboxTriage.name || row['batteryVersion'] !== inboxTriage.version) return invalid();
+  const model = row['model'], actualModel = row['actualModel'], targetModel = row['targetModel'];
+  const identifier = (entry: unknown): entry is string => typeof entry === 'string' && /^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$/.test(entry);
+  const modern = row['receiptVersion'] === 2;
+  if (row['receiptVersion'] !== undefined && !modern) return invalid();
+  if (modern) {
+    // Stored attribution describes the validated port response. It neither
+    // revalidates a provider alias nor authorizes an action from disk.
+    if (row['status'] === 'unavailable') {
+      if (model !== undefined || actualModel !== undefined || targetModel !== undefined) return invalid();
+    } else if (!identifier(model) || !identifier(actualModel) || !identifier(targetModel)) return invalid();
+  } else {
+    // Historical Jev-only receipts keep their original interpretation.
+    if (model !== TRIAGE_MODEL && (typeof model !== 'string' || !isPinnedJudgmentModel(model))) return invalid();
+    if (actualModel !== undefined && (typeof actualModel !== 'string' || !matchesJudgmentModel(model as string, actualModel))) return invalid();
+    if (model === TRIAGE_MODEL && row['status'] !== 'unavailable' && actualModel === undefined) return invalid();
+    if (targetModel !== undefined) return invalid();
+  }
   const binding: TriageBinding = { id: row['id'], inputHash: row['inputHash'], battery: inboxTriage.name, batteryVersion: inboxTriage.version,
-    model, ...(actualModel === undefined ? {} : { actualModel: actualModel as string }) };
+    ...(modern ? { receiptVersion: 2 as const } : {}), ...(model === undefined ? {} : { model: model as string }),
+    ...(actualModel === undefined ? {} : { actualModel: actualModel as string }), ...(targetModel === undefined ? {} : { targetModel: targetModel as string }) };
   if (row['status'] === 'held' || row['status'] === 'unavailable') {
     const expected = Object.freeze({ ...binding, status: row['status'] });
     if (!isDeepStrictEqual(safe, expected)) return invalid();

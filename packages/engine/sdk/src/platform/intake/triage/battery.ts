@@ -1,7 +1,8 @@
-import { DEFAULT_MODEL, defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
 
-/** Battery versioning: changing questions, bands or semantic projection requires a version bump. */
-export const TRIAGE_MODEL = DEFAULT_MODEL;
+/** Historical v1 receipt alias; never overrides the configured port. */
+export const TRIAGE_MODEL = 'jev-latest';
+/** Changing questions, bands or semantic projection requires a battery version bump. */
 const highBand = { yes: { ...STAKES_BANDS.high.yesNo.yes }, no: { ...STAKES_BANDS.high.yesNo.no } };
 const mediumBand = { yes: { ...STAKES_BANDS.medium.yesNo.yes }, no: { ...STAKES_BANDS.medium.yesNo.no } };
 export const inboxTriage = defineBattery({

@@ -1,5 +1,5 @@
 import { types as nodeTypes } from 'node:util';
-import { checkAnswers, type JudgmentResult, type Questions } from '@goodvibes-jev/judgment';
+import { observeJudgmentModel, checkAnswers, type JudgmentResult, type Questions } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, captureOwnedJson, retainOwnedJson } from './judgment-input.js';
 
 export type JudgmentResultAdmissionProblem = 'malformed' | 'stale';
@@ -138,6 +138,6 @@ export function prepareJudgmentResult(questions: Questions, failure: JudgmentRes
         slots.get(entry)?.has(key) ? true : screeningView(value)]));
     };
     assertJudgmentInput(screeningView(snapshot));
-    assertCurrent(); return snapshot;
+    assertCurrent(); return observeJudgmentModel(original) ? original : snapshot;
   } };
 }

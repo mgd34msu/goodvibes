@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Inbox scoring and custom label interpretation follow the authorized configured
+  decision model and its fallbacks. Saved receipts identify the requested model,
+  answering target and resolved model; unavailable results invent no model.
+  Existing receipts remain readable, and inbox privacy permissions still apply.
+
 - Publish reader metadata for the actual native TUI and Agent build cohorts,
   preserve it through CI archives, and install it beside each executable. Saved
   reader requirements reject unsupported historical terminals before attempting

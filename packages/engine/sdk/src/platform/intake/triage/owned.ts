@@ -7,9 +7,8 @@ import { acquireCrossProcessLock } from '../../state/durable-file-io.js';
 import { aggregateInbox, normalizeInboxQuery, type ChannelInboxItem, type InboxListInput } from '../aggregator.js';
 import { createOwnedInboxSource, registerCompositeInboxSurface, type InboxSurfaceContext,
   type OwnedInboxSource, type RegisterInboxSurfaceOptions, type InboxTriageOverlay } from '../registration.js';
-import { captureTriageInputs, triageBinding } from './evidence.js';
+import { captureTriageInputs } from './evidence.js';
 import { readTriageMetadataBatch, runInboxTriage } from './pipeline.js';
-import { TRIAGE_MODEL } from './battery.js';
 import { SqliteTriageStore } from './store.js';
 import type { TriageInput, TriageReceipt } from './types.js';
 import { acquireOwnedTriageIdentity } from '../providers/account-identity.js';
@@ -37,6 +36,7 @@ export interface OwnedTriagedInboxOptions extends Omit<RegisterInboxSurfaceOptio
   readonly triageStoreFileName?: string;
   /** Native installation declaration before publishing default opaque selectors. */
   readonly beforeIdentityWrite?: (() => void) | undefined;
+  readonly beforeReceiptWrite?: (() => void) | undefined;
   readonly providerId: string;
   readonly accountScopeId: string;
   readonly acquireReadLease: NonNullable<RegisterInboxSurfaceOptions['acquireReadLease']>;
@@ -141,7 +141,7 @@ async function createTriagedSource(
     if (!authority) return false;
     assertAuthority(); return true;
   };
-  const getStore = (): SqliteTriageStore => store ??= new SqliteTriageStore(ctx.workingDirectory, fileName);
+  const getStore = (): SqliteTriageStore => store ??= new SqliteTriageStore(ctx.workingDirectory, fileName, options.beforeReceiptWrite);
   let source: OwnedInboxSource;
   try {
     source = createOwnedInboxSource(ctx, { ...options, adapters: new Map(options.adapters), storeFileName: mirrorFileName,
@@ -200,17 +200,17 @@ async function createTriagedSource(
         const page = aggregateInbox(read.sources, selected);
         const batch = inputs(page.items);
         const captured = captureTriageInputs(batch);
-        const expected = JSON.stringify(captured.map(triageBinding));
+        const expected = JSON.stringify(captured);
         const assertCurrent = (): void => {
           signal.throwIfAborted(); assertAuthority(); read.assertCurrent();
           const current = inputs(aggregateInbox(read.sources, selected).items);
-          if (JSON.stringify(captureTriageInputs(current).map(triageBinding)) !== expected) {
+          if (JSON.stringify(captureTriageInputs(current)) !== expected) {
             throw new HandlerError('Inbox triage selection changed', 'INBOX_TRIAGE_SELECTION_CHANGED', 409);
           }
         };
         assertCurrent();
         // Recheck at the actual outbound call, rather than only before fan-out.
-        const guardedPort: JudgmentPort = { model: TRIAGE_MODEL, async ask(request) { assertCurrent(); return port!.ask({ ...request, beforeAttempt: assertCurrent }); } };
+        const guardedPort: JudgmentPort = { get model() { return port!.model; }, async ask(request) { assertCurrent(); return port!.ask({ ...request, beforeAttempt: assertCurrent }); } };
         const receipts = await runInboxTriage(batch, { port: guardedPort, signal, dryRun,
           // This seam is not caller-injectable. The canonical store enforces the
           // exact proof immediately before rename, with no intervening await.

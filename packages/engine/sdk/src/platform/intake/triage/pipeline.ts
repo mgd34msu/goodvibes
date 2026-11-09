@@ -11,7 +11,7 @@ export async function runInboxTriage(items: readonly TriageInput[], options: Run
   if (options.dryRun || !receipts.length || options.signal?.aborted) return receipts;
   const injected = options.store;
   if (!injected && !options.workingDirectory) throw new Error('Triage persistence requires a store or working directory.');
-  const store = injected ?? new SqliteTriageStore(options.workingDirectory!);
+  const store = injected ?? new SqliteTriageStore(options.workingDirectory!, undefined, options.beforeReceiptWrite);
   try { await store.commit(receipts, options.signal); }
   finally { if (!injected) await store.close(); }
   return receipts;
@@ -20,6 +20,7 @@ export async function runInboxTriage(items: readonly TriageInput[], options: Run
 /** One batched read; historical evidence is projected only when the latest receipt still agrees. */
 export async function readTriageMetadataBatch(items: readonly TriageInput[], store: TriageStore): Promise<ReadonlyMap<string, TriageEvidence>> {
   const input = captureTriageInputs(items);
+  // Only persisted receipt matching needs this commitment; live owned source fences compare exact captured input.
   const current = new Map(input.map(item => [item.id, triageBinding(item)]));
   if (!current.size) return new Map();
   const records = await store.readBatch([...current.keys()]);

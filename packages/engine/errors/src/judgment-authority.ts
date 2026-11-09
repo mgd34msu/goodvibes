@@ -1,3 +1,4 @@
+import { reuseObservedJudgmentResult } from '@goodvibes-jev/judgment/decisions';
 import type { JudgmentPort, JudgmentRequest, JudgmentResult, Questions } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentPortMissingError, judgmentPortInstallation } from './judgment-port.js';
 import { DecisionModelsDisabledError } from './decision-policy.js';
@@ -274,7 +275,7 @@ function capture(site: string, options: JudgmentReadingOptions): JudgmentPortCap
           onRetry: (progress: Parameters<NonNullable<typeof onRetry>>[0]) => { check(); onRetry?.(progress); check(); },
           ...(strictResultCapture ? { captureResult: <T extends JudgmentResult<Q>>(original: T): T => {
             check(); assertResult?.(original); check();
-            const admitted = resultFrame ? resultFrame.capture(original) : captureResult ? captureResult(original) : original;
+            const admitted = reuseObservedJudgmentResult(original, resultFrame ? resultFrame.capture(original) : captureResult ? captureResult(original) : original);
             check();
             // A caller restriction cannot replace, project or bypass the
             // scope-owned complete original admission. It sees its snapshot.
@@ -298,7 +299,7 @@ function capture(site: string, options: JudgmentReadingOptions): JudgmentPortCap
       // accessor or retain a site-rejected decision identifier first.
       assertResult?.(result);
       check();
-      const admitted = resultFrame ? resultFrame.capture(result) : captureResult ? captureResult(result) : result;
+      const admitted = reuseObservedJudgmentResult(result, resultFrame ? resultFrame.capture(result) : captureResult ? captureResult(result) : result);
       check();
       const decision = Object.getOwnPropertyDescriptor(admitted, 'decisionId');
       if (decision?.get || decision?.set || (decision?.value !== undefined && typeof decision.value !== 'string')) throw new JudgmentAuthorityRetiredError();

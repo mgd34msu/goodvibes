@@ -21,3 +21,5 @@ export * from './types.ts';
 export type { JudgmentRetryPolicy } from './retry.ts';
 
 export { matchesJudgmentModel } from './endpoint-validation.ts';
+
+export { observeJudgmentModel, reuseObservedJudgmentResult, type JudgmentModelObservation } from './model-observation.ts';

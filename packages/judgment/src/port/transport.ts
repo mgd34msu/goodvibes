@@ -7,6 +7,7 @@ import { JudgmentContextLimitError, JudgmentError } from './errors.ts';
 import { requiresLongContext, validateContextBudget, validateQuestions } from './limits.ts';
 import { withRequestId } from './request-id.ts';
 import { interruptible, retryDelay, retryPolicy } from './retry.ts';
+import { recordNativeModelObservation } from './model-observation.ts';
 import { opaqueUuid } from './opaque-uuid.ts';
 import { captureJudgmentInput } from './input-snapshot.ts';
 import type { JudgmentAttempt, JudgmentEndpointHealth, JudgmentPort, JudgmentRequest, JudgmentResult } from './types.ts';
@@ -161,11 +162,11 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               };
               remember(attempt);
               health[endpointIndex] = { ...health[endpointIndex]!, attempts: health[endpointIndex]!.attempts + 1, consecutiveFailures: 0, lastOutcome: 'answered' };
-              return {
+              return recordNativeModelObservation({
                 answers: projectAnswers(questions, result.answers), requestedModel, model: result.model,
                 usage: { inputTokens: result.usage.input_tokens, outputTokens: result.usage.output_tokens },
                 latencyMs: performance.now() - started, requestId, lineage: lineage(),
-              };
+              }, { requestedModel, model: result.model, targetModel, endpointIndex });
             } catch (error) {
               failure = controller.signal.aborted ? controller.signal.reason : attemptController.signal.aborted ? attemptController.signal.reason : error;
               const last = toJudgmentError(failure);

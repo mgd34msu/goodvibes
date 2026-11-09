@@ -181,6 +181,8 @@ function publishImage(path: string, image: Uint8Array, signal?: AbortSignal, ass
 
 /**
  * Atomic latest-attempt and last-settled storage for the bounded triage pass.
+ * Receipts retain only an exact-input commitment, not duplicated protected previews;
+ * the commitment is dictionary-recoverable and grants no execution authority.
  * Construction, reads, and close are read-only. Every commit reloads the latest
  * disk image under the shared canonical-path process queue; separate instances
  * therefore cannot overwrite each other's admitted updates. The directory must
@@ -193,7 +195,7 @@ export class SqliteTriageStore implements TriageStore {
   private closing: Promise<void> | null = null;
   private readonly pending = new Set<Promise<unknown>>();
 
-  constructor(workingDirectory: string, fileName: string = STORE_FILE) {
+  constructor(workingDirectory: string, fileName: string = STORE_FILE, private readonly beforeReceiptWrite?: (() => void) | undefined) {
     if (!/^[a-zA-Z0-9_-]+\.sqlite$/.test(fileName)) throw new TypeError('Triage store requires a safe SQLite filename.');
     this.path = join(canonicalDirectory(workingDirectory), '.goodvibes', 'tui', 'operator', fileName);
   }
@@ -263,7 +265,15 @@ export class SqliteTriageStore implements TriageStore {
         }
         db.run('COMMIT');
         abortIfRequested(signal);
-        publishImage(this.path, db.export(), signal, assertPublicationCurrent);
+        publishImage(this.path, db.export(), signal, () => {
+          const before: unknown = assertPublicationCurrent?.();
+          if (types.isPromise(before)) void before.catch(() => {});
+          if (before !== undefined) throw new Error('Triage publication fence must be synchronous');
+          const declared: unknown = this.beforeReceiptWrite?.();
+          if (types.isPromise(declared)) void declared.catch(() => {});
+          if (declared !== undefined) throw new Error('Triage receipt format declaration must be synchronous');
+          return assertPublicationCurrent?.();
+        });
       } finally {
         db.close();
       }

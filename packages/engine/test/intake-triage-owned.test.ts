@@ -116,7 +116,7 @@ test('corrupt and incompatible receipt stores are optional, fixed diagnostic, an
   for (const corrupt of [true, false]) {
     const f = await setup(); await f.owned.runInboxTriage(); const file = f.path()[0]!;
     if (corrupt) writeFileSync(file, 'private corrupt data');
-    else { const db = new Database(file); const latest = JSON.parse((db.query('SELECT latest FROM triage_receipts').get() as { latest: string }).latest); latest.model = 'wrong'; db.query('UPDATE triage_receipts SET latest = ?').run(JSON.stringify(latest)); db.close(); }
+    else { const db = new Database(file); const latest = JSON.parse((db.query('SELECT latest FROM triage_receipts').get() as { latest: string }).latest); latest.model = 'invalid model'; db.query('UPDATE triage_receipts SET latest = ?').run(JSON.stringify(latest)); db.close(); }
     const bytes = readFileSync(file); expect((await f.read()).items[0]?.triageLabel).toBeUndefined();
     expect(readFileSync(file)).toEqual(bytes); expect(f.messages).toEqual(['Inbox triage metadata unavailable']);
   }

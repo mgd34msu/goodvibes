@@ -1,3 +1,4 @@
+import { retainNativeModelObservation } from '../port/model-observation.ts';
 import { drainOwned } from '../drain-owned.ts';
 import { opaqueUuid } from '../port/opaque-uuid.ts';
 import { captureJudgmentInput } from '../port/input-snapshot.ts';
@@ -30,7 +31,7 @@ const object = (value: unknown): value is Record<string, unknown> => typeof valu
  * in documented metadata cannot be classified by a borrowed-port wrapper.
  */
 function identifier(value: unknown, model = false): string | undefined {
-  const syntax = model ? /^[A-Za-z0-9][A-Za-z0-9._:/+-]*$/ : /^[A-Za-z0-9._:-]+$/;
+  const syntax = model ? /^[A-Za-z0-9@][A-Za-z0-9._:/@+-]*$/ : /^[A-Za-z0-9._:-]+$/;
   if (typeof value !== 'string' || value.length > 256 || !syntax.test(value) || value.includes('://')) return undefined;
   return value;
 }
@@ -217,6 +218,7 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
         stateHash: hashState(input.state),
         questions,
       };
+      let originalResult: JudgmentResult<Q> | undefined;
       let result: JudgmentResult<Q>;
       let resultToReturn: JudgmentResult<Q>;
       try {
@@ -224,6 +226,7 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
         if (requestedModel === undefined) throw new JudgmentError('invalid-request', FAILURE_MESSAGES['invalid-request']);
         checkCancellation(signal);
         const original = await inner.ask(Object.freeze({ ...captureRequest(request, logAssertion), ...input, context: call.context, model: requestedModel }));
+        originalResult = original;
         checkCancellation(signal);
         // An owned strict scope must see every original field before the
         // ordinary known-field projection can discard it or record success.
@@ -273,7 +276,7 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
       }));
       assertLogCurrent(logAssertion);
       const decisionId = recorded(() => log.record(entry));
-      return { ...resultToReturn, decisionId };
+      return retainNativeModelObservation(originalResult, { ...resultToReturn, decisionId });
     },
   };
 }

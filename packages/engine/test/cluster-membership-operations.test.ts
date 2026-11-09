@@ -107,10 +107,22 @@ test('queued material writes preserve the original observed source and reject st
     const node = await addGroupNode(world, 'queued-material', { secrets }); expect((await createGroup(node.context, {})).ok).toBe(true);
     const original = node.runtime.keyMaterial!, rotated = rotateGroupKeyMaterial(original, 'scheduled', node.id, world.clock.now(), 1000);
     secrets.writeWait = async () => { entered.resolve(); await release.promise; };
-    const first = node.runtime.commitMaterial(rotated); await entered.promise;
+    const first = node.runtime.commitMaterial(rotated);
+    // Observe early failure as well as entry, so a regression before the store
+    // boundary cannot strand the held-write fixture during teardown.
+    await Promise.race([entered.promise, first.then(() => { throw new Error('Material write settled before entering the store'); })]);
     const stale = node.runtime.commitMaterial({ ...original, keys: [...original.keys] });
-    const rejected = expect(stale).rejects.toBeInstanceOf(ClusterMembershipOperationError);
-    release.resolve(); await first; await rejected; expect(secrets.writes).toBe(2);
+    // Bun's promise matcher waits for settlement. Observe rejection without a
+    // matcher until the original write is released and the queue can advance.
+    const outcome = stale.then(() => ({ ok: true as const }), (error: unknown) => ({ ok: false as const, error }));
+    release.resolve(); await first;
+    const rejected = await outcome;
+    expect(rejected.ok).toBe(false);
+    if (rejected.ok) throw new Error('Stale material unexpectedly persisted');
+    expect(rejected.error).toBeInstanceOf(ClusterMembershipOperationError);
+    if (!(rejected.error instanceof ClusterMembershipOperationError)) throw rejected.error;
+    expect(rejected.error.kind).toBe('abandoned');
+    expect(secrets.writes).toBe(2);
     expect(node.runtime.keyMaterial?.currentGeneration).toBe(rotated.currentGeneration);
   } finally { release.resolve(); await stopGroupWorld(world); destroyGroupWorld(world); }
 });

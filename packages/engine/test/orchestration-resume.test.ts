@@ -10,6 +10,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createWorktreeIsolationManager } from '../platform/src/platform/orchestration/worktree-isolation.js';
 import { createCancellationRegistry } from '../platform/src/platform/orchestration/cancellation.js';
 import { createOrchestrationEngine } from '../platform/src/platform/orchestration/engine.js';
 import type { PhaseRunnerAgentManagerLike } from '../platform/src/platform/orchestration/phase-runner.js';
@@ -80,17 +81,21 @@ describe('import reconciliation', () => {
     const root = repo();
     const bus = new RuntimeEventBus();
     const first = createOrchestrationEngine({ agentManager: idleAgents(), configManager: makeFakeConfigManager(), runtimeBus: bus, projectRoot: root, persist: false });
-    first.createWorkstream({ id: 'ws-re', title: 're', phases: [PHASE], items: [{ id: 'item-x', title: 'X', task: 't' }], isolation: 'worktree' });
+    const originalStream = first.createWorkstream({ id: 'ws-re', title: 're', phases: [PHASE], items: [{ id: 'item-x', title: 'X', task: 't' }], isolation: 'worktree' });
+    // Allocation, native Git creation and its durable receipt all belong to
+    // the original manager. A copied old path/branch label cannot issue proof.
+    const originalOwner = createWorktreeIsolationManager({ projectRoot: root, emit() {} });
+    const handle = await originalOwner.ensureWorktree(originalStream, originalStream.items[0]!);
+    const path = handle.path;
     const serialized = JSON.parse(first.serializeWorkstream('ws-re')!) as { workstream: { items: Record<string, unknown>[] } };
     first.dispose();
+    await first.join();
 
     // As the process left it: the item passed and committed on its branch, and the merge never ran.
-    const path = join(root, '.goodvibes', '.worktrees', 'ws', 're', 'x');
-    git(root, 'worktree', 'add', '-q', path, '-b', 'ws/re/x');
     writeFileSync(join(path, 'feature.txt'), 'done\n');
     git(path, 'add', 'feature.txt');
     git(path, 'commit', '-q', '-m', 'item work');
-    Object.assign(serialized.workstream.items[0]!, { state: 'passed', currentPhaseId: null, worktreePath: path, worktreeBranch: 'ws/re/x', completedAt: 1 });
+    Object.assign(serialized.workstream.items[0]!, { state: 'passed', currentPhaseId: null, completedAt: 1 });
 
     const second = createOrchestrationEngine({ agentManager: idleAgents(), configManager: makeFakeConfigManager(), runtimeBus: bus, projectRoot: root, persist: false });
     const events: OrchestrationEvent[] = [];
@@ -100,6 +105,8 @@ describe('import reconciliation', () => {
     expect(second.getWorkstream('ws-re')!.items[0]!.mergeState).toBe('merged');
     expect(git(root, 'show', 'HEAD:feature.txt')).toBe('done\n');
     second.dispose();
+    await second.join();
+    await originalOwner.join();
   }, 30_000);
 });
 

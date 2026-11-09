@@ -6,7 +6,7 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
  * primitive reuse (phantom guard + scoped commit).
  */
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createOrchestrationEngine, type OrchestrationEngineDeps } from '../platform/src/platform/orchestration/engine.js';
@@ -171,7 +171,7 @@ function makeHarness(projectRoot: string): Harness {
       createWorktree,
       persist: false,
       // Scheduling/budget/cancellation tests use bare fixture reports with no
-      // real files and no git repo in `projectRoot`, verifyEngineerClaims
+      // real report-backed files in `projectRoot`; verifyEngineerClaims
       // would honestly flag those as phantom work (no claims, no git diff).
       // Tests that specifically exercise the phantom-work guard (the
       // "primitive reuse" describe block) override this back to false.
@@ -233,6 +233,11 @@ let h: Harness;
 
 beforeEach(() => {
   projectRoot = mkdtempSync(join(tmpdir(), 'orch-engine-'));
+  // Scheduling uses fake commits, but the launch-residue proof must still
+  // come from an actual repository owned by this fixture.
+  const initialized = Bun.spawnSync(['git', 'init', '-q'], { cwd: projectRoot });
+  if (initialized.exitCode !== 0) throw new Error(new TextDecoder().decode(initialized.stderr));
+  writeFileSync(join(projectRoot, '.gitignore'), '.goodvibes/\n');
   h = makeHarness(projectRoot);
 });
 
@@ -710,7 +715,9 @@ describe('resume prefix replay', () => {
     expect(snapshot).toBeNull();
     // Original path is gone; quarantined alongside it.
     expect(existsSync(path)).toBe(false);
-    expect(existsSync(`${path}.unrecognized`)).toBe(true);
+    const quarantined = readdirSync(dir).filter(name => name.startsWith('ws-corrupt.json.') && name.endsWith('.unrecognized'));
+    expect(quarantined).toHaveLength(1);
+    expect(readFileSync(join(dir, quarantined[0]!), 'utf8')).toBe('{ this is not valid json');
   });
 
   test('a future schemaVersion is rejected (fail closed)', () => {

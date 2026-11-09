@@ -236,6 +236,7 @@ describe('phase-runner: dirty-residue guard wiring', () => {
     expect(outcome.result.commitExclusion?.excludedPaths).toEqual(['residue.ts']);
     expect(outcome.result.commitExclusion?.skipped).toBe(false);
 
+    expect(outcome.result.commit?.status).toBe('committed');
     const committedFiles = runGit(root, ['show', '--stat', '--name-only', 'HEAD']);
     expect(committedFiles).toContain('feature.ts');
     expect(committedFiles).not.toContain('residue.ts');
@@ -274,6 +275,7 @@ describe('phase-runner: dirty-residue guard wiring', () => {
     const outcome = await outcomePromise;
 
     expect(outcome.result.commitExclusion).toBeUndefined();
+    expect(outcome.result.commit?.status).toBe('committed');
     const committedFiles = runGit(root, ['show', '--stat', '--name-only', 'HEAD']);
     expect(committedFiles).toContain('residue.ts');
   });
@@ -337,6 +339,7 @@ describe('phase-runner: dirty-residue guard wiring', () => {
     const outcome = await outcomePromise;
 
     expect(outcome.result.commitExclusion).toBeUndefined();
+    expect(outcome.result.commit?.status).toBe('committed');
     const committedFiles = runGit(root, ['show', '--stat', '--name-only', 'HEAD']);
     expect(committedFiles).toContain('residue.ts');
   });

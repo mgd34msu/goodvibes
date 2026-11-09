@@ -50,7 +50,8 @@ test.each(['decode', 'subarray', 'driver'] as const)('the actual %s dependency r
   const target = kind === 'decode' ? TextDecoder.prototype : kind === 'subarray' ? Uint8Array.prototype : engine.Database.prototype;
   const key = kind === 'driver' ? 'exec' : kind;
   const descriptor = Object.getOwnPropertyDescriptor(target, key); let called = 0;
-  Object.defineProperty(target, key, { configurable: true, writable: true, value() { called++; throw new Error('Borrowed native decoder'); } });
+  Object.defineProperty(target, key, { ...(descriptor ?? { configurable: true, writable: true }),
+    value() { called++; throw new Error('Borrowed native decoder'); } });
   let rejected = false;
   try { await inspectPersistedPlanningProjects(f.path, () => {}); }
   catch { rejected = true; }

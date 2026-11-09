@@ -241,7 +241,6 @@ describe('OrchestrationEngine.join', () => {
     engine.start(ws.id);
     await entered.promise;
     engine.kill('item');
-    engine.dispose();
     const joined = engine.join();
     const finished = observe(joined);
     await flushMicrotasks();
@@ -251,6 +250,7 @@ describe('OrchestrationEngine.join', () => {
     await joined;
     expect(h.spawnedRecords).toHaveLength(0);
     expect(ws.items[0]!.worktreePath).toBeUndefined();
+    engine.dispose();
   });
 
   test('best-of-N loser cleanup cannot delete a cancelled sibling before its executor exits', async () => {
@@ -276,13 +276,18 @@ describe('OrchestrationEngine.join', () => {
     const winner = ws.items[0]!;
     const loser = ws.items[1]!;
     const loserPath = loser.worktreePath!;
+    const held = deferred();
+    const unlisten = engine.on(event => {
+      if (event.type === 'item-attempt-held' && event.itemId === winner.id) held.resolve();
+    });
     h.completeAgent(winner.agentId!, engineerReportOutput({}));
-    await flushMicrotasks(30);
+    await held.promise;
+    unlisten();
+    expect(winner.state).toBe('held-merge');
     engine.kill(loser.id);
     await engine.pickAttemptWinner(winner.attemptGroupId!, winner.id);
     await flushMicrotasks(30);
     expect(removed).not.toContain(loserPath);
-    engine.dispose();
     const joined = engine.join();
     const finished = observe(joined);
     await flushMicrotasks();
@@ -290,6 +295,7 @@ describe('OrchestrationEngine.join', () => {
     execution.resolve();
     await joined;
     expect(removed).toContain(loserPath);
+    engine.dispose();
   });
 
   test('joins integration started by imported terminal items and its delayed removal', async () => {

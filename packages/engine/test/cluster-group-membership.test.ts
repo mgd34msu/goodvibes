@@ -6,7 +6,7 @@
  */
 import { GROUP_MATERIAL_SECRET_KEY } from '../platform/src/platform/cluster/group-store.js';
 import { ntfySurface, surfaceIdFor } from '../platform/src/platform/cluster/surface-id.js';
-import { describe, expect, test, afterEach } from 'bun:test';
+import { describe, expect, test, afterEach, spyOn } from 'bun:test';
 import {
   addGroupNode,
   advance,
@@ -125,16 +125,24 @@ describe('creating and joining a group', () => {
     const { world: w, groupId } = await makeGroupOfOne();
     const second = await addGroupNode(w, 'node-b');
 
-    const joined = await resolveWithClock(
-      w,
-      joinGroup(second.context, { groupId, joinKey: 'gvj1-WRON-GKEY-0000-0000-0000' }),
-    );
-
-    expect(joined.ok).toBe(false);
-    if (joined.ok) return;
-    expect(joined.error.toLowerCase()).toContain('join key');
-    expect(joined.fix).toContain('cluster key');
-    expect(second.runtime.membership).toBe('no-group');
+    const dispatched = Promise.withResolvers<void>();
+    const send = second.transport.send.bind(second.transport);
+    const sending = spyOn(second.transport, 'send').mockImplementation(async raw => {
+      await send(raw);
+      if ((JSON.parse(raw) as { type: string }).type === GROUP_MESSAGE_TYPES.join) dispatched.resolve();
+    });
+    try {
+      const pending = joinGroup(second.context, { groupId, joinKey: 'gvj1-WRON-GKEY-0000-0000-0000' });
+      // Real scrypt runs on the thread pool. Do not consume a whole simulated
+      // admission deadline while the original proof has not even been sent.
+      await Promise.race([dispatched.promise, pending.then(() => { throw new Error('Join settled before sending its proof'); })]);
+      const joined = await resolveWithClock(w, pending);
+      expect(joined.ok).toBe(false);
+      if (joined.ok) return;
+      expect(joined.error.toLowerCase()).toContain('join key');
+      expect(joined.fix).toContain('cluster key');
+      expect(second.runtime.membership).toBe('no-group');
+    } finally { sending.mockRestore(); }
   });
 
   test('the join key is shown on demand, repeatedly, from any member', async () => {

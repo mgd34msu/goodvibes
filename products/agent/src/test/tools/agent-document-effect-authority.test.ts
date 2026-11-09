@@ -1,5 +1,4 @@
 import { afterEach, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { ArtifactStore, type ArtifactRecord } from '@goodvibes-jev/engine/sdk/platform/artifacts';
@@ -18,7 +17,7 @@ function root() { const directory = makeProjectTempDir('agent-document-effect-au
 function sourceStore(afterRead: () => void = () => {}) {
   const buffer = Buffer.from('Exact reviewed bytes');
   const record: ArtifactRecord = { id: 'reviewed', kind: 'document', mimeType: 'text/plain', sizeBytes: buffer.byteLength,
-    sha256: createHash('sha256').update(buffer).digest('hex'), createdAt: 1, acquisitionMode: 'inline-data', fetchMode: 'not-applicable', metadata: {}, contentPath: '/synthetic/content', metadataPath: '/synthetic/metadata' };
+    createdAt: 1, acquisitionMode: 'inline-data', fetchMode: 'not-applicable', metadata: {}, contentPath: '/synthetic/content', metadataPath: '/synthetic/metadata' };
   return { record, get: () => record, list: () => [record], async readContent() { await Promise.resolve(); afterRead(); return { record, buffer }; } };
 }
 
@@ -76,8 +75,8 @@ test('an inside-workspace directory replaced while acquiring bytes retires the c
   expect(result.success).toBe(false); expect(existsSync(join(parent, 'copy.txt'))).toBe(false);
 });
 
-test('an artifact whose bytes contradict its retained receipt cannot be exported', async () => {
-  const directory = root(); const owned = sourceStore(); const store = { ...owned, async readContent() { const source = await owned.readContent(); return { ...source, record: { ...source.record, sha256: '0'.repeat(64) } }; } };
+test('an artifact whose byte count contradicts its retained receipt cannot be exported', async () => {
+  const directory = root(); const owned = sourceStore(); const store = { ...owned, async readContent() { const source = await owned.readContent(); return { ...source, record: { ...source.record, sizeBytes: source.record.sizeBytes + 1 } }; } };
   const result = await executeAdmitted(createAgentArtifactsTool(store, { projectRoot: directory }), { mode: 'export', artifactId: 'reviewed', destinationPath: 'copy.txt' }, { directory });
   expect(result.success).toBe(false); expect(existsSync(join(directory, 'copy.txt'))).toBe(false);
 });

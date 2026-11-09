@@ -13,7 +13,6 @@ import { securityPort } from '../helpers/security-readings.ts';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 import { ArtifactStore, type ArtifactCreateInput, type ArtifactDescriptor, type ArtifactRecord } from '@goodvibes-jev/engine/sdk/platform/artifacts';
 import type { ChannelDeliveryRequest } from '@goodvibes-jev/engine/sdk/platform/channels';
 import type { Tool } from '@goodvibes-jev/engine/sdk/platform/types';
@@ -93,7 +92,6 @@ export function createHarnessArtifactStore(clock: () => number = () => Date.now(
         mimeType: input.mimeType ?? 'text/plain',
         ...(input.filename ? { filename: input.filename } : {}),
         sizeBytes: buffer.byteLength,
-        sha256: createHash('sha256').update(buffer).digest('hex'),
         createdAt: clock() + records.length,
         acquisitionMode: input.acquisitionMode ?? 'inline-data',
         fetchMode: input.fetchMode ?? 'not-applicable',

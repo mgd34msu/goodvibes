@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { admittedToolWorkspace, executeAdmitted } from '../helpers/admitted-tool.ts';
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
@@ -34,7 +33,6 @@ class ArtifactBrowserTestStore implements Partial<Pick<ArtifactStore, 'get' | 'l
       mimeType: input.mimeType ?? 'text/plain',
       ...(input.filename ? { filename: input.filename } : {}),
       sizeBytes: buffer.byteLength,
-      sha256: createHash('sha256').update(buffer).digest('hex'),
       createdAt: input.createdAt ?? Date.now(),
       ...(input.sourceUri ? { sourceUri: input.sourceUri } : {}),
       acquisitionMode: 'inline-data',

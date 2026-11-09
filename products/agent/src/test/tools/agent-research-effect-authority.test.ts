@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { afterAll, afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -44,7 +43,7 @@ function compareFixture(options: { mode?: PermissionMode; artifactText?: string;
   const owner = effectAdmissionFixture(options.mode);
   if (options.sourceOwner !== null) bindAgentResearchSourceOwner(owner.registry, options.sourceOwner ?? ordinaryResearchOwner());
   let writes = 0; let chats = 0; let drained = 0; let backendGetterReads = 0;
-  const record: ArtifactRecord = { id: 'source-1', kind: 'document', mimeType: 'text/plain', sizeBytes: 16, sha256: createHash('sha256').update(options.artifactText ?? 'Synthetic source content.').digest('hex'), createdAt: 1,
+  const record: ArtifactRecord = { id: 'source-1', kind: 'document', mimeType: 'text/plain', sizeBytes: Buffer.byteLength(options.artifactText ?? 'Synthetic source content.'), createdAt: 1,
     acquisitionMode: 'inline-data', fetchMode: 'not-applicable', metadata: { purpose: 'synthetic', ...options.artifactMetadata }, contentPath: '/synthetic/source', metadataPath: '/synthetic/source-metadata' };
   let current = record;
   let content = options.artifactText ?? 'Synthetic source content.';
@@ -110,7 +109,7 @@ test('report writes use recorded effect admission without caller confirmation fi
   const store: AgentModelCompareArtifactStore = { async create(input, ownership) {
     ownership?.assertCurrent?.(); writes++;
     return { id: 'report-1', kind: 'document', mimeType: input.mimeType ?? 'text/plain', sizeBytes: Buffer.byteLength(input.text ?? ''),
-      sha256: createHash('sha256').update(input.text ?? '').digest('hex'), createdAt: 1, acquisitionMode: 'inline-data', fetchMode: 'not-applicable', metadata: input.metadata ?? {} };
+      createdAt: 1, acquisitionMode: 'inline-data', fetchMode: 'not-applicable', metadata: input.metadata ?? {} };
   } };
   const sourceOwner = ordinaryResearchOwner();
   const raw = createAgentResearchReportTool(store, sourceOwner);
@@ -128,7 +127,7 @@ test('revocation during report artifact commit prevents the actual write', async
   const entered = deferred(); const release = deferred(); const admitted = effectAdmissionFixture(); let writes = 0;
   const store: AgentModelCompareArtifactStore = { async create(input, ownership) {
     entered.resolve(); await release.promise; ownership?.assertCurrent?.(); writes++;
-    return { id: 'report-1', kind: 'document', mimeType: input.mimeType ?? 'text/plain', sizeBytes: 0, sha256: '', createdAt: 1,
+    return { id: 'report-1', kind: 'document', mimeType: input.mimeType ?? 'text/plain', sizeBytes: 0, createdAt: 1,
       acquisitionMode: 'inline-data', fetchMode: 'not-applicable', metadata: {} };
   } };
   const sourceOwner = ordinaryResearchOwner();

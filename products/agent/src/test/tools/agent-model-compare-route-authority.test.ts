@@ -1,5 +1,4 @@
 import { afterAll, afterEach, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
@@ -38,7 +37,7 @@ function fixture(beforeSettingsProjection?: () => Promise<void>) {
     winnerBlindId: 'B', reasons: 'Synthetic native route winner.', notes: '', revealIncludedInJudgment: true,
     winnerModel: { registryKey: 'synthetic:b', modelId: 'b', providerId: 'synthetic', displayName: 'Synthetic B' } });
   let record: ArtifactRecord = { id: 'judgment-native', kind: 'data', mimeType: 'application/json', sizeBytes: Buffer.byteLength(content),
-    sha256: createHash('sha256').update(content).digest('hex'), createdAt: 1, acquisitionMode: 'inline-data', fetchMode: 'not-applicable',
+    createdAt: 1, acquisitionMode: 'inline-data', fetchMode: 'not-applicable',
     metadata: { purpose: 'agent-model-compare-judgment' }, contentPath: '/synthetic/judgment', metadataPath: '/synthetic/judgment-metadata' };
   let writes = 0, usage = 0;
   const store: AgentModelCompareArtifactStore = {

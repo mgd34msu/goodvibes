@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';
 import { effectAdmissionFixture } from '../helpers/effect-admission.ts';
@@ -56,7 +55,6 @@ function artifactStore() {
         mimeType: input.mimeType ?? 'application/json',
         filename: input.filename,
         sizeBytes: buffer.byteLength,
-        sha256: createHash('sha256').update(buffer).digest('hex'),
         createdAt: 0,
         acquisitionMode: 'inline-data',
         fetchMode: 'not-applicable',

@@ -2,7 +2,6 @@ import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { withDecisionModelPolicy } from '@goodvibes-jev/engine/sdk/platform/runtime';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { ArtifactRecord } from '@goodvibes-jev/engine/sdk/platform/artifacts';
 import { modelReasonTheme, routingRegistry } from '@goodvibes-jev/engine/sdk/platform/routing';
@@ -33,7 +32,7 @@ function fixture() {
   };
   const bytes = (id: string) => Buffer.from(typeof contents[id] === 'string' ? contents[id] as string : JSON.stringify(contents[id]));
   const records = Object.fromEntries(Object.keys(contents).map(id => [id, { id, kind: 'data', mimeType: id === 'source-a' ? 'text/plain' : 'application/json',
-    sizeBytes: bytes(id).byteLength, sha256: createHash('sha256').update(bytes(id)).digest('hex'), createdAt: 0, acquisitionMode: 'inline-data', fetchMode: 'not-applicable',
+    sizeBytes: bytes(id).byteLength, createdAt: 0, acquisitionMode: 'inline-data', fetchMode: 'not-applicable',
     metadata: { provenance: 'owned synthetic artifact', unknownField: 'complete provenance metadata' },
     contentPath: '/synthetic/transport/' + id, metadataPath: '/synthetic/transport/' + id + '.json' } satisfies ArtifactRecord]));
   const store: AgentModelCompareArtifactStore = { create: async () => { throw new Error('No writes in theme reader'); },

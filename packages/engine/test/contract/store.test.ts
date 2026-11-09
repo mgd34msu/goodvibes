@@ -12,6 +12,7 @@ import {
   CONTRACT_QUARANTINE_MAX_AGE_MS,
   CURRENT_CONTRACT_SCHEMA_VERSION,
   ContractStore,
+  ContractStoreVersionError,
   MAX_CONTRACT_QUARANTINE_FILES,
   contractPath,
   contractsDir,
@@ -144,9 +145,22 @@ describe('atomic write', () => {
 });
 
 describe('quarantine', () => {
+  test('future checkpoints remain at their original path and refuse load, put, hold, write and forced import', () => {
+    const root = tempRoot(), contract = makeContract(), store = storeAt(root);
+    store.hold(contract);
+    const text = envelope(contract, CURRENT_CONTRACT_SCHEMA_VERSION + 1), path = writeRaw(root, contract.id, text);
+    expect(() => store.load(contract.id)).toThrow(ContractStoreVersionError);
+    expect(() => store.put(contract)).toThrow(ContractStoreVersionError);
+    expect(() => store.hold(contract)).toThrow(ContractStoreVersionError);
+    expect(store.write(contract.id)).toBe(false);
+    expect(store.importContract(envelope(contract), true)).toBe(false);
+    expect(store.listStoredIds()).toContain(contract.id);
+    expect(readFileSync(path, 'utf8')).toBe(text);
+    expect(existsSync(`${path}.unrecognized`)).toBe(false);
+  });
+
   const cases: ReadonlyArray<readonly [string, (contract: Contract) => string, ContractSnapshotRejection]> = [
     ['corrupt JSON', () => '{"schemaVersion": 1, "contract": {', 'unparseable'],
-    ['a newer schema version', (contract) => envelope(contract, CURRENT_CONTRACT_SCHEMA_VERSION + 1), 'future-version'],
     ['a bare contract with no envelope', (contract) => JSON.stringify(contract), 'invalid-contract'],
     ['an envelope with no schema version', (contract) => JSON.stringify({ writtenAt: 1, contract }), 'not-an-envelope'],
     ['a malformed contract', (contract) => envelope({ ...contract, units: 'none' }), 'invalid-contract'],

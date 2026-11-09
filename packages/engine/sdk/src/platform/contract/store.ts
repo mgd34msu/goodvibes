@@ -53,6 +53,14 @@ export interface ContractSnapshot {
   readonly contract: Contract;
 }
 
+/** A newer checkpoint remains at its original path and must never look absent. */
+export class ContractStoreVersionError extends Error {
+  override readonly name = 'ContractStoreVersionError';
+  constructor(readonly contractId: string) {
+    super(`Contract ${contractId} uses a newer checkpoint format. Run a compatible GoodVibes build before loading or replacing it.`);
+  }
+}
+
 /** The directory contract files live in. */
 export function contractsDir(projectRoot: string): string {
   return join(projectRoot, '.goodvibes', 'contracts');
@@ -227,12 +235,14 @@ export class ContractStore {
 
   /** Holds a contract in memory and schedules its write. */
   put(contract: Contract): void {
+    this.assertStoredVersion(contract.id);
     this.contracts.set(contract.id, contract);
     this.scheduleWrite(contract.id);
   }
 
   /** Holds a contract read from its own file in memory, without writing it back (resume, design 7.2). */
   hold(contract: Contract): void {
+    this.assertStoredVersion(contract.id);
     this.contracts.set(contract.id, contract);
   }
 
@@ -251,6 +261,7 @@ export class ContractStore {
     if (json === null) return false;
     const path = contractPath(this.projectRoot, contract.id);
     try {
+      this.assertStoredVersion(contract.id);
       if (contract.durableAdmission !== undefined) new DurableContractAdmissions(this.projectRoot).update(contract.durableAdmission, json);
       writeFileAtomic(path, json);
       if (contract.durableAdmission !== undefined) syncContractDirectory(contractsDir(this.projectRoot));
@@ -279,8 +290,9 @@ export class ContractStore {
 
   /**
    * Reads a contract's file. A file that is refused (unparseable, not an
-   * envelope, a newer schema, a malformed contract) is moved to
-   * `<path>.unrecognized` and null is returned. Does not hold the contract.
+   * envelope or malformed contract) is quarantined. A newer schema throws and
+   * stays at its original path, so no caller may mistake it for an absent file.
+   * Does not hold the contract.
    */
   load(contractId: string): Contract | null {
     const path = contractPath(this.projectRoot, contractId);
@@ -294,6 +306,7 @@ export class ContractStore {
     }
     const read = readContractSnapshot(text);
     if ('rejected' in read) {
+      if (read.rejected === 'future-version') throw new ContractStoreVersionError(contractId);
       this.quarantine(path, read.rejected);
       return null;
     }
@@ -341,6 +354,7 @@ export class ContractStore {
       return false;
     }
     const contract = read.snapshot.contract;
+    try { this.assertStoredVersion(contract.id); } catch { return false; }
     try { if (new DurableContractAdmissions(this.projectRoot).findByContractId(contract.id) !== null) return false; }
     catch { return false; }
     const existing = this.contracts.get(contract.id) ?? this.load(contract.id);
@@ -367,6 +381,18 @@ export class ContractStore {
       overwroteExisting: existing !== null,
     });
     return true;
+  }
+
+  private assertStoredVersion(contractId: string): void {
+    const path = contractPath(this.projectRoot, contractId);
+    let text: string;
+    try { text = readFileSync(path, 'utf8'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+    let value: unknown;
+    try { value = JSON.parse(text); } catch { return; }
+    if (isRecord(value) && typeof value['schemaVersion'] === 'number' && value['schemaVersion'] > CURRENT_CONTRACT_SCHEMA_VERSION) {
+      throw new ContractStoreVersionError(contractId);
+    }
   }
 
   /**

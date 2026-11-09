@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Attach trigger controls to the existing catalog entries during daemon boot,
+  and validate stored triggers through the current recovery parser during
+  migration and sweeping.
+
 - Preserve reviewed Home Graph quality issue identities during refresh and
   restart. Omit absent reading IDs from saved provenance, and import objects
   shared between entity/helper groups once while retaining both memberships

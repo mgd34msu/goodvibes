@@ -25,5 +25,5 @@ export function registerTriggerSupervisorGatewayMethods(catalog: GatewayMethodCa
       refuseNonUserRequest(invocation, 'Trigger migration');
       authenticate(invocation, 'write:watchers'); return migrateOperatorTriggers(supervisor, { olderInstancesClosed: true });
     } catch (error) { translate(error); }
-  });
+  }, { replace: true });
 }

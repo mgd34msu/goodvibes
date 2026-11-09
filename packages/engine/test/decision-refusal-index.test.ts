@@ -15,14 +15,12 @@ function action(args: Readonly<Record<string, unknown>>, directory = '/workspace
 test('refusal indexing preserves the previous exact snapshot comparison at JSON edge cases', () => {
   const sparse = new Array(2);
   sparse[1] = 'last';
-  const extra = ['first'];
-  Object.defineProperty(extra, 'note', { value: 'hidden in the caller, captured on an array' });
   const cases = [
     action({}), action({ value: undefined }), action({ value: null }), action({ value: 0 }), action({ value: -0 }),
     action({ value: false }), action({ value: 'false;' }), action({ value: 'undefined;' }),
     action({ value: [] }), action({ value: new Array(1) }), action({ value: [undefined] }), action({ value: [null] }),
     action({ value: sparse }), action({ value: [undefined, 'last'] }), action({ value: ['last'] }),
-    action({ value: extra }), action({ value: ['first'] }), action({ value: { length: 1, '0': 'first' } }),
+    action({ value: ['first'] }), action({ value: { length: 1, '0': 'first' } }),
     action({ value: Object.assign(Object.create(null) as Record<string, unknown>, { x: 1 }) }),
     action({ value: { x: 1 } }), action({ value: { x: 1, y: 2 } }), action({ value: { y: 2, x: 1 } }),
     action({ value: { 'a"b': '\u0000object:1:"key"', toJSON: 'literal data' } }),
@@ -37,6 +35,24 @@ test('refusal indexing preserves the previous exact snapshot comparison at JSON 
       }
     });
   }
+});
+
+test('array own data captured from the caller remains part of an exact refused action', () => {
+  const arrayWithNote = (note: string, enumerable = false) => {
+    const value = ['first']; Object.defineProperty(value, 'note', { value: note, enumerable }); return value;
+  };
+  const original = action({ value: arrayWithNote('original note') });
+  withDecisionModelPolicy(() => 'Preferred', () => {
+    rememberDecisionRefusal(original);
+    // Bun's util.isDeepStrictEqual ignores these extra array properties. The
+    // actual snapshot deliberately captures them as ordinary own data, so that
+    // lossy comparator is not an oracle for this case.
+    expect(wasDecisionRefused(original)).toBe(true);
+    expect(wasDecisionRefused(action({ value: arrayWithNote('original note') }))).toBe(true);
+    expect(wasDecisionRefused(action({ value: arrayWithNote('original note', true) }))).toBe(true);
+    expect(wasDecisionRefused(action({ value: ['first'] }))).toBe(false);
+    expect(wasDecisionRefused(action({ value: arrayWithNote('changed note') }))).toBe(false);
+  });
 });
 
 test('every refusal survives more than 1024 subsequent entries and Preferred availability fallback', async () => {

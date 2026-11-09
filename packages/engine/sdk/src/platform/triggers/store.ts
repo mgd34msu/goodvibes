@@ -376,7 +376,7 @@ export function sweepTriggers(input: SweepInput): SweepResult {
     // A malformed record must not take the sweep down: recovery is exactly
     // when the store is most likely to hold something torn, and a crash here
     // would leave every OTHER record unreaped and unbounded too.
-    if (!isWellFormedRecord(record)) {
+    if (!isTriggerRecord(record)) {
       const id = (record as Partial<TriggerRecord>)?.definition?.id;
       reapedIds.push(typeof id === 'string' && id.length > 0 ? id : '<malformed record>');
       continue;

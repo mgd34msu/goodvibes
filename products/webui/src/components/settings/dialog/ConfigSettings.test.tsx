@@ -51,7 +51,7 @@ mock.module("../../../lib/goodvibes", () => ({
   sdk: {
     operator: {
       payments: {
-        purchase: { status: () => Promise.resolve({ windows: [] }) },
+        purchase: { status: () => Promise.resolve({ windows: [], operations: [] }) },
         cards: {
           list: () => {
             cardsListCalls.push("list");
@@ -828,6 +828,9 @@ test('decision call-volume alerts save and read back on the actual Models and pr
 async function showJudgmentSettings(el: HTMLElement): Promise<void> {
   await waitFor(() => [...el.querySelectorAll('.settings-category')].some(button => button.textContent === 'Judgment'));
   clickCategory(el, 'Judgment');
+  // Navigation is available before the asynchronous config query settles.
+  // Wait for the real editor, as the earlier settings interaction fixtures do.
+  await waitFor(() => Boolean(el.querySelector('[aria-label="judgment.endpoint"]')));
 }
 
 test('changing the actual primary endpoint disables prior authentication before publishing the new destination', async () => {

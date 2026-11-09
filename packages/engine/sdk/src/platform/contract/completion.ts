@@ -43,7 +43,7 @@ import { captureOwnedJson } from '../gate/judgment-input.js';
 import { judgmentPort, captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { recordedJudgmentInputHash, hashState, JudgmentContextLimitError, JudgmentError, mapLimit, toJson, type JsonValue, type YesNoReading } from '@goodvibes-jev/judgment';
 import { AgentWorktree, IsolatedWorktree } from '../agents/worktree.js';
-import { excludeUntouchedLaunchResidue } from '../orchestration/dirty-guard.js';
+import { assertBaselineExecutionRootCurrent, partitionBaselinePaths } from './tree-baseline.js';
 import { GitService } from '../git/service.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
@@ -1019,10 +1019,12 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         : { status: 'committed', hash: result.hash, note: describeCommitOutcome(result.hash, result.skippedIgnored, false) };
     }
     const touched = [...new Set(contract.units.flatMap((unit) => unit.touchedPaths))];
-    const launch = new Map(Object.entries(contract.baseline?.dirty ?? {}));
-    const { included } = excludeUntouchedLaunchResidue(root, touched, launch);
+    if (!contract.baseline) return { status: 'skipped', note: 'Scoped commit withheld: no original Git baseline was captured; preserve existing owner edits' };
+    const { included, uncertain } = partitionBaselinePaths(root, touched, contract.baseline);
+    if (uncertain.length) return { status: 'skipped', note: 'Scoped commit withheld: original dirty owner edits could not be verified; preserve them and inspect or re-establish the original work baseline' };
     if (included.length === 0) return { status: 'skipped', note: describeCommitOutcome(null, [], true) };
-    const result = await worktree.commitWorkingTree(message, [...included], () => assertAcceptedResultCurrent(run));
+    const baseline = contract.baseline;
+    const result = await worktree.commitWorkingTree(message, [...included], () => { assertBaselineExecutionRootCurrent(root, baseline); assertAcceptedResultCurrent(run); });
     return result.hash === null
       ? { status: 'skipped', note: describeCommitOutcome(null, result.skippedIgnored, false) }
       : { status: 'committed', hash: result.hash, note: describeCommitOutcome(result.hash, result.skippedIgnored, false) };

@@ -77,8 +77,8 @@ export type { ProposalLaunchInput } from './proposal-workstream.js';
 export type { PhaseRunnerAgentManagerLike, PhaseRunnerDeps, PhaseRunOutcome, WorktreeOps } from './phase-runner.js';
 export { runPhase } from './phase-runner.js';
 
-export type { DirtyLaunchSnapshot, ScopedCommitExclusion } from './dirty-guard.js';
-export { excludeUntouchedLaunchResidue, hashWorkingTreeFile, snapshotDirtyTree } from './dirty-guard.js';
+export type { DirtyLaunchSnapshot, DirtyPathState, ScopedCommitExclusion } from './dirty-guard.js';
+export { excludeUntouchedLaunchResidue, listDirtyTreePaths, snapshotDirtyTree } from './dirty-guard.js';
 
 export {
   computeClaims,

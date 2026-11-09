@@ -297,8 +297,9 @@ export interface Nudge {
 
 // ── The tree ──────────────────────────────────────────────────────────────────
 
-/** A working tree as it stood at some moment: HEAD and the hashes of paths already dirty. Diffs are measured against it. */
+/** HEAD and compact saved dirty-content commitments. Original local bytes stay private; version two distinguishes file bytes, symlink text and confirmed deletion. */
 export interface TreeBaseline {
+  readonly version?: 2;
   readonly head: string | null;
   readonly dirty: Readonly<Record<string, string | null>>;
 }

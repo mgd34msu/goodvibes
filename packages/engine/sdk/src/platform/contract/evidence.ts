@@ -6,7 +6,7 @@
  *
  * Where the diff comes from:
  * - In git (the unit's item worktree in worktree mode, the project root in
- *   shared mode): paths whose working-tree hash differs from the unit's
+ *   shared mode): paths whose exact local source differs from the unit's
  *   baseline (taken in that tree when its agent was spawned), that are new, or
  *   that commits since the baseline changed, each diffed against the baseline
  *   HEAD, or shown whole when git has no diff for it. The agent's work is
@@ -17,11 +17,12 @@
  *
  * Everything here is collection and arithmetic over sizes; no judgment.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, join, relative } from 'node:path';
+import { isAbsolute, relative } from 'node:path';
 import { estimateTokens, type JsonValue } from '@goodvibes-jev/judgment';
 import { GitService } from '../git/service.js';
-import { hashWorkingTreeFile, snapshotDirtyTree } from '../orchestration/dirty-guard.js';
+import { listDirtyTreePaths } from '../orchestration/dirty-guard.js';
+import { captureDirtyFile, captureDirtyTreeRoot } from '../orchestration/dirty-file-observation.js';
+import { assertBaselineExecutionRootCurrent, baselineChangedPaths } from './tree-baseline.js';
 import { readNativePrivateReceiptArchives, verifyPrivateReceiptPreservation } from './private-read-receipts.js';
 import { compareJsonReadReferences, compareReadReferences } from './read-reference-comparison.js';
 import { commandObservation } from './command-observation.js';
@@ -309,15 +310,13 @@ async function git(cwd: string, args: readonly string[]): Promise<string | null>
 
 /** A file's current text for evidence, or a note when it is gone or binary. */
 function fileText(cwd: string, path: string): string {
-  const absolute = isAbsolute(path) ? path : join(cwd, path);
-  if (!existsSync(absolute)) return `(${path} no longer exists)`;
-  try {
-    const bytes = readFileSync(absolute);
-    if (bytes.includes(0)) return `(binary file, ${bytes.length} bytes)`;
-    return bytes.toString('utf-8');
-  } catch (error) {
-    return `(${path} could not be read: ${summarizeError(error)})`;
-  }
+  const selected = isAbsolute(path) ? relative(cwd, path) : path;
+  const file = captureDirtyFile(cwd, selected);
+  if (file.kind === 'missing') return `(${path} no longer exists)`;
+  if (file.kind === 'unavailable') return `(${path} could not be safely read)`;
+  if (file.kind === 'symlink') return `symlink ${path} -> ${file.bytes.toString('utf8')}`;
+  if (file.bytes.includes(0)) return `(binary file, ${file.bytes.length} bytes)`;
+  return file.bytes.toString('utf-8');
 }
 
 /** Splits a unified diff into one entry per file, keyed by its new path. */
@@ -332,23 +331,25 @@ export function splitUnifiedDiff(unifiedDiff: string): FileChange[] {
 
 /** Shared mode: what changed in `cwd` since the unit's baseline, with each path's diff. */
 async function sharedTreeChanges(cwd: string, baseline: ContractUnit['baseline']): Promise<FileChange[]> {
-  const dirtyAtBaseline = baseline?.dirty ?? {};
-  const now = snapshotDirtyTree(cwd);
-  const paths = new Set<string>();
-  for (const [path, hash] of now) if (!(path in dirtyAtBaseline) || dirtyAtBaseline[path] !== hash) paths.add(path);
-  for (const [path, hash] of Object.entries(dirtyAtBaseline)) if (!now.has(path) && hashWorkingTreeFile(cwd, path) !== hash) paths.add(path);
-  const head = (await git(cwd, ['rev-parse', 'HEAD']))?.trim() || null;
+  const root = captureDirtyTreeRoot(cwd);
+  const assertCurrent = () => { root.assertCurrent(); if (baseline) assertBaselineExecutionRootCurrent(cwd, baseline); };
+  const readGit = async (args: readonly string[]) => { assertCurrent(); const result = await git(cwd, args); assertCurrent(); return result; };
+  assertCurrent();
+  const paths = new Set(baselineChangedPaths(cwd, listDirtyTreePaths(cwd), baseline));
+  const head = (await readGit(['rev-parse', 'HEAD']))?.trim() || null;
   const base = baseline?.head ?? head;
   if (baseline?.head && head !== null && head !== baseline.head) {
-    const committed = await git(cwd, ['diff', '--name-only', baseline.head, head]);
+    const committed = await readGit(['diff', '--name-only', baseline.head, head]);
     for (const path of (committed ?? '').split('\n').filter(Boolean)) paths.add(path);
   }
   const changes: FileChange[] = [];
   for (const path of paths) {
-    const diff = base === null ? '' : ((await git(cwd, ['diff', base, '--', path])) ?? '');
+    const diff = base === null ? '' : ((await readGit(['diff', base, '--', path])) ?? '');
+    assertCurrent();
     changes.push({ path, diff: diff.trim().length > 0 ? diff.trimEnd() : `new file ${path}\n${fileText(cwd, path)}` });
+    assertCurrent();
   }
-  return changes;
+  assertCurrent(); return changes;
 }
 
 /** Outside git: the paths the unit wrote or edited, with their current text. */

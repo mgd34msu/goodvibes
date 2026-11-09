@@ -1,4 +1,5 @@
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { selectBaselineExecutionRoot } from './tree-baseline.js';
 import { nativeContractActionSource, nativeContractPort } from './native-decisions.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { selectSourceCitationEvidence } from './source-citation-selection.js';
@@ -512,6 +513,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
     runtime.cwd = run.contract.projectRoot;
     runtime.agentStartedAt = run.env.now();
     unit.baseline ??= takeBaseline(run.contract.projectRoot);
+    selectBaselineExecutionRoot(unit.baseline, runtime.cwd);
     return record;
   }
 

@@ -29,6 +29,7 @@ import { assertContractInputObjects, assertContractInputView, assertContractExec
 import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 import { existsSync } from 'node:fs';
+import { selectBaselineExecutionRoot } from './tree-baseline.js';
 import { hasScheduledFix } from './fix-identity.js';
 import { loadWorkstreamSnapshot } from '../orchestration/persistence.js';
 import { awaitNativeResumeConditions, nativeDecisionState } from './native-decisions.js';
@@ -419,6 +420,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       // An item that already left its phase (a unit's work merged for a planned fix) runs no phase to wait on.
       if (runtime.preSpawn === 'wait' && (item === undefined || item.state === 'passed' || item.state === 'failed' || item.state === 'held-merge')) runtime.preSpawn = null;
       runtime.cwd = item?.worktreePath ?? contract.worktreePath ?? contract.projectRoot;
+      selectBaselineExecutionRoot(unit.baseline, runtime.cwd);
       if (unit.attemptUnits !== undefined) {
         // A best-of-N unit: a selection that did not finish is read again.
         if (unit.status === 'checking') deps.groups.selectAttempts(run, unit.id);
@@ -443,6 +445,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       const runtime = run.runtime(unit);
       runtime.agentLost = true;
       runtime.cwd = contract.projectRoot;
+      selectBaselineExecutionRoot(unit.baseline, runtime.cwd);
       if (unit.status === 'held' || unit.status === 'checking') {
         void deps.checks.runCheck(run, unit, 'resume', unit.lastOutput ?? '');
       } else if (unit.status === 'nudged') {

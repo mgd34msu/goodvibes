@@ -1,4 +1,5 @@
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { selectBaselineExecutionRoot } from './tree-baseline.js';
 import { bindContractInputAuthority } from './input-authority.js';
 import { bindContractActionSource, bindContractPlanConsumer } from '../tools/agent/contract-binding.js';
 import { nativeContractActionSource } from './native-decisions.js';
@@ -205,7 +206,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       run.settle(unit, 'completed');
     });
     // The item worktree is gone once merged: checks of this unit read the contract branch from now on.
-    if (run.contract.worktreePath !== undefined) runtime.cwd = run.contract.worktreePath;
+    if (run.contract.worktreePath !== undefined) { runtime.cwd = run.contract.worktreePath; selectBaselineExecutionRoot(unit.baseline, runtime.cwd); }
     return outcome;
   }
 
@@ -544,7 +545,8 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         allowAct: run.contract.sessionMode !== true && !exhausted(run, unit.fixRounds + unit.freshAgents),
         state: () => ({ conflict: { ...conflict, files: [...conflict.files] }, goal: unit.goal, spent: unit.fixRounds + unit.freshAgents, limit: config().maxFixRounds === 0 ? null : config().maxFixRounds }), continuations: [], signal: run.abort.signal });
       if (decision.decision.outcome !== 'act') { run.control.fail('other', 'Jev refused the native merge repair'); return; }
-      decision.recordClaim(); run.runtime(unit).cwd = run.contract.worktreePath ?? run.contract.projectRoot; stopForFix(run, unit); unit.fixRounds += 1;
+      decision.recordClaim(); const runtime = run.runtime(unit); runtime.cwd = run.contract.worktreePath ?? run.contract.projectRoot;
+      selectBaselineExecutionRoot(unit.baseline, runtime.cwd); stopForFix(run, unit); unit.fixRounds += 1;
       await planFix(run, unitBrief(run, unit, conflict), unit.fixRounds); return;
     }
     if (exhausted(run, unit.fixRounds + unit.freshAgents)) {
@@ -553,7 +555,8 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       return;
     }
     stalled(run, 'unit', unit.id, 'split', unmet, why);
-    run.runtime(unit).cwd = run.contract.worktreePath ?? run.contract.projectRoot;
+    const runtime = run.runtime(unit); runtime.cwd = run.contract.worktreePath ?? run.contract.projectRoot;
+    selectBaselineExecutionRoot(unit.baseline, runtime.cwd);
     stopForFix(run, unit);
     unit.fixRounds += 1;
     await planFix(run, unitBrief(run, unit, conflict), unit.fixRounds);

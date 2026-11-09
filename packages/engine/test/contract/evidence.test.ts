@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import type { CompletionReport } from '../../sdk/src/platform/agents/completion-report.js';
 import { estimateTokens, LIMITS, validateContextBudget } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { snapshotDirtyTree } from '../../sdk/src/platform/orchestration/dirty-guard.js';
+import { takeBaseline } from '../../sdk/src/platform/contract/group-runner.js';
 import { RuntimeEventBus } from '../../sdk/src/platform/runtime/events/index.js';
 import type { ContractConfigReader } from '../../sdk/src/platform/contract/config.js';
 import { runUnitCheck } from '../../sdk/src/platform/contract/check.js';
@@ -190,7 +190,7 @@ describe('changed paths', () => {
   test('shared mode: changes since the baseline, staged or not, new files whole, untouched residue left out', async () => {
     gitRepo();
     writeFileSync(join(dir, 'dirty.ts'), 'export const d = 2;\n'); // dirty before the unit started
-    const baseline = { head: git(dir, 'rev-parse', 'HEAD'), dirty: Object.fromEntries(snapshotDirtyTree(dir)) };
+    const baseline = takeBaseline(dir)!;
     writeFileSync(join(dir, 'a.ts'), 'export const a = 2;\n');
     git(dir, 'add', 'a.ts');
     writeFileSync(join(dir, 'new.ts'), 'export const n = 1;\n');
@@ -205,7 +205,7 @@ describe('changed paths', () => {
 
   test('shared mode: work the agent committed is still its change', async () => {
     gitRepo();
-    const baseline = { head: git(dir, 'rev-parse', 'HEAD'), dirty: {} };
+    const baseline = takeBaseline(dir)!;
     writeFileSync(join(dir, 'a.ts'), 'export const a = 5;\n');
     git(dir, 'commit', '-q', '-am', 'agent commit');
     const changes = await collectChanges({ baseline }, { cwd: dir, turns: [] });
@@ -446,7 +446,7 @@ describe('what each trigger collects', () => {
   test('corroboration is the unit\'s own baseline-scoped changes: an untracked new file counts, launch residue does not', async () => {
     gitRepo();
     writeFileSync(join(dir, 'dirty.ts'), 'export const d = 2;\n'); // residue from before the unit started
-    const baseline = { head: git(dir, 'rev-parse', 'HEAD'), dirty: Object.fromEntries(snapshotDirtyTree(dir)) };
+    const baseline = takeBaseline(dir)!;
     const gitSources = () => ({ ...sources(), turns: [] });
     const untouched = await collectUnitEvidence(contract, makeUnit({ baseline }), 'completion', gitSources());
     expect(untouched.changedPaths).toEqual([]);

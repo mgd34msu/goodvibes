@@ -91,6 +91,7 @@ const ROUTE_SCHEMA = objectSchema({
 }, ['model', 'provider', 'reason']);
 
 const TREE_BASELINE_SCHEMA = objectSchema({
+  version: { type: 'number', enum: [2] },
   head: { anyOf: [STRING_SCHEMA, { type: 'null' }] },
   dirty: recordSchema({ anyOf: [STRING_SCHEMA, { type: 'null' }] }),
 }, ['head', 'dirty']);

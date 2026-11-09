@@ -29,7 +29,7 @@ import { spawnSync } from 'node:child_process';
 import type { CreateWorkstreamInput, OrchestrationEngine } from '../orchestration/engine.js';
 import type { FleetCapacityFn } from '../orchestration/elastic-pool.js';
 import type { ContractUnitSettlement } from '../orchestration/phase-runner.js';
-import { snapshotDirtyTree } from '../orchestration/dirty-guard.js';
+import { selectBaselineExecutionRoot, createTreeBaseline } from './tree-baseline.js';
 import type { AttemptJudge, OrchestrationEvent, WorkItem } from '../orchestration/types.js';
 import { GitService } from '../git/service.js';
 import type { AgentRecord } from '../tools/agent/index.js';
@@ -107,14 +107,13 @@ export interface GroupRunner {
   selectAttempts(run: ContractRun, unitId: string): void;
 }
 
-/** A unit's baseline in `cwd`: HEAD and the hashes of paths already dirty. Undefined outside git. */
+/** HEAD plus the actual original baseline; only restart commitments are saved. */
 export function takeBaseline(cwd: string): ContractUnit['baseline'] {
   if (!GitService.isGitRepo(cwd)) return undefined;
-  const head = spawnSync('git', ['-C', cwd, 'rev-parse', 'HEAD'], { encoding: 'utf-8' });
-  return {
-    head: head.status === 0 ? head.stdout.trim() || null : null,
-    dirty: Object.fromEntries(snapshotDirtyTree(cwd)),
-  };
+  const head = spawnSync('git', ['-C', cwd, 'rev-parse', '--verify', '--quiet', 'HEAD'], { encoding: 'utf-8' });
+  const value = head.status === 0 ? head.stdout.trim() : null;
+  if ((head.status !== 0 && head.status !== 1) || value !== null && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value)) throw new Error('Original Git baseline HEAD could not be read');
+  return createTreeBaseline(cwd, value);
 }
 
 /** The engine item whose state is the unit's: its own, or for a best-of-N unit the attempt it took. */
@@ -258,6 +257,7 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
     runtime.agentStartedAt = run.env.now();
     runtime.cwd = item?.worktreePath ?? run.contract.worktreePath ?? run.contract.projectRoot;
     unit.baseline ??= takeBaseline(runtime.cwd);
+    selectBaselineExecutionRoot(unit.baseline, runtime.cwd);
     const purpose = runtime.nextSpawnPurpose;
     runtime.nextSpawnPurpose = 'unit';
     run.moveUnit(unit, 'running');

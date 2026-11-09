@@ -5,8 +5,8 @@
  * (dirty-guard.ts, against a real scratch git repo) and the actual
  * phase-runner wiring (runPhase -> commitPhaseWork).
  */
-import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -42,7 +42,7 @@ function commitCount(cwd: string): number {
 // ---------------------------------------------------------------------------
 
 describe('dirty-guard: snapshotDirtyTree', () => {
-  test('captures dirty tracked + untracked paths with content hashes, excluding .goodvibes', async () => {
+  test('captures dirty tracked + untracked paths with private original bytes, excluding .goodvibes', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dirty-guard-snapshot-'));
     runGit(root, ['init']);
     writeFileSync(join(root, 'tracked.ts'), 'export const a = 1;\n');
@@ -58,16 +58,17 @@ describe('dirty-guard: snapshotDirtyTree', () => {
     expect(snapshot.has('tracked.ts')).toBe(true);
     expect(snapshot.has('untracked.ts')).toBe(true);
     expect([...snapshot.keys()].some((path) => path.startsWith('.goodvibes'))).toBe(false);
-    expect(snapshot.get('tracked.ts')).toMatch(/^[0-9a-f]{64}$/);
+    expect(snapshot.get('tracked.ts')).toEqual({ kind: 'file' });
   });
 
-  test('degrades to an empty snapshot (never throws) when cwd is not a git repo', async () => {
+  test('retains an unavailable snapshot without authorizing a later commit outside Git', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dirty-guard-nogit-'));
     const snapshot = snapshotDirtyTree(root);
     expect(snapshot.size).toBe(0);
+    expect(() => excludeUntouchedLaunchResidue(root, ['owner-file'], snapshot)).toThrow('snapshot is unavailable');
   });
 
-  test('keys non-ASCII paths by their RAW name (via `-z`), not git\'s C-quoted form, so the hash reads real bytes', async () => {
+  test('keys non-ASCII paths by their RAW name (via `-z`), not git\'s C-quoted form, so native reads select the real file', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dirty-guard-unicode-'));
     runGit(root, ['init']);
     // Both names are C-quoted by git's default porcelain (core.quotePath=true):
@@ -83,10 +84,9 @@ describe('dirty-guard: snapshotDirtyTree', () => {
     expect(snapshot.has('café.txt')).toBe(true);
     expect(snapshot.has('普通话.txt')).toBe(true);
     expect([...snapshot.keys()].some((key) => key.includes('\\') || key.startsWith('"'))).toBe(false);
-    // Real digests: the raw names resolve on disk, so hashWorkingTreeFile read
-    // actual bytes rather than failing on a nonexistent quoted filename.
-    expect(snapshot.get('café.txt')).toMatch(/^[0-9a-f]{64}$/);
-    expect(snapshot.get('普通话.txt')).toMatch(/^[0-9a-f]{64}$/);
+    // Only source kinds are public; the original raw-name bytes stay private.
+    expect(snapshot.get('café.txt')).toEqual({ kind: 'file' });
+    expect(snapshot.get('普通话.txt')).toEqual({ kind: 'file' });
 
     // End to end: untouched non-ASCII residue is excluded from a scoped commit
     // (the whole point of the guard) instead of leaking through on a key mismatch.
@@ -110,7 +110,7 @@ describe('dirty-guard: snapshotDirtyTree', () => {
     // consumed, never mis-parsed as its own standalone dirty path.
     expect(snapshot.has('renamed.txt')).toBe(true);
     expect(snapshot.has('café.txt')).toBe(false);
-    expect(snapshot.get('renamed.txt')).toMatch(/^[0-9a-f]{64}$/);
+    expect(snapshot.get('renamed.txt')).toEqual({ kind: 'file' });
   });
 });
 
@@ -340,4 +340,28 @@ describe('phase-runner: dirty-residue guard wiring', () => {
     const committedFiles = runGit(root, ['show', '--stat', '--name-only', 'HEAD']);
     expect(committedFiles).toContain('residue.ts');
   });
+});
+
+
+// The actual phase runner must pass its original root to the final Git commit
+// callback; a path resolved afresh after the phase is not that original source.
+test('phase-runner passes the retained alias root guard through the Git commit assertion seam', async () => {
+  const physical = mkdtempSync(join(tmpdir(), 'phase-root-physical-')), foreign = mkdtempSync(join(tmpdir(), 'phase-root-foreign-')), alias = physical + '.alias';
+  symlinkSync(physical, alias, 'dir'); runGit(alias, ['init']);
+  const launchDirtySnapshot = snapshotDirtyTree(alias), h = createOrchestrationHarness(), worktree = new AgentWorktree(alias);
+  let callback: (() => void) | undefined;
+  const commit = spyOn(worktree, 'commitWorkingTree').mockImplementation(async (_message, _paths, beforeCommit) => {
+    callback = beforeCommit; beforeCommit?.(); return { hash: null, skippedIgnored: [] };
+  });
+  try {
+    const outcomePromise = runPhase(makeWorkstream(), makeItem(['feature.ts']), makeScopedPhase(), [], {
+      agentManager: h.agentManager, configManager: makeFakeConfigManager(), runtimeBus: h.bus, projectRoot: alias, sessionId: 'test',
+      createWorktree: () => worktree, cancellation: createCancellationRegistry(), skipClaimVerification: true, launchDirtySnapshot,
+    });
+    writeFileSync(join(alias, 'feature.ts'), 'export const feature = true;\n');
+    h.completeAgent(h.spawnedRecords.at(-1)!.id, engineerReportOutput({ filesCreated: ['feature.ts'] }));
+    await outcomePromise; expect(typeof callback).toBe('function');
+    unlinkSync(alias); symlinkSync(foreign, alias, 'dir');
+    expect(() => callback?.()).toThrow();
+  } finally { commit.mockRestore(); rmSync(alias, { force: true }); rmSync(physical, { recursive: true, force: true }); rmSync(foreign, { recursive: true, force: true }); }
 });

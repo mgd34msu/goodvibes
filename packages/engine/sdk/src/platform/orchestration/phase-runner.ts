@@ -38,7 +38,7 @@ import { getContractTransportRetryDelayMs, getContractTransportRetryLimit } from
 import { readFailure } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
 import type { CancellationRegistry } from './cancellation.js';
-import { excludeUntouchedLaunchResidue, snapshotDirtyTree, type DirtyLaunchSnapshot } from './dirty-guard.js';
+import { excludeUntouchedLaunchResidue, listDirtyTreePaths, nativeDirtySnapshotRoot, type DirtyLaunchSnapshot } from './dirty-guard.js';
 import { classifyBookkeepingFailure, type BookkeepingFailureReading } from './bookkeeping.js';
 import { mergeWorkItemUsage } from './types.js';
 import type { UnitRoute } from '../contract/types.js';
@@ -54,7 +54,7 @@ export type PhaseRunnerAgentManagerLike = Pick<
 export interface WorktreeOps {
   merge(agentId: string): Promise<boolean>;
   cleanup(agentId: string): Promise<void>;
-  commitWorkingTree(message: string, paths?: string[]): Promise<CommitWorkingTreeResult>;
+  commitWorkingTree(message: string, paths?: string[], beforeCommit?: () => void): Promise<CommitWorkingTreeResult>;
   currentHead(): Promise<string | null>;
 }
 
@@ -278,9 +278,12 @@ const WRITING_PHASE_KINDS: ReadonlySet<Phase['kind']> = new Set(['engineer', 'in
 /** The paths a phase changed: the item worktree's own changes, or the shared tree's less untouched launch residue. */
 function phaseChangedPaths(deps: Pick<PhaseRunnerDeps, 'projectRoot' | 'itemWorktree' | 'launchDirtySnapshot'>): readonly string[] {
   const cwd = deps.itemWorktree?.path ?? deps.projectRoot;
-  const dirty = [...snapshotDirtyTree(cwd).keys()];
-  if (deps.itemWorktree !== undefined || deps.launchDirtySnapshot === undefined) return dirty;
-  return excludeUntouchedLaunchResidue(cwd, dirty, deps.launchDirtySnapshot).included;
+  const originalRoot = deps.itemWorktree === undefined && deps.launchDirtySnapshot ? nativeDirtySnapshotRoot(deps.launchDirtySnapshot, cwd) : undefined;
+  const dirty = listDirtyTreePaths(cwd); originalRoot?.assertCurrent();
+  if (dirty.length === 0 || deps.itemWorktree !== undefined || deps.launchDirtySnapshot === undefined) return dirty;
+  const result = excludeUntouchedLaunchResidue(cwd, dirty, deps.launchDirtySnapshot);
+  if (result.uncertain.length) throw new Error('Original dirty owner edits could not be safely read');
+  return result.included;
 }
 
 /** Quality gates (global-config-driven) + phase-required-gate assertion + phantom guard, for an item that is not a contract unit. */
@@ -382,8 +385,9 @@ async function commitPhaseWork(
 
   if (paths && paths.length > 0 && deps.launchDirtySnapshot) {
     const launchSnapshot = deps.launchDirtySnapshot;
-    if (launchSnapshot.size > 0) {
-      const { included, excluded } = excludeUntouchedLaunchResidue(deps.projectRoot, paths, launchSnapshot);
+    {
+      const { included, excluded, uncertain } = excludeUntouchedLaunchResidue(deps.projectRoot, paths, launchSnapshot);
+      if (uncertain.length) return { commit: { status: 'skipped', reason: 'original dirty owner edits could not be safely read' }, exclusion: { excludedPaths: excluded, skipped: true } };
       if (excluded.length > 0) {
         exclusion = { excludedPaths: excluded, skipped: included.length === 0 };
         if (included.length === 0) {
@@ -408,8 +412,10 @@ async function commitPhaseWork(
   }
 
   try {
-    const result = await worktree.commitWorkingTree(`orchestration: ${item.title}, ${phase.kind} phase`, paths);
-    await worktree.merge(agentId);
+    const originalRoot = deps.launchDirtySnapshot ? nativeDirtySnapshotRoot(deps.launchDirtySnapshot, deps.projectRoot) : undefined;
+    const assertRoot = originalRoot?.assertCurrent; assertRoot?.();
+    const result = await worktree.commitWorkingTree(`orchestration: ${item.title}, ${phase.kind} phase`, paths, assertRoot);
+    assertRoot?.(); await worktree.merge(agentId); assertRoot?.();
     const ignoredNote = result.skippedIgnored.length > 0
       ? `${result.skippedIgnored.length} ignored path${result.skippedIgnored.length === 1 ? '' : 's'} skipped`
       : undefined;

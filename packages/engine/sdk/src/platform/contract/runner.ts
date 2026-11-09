@@ -71,6 +71,7 @@ import { ContractRun, failureFromError, type RunEnv } from './run-context.js';
 import { createContractSteps, type ContractSteps, type ContractStepsWithReplies } from './steps.js';
 import { deserializeContract, deserializeOwnedContractCheckpoint, serializeContract, type ContractStore } from './store.js';
 import { retainOriginalReviewDescriptors } from './review-file-observations.js';
+import { releaseTreeBaselineBytes, retainOriginalTreeBaselines } from './tree-baseline.js';
 import {
   CURRENT_CONTRACT_SCHEMA_VERSION,
   isTerminalContractStatus,
@@ -267,6 +268,11 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       // Engine phases independently join unit executors before their cleanup.
       await Promise.all(contractAgentIds(run.contract).map((id) => deps.agentManager.join?.(id)));
       await run.work.join();
+      // Terminal history can retain Contract objects indefinitely. Actual
+      // executor drainage, rather than a terminal status event, ends private
+      // dirty-byte ownership; durable commitments/provenance remain intact.
+      releaseTreeBaselineBytes(run.contract);
+      const disposal = disposalCheckpoints.get(run.id); if (disposal) releaseTreeBaselineBytes(disposal);
       let checkpointed = false;
       try {
         if (deps.store.get(run.id) !== run.contract) throw new Error('Contract settlement checkpoint owner changed');
@@ -1350,7 +1356,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       for (const run of new Set([...runs.values(), ...settling.values()])) {
         const json = serializeContract(run.contract, now());
         const copy = json === null ? null : deserializeContract(json);
-        if (copy) retainOriginalReviewDescriptors(run.contract, copy);
+        if (copy) { retainOriginalReviewDescriptors(run.contract, copy); retainOriginalTreeBaselines(run.contract, copy); }
         disposalCheckpoints.set(run.id, copy);
       }
       watchdog.dispose();

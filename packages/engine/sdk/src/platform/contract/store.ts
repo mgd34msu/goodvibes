@@ -26,6 +26,7 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { contractWithStoredReviewObservations, hydrateStoredReviewObservations } from './review-file-observations.js';
 import { ownedContractCheckpointText, readOwnedContractCheckpoint, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 import { storedCurrentFileLabels, restoreCurrentFileLabels } from './current-file-observations.js';
+import { storedTreeBaselineOrigins, hydrateTreeBaselines, releaseTreeBaselineBytes } from './tree-baseline.js';
 import { isContractInputSnapshot } from './input-snapshot.js';
 import { validateNativeDecisionState } from './native-decisions.js';
 import { assertNativeContractSource, bindNativeContractSource } from './native-source.js';
@@ -94,7 +95,7 @@ export function serializeContract(contract: Contract, writtenAt: number): string
     validateNativeDecisionState(contract);
     const labels = storedCurrentFileLabels(contract);
     const snapshot = { schemaVersion: CURRENT_CONTRACT_SCHEMA_VERSION, writtenAt, contract: contractWithStoredReviewObservations(contract),
-      ...(labels === undefined ? {} : { nativeFileLabels: labels }) };
+      ...(labels === undefined ? {} : { nativeFileLabels: labels }), treeBaselineOrigins: storedTreeBaselineOrigins(contract) };
     return JSON.stringify(snapshot);
   } catch (error) {
     logger.error('contract store: JSON serialization failed', { contractId: contract.id, error: summarizeError(error) });
@@ -159,6 +160,8 @@ function parseContractSnapshot(json: string, receipt?: OwnedContractCheckpointRe
   if (raw['contract'].durableAdmission !== undefined && raw['schemaVersion'] < 2) return { rejected: 'invalid-contract' };
   try {
     hydrateStoredReviewObservations(raw['contract'], raw['schemaVersion'], json, receipt);
+    hydrateTreeBaselines(raw['contract'], json, receipt);
+    if (isTerminalContractStatus(raw['contract'].status)) releaseTreeBaselineBytes(raw['contract']);
     if (receipt !== undefined && raw['schemaVersion'] >= 6) restoreCurrentFileLabels(raw['contract'], receipt);
   }
   catch { return { rejected: 'invalid-contract' }; }

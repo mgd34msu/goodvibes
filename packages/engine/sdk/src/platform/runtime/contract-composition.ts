@@ -25,6 +25,7 @@ import { resolve } from 'node:path';
 import { createOwnerReadEvidenceReader } from './owner-read-evidence.js';
 import { resolveSurfaceDirectory } from './surface-root.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { ConfigManager } from '../config/manager.js';
 import { ContractStore } from '../contract/store.js';
 import { createContractRunner, type ContractRunner } from '../contract/runner.js';
@@ -220,7 +221,12 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
   }
   const writer = options.nativeDataWriter;
   const store = new ContractStore({ projectRoot: options.projectRoot,
-    beforeWrite: () => writer?.declare('contract-review-observations-v1') });
+    beforeWrite: () => {
+      for (const format of ['contract-review-observations-v1', 'contract-tree-baselines-v2'] as const) {
+        const result: unknown = writer?.declare(format);
+        if (result !== undefined) { drainOwned(result); throw new Error('Contract data format publication requires a synchronous native owner'); }
+      }
+    } });
   const { priceUsage, priceProvenance } = buildPricingSeams(options.providerRegistry);
   const planner = createBenchmarkRoutePlanner({
     catalog: options.providerRegistry,

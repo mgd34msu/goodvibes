@@ -4,6 +4,21 @@
 
 ### Fixed
 
+- Preserve each decision fallback's own protocol and model aliases while editing
+  it. Resolve reasoning effort against the selected provider and exact model,
+  including Sol `xhigh` and `max` in category routes. Refuse stale terminal route
+  edits and show the correct routing context limits and settings controls.
+
+- Stop returning retained delegated messages after owner revocation,
+  cancellation, expiry or workspace retirement. Keep saved review metadata
+  readable without reviving original message authority, and declare its reader
+  requirement before saving the explicit owner binding.
+
+- Replace repeated local record, generated-page and retained native-artifact
+  hashes with exact comparisons against their existing originals. Give fresh
+  native actions their own incarnation instead of hashing the same evidence
+  again. Remove an unused historical downloader; retain release manifest pins.
+
 - Retain the actual Telegram polling cursor and its local receiving lease
   through provider calls, dispatch and shutdown. A competing local receiver
   waits and retries; another writer's cursor cannot become this session's

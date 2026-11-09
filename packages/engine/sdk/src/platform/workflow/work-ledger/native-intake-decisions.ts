@@ -3,15 +3,16 @@ import { captureNativeConversationContinuation, type NativeConversationContinuat
 /** Recorded conversation intake. Proposals name source ranges; only the host owns text and execution. */
 import { types as nodeTypes } from 'node:util';
 import {
-  askAs, canonicalJson, checkEachFixture, decisionHeader, fixtureCheck, hashState, JudgmentError,
+  askAs, canonicalJson, checkEachFixture, decisionHeader, fixtureCheck, hashState, recordedJudgmentInputHash, reuseObservedJudgmentResult, JudgmentError,
   noul, readYesNo, recordReadings, STAKES_BANDS,
   type CallOptions, type ChoiceReading, type DecisionLog, type EntryType, type JudgmentPort,
   type JudgmentRetryProgress, type NamedDecision, type NoulResponse, type Questions, type YesNoReading,
 } from '@goodvibes-jev/judgment';
-import { captureJevDecisionContext, type JevDecisionBinding, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
+import { captureJevDecisionContext, drainOwned, type JevDecisionBinding, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
 import { criterionTrace, traceClaim } from '../../contract/batteries/criterion-trace.js';
 import { requestRoute } from '../../contract/batteries/request-route.js';
 import { decideAutonomous, inspectDecisionProtocolReferences, type AutonomousCondition, type AutonomousContinuation, type AutonomousDecision } from '../../gate/autonomous-decision.js';
+import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import { validateNativeConversationProposal, type NativeConversationProposal, type NativeConversationSpan } from './native-intake-types.js';
 
@@ -83,6 +84,7 @@ export interface NativeIntakeReadInput {
 }
 interface RecordedRead { readonly id: string; readonly stateHash: string; readonly context: string; readonly questions: string; readonly answers: string; }
 interface RouteOwnership { readonly text: string; readonly sourceRevision: string; readonly sourceIssues: string; readonly continuation: string; readonly binding: JevDecisionBinding; readonly records: readonly RecordedRead[]; readonly assertCurrent: () => void; }
+const applyRouteOwner = Reflect.apply, getRouteOwner = WeakMap.prototype.get, setRouteOwner = WeakMap.prototype.set;
 const routeOwners = new WeakMap<NativeIntakeRouteEvidence, RouteOwnership>();
 function assertRecorded(log: Pick<DecisionLog, 'get'>, record: RecordedRead): void {
   const entry = log.get(record.id);
@@ -103,24 +105,50 @@ function readSession(input: NativeIntakeReadInput, records: RecordedRead[] = [],
   inspectDecisionProtocolReferences(metadata);
   if (metadata.binding.inputRevision !== sourceRevision) throw new JudgmentError('invalid-request', 'Native intake binding does not name the captured source revision');
   if (!basePort.recorder) throw new JudgmentError('unrecorded', 'Native intake requires a recorded judgment port');
-  const active = () => { ownerSignal?.throwIfAborted(); assertCurrent(); for (const record of records) assertRecorded(decisionLog, record); };
+  const active = () => {
+    ownerSignal?.throwIfAborted();
+    const checked: unknown = assertCurrent();
+    if (checked !== undefined) { drainOwned(checked); throw new JudgmentError('invalid-request', 'Native intake owner guards must complete synchronously without a return value'); }
+    for (const record of records) assertRecorded(decisionLog, record);
+  };
   const port: JudgmentPort = { ...basePort, async ask(request) {
-    const beforeAttempt = () => { active(); request.signal?.throwIfAborted(); request.beforeAttempt?.(); };
+    const beforeAttempt = () => {
+      active(); request.signal?.throwIfAborted();
+      const checked: unknown = request.beforeAttempt?.();
+      if (checked !== undefined) { drainOwned(checked); throw new JudgmentError('invalid-request', 'Native intake attempt guards must complete synchronously without a return value'); }
+      active(); request.signal?.throwIfAborted();
+    };
     const signal = ownerSignal === undefined ? request.signal : request.signal === undefined ? ownerSignal : AbortSignal.any([ownerSignal, request.signal]);
     // decideAutonomous already inspects semantic state and canonical protocol identities separately.
     // Re-scanning its envelope would reinterpret host UUIDs and hashes as user payment material.
     const checked = request.context?.site === finalSite ? request.state : snapshotJudgmentInput(request.state);
-    const state = { input: checked, originalSource: { text, sourceRevision, sourceIssues, ...(continuation ? { conversationContext, ...(selectedDiffContext ? { selectedDiffContext } : {}) } : {}) }, binding: metadata.binding } as unknown as EntryType;
+    const state = captureStrictJudgmentJson({ input: checked, originalSource: { text, sourceRevision, sourceIssues, ...(continuation ? { conversationContext, ...(selectedDiffContext ? { selectedDiffContext } : {}) } : {}) }, binding: metadata.binding } as unknown as EntryType, () => new JudgmentError('invalid-request', 'Native intake requires plain original request data'));
     // This compares the exact actual wire request to DecisionLog.stateHash;
     // a borrowed port cannot merely supply somebody else's recorded id.
-    const expected = { stateHash: hashState(state), context: canonicalJson(request.context as unknown as EntryType), questions: canonicalJson(request.questions as unknown as EntryType) };
+    const expected = { context: canonicalJson(request.context as unknown as EntryType), questions: canonicalJson(request.questions as unknown as EntryType) };
     beforeAttempt();
-    const result = await basePort.ask({ ...request, state, beforeAttempt, ...(signal ? { signal } : {}),
-      onRetry(progress) { onRetry?.(progress); request.onRetry?.(progress); },
-    });
+    const forwarded: typeof request = { ...request, state, beforeAttempt, ...(signal ? { signal } : {}),
+      async onRetry(progress) {
+        beforeAttempt();
+        const observed = await Promise.allSettled([
+          Promise.resolve().then(() => onRetry?.(progress)),
+          Promise.resolve().then(() => request.onRetry?.(progress)),
+        ]);
+        beforeAttempt();
+        const failed = observed.find(result => result.status === 'rejected');
+        if (failed?.status === 'rejected') throw failed.reason;
+      },
+    };
+    const borrowed = await basePort.ask(forwarded);
+    const captured = captureStrictJudgmentJson(borrowed, () => new JudgmentError('invalid-response', 'Native intake requires plain recorded response data'));
+    const result = reuseObservedJudgmentResult(borrowed, captured);
+    // Only an actual recorded original may reuse its exact input commitment.
+    // A custom/copy result must independently bind this captured input to the
+    // real log once; a copied public decisionId cannot acquire provenance.
+    const stateHash = recordedJudgmentInputHash(borrowed, forwarded) ?? hashState(state);
     beforeAttempt();
     if (!result.decisionId || records.some(record => record.id === result.decisionId)) throw new JudgmentError('unrecorded', 'Native intake requires a fresh recorded judgment');
-    const record = { id: result.decisionId, ...expected, answers: canonicalJson(result.answers as unknown as EntryType) };
+    const record = { id: result.decisionId, stateHash, ...expected, answers: canonicalJson(result.answers as unknown as EntryType) };
     assertRecorded(decisionLog, record); records.push(Object.freeze(record));
     return result;
   } };
@@ -142,7 +170,7 @@ export async function readNativeIntakeRoute(input: NativeIntakeReadInput): Promi
     { yes: STAKES_BANDS.medium.confidence, no: STAKES_BANDS.high.confidence }));
   const settled = result.route === 'contract' ? reading.outcome === 'act' : ordinaryTurnReading.verdict === 'yes' && ordinaryTurnReading.outcome === 'act';
   const evidence = Object.freeze({ route: result.route, settled, reading, ordinaryTurnReading, decisionId: result.decisionId });
-  routeOwners.set(evidence, { text: session.text, sourceRevision: session.sourceRevision, sourceIssues: canonicalJson(session.sourceIssues), continuation: JSON.stringify(session.continuation ?? null), binding: session.binding, records: Object.freeze([...session.records]), assertCurrent: session.active });
+  applyRouteOwner(setRouteOwner, routeOwners, [evidence, { text: session.text, sourceRevision: session.sourceRevision, sourceIssues: canonicalJson(session.sourceIssues), continuation: JSON.stringify(session.continuation ?? null), binding: session.binding, records: Object.freeze([...session.records]), assertCurrent: session.active }]);
   return evidence;
 }
 
@@ -222,7 +250,7 @@ export async function decideNativeIntake(request: NativeIntakeDecisionInput): Pr
     continuations: request.continuations.map((item, index) => Object.freeze({ ref: catalog.continuations[index]!, description: snapshotJudgmentInput(item.description) as string, input: snapshotJudgmentInput(item.input) as EntryType })),
     conditions: request.conditions.map((item, index) => Object.freeze({ ref: catalog.resumeConditions[index]!, description: snapshotJudgmentInput(item.description) as string })),
   };
-  const owned = routeOwners.get(input.routeEvidence);
+  const owned = applyRouteOwner(getRouteOwner, routeOwners, [input.routeEvidence]) as RouteOwnership | undefined;
   if (!owned || owned.text !== input.text || owned.sourceRevision !== input.sourceRevision
     || owned.sourceIssues !== canonicalJson(input.sourceIssues as EntryType ?? null)
     || owned.continuation !== JSON.stringify(input.continuation ?? null)

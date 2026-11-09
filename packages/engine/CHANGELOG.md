@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Reuse the actual recorded input commitment during conversational intake,
+  keeping original source data immutable across custom provider callbacks.
+  Preserve real model attribution and reject copied or fabricated ownership.
+
 - Assign each configured project one saved identity instead of deriving it from
   its filesystem path. Preserve existing planning data and prepare the same
   identity before terminal, daemon and embedded work services start. Readonly

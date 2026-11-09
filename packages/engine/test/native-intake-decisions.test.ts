@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { createSystemOnePort, JudgmentError, DEFAULT_MODEL, SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions,
 } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -6,6 +6,7 @@ import {
   decideNativeIntake, NATIVE_INTAKE_COVERAGE_SITE, NATIVE_INTAKE_DECISION_SITE, NATIVE_INTAKE_ROUTE_SITE,
   readNativeIntakeRoute, validateNativeRequirementProposal, type NativeIntakeReadInput,
 } from '../sdk/src/platform/workflow/work-ledger/native-intake-decisions.js';
+import { requestRoute } from '../sdk/src/platform/contract/batteries/request-route.js';
 
 const binding = { sourceId: 'source', inputRevision: 'source-1', actionId: 'intake', actionRevision: 'routing-1', authorityId: 'owner', authorityRevision: 'authority-1', scopeId: 'project', scopeRevision: 'scope-1',
 };
@@ -225,6 +226,95 @@ test('missing recorder or mismatched log lineage fails closed', async () => {
     },
   };
   await expect(readNativeIntakeRoute(read)).rejects.toMatchObject({ kind: 'unrecorded' });
+});
+
+for (const copied of [false, true]) test(`intake reuses only the actual recorded input commitment (copy=${copied})`, async () => {
+  using log = new SqliteDecisionLog(':memory:'); const fake = answers(), recorded = withDecisionLog(fake.port, log);
+  const selected: JudgmentPort = copied ? { ...recorded, async ask(request) { return { ...await recorded.ask(request) }; } } : recorded;
+  const hash = spyOn(Bun.CryptoHasher, 'hash');
+  try {
+    const route = await readNativeIntakeRoute(input(selected, log)); expect(route.route).toBe('contract');
+    expect(fake.requests).toHaveLength(1); expect(log.get(route.decisionId)?.status).toBe('answered');
+    // One actual recorder input hash; only a copied result needs one extra
+    // independent forwarded-input comparison to the real saved log row.
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(copied ? 2 : 1);
+  } finally { hash.mockRestore(); }
+});
+
+test('a custom port cannot mutate the original source before its recorded-input comparison', async () => {
+  using log = new SqliteDecisionLog(':memory:'); const fake = answers(), recorded = withDecisionLog(fake.port, log); let immutable = false;
+  const selected: JudgmentPort = { ...recorded, async ask(request) {
+    const source = (request.state as { originalSource: { text: string } }).originalSource;
+    immutable = Object.isFrozen(source);
+    try { source.text = 'Different borrowed requirement'; } catch { /* Frozen original is required. */ }
+    return recorded.ask(request);
+  } };
+  const route = await readNativeIntakeRoute(input(selected, log)); expect(route.route).toBe('contract'); expect(immutable).toBe(true);
+  expect((fake.requests[0]!.state as { originalSource: { text: string } }).originalSource.text).toBe(text);
+});
+
+test('borrowed response getters cannot run in intake capture or fabricate recorded route answers', async () => {
+  using log = new SqliteDecisionLog(':memory:'); const fake = answers(), recorded = withDecisionLog(fake.port, log); let invoked = 0;
+  const selected: JudgmentPort = { ...recorded, async ask(request) { const result = await recorded.ask(request); return { ...result, get answers() { invoked++; return result.answers; } }; } };
+  await expect(readNativeIntakeRoute(input(selected, log))).rejects.toMatchObject({ kind: 'invalid-response' }); expect(invoked).toBe(0);
+});
+
+test('later route-owner map overrides cannot make copied reading fields an actual source owner', async () => {
+  using log = new SqliteDecisionLog(':memory:'); const fake = answers({ route: 'answer' }), read = input(withDecisionLog(fake.port, log), log), route = await readNativeIntakeRoute(read);
+  const get = WeakMap.prototype.get;
+  let pending: ReturnType<typeof decideNativeIntake>;
+  try {
+    WeakMap.prototype.get = () => ({ text, sourceRevision: 'source-1', sourceIssues: 'null', continuation: 'null', binding, records: [], assertCurrent() {} });
+    pending = decideNativeIntake({ ...read, routeEvidence: { ...route }, allowAct: true, continuations: [], conditions: [] });
+  } finally { WeakMap.prototype.get = get; }
+  await expect(pending!).rejects.toMatchObject({ kind: 'invalid-request' }); expect(fake.requests).toHaveLength(1);
+});
+
+for (const mode of ['reject', 'cancel', 'stale'] as const) test(`intake joins both actual retry observers before proceeding (${mode})`, async () => {
+  using log = new SqliteDecisionLog(':memory:'); const fake = answers(), recorded = withDecisionLog(fake.port, log), controller = new AbortController();
+  let current = true, next = false, entered!: () => void, release!: () => void;
+  const events: string[] = [], started = new Promise<void>(resolve => { entered = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+  const actualRoute = requestRoute.route.bind(requestRoute);
+  const routing = spyOn(requestRoute, 'route').mockImplementation((port, state, options) => actualRoute(port, state, { ...options, async onRetry() {
+    events.push('request-entered'); entered(); await gate; events.push('request-drained');
+  } }));
+  const selected: JudgmentPort = { ...recorded, async ask(request) {
+    await request.onRetry?.({ logicalRequestId: 'synthetic-retry', attempt: { attempt: 1, endpointIndex: 0, endpointKind: 'local', requestedModel: 'fixture', latencyMs: 1, outcome: 'unavailable' }, elapsedMs: 1, nextDelayMs: 0 });
+    next = true; return recorded.ask(request);
+  } };
+  const pending = readNativeIntakeRoute({ ...input(selected, log), signal: controller.signal,
+    assertCurrent() { if (!current) throw new JudgmentError('aborted', 'Synthetic stale owner'); },
+    async onRetry() { events.push('owner'); if (mode === 'reject') throw new Error('Synthetic observer rejection'); },
+  }); void pending.catch(() => {});
+  try {
+    await started; expect(next).toBe(false); expect(fake.requests).toHaveLength(0);
+    if (mode === 'cancel') controller.abort(new JudgmentError('aborted', 'Synthetic observer cancellation'));
+    if (mode === 'stale') current = false;
+    release();
+    if (mode === 'reject') await expect(pending).rejects.toThrow('Synthetic observer rejection');
+    else await expect(pending).rejects.toMatchObject({ kind: 'aborted' });
+    expect(events).toEqual(['owner', 'request-entered', 'request-drained']); expect(next).toBe(false); expect(fake.requests).toHaveLength(0);
+  } finally { release(); await pending.catch(() => {}); routing.mockRestore(); }
+});
+
+for (const mode of ['async-owner', 'nonvoid-owner', 'async-request', 'nonvoid-request', 'revoke-in-request'] as const) test(`intake cannot erase a synchronous guard contract (${mode})`, async () => {
+  using log = new SqliteDecisionLog(':memory:'); const fake = answers(), recorded = withDecisionLog(fake.port, log); let current = true, borrowed = false;
+  const actualRoute = requestRoute.route.bind(requestRoute);
+  const routing = spyOn(requestRoute, 'route').mockImplementation((port, state, options) => actualRoute(port, state, { ...options, beforeAttempt() {
+    if (mode === 'async-request') return Promise.reject(new Error('Synthetic rejected request guard'));
+    if (mode === 'nonvoid-request') return true;
+    if (mode === 'revoke-in-request') current = false;
+  } }));
+  const selected: JudgmentPort = { ...recorded, ask(request) { borrowed = true; return recorded.ask(request); } };
+  try {
+    const pending = readNativeIntakeRoute({ ...input(selected, log), assertCurrent() {
+      if (mode === 'async-owner') return Promise.reject(new Error('Synthetic rejected owner guard'));
+      if (mode === 'nonvoid-owner') return true;
+      if (!current) throw new JudgmentError('aborted', 'Synthetic retired original owner');
+    } });
+    await expect(pending).rejects.toMatchObject({ kind: mode === 'revoke-in-request' ? 'aborted' : 'invalid-request' });
+    expect(borrowed).toBe(false); expect(fake.requests).toHaveLength(0); expect(log.query()).toHaveLength(0);
+  } finally { routing.mockRestore(); }
 });
 
 test('binding input revision must identify the captured source before any reading', async () => {

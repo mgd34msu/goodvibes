@@ -88,9 +88,11 @@ export function knowledgeRowGenerationFromRows(rows: ReturnType<SqlDatabase['exe
 }
 
 /** Native SQL bookkeeping is not evidence sent for semantic interpretation. */
-export function knowledgeRawRowForAdmission(raw: Readonly<Record<string, unknown>> | null): Record<string, unknown> | null {
+export function knowledgeRawRowForAdmission(raw: Readonly<Record<string, unknown>> | null,
+  kind?: 'source' | 'node' | 'extraction' | 'edge'): Record<string, unknown> | null {
   if (raw === null) return null;
   const result = { ...raw };
   delete result[KNOWLEDGE_ROW_REVISION_COLUMN];
+  if (kind === 'node') delete result.gv_content_revision;
   return result;
 }

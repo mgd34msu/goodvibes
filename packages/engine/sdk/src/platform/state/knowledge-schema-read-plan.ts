@@ -1,4 +1,7 @@
 import { validateKnowledgeRowRevisions } from '../knowledge/store-row-revisions.js';
+import { validateKnowledgeNodeContentRevisions } from '../knowledge/store-node-content-revisions.js';
+import { validateKnowledgeNodeActivationCache } from '../knowledge/store-node-activation-cache.js';
+import { KNOWLEDGE_SCHEMA_VERSION } from '../knowledge/store-schema-version.js';
 import type { SqlDatabase } from './sqlite-store.js';
 import { validateCurrentKnowledgeSchema } from '../knowledge/store-current-schema-validation.js';
 import { knowledgeSchemaColumns, executionAttemptColumns, conversationRequestColumns, knowledgeEdgeChangeTriggers } from '../knowledge/store-schema-validation-data.js';
@@ -6,7 +9,7 @@ import { knowledgeSchemaColumns, executionAttemptColumns, conversationRequestCol
 const planBrand: unique symbol = Symbol('native-knowledge-schema-read-plan');
 export interface NativeKnowledgeSchemaReadPlan { readonly [planBrand]: true }
 interface Plan {
-  readonly schemaVersion: 12;
+  readonly schemaVersion: typeof KNOWLEDGE_SCHEMA_VERSION;
   readonly validator: typeof validateCurrentKnowledgeSchema;
 }
 const plans = new WeakMap<object, Plan>();
@@ -14,7 +17,7 @@ const plans = new WeakMap<object, Plan>();
 /** No caller data or function can define the conditions of this native plan. */
 export function prepareNativeKnowledgeSchemaReadPlan(): NativeKnowledgeSchemaReadPlan {
   const token = Object.freeze({ [planBrand]: true as const });
-  plans.set(token, Object.freeze({ schemaVersion: 12, validator: validateCurrentKnowledgeSchema }));
+  plans.set(token, Object.freeze({ schemaVersion: KNOWLEDGE_SCHEMA_VERSION, validator: validateCurrentKnowledgeSchema }));
   return token;
 }
 
@@ -47,7 +50,11 @@ const emptyTables = Object.freeze(['work_ledgers', 'native_work_executions', 'na
 /** Fixed readonly SQL and data comparisons, never a borrowed validation callback.
  * A populated authority table requires the original full validator and clone. */
 export function validateNativeKnowledgeReadSchema(db: Pick<SqlDatabase, 'exec'>): boolean {
-  try { validateKnowledgeRowRevisions(db); } catch { return false; }
+  try {
+    validateKnowledgeRowRevisions(db);
+    validateKnowledgeNodeContentRevisions(db);
+    validateKnowledgeNodeActivationCache(db);
+  } catch { return false; }
   const layoutResults = db.exec(layouts.map(([table]) => `PRAGMA table_info(${table})`).join(';'));
   // sql.js omits empty statement results. Never attribute a shifted result to
   // the next table when one layout or index list is missing.

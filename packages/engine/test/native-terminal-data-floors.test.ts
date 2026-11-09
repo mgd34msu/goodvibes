@@ -39,17 +39,17 @@ test('Linux admission refuses a selected path that is not the OS loaded image', 
   expect(() => admitInstalledClientDataWriter({ moduleUrl: 'file:///$bunfs/root/main.js', execPath: f.execPath, compiledVersion: '3.1.2', platform: 'linux' })).toThrow('loaded');
 });
 
-test('the actual knowledge schema12 write establishes a floor before its first SQLite image', async () => {
+test('the actual knowledge schema13 write establishes a floor before its first SQLite image', async () => {
   const f = fixture(), path = join(f.root, 'knowledge.sqlite'); let declared = false;
   const store = new KnowledgeStore({ dbPath: path, nativeDataWriter: { declare(format) {
     if (!declared) expect(existsSync(path)).toBe(false);
-    f.owner.declare(format); expect(formats(f.requirement)).toContain('knowledge-schema-v12'); declared = true;
+    f.owner.declare(format); expect(formats(f.requirement)).toContain('knowledge-schema-v13'); declared = true;
   } } });
   try {
     await store.init(); expect(existsSync(path)).toBe(false); expect(existsSync(f.requirement)).toBe(false);
     await store.upsertSource({ connectorId: 'fixture', sourceType: 'document', title: 'Owned document', canonicalUri: 'fixture://source', status: 'indexed' });
     expect(declared).toBe(true);
-    const db = new Database(path, { readonly: true }); try { expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 12 }); } finally { db.close(); }
+    const db = new Database(path, { readonly: true }); try { expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 13 }); } finally { db.close(); }
   } finally { await store.close(); }
 });
 

@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Reuse accepted knowledge nodes from actual source and subject revisions,
+  including after restart, without repeatedly hashing complete evidence. Changes
+  made during review invalidate the result. Preserve older saved acceptances
+  during migration and keep unsupported cache data untouched.
+
 - Preserve native settlement replay with the exact original runner receipt and
   independently checked adjacent ledger events. Reuse recorded decision input
   commitments for verified criteria instead of hashing navigation references,

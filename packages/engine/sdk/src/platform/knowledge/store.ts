@@ -4,12 +4,14 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeRecordAdmissionHeldError, knowledgeEdgeSnapshotFromRows, knowledgeRecordGenerationFromRows, knowledgeRecordSnapshotFromRows, type KnowledgeRecordSnapshot } from './store-record-snapshot.js';
 import { sameKnowledgeRecord, captureKnowledgeStoreInput, copyKnowledgeRepresentation, prepareKnowledgeOwnedClocks } from './store-record-representation.js';
 import { captureOwnedJson, JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { validateCurrentKnowledgeSchema } from './store-current-schema-validation.js';
+import { validateCurrentKnowledgeSchema, validateKnowledgeSchemaV12 } from './store-current-schema-validation.js';
+import { createKnowledgeNodeContentRevisions } from './store-node-content-revisions.js';
+import { createKnowledgeNodeActivationCache } from './store-node-activation-cache.js';
 import { prepareNativeKnowledgeSchemaReadPlan } from '../state/knowledge-schema-read-plan.js';
 import { createNativeCiContinuationTable, validateNativeCiContinuationTable } from './store-native-ci-continuation.js';
 import { createNativeConversationStorage, validateNativeConversationCaptureTable, migrateNativeConversationCaptureTable } from './store-native-intake.js';
 import type { NativeConversationStorage } from '../workflow/work-ledger/native-intake-types.js';
-import { migrateNativeWorkSettlementTable, validateNativeWorkSettlementTable, createNativeWorkExecutionStorage, createNativeWorkExecutionTable, validateNativeWorkExecutionTable, createNativeWorkExecutionIntentTable, validateNativeWorkExecutionIntentTable } from './store-native-work-execution.js';
+import { migrateNativeWorkSettlementTable, validateNativeWorkSettlementTable, createNativeWorkSettlementTargetIndex, createNativeWorkExecutionStorage, createNativeWorkExecutionTable, validateNativeWorkExecutionTable, createNativeWorkExecutionIntentTable, validateNativeWorkExecutionIntentTable } from './store-native-work-execution.js';
 import type { NativeWorkExecutionStorage } from '../workflow/work-ledger/native-execution-types.js';
 import { createKnowledgeWorkLedgerStorage, createWorkLedgerTable, validateWorkLedgerTable, migrateWorkLedgerTableToVersion2, type KnowledgeWorkLedgerStorage } from './store-work-ledger.js';
 import { randomUUID } from 'node:crypto';
@@ -237,7 +239,7 @@ export class KnowledgeStore {
     this.declareNativeExecutionFormat = declareNativeData ? () => declareNativeData('native-execution-bindings-v2') : undefined;
     this.declareNativeCiFormat = declareNativeData ? () => declareNativeData('native-ci-continuations-v2') : undefined;
     this.declareNativeSettlementFormat = declareNativeData ? () => declareNativeData('native-settlements-v2') : undefined;
-    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v12'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
+    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v13'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
     nativePublicationApply(nativePublicationAdd, nativeNodePublicationOwners, [this]);
     void this.init().catch((error: unknown) => {
       logger.error('[knowledge-store] initialization failed', {
@@ -588,6 +590,16 @@ export class KnowledgeStore {
     return this.sqlite.readPersistedRecordGenerations(selectors);
   }
 
+  getNodeActivationCache(nodeId: string) {
+    return this.sqlite.readPersistedNodeActivationCache(nodeId);
+  }
+
+  /** Native activation reuse compares only actual persisted row versions.
+   * The receipt reference is descriptive, never an admission capability. */
+  getNodeActivationState(nodeId: string, selectors: readonly PersistedKnowledgeRecordSelector[], observation: string | null) {
+    return this.sqlite.readPersistedNodeActivationState(nodeId, selectors, observation);
+  }
+
   captureExpectedRecordReadset(selectors: readonly PersistedKnowledgeRecordSelector[]) {
     return this.sqlite.captureExpectedRecordReadset(selectors);
   }
@@ -871,7 +883,8 @@ export class KnowledgeStore {
     await this.init();
     const { existing, record, now, observationEvidence } = preparedNodeWrite(this, prepared, index, this.nodeActivationScope);
     if (record === existing) {
-      retainKnowledgeNodeObservation(existing, record, observationEvidence); markPreparedNodeWritten(prepared, index);
+      retainKnowledgeNodeObservation(existing, record, observationEvidence);
+      if (markPreparedNodeWritten(prepared, index, this.sqlite)) await this.sqlite.save();
       const snapshot = knowledgeRecordSnapshotFromRows('node', this.sqlite.exec('SELECT * FROM knowledge_nodes WHERE id = ? LIMIT 1', [record.id]));
       nativePublicationApply(nativePublicationSet, nativeNodePublications, [record, Object.freeze({ store: this, previous: existing ? new WeakRef(existing) : undefined, snapshot })]);
       return record;
@@ -881,7 +894,7 @@ export class KnowledgeStore {
     recordKnowledgeNodeRevisions(this.sqlite, this.nodeRevisions, record, existing, now);
     retainKnowledgeNodeObservation(existing, record, observationEvidence);
     this.nodes.set(record.id, record);
-    markPreparedNodeWritten(prepared, index);
+    markPreparedNodeWritten(prepared, index, this.sqlite);
     await this.sqlite.save();
     nativePublicationApply(nativePublicationSet, nativeNodePublications, [record, Object.freeze({ store: this, previous: existing ? new WeakRef(existing) : undefined, snapshot })]);
     return record;
@@ -930,7 +943,7 @@ export class KnowledgeStore {
     if (mutation) recordKnowledgeNodeRevisions(this.sqlite, this.nodeRevisions, guarded, existing, now);
     retainKnowledgeNodeObservation(existing, guarded);
     this.nodes.set(guarded.id, guarded);
-    markPreparedNodeWritten(prepared, 0);
+    markPreparedNodeWritten(prepared, 0, this.sqlite);
     await this.sqlite.save();
   }
 
@@ -1061,7 +1074,7 @@ export class KnowledgeStore {
     assertPreparedNodeWrites(this, prepared, this.nodeActivationScope);
     commitKnowledgeNodeIssueWrites({ sqlite: this.sqlite, nodes: this.nodes, issues: this.issues, nodeRevisions: this.nodeRevisions },
       nodes, issues.filter((issue) => !issue.preserve).map((issue) => issue.record));
-    nodes.forEach(({ existing, record, observationEvidence }, index) => { retainKnowledgeNodeObservation(existing, record, observationEvidence); markPreparedNodeWritten(prepared, index); });
+    nodes.forEach(({ existing, record, observationEvidence }, index) => { retainKnowledgeNodeObservation(existing, record, observationEvidence); markPreparedNodeWritten(prepared, index, this.sqlite); });
     await this.sqlite.save();
   }
 
@@ -1392,7 +1405,17 @@ export class KnowledgeStore {
         // Writer semantic barrier only: preserve every source ID, original row
         // and SQLite-issued revision. Old hash-ID planning writers refuse v12
         // before the version opener invokes their schema or migration callbacks.
-        { toVersion: 12, migrate: db => { validateCurrentKnowledgeSchema(db); } },
+        { toVersion: 12, migrate: db => { validateKnowledgeSchemaV12(db); } },
+        // Keep every saved project/source ID. Older default-ID writers cannot
+        // recreate namespaces after explicit registration, and older activation
+        // writers cannot bypass the new native dependency bookkeeping.
+        { toVersion: 13, migrate: db => {
+          validateKnowledgeSchemaV12(db);
+          createKnowledgeNodeContentRevisions(db);
+          createKnowledgeNodeActivationCache(db);
+          createNativeWorkSettlementTargetIndex(db);
+          validateCurrentKnowledgeSchema(db);
+        } },
       ],
     });
     try {

@@ -1,3 +1,5 @@
+import { sameNativeKnowledgeTableSql } from '../knowledge/store-table-definition.js';
+import { activationCacheRowSql, readKnowledgeActivationDependencies, parseKnowledgeActivationCacheRow, type KnowledgeActivationDependencies, type KnowledgeActivationCacheRow } from '../knowledge/store-node-activation-cache.js';
 import { queryPersistedPlanningProjects } from '../knowledge/project-planning/persisted-project-query.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createSqlJsDatabase } from './sqljs-database.js';
@@ -1362,6 +1364,41 @@ export class SQLiteStore {
     } catch (error) { if (frame) frame.poisoned = true; throw error; }
   }
 
+  readPersistedNodeActivationCache(nodeId: string): KnowledgeActivationCacheRow | null {
+    try {
+      if (typeof nodeId !== 'string') throw new TypeError('SQLiteStore: invalid activation selector');
+      return parseKnowledgeActivationCacheRow(this.readPrivatePersistedRows(activationCacheRowSql, [nodeId]));
+    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  }
+
+  /** Closed native dependency/cache read: source selectors also select the
+   * actual current source-unique extraction, including its absence. */
+  readPersistedNodeActivationState(nodeId: string, selectors: readonly PersistedKnowledgeRecordSelector[], observation: string | null): {
+    readonly dependencies: KnowledgeActivationDependencies; readonly cache: KnowledgeActivationCacheRow | null;
+  } {
+    try {
+      if (typeof nodeId !== 'string' || (observation !== null && typeof observation !== 'string')) throw new TypeError('SQLiteStore: invalid activation selector');
+      const captured = captureRecordSelectors(selectors);
+      if (captured.some(selector => selector.kind === 'extraction')) throw new TypeError('SQLiteStore: invalid activation selector');
+      let state: { dependencies: KnowledgeActivationDependencies; cache: KnowledgeActivationCacheRow | null } | undefined;
+      this.assertPersistedReadFrame(() => {
+        // This adapter is created here, never supplied by a consumer. The
+        // imported native reader owns every fixed SELECT and bind parameter.
+        const native = { exec: (sql: string, parameters: (string | number)[] = []) => {
+          if (parameters.some(value => typeof value !== 'string')) throw new TypeError('SQLiteStore: invalid activation parameters');
+          return this.readPrivatePersistedRows(sql, parameters as string[], this.persistedReadFrame?.localState !== undefined);
+        } };
+        state = { dependencies: readKnowledgeActivationDependencies(native, nodeId,
+          captured.filter(selector => selector.kind === 'source').map(selector => selector.id),
+          captured.filter(selector => selector.kind === 'node').map(selector => selector.id), observation),
+          cache: parseKnowledgeActivationCacheRow(this.readPrivatePersistedRows(activationCacheRowSql, [nodeId], this.persistedReadFrame?.localState !== undefined)) };
+        return undefined;
+      });
+      if (!state) throw new SQLiteObservationRetiredError();
+      return state;
+    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  }
+
   /** A closed primitive readset has no caller code between its physical fences. */
   readPersistedRecordGenerations(selectors: readonly PersistedKnowledgeRecordSelector[]): readonly (string | null)[] {
     let generations: readonly (string | null)[] = [];
@@ -1421,7 +1458,7 @@ export class SQLiteStore {
       if (canonical) {
         const rows = readDatabaseRow(db, "SELECT type,name,sql FROM main.sqlite_schema WHERE name IN ('knowledge_sources','knowledge_nodes','knowledge_extractions')", [])[0]?.values;
         canonical = Boolean(rows && rows.length === 3 && Object.entries(knowledgeRecordTableSql).every(([name, sql]) =>
-          rows.some(row => row[0] === 'table' && row[1] === name && row[2] === sql.trim().replace('IF NOT EXISTS ', ''))));
+          rows.some(row => row[0] === 'table' && row[1] === name && sameNativeKnowledgeTableSql(row[2], sql))));
       }
       currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
       frame?.assertCurrent();
@@ -1465,7 +1502,7 @@ export class SQLiteStore {
       if (canonical) {
         const rows = readDatabaseRow(db, "SELECT type,name,sql FROM main.sqlite_schema WHERE name IN ('knowledge_sources','knowledge_nodes','knowledge_extractions')", [])[0]?.values;
         canonical = Boolean(rows && rows.length === 3 && Object.entries(knowledgeRecordTableSql).every(([name, sql]) =>
-          rows.some(row => row[0] === 'table' && row[1] === name && row[2] === sql.trim().replace('IF NOT EXISTS ', ''))));
+          rows.some(row => row[0] === 'table' && row[1] === name && sameNativeKnowledgeTableSql(row[2], sql))));
       }
       currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
       frame?.assertCurrent();

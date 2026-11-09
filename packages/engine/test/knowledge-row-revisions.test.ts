@@ -1,3 +1,5 @@
+import { knowledgeNodeContentRevisionTriggers } from '../sdk/src/platform/knowledge/store-node-content-revisions.js';
+import { knowledgeContentHash } from '../sdk/src/platform/knowledge/content-hash.js';
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -83,12 +85,17 @@ test.each(['missing-trigger', 'foreign-trigger', 'recursive-triggers', 'view'] a
 });
 
 test('the native admission projection omits only the host column, including no metadata exceptions', () => {
-  const raw = { gv_revision: 'native revision', metadata: '{"gv_revision":"private user value"}', unknown: 'unrecognized input' };
-  expect(knowledgeRawRowForAdmission(raw)).toEqual({ metadata: raw.metadata, unknown: raw.unknown });
+  const raw = { gv_revision: 'native revision', gv_content_revision: 'native content revision', metadata: '{"gv_revision":"private user value"}', unknown: 'unrecognized input' };
+  expect(knowledgeRawRowForAdmission(raw, 'node')).toEqual({ metadata: raw.metadata, unknown: raw.unknown });
+  expect(knowledgeRawRowForAdmission(raw, 'source')?.gv_content_revision).toBe('native content revision');
   expect(raw.gv_revision).toBe('native revision');
 });
 
 function makeVersionTen(db: SqlDatabase) {
+  db.run('DROP TRIGGER knowledge_node_activation_dependencies_delete');
+  db.run('DROP TABLE knowledge_node_activation_dependencies');
+  for (const [name] of knowledgeNodeContentRevisionTriggers) db.run(`DROP TRIGGER ${name}`);
+  db.run('ALTER TABLE knowledge_nodes DROP COLUMN gv_content_revision');
   for (const [name] of knowledgeRowRevisionTriggers) db.run(`DROP TRIGGER ${name}`);
   for (const table of knowledgeRevisionTables) db.run(`ALTER TABLE ${table} DROP COLUMN gv_revision`);
   db.run('DROP TRIGGER knowledge_edge_change_update');
@@ -132,15 +139,23 @@ test('native row migration preserves paid activation receipts without another mo
       summary: 'The device has four inputs.', sourceId: 'manual',
       metadata: { semanticKind: 'fact', factKind: 'specification', value: 'four inputs', evidence: 'The device has four inputs.' } });
     expect(original.status).toBe('active'); expect(fake.requests).toHaveLength(1);
+    const { dependencyReference: _reference, dependencyVersion: _dependencyVersion, ...oldReading } = original.metadata.nodeActivation as Record<string, unknown>;
+    const historical = { ...original, metadata: { ...original.metadata, nodeActivation: { ...oldReading,
+      evidenceHash: knowledgeContentHash(JSON.stringify({ evidence: [{ id: 'manual', source: store.getSource('manual'),
+        extraction: store.getExtractionBySourceId('manual') }], subjects: [] })) } } };
     await store.close();
     const SQL = await loadSqlJsEngine(), old = new SQL.Database(readFileSync(dbPath));
-    try { makeVersionTen(old); writeFileSync(dbPath, old.export()); } finally { old.close(); }
+    try { old.run('UPDATE knowledge_nodes SET metadata=? WHERE id=?', [JSON.stringify(historical.metadata), original.id]); old.run('UPDATE knowledge_node_revisions SET metadata=? WHERE node_id=?', [JSON.stringify(historical.metadata), original.id]); makeVersionTen(old); writeFileSync(dbPath, old.export()); } finally { old.close(); }
     const restarted = new KnowledgeStore({ dbPath });
     try {
       await restarted.init();
-      expect(restarted.getNode('fact')).toEqual(original);
+      expect(restarted.getNode('fact')).toEqual(historical);
+      const adopted = await restarted.upsertNode({ ...historical });
+      expect((adopted.metadata.nodeActivation as Record<string, unknown>).evidenceHash).toBeUndefined();
+      expect((adopted.metadata.nodeActivation as Record<string, unknown>).dependencyVersion).toBe(1);
+      expect(fake.requests).toHaveLength(1);
       const migrated = readFileSync(dbPath);
-      expect(await restarted.upsertNode({ ...original })).toEqual(original);
+      expect(await restarted.upsertNode({ ...adopted })).toEqual(adopted);
       expect(fake.requests).toHaveLength(1);
       expect(readFileSync(dbPath)).toEqual(migrated);
     } finally { await restarted.close(); }

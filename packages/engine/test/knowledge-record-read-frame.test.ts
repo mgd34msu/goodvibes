@@ -13,6 +13,7 @@ import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
 import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { prepareKnowledgeScopeSelection, KnowledgeScopeSelectionHeldError } from '../sdk/src/platform/knowledge/scope-selection.js';
+import { knowledgeNodeContentRevisionTriggers } from '../sdk/src/platform/knowledge/store-node-content-revisions.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [], databases: SQLiteStore[] = [];
 afterEach(async () => {
@@ -1316,6 +1317,49 @@ function observeExpectedRawRows(sqlite: SQLiteStore) {
     } });
   return { count: () => count, reset: () => { count = 0; }, restore: () => { Reflect.deleteProperty(sqlite, 'readPrivatePersistedRows'); } };
 }
+
+test('actual v12 ALTER migration preserves the compiled native readset path', async () => {
+  const { store, source, extraction } = await fixture(); const filename = store.storagePath; await store.close();
+  const SQL = await loadSqlJsEngine(), old = new SQL.Database(readFileSync(filename));
+  try {
+    old.run('DROP TRIGGER knowledge_node_activation_dependencies_delete'); old.run('DROP TABLE knowledge_node_activation_dependencies');
+    for (const [name] of knowledgeNodeContentRevisionTriggers) old.run(`DROP TRIGGER ${name}`);
+    old.run('ALTER TABLE knowledge_nodes DROP COLUMN gv_content_revision'); old.run('PRAGMA user_version=12');
+    writeFileSync(filename, old.export());
+  } finally { old.close(); }
+  const migrated = new KnowledgeStore({ dbPath: filename }); stores.push(migrated); await migrated.init();
+  const sqlite = (migrated as unknown as { sqlite: SQLiteStore }).sqlite;
+  const selectors = [{ kind: 'source' as const, id: source.id }, { kind: 'extraction' as const, id: extraction.id }];
+  const captured = migrated.captureExpectedRecordReadset(selectors), rows = observeExpectedRawRows(sqlite);
+  try {
+    expect(migrated.matchesExpectedRecordReadsets([{ expected: captured.expected, selectors }])).toEqual([true]);
+    expect(rows.count()).toBe(0);
+  } finally { rows.restore(); }
+});
+
+test('a source extra column cannot borrow the node-only private content stamp exclusion', async () => {
+  const { store, source, sqlite } = await fixture();
+  sqlite.run('ALTER TABLE knowledge_sources ADD COLUMN gv_content_revision TEXT');
+  sqlite.run('UPDATE knowledge_sources SET gv_content_revision=? WHERE id=?', ['api_key=synthetic-private-source-material', source.id]);
+  await sqlite.save();
+  expect(() => prepareKnowledgeRecordAdmission(store, 'source', source)).toThrow(JudgmentInputError);
+});
+
+test('multi-node activation cache preflight and reuse share one synchronous native image', async () => {
+  const { store, source, sqlite } = await fixture();
+  const fake = fakePort(() => noulAnswer(0.99)), previous = installJudgmentPort(fake.port);
+  try {
+    const nodes = [];
+    for (let index = 0; index < 8; index++) nodes.push(await store.upsertNode({ id: `fact-${index}`, kind: 'fact', slug: `fact-${index}`,
+      title: 'Router reference', summary: 'Router operations are documented.', sourceId: source.id,
+      metadata: { semanticKind: 'fact', value: 'Router reference', evidence: 'Router reference' } }));
+    const requests = fake.requests.length, images = instrument(sqlite);
+    await store.prepareNodeWrites(nodes.map(node => ({ ...node })));
+    expect(fake.requests).toHaveLength(requests);
+    expect(images().opened).toBeLessThanOrEqual(1);
+    expect(images.privateImages().opened).toBeLessThanOrEqual(1);
+  } finally { installJudgmentPort(previous); }
+});
 
 test('compiled expected readsets return equality only and still open a fresh physical frame', async () => {
   const { store, source, extraction, sqlite } = await fixture();

@@ -72,7 +72,7 @@ export function prepareKnowledgeRecordAdmission(store: KnowledgeStore, kind: Rec
   }
   const originalRaw = captureOwnedJson(snapshot.raw) as Record<string, unknown>;
   const generated = kind === 'node' ? projectGeneratedFactRecordAdmission(store, record as KnowledgeNodeRecord, originalRaw) : undefined;
-  const raw = knowledgeRawRowForAdmission(generated?.raw ?? originalRaw)!;
+  const raw = knowledgeRawRowForAdmission(generated?.raw ?? originalRaw, kind)!;
   const nodeIdentity = kind === 'node' ? projectGeneratedKnowledgeNodeIdentity(store, record as KnowledgeNodeRecord) : undefined;
   if (nodeIdentity) raw.id = nodeIdentity.id;
   // A node's foreign key may contain card-shaped digits in a generated digest.

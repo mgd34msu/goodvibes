@@ -1,4 +1,6 @@
 import { createKnowledgeRowRevisions, knowledgeRowRevisionTriggers } from './store-row-revisions.js';
+import { createKnowledgeNodeContentRevisions, knowledgeNodeContentRevisionTriggers } from './store-node-content-revisions.js';
+import { createKnowledgeNodeActivationCache, knowledgeNodeActivationCacheSql, knowledgeNodeActivationCacheDeleteSql } from './store-node-activation-cache.js';
 import type { SqlDatabase } from '../state/sqlite-store.js';
 import { knowledgeRecordTableSql } from './store-schema-validation-data.js';
 import { planningSourceIdentityIndexSql } from './store-planning-source-selector.js';
@@ -41,8 +43,8 @@ import type {
 } from './types.js';
 
 export const DEFAULT_KNOWLEDGE_DB_FILE = 'knowledge-wiki.sqlite';
-// v12 is also a writer-format barrier: planning source IDs are opaque and old
-// writers must not recreate the same artifact under a computed hash identity.
+// Versioned writer barriers preserve old saved identities while new writers
+// register project defaults and store native activation dependency versions.
 export { KNOWLEDGE_SCHEMA_VERSION } from './store-schema-version.js';
 
 export function resolveKnowledgeDbPathFromControlPlaneDir(
@@ -276,11 +278,19 @@ export function createSchema(db: Pick<SqlDatabase, 'run'> & Partial<Pick<SqlData
     )
   `);
   const exec = db.exec;
-  if (exec) createKnowledgeRowRevisions({ run: sql => db.run(sql), exec: (sql, params, config) => exec.call(db, sql, params, config) });
+  if (exec) {
+    const native = { run: (sql: string) => db.run(sql), exec: (sql: string, params?: Parameters<SqlDatabase['exec']>[1], config?: Parameters<SqlDatabase['exec']>[2]) => exec.call(db, sql, params, config) };
+    createKnowledgeRowRevisions(native);
+    createKnowledgeNodeContentRevisions(native);
+    createKnowledgeNodeActivationCache(native);
+  }
   else {
     // Schema documentation collects DDL without constructing a database.
     db.run('PRAGMA recursive_triggers = OFF');
     for (const [, sql] of knowledgeRowRevisionTriggers) db.run(sql);
+    for (const [, sql] of knowledgeNodeContentRevisionTriggers) db.run(sql);
+    db.run(knowledgeNodeActivationCacheSql);
+    db.run(knowledgeNodeActivationCacheDeleteSql);
   }
 
 }

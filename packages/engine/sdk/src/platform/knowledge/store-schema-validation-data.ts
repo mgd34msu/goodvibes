@@ -115,7 +115,8 @@ export const knowledgeRecordTableSql = Object.freeze({
       metadata TEXT NOT NULL DEFAULT '{}',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
-      gv_revision TEXT NOT NULL DEFAULT ''
+      gv_revision TEXT NOT NULL DEFAULT '',
+      gv_content_revision TEXT NOT NULL DEFAULT ''
     )
   `,
   knowledge_extractions: `

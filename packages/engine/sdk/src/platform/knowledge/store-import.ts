@@ -6,7 +6,7 @@ import { KnowledgeNodeActivationHeldError as Held, type KnowledgeNodeActivationO
 import { observeKnowledgeValue } from './local-value-observation.js';
 import { findKnowledgeEdge, prepareKnowledgeEdgeRecord, writeKnowledgeEdgeRow } from './store-edge-writes.js';
 import { prepareKnowledgeExtractionRecord, prepareKnowledgeSourceRecord, writeKnowledgeExtractionRow, writeKnowledgeSourceRow } from './store-evidence-writes.js';
-import { assertPreparedNodeWrites, markPreparedNodeWritten, preparedNodeWrites, prepareNodeActivationPass, type NodeMutationDraft } from './store-node-activation.js';
+import { assertPreparedNodeWrites, markPreparedNodeWritten, preparedNodeWrites, prepareNodeActivationPass, writePreparedNodeActivationCache, type NodeMutationDraft } from './store-node-activation.js';
 import { recordKnowledgeNodeRevisions, writeKnowledgeNodeRow } from './store-node-history.js';
 import { prepareKnowledgeIssueRecord, writeKnowledgeIssueRow } from './store-node-issue-writes.js';
 import { retainKnowledgeNodeObservation } from './store-node-observation.js';
@@ -139,6 +139,7 @@ export async function applyKnowledgeImport(store: KnowledgeStore, view: Knowledg
     }
     for (const record of edgeWrites) writeKnowledgeEdgeRow(sqlite, record);
     for (const record of issueWrites) writeKnowledgeIssueRow(sqlite, record);
+    writePreparedNodeActivationCache(prepared, sqlite);
   }, () => assertPreparedNodeWrites(store, prepared, scope), () => {
     for (const record of sourceWrites) view.sources.set(record.id, record);
     for (const id of removedExtractions) view.extractions.delete(id);

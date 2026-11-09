@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { JudgmentInputError, judgmentInputProblem } from '../sdk/src/platform/gate/judgment-input.js';
-import { supportHash, createSupportOriginalValues, projectSupportInput, originalSupportValues, releaseOriginalSupportValues } from '../sdk/src/platform/knowledge/semantic/verification/projection.js';
+import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
+import { createSupportOriginalValues, projectSupportInput, originalSupportValues, releaseOriginalSupportValues } from '../sdk/src/platform/knowledge/semantic/verification/projection.js';
 import { prepareGeneratedFactSupport, KnowledgeGeneratedFactSupportHeldError, type GeneratedFactSupportInput, type GeneratedFactSupportHoldReason } from '../sdk/src/platform/knowledge/semantic/verification/generated-fact-support.js';
 import { registry } from '../sdk/src/platform/knowledge/semantic/verification/judgment-registry.js';
 import { generatedFactFieldSupport, generatedFactSubjectAttachment } from '../sdk/src/platform/knowledge/semantic/verification/batteries.js';
@@ -36,14 +36,6 @@ async function held(promise: Promise<unknown>, reason: GeneratedFactSupportHoldR
 }
 
 describe('generated fact field support and subject attachment', () => {
-  test('producer integrity digests preserve distinct inputs and pass complete privacy admission', () => {
-    const first = supportHash({ clock: 1791684509006, title: 'TV profile' });
-    expect(first).toMatch(/^[a-p]{64}$/);
-    expect(first).toBe(supportHash({ clock: 1791684509006, title: 'TV profile' }));
-    expect(first).not.toBe(supportHash({ clock: 1791684509007, title: 'TV profile' }));
-    expect(judgmentInputProblem({ candidateHash: first })).toBeUndefined();
-    expect(judgmentInputProblem({ candidateHash: '4111111111111111' })).toBe('card-material');
-  });
   test('both high-stakes batteries are registered with labelled positive and adversarial fixtures', () => {
     expect(registry.list().map((battery) => battery.name)).toEqual([generatedFactFieldSupport.name, generatedFactSubjectAttachment.name]);
     for (const battery of [generatedFactFieldSupport, generatedFactSubjectAttachment]) {

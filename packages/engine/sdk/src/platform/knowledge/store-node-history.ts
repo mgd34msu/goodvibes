@@ -28,9 +28,13 @@ export function knowledgeNodeRow(record: KnowledgeNodeRecord): [{ columns: strin
 export function writeKnowledgeNodeRow(sqlite: Pick<SQLiteStore, 'run' | 'exec'>, record: KnowledgeNodeRecord): ReturnType<SQLiteStore['exec']> {
   const rows = knowledgeNodeRow(record);
   sqlite.run(`
-    INSERT OR REPLACE INTO knowledge_nodes (
+    INSERT INTO knowledge_nodes (
       id, kind, slug, title, summary, aliases, status, confidence, source_id, metadata, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, slug=excluded.slug,
+      title=excluded.title, summary=excluded.summary, aliases=excluded.aliases,
+      status=excluded.status, confidence=excluded.confidence, source_id=excluded.source_id,
+      metadata=excluded.metadata, created_at=excluded.created_at, updated_at=excluded.updated_at
   `, rows[0].values[0]);
   return sqlite.exec('SELECT * FROM knowledge_nodes WHERE id = ? LIMIT 1', [record.id]);
 }
@@ -252,7 +256,7 @@ export async function mergeKnowledgeNodes(
   view.nodes.set(record.id, record);
   view.nodeRevisions.set(record.id, revisions.get(record.id)!);
   retainKnowledgeNodeObservation(existing, record, observationEvidence);
-  markPreparedNodeWritten(prepared, 0);
+  markPreparedNodeWritten(prepared, 0, view.sqlite);
   // save() retains its normal contract, including outer batch-save deferral.
   // It is not a SQL transaction and is never used as rollback protection.
   await view.sqlite.save();

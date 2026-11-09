@@ -112,6 +112,44 @@ describe('decision backend protocol conformance', () => {
     expect(answer.lineage?.attempts.map(attempt => attempt.outcome)).toEqual(['invalid-response', 'answered']);
   });
 
+  test('Kev top-level truncation falls back with the whole original evidence', async () => {
+    const endpoint: JudgmentEndpoint = { kind: 'local', baseURL: 'http://127.0.0.1:9000', apiKey: '', authentication: 'none' };
+    const original = { task: 'Read both ends of the evidence', first: 'Beginning', last: 'Required final evidence' };
+    const seen: unknown[] = [];
+    const config = configured(endpoint, 'kev-latest', async (url, init) => {
+      seen.push(JSON.parse(String(init?.body)));
+      return Response.json(String(url).includes(':9000/') ? result('kev-latest', {
+        truncated: true, usage: { input_tokens: 20, output_tokens: 2, state_tokens: 100, state_tokens_used: 20 },
+      }) : result('jev-latest'));
+    });
+    const port = createSystemOnePort({ ...config, fallbacks: [{ endpoint: { ...endpoint, baseURL: 'http://127.0.0.1:9001' }, model: 'jev-latest' }] });
+    const answer = await port.ask({ state: original, questions });
+    expect(answer.model).toBe('jev-latest');
+    expect(seen).toEqual([{ model: 'kev-latest', state: original, questions }, { model: 'jev-latest', state: original, questions }]);
+    expect(answer.lineage?.attempts.map(attempt => attempt.outcome)).toEqual(['invalid-response', 'answered']);
+  });
+
+  test.each([
+    { truncated: true },
+    { truncated: false, usage: { input_tokens: 20, output_tokens: 2, state_tokens: 100, state_tokens_used: 20 } },
+    ...['false', null, 0, {}, []].map(truncated => ({ truncated })),
+    ...[{ state_tokens: 20 }, { state_tokens_used: 20 }, { state_tokens: -1, state_tokens_used: 0 },
+      { state_tokens: 20, state_tokens_used: 21 }, { state_tokens: 20.5, state_tokens_used: 20 },
+      { state_tokens: '20', state_tokens_used: 20 }].map(usage => ({ usage: { input_tokens: 20, output_tokens: 2, ...usage } })),
+  ])('refuses incomplete or malformed Kev evidence metadata %j without a backup', async metadata => {
+    const endpoint: JudgmentEndpoint = { kind: 'local', baseURL: 'http://127.0.0.1:9000', apiKey: '', authentication: 'none' };
+    const port = createSystemOnePort(configured(endpoint, 'kev-latest', async () => Response.json(result('kev-latest', metadata))));
+    await expect(port.ask({ state, questions })).rejects.toMatchObject({ kind: 'invalid-response' });
+  });
+
+  test('Kev complete-state metadata preserves a valid full response', async () => {
+    const endpoint: JudgmentEndpoint = { kind: 'local', baseURL: 'http://127.0.0.1:9000', apiKey: '', authentication: 'none' };
+    const port = createSystemOnePort(configured(endpoint, 'kev-latest', async () => Response.json(result('kev-latest', {
+      truncated: false, usage: { input_tokens: 20, output_tokens: 2, state_tokens: 20, state_tokens_used: 20 },
+    }))));
+    expect((await port.ask({ state, questions })).answers.yes.noul).toBe(0.8);
+  });
+
   test('only declared deployment aliases may change the returned model identity', async () => {
     const aliases = ['kev-9b-v1'];
     const endpoint: JudgmentEndpoint = { kind: 'local', baseURL: 'http://127.0.0.1:9000', apiKey: '', authentication: 'none', responseModels: aliases };

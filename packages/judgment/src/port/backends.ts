@@ -63,6 +63,21 @@ export async function askBackend<Q extends Questions>(
   }
   if (!record(raw) || !record(raw.usage)) throw new JudgmentError('invalid-response', 'the decision model returned no usage evidence');
   const usage = raw.usage;
+  // Kev exposes the cut on the result, with original/used state-token counts
+  // in usage. Other supported servers put it in usage. Neither location may
+  // be discarded before complete-evidence admission.
+  const stateTokenCounts = usage.state_tokens !== undefined || usage.state_tokens_used !== undefined;
+  const tokenCount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+  if (raw.truncated !== undefined && typeof raw.truncated !== 'boolean') {
+    throw new JudgmentError('invalid-response', 'the decision model returned invalid truncation evidence');
+  }
+  if (stateTokenCounts) {
+    const original = usage.state_tokens, used = usage.state_tokens_used;
+    if (!tokenCount(original) || !tokenCount(used) || used > original) {
+      throw new JudgmentError('invalid-response', 'the decision model returned invalid truncation evidence');
+    }
+    if (used < original) throw new JudgmentError('invalid-response', 'the decision model reported incomplete evidence');
+  }
   if (usage.truncated !== undefined && typeof usage.truncated !== 'boolean'
       && (typeof usage.truncated !== 'number' || !Number.isSafeInteger(usage.truncated) || usage.truncated < 0)
     || usage.state_tokens_dropped !== undefined && (typeof usage.state_tokens_dropped !== 'number'
@@ -71,7 +86,7 @@ export async function askBackend<Q extends Questions>(
       || usage.truncated_questions.some(question => typeof question !== 'string'))) {
     throw new JudgmentError('invalid-response', 'the decision model returned invalid truncation evidence');
   }
-  if (usage.truncated === true || typeof usage.truncated === 'number' && usage.truncated > 0
+  if (raw.truncated === true || usage.truncated === true || typeof usage.truncated === 'number' && usage.truncated > 0
     || typeof usage.state_tokens_dropped === 'number' && usage.state_tokens_dropped > 0
     || Array.isArray(usage.truncated_questions) && usage.truncated_questions.length > 0) {
     throw new JudgmentError('invalid-response', 'the decision model reported incomplete evidence');

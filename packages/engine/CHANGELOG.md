@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Refuse decision responses that report Kev-style top-level truncation or
+  unequal original/used state-token counts. A configured fallback receives the
+  complete original evidence; malformed truncation metadata cannot pass.
+
 - Stop hashing passing contract checks when nothing compares that digest.
   Nonpass checks retain their saved refusal comparison; earlier stored digests
   remain readable. Update inspection, work receipts and WebUI together, and

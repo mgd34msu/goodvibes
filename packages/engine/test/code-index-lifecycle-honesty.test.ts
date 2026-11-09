@@ -380,3 +380,70 @@ test('an old empty file read cannot delete same-path chunks after reroot', async
     store.close();
   }
 });
+
+
+function observeOriginalCodeRevision(content: string) {
+  const create = crypto.createHash, reads: Array<() => readonly unknown[]> = [], restores: Array<() => void> = [];
+  const hash = spyOn(crypto, 'createHash').mockImplementation((algorithm, options) => {
+    const hasher = create(algorithm, options);
+    if (algorithm === 'sha256') {
+      const update = spyOn(hasher, 'update'); reads.push(() => update.mock.calls.map(([input]) => input));
+      restores.push(() => update.mockRestore());
+    }
+    return hasher;
+  });
+  return { count: () => reads.flatMap(read => read()).filter(input => input === content).length,
+    restore() { for (const restore of restores) restore(); hash.mockRestore(); } };
+}
+
+for (const forced of [false, true]) for (const ending of ['close', 'reroot'] as const) {
+  test(`an original ${forced ? 'forced' : 'cold'} code revision is not hashed when readiness ends in ${ending}`, async () => {
+    const rootA = makeRoot('gv-code-index-ready-a-'), rootB = makeRoot('gv-code-index-ready-b-');
+    const content = 'export const originalReadySource = 1;\n', path = join(rootA, 'original.ts');
+    writeFileSync(path, content);
+    const registry = makeRegistry(rootA), { provider } = makeProvider('readiness-original');
+    registry.register(provider, { makeDefault: true });
+    const dbPath = join(makeRoot('gv-code-index-ready-db-'), 'index.sqlite');
+    if (forced) {
+      const initial = new CodeIndexStore(rootA, dbPath, registry); await initial.init();
+      try { expect((await initial.buildFull()).filesIndexed).toBe(1); } finally { initial.close(); }
+      registry.register(makeProvider('readiness-replacement').provider, { makeDefault: true });
+    }
+    const store = new CodeIndexStore(rootA, dbPath, registry); await store.init();
+    const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    const initialize = CodeIntelligence.prototype.initialize;
+    const parser = spyOn(CodeIntelligence.prototype, 'initialize').mockImplementation(async function (this: CodeIntelligence) {
+      entered.resolve(); await release.promise; await initialize.call(this);
+    });
+    const hashes = observeOriginalCodeRevision(content);
+    let building: ReturnType<CodeIndexStore['buildFull']> | undefined;
+    try {
+      building = store.buildFull();
+      await entered.promise;
+      expect(hashes.count()).toBe(0);
+      if (ending === 'close') store.close(); else await store.reroot(rootB, ':memory:');
+      release.resolve();
+      expect((await building).abortReason).toBe('build aborted by reroot');
+      expect(hashes.count()).toBe(0);
+      expect(store.stats().indexedChunks).toBe(0);
+      expect(store.stats().lastBuild).toBeNull();
+    } finally {
+      release.resolve();
+      try { await building; } finally { hashes.restore(); parser.mockRestore(); store.close(); }
+    }
+  });
+}
+
+test('valid cold and current cached code each compute exactly one original revision', async () => {
+  const root = makeRoot('gv-code-index-ready-valid-'), path = join(root, 'original.ts');
+  const content = 'export const readyOriginal = 1;\n'; writeFileSync(path, content);
+  const registry = makeRegistry(root); registry.register(makeProvider('readiness-valid').provider, { makeDefault: true });
+  const store = new CodeIndexStore(root, ':memory:', registry); await store.init();
+  const hashes = observeOriginalCodeRevision(content);
+  try {
+    expect((await store.reindexFile(path)).indexed).toBe(true); expect(hashes.count()).toBe(1);
+    const chunks = store.stats().indexedChunks; expect(chunks).toBeGreaterThan(0);
+    expect(await store.reindexFile(path)).toEqual({ indexed: true, mode: 'unchanged' });
+    expect(hashes.count()).toBe(2); expect(store.stats().indexedChunks).toBe(chunks);
+  } finally { hashes.restore(); store.close(); }
+});

@@ -767,19 +767,23 @@ export class CodeIndexStore {
       deleteChunksForPath(db, relPath);
       return { indexed: true, mode: 'empty', chunkCount: 0 };
     }
-    // One persisted cache commitment per file, not per chunk. This recognizes
-    // the exact source across restarts without storing a second copy of code
-    // merely to avoid repeating every embedding request for an unchanged file.
-    const fileRevision = createHash('sha256').update(content).digest('hex');
-    if (!forceReembed) {
-      const existingHash = getFileRevision(db, relPath);
+    // Compare only an actual prior row before parser readiness. A cold or
+    // forced rebuild has no candidate consuming this commitment yet.
+    let fileRevision: string | undefined;
+    const revisionForContent = () => createHash('sha256').update(content).digest('hex');
+    const existingHash = forceReembed ? null : getFileRevision(db, relPath);
+    if (existingHash !== null) {
+      fileRevision = revisionForContent();
       if (existingHash === fileRevision) {
         return { indexed: true, mode: 'unchanged', chunkCount: countChunksForPath(db, relPath) };
       }
     }
 
     await this.ensureIntelligenceReady();
-    if (this.epoch !== callEpoch) return null;
+    if (this.epoch !== callEpoch || this.db !== db) return null;
+    // The captured string is immutable across readiness. The actual chunk IDs
+    // and persisted file revision now require exactly one content commitment.
+    fileRevision ??= revisionForContent();
     const { drafts, mode } = await chunkFileContent({
       intelligence: this.intelligence,
       absPath,

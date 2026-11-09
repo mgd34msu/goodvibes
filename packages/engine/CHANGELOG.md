@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- Retain the actual Telegram polling cursor and its local receiving lease
+  through provider calls, dispatch and shutdown. A competing local receiver
+  waits and retries; another writer's cursor cannot become this session's
+  confirmed progress. Repeated stop/start calls also drain retired receiving
+  work before handing over the queue. The encrypted archive/cursor link for
+  an outage overlapping an unfinished payment window remains incomplete.
+
 - Persist a completed native payment receive span and its silence result before
   resolving the window. Restore that original expiry without another notice
   after independently restoring its authority and page. Keep new notices and

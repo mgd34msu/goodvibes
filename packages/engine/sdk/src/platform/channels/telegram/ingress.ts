@@ -36,7 +36,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import { IngressProcessingHealth, type ChannelIngressAlarm } from '../ingress-alarm.js';
 import { TelegramApiError, TelegramBotApi, TelegramUpdateResponseError, type TelegramBotIdentity, type TelegramUpdate } from './api.js';
 import { TelegramPollingReceiveProgress, TelegramReceiveCoverageError } from './receive-progress.js';
-import { TelegramOffsetStore, TelegramOffsetStoreError, type TelegramOffsetStart } from './offset-store.js';
+import { TelegramOffsetStore, TelegramOffsetStoreError, type TelegramPollingCursor } from './offset-store.js';
 import { CONFLICT_ESCALATION_ATTEMPTS, classifyTelegramConflict } from './conflict-policy.js';
 import { TelegramCursorMigration } from './cursor-migration.js';
 import type { TelegramCursorPreview, TelegramCursorMigrationResult } from './cursor-migration-data.js';
@@ -151,6 +151,7 @@ export class TelegramIngressSupervisor {
   private credentialUnsubscribe: (() => void) | null = null;
   private abort: AbortController | null = null;
   private loop: Promise<void> | null = null;
+  private readonly retiringLoops = new Set<Promise<void>>();
   private webhookSetup: Promise<TelegramIngressStatus> | null = null;
   private cursorMigration: TelegramCursorMigration | undefined;
   private readonly cursorMigrations = new Set<TelegramCursorMigration>();
@@ -288,8 +289,16 @@ export class TelegramIngressSupervisor {
     abort?.abort();
     const loop = this.loop;
     this.loop = null;
+    if (loop) {
+      this.retiringLoops.add(loop);
+      const retired = () => { this.retiringLoops.delete(loop); };
+      void loop.then(retired, retired);
+    }
+    const retiringLoops = [...this.retiringLoops];
     const webhookSetup = this.webhookSetup;
-    if (loop) await loop.catch(() => { /* loop reports its own failures */ });
+    // A second stop/start must join work already retired by the first stop.
+    // Clearing the active pointer does not release the original queue lease.
+    await Promise.allSettled(retiringLoops);
     if (webhookSetup) await webhookSetup.catch(() => { /* setup reports its own failures */ });
     await migrationClose;
     if (this.abort === abort) this.abort = null;
@@ -430,22 +439,24 @@ export class TelegramIngressSupervisor {
     this.stopped = false;
     const lifetime = new AbortController();
     this.abort = lifetime;
-    const receiveProgress = new TelegramPollingReceiveProgress(lifetime.signal, this.deps.now ?? Date.now);
     const live = (): boolean => generation === this.generation && !this.stopped
       && this.abort === lifetime && !lifetime.signal.aborted
       && Boolean(this.deps.configManager.get('surfaces.telegram.enabled'))
       && this.deps.configManager.get('surfaces.telegram.mode') === 'polling';
-    const sourceAccount = this.deps.telegramSourceAccounts?.attach({
+    const attachSource = (cursor: TelegramPollingCursor, receiveProgress: TelegramPollingReceiveProgress) => this.deps.telegramSourceAccounts?.attach({
       receiveProgress,
       lifetime: lifetime.signal,
       readIdentity: (signal) => api.getVerifiedIdentity(signal),
-      isCurrentSync: () => live() && this.credentialUnsubscribe !== null
-        && this.credentialRevision === credentialRevision && credentialSnapshot !== null
-        && this.sourceCredentialSnapshot() === credentialSnapshot
-        && this.resolveSourceTokenSync() === token,
+      isCurrentSync: () => {
+        cursor.assertCurrent();
+        return live() && this.credentialUnsubscribe !== null && this.credentialRevision === credentialRevision && credentialSnapshot !== null
+          && this.sourceCredentialSnapshot() === credentialSnapshot && this.resolveSourceTokenSync() === token;
+      },
       isCurrent: async () => {
+        cursor.assertCurrent();
         if (!live()) return false;
         const currentToken = await this.resolveBotToken();
+        cursor.assertCurrent();
         return live() && currentToken === token;
       },
     });
@@ -463,7 +474,9 @@ export class TelegramIngressSupervisor {
       logger.error('Telegram polling stopped because its saved cursor needs inspection', { kind: start.kind });
       return this.settle('inactive', start.reason);
     }
-    this.loop = this.runPollLoop(api, store, lifetime.signal, start, sourceAccount, receiveProgress)
+    // Reserve the runner before any dependency can synchronously reenter stop.
+    // Waiting for another local receiver does not attach payment-source proof.
+    this.loop = this.runOwnedPolling(api, store, lifetime.signal, attachSource)
       .finally(() => { lifetime.abort(); });
     return this.settle('polling',
       `long-polling Telegram getUpdates for bot ${api.botId} (no public URL required)`, true);
@@ -471,26 +484,65 @@ export class TelegramIngressSupervisor {
 
   // ── the poll loop ─────────────────────────────────────────────────────────
 
+  private async runOwnedPolling(api: TelegramBotApi, store: TelegramOffsetStore, lifetime: AbortSignal,
+    attach: (cursor: TelegramPollingCursor, progress: TelegramPollingReceiveProgress) => TelegramSourceAccountLease | undefined): Promise<void> {
+    await Promise.resolve();
+    let reportedBusy = false;
+    while (!this.stopped && !lifetime.aborted && this.abort?.signal === lifetime) {
+      let cursor: TelegramPollingCursor;
+      try { cursor = store.retainPolling(); }
+      catch (error) {
+        if (error instanceof TelegramOffsetStoreError && error.kind === 'busy') {
+          const reason = 'Another local Telegram receiver is using this bot. Waiting for its actual work to finish.';
+          this.markBlocked(reason);
+          if (!reportedBusy) {
+            reportedBusy = true;
+            try { this.deps.onConcurrentConsumerConflict?.(reason); }
+            catch { this.currentStatus = { mode: 'inactive', reason: 'Telegram receiver coordination failed. Inspect its original cursor owner.', running: false }; return; }
+          }
+          await this.delay(BACKOFF_MIN_MS); continue;
+        }
+        const failure = error instanceof TelegramOffsetStoreError ? error : new TelegramOffsetStoreError('unavailable');
+        this.currentStatus = { mode: 'inactive', reason: failure.message, running: false };
+        logger.error('Telegram polling stopped because its saved cursor needs inspection', { kind: failure.kind }); return;
+      }
+      try {
+        lifetime.throwIfAborted();
+        if (this.stopped || this.abort?.signal !== lifetime) return;
+        const progress = new TelegramPollingReceiveProgress(lifetime, this.deps.now ?? Date.now), source = attach(cursor, progress);
+        await this.runPollLoop(api, cursor, lifetime, source, progress);
+      } catch {
+        if (!lifetime.aborted && !this.stopped) this.currentStatus = { mode: 'inactive', reason: 'Telegram original receive owner became unavailable. Inspect its cursor and channel status.', running: false };
+      } finally {
+        // Even an injected getUpdates that ignores abort must finish before a
+        // replacement receiver can acquire and confirm this queue's offsets.
+        try { cursor.release(); }
+        catch { this.currentStatus = { mode: 'inactive', reason: 'The original Telegram cursor lease could not be released. Inspect its saved owner before restarting ingress.', running: false }; }
+      }
+      return;
+    }
+  }
+
   private async runPollLoop(
     api: TelegramBotApi,
-    store: TelegramOffsetStore,
+    cursor: TelegramPollingCursor,
     lifetime: AbortSignal,
-    start: Exclude<TelegramOffsetStart, { readonly mode: 'blocked' }>,
     sourceAccount?: TelegramSourceAccountLease,
     receiveProgress?: TelegramPollingReceiveProgress,
   ): Promise<void> {
-    let offset: number | undefined = start.mode === 'resume' ? start.offset : undefined;
     let backoffMs = BACKOFF_MIN_MS;
     let conflictRecoveries = 0;
 
     while (!this.stopped && !lifetime.aborted) {
       try {
+        const entered = cursor.capture(), offset = entered.observation.offset ?? undefined;
         const startedAtMs = receiveProgress?.beginRequest();
         const updates = await api.getUpdates({
           offset,
           timeoutSeconds: receiveProgress?.timeoutSeconds(POLL_TIMEOUT_SECONDS) ?? POLL_TIMEOUT_SECONDS,
           signal: lifetime,
         });
+        lifetime.throwIfAborted(); entered.assertCurrent();
         backoffMs = BACKOFF_MIN_MS;
         conflictRecoveries = 0;
         // A poll that came back is the only proof the surface recovered, so it
@@ -509,12 +561,14 @@ export class TelegramIngressSupervisor {
           };
         }
         if (updates.length > 0) {
-          offset = await this.dispatchBatch(updates, api, offset, sourceAccount, receiveProgress);
-          if (offset !== undefined) offset = store.save(offset, () => {
+          const next = await this.dispatchBatch(updates, api, offset, sourceAccount, receiveProgress);
+          entered.assertCurrent();
+          if (next !== undefined) cursor.save(next, () => {
             lifetime.throwIfAborted();
             if (this.stopped || this.abort?.signal !== lifetime) throw new Error('Telegram polling owner retired');
           });
         }
+        cursor.assertCurrent();
         if (startedAtMs !== undefined) receiveProgress?.completeRequest(startedAtMs, updates.length === 0);
       } catch (error) {
         if (this.stopped || lifetime.aborted || (error instanceof Error && error.name === 'AbortError')) return;

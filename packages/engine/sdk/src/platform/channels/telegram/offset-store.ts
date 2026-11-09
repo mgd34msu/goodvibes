@@ -27,6 +27,19 @@ export class TelegramOffsetStoreError extends Error {
 }
 export type TelegramOffsetStart = { readonly mode: 'resume'; readonly offset: number } | { readonly mode: 'fresh' }
   | { readonly mode: 'blocked'; readonly reason: string; readonly kind: TelegramOffsetFailure };
+/** Queue facts only. A copy cannot acquire a polling lease or prove that any
+ * payment replies were archived. Protected history must retain its own link. */
+export interface TelegramCursorObservation {
+  readonly accountId: string;
+  readonly offset: number | null;
+  readonly physical: string | null;
+}
+export interface TelegramPollingCursor {
+  capture(): { readonly observation: TelegramCursorObservation; assertCurrent(): void };
+  assertCurrent(): void;
+  save(offset: number, assertCurrent: () => void): number;
+  release(): void;
+}
 interface AccountCursor { readonly accountId: string; readonly offset: number; readonly updatedAt: string; }
 declare const legacyMigrationHandle: unique symbol;
 export interface TelegramLegacyCursorHandle { readonly [legacyMigrationHandle]: true; }
@@ -114,6 +127,64 @@ export class TelegramOffsetStore {
       const failure = error instanceof TelegramOffsetStoreError ? error : new TelegramOffsetStoreError('unavailable');
       return { mode: 'blocked', reason: failure.message, kind: failure.kind };
     }
+  }
+
+  /** One actual receiving session owns confirmation for this bot. Keep the
+   * strict lease through provider awaits, dispatch and persistence, including
+   * cancellation drainage. An external cursor change is not an offset this
+   * receiver may silently adopt with Math.max(). */
+  retainPolling(): TelegramPollingCursor {
+    const lockPath = `${this.filePath}.polling-${this.accountId}.lock`;
+    let release: (() => void) | null;
+    try { release = tryAcquireCrossProcessLock(lockPath); } catch { throw new TelegramOffsetStoreError('unavailable'); }
+    if (!release) throw new TelegramOffsetStoreError('busy');
+    try {
+      const lease = readFileObservation(lockPath);
+      let expected = this.read(), retired = false;
+      const assertLease = () => {
+        if (retired || this.failed) throw new TelegramOffsetStoreError('unavailable');
+        try {
+          const held = readFileObservation(lockPath);
+          if (held.physical !== lease.physical || !held.bytes.equals(lease.bytes)) throw new Error();
+        } catch { throw new TelegramOffsetStoreError('unavailable'); }
+      };
+      const assertCurrent = () => {
+        assertLease();
+        try { this.assertFileCurrent(expected.observed); }
+        catch { throw new TelegramOffsetStoreError('unavailable'); }
+      };
+      assertCurrent();
+      const releaseOriginal = release;
+      return Object.freeze({
+        assertCurrent,
+        capture: () => {
+          assertCurrent(); const selected = expected, cursor = selected.accounts.find(entry => entry.accountId === this.accountId);
+          const observation = Object.freeze({ accountId: this.accountId, offset: cursor?.offset ?? null, physical: selected.observed?.physical ?? null });
+          return Object.freeze({ observation, assertCurrent: () => {
+            assertLease();
+            try { this.assertFileCurrent(selected.observed); } catch { throw new TelegramOffsetStoreError('unavailable'); }
+          } });
+        },
+        save: (offset: number, current: () => void) => {
+          if (!offsetValue(offset)) throw new TelegramOffsetStoreError('invalid-request');
+          const selected = expected;
+          const owned = () => { assertLease(); current(); assertLease(); };
+          return this.mutate(owned, mutationLease => {
+            owned(); this.assertFileCurrent(selected.observed);
+            const previous = selected.accounts.find(entry => entry.accountId === this.accountId);
+            if (previous && offset < previous.offset) throw new TelegramOffsetStoreError('invalid-request');
+            if (previous?.offset === offset) { mutationLease(); assertCurrent(); return offset; }
+            if (!previous && selected.accounts.length >= MAX_ACCOUNTS) throw new TelegramOffsetStoreError('unavailable');
+            const next = { accountId: this.accountId, offset, updatedAt: new Date().toISOString() };
+            const accounts = previous ? selected.accounts.map(entry => entry.accountId === this.accountId ? next : entry) : [...selected.accounts, next];
+            this.publish(selected.observed, accounts, owned, mutationLease);
+            expected = this.read(); owned(); this.assertFileCurrent(expected.observed);
+            return offset;
+          });
+        },
+        release: () => { if (retired) return; retired = true; releaseOriginal(); },
+      });
+    } catch (error) { release(); throw error instanceof TelegramOffsetStoreError ? error : new TelegramOffsetStoreError('unavailable'); }
   }
 
   /** Refresh under the real shared lock and preserve every other bot's cursor.

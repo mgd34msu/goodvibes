@@ -840,8 +840,19 @@ original operation. It declares `payment-reply-coverage-v1` before publication;
 an older or same-version build lacking that reader capability cannot be selected
 for rollback over it. A newly delivered notice does not inherit the old proof.
 
-Native webhook
-identity alone does not supply this polling barrier; explicit owner answers can
+Each native polling session now retains the original account's confirmation
+cursor under a strict local receiving lease. A second local receiver waits for
+that work to drain and retries without issuing another `getUpdates` or attaching
+payment-source proof. The receiving session pins its exact saved cursor around
+the provider and dispatch awaits, and advances it only through its own confirmed
+write. Another writer's advance, deletion or replacement cannot be adopted as
+this receiver's progress. Even an unchanged-byte rewrite retires that original
+observation. Stop and repeated stop/start calls drain the original provider and
+dispatch work before releasing the receiving lease. These local file observations
+do not use content hashes and do not establish the still-required archive link
+for a window whose outage overlaps reception.
+
+Native webhook identity alone does not supply this polling barrier; explicit owner answers can
 still settle a webhook window before expiry, but unattended expiry requires
 confirmed receive coverage. Durable downtime and webhook coverage remain work
 in progress; see §8.6.1.

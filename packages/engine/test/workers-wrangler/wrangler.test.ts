@@ -283,6 +283,7 @@ describe('Workers wrangler: crypto', () => {
     expect(b.ok).toBe(true);
     expect(b.isValidUuid).toBe(true);
     expect(b.hasCryptoSubtle).toBe(true);
+    expect(b.sha256Vector).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
     expect(b.sha256HashLength).toBe(64);
   }, 10_000);
 });

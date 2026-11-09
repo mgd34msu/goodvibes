@@ -236,6 +236,7 @@ describe('Workers harness: crypto.subtle + randomUUID', () => {
     expect(body.ok).toBe(true);
     expect(body.isValidUuid).toBe(true);
     expect(body.hasCryptoSubtle).toBe(true);
+    expect(body.sha256Vector).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
     expect(body.sha256HashLength).toBe(64); // SHA-256 = 32 bytes = 64 hex chars
   }, 10_000);
 });

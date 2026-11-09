@@ -175,7 +175,7 @@ async function handleCrypto(): Promise<Response> {
 
   const hasCryptoSubtle = typeof crypto.subtle === 'object';
 
-  const encoded = new TextEncoder().encode('goodvibes-workers-test');
+  const encoded = new TextEncoder().encode('abc');
   const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
   const hashHex = Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, '0'))
@@ -187,6 +187,7 @@ async function handleCrypto(): Promise<Response> {
     isValidUuid,
     hasCryptoSubtle,
     sha256HashLength: hashHex.length,
+    sha256Vector: hashHex,
   });
 }
 

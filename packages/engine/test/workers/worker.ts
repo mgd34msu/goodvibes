@@ -250,8 +250,9 @@ async function handleCrypto(): Promise<Response> {
   // Verify crypto.subtle is available
   const hasCryptoSubtle = typeof crypto.subtle === 'object';
 
-  // Quick hash to exercise crypto.subtle
-  const encoded = new TextEncoder().encode('goodvibes-workers-test');
+  // Standard independent vector exercises the functional Web Crypto primitive
+  // required by S256 PKCE in this actual isolate; length alone is insufficient.
+  const encoded = new TextEncoder().encode('abc');
   const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
   const hashHex = Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, '0'))
@@ -263,6 +264,7 @@ async function handleCrypto(): Promise<Response> {
     isValidUuid,
     hasCryptoSubtle,
     sha256HashLength: hashHex.length,
+    sha256Vector: hashHex,
   });
 }
 

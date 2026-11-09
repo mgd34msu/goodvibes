@@ -28,8 +28,12 @@ export function routingMessageText(message: ProviderMessage): string {
 
 function preview(text: string, budget: number): RoutingTextPreview {
   if (text.length <= budget) return { text, omittedChars: 0 };
-  const take = Math.max(0, budget - 28), head = Math.ceil(take * 0.6), tail = take - head;
-  return { text: text.slice(0, head) + '\n[... routing preview ...]\n' + (tail ? text.slice(-tail) : ''), omittedChars: text.length - take };
+  const marker = '\n[... routing preview ...]\n';
+  // A short per-message allowance can be smaller than the marker itself.
+  // Omit that text with explicit accounting instead of exceeding its budget.
+  if (budget < marker.length) return { text: '', omittedChars: text.length };
+  const take = Math.max(0, budget - marker.length), head = Math.ceil(take * 0.6), tail = take - head;
+  return { text: text.slice(0, head) + marker + (tail ? text.slice(-tail) : ''), omittedChars: text.length - take };
 }
 
 /** Routing reads bounded previews. Answering and stored history use their original messages. */

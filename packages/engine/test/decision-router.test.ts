@@ -76,6 +76,8 @@ test('one classification pins an actual provider/model/effort across streaming a
   expect(f.fake.requests).toHaveLength(1); // one logical decision / one wire request with eleven fixed questions
   expect(Object.keys(f.fake.requests[0]?.questions ?? {})).toHaveLength(11);
   expect(f.calls).toHaveLength(2); expect(f.calls.every(call => call.messages === messages && call.tools === tools)).toBe(true);
+  expect(f.calls.every(call => !Object.hasOwn(call, 'routingContext'))).toBe(true);
+  expect(params.routingContext).toEqual({ sessionId: 'session', turnId: 'turn-1' });
   expect(f.calls[0]).toMatchObject({ model: 'coding', reasoningEffort: 'medium' });
   expect(first.decisionRoute).toMatchObject({ provider: 'other', model: 'coding', category: 'coding-implementation', requestedEffort: 'high', effort: 'medium' });
   expect(first.usage).toEqual(response.usage); expect(deltas).toHaveLength(2);
@@ -172,4 +174,17 @@ test('retired decision authority and cancellation prevent answer dispatch', asyn
   const retired = fixture(); retired.retire();
   await expect(retired.router.prepare({ messages: [] })).rejects.toThrow('retired');
   expect(retired.calls).toHaveLength(0);
+});
+
+test('the supported minimum expanded context keeps all six recent text previews inside their per-message and total allowance', () => {
+  const messages: ChatRequest['messages'] = [...Array.from({ length: 6 }, (_, index) => ({ role: 'user' as const, content: `Earlier turn ${index} `.repeat(100) })),
+    { role: 'user', content: 'Current request '.repeat(100) }];
+  const original = JSON.stringify(messages);
+  const result = buildDecisionRoutingPreview(messages, { turnId: 'minimum-context', activeTask: 'Active task '.repeat(100) }, undefined, 512, true);
+  const allowance = Math.floor(512 * 0.2 / 6);
+  expect(result.recent).toHaveLength(6);
+  expect(result.recent.every(message => message.content.text.length <= allowance && message.content.omittedChars > 0)).toBe(true);
+  expect(result.request.text.length + result.activeTask.text.length + result.selectedFiles.reduce((sum, file) => sum + file.length, 0)
+    + result.recent.reduce((sum, message) => sum + message.content.text.length, 0)).toBeLessThanOrEqual(512);
+  expect(JSON.stringify(messages)).toBe(original);
 });

@@ -225,7 +225,12 @@ export async function chatWithDecisionRoute(route: PreparedDecisionRoute, reques
   if (routingScope.getStore()) throw new Error('Nested Decision Router routes are forbidden.');
   route.assertCurrent();
   return routingScope.run(true, async () => {
-    const response = await route.provider.chat(request);
+    // Turn/session hints belong to categorization, not the answering adapter.
+    // Keep the exact conversation and tool arrays while omitting that host data.
+    const answerRequest = request.routingContext === undefined ? request : { ...request };
+    if (answerRequest !== request) delete answerRequest.routingContext;
+    route.assertCurrent();
+    const response = await route.provider.chat(answerRequest);
     route.assertCurrent();
     return { ...response, decisionRoute: route.info };
   });

@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Keep Decision Router previews inside the configured minimum context budget
+  and remove classification-only context from the answering adapter request.
+  Preserve the original conversation and tool arrays for the selected model.
+
 - Stop hashing fresh formatted read output at creation, clipping and evidence
   projection. Keep versioned line and truncation metadata with the actual
   retained tool result; owner evidence still compares returned rows against

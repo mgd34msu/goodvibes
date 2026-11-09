@@ -4,6 +4,7 @@ import { builtinGatewayNativeConversationIntakeMethodDescriptors } from '../sdk/
 import { builtinGatewayNativeWorkSubmissionMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-native-work-submission.ts';
 import { builtinGatewayWorkLedgerMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-work-ledger.ts';
 import { builtinGatewayNativeWorkExecutionMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-native-work-execution.ts';
+import { builtinTriggerSupervisorMethodDescriptors } from '../sdk/src/platform/control-plane/method-catalog-trigger-supervisor.js';
 // foundation-io-catalog.ts
 //
 // The one composition of every builtin gateway method descriptor, used by both
@@ -12,7 +13,7 @@ import { builtinGatewayNativeWorkExecutionMethodDescriptors } from '../sdk/src/p
 //
 // It mirrors BUILTIN_GATEWAY_METHODS in
 // sdk/src/platform/control-plane/method-catalog.ts exactly, the same
-// 27 descriptor arrays in the same order. That constant is module-private, so
+// descriptor arrays in the same order. That constant is module-private, so
 // this file re-composes it from the exported arrays rather than duplicating any
 // descriptor. `assertCoversMethodIds` below proves the composition has not
 // fallen behind the generated operator method id list, so a new catalog module
@@ -66,6 +67,7 @@ export const ALL_GATEWAY_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[] 
   ...builtinGatewayControlMethodDescriptors,
   ...builtinBrowserJudgmentMethodDescriptors,
   ...builtinGatewayChannelMethodDescriptors,
+  ...builtinTriggerSupervisorMethodDescriptors,
   ...builtinGatewayChannelTestMethodDescriptors,
   ...builtinGatewayCostMethodDescriptors,
   ...builtinGatewayPermissionRuleMethodDescriptors,

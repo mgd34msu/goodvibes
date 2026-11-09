@@ -1,11 +1,45 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { bindJudgmentPortAuthority, captureJudgmentPort, installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { bindJudgmentPortAuthority, captureJudgmentPort, installJudgmentPort, JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { noul, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
 afterEach(() => { installJudgmentPort(previous); });
 const request = { state: {}, questions: { yes: noul('Synthetic question') } };
+
+for (const source of ['binding', 'getter', 'owner', 'caller'] as const)
+  test(`capture drains a rejected promise thrown by the original ${source} callback`, async () => {
+    const fake = fakePort(() => noulAnswer(0.99));
+    const fail = () => { throw Promise.reject(new Error('Synthetic rejected source check')); };
+    const port = source === 'getter' ? { get model(): string { return fail(); }, ask: fake.port.ask } : fake.port;
+    if (source === 'binding') bindJudgmentPortAuthority(port, fail);
+    if (source === 'owner') bindJudgmentPortAuthority(port, () => ({ identity: {}, assertCurrent: fail }));
+    installJudgmentPort(port);
+    expect(() => captureJudgmentPort('test.thrown-source-promise', source === 'caller' ? { assertCurrent: fail } : {}))
+      .toThrow(JudgmentAuthorityRetiredError);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(fake.requests).toHaveLength(0);
+  });
+
+for (const source of ['owner', 'caller', 'beforeAttempt', 'assertLogCurrent'] as const)
+  test(`a retained ${source} check drains thrown rejected work and refuses before dispatch`, async () => {
+    const fake = fakePort(() => noulAnswer(0.99)); let armed = false;
+    const fail = () => { if (armed) throw Promise.reject(new Error('Synthetic rejected retained check')); };
+    const port: JudgmentPort = { ...fake.port, async ask(input) {
+      input.beforeAttempt?.(); input.assertLogCurrent?.(); return fake.port.ask(input);
+    } };
+    if (source === 'owner') bindJudgmentPortAuthority(port, () => ({ identity: {}, assertCurrent: fail }));
+    installJudgmentPort(port);
+    const owner = captureJudgmentPort('test.thrown-retained-promise', source === 'caller' ? { assertCurrent: fail } : {});
+    armed = true;
+    await expect(owner.port.ask({ ...request,
+      ...(source === 'beforeAttempt' ? { beforeAttempt: fail } : {}),
+      ...(source === 'assertLogCurrent' ? { assertLogCurrent: fail } : {}),
+    })).rejects.toBeInstanceOf(JudgmentAuthorityRetiredError);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(fake.requests).toHaveLength(0);
+  });
+
 for (const mode of ['ask', 'health', 'recorder', 'recordReadings', 'recordAction'] as const) test(`canonical capture rejects same-object ${mode} replacement`, async () => {
   const fake = fakePort(() => noulAnswer(0.99)); let retained = 0;
   const port = { ...fake.port, health: () => ({} as never), recorder: {

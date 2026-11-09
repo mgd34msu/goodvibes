@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Drain rejected work thrown by synchronous decision-source restrictions before
+  reporting the retired source. Refused capture, retry and recording checks
+  cannot leave a separate rejected promise unobserved.
+
 - Refuse decision responses that report Kev-style top-level truncation or
   unequal original/used state-token counts. A configured fallback receives the
   complete original evidence; malformed truncation metadata cannot pass.

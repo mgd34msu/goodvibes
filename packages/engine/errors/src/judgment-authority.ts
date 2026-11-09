@@ -1,4 +1,4 @@
-import { reuseObservedJudgmentResult } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned, reuseObservedJudgmentResult } from '@goodvibes-jev/judgment/decisions';
 import type { JudgmentPort, JudgmentRequest, JudgmentResult, Questions } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentPortMissingError, judgmentPortInstallation } from './judgment-port.js';
 import { DecisionModelsDisabledError } from './decision-policy.js';
@@ -73,9 +73,11 @@ export function bindJudgmentPortAuthority(port: JudgmentPort, capture: () => Jud
 }
 
 function synchronous(check: (() => void) | undefined): void {
-  const value: unknown = check?.();
+  let value: unknown;
+  try { value = check?.(); }
+  catch (error) { drainOwned(error); throw new JudgmentAuthorityRetiredError(); }
   if (value === undefined) return;
-  try { void Promise.prototype.then.call(value, undefined, () => {}); } catch { /* Only genuine promises need rejection draining. */ }
+  drainOwned(value);
   throw new JudgmentAuthorityRetiredError();
 }
 
@@ -98,6 +100,7 @@ async function interrupt<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 export function captureJudgmentPort(site: string, options: JudgmentReadingOptions = {}): JudgmentPortCapture {
   try { return capture(site, options); }
   catch (error) {
+    drainOwned(error);
     if (error instanceof JudgmentPortMissingError || error instanceof DecisionModelsDisabledError) throw error;
     throw new JudgmentAuthorityRetiredError();
   }
@@ -193,7 +196,7 @@ function capture(site: string, options: JudgmentReadingOptions): JudgmentPortCap
       if (consumed) throw new JudgmentAuthorityRetiredError();
       if (readObservation(readPortModel) !== model || readObservation(readPortAsk) !== ask || readObservation(readPortHealth) !== health || readObservation(readPortRecorder) !== recorder
         || readObservation(readRecorderReadings) !== recordReadings || readObservation(readRecorderAction) !== recordAction || signal.aborted) throw new JudgmentAuthorityRetiredError();
-    } catch { throw new JudgmentAuthorityRetiredError(); }
+    } catch (error) { drainOwned(error); throw new JudgmentAuthorityRetiredError(); }
   };
   current();
   const decisionChecks = new Map<string, () => void>();

@@ -107,7 +107,7 @@ describe('genuine runner records across the WebUI inspection boundary', () => {
         expect(text).toContain(fixture.record.inputSnapshot.sourceRoot);
         for (const file of fixture.record.inputSnapshot.files) {
           expect(text).toContain(file.path);
-          if (file.digest) expect(text).toContain(file.digest);
+          if ('digest' in file && file.digest) expect(text).toContain(file.digest);
         }
       }
       if (fixture.record.nativeSource) {

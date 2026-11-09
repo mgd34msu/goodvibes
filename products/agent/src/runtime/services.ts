@@ -127,6 +127,7 @@ import {
   KnowledgeStore,
   ProjectPlanningService,
   createConfiguredPlanningStore,
+  assertConfiguredProjectContextReady,
   configureKnowledgeArtifactReferences,
   createProviderBackedKnowledgeSemanticLlm,
   createWebKnowledgeGapRepairer,
@@ -770,6 +771,7 @@ export function describeMemoryConsolidationReceipt(receipt: MemoryConsolidationR
 }
 
 export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeServices {
+  assertConfiguredProjectContextReady(options.configManager, options.workingDir, GOODVIBES_AGENT_KNOWLEDGE_DB_FILE);
   const disposalScope = createAsyncDisposalScope('RuntimeServices');
   let homeGraphClosing: Promise<void> | undefined;
   let conversationRewindClosing: Promise<void> | undefined;

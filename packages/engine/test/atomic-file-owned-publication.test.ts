@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { basename, join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
-import { AtomicWriteDurabilityError, captureExistingDirectory, STALE_TEMP_FILE_MIN_AGE_MS, writeFileAtomic, writeJsonFileAtomic } from '../platform/src/platform/utils/atomic-json-store.js';
+import { AtomicWriteDurabilityError, captureExistingDirectory, confirmFileDurable, STALE_TEMP_FILE_MIN_AGE_MS, writeFileAtomic, writeJsonFileAtomic } from '../platform/src/platform/utils/atomic-json-store.js';
 const restore: Array<() => void> = [];
 afterEach(() => { for (const close of restore.splice(0).reverse()) close(); });
 function fixture() { const root = makeProjectTempDir('atomic-owned-file'); return { root, file: join(root, 'state.json') }; }
@@ -90,6 +90,28 @@ test('read-only alias dot-dot capture keeps the actual parent and rejects replac
   expect(fs.readdirSync(physical)).toEqual(['child']);
 });
 
+test('durability confirms the symlink-aware actual file and refuses alias retargeting during fsync', () => {
+  const f = fixture(), physical = join(f.root, 'physical'), foreign = join(f.root, 'foreign'), alias = join(f.root, 'alias');
+  for (const parent of [physical, foreign]) fs.mkdirSync(join(parent, 'child'), { recursive: true });
+  const originalFile = join(physical, 'state.json'), foreignFile = join(foreign, 'state.json');
+  fs.writeFileSync(originalFile, 'Original visible bytes'); fs.writeFileSync(foreignFile, 'Foreign visible bytes');
+  fs.symlinkSync(join(physical, 'child'), alias);
+  const selected = `${alias}/../state.json`;
+  expect(() => confirmFileDurable(selected)).not.toThrow();
+  const original = fs.statSync(originalFile), fsync = fs.fsyncSync;
+  let retargeted = false;
+  const syncing = spyOn(fs, 'fsyncSync').mockImplementation(fd => {
+    fsync(fd);
+    if (!retargeted && fs.fstatSync(fd).ino === original.ino) {
+      retargeted = true; fs.unlinkSync(alias); fs.symlinkSync(join(foreign, 'child'), alias);
+    }
+  }); restore.push(() => syncing.mockRestore());
+  expect(durableFailure(() => confirmFileDurable(selected)).phase).toBe('published-indeterminate');
+  expect(retargeted).toBe(true);
+  expect(fs.readFileSync(originalFile, 'utf8')).toBe('Original visible bytes');
+  expect(fs.readFileSync(foreignFile, 'utf8')).toBe('Foreign visible bytes');
+});
+
 test('a dangling parent alias never grants creation of its outside target', () => {
   const f = fixture(), outside = join(f.root, 'unselected-outside'), alias = join(f.root, 'dangling');
   fs.symlinkSync(outside, alias);
@@ -122,7 +144,7 @@ test('actual pre-effect rename failure remains before-publication with the old i
 });
 
 test('live and unknown writer identities are not swept merely because their files are old', () => {
-  const f = fixture(), live = `${f.file}.tmp-${process.pid}-older-live`, unknown = `${f.file}.tmp-unknown-writer`;
+  const f = fixture(), live = `${f.file}.tmp-${process.pid}-1-abcdef01`, unknown = `${f.file}.tmp-unknown-writer`;
   fs.writeFileSync(live, 'Live owned work'); fs.writeFileSync(unknown, 'Unknown owner');
   const old = new Date(Date.now() - STALE_TEMP_FILE_MIN_AGE_MS - 60_000); fs.utimesSync(live, old, old); fs.utimesSync(unknown, old, old);
   writeFileAtomic(f.file, 'Current image'); expect(fs.readFileSync(live, 'utf8')).toBe('Live owned work'); expect(fs.readFileSync(unknown, 'utf8')).toBe('Unknown owner');
@@ -130,9 +152,15 @@ test('live and unknown writer identities are not swept merely because their file
 
 test('a proven-dead native writer can have its old regular staging file reclaimed', () => {
   const f = fixture(), child = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'ignore' });
-  expect(child.status).toBe(0); const dead = `${f.file}.tmp-${child.pid}-crash-source`;
-  fs.writeFileSync(dead, 'Old crashed write'); const old = new Date(Date.now() - STALE_TEMP_FILE_MIN_AGE_MS - 60_000); fs.utimesSync(dead, old, old);
-  writeFileAtomic(f.file, 'Current image'); expect(fs.existsSync(dead)).toBe(false);
+  expect(child.status).toBe(0);
+  const current = `${f.file}.tmp-${child.pid}-1-deadbeef`, earlier = `${f.file}.tmp-${child.pid}`;
+  const unrecognized = `${f.file}.tmp-${child.pid}-crash-source`;
+  const old = new Date(Date.now() - STALE_TEMP_FILE_MIN_AGE_MS - 60_000);
+  for (const path of [current, earlier, unrecognized]) { fs.writeFileSync(path, 'Old crashed write'); fs.utimesSync(path, old, old); }
+  writeFileAtomic(f.file, 'Current image');
+  expect(fs.existsSync(current)).toBe(false); expect(fs.existsSync(earlier)).toBe(false);
+  // A dead PID and matching prefix do not identify an arbitrary foreign name.
+  expect(fs.readFileSync(unrecognized, 'utf8')).toBe('Old crashed write');
 });
 
 test('private binary bytes and public text modes remain exact under restrictive umask', () => {

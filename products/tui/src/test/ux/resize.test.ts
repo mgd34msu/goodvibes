@@ -31,6 +31,9 @@ import { InputHandler } from '../../input/handler.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import { createDefaultUiRuntimeServices } from '../helpers/ui-services.ts';
+import { disposeTestRuntimeServicesAfterAll } from '../helpers/runtime-services.ts';
+
+disposeTestRuntimeServicesAfterAll();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,7 +71,7 @@ function makeRequest(width: number, height: number): CompositeRequest {
   };
 }
 
-function makeInputHandler(): InputHandler {
+async function makeInputHandler(): Promise<InputHandler> {
   const sel = new SelectionManager();
   const history = new InfiniteBuffer();
   return new InputHandler(
@@ -79,7 +82,7 @@ function makeInputHandler(): InputHandler {
     () => history,
     () => {},
     () => {},
-    createDefaultUiRuntimeServices(),
+    (await createDefaultUiRuntimeServices()),
   );
 }
 
@@ -172,8 +175,8 @@ describe('ux:resize; compositor.resetDiff causes full redraw on next composite',
 describe('ux:resize; setContentWidth updates prompt wrapping width', () => {
   let input: InputHandler;
 
-  beforeEach(() => {
-    input = makeInputHandler();
+  beforeEach(async () => {
+    input = (await makeInputHandler());
     input.setContentWidth(80);
   });
 

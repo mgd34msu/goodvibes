@@ -1,3 +1,4 @@
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts';
 /**
  * runtime-services-disposal.test.ts
@@ -115,10 +116,12 @@ function describe(): string[] {
 beforeAll(async () => {
   root = makeProjectTempDir('tui-disposal');
   seedBenchmarkCacheFixture({ homeDirectory: root, workingDirectory: root, surfaceRoot: 'tui' });
+  const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: join(root, 'cfg'), workingDir: root, homeDir: root });
+  await prepareConfiguredProjectContext(configManager, root, 'knowledge-wiki.sqlite', { activate: true });
   install();
   try {
     services = createRuntimeServices({
-      configManager: new ConfigManager({ surfaceRoot: 'tui', configDir: join(root, 'cfg'), workingDir: root, homeDir: root }),
+      configManager,
       runtimeBus: new RuntimeEventBus(),
       runtimeStore: createRuntimeStore(),
       workingDir: root,

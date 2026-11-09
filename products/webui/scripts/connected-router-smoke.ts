@@ -14,6 +14,8 @@ const root = installTestTempRoot();
 const home = join(root, 'host/home'); mkdirSync(home, { recursive: true });
 process.env.HOME = home; process.env.GOODVIBES_HOME = home;
 const project = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const enclosingAppState = resolve(project, '../../.goodvibes');
+const enclosingAppStateExisted = existsSync(enclosingAppState);
 const bundle = resolve(process.env.GOODVIBES_WEBUI_CONNECTED_BUNDLE ?? join(project, 'dist'));
 assert.ok(existsSync(join(bundle, 'index.html')), 'Build WebUI before running the connected Router lane');
 const output = resolve(process.env.GOODVIBES_WEBUI_CONNECTED_OUTPUT ?? join(project, 'e2e/.artifacts/connected-router'));
@@ -177,6 +179,8 @@ try {
         } });
     },
   });
+  await host.services.workspaceCheckpointManager.init();
+  assert.equal(host.services.workspaceCheckpointManager.workspaceRoot, host.workingDirectory, 'The connected fixture must retain its owned non-Git workspace');
   allowedOrigins.add(host.baseUrl);
   const models: ModelDefinition[] = ['gpt-6.1-sol', 'fixture-coding'].map((id, index) => ({ id, provider: 'synthetic-wire', registryKey: `synthetic-wire:${id}`,
     displayName: index ? 'Synthetic coding' : 'Synthetic general', description: 'Owned local protocol fixture, not a live model', selectable: true, contextWindow: 65536,
@@ -266,4 +270,5 @@ try {
   throw error;
 } finally {
   await cleanup(); process.removeListener('SIGINT', interrupted); process.removeListener('SIGTERM', interrupted);
+  if (!enclosingAppStateExisted) assert.equal(existsSync(enclosingAppState), false, 'Connected acceptance must not recreate source-checkout app state');
 }

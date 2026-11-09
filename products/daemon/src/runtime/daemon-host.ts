@@ -251,12 +251,16 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         return;
       }
       fence();
+      // Listener startup awaits accepted backend owners. Retirement during
+      // that work cannot admit a new listener or boot effects afterward.
+      assertInstallationCurrent();
       if (!daemon.isRunning) throw new Error('Daemon server did not start');
       if (listener) {
         phase = 'HTTP listener startup';
         observeNativeStartupPhase('secondary-listener-startup');
         await listener.start();
         fence();
+        assertInstallationCurrent();
         if (!listener.isRunning) throw new Error('HTTP listener did not start');
       }
       phase = 'boot startup';

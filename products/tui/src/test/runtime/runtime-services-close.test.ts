@@ -1,3 +1,4 @@
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { expect, spyOn, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync } from 'node:fs';
@@ -32,6 +33,7 @@ test.each(['HomeGraph', 'rewind'] as const)('TUI close waits for %s last while c
   configManager.set('controlPlane.host', '127.0.0.1'); configManager.set('controlPlane.port', peer.port!);
   configManager.set('daemon.enabled', true);
   seedProviderMetadataCacheFixture({ configManager, homeDirectory: home, workingDirectory: work });
+  await prepareConfiguredProjectContext(configManager, work, 'knowledge-wiki.sqlite', { activate: true });
   const services = createRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
     workingDir: work, homeDirectory: home, modelDiscovery: 'skip', getConversationTitle: () => 'close fixture' });
   const entered = Promise.withResolvers<AbortSignal>(); const releaseHomeGraph = Promise.withResolvers<void>();

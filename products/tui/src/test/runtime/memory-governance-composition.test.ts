@@ -15,8 +15,8 @@ import { getTestRuntimeServices, disposeTestRuntimeServicesAfterAll } from '../h
 disposeTestRuntimeServicesAfterAll();
 
 describe('memory governance is live on a TUI-composed runtime', () => {
-  test('the governor is present and serves a real snapshot', () => {
-    const services = getTestRuntimeServices();
+  test('the governor is present and serves a real snapshot', async () => {
+    const services = (await getTestRuntimeServices());
     expect(services.memoryGovernor).toBeDefined();
     const snapshot = services.memoryGovernor.snapshot();
     expect(['normal', 'elevated', 'high', 'critical']).toContain(snapshot.tier);
@@ -25,8 +25,8 @@ describe('memory governance is live on a TUI-composed runtime', () => {
     expect(snapshot.thresholds.highPct).toBeLessThan(snapshot.thresholds.criticalPct);
   });
 
-  test('the REAL cache adapters are registered (knowledge-store + session-union)', () => {
-    const services = getTestRuntimeServices();
+  test('the REAL cache adapters are registered (knowledge-store + session-union)', async () => {
+    const services = (await getTestRuntimeServices());
     const ids = services.cacheRegistry.registeredIds();
     expect(ids).toContain('knowledge-store');
     expect(ids).toContain('session-union');
@@ -36,8 +36,8 @@ describe('memory governance is live on a TUI-composed runtime', () => {
     expect(snapshotCacheIds).toContain('session-union');
   });
 
-  test('the three deferrable background jobs are registered as pausable', () => {
-    const services = getTestRuntimeServices();
+  test('the three deferrable background jobs are registered as pausable', async () => {
+    const services = (await getTestRuntimeServices());
     const jobIds = services.pauseController.states().map((s) => s.id);
     for (const id of ['knowledge-self-improvement', 'memory-consolidation', 'code-index-reindex']) {
       expect(jobIds).toContain(id);

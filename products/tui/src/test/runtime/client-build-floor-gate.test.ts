@@ -47,7 +47,7 @@ const FROM_A_CHANNEL = { surfaceKind: 'telegram' as const, surfaceId: 'surface:t
  * that agent, the exact state whose completion runs the continuation runner.
  */
 async function sessionWithQueuedFollowUp(
-  services: ReturnType<typeof getTestRuntimeServices>,
+  services: Awaited<ReturnType<typeof getTestRuntimeServices>>,
   title: string,
 ): Promise<{ sessionId: string; busyAgentId: string }> {
   const session = await services.sessionBroker.createSession({ title });
@@ -65,7 +65,7 @@ async function sessionWithQueuedFollowUp(
 }
 
 async function bindRunningAgent(
-  services: ReturnType<typeof getTestRuntimeServices>,
+  services: Awaited<ReturnType<typeof getTestRuntimeServices>>,
   sessionId: string,
   task: string,
 ): Promise<string> {
@@ -77,7 +77,7 @@ async function bindRunningAgent(
 
 describe('a terminal below the daemon floor', () => {
   test('runs the queued follow-up while the daemon has asked for nothing', async () => {
-    const services = getTestRuntimeServices();
+    const services = (await getTestRuntimeServices());
     const { sessionId, busyAgentId } = await sessionWithQueuedFollowUp(services, 'floor-ok');
 
     const completion = await services.sessionBroker.completeAgent(sessionId, busyAgentId, 'done');
@@ -88,7 +88,7 @@ describe('a terminal below the daemon floor', () => {
   });
 
   test('refuses the queued follow-up once the daemon announces a floor above this build', async () => {
-    const services = getTestRuntimeServices();
+    const services = (await getTestRuntimeServices());
     const { sessionId, busyAgentId } = await sessionWithQueuedFollowUp(services, 'floor-too-low');
 
     // What the attach handshake feeds it, from the daemon's /status header.
@@ -104,7 +104,7 @@ describe('a terminal below the daemon floor', () => {
   });
 
   test('the refusal holds for later follow-ups, not just the one that hit the floor', async () => {
-    const services = getTestRuntimeServices();
+    const services = (await getTestRuntimeServices());
     const { sessionId, busyAgentId } = await sessionWithQueuedFollowUp(services, 'floor-stays');
     services.clientBuildGuard.observeFloor('999.0.0');
     await services.sessionBroker.completeAgent(sessionId, busyAgentId, 'done');

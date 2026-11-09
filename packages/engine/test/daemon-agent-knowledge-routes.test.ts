@@ -2,13 +2,14 @@ import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { DaemonServer } from '../platform/src/platform/daemon/facade.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import { createRuntimeServices } from '../platform/src/platform/runtime/services.js';
 import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
-import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE } from '../platform/src/platform/knowledge/index.js';
+import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '../platform/src/platform/knowledge/index.js';
+import { ProjectIdentityUnavailableError } from '../platform/src/platform/knowledge/project-planning/project-registry.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 /**
@@ -45,6 +46,24 @@ async function dispatch(
 }
 
 describe('daemon Agent knowledge route wiring', () => {
+  test('an unprepared project refuses before reading runtime configuration or starting its graph', () => {
+    const root = mkdtempSync(join(tmpdir(), 'unprepared-runtime-project-'));
+    tmpRoots.push(root);
+    const workingDir = join(root, 'workspace'), homeDirectory = join(root, 'home');
+    mkdirSync(workingDir, { recursive: true });
+    mkdirSync(homeDirectory, { recursive: true });
+    const configManager = new ConfigManager({ homeDir: homeDirectory, workingDir, surfaceRoot: 'goodvibes-test' });
+    const read = spyOn(configManager, 'get').mockImplementation(() => {
+      throw new Error('An unprepared graph reached runtime configuration');
+    });
+    try {
+      expect(() => createRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(),
+        runtimeStore: createRuntimeStore(), surfaceRoot: 'goodvibes', workingDir, homeDirectory,
+      })).toThrow(ProjectIdentityUnavailableError);
+      expect(read).not.toHaveBeenCalled();
+    } finally { read.mockRestore(); }
+  });
+
   test('normalizes injected runtime services that predate agentKnowledgeService', async () => {
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-agent-knowledge-routes-'));
     tmpRoots.push(root);
@@ -59,6 +78,7 @@ describe('daemon Agent knowledge route wiring', () => {
       workingDir,
       surfaceRoot: 'goodvibes-test',
     });
+    await prepareConfiguredProjectContext(configManager, workingDir, 'knowledge-wiki.sqlite', { activate: true });
     const runtimeServices = disposables.add(createRuntimeServices({
       configManager,
       runtimeBus,

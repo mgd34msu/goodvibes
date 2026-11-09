@@ -17,7 +17,7 @@ type InputHandlerTestAccess = {
   };
 };
 
-function makeInput() {
+async function makeInput() {
   const selection = new SelectionManager();
   const history = new InfiniteBuffer();
   const renders: string[] = [];
@@ -31,15 +31,15 @@ function makeInput() {
     () => history,
     () => {},
     () => {},
-    createDefaultUiRuntimeServices(),
+    (await createDefaultUiRuntimeServices()),
   );
   input.setContentWidth(80);
   return { input, renders };
 }
 
 describe('Ctrl+C behavior', () => {
-  test('clears prompt content even when the process indicator has focus', () => {
-    const { input, renders } = makeInput();
+  test('clears prompt content even when the process indicator has focus', async () => {
+    const { input, renders } = (await makeInput());
     input.prompt = 'pending text';
     input.cursorPos = input.prompt.length;
     input.indicatorFocused = true;
@@ -51,8 +51,8 @@ describe('Ctrl+C behavior', () => {
     expect(renders.at(-1)).toBe('');
   });
 
-  test('clears prompt content even while a modal is active', () => {
-    const { input, renders } = makeInput();
+  test('clears prompt content even while a modal is active', async () => {
+    const { input, renders } = (await makeInput());
     input.prompt = 'clear me';
     input.cursorPos = input.prompt.length;
     input.helpOverlayActive = true;
@@ -66,8 +66,8 @@ describe('Ctrl+C behavior', () => {
     expect(renders.at(-1)).toBe('');
   });
 
-  test('cancels generation globally when prompt is empty', () => {
-    const { input } = makeInput();
+  test('cancels generation globally when prompt is empty', async () => {
+    const { input } = (await makeInput());
     const cancelGeneration = mock(() => {});
     (input as unknown as InputHandlerTestAccess).commandContext = { cancelGeneration };
     input.indicatorFocused = true;
@@ -88,8 +88,8 @@ describe('Ctrl+C behavior', () => {
   // pins that: it simulates the interleaving directly (extra render() calls
   // between the press and the check) and confirms both the state and what the
   // footer would actually paint from it.
-  test('the arm-hint state and rendered text survive an interleaved render between the first Ctrl+C press and the check (item 5)', () => {
-    const { input } = makeInput();
+  test('the arm-hint state and rendered text survive an interleaved render between the first Ctrl+C press and the check (item 5)', async () => {
+    const { input } = (await makeInput());
     input.prompt = '';
     input.cursorPos = 0;
 

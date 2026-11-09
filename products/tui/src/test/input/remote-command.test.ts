@@ -35,14 +35,14 @@ type CommandContextOverrides =
     extensions?: Partial<CommandContext['extensions']>;
   };
 
-function createRemoteCommandContext(
+async function createRemoteCommandContext(
   store: ReturnType<typeof createRuntimeStore>,
   out: string[],
   overrides: CommandContextOverrides = {},
-): CommandContext {
+): Promise<CommandContext> {
   const shellRoot = makeProjectTempDir('gv-remote-shell');
-  const remoteRunnerRegistry = getTestRemoteRunnerRegistry();
-  const remoteSupervisor = getTestRemoteSupervisor();
+  const remoteRunnerRegistry = (await getTestRemoteRunnerRegistry());
+  const remoteSupervisor = (await getTestRemoteSupervisor());
   const remoteRuntime = {
     listActiveConnections: () => {
       const state = store.getState().acp;
@@ -167,7 +167,7 @@ function createRemoteCommandContext(
     },
     ops: {
       remoteRuntime,
-      agentManager: getTestAgentManager(),
+      agentManager: (await getTestAgentManager()),
     },
     extensions: {
       toolRegistry: {} as never,
@@ -218,7 +218,7 @@ describe('remote command', () => {
     const remote = registry.get('remote');
     expect(remote).toBeDefined();
 
-    const manager = getTestAgentManager();
+    const manager = (await getTestAgentManager());
     const agent = manager.spawn({
       mode: 'spawn',
       task: 'Export remote review artifact',
@@ -255,7 +255,7 @@ describe('remote command', () => {
     const dir = makeProjectTempDir('gv-remote-cmd');
     const path = join(dir, 'review-artifact.json');
 
-    const ctx = createRemoteCommandContext(store, out);
+    const ctx = (await createRemoteCommandContext(store, out));
 
     await remote!.handler(['export', agent.id, path], ctx);
     expect(existsSync(path)).toBe(true);
@@ -277,13 +277,13 @@ describe('remote command', () => {
     const spawn = mock(async () => 'remote-runner-1');
     const out: string[] = [];
 
-    const ctx = createRemoteCommandContext(store, out, {
+    const ctx = (await createRemoteCommandContext(store, out, {
       ops: {
         acpManager: {
           spawn,
         } as never,
       },
-    });
+    }));
 
     await registry.executeFromOwner('remote', ['dispatch', 'researcher', 'Inspect', 'deployment', 'logs'], ctx, '/remote dispatch researcher Inspect deployment logs');
     expect(spawn).toHaveBeenCalledTimes(1);
@@ -351,14 +351,14 @@ describe('remote command', () => {
     const dir = makeProjectTempDir('gv-remote-env');
     const envPath = join(dir, 'remote-env.sh');
 
-    const ctx = createRemoteCommandContext(store, out, {
+    const ctx = (await createRemoteCommandContext(store, out, {
       platform: {
         configManager: {
           getCategory: () => ({ httpListener: false }),
           get: (key: string) => (key === 'daemon.enabled' ? false : undefined),
         } as never,
       },
-    });
+    }));
 
     await remote!.handler(['setup'], ctx);
     expect(out.join('\n')).toContain('Remote Setup Review');
@@ -404,14 +404,14 @@ describe('remote command', () => {
     const out: string[] = [];
     const dir = makeProjectTempDir('gv-remote-setup-daemon');
 
-    const defaultCtx = createRemoteCommandContext(store, out, {
+    const defaultCtx = (await createRemoteCommandContext(store, out, {
       platform: {
         configManager: {
           getCategory: () => ({ httpListener: false }),
           get: () => undefined,
         } as never,
       },
-    });
+    }));
 
     await remote!.handler(['setup'], defaultCtx);
     expect(out.join('\n')).toContain('daemon enabled: yes');
@@ -422,14 +422,14 @@ describe('remote command', () => {
     expect(JSON.parse(readFileSync(defaultBundle, 'utf-8')).daemonEnabled).toBe(true);
 
     out.length = 0;
-    const overrideCtx = createRemoteCommandContext(store, out, {
+    const overrideCtx = (await createRemoteCommandContext(store, out, {
       platform: {
         configManager: {
           getCategory: () => ({ httpListener: false }),
           get: (key: string) => (key === 'daemon.enabled' ? false : undefined),
         } as never,
       },
-    });
+    }));
 
     await remote!.handler(['setup'], overrideCtx);
     expect(out.join('\n')).toContain('daemon enabled: no');
@@ -450,7 +450,7 @@ describe('remote command', () => {
     const store = createRuntimeStore();
     const spawn = mock(async () => 'remote-runner-pool-1');
     const out: string[] = [];
-    const ctx = createRemoteCommandContext(store, out, {
+    const ctx = (await createRemoteCommandContext(store, out, {
       platform: {
         configManager: {
           getCategory: () => ({ httpListener: false }),
@@ -472,7 +472,7 @@ describe('remote command', () => {
           spawn,
         } as never,
       },
-    });
+    }));
 
     await remote!.handler(['pool', 'create', 'ops', 'Ops Pool'], ctx);
     expect(out.join('\n')).toContain('Created remote runner pool ops');
@@ -502,7 +502,7 @@ describe('remote command', () => {
     const store = createRuntimeStore();
     const out: string[] = [];
     const dir = makeProjectTempDir('gv-teleport-cmd');
-    const ctx = createRemoteCommandContext(store, out, {
+    const ctx = (await createRemoteCommandContext(store, out, {
       session: {
         runtime: {
           model: '',
@@ -513,7 +513,7 @@ describe('remote command', () => {
           sessionId: 'sess-teleport-command',
         },
       },
-    });
+    }));
     store.setState((state) => ({
       ...state,
       acp: {
@@ -560,8 +560,8 @@ import { fileURLToPath } from 'node:url';
 for (const pooled of [false, true]) test(`direct owner /remote ${pooled ? 'dispatch-pool' : 'dispatch'} carries exact command source to real ACP subprocess`, async () => {
   resetTestRuntimeServices();
   const registry = new CommandRegistry(); registerBuiltinCommands(registry);
-  const ctx = createRemoteCommandContext(createRuntimeStore(), []);
-  if (pooled) getTestRemoteRunnerRegistry().createPool({ id: 'proof', label: 'Proof' });
+  const ctx = (await createRemoteCommandContext(createRuntimeStore(), []));
+  if (pooled) (await getTestRemoteRunnerRegistry()).createPool({ id: 'proof', label: 'Proof' });
   const report = join(makeProjectTempDir('acp-command-wire'), 'result.json');
   const log = new SqliteDecisionLog(':memory:');
   const synthetic = fakePort((wireQuestionName, question) => {
@@ -600,7 +600,7 @@ for (const pooled of [false, true]) test(`direct owner /remote ${pooled ? 'dispa
 
 test('remote dispatch from a model or source-less command cannot fabricate authority from task prose', async () => {
   resetTestRuntimeServices(); const registry = new CommandRegistry(); registerBuiltinCommands(registry);
-  const ctx = createRemoteCommandContext(createRuntimeStore(), []);
+  const ctx = (await createRemoteCommandContext(createRuntimeStore(), []));
   const spawn = mock(async () => 'should-not-spawn'); ctx.ops.acpManager = { spawn, cancel: async () => {} };
   await registry.execute('remote', ['dispatch', 'read', 'the', 'project'], ctx);
   await registry.executeFromOwner('remote', ['dispatch', 'read', 'the', 'project'], { ...ctx, invokedByModel: true }, '/remote dispatch read the project');

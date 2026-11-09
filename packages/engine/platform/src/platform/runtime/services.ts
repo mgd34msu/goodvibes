@@ -24,6 +24,7 @@ import {
   KnowledgeSemanticService,
   KnowledgeStore,
   ProjectPlanningService,
+  assertConfiguredProjectContextReady,
   createConfiguredPlanningStore,
   configureKnowledgeArtifactReferences,
   createProviderBackedKnowledgeSemanticLlm,
@@ -357,6 +358,7 @@ export {
 } from './provider-optimizer-wiring.js';
 
 export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeServices {
+  assertConfiguredProjectContextReady(options.configManager, options.workingDir, REGULAR_KNOWLEDGE_DB_FILE);
   const disposalScope = createAsyncDisposalScope('RuntimeServices');
   const workingDirectory = options.workingDir;
   const homeDirectory = options.homeDirectory;

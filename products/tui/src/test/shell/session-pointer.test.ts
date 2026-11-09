@@ -77,8 +77,8 @@ test('tool parsing is reused across cloned snapshots and invalidated by changed 
   expect(cache.needsAttention('exec', exec, failure.replace('"exit_code":1', '"exit_code":0'))).toBe(false);
 });
 
-test('real SGR mouse input reaches the top dialog, and keyboard editing still works afterwards', () => {
-  const input = new InputHandler(() => {}, new SelectionManager(), () => 0, () => 20, () => new InfiniteBuffer(), () => {}, () => {}, createDefaultUiRuntimeServices());
+test('real SGR mouse input reaches the top dialog, and keyboard editing still works afterwards', async () => {
+  const input = new InputHandler(() => {}, new SelectionManager(), () => 0, () => 20, () => new InfiniteBuffer(), () => {}, () => {}, (await createDefaultUiRuntimeServices()));
   let answer: boolean | undefined;
   const dialog = new ConfirmDialog({ title: 'Stop agent?', body: 'The agent is still running.', confirmLabel: 'Stop', tone: 'danger' }, result => { answer = result; });
   input.surfaceModals.push(dialog);

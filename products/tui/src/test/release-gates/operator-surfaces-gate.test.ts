@@ -1,3 +1,4 @@
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts';
 import { beforeAll, beforeEach, describe, expect, test } from 'bun:test';
@@ -76,13 +77,14 @@ describe('operator surfaces gate', () => {
   // One composed graph per file: no test here writes to it (the orchestration
   // cancel test builds its own AgentManager), and composing it per test was
   // the bulk of this file's run time.
-  beforeAll(() => {
+  beforeAll(async () => {
     const workingDirectory = makeProjectTempDir('gv-operator-surfaces');
     configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: join(workingDirectory, '.goodvibes', 'tui'), workingDir: workingDirectory, homeDir: tmpdir() });
     configManager.set('fleet.maxSize', 8);
     configManager.set('orchestration.maxDepth', 1);
     configManager.set('orchestration.recursionEnabled', true);
     seedBenchmarkCacheFixture({ homeDirectory: tmpdir(), workingDirectory, surfaceRoot: 'tui' });
+    await prepareConfiguredProjectContext(configManager, workingDirectory, 'knowledge-wiki.sqlite', { activate: true });
     runtimeServices = disposables.add(createRuntimeServices({
       runtimeBus: new RuntimeEventBus(),
       runtimeStore: createRuntimeStore(),

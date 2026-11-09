@@ -85,13 +85,28 @@ export async function prepareConfiguredProjectContext(config: ConfigManager, wor
   }
   return Object.freeze({ registration: 'registered', projectId: registered.projectId });
 }
+function requirePreparedProject(config: ConfigManager, file: string): PreparedProject {
+  selectedFile(file); const prepared = mapGet(weakGet(preparations, config), file); if (!prepared) throw new ProjectIdentityUnavailableError(); prepared.assertCurrent(); prepared.source.assertInitialImage();
+  if (Object.getOwnPropertyDescriptor(KnowledgeStore.prototype, 'init')?.value !== nativeInit) throw new ProjectIdentityUnavailableError();
+  return prepared;
+}
+
+/** Fail before a runtime graph starts resources. Preparation remains explicit
+ * and asynchronous; this assertion cannot activate or reconstruct a project. */
+export function assertConfiguredProjectContextReady(config: ConfigManager, workingDirectory: string, file = REGULAR_KNOWLEDGE_DB_FILE): void {
+  const prepared = requirePreparedProject(config, file);
+  const workspace = retainConfiguredWorkspace(config);
+  workspace.assertCurrent();
+  if (workspace.directory !== resolve(workingDirectory)) throw new ProjectIdentityUnavailableError();
+  prepared.assertCurrent();
+}
+
 /** Actual constructor bridge, not an exemption for an arbitrary supplied store.
  * The original image restriction is installed before KnowledgeStore starts init.
  */
 export function createConfiguredPlanningStore(config: ConfigManager, file = REGULAR_KNOWLEDGE_DB_FILE,
   options: Pick<KnowledgeStoreConfig, 'nativeDataWriter' | 'family'> = {}): KnowledgeStore {
-  selectedFile(file); const prepared = mapGet(weakGet(preparations, config), file); if (!prepared) throw new ProjectIdentityUnavailableError(); prepared.assertCurrent(); prepared.source.assertInitialImage();
-  if (Object.getOwnPropertyDescriptor(KnowledgeStore.prototype, 'init')?.value !== nativeInit) throw new ProjectIdentityUnavailableError();
+  const prepared = requirePreparedProject(config, file);
   const store = new nativeStoreConstructor({ ...options, configManager: config, dbFileName: file, beforeInitialRead: () => { prepared.assertCurrent(); prepared.source.assertInitialImage(); } });
   prepared.assertCurrent(); weakSet(constructedStores, store, prepared); return store;
 }

@@ -993,12 +993,39 @@ for (const retirement of ['payload', 'cancel'] as const) test(`late native start
   if (retirement === 'payload') writeFileSync(native.execPath, 'retired during actual startup');
   else abort.abort();
   release.resolve();
-  await expect(starting).rejects.toThrow('server startup');
+  await expect(starting).rejects.toThrow('Daemon host server startup failed');
   await fx.host.close();
   expect(readFileSync(markerPath, 'utf8')).toBe(attempted);
   expect(fx.host.daemon?.isRunning).toBe(false);
   expect(bootStarts).toBe(0); expect(graphCloses).toBe(1);
   expect(fx.host.snapshot().state).toBe('failed');
+});
+
+test('native retirement during secondary listener startup prevents all later boot effects', async () => {
+  const native = writeNativeInstallationFixture(makeOwnedTempDir('host-native-secondary-start'), '9.9.9-test', process.arch === 'arm64' ? 'arm64' : 'x64');
+  const abort = new AbortController();
+  const artifact = resolveInstalledDaemonUpdateArtifact({ isOverridden: false }, { ...native.options, signal: abort.signal });
+  if (!artifact) throw new Error('Native fixture admission missing');
+  const entered = gate(), release = gate(); let bootStarts = 0, graphCloses = 0;
+  const fx = fixture(runtime => {
+    const start = runtime.bootTasks!.start;
+    keep(spyOn(runtime.bootTasks!, 'start').mockImplementation(() => { bootStarts++; return start(); }));
+    const close = runtime.close;
+    keep(spyOn(runtime, 'close').mockImplementation(async () => { graphCloses++; await close(); }));
+  }, { createListener(config) {
+    const listener = new HttpListener(config), start = listener.start.bind(listener);
+    keep(spyOn(listener, 'start').mockImplementation(async () => { await start(); entered.resolve(); await release.promise; }));
+    return listener;
+  } }, { updateArtifact: artifact, hasOverriddenHome: false, httpListener: { host: '127.0.0.1', port: 0, token: 'native-secondary-startup-fixture' } });
+  const markerPath = join(fx.options.runtime.configManager.getControlPlaneConfigDir(), 'control-plane', 'daemon-lifecycle.json');
+  const starting = fx.host.start(); await entered.promise;
+  const attempted = readFileSync(markerPath, 'utf8'); expect(JSON.parse(attempted).failedStarts).toBe(1);
+  expect(bootStarts).toBe(0); expect(fx.host.httpListener?.isRunning).toBe(true);
+  abort.abort(); release.resolve();
+  await expect(starting).rejects.toThrow('Daemon host HTTP listener startup failed'); await fx.host.close();
+  expect(readFileSync(markerPath, 'utf8')).toBe(attempted);
+  expect(fx.host.daemon?.isRunning).toBe(false); expect(fx.host.httpListener?.isRunning).toBe(false);
+  expect(bootStarts).toBe(0); expect(graphCloses).toBe(1); expect(fx.host.snapshot().state).toBe('failed');
 });
 
 function inertNativeHostServer(): NonNullable<DaemonHost['daemon']> {
@@ -1014,7 +1041,9 @@ for (const finish of ['ready', 'cancel'] as const) test(`host ${finish} defers n
   const fx = fixture(runtime => {
     const start = runtime.bootTasks!.start;
     keep(spyOn(runtime.bootTasks!, 'start').mockImplementation(async () => {
-      bootEntered.resolve(); await bootRelease.promise; return start();
+      // Hold the return of an actually admitted boot, not a future call that
+      // would be made only after close has correctly fenced the controller.
+      const snapshot = await start(); bootEntered.resolve(); await bootRelease.promise; return snapshot;
     }));
   }, {
     createServer(config) {
@@ -1037,6 +1066,7 @@ for (const finish of ['ready', 'cancel'] as const) test(`host ${finish} defers n
   listenerRelease.resolve(); await bootEntered.promise;
   expect(activations).toBe(0); expect(fx.host.snapshot().state).toBe('starting');
   const closing = finish === 'cancel' ? fx.host.close() : undefined;
+  if (closing) { const done = settled(closing); await tick(); expect(done()).toBe(false); expect(activations).toBe(0); }
   bootRelease.resolve(); const started = await starting;
   if (finish === 'ready') { expect(started.state).toBe('ready'); expect(activations).toBe(1); }
   else { await closing; expect(activations).toBe(0); expect(fx.host.snapshot().state).toBe('closed'); }

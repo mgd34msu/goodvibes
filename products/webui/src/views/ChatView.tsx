@@ -4,6 +4,7 @@ import { BookOpen, CalendarDays, LayoutGrid, Mail } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getClientLifetime, isClientLifetimeCurrent } from '../lib/client-lifetime';
 import { client as platformClient } from '../lib/goodvibes';
+import { getOperatorMethod } from '@goodvibes-jev/engine/contracts';
 import { asRecord, bestId, bestTitle, firstString } from '../lib/object';
 import { queryKeys } from '../lib/queries';
 import { useProviderModelOptions } from '../lib/use-provider-model-options';
@@ -46,6 +47,18 @@ import { resolveScrollTarget, isScrollTargetReady, findMessageElement } from './
 import type { ChatViewProps, ChatMessage } from './chat/types';
 
 export type { ChatViewProps };
+
+type SessionRoutePatch = Parameters<typeof platformClient.chat.sessions.update>[1];
+type SessionEffort = NonNullable<SessionRoutePatch['reasoningEffort']>;
+/** Read the actual session wire enum; model-advertised custom strings are not session contracts. */
+function isSessionEffort(value: string): value is SessionEffort {
+  const schema = asRecord(asRecord(getOperatorMethod('companion.chat.sessions.update')?.inputSchema).properties).reasoningEffort;
+  const alternatives = asRecord(schema).anyOf;
+  return Array.isArray(alternatives) && alternatives.some(alternative => {
+    const branch = asRecord(alternative);
+    return branch.type === 'string' && Array.isArray(branch.enum) && branch.enum.includes(value);
+  });
+}
 
 const SUGGESTION_ICONS: Record<SuggestionIcon, typeof Mail> = {
   calendar: CalendarDays,
@@ -211,7 +224,7 @@ export function ChatView({
   const routeSelectionCurrent = (selection: typeof selectedChat, lifetime: ReturnType<typeof getClientLifetime>) => {
     if (!chatSelection.isCurrent(selection) || !isClientLifetimeCurrent(lifetime)) throw new Error('The selected chat or connection changed. Choose the model again.');
   };
-  const applySessionRoute = async (patch: { provider?: string; model?: string; reasoningEffort?: string | null }) => {
+  const applySessionRoute = async (patch: SessionRoutePatch) => {
     const lifetime = getClientLifetime(); routeSelectionCurrent(selectedChat, lifetime);
     if (ACTIVE_TURN_STATES.includes(turnState)) throw new Error('Wait for this chat’s current reply to finish before changing its model or effort.');
     const result = await platformClient.chat.sessions.update(activeSessionId, patch);
@@ -253,7 +266,10 @@ export function ChatView({
   const selectEffort = useMutation({
     mutationFn: async (effort: string) => {
       if (sessionProvider === 'decision-router') throw new Error('Decision Router effort is configured by category.');
-      if (activeSessionId) return applySessionRoute({ reasoningEffort: effort === '' ? null : effort });
+      if (activeSessionId) {
+        if (effort !== '' && !isSessionEffort(effort)) throw new Error('This reasoning effort is not supported by chat sessions. Choose a supported level or the provider default.');
+        return applySessionRoute({ reasoningEffort: effort === '' ? null : effort });
+      }
       const lifetime = getClientLifetime(); routeSelectionCurrent(selectedChat, lifetime);
       const result = await platformClient.operator.models.current.set(currentRegistryKey, effort === '' ? null : effort);
       routeSelectionCurrent(selectedChat, lifetime); return result;

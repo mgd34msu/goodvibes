@@ -27,7 +27,8 @@ afterEach(() => {
   resetTestRuntimeServices();
 });
 
-function makeInput(uiServices = createDefaultUiRuntimeServices()): InputHandler {
+async function makeInput(uiServices?: UiRuntimeServices): Promise<InputHandler> {
+  uiServices ??= await createDefaultUiRuntimeServices();
   const history = new InfiniteBuffer();
   const input = new InputHandler(
     () => {},
@@ -1113,8 +1114,8 @@ describe('OnboardingWizardController', () => {
 });
 
 describe('InputHandler onboarding integration', () => {
-  test('keeps onboarding locked while runtime settings are hydrating', () => {
-    const input = makeInput();
+  test('keeps onboarding locked while runtime settings are hydrating', async () => {
+    const input = (await makeInput());
     input.openOnboardingWizard();
 
     input.feed('j');
@@ -1125,8 +1126,8 @@ describe('InputHandler onboarding integration', () => {
     expect(input.onboardingWizard.currentStep.id).toBe('loading');
   });
 
-  test('routes arrow navigation into the onboarding shell instead of the prompt', () => {
-    const input = makeInput();
+  test('routes arrow navigation into the onboarding shell instead of the prompt', async () => {
+    const input = (await makeInput());
     input.openOnboardingWizard({ mode: 'new', preload: () => {} });
 
     input.feed('\x1b[B');
@@ -1136,9 +1137,9 @@ describe('InputHandler onboarding integration', () => {
     expect(input.onboardingWizard.active).toBe(true);
   });
 
-  test('does not write the check marker when the wizard opens and the user escapes without applying', () => {
-    const uiServices = createDefaultUiRuntimeServices();
-    const input = makeInput(uiServices);
+  test('does not write the check marker when the wizard opens and the user escapes without applying', async () => {
+    const uiServices = (await createDefaultUiRuntimeServices());
+    const input = (await makeInput(uiServices));
 
     input.openOnboardingWizard({ mode: 'new', preload: () => {} });
     input.feed('\x1b');
@@ -1148,8 +1149,8 @@ describe('InputHandler onboarding integration', () => {
     expect(input.onboardingWizard.active).toBe(false);
   });
 
-  test('opens nested model picker from onboarding and unwinds back to the shell on escape', () => {
-    const input = makeInput();
+  test('opens nested model picker from onboarding and unwinds back to the shell on escape', async () => {
+    const input = (await makeInput());
     input.openOnboardingWizard({ mode: 'edit', preload: () => {} });
     input.onboardingWizard.setStep(3);
 
@@ -1181,7 +1182,7 @@ describe('InputHandler onboarding integration', () => {
   });
 
   test('shows apply blockers inside the wizard instead of printing behind the overlay', async () => {
-    const input = makeInput();
+    const input = (await makeInput());
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -1217,8 +1218,8 @@ describe('InputHandler onboarding integration', () => {
 
   test('apply-and-continue advances without persisting runtime settings', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
-    const input = makeInput(uiServices);
+    const uiServices = (await createDefaultUiRuntimeServices());
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -1258,8 +1259,8 @@ describe('InputHandler onboarding integration', () => {
 
   test('apply-and-continue advances to the next section instead of review when later required fields are incomplete', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
-    const input = makeInput(uiServices);
+    const uiServices = (await createDefaultUiRuntimeServices());
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -1296,8 +1297,8 @@ describe('InputHandler onboarding integration', () => {
 
   test('apply-and-continue blocks and shows error when required text field is empty', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
-    const input = makeInput(uiServices);
+    const uiServices = (await createDefaultUiRuntimeServices());
+    const input = (await makeInput(uiServices));
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
       print: () => {},
@@ -1345,8 +1346,8 @@ describe('InputHandler onboarding integration', () => {
 
   test('apply-and-continue advances when all required fields on the step are satisfied', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
-    const input = makeInput(uiServices);
+    const uiServices = (await createDefaultUiRuntimeServices());
+    const input = (await makeInput(uiServices));
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
       print: () => {},
@@ -1386,8 +1387,8 @@ describe('InputHandler onboarding integration', () => {
 
   test('apply-and-continue does not crash on a step with no required fields', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
-    const input = makeInput(uiServices);
+    const uiServices = (await createDefaultUiRuntimeServices());
+    const input = (await makeInput(uiServices));
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
       print: () => {},
@@ -1408,8 +1409,8 @@ describe('InputHandler onboarding integration', () => {
 
   test('does not write the global onboarding check marker when the wizard is opened', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
-    const input = makeInput(uiServices);
+    const uiServices = (await createDefaultUiRuntimeServices());
+    const input = (await makeInput(uiServices));
     input.openOnboardingWizard({ mode: 'new', preload: () => {} });
 
     const marker = readOnboardingCheckMarker(uiServices.environment.shellPaths, 'user');
@@ -1419,9 +1420,9 @@ describe('InputHandler onboarding integration', () => {
 
   test('writes the global onboarding check marker on successful apply', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
+    const uiServices = (await createDefaultUiRuntimeServices());
     ensureLocalAdminAuth(uiServices);
-    const input = makeInput(uiServices);
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -1442,8 +1443,8 @@ describe('InputHandler onboarding integration', () => {
 
   test('does not write the global onboarding check marker when apply errors occur', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
-    const input = makeInput(uiServices);
+    const uiServices = (await createDefaultUiRuntimeServices());
+    const input = (await makeInput(uiServices));
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
       print: () => {},
@@ -1463,8 +1464,8 @@ describe('InputHandler onboarding integration', () => {
 
   test('keeps the global onboarding check marker when post-apply verification fails', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
-    const input = makeInput(uiServices);
+    const uiServices = (await createDefaultUiRuntimeServices());
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -1499,7 +1500,7 @@ describe('InputHandler onboarding integration', () => {
 
   test('restarts and verifies background services after the wizard has been checked', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
+    const uiServices = (await createDefaultUiRuntimeServices());
     ensureLocalAdminAuth(uiServices);
     let restarted = false;
     installExternalServices(uiServices, {
@@ -1515,7 +1516,7 @@ describe('InputHandler onboarding integration', () => {
         };
       },
     });
-    const input = makeInput(uiServices);
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -1551,7 +1552,7 @@ describe('InputHandler onboarding integration', () => {
 
   test('accepts a verified external daemon as active after onboarding restart', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
+    const uiServices = (await createDefaultUiRuntimeServices());
     ensureLocalAdminAuth(uiServices);
     const daemonStatus: HostServiceStatus = {
       mode: 'external',
@@ -1584,7 +1585,7 @@ describe('InputHandler onboarding integration', () => {
         httpListenerStatus: listenerStatus,
       }),
     });
-    const input = makeInput(uiServices);
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -1619,7 +1620,7 @@ describe('InputHandler onboarding integration', () => {
 
   test('keeps the global onboarding check marker when background service activation fails', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
+    const uiServices = (await createDefaultUiRuntimeServices());
     ensureLocalAdminAuth(uiServices);
     installExternalServices(uiServices, {
       inspect: () => ({
@@ -1631,7 +1632,7 @@ describe('InputHandler onboarding integration', () => {
         httpListenerRunning: false,
       }),
     });
-    const input = makeInput(uiServices);
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -1669,7 +1670,7 @@ describe('InputHandler onboarding integration', () => {
 
   test('reports blocked daemon status reason when an unverified process owns the configured port', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
+    const uiServices = (await createDefaultUiRuntimeServices());
     ensureLocalAdminAuth(uiServices);
     const daemonStatus: HostServiceStatus = {
       mode: 'blocked',
@@ -1691,7 +1692,7 @@ describe('InputHandler onboarding integration', () => {
         daemonStatus,
       }),
     });
-    const input = makeInput(uiServices);
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -1728,7 +1729,7 @@ describe('InputHandler onboarding integration', () => {
 
   test('deduplicates runtime activation warnings in completion output', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
+    const uiServices = (await createDefaultUiRuntimeServices());
     ensureLocalAdminAuth(uiServices);
     installExternalServices(uiServices, {
       inspect: () => ({
@@ -1742,7 +1743,7 @@ describe('InputHandler onboarding integration', () => {
         httpListenerPortInUse: true,
       }),
     });
-    const input = makeInput(uiServices);
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -1782,7 +1783,7 @@ describe('InputHandler onboarding integration', () => {
 
   test('stops the HTTP listener but keeps the cross-surface daemon running when completing Local TUI Only', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
+    const uiServices = (await createDefaultUiRuntimeServices());
     let daemonRunning = true;
     let httpListenerRunning = true;
     let restarted = false;
@@ -1798,7 +1799,7 @@ describe('InputHandler onboarding integration', () => {
         return { daemonRunning, httpListenerRunning };
       },
     });
-    const input = makeInput(uiServices);
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -1843,8 +1844,8 @@ describe('InputHandler onboarding integration', () => {
 
   test('keeps the global onboarding check marker when Local TUI Only cannot inspect services', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
-    const input = makeInput(uiServices);
+    const uiServices = (await createDefaultUiRuntimeServices());
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -1883,7 +1884,7 @@ describe('InputHandler onboarding integration', () => {
 
   test('keeps the global onboarding check marker when Local TUI Only cannot stop a running service', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
+    const uiServices = (await createDefaultUiRuntimeServices());
     installExternalServices(uiServices, {
       inspect: () => ({
         daemonRunning: false,
@@ -1894,7 +1895,7 @@ describe('InputHandler onboarding integration', () => {
         httpListenerRunning: true,
       }),
     });
-    const input = makeInput(uiServices);
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -1933,7 +1934,7 @@ describe('InputHandler onboarding integration', () => {
 
   test('keeps the global onboarding check marker when Local TUI Only leaves an external listener port occupied', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
+    const uiServices = (await createDefaultUiRuntimeServices());
     installExternalServices(uiServices, {
       inspect: () => ({
         daemonRunning: false,
@@ -1948,7 +1949,7 @@ describe('InputHandler onboarding integration', () => {
         httpListenerPortInUse: true,
       }),
     });
-    const input = makeInput(uiServices);
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -2199,7 +2200,7 @@ describe('network step: connect to an existing daemon (F1)', () => {
 
   test('connect-existing-daemon action refuses to proceed without a pasted token', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
+    const uiServices = (await createDefaultUiRuntimeServices());
     ensureLocalAdminAuth(uiServices);
     let restartCalled = false;
     installExternalServices(uiServices, {
@@ -2209,7 +2210,7 @@ describe('network step: connect to an existing daemon (F1)', () => {
         return { daemonRunning: false, httpListenerRunning: false };
       },
     });
-    const input = makeInput(uiServices);
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -2228,7 +2229,7 @@ describe('network step: connect to an existing daemon (F1)', () => {
 
   test('connect-existing-daemon action installs the pasted token, applies host/port, and reports success on adoption', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
+    const uiServices = (await createDefaultUiRuntimeServices());
     ensureLocalAdminAuth(uiServices);
     const adoptedStatus: HostServiceStatus = {
       mode: 'external',
@@ -2248,7 +2249,7 @@ describe('network step: connect to an existing daemon (F1)', () => {
         daemonStatus: adoptedStatus,
       }),
     });
-    const input = makeInput(uiServices);
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -2274,13 +2275,13 @@ describe('network step: connect to an existing daemon (F1)', () => {
 
   test('connect-existing-daemon action reports an honest diagnostic when the daemon could not be verified', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
+    const uiServices = (await createDefaultUiRuntimeServices());
     ensureLocalAdminAuth(uiServices);
     installExternalServices(uiServices, {
       inspect: () => ({ daemonRunning: false, httpListenerRunning: false }),
       restart: async () => ({ daemonRunning: false, httpListenerRunning: false }),
     });
-    const input = makeInput(uiServices);
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },
@@ -2409,7 +2410,7 @@ describe('network step: migrate the install-script daemon service', () => {
 
   test('migrate-legacy-daemon-service action reads the confirm checklist and dispatches to the handler (legacy absent, port free: safe, deterministic branch)', async () => {
     resetTestRuntimeServices();
-    const uiServices = createDefaultUiRuntimeServices();
+    const uiServices = (await createDefaultUiRuntimeServices());
     ensureLocalAdminAuth(uiServices);
     // A distinctive, unlikely-to-be-bound high port, never 3421/4444, so this
     // exercises the engine's real (uninjected) TCP port probe deterministically
@@ -2418,7 +2419,7 @@ describe('network step: migrate the install-script daemon service', () => {
     // detectLegacyUnit's unit-file check is guaranteed to report absent.
     uiServices.platform.configManager.setDynamic('controlPlane.host', '127.0.0.1');
     uiServices.platform.configManager.setDynamic('controlPlane.port', 58921);
-    const input = makeInput(uiServices);
+    const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {
       session: { runtime: {} },

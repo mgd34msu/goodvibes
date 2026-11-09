@@ -47,8 +47,8 @@ import { SETTINGS_CATEGORIES, SETTINGS_CATEGORY_GROUPS } from '../../input/setti
 // registered inside the helper, for the reason its doc comment gives.
 disposeTestRuntimeServicesAfterAll();
 
-describe('a client with no verbs of its own says so instead of guessing', () => {
-  const services = getTestRuntimeServices();
+describe('a client with no verbs of its own says so instead of guessing', async () => {
+  const services = (await getTestRuntimeServices());
 
   test('an empty catalog is reported as unreachable, never as needs-setup', async () => {
     // The distinction is the whole point. "needs-setup" tells the user to go
@@ -170,8 +170,8 @@ describe('rendering', () => {
   });
 });
 
-describe('the Connections category of the settings workspace', () => {
-  const services = getTestRuntimeServices();
+describe('the Connections category of the settings workspace', async () => {
+  const services = (await getTestRuntimeServices());
 
   test('rows start as checking, never as a settled state the daemon has not confirmed', () => {
     const entries = initialConnectionEntries();

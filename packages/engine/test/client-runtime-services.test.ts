@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { prepareConfiguredProjectContext } from '../platform/src/platform/knowledge/project-planning/configured-project.ts';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../platform/src/platform/runtime/services.ts';
@@ -75,7 +76,7 @@ async function declineEverything(input: {
   return { approved: false };
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'client-runtime-'));
   daemonRoot = mkdtempSync(join(tmpdir(), 'client-runtime-daemon-'));
   seedBenchmarkCache(root, 'tui');
@@ -97,8 +98,10 @@ beforeAll(() => {
     requestApproval: declineEverything,
   });
 
+  const daemonConfig = new ConfigManager({ surfaceRoot: 'daemon', configDir: join(daemonRoot, 'cfg'), workingDir: daemonRoot, homeDir: daemonRoot });
+  await prepareConfiguredProjectContext(daemonConfig, daemonRoot, undefined, { activate: true });
   daemon = createRuntimeServices({
-    configManager: new ConfigManager({ surfaceRoot: 'daemon', configDir: join(daemonRoot, 'cfg'), workingDir: daemonRoot, homeDir: daemonRoot }),
+    configManager: daemonConfig,
     runtimeBus: new RuntimeEventBus(),
     runtimeStore: createRuntimeStore(),
     surfaceRoot: 'goodvibes',

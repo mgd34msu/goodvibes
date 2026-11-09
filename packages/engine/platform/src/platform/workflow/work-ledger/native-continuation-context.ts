@@ -6,13 +6,15 @@ import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 export const NATIVE_CONVERSATION_CONTINUATION_MAX_MESSAGES = Infinity;
 export const NATIVE_CONVERSATION_CONTINUATION_MAX_BYTES = Infinity;
 const id = string().min(1).max(200);
-export const NATIVE_CONTINUATION_OPAQUE_PATTERN = /^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/;
+// Spell out the fixed-width segments so generated structural contracts remain
+// compatible with the synchronous client's conservative nested-repeat veto.
+export const NATIVE_CONTINUATION_OPAQUE_PATTERN = /^[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/;
 const nativeApply = Reflect.apply, freeze = Object.freeze;
 const nativeWeakGet = WeakMap.prototype.get, nativeWeakSet = WeakMap.prototype.set;
 const nativeWeakHas = WeakSet.prototype.has, nativeWeakAdd = WeakSet.prototype.add;
 const snapshotOwners = new WeakMap<object, object>();
 const capturedContexts = new WeakSet<object>();
-const continuationRef = strictObject({ version: literal(2).optional(), sessionId: id, revision: string().max(200).regex(/^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$/), selectedDiff: nativeSelectedDiffSelectorSchema.optional() });
+const continuationRef = strictObject({ version: literal(2).optional(), sessionId: id, revision: string().max(200).regex(/^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$/), selectedDiff: nativeSelectedDiffSelectorSchema.optional() });
 const validRevision = (value: { readonly version?: 2 | undefined; readonly revision: string }) => value.version === 2 ? NATIVE_CONTINUATION_OPAQUE_PATTERN.test(value.revision) : /^[a-f0-9]{64}$/.test(value.revision);
 export const nativeConversationContinuationRefSchema = continuationRef.refine(validRevision, 'Invalid continuation revision');
 export const nativeConversationContinuationMessageSchema = strictObject({ role: enumSchema(['user', 'assistant', 'system', 'tool']), content: string() });

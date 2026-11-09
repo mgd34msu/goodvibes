@@ -32,6 +32,7 @@ import { gateSurfaceSpawn } from '../platform/src/platform/daemon/surface-conver
 import type { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import { createRuntimeServices, type RuntimeServices } from '../platform/src/platform/runtime/services.js';
+import { prepareConfiguredProjectContext } from '../platform/src/platform/knowledge/project-planning/configured-project.js';
 import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
 import type { ChatRequest, ChatResponse, LLMProvider } from '../platform/src/platform/providers/interface.js';
 import type { SharedSessionContinuationRunner, SharedSessionInputRecord } from '../platform/src/platform/control-plane/session-intents.js';
@@ -84,7 +85,7 @@ async function waitFor<T>(what: string, probe: () => T | undefined): Promise<T> 
   }
 }
 
-function buildHarness(options: { attemptProfile?: boolean; ownerChannels?: string; useDefaultOwnerChannels?: boolean } = {}): Harness {
+async function buildHarness(options: { attemptProfile?: boolean; ownerChannels?: string; useDefaultOwnerChannels?: boolean } = {}): Promise<Harness> {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-channel-continuation-tools-'));
   disposables.defer(() => rmSync(root, { recursive: true, force: true }));
   const workingDir = join(root, 'workspace');
@@ -133,6 +134,7 @@ function buildHarness(options: { attemptProfile?: boolean; ownerChannels?: strin
     },
   } as unknown as LLMProvider;
 
+  await prepareConfiguredProjectContext(configManager, workingDir, undefined, { activate: true });
   const services = disposables.add(createRuntimeServices({
     configManager,
     runtimeBus: new RuntimeEventBus(),
@@ -224,7 +226,7 @@ function expectConversationalTools(request: ChatRequest): void {
 
 describe('a served daemon offers a channel conversation the conversational tools', () => {
   test('the first turn of a Telegram conversation', async () => {
-    const harness = buildHarness();
+    const harness = await buildHarness();
     try {
       await startTelegramConversation(harness);
       const first = await waitFor('the first turn to reach the provider', () =>
@@ -237,7 +239,7 @@ describe('a served daemon offers a channel conversation the conversational tools
 
   for (const defaults of [false, true]) {
     test(`${defaults ? 'a permitted collaborator on shipped defaults' : 'an unlisted chat'} cannot read or acknowledge through an unoffered profile call`, async () => {
-      const harness = buildHarness({ attemptProfile: true, ...(defaults ? { useDefaultOwnerChannels: true } : { ownerChannels: 'telegram:different-owner-chat' }) });
+      const harness = await buildHarness({ attemptProfile: true, ...(defaults ? { useDefaultOwnerChannels: true } : { ownerChannels: 'telegram:different-owner-chat' }) });
       forgetGateReadings();
       const readings = gateReadingsPort([['"action":"list"', READ_ONLY]]);
       // Explicit fixture answers let the real permission path settle. Unknown
@@ -286,7 +288,7 @@ describe('a served daemon offers a channel conversation the conversational tools
   }
 
   test('a follow-up queued behind a running turn, once it is continued', async () => {
-    const harness = buildHarness();
+    const harness = await buildHarness();
     try {
       const { sessionId, agentId } = await startTelegramConversation(harness);
       await waitFor('the first turn to be running in the provider', () =>
@@ -326,7 +328,7 @@ describe('the platform runtime continuation before the daemon replaces it', () =
     ['local work', 'tui', {}],
   ] as const) {
     test(`${name} receives its own capability boundary`, async () => {
-      const harness = buildHarness();
+      const harness = await buildHarness();
       const calls: SpawnInput[] = [];
       const spawn = spyOn(harness.services.agentManager, 'spawn').mockImplementation((input) => {
         calls.push(input);

@@ -16,9 +16,12 @@
  *    name yields no pid at all. A guard that only ever answers yes is not a guard.
  */
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { makeProjectTempDir } from './helpers/project-temp';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   RUN_ROOT_PREFIX,
@@ -173,7 +176,7 @@ describe('sweepStaleRunRoots really deletes, against the real filesystem', () =>
 
 describe('installTestTempRoot', () => {
   test('creates the root and points all three temp variables at it', () => {
-    const before = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
+    const before = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP, GIT_CEILING_DIRECTORIES: process.env.GIT_CEILING_DIRECTORIES };
     try {
       const root = installTestTempRoot(REPO_ROOT, process.pid);
       expect(existsSync(root)).toBe(true);
@@ -184,6 +187,61 @@ describe('installTestTempRoot', () => {
       process.env.TMPDIR = before.TMPDIR;
       process.env.TMP = before.TMP;
       process.env.TEMP = before.TEMP;
+      process.env.GIT_CEILING_DIRECTORIES = before.GIT_CEILING_DIRECTORIES;
+    }
+  });
+});
+
+
+describe('owned Git discovery boundary', () => {
+  test.each([false, true])('real checkpoint normalization preserves enclosing parent state (existing marker: %s)', async existingMarker => {
+    const parent = makeProjectTempDir('temp-root-proof-');
+    const before = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP, GIT_CEILING_DIRECTORIES: process.env.GIT_CEILING_DIRECTORIES };
+    const parentState = join(parent, '.goodvibes');
+    const ignored = join(parentState, '.gitignore');
+    const marker = 'retained parent marker\n';
+    let manager: WorkspaceCheckpointManager | undefined, inner: WorkspaceCheckpointManager | undefined;
+    const git = (cwd: string, args: readonly string[]) => {
+      const result = spawnSync('git', [...args], { cwd, encoding: 'utf8', timeout: 10_000,
+        env: { PATH: process.env.PATH, HOME: parent, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+          ...(process.env.GIT_CEILING_DIRECTORIES ? { GIT_CEILING_DIRECTORIES: process.env.GIT_CEILING_DIRECTORIES } : {}) } });
+      expect(result.error).toBeUndefined();
+      return result;
+    };
+    try {
+      expect(git(parent, ['init', '-q']).status).toBe(0);
+      const originalConfig = readFileSync(join(parent, '.git/config'));
+      if (existingMarker) { mkdirSync(parentState); writeFileSync(ignored, marker); }
+      const earlier = join(parent, 'earlier-boundary'); mkdirSync(earlier);
+      process.env.GIT_CEILING_DIRECTORIES = [earlier, before.GIT_CEILING_DIRECTORIES].filter(Boolean).join(delimiter);
+      const owned = installTestTempRoot(parent);
+      const workspace = join(owned, 'host/workspace'); mkdirSync(workspace, { recursive: true });
+      const ceilings = process.env.GIT_CEILING_DIRECTORIES?.split(delimiter) ?? [];
+      expect(ceilings).toContain(realpathSync(owned)); expect(ceilings).toContain(earlier);
+      installTestTempRoot(parent);
+      expect(process.env.GIT_CEILING_DIRECTORIES?.split(delimiter).filter(value => value === realpathSync(owned))).toHaveLength(1);
+      expect(git(workspace, ['rev-parse', '--show-toplevel']).status).not.toBe(0);
+      manager = new WorkspaceCheckpointManager({ workspaceRoot: workspace, autoRetention: false });
+      await manager.init();
+      expect(manager.workspaceRoot).toBe(workspace);
+      expect(readFileSync(join(workspace, '.goodvibes/.gitignore'), 'utf8')).toBe('*\n');
+      // A genuine repository inside the boundary remains discoverable and is
+      // still the checkpoint root when work starts in one of its subfolders.
+      const innerRoot = join(owned, 'inner'); mkdirSync(join(innerRoot, 'sub'), { recursive: true });
+      expect(git(innerRoot, ['init', '-q']).status).toBe(0);
+      inner = new WorkspaceCheckpointManager({ workspaceRoot: join(innerRoot, 'sub'), autoRetention: false });
+      await inner.init(); expect(realpathSync(inner.workspaceRoot)).toBe(realpathSync(innerRoot));
+      expect(readFileSync(join(parent, '.git/config'))).toEqual(originalConfig);
+      expect(existsSync(parentState)).toBe(existingMarker);
+      if (existingMarker) expect(readFileSync(ignored, 'utf8')).toBe(marker);
+    } finally {
+      try { await inner?.drain(); await manager?.drain(); }
+      finally {
+        for (const key of ['TMPDIR', 'TMP', 'TEMP', 'GIT_CEILING_DIRECTORIES'] as const) {
+          if (before[key] === undefined) delete process.env[key]; else process.env[key] = before[key];
+        }
+        rmSync(parent, { recursive: true, force: true });
+      }
     }
   });
 });

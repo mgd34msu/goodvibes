@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { prepareConfiguredProjectContext } from '../platform/src/platform/knowledge/project-planning/configured-project.js';
 import type { ConfigKey } from '../platform/src/platform/config/schema-types.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import { createRuntimeServices } from '../platform/src/platform/runtime/services.js';
@@ -47,7 +48,7 @@ afterEach(() => {
   }
 });
 
-function buildServices() {
+async function buildServices() {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-flag-config-bridge-'));
   tmpRoots.push(root);
   const workingDir = join(root, 'workspace');
@@ -60,6 +61,7 @@ function buildServices() {
     workingDir,
     surfaceRoot: 'goodvibes-test',
   });
+  await prepareConfiguredProjectContext(configManager, workingDir, undefined, { activate: true });
   const runtimeServices = disposables.add(createRuntimeServices({
     configManager,
     runtimeBus: new RuntimeEventBus(),
@@ -72,8 +74,8 @@ function buildServices() {
 }
 
 describe('createRuntimeServices: live feature-settings bridge', () => {
-  test('config.set on a runtime-toggleable flag applies live and notifies subscribers', () => {
-    const { configManager, runtimeServices } = buildServices();
+  test('config.set on a runtime-toggleable flag applies live and notifies subscribers', async () => {
+    const { configManager, runtimeServices } = await buildServices();
     const seen: Array<{ flagId: string; state: string }> = [];
     runtimeServices.featureFlags.subscribe((flagId, state) => seen.push({ flagId, state }));
 
@@ -85,8 +87,8 @@ describe('createRuntimeServices: live feature-settings bridge', () => {
     expect(seen).toEqual([{ flagId: TOGGLEABLE_FLAG_ID, state: 'disabled' }]);
   });
 
-  test('config.set on a startup-gated flag does not change effective state but is visible as pending-restart', () => {
-    const { configManager, runtimeServices } = buildServices();
+  test('config.set on a startup-gated flag does not change effective state but is visible as pending-restart', async () => {
+    const { configManager, runtimeServices } = await buildServices();
     const seen: unknown[] = [];
     runtimeServices.featureFlags.subscribe((flagId, state) => seen.push({ flagId, state }));
 
@@ -104,7 +106,7 @@ describe('createRuntimeServices: live feature-settings bridge', () => {
     expect(snapshot).toMatchObject({ state: 'disabled', persistedState: 'enabled', pendingRestart: true });
   });
 
-  test('an externally-injected featureFlags manager is NOT bridged (caller owns it)', () => {
+  test('an externally-injected featureFlags manager is NOT bridged (caller owns it)', async () => {
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-flag-config-bridge-injected-'));
     tmpRoots.push(root);
     const workingDir = join(root, 'workspace');
@@ -118,6 +120,7 @@ describe('createRuntimeServices: live feature-settings bridge', () => {
       surfaceRoot: 'goodvibes-test',
     });
     const injectedFeatureFlags = createFeatureFlagManager();
+    await prepareConfiguredProjectContext(configManager, workingDir, undefined, { activate: true });
     const runtimeServices = disposables.add(createRuntimeServices({
       configManager,
       runtimeBus: new RuntimeEventBus(),
@@ -137,7 +140,7 @@ describe('createRuntimeServices: live feature-settings bridge', () => {
     expect(injectedFeatureFlags.isEnabled(TOGGLEABLE_FLAG_ID)).toBe(true);
   });
 
-  test('boot load still seeds effective state from persisted config at construction (unchanged)', () => {
+  test('boot load still seeds effective state from persisted config at construction (unchanged)', async () => {
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-flag-config-bridge-boot-'));
     tmpRoots.push(root);
     const workingDir = join(root, 'workspace');
@@ -154,6 +157,7 @@ describe('createRuntimeServices: live feature-settings bridge', () => {
     // boot path derives gate states from the domain keys at construction.
     configManager.setDynamic(TOGGLEABLE_KEY, 'off');
 
+    await prepareConfiguredProjectContext(configManager, workingDir, undefined, { activate: true });
     const runtimeServices = disposables.add(createRuntimeServices({
       configManager,
       runtimeBus: new RuntimeEventBus(),
@@ -182,7 +186,7 @@ describe('createRuntimeServices: live feature-settings bridge', () => {
 // with it on, and an OTLP POST when it is set to remote-export with a collector.
 
 /** Build a runtime with `telemetry.otelMode` persisted before construction. */
-function servicesWithOtelMode(mode: string): { configManager: ConfigManager } {
+async function servicesWithOtelMode(mode: string): Promise<{ configManager: ConfigManager }> {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-otel-mode-'));
   tmpRoots.push(root);
   const workingDir = join(root, 'workspace');
@@ -194,6 +198,7 @@ function servicesWithOtelMode(mode: string): { configManager: ConfigManager } {
   // otel-foundation is startup-gated, so the value has to be persisted before
   // the runtime is composed, the same ordering the case above documents.
   configManager.setDynamic('telemetry.otelMode' as ConfigKey, mode);
+  await prepareConfiguredProjectContext(configManager, workingDir, undefined, { activate: true });
   disposables.add(createRuntimeServices({
     configManager,
     runtimeBus: new RuntimeEventBus(),
@@ -220,15 +225,15 @@ describe('createRuntimeServices: telemetry.otelMode governs the platform tracer'
     else process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] = savedEnv.general;
   });
 
-  test("'off' (the shipped default) installs a tracer that records nothing", () => {
-    servicesWithOtelMode('off');
+  test("'off' (the shipped default) installs a tracer that records nothing", async () => {
+    await servicesWithOtelMode('off');
     const span = platformTracer().startSpan('probe');
     expect(span.spanContext.isValid).toBe(false);
     span.end();
   });
 
-  test("'in-process' installs a tracer that creates real, recording spans", () => {
-    servicesWithOtelMode('in-process');
+  test("'in-process' installs a tracer that creates real, recording spans", async () => {
+    await servicesWithOtelMode('in-process');
     const span = platformTracer().startSpan('probe', { attributes: { 'probe.kind': 'unit' } });
     expect(span.spanContext.isValid).toBe(true);
     expect(span.spanContext.traceId).toMatch(/^[0-9a-f]{32}$/);
@@ -239,14 +244,14 @@ describe('createRuntimeServices: telemetry.otelMode governs the platform tracer'
   });
 
   test('an LLM call produces no span with the mode off and a real one with it on', async () => {
-    servicesWithOtelMode('off');
+    await servicesWithOtelMode('off');
     await instrumentedLlmCall(async () => 'result', { provider: 'anthropic', model: 'claude-x' });
     // Nothing to assert on a no-op span beyond its invalidity; the point is that
     // the same call below yields a recording span once the mode changes.
     expect(platformTracer().startSpan('probe').spanContext.isValid).toBe(false);
 
     installPlatformTracer(null);
-    servicesWithOtelMode('in-process');
+    await servicesWithOtelMode('in-process');
     expect(platformTracer().startSpan('probe').spanContext.isValid).toBe(true);
   });
 
@@ -261,7 +266,7 @@ describe('createRuntimeServices: telemetry.otelMode governs the platform tracer'
     });
     try {
       process.env['OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'] = `http://localhost:${collector.port}/v1/traces`;
-      servicesWithOtelMode('remote-export');
+      await servicesWithOtelMode('remote-export');
 
       await instrumentedLlmCall(async () => 'result', { provider: 'anthropic', model: 'claude-x' });
       // The exporter batches; a flush is what a graceful shutdown does.
@@ -290,7 +295,7 @@ describe('createRuntimeServices: telemetry.otelMode governs the platform tracer'
     try {
       // A collector IS configured; the mode is what decides whether it is used.
       process.env['OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'] = `http://localhost:${collector.port}/v1/traces`;
-      servicesWithOtelMode('in-process');
+      await servicesWithOtelMode('in-process');
 
       await instrumentedLlmCall(async () => 'result', { provider: 'anthropic', model: 'claude-x' });
       await platformTracer().flush();

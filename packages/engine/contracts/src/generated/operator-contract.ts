@@ -143710,7 +143710,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                           "revision": {
                                             "type": "string",
                                             "maxLength": 200,
-                                            "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                                            "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                                           },
                                           "selectedDiff": {
                                             "anyOf": [
@@ -144539,7 +144539,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                             "revision": {
                                               "type": "string",
                                               "maxLength": 200,
-                                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                                             },
                                             "selectedDiff": {
                                               "anyOf": [
@@ -145197,7 +145197,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                 "revision": {
                                                   "type": "string",
                                                   "maxLength": 200,
-                                                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                                                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                                                 },
                                                 "selectedDiff": {
                                                   "anyOf": [
@@ -146019,7 +146019,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                   "revision": {
                                                     "type": "string",
                                                     "maxLength": 200,
-                                                    "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                                                    "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                                                   },
                                                   "selectedDiff": {
                                                     "anyOf": [
@@ -147197,7 +147197,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -147397,7 +147397,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -147616,7 +147616,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -147741,7 +147741,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -148035,7 +148035,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -148250,7 +148250,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -148458,7 +148458,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -148658,7 +148658,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -148896,7 +148896,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -149300,7 +149300,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -149500,7 +149500,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -149719,7 +149719,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -149844,7 +149844,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -150138,7 +150138,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -150353,7 +150353,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -150561,7 +150561,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -150761,7 +150761,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -150999,7 +150999,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -151528,7 +151528,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -151728,7 +151728,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -151947,7 +151947,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -152072,7 +152072,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -152366,7 +152366,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -152581,7 +152581,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -152789,7 +152789,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -152989,7 +152989,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -153227,7 +153227,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -153627,7 +153627,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -153827,7 +153827,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -154046,7 +154046,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -154171,7 +154171,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -154465,7 +154465,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -154680,7 +154680,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -154888,7 +154888,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -155088,7 +155088,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -155326,7 +155326,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                                 },
                                 "selectedDiff": {
                                   "anyOf": [
@@ -155747,7 +155747,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -155947,7 +155947,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -156166,7 +156166,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -156291,7 +156291,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -156585,7 +156585,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -156800,7 +156800,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -157008,7 +157008,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -157208,7 +157208,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -157446,7 +157446,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -158034,7 +158034,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       "revision": {
                                         "type": "string",
                                         "maxLength": 200,
-                                        "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                                        "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                                       },
                                       "selectedDiff": {
                                         "anyOf": [

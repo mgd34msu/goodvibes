@@ -87,12 +87,29 @@ describe('the complete native daemon installation', () => {
     expect(files.every(file => file.assetName?.includes('linux-arm64'))).toBe(true);
   });
 
-  for (const platform of ['darwin', 'win32'] as const) {
-    test(`${platform} has no supported native release cohort`, () => {
-      expect(resolveDaemonNativePayloads(platform, 'x64')).toBeNull();
-      const { io } = installation();
-      const files = resolveDaemonInstalledFiles({ execPath, platform, arch: 'x64', io });
-      expect(files.some(file => file.assetName !== null)).toBe(false);
+  for (const arch of ['x64', 'arm64']) {
+    test(`Darwin ${arch} selects its complete reader-artifact and SQLite cohort`, () => {
+      // The Linux installation-receipt resolver intentionally remains Linux
+      // only. Darwin updates use their own compiled reader artifact layout.
+      expect(resolveDaemonNativePayloads('darwin', arch)).toBeNull();
+      const files = resolveDaemonInstalledFiles({ execPath, platform: 'darwin', arch });
+      expect(files.map(file => file.path)).toEqual([
+        execPath, `${execPath}.readers.json`,
+        `/home/someone/.local/bin/lib/sqlite-vec-darwin-${arch}/vec0.dylib`,
+        `/home/someone/.local/bin/lib/sqlite-darwin-${arch}/libsqlite3.dylib`,
+        `/home/someone/.local/bin/lib/sqlite-darwin-${arch}/libsqlite3.dylib.json`,
+      ]);
+      expect(files.map(file => file.assetName)).toEqual([
+        `goodvibes-daemon-macos-${arch}`, `goodvibes-daemon-macos-${arch}.reader-ci-artifact.json`,
+        `sqlite-vec-darwin-${arch}.dylib`, `sqlite-darwin-${arch}.dylib`, `sqlite-darwin-${arch}.dylib.json`,
+      ]);
+      expect(files.map(file => file.executable)).toEqual([true, false, false, false, false]);
     });
   }
+
+  test('Windows and an unsupported Darwin architecture have no downloadable daemon cohort', () => {
+    expect(resolveDaemonNativePayloads('win32', 'x64')).toBeNull();
+    expect(resolveDaemonInstalledFiles({ execPath, platform: 'win32', arch: 'x64' })).toEqual([]);
+    expect(resolveDaemonInstalledFiles({ execPath, platform: 'darwin', arch: 'ia32' })).toEqual([]);
+  });
 });

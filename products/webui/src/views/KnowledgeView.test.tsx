@@ -144,6 +144,13 @@ describe('KnowledgeView: the knowledge map never dumps raw JSON', () => {
   });
 });
 
+/** Peek details are rendered into the kit Drawer portal, outside the list root. */
+function detailPane(): HTMLElement {
+  const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"][aria-label="Knowledge detail"]');
+  expect(dialogs).toHaveLength(1);
+  return dialogs[0]!;
+}
+
 function clickButton(el: HTMLElement, label: string): void {
   const button = [...el.querySelectorAll('button')].find(item => item.textContent === label
     || item.querySelector('.gv-row__title')?.textContent === label);
@@ -173,7 +180,7 @@ describe('KnowledgeView projection target dispatch and preserved-page inspection
         await waitFor(() => Boolean([...view.el.querySelectorAll('.gv-row__title')].find(item => item.textContent === target.title)));
         clickButton(view.el, target.title);
         for (const [button, method] of [['Render', 'knowledge.projection.render'], ['Materialize', 'knowledge.projection.materialize']] as const) {
-          clickButton(view.el, button);
+          clickButton(detailPane(), button);
           await waitFor(() => calls.some(call => call.method === method));
           expect(calls.find(call => call.method === method)?.input).toEqual({ kind: target.kind,
             ...(target.expected === undefined ? {} : { id: target.expected }), limit: 25 });
@@ -198,12 +205,12 @@ describe('KnowledgeView projection target dispatch and preserved-page inspection
     const view = render();
     try {
       await waitFor(() => (view.el.textContent ?? '').includes('Overview projection'));
-      clickButton(view.el, 'Overview projection'); clickButton(view.el, 'Materialize');
-      await waitFor(() => (view.el.textContent ?? '').includes('Inspect saved projection kg-gen-historical'));
+      clickButton(view.el, 'Overview projection'); clickButton(detailPane(), 'Materialize');
+      await waitFor(() => (detailPane().textContent ?? '').includes('Inspect saved projection kg-gen-historical'));
       clickButton(view.el, 'Bundle projection');
-      expect(view.el.textContent).not.toContain('Inspect saved projection kg-gen-historical');
+      expect(detailPane().textContent).not.toContain('Inspect saved projection kg-gen-historical');
       clickButton(view.el, 'Overview projection');
-      clickButton(view.el, 'Inspect saved projection kg-gen-historical');
+      clickButton(detailPane(), 'Inspect saved projection kg-gen-historical');
       await waitFor(() => calls.some(call => call.method === 'knowledge.item.get'));
       expect(calls.find(call => call.method === 'knowledge.item.get')?.input).toEqual({ id: 'kg-gen-historical', includeAllSpaces: true });
     } finally { view.unmount(); }

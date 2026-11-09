@@ -33,10 +33,10 @@ const clipboardImage = { data: 'iVBORw0KGgoAAAANSUhEUg' + 'A'.repeat(400), media
 let imageOnClipboard: { data: string; mediaType: string } | null = clipboardImage;
 let textOnClipboard = '';
 
-function makeInput(): InputHandler {
+async function makeInput(): Promise<InputHandler> {
   const ih = new InputHandler(
     () => {}, new SelectionManager(), () => 0, () => 20,
-    () => new InfiniteBuffer(), () => {}, () => {}, createDefaultUiRuntimeServices(),
+    () => new InfiniteBuffer(), () => {}, () => {}, (await createDefaultUiRuntimeServices()),
   );
   ih.setContentWidth(80);
   // Never reach for the machine's real clipboard in a test.
@@ -53,16 +53,16 @@ describe('Ctrl+V keeps what it pasted', () => {
     textOnClipboard = '';
   });
 
-  test('an image marker survives the keystroke', () => {
-    const input = makeInput();
+  test('an image marker survives the keystroke', async () => {
+    const input = (await makeInput());
     input.feed(CTRL_V);
 
     expect(input.prompt).toMatch(/^\[IMAGE: img\d+, clipboard, \d+KB\]$/);
     expect(input.cursorPos).toBe(input.prompt.length);
   });
 
-  test('the pasted image is held as a real attachment', () => {
-    const input = makeInput();
+  test('the pasted image is held as a real attachment', async () => {
+    const input = (await makeInput());
     input.feed(CTRL_V);
 
     const attachments = input.getImageAttachments();
@@ -70,8 +70,8 @@ describe('Ctrl+V keeps what it pasted', () => {
     expect([...attachments.values()][0]?.data).toBe(clipboardImage.data);
   });
 
-  test('the attachment reaches the outgoing message as an image part', () => {
-    const input = makeInput();
+  test('the attachment reaches the outgoing message as an image part', async () => {
+    const input = (await makeInput());
     input.feed(CTRL_V);
     input.feed('what is this?');
 
@@ -81,8 +81,8 @@ describe('Ctrl+V keeps what it pasted', () => {
     expect(parts.filter(p => p.type === 'text').map(p => p.text).join('')).toContain('what is this?');
   });
 
-  test('pasting mid-sentence keeps the surrounding text and the cursor', () => {
-    const input = makeInput();
+  test('pasting mid-sentence keeps the surrounding text and the cursor', async () => {
+    const input = (await makeInput());
     input.feed('look: ');
     input.feed(CTRL_V);
     input.feed('!');
@@ -91,18 +91,18 @@ describe('Ctrl+V keeps what it pasted', () => {
     expect(input.prompt.endsWith(']!')).toBe(true);
   });
 
-  test('text on the clipboard pastes when there is no image', () => {
+  test('text on the clipboard pastes when there is no image', async () => {
     imageOnClipboard = null;
     textOnClipboard = 'pasted words';
-    const input = makeInput();
+    const input = (await makeInput());
     input.feed(CTRL_V);
 
     expect(input.prompt).toBe('pasted words');
   });
 
-  test('an empty clipboard leaves what was already typed alone', () => {
+  test('an empty clipboard leaves what was already typed alone', async () => {
     imageOnClipboard = null;
-    const input = makeInput();
+    const input = (await makeInput());
     input.feed('typed already');
     input.feed(CTRL_V);
 
@@ -116,9 +116,9 @@ describe('Ctrl+Z keeps what it undid', () => {
     textOnClipboard = '';
   });
 
-  test('undo after a paste removes the pasted text', () => {
+  test('undo after a paste removes the pasted text', async () => {
     textOnClipboard = 'some pasted text';
-    const input = makeInput();
+    const input = (await makeInput());
     input.feed('keep this ');
     input.feed(CTRL_V);
     expect(input.prompt).toBe('keep this some pasted text');
@@ -127,8 +127,8 @@ describe('Ctrl+Z keeps what it undid', () => {
     expect(input.prompt).toBe('keep this ');
   });
 
-  test('undo after a typed edit restores the earlier prompt', () => {
-    const input = makeInput();
+  test('undo after a typed edit restores the earlier prompt', async () => {
+    const input = (await makeInput());
     input.feed('hello');
     input.saveUndoState();
     input.feed(' world');

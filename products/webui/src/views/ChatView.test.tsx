@@ -436,6 +436,15 @@ describe('ChatView: acknowledged session-local routing', () => {
     expect(defaultModelWrites).toEqual([]);
   });
 
+  test('a model-advertised effort outside the actual session contract refuses before publication', async () => {
+    const f = routingProps();
+    modelCatalogResponse = { providers: [{ id: 'openai', models: [{ id: 'first', registryKey: 'openai:first', displayName: 'first model', selectable: true,
+      reasoningOptions: { levels: ['high', 'custom-fixture-effort'], source: 'declared' } }] }] };
+    renderChatView(f.props); await chooseRouteItem('Custom-fixture-effort');
+    await waitFor(() => container.textContent?.includes('not supported by chat sessions') === true);
+    expect(routeUpdates).toEqual([]); expect(defaultModelWrites).toEqual([]); expect(f.acknowledged).toEqual([]);
+  });
+
   test('a model switch shows its effective capped effort while preserving Max for the return switch', async () => {
     const f = routingProps();
     modelCatalogResponse = { providers: [{ id: 'openai', name: 'OpenAI', models: [

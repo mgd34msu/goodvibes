@@ -31,7 +31,7 @@ function mkItems(prefix: string, count: number): SelectionItem[] {
   return Array.from({ length: count }, (_, i) => ({ id: `${prefix}-${i}`, label: `${prefix} ${i}` }));
 }
 
-function makeHandler(): InputHandler {
+async function makeHandler(): Promise<InputHandler> {
   const history = new InfiniteBuffer();
   return new InputHandler(
     () => {},
@@ -41,7 +41,7 @@ function makeHandler(): InputHandler {
     () => history,
     () => {},
     () => {},
-    createDefaultUiRuntimeServices(),
+    (await createDefaultUiRuntimeServices()),
   );
 }
 
@@ -53,7 +53,7 @@ async function flushMicrotasks(): Promise<void> {
 
 describe('InputHandler.openSelection: queueing overlapping calls', () => {
   test('two overlapping calls: both callbacks resolve, second opens with its own title/items after the first is answered', async () => {
-    const input = makeHandler();
+    const input = (await makeHandler());
     const resultsA: (SelectionResult | null)[] = [];
     const resultsB: (SelectionResult | null)[] = [];
 
@@ -86,7 +86,7 @@ describe('InputHandler.openSelection: queueing overlapping calls', () => {
   });
 
   test('first modal dismissed via Escape (null): the second still opens and can be answered', async () => {
-    const input = makeHandler();
+    const input = (await makeHandler());
     const resultsA: (SelectionResult | null)[] = [];
     const resultsB: (SelectionResult | null)[] = [];
 
@@ -107,8 +107,8 @@ describe('InputHandler.openSelection: queueing overlapping calls', () => {
     expect(resultsB[0]?.item.id).toBe('b-0');
   });
 
-  test('queue overflow: the overflowing caller gets null promptly instead of hanging', () => {
-    const input = makeHandler();
+  test('queue overflow: the overflowing caller gets null promptly instead of hanging', async () => {
+    const input = (await makeHandler());
     const firstResults: (SelectionResult | null)[] = [];
     input.openSelection('Active', mkItems('active', 1), undefined, (r) => firstResults.push(r));
     expect(input.selectionModal.title).toBe('Active');
@@ -132,7 +132,7 @@ describe('InputHandler.openSelection: queueing overlapping calls', () => {
   });
 
   test('production race regression: a liveness-confirm modal vs. a 0ms-macrotask recovery offer both settle', async () => {
-    const input = makeHandler();
+    const input = (await makeHandler());
 
     // Mirrors the `ask()` helper in runtime/recovery-prompt.ts (and the
     // matching Promise shape in session-resume-liveness-confirm.ts's

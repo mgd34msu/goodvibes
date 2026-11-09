@@ -1,9 +1,10 @@
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { recordTuiCiArtifact, retainVerifiedTuiCiArtifact, verifyTuiCiArtifact, type TuiArtifactSource } from '../../../scripts/ci-artifact.ts';
 import { nativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
@@ -81,7 +82,9 @@ test('rejects lost execute mode, library mode changes, missing payloads and malf
 
 test('the CLI refuses another checkout or modified tracked source before recording provenance', () => fixture(async root => {
   mkdirSync(join(root, 'scripts'));
-  symlinkSync(resolve(import.meta.dir, '../../../../../node_modules'), join(root, 'node_modules'));
+  const engine = dirname(createRequire(import.meta.url).resolve('@goodvibes-jev/engine/package.json'));
+  mkdirSync(join(root, 'node_modules/@goodvibes-jev'), { recursive: true });
+  symlinkSync(engine, join(root, 'node_modules/@goodvibes-jev/engine'), 'dir');
   writeFileSync(join(root, 'scripts/ci-artifact.ts'), readFileSync(resolve(import.meta.dir, '../../../scripts/ci-artifact.ts')));
   writeFileSync(join(root, '.gitignore'), 'dist/\nnode_modules/\n');
   writeFileSync(join(root, 'source.txt'), 'committed source\n');

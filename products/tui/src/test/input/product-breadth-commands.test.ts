@@ -1,3 +1,4 @@
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -101,7 +102,7 @@ describe('product breadth commands', () => {
   const savedServiceTokens: Record<string, string | undefined> = {};
   let root = '';
 
-  beforeEach(() => {
+  beforeEach(async () => {
     for (const key of SERVICE_TOKEN_ENV_VARS) {
       savedServiceTokens[key] = process.env[key];
       delete process.env[key];
@@ -116,17 +117,15 @@ describe('product breadth commands', () => {
       users: [{ username: 'admin', passwordHash: UserAuthManager.hashPassword('admin-pass'), roles: ['admin'] }],
     });
     seedBenchmarkCacheFixture({ homeDirectory: root, workingDirectory: root, surfaceRoot: 'tui' });
+    const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: join(root, '.goodvibes', 'tui'), workingDir: root, homeDir: root });
+    await prepareConfiguredProjectContext(configManager, root, 'knowledge-wiki.sqlite', { activate: true });
     runtimeServices = disposables.add(createRuntimeServices({
       runtimeBus: new RuntimeEventBus(),
       runtimeStore: createRuntimeStore(),
       featureFlags: createProductFeatureFlags(),
       workingDir: root,
       homeDirectory: root,
-      configManager: new ConfigManager({ surfaceRoot: 'tui',
-        configDir: join(root, '.goodvibes', 'tui'),
-        workingDir: root,
-        homeDir: root,
-      }),
+      configManager,
       localUserAuthManager,
       getConversationTitle: () => 'test-runtime',
     }));

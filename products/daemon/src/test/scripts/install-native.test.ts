@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
+import * as nativeFs from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -202,16 +203,34 @@ nativeTest('unowned target files are not adopted and failed cohort commit compen
 
 nativeTest('rollback checks complete previous bytes while all canonical transaction claims are held', async () => {
   const f = await fixture(); await f.install(); await artifact(f.source, second); await f.install(second);
-  const before = state(f.prefix); let claims = 0;
+  const before = state(f.prefix);
+  const members = [...DAEMON_CI_PAYLOADS, 'daemon-installation.json'];
+  const previous = members.map(member => readFileSync(join(f.prefix, member + '.previous')));
+  const claims = members.map(member => join(f.prefix, member + '.update-transaction'));
   const victim = join(f.prefix, DAEMON_CI_PAYLOADS[4] + '.previous');
-  expect(() => rollbackDaemonNative(f.prefix, {
-    ...realUpdateFileIo,
-    writeExclusive(path, bytes) {
-      realUpdateFileIo.writeExclusive!(path, bytes);
-      if (++claims === DAEMON_CI_PAYLOADS.length + 1) writeFileSync(victim, 'changed after last claim');
-    },
-  })).toThrow();
-  expect(claims).toBe(DAEMON_CI_PAYLOADS.length + 1); expect(state(f.prefix)).toEqual(before);
+  const changed = Buffer.from(previous[4]!); changed[0] = changed[0]! ^ 1;
+  let mutated = false;
+  const actualSync = nativeFs.fsyncSync;
+  // Native creator ownership deliberately bypasses borrowed writeExclusive.
+  // The last original claim is synced before admission; all exact claims must
+  // exist here, so this mutates saved bytes under the real transaction fence.
+  const sync = spyOn(nativeFs, 'fsyncSync').mockImplementation(fd => {
+    actualSync(fd);
+    if (!mutated && claims.every(path => existsSync(path))) {
+      for (const path of claims) {
+        expect(statSync(path).isFile()).toBe(true);
+        expect(JSON.parse(readFileSync(path, 'utf8')).operation).toBe('rollback');
+      }
+      mutated = true;
+      writeFileSync(victim, changed);
+    }
+  });
+  try { expect(() => rollbackDaemonNative(f.prefix)).toThrow(); }
+  finally { sync.mockRestore(); }
+  expect(mutated).toBe(true); expect(state(f.prefix)).toEqual(before);
+  for (const [index, member] of members.entries()) {
+    expect(readFileSync(join(f.prefix, member + '.previous'))).toEqual(index === 4 ? changed : previous[index]!);
+  }
   expect(transientFiles(f.prefix)).toEqual([]);
 });
 

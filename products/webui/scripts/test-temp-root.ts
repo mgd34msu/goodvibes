@@ -15,6 +15,8 @@
  *   - Points TMPDIR/TMP/TEMP at `<repo>/.test-tmp/run-<pid>` (gitignored) before
  *     any test module is evaluated, so `os.tmpdir()` and every child process
  *     spawned by a test land inside the repo instead of the system temp.
+ *   - Adds the actual owned run root to Git discovery ceilings, as the canonical
+ *     engine runner does, so a nested non-Git fixture cannot adopt this checkout.
  *   - Sweeps `.test-tmp/run-*` roots whose owning process is GONE. That is the
  *     recovery path for a killed run, and it is why this file does not try to
  *     delete the current run's root on the way out: under `bun test --isolate`
@@ -26,8 +28,8 @@
  * Wired as the FIRST entry of bunfig.toml's [test] preload, so it runs before
  * src/test-setup.ts and before any test module.
  */
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { delimiter, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -139,6 +141,11 @@ export function installTestTempRoot(repoRoot: string = REPO_ROOT, pid: number = 
   process.env.TMPDIR = root;
   process.env.TMP = root;
   process.env.TEMP = root;
+  // Preserve existing explicit boundaries and discover real fixture repositories
+  // below this one; never ascend into the enclosing source checkout.
+  process.env.GIT_CEILING_DIRECTORIES = [...new Set([
+    realpathSync(root), ...(process.env.GIT_CEILING_DIRECTORIES?.split(delimiter) ?? []),
+  ].filter(Boolean))].join(delimiter);
   return root;
 }
 

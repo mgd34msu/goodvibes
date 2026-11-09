@@ -1,3 +1,4 @@
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { expect, spyOn, test } from 'bun:test';
 import * as childProcess from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -21,6 +22,7 @@ test('actual tui graph public terminal control preserves Jev ownership and lifet
   const configManager = new ConfigManager({ surfaceRoot: 'tui', workingDir: root, homeDir: root, configDir: join(root, 'config') });
   configManager.set('sandbox.enabled', false); // Explicit temporary fixture, no product containment policy change.
   seedBenchmarkCacheFixture({ workingDirectory: root, homeDirectory: root, surfaceRoot: 'tui' });
+  await prepareConfiguredProjectContext(configManager, root, 'knowledge-wiki.sqlite', { activate: true });
   const services = createRuntimeServices({ configManager, workingDir: root, homeDirectory: root, modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore() });
   let sawSandbox = false; let sawLocalhost = false; let localRequests = 0;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() { localRequests++; return new Response('owned-local-preview'); } });

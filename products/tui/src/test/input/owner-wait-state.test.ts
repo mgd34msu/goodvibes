@@ -8,14 +8,14 @@ import { disposeTestRuntimeServicesAfterAll } from '../helpers/runtime-services.
 
 disposeTestRuntimeServicesAfterAll();
 
-function handler() {
+async function handler() {
   const history = new InfiniteBuffer();
   return new InputHandler(() => {}, new SelectionManager(), () => 0, () => 20, () => history,
-    () => {}, () => {}, createDefaultUiRuntimeServices());
+    () => {}, () => {}, (await createDefaultUiRuntimeServices()));
 }
 
-test('native owner wait distinguishes real confirmations from settings and picker navigation', () => {
-  const input = handler();
+test('native owner wait distinguishes real confirmations from settings and picker navigation', async () => {
+  const input = (await handler());
   expect(input.waitingForOwner).toBe(false);
   input.settingsModal.active = true;
   expect(input.waitingForOwner).toBe(false);
@@ -51,7 +51,7 @@ test('native owner wait distinguishes real confirmations from settings and picke
 });
 
 test('surface confirmation and preview questions remain explicit until answered or closed', async () => {
-  const input = handler();
+  const input = (await handler());
   const confirmation = confirmThrough(input.surfaceModals, { title: 'Synthetic question', body: 'Fixture', confirmLabel: 'Continue' });
   expect(input.waitingForOwner).toBe(true);
   input.surfaceModals.escape();

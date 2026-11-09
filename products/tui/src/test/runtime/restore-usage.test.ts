@@ -8,7 +8,7 @@ import { createBootstrapShell } from '../../runtime/bootstrap-shell.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { createUiRuntimeServices } from '../../runtime/ui-services.ts';
 import { RuntimeEventBus, ForensicsRegistry, createTaskManager } from '@/runtime/index.ts';
-import { getTestRuntimeServices, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
+import { getTestRuntimeServices, resetTestRuntimeServices, disposeTestRuntimeServicesAfterAll } from '../helpers/runtime-services.ts';
 import { buildShellFooter } from '../../renderer/shell-surface.ts';
 import { resumeSessionCore } from '../../core/session-resume-core.ts';
 import { createContextAccountingSource } from '../../runtime/context-accounting-source.ts';
@@ -21,11 +21,13 @@ import { UsageModal } from '../../input/usage-modal.ts';
 import { layerTextBlock } from '../helpers/surface-frame.ts';
 import { withPublicErrorText } from '../helpers/user-error-reading.ts';
 
+disposeTestRuntimeServicesAfterAll();
+
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-function fixture() {
-  const services = getTestRuntimeServices();
+async function fixture() {
+  const services = (await getTestRuntimeServices());
   cleanups.push(async () => { await services.close(); resetTestRuntimeServices(); });
   const runtimeBus = new RuntimeEventBus();
   const runtimeStore = createRuntimeStore();
@@ -77,7 +79,7 @@ const validHistory = [
 
 describe('real bootstrap usage restoration', () => {
   test('malformed persisted usage resumes as unavailable, remains unknown after a live increment, and recovers on a valid restore and clear', async () => {
-    const f = fixture();
+    const f = (await fixture());
     f.save('invalid-usage', [{ role: 'assistant', content: 'transcript survives', usage: { inputTokens: 9, outputTokens: 2, cacheReadTokens: 'PRIVATE-BILLING-VALUE' } }]);
     await f.resume('invalid-usage');
     expect(f.conversation.getMessageSnapshot()[0]?.content).toBe('transcript survives');
@@ -141,7 +143,7 @@ describe('real bootstrap usage restoration', () => {
   });
 
   test('all malformed persisted usage shapes stay unavailable without losing the transcript', async () => {
-    const f = fixture();
+    const f = (await fixture());
     const values: unknown[] = [null, [], 'PRIVATE-USAGE', {}, { inputTokens: '9', outputTokens: 2 },
       { inputTokens: -1, outputTokens: 2 }, { inputTokens: 1.5, outputTokens: 2 },
       { inputTokens: Number.MAX_SAFE_INTEGER + 1, outputTokens: 2 },
@@ -158,7 +160,7 @@ describe('real bootstrap usage restoration', () => {
   });
 
   test('the picker Enter route resumes the native session and uses the same bound restore adapter', async () => {
-    const f = fixture();
+    const f = (await fixture());
     const target = 'picker-invalid';
     f.services.sessionManager.save(target, [{ role: 'assistant', content: 'kept', usage: null }], {
       title: 'Saved picker', titleSource: 'user', model: 'mock-model', provider: 'mock', timestamp: Date.now(),
@@ -200,7 +202,7 @@ describe('real bootstrap usage restoration', () => {
   });
 
   test('aggregate overflow is unavailable rather than a partial sum', async () => {
-    const f = fixture();
+    const f = (await fixture());
     f.save('overflow', [
       { role: 'assistant', content: 'one', usage: { inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 0 } },
       { role: 'assistant', content: 'two', usage: { inputTokens: 1, outputTokens: 0 } },

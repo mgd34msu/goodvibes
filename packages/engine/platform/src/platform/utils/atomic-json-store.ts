@@ -82,7 +82,6 @@ import {
   readFileSync,
   readFile,
   readlinkSync,
-  realpathSync,
   renameSync,
   statSync,
   unlinkSync,
@@ -187,7 +186,6 @@ function traceDurablePath(filePath: string): {
   readonly canonical: string; readonly file: Stats;
   readonly directories: readonly DurablePathEntry[]; readonly links: readonly DurablePathLink[];
 } {
-  const canonical = realpathSync(filePath);
   const absolute = isAbsolute(filePath) ? filePath : `${process.cwd()}${sep}${filePath}`;
   let cursor = parse(absolute).root;
   let pending = absolute.slice(cursor.length).split(sep);
@@ -216,9 +214,12 @@ function traceDurablePath(filePath: string): {
     cursor = path;
     if (identity.isDirectory()) rememberDirectory(cursor);
   }
-  if (cursor !== canonical) throw new Error('Durable path changed during resolution');
-  const file = lstatSync(canonical);
+  // Preserve the exact symlink-aware walk. realpathSync can normalize '..'
+  // before resolving aliases; the kernel's native stat must select this same
+  // original physical file before any durability effects begin.
+  const canonical = cursor, file = lstatSync(canonical);
   if (!file.isFile()) throw new Error('Durable publication is not a regular file');
+  if (!sameFile(statSync(filePath), file)) throw new Error('Durable path changed during resolution');
   return { canonical, file, directories: [...directories.values()], links };
 }
 
@@ -245,7 +246,8 @@ export function confirmFileDurable(filePath: string): void {
           fsyncSync(dirFd);
         } finally { closeSync(dirFd); }
       }
-      if (realpathSync(filePath) !== path.canonical || !sameFile(fstatSync(fd), path.file)
+      const selectedFile = lstatSync(path.canonical);
+      if (!selectedFile.isFile() || !sameFile(selectedFile, path.file) || !sameFile(fstatSync(fd), path.file)
         || !sameFile(statSync(filePath), path.file)) throw new Error('Durable file changed during confirmation');
       for (const directory of path.directories) {
         if (!sameInode(lstatSync(directory.path), directory.identity)) throw new Error('Durable ancestor changed');

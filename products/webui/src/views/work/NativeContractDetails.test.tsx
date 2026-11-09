@@ -167,6 +167,9 @@ describe('Native contract records', () => {
     const capture = disclosure(el, 'Captured input provenance');
     for (const value of ['capture-original', '/owner/project', 'source-inode-identity', 'git-original', 'original-head', 'refs/heads/main', 'index-original', 'tree-original', 'commit-original', '1970-01-01T00:00:00.000Z', 'true', '.goodvibes', 'original-oid', 'original-digest', 'file-inode-identity', 'removed.txt', 'missing', 'symlink', '120000']) expect(capture?.textContent).toContain(value);
     expect(el.querySelector('[aria-label="Captured files"]')?.children).toHaveLength(3);
+    const missing = [...el.querySelectorAll('[aria-label="Captured files"] > li')].find(item => item.textContent?.includes('removed.txt'));
+    expect(missing?.textContent).toContain('Path was missing at capture.');
+    for (const label of ['Object id', 'Digest', 'Identity']) expect(missing?.textContent).not.toContain(label);
     expect(el.querySelectorAll('a, button')).toHaveLength(0);
     expect(section(el, 'Native source')).toBeUndefined();
   });

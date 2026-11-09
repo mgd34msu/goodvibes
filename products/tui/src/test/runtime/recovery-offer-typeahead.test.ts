@@ -51,9 +51,9 @@ function writeCrash(sessionId: string): void {
   ageRecoverySnapshot(surface.recoveryFile(sessionId), 0);
 }
 
-function makeHandler(submitted: string[]): InputHandler {
+async function makeHandler(submitted: string[]): Promise<InputHandler> {
   const history = new InfiniteBuffer();
-  const input = new InputHandler(() => {}, new SelectionManager(), () => 0, () => 20, () => history, () => {}, () => {}, createDefaultUiRuntimeServices());
+  const input = new InputHandler(() => {}, new SelectionManager(), () => 0, () => 20, () => history, () => {}, () => {}, (await createDefaultUiRuntimeServices()));
   input.commandContext = { submitInput: (text: string) => { submitted.push(text); } } as never;
   return input;
 }
@@ -148,7 +148,7 @@ describe('typing before the offer appeared, through the real input handler', () 
   test('typed text and its Enter never answer the modal; they land in the composer after the offer is declined', async () => {
     writeCrash('sess-typed');
     const submitted: string[] = [];
-    const input = makeHandler(submitted);
+    const input = (await makeHandler(submitted));
     let t = 0;
     const gate = createStartupTypeaheadGate({ now: () => t });
     const applied: string[] = [];

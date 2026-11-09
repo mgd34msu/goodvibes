@@ -20,11 +20,11 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 // registered inside the helper, for the reason its doc comment gives.
 disposeTestRuntimeServicesAfterAll();
 
-function makeContext(store = createRuntimeStore()) {
+async function makeContext(store = createRuntimeStore()) {
   const printed: string[] = [];
   const shellRoot = makeProjectTempDir('gv-local-remote-shell');
-  const remoteRunnerRegistry = getTestRemoteRunnerRegistry();
-  const remoteSupervisor = getTestRemoteSupervisor();
+  const remoteRunnerRegistry = (await getTestRemoteRunnerRegistry());
+  const remoteSupervisor = (await getTestRemoteSupervisor());
   const remoteRuntime = {
     listActiveConnections: () => {
       const state = store.getState().acp;
@@ -100,7 +100,7 @@ function makeContext(store = createRuntimeStore()) {
     },
     ops: {
       remoteRuntime,
-      agentManager: getTestAgentManager(),
+      agentManager: (await getTestAgentManager()),
     },
     extensions: {
       toolRegistry: {} as never,
@@ -193,7 +193,7 @@ describe('local runtime remote commands', () => {
         ]),
       },
     }));
-    const { context, printed } = makeContext(store);
+    const { context, printed } = (await makeContext(store));
 
     await registry.execute('remote', ['show', 'agent-remote'], context);
 
@@ -204,7 +204,7 @@ describe('local runtime remote commands', () => {
 
   test('cancels a remote agent through the normal agent manager path', async () => {
     resetTestRuntimeServices();
-    const manager = getTestAgentManager();
+    const manager = (await getTestAgentManager());
     const record = manager.spawn({ mode: 'spawn', task: 'Stuck task', template: 'general', tools: [], orchestrationNodeId: 'remote-node', orchestrationGraphId: 'graph-remote' });
 
     const registry = new CommandRegistry();
@@ -228,7 +228,7 @@ describe('local runtime remote commands', () => {
         ]),
       },
     }));
-    const { context, printed } = makeContext(store);
+    const { context, printed } = (await makeContext(store));
 
     await registry.execute('remote', ['cancel', record.id], context);
 

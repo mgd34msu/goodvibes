@@ -51,11 +51,11 @@ function makeContext(out: string[]): CommandContext {
   } as unknown as CommandContext;
 }
 
-function makeWiredContext(out: string[]): {
+async function makeWiredContext(out: string[]): Promise<{
   ctx: CommandContext;
   inputState: { active: boolean; mode: 'new' | 'edit' | 'reopen' | undefined; modalStack: string[] };
-} {
-  const runtimeServices = getTestRuntimeServices();
+}> {
+  const runtimeServices = (await getTestRuntimeServices());
   const inputState = {
     active: false,
     mode: undefined as 'new' | 'edit' | 'reopen' | undefined,
@@ -102,7 +102,7 @@ describe('onboarding entrypoints', () => {
     registerLocalSetupCommands(registry);
 
     const out: string[] = [];
-    const { ctx, inputState } = makeWiredContext(out);
+    const { ctx, inputState } = (await makeWiredContext(out));
 
     await expect(registry.execute('setup', ['onboarding'], ctx)).resolves.toBe(true);
 
@@ -117,7 +117,7 @@ describe('onboarding entrypoints', () => {
     registerOnboardingRuntimeCommands(registry);
 
     const out: string[] = [];
-    const { ctx, inputState } = makeWiredContext(out);
+    const { ctx, inputState } = (await makeWiredContext(out));
 
     await expect(registry.execute('onboarding', [], ctx)).resolves.toBe(true);
 

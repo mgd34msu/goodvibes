@@ -22,8 +22,8 @@ disposeTestRuntimeServicesAfterAll();
 describe('model override resolution: services composition wiring', () => {
   afterAll(() => resetTestRuntimeServices());
 
-  test('agent spawn: a bare model id resolves through the shared resolver', () => {
-    const services = getTestRuntimeServices();
+  test('agent spawn: a bare model id resolves through the shared resolver', async () => {
+    const services = (await getTestRuntimeServices());
     const record = services.agentManager.spawn({
       mode: 'spawn',
       task: 'resolve a bare model override',
@@ -33,7 +33,7 @@ describe('model override resolution: services composition wiring', () => {
   });
 
   test('automation create: a bare model id resolves through the shared resolver', async () => {
-    const services = getTestRuntimeServices();
+    const services = (await getTestRuntimeServices());
     const job = await services.automationManager.createJob({
       name: 'bare-model-automation',
       prompt: 'run with a bare model id',

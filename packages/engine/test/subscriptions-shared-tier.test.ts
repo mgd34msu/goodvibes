@@ -32,6 +32,7 @@ import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
 import { createRuntimeServices } from '../platform/src/platform/runtime/services.ts';
+import { prepareConfiguredProjectContext } from '../platform/src/platform/knowledge/project-planning/configured-project.ts';
 import { createClientRuntimeServices } from '../platform/src/platform/runtime/client-services.ts';
 
 const roots: string[] = [];
@@ -84,10 +85,12 @@ describe('sharedSubscriptionsPath', () => {
 });
 
 describe('both runtime service factories resolve the shared path', () => {
-  test('createRuntimeServices (the daemon graph) writes subscriptions under .goodvibes/shared/, not .goodvibes/<surfaceRoot>/', () => {
+  test('createRuntimeServices (the daemon graph) writes subscriptions under .goodvibes/shared/, not .goodvibes/<surfaceRoot>/', async () => {
     const home = makeHome('gv-sub-daemon-factory');
+    const configManager = new ConfigManager({ surfaceRoot: 'daemon', configDir: join(home, 'cfg'), workingDir: home, homeDir: home });
+    await prepareConfiguredProjectContext(configManager, home, undefined, { activate: true });
     const daemon = createRuntimeServices({
-      configManager: new ConfigManager({ surfaceRoot: 'daemon', configDir: join(home, 'cfg'), workingDir: home, homeDir: home }),
+      configManager,
       runtimeBus: new RuntimeEventBus(),
       runtimeStore: createRuntimeStore(),
       surfaceRoot: 'daemon',
@@ -129,7 +132,7 @@ describe('both runtime service factories resolve the shared path', () => {
     }
   });
 
-  test('a login recorded by one surface graph is visible to another surface graph on the same home: the defect this round fixes', () => {
+  test('a login recorded by one surface graph is visible to another surface graph on the same home: the defect this round fixes', async () => {
     const home = makeHome('gv-sub-cross-surface-factories');
     const tui = createClientRuntimeServices({
       configManager: new ConfigManager({ surfaceRoot: 'tui', configDir: join(home, 'tui-cfg'), workingDir: home, homeDir: home }),
@@ -140,8 +143,10 @@ describe('both runtime service factories resolve the shared path', () => {
       homeDirectory: home,
       requestApproval: async () => ({ approved: false }),
     });
+    const daemonConfig = new ConfigManager({ surfaceRoot: 'daemon', configDir: join(home, 'daemon-cfg'), workingDir: home, homeDir: home });
+    await prepareConfiguredProjectContext(daemonConfig, home, undefined, { activate: true });
     const daemon = createRuntimeServices({
-      configManager: new ConfigManager({ surfaceRoot: 'daemon', configDir: join(home, 'daemon-cfg'), workingDir: home, homeDir: home }),
+      configManager: daemonConfig,
       runtimeBus: new RuntimeEventBus(),
       runtimeStore: createRuntimeStore(),
       surfaceRoot: 'daemon',

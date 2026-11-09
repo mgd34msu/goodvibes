@@ -152,15 +152,36 @@ function trackTimers() {
   };
 }
 
+describe('genuine async shared runtime preparation', () => {
+  test('concurrent acquisition publishes one actual prepared graph', async () => {
+    resetTestRuntimeServices();
+    const [first, second] = await Promise.all([getTestRuntimeServices(), getTestRuntimeServices()]);
+    expect(first).toBe(second);
+    expect(await getTestRuntimeServices()).toBe(first);
+    resetTestRuntimeServices();
+  });
+
+  test('a reset retires in-flight preparation without publishing over the replacement', async () => {
+    resetTestRuntimeServices();
+    const retired = getTestRuntimeServices();
+    resetTestRuntimeServices();
+    const replacement = getTestRuntimeServices();
+    await expect(retired).rejects.toThrow('Test runtime preparation was reset');
+    const current = await replacement;
+    expect(await getTestRuntimeServices()).toBe(current);
+    resetTestRuntimeServices();
+  });
+});
+
 describe('resetTestRuntimeServices: stops the graph it drops', () => {
-  test('every poller the shared test graph started is cleared when it is reset', () => {
+  test('every poller the shared test graph started is cleared when it is reset', async () => {
     resetTestRuntimeServices();
     const timers = trackTimers();
     try {
-      const services = getTestRuntimeServices();
+      const services = (await getTestRuntimeServices());
       // Same graph until it is reset, the sanity check that makes the
       // measurement below mean something.
-      expect(getTestRuntimeServices()).toBe(services);
+      expect((await getTestRuntimeServices())).toBe(services);
 
       // Guards the false pass where the graph stopped composing anything and
       // the leak count reads zero for entirely the wrong reason.
@@ -171,7 +192,7 @@ describe('resetTestRuntimeServices: stops the graph it drops', () => {
       expect(timers.liveCount).toBe(0);
 
       // ...and the next request builds a fresh, running graph.
-      const rebuilt = getTestRuntimeServices();
+      const rebuilt = (await getTestRuntimeServices());
       expect(rebuilt).not.toBe(services);
       expect(timers.liveCount).toBeGreaterThan(3);
       resetTestRuntimeServices();

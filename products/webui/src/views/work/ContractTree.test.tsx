@@ -111,7 +111,9 @@ describe('ContractTree read-only evidence', () => {
   });
 
   test('fresh passed checks omit unused digest details while actual historical fields remain visible', () => {
-    const { evidenceDigest: historical, ...fresh } = check({ result: 'pass' });
+    const historical = 'sha256:recorded-digest';
+    const { evidenceDigest: omitted, ...fresh } = check({ result: 'pass', evidenceDigest: historical });
+    expect(omitted).toBe(historical);
     const current = render(contract({ checks: [fresh] }));
     expect(current.textContent).toContain('decision-check');
     expect(current.textContent).not.toContain('Evidence digest');

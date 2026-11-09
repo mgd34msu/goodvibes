@@ -15,7 +15,7 @@ import { disposeTestRuntimeServicesAfterAll } from '../helpers/runtime-services.
 
 disposeTestRuntimeServicesAfterAll();
 
-function shellFixture(options: Parameters<typeof interactiveHostPairingFixture>[0] = {}) {
+async function shellFixture(options: Parameters<typeof interactiveHostPairingFixture>[0] = {}) {
   const fixture = interactiveHostPairingFixture(options);
   const conversation = new ConversationManager(() => 80);
   conversation.dismissSplash();
@@ -30,7 +30,7 @@ function shellFixture(options: Parameters<typeof interactiveHostPairingFixture>[
   const submissions: string[] = [];
   const render = () => { renders++; controller?.checkPresentation(); };
   const input = new InputHandler(render, new SelectionManager(), () => 0, () => 20, () => history,
-    lines => scrolls.push(lines), () => {}, createDefaultUiRuntimeServices());
+    lines => scrolls.push(lines), () => {}, (await createDefaultUiRuntimeServices()));
   input.setContentWidth(80);
   input.conversationManager = conversation;
   const context = {
@@ -64,13 +64,13 @@ function shellFixture(options: Parameters<typeof interactiveHostPairingFixture>[
   };
 }
 
-async function withShell(run: (s: ReturnType<typeof shellFixture>) => Promise<void>, options: Parameters<typeof interactiveHostPairingFixture>[0] = {}) {
-  const shell = shellFixture(options);
+async function withShell(run: (s: Awaited<ReturnType<typeof shellFixture>>) => Promise<void>, options: Parameters<typeof interactiveHostPairingFixture>[0] = {}) {
+  const shell = (await shellFixture(options));
   try { await run(shell); }
   finally { await shell.stop(); }
 }
 
-function expectNoGrant(s: ReturnType<typeof shellFixture>) {
+function expectNoGrant(s: Awaited<ReturnType<typeof shellFixture>>) {
   expect(s.fixture.migrations()).toBe(0);
   expect(readTuiHostPairing(s.fixture.homeDirectory, s.fixture.host).status).toBe('missing');
   expect(s.submissions).toEqual([]);
@@ -82,7 +82,7 @@ describe('host pairing shell over the real InputHandler', () => {
     { label: 'ordinary response', options: {}, reads: 3 },
     { label: 'interrupted first read', options: { holdAuth: 1 }, reads: 4 },
     { label: 'empty first response', options: { emptyAuth: 'first' as const }, reads: 4 },
-  ])('direct slash dispatch wires fresh confirmation after $label', async ({ options, reads }) => withShell(async s => {
+  ])('direct slash dispatch wires fresh confirmation after $label', async ({ options, reads }) => (await withShell(async s => {
     s.input.feed('/host pair --bootstrap-shared --apply');
     expect(s.input.commandMode).toBe(true);
     s.input.feed('\r');
@@ -120,20 +120,20 @@ describe('host pairing shell over the real InputHandler', () => {
     expect(s.conversation.getMessagesForLLM()).toEqual([]);
     expect(s.renders()).toBeGreaterThan(0);
     expect(s.toBottom()).toBeGreaterThan(0);
-  }, options));
+  }, options)));
 
-  test('repeated empty authority responses remain blocked without a grant or model submission', async () => withShell(async s => {
+  test('repeated empty authority responses remain blocked without a grant or model submission', async () => (await withShell(async s => {
     await s.start();
     expect(s.controller.active).toBe(false);
     expect(s.fixture.authCalls()).toBe(2);
     expect(s.text()).not.toMatch(/PAIR [0-9a-f]{12}/);
     expectNoGrant(s);
-  }, { emptyAuth: 'always' }));
+  }, { emptyAuth: 'always' })));
 
   for (const field of ['bookmarkModal', 'settingsModal', 'mcpWorkspace', 'sessionPickerModal',
     'profilePickerModal', 'configModal', 'contextInspectorModal', 'modelPicker', 'filePicker',
     'blockActionsMenu', 'selectionModal', 'onboardingWizard'] as const) {
-    test(`an active ${field} cancels even without a modal-stack entry`, async () => withShell(async s => {
+    test(`an active ${field} cancels even without a modal-stack entry`, async () => (await withShell(async s => {
       await s.start();
       const phrase = s.phrase();
       s.input.feed('P');
@@ -147,11 +147,11 @@ describe('host pairing shell over the real InputHandler', () => {
       expect(s.input[field].active).toBe(true);
       expect(s.input.prompt).toBe('');
       expectNoGrant(s);
-    }));
+    })));
   }
 
   for (const field of ['helpOverlayActive', 'shortcutsOverlayActive'] as const) {
-    test(`a ${field} flag cancels without a modal-stack entry`, async () => withShell(async s => {
+    test(`a ${field} flag cancels without a modal-stack entry`, async () => (await withShell(async s => {
       await s.start();
       const phrase = s.phrase();
       s.input.feed('P');
@@ -162,11 +162,11 @@ describe('host pairing shell over the real InputHandler', () => {
       expect(s.controller.ownsInput).toBe(false);
       expect(s.input[field]).toBe(true);
       expectNoGrant(s);
-    }));
+    })));
   }
 
   for (const surface of ['modal stack', 'search', 'history search', 'concealed field', 'shell blocker'] as const) {
-    test(`${surface} invalidates confirmation and drains its abandoned line`, async () => withShell(async s => {
+    test(`${surface} invalidates confirmation and drains its abandoned line`, async () => (await withShell(async s => {
       await s.start();
       const phrase = s.phrase();
       s.input.feed('P');
@@ -184,10 +184,10 @@ describe('host pairing shell over the real InputHandler', () => {
       expect(s.input.prompt).toBe('');
       expect(concealed).toEqual([]);
       expectNoGrant(s);
-    }));
+    })));
   }
 
-  test('surface modal receives no abandoned confirmation tokens, then accepts fresh input', async () => withShell(async s => {
+  test('surface modal receives no abandoned confirmation tokens, then accepts fresh input', async () => (await withShell(async s => {
     await s.start();
     const phrase = s.phrase();
     s.input.feed('P');
@@ -203,9 +203,9 @@ describe('host pairing shell over the real InputHandler', () => {
     s.input.feed('y');
     expect(received).toHaveLength(1);
     expectNoGrant(s);
-  }));
+  })));
 
-  test('modalOpened aborts revalidation synchronously before a held host reply', async () => withShell(async s => {
+  test('modalOpened aborts revalidation synchronously before a held host reply', async () => (await withShell(async s => {
     await s.start();
     s.input.feed(`${s.phrase()}\r`);
     await untilPairing(s.fixture.held, 'held authority');
@@ -217,9 +217,9 @@ describe('host pairing shell over the real InputHandler', () => {
     await Bun.sleep(10);
     expect(s.text()).toBe(beforeRelease);
     expectNoGrant(s);
-  }, { holdAuth: 2 }));
+  }, { holdAuth: 2 })));
 
-  test('beginConcealedInput quarantines pairing bytes before accepting a separate answer', async () => withShell(async s => {
+  test('beginConcealedInput quarantines pairing bytes before accepting a separate answer', async () => (await withShell(async s => {
     await s.start();
     const phrase = s.phrase();
     s.input.feed('P');
@@ -232,9 +232,9 @@ describe('host pairing shell over the real InputHandler', () => {
     s.input.feed('fresh-answer\r');
     expect(received).toEqual(['fresh-answer']);
     expectNoGrant(s);
-  }));
+  })));
 
-  test('a voice-like draft replacement preserves the new text while draining abandoned pairing', async () => withShell(async s => {
+  test('a voice-like draft replacement preserves the new text while draining abandoned pairing', async () => (await withShell(async s => {
     await s.start();
     s.input.feed('P');
     const draft = 'A fresh voice draft must remain visible.';
@@ -247,9 +247,9 @@ describe('host pairing shell over the real InputHandler', () => {
     expect(s.input.prompt).toBe(draft);
     expect(s.input.cursorPos).toBe(draft.length);
     expectNoGrant(s);
-  }));
+  })));
 
-  test('new pairing input stays visible after a scrolled composer and at narrow width', async () => withShell(async s => {
+  test('new pairing input stays visible after a scrolled composer and at narrow width', async () => (await withShell(async s => {
     s.input.setContentWidth(8);
     s.input.inputScrollTop = 8;
     await s.start();
@@ -262,9 +262,9 @@ describe('host pairing shell over the real InputHandler', () => {
     s.input.feed('\r');
     await untilPairing(() => !s.controller.active, 'visible narrow-width confirmation');
     expect(s.fixture.migrations()).toBe(1);
-  }));
+  })));
 
-  test('paging and mouse-wheel input are wired to shell scrolling without changing the answer', async () => withShell(async s => {
+  test('paging and mouse-wheel input are wired to shell scrolling without changing the answer', async () => (await withShell(async s => {
     await s.start();
     const phrase = s.phrase();
     s.input.feed(phrase.slice(0, 6));
@@ -274,11 +274,11 @@ describe('host pairing shell over the real InputHandler', () => {
     s.input.feed(`${phrase.slice(6)}\r`);
     await untilPairing(() => !s.controller.active, 'confirmation after shell scrolling');
     expect(s.fixture.migrations()).toBe(1);
-  }));
+  })));
 });
 
 
-test('pairing replacement preserves the exact original remote dispatch source', async () => withShell(async s => {
+test('pairing replacement preserves the exact original remote dispatch source', async () => (await withShell(async s => {
   let original: string | undefined;
   s.registry.register({ name: 'remote', description: 'Synthetic source probe', handler(_args, ctx) { original = directOwnerRemoteInput(ctx); } });
   await s.start();
@@ -286,4 +286,4 @@ test('pairing replacement preserves the exact original remote dispatch source', 
   s.input.feed(`${command}\r`);
   await untilPairing(() => original !== undefined, 'replacement remote command');
   expect(original).toBe(command); expectNoGrant(s);
-}));
+})));

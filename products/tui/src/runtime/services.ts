@@ -50,7 +50,7 @@ import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platfor
 import { registerSurfaceRuntimePollers } from './disposal-wiring.ts';
 import { composeCredentialServices } from './credential-composition.ts';
 import { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
-import { createWebKnowledgeGapRepairer } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { assertConfiguredProjectContextReady, createWebKnowledgeGapRepairer } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createKnowledgeServices } from './knowledge-services.ts';
 import { cancelAllAgentRuns } from '@goodvibes-jev/engine/platform/platform/tools';
 import { MediaProviderRegistry, ensureBuiltinMediaProviders } from '@goodvibes-jev/engine/platform/platform/media';
@@ -135,6 +135,7 @@ import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services
 export type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.ts';
 
 export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeServices {
+  assertConfiguredProjectContextReady(options.configManager, options.workingDir);
   const disposalScope = createAsyncDisposalScope('RuntimeServices');
   let homeGraphClosing: Promise<void> | undefined;
   let conversationRewindClosing: Promise<void> | undefined;

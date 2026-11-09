@@ -492,7 +492,7 @@ describe('command modal handoff', () => {
         () => history,
         () => {},
         () => {},
-        createDefaultUiRuntimeServices(),
+        (await createDefaultUiRuntimeServices()),
       );
       input.setContentWidth(80);
 
@@ -733,7 +733,7 @@ describe('command modal handoff', () => {
       () => history,
       () => {},
       () => {},
-      createDefaultUiRuntimeServices(),
+      (await createDefaultUiRuntimeServices()),
     );
     input.setContentWidth(80);
 
@@ -796,7 +796,7 @@ describe('command modal handoff', () => {
       () => history,
       () => {},
       () => {},
-      createDefaultUiRuntimeServices(),
+      (await createDefaultUiRuntimeServices()),
     );
     input.setContentWidth(80);
     const registry = new CommandRegistry();
@@ -831,7 +831,7 @@ describe('command modal handoff', () => {
       () => history,
       () => {},
       () => {},
-      createDefaultUiRuntimeServices(),
+      (await createDefaultUiRuntimeServices()),
     );
     input.setContentWidth(80);
     const registry = new CommandRegistry();

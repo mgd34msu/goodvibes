@@ -14,8 +14,8 @@ import {
 // registered inside the helper, for the reason its doc comment gives.
 disposeTestRuntimeServicesAfterAll();
 
-function createProviderCommandContext(output: string[]): CommandContext {
-  const runtimeServices = getTestRuntimeServices();
+async function createProviderCommandContext(output: string[]): Promise<CommandContext> {
+  const runtimeServices = (await getTestRuntimeServices());
   seedProviderMetadataCacheFixture({ configManager: runtimeServices.configManager, homeDirectory: runtimeServices.homeDirectory, workingDirectory: runtimeServices.workingDirectory });
   runtimeServices.providerRegistry.initModelLimits();
   runtimeServices.providerRegistry.initCatalog();
@@ -65,7 +65,7 @@ describe('/provider-opt', () => {
 
   test('explains the current route through the provider api surface', async () => {
     const output: string[] = [];
-    const context = createProviderCommandContext(output);
+    const context = (await createProviderCommandContext(output));
     const currentModel = await context.clients!.providerApi!.getCurrentModel();
 
     await providerCommand.handler(['explain-route'], context);
@@ -78,7 +78,7 @@ describe('/provider-opt', () => {
 
   test('pins using provider api model records rather than raw registry enumeration', async () => {
     const output: string[] = [];
-    const context = createProviderCommandContext(output);
+    const context = (await createProviderCommandContext(output));
     const target = await context.clients!.providerApi!.getCurrentModel();
 
     await providerCommand.handler(['pin', target!.registryKey], context);
@@ -92,8 +92,8 @@ describe('/provider-opt', () => {
 
   test('optimizer on enables the optimizer and persists to config', async () => {
     const output: string[] = [];
-    const context = createProviderCommandContext(output);
-    const runtimeServices = getTestRuntimeServices();
+    const context = (await createProviderCommandContext(output));
+    const runtimeServices = (await getTestRuntimeServices());
 
     // Optimizer starts disabled (no feature flag set)
     expect(context.provider.providerOptimizer?.enabled).toBe(false);
@@ -109,8 +109,8 @@ describe('/provider-opt', () => {
 
   test('optimizer off disables the optimizer and persists to config', async () => {
     const output: string[] = [];
-    const context = createProviderCommandContext(output);
-    const runtimeServices = getTestRuntimeServices();
+    const context = (await createProviderCommandContext(output));
+    const runtimeServices = (await getTestRuntimeServices());
 
     // Enable first so we can test the off path
     await providerCommand.handler(['optimizer', 'on'], context);
@@ -126,7 +126,7 @@ describe('/provider-opt', () => {
 
   test('optimizer on when already enabled reports no-change', async () => {
     const output: string[] = [];
-    const context = createProviderCommandContext(output);
+    const context = (await createProviderCommandContext(output));
 
     // Enable once
     await providerCommand.handler(['optimizer', 'on'], context);
@@ -141,7 +141,7 @@ describe('/provider-opt', () => {
 
   test('optimizer with invalid subcommand shows usage', async () => {
     const output: string[] = [];
-    const context = createProviderCommandContext(output);
+    const context = (await createProviderCommandContext(output));
 
     await providerCommand.handler(['optimizer', 'maybe'], context);
 
@@ -150,7 +150,7 @@ describe('/provider-opt', () => {
 
   test('route auto when optimizer is off records mode and explains it is off', async () => {
     const output: string[] = [];
-    const context = createProviderCommandContext(output);
+    const context = (await createProviderCommandContext(output));
 
     // optimizer starts disabled
     await providerCommand.handler(['route', 'auto'], context);

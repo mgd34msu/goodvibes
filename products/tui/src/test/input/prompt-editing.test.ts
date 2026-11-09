@@ -29,10 +29,10 @@ function asTestAccess(input: InputHandler): InputHandlerTestAccess {
   return input as unknown as InputHandlerTestAccess;
 }
 
-function makeInput(): InputHandler {
+async function makeInput(): Promise<InputHandler> {
   const sel = new SelectionManager();
   const history = new InfiniteBuffer();
-  const ih = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, createDefaultUiRuntimeServices());
+  const ih = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, (await createDefaultUiRuntimeServices()));
   ih.setContentWidth(80);
   return ih;
 }
@@ -60,8 +60,8 @@ function findPathToken(ih: InputHandler): { start: number; prefix: string } | nu
 // ── saveUndoState ──────────────────────────────────────────────────────────
 
 describe('saveUndoState', () => {
-  test('captures current prompt and cursor onto the undo stack', () => {
-    const ih = makeInput();
+  test('captures current prompt and cursor onto the undo stack', async () => {
+    const ih = (await makeInput());
     ih.prompt = 'hello';
     ih.cursorPos = 5;
     saveUndo(ih);
@@ -71,8 +71,8 @@ describe('saveUndoState', () => {
     expect(stack[0].cursorPos).toBe(5);
   });
 
-  test('clears the redo stack on each save', () => {
-    const ih = makeInput();
+  test('clears the redo stack on each save', async () => {
+    const ih = (await makeInput());
     ih.prompt = 'step1';
     ih.cursorPos = 5;
     saveUndo(ih);
@@ -84,8 +84,8 @@ describe('saveUndoState', () => {
     expect(getRedoStack(ih).length).toBe(0);
   });
 
-  test('undo stack bounded at MAX_UNDO (100)', () => {
-    const ih = makeInput();
+  test('undo stack bounded at MAX_UNDO (100)', async () => {
+    const ih = (await makeInput());
     const MAX = 100;
     for (let i = 0; i <= MAX; i++) {
       ih.prompt = `state${i}`;
@@ -97,7 +97,7 @@ describe('saveUndoState', () => {
 });
 
 describe('feed render ordering', () => {
-  test('render callbacks observe the committed prompt state for typed text', () => {
+  test('render callbacks observe the committed prompt state for typed text', async () => {
     const sel = new SelectionManager();
     const history = new InfiniteBuffer();
     const renders: string[] = [];
@@ -112,7 +112,7 @@ describe('feed render ordering', () => {
       () => history,
       () => {},
       () => {},
-      createDefaultUiRuntimeServices(),
+      (await createDefaultUiRuntimeServices()),
     );
     input.setContentWidth(80);
 
@@ -126,8 +126,8 @@ describe('feed render ordering', () => {
 // ── handleUndo ─────────────────────────────────────────────────────────────
 
 describe('handleUndo', () => {
-  test('restores the previous prompt and cursor state', () => {
-    const ih = makeInput();
+  test('restores the previous prompt and cursor state', async () => {
+    const ih = (await makeInput());
     ih.prompt = 'before';
     ih.cursorPos = 6;
     saveUndo(ih);
@@ -138,8 +138,8 @@ describe('handleUndo', () => {
     expect(ih.cursorPos).toBe(6);
   });
 
-  test('pushes current state to redo stack before restoring', () => {
-    const ih = makeInput();
+  test('pushes current state to redo stack before restoring', async () => {
+    const ih = (await makeInput());
     ih.prompt = 'v1';
     ih.cursorPos = 2;
     saveUndo(ih);
@@ -151,8 +151,8 @@ describe('handleUndo', () => {
     expect(redo[0].prompt).toBe('v2');
   });
 
-  test('does nothing when undo stack is empty', () => {
-    const ih = makeInput();
+  test('does nothing when undo stack is empty', async () => {
+    const ih = (await makeInput());
     ih.prompt = 'current';
     ih.cursorPos = 7;
     doUndo(ih);
@@ -160,8 +160,8 @@ describe('handleUndo', () => {
     expect(ih.cursorPos).toBe(7);
   });
 
-  test('redo stack bounded at MAX_UNDO after many undos', () => {
-    const ih = makeInput();
+  test('redo stack bounded at MAX_UNDO after many undos', async () => {
+    const ih = (await makeInput());
     const MAX = 100;
     // Build a large undo stack
     for (let i = 0; i <= MAX + 5; i++) {
@@ -180,8 +180,8 @@ describe('handleUndo', () => {
 // ── handleRedo ─────────────────────────────────────────────────────────────
 
 describe('handleRedo', () => {
-  test('restores the undone state', () => {
-    const ih = makeInput();
+  test('restores the undone state', async () => {
+    const ih = (await makeInput());
     ih.prompt = 'v1';
     ih.cursorPos = 2;
     saveUndo(ih);
@@ -193,8 +193,8 @@ describe('handleRedo', () => {
     expect(ih.cursorPos).toBe(2);
   });
 
-  test('does nothing when redo stack is empty', () => {
-    const ih = makeInput();
+  test('does nothing when redo stack is empty', async () => {
+    const ih = (await makeInput());
     ih.prompt = 'current';
     ih.cursorPos = 7;
     doRedo(ih);
@@ -202,8 +202,8 @@ describe('handleRedo', () => {
     expect(ih.cursorPos).toBe(7);
   });
 
-  test('redo stack is cleared on new edit after undo', () => {
-    const ih = makeInput();
+  test('redo stack is cleared on new edit after undo', async () => {
+    const ih = (await makeInput());
     ih.prompt = 'v1';
     ih.cursorPos = 2;
     saveUndo(ih);
@@ -221,8 +221,8 @@ describe('handleRedo', () => {
 // ── findPathToken ───────────────────────────────────────────────────────────
 
 describe('findPathToken', () => {
-  test('detects @path token', () => {
-    const ih = makeInput();
+  test('detects @path token', async () => {
+    const ih = (await makeInput());
     ih.prompt = 'open @src/in';
     ih.cursorPos = 12;
     const result = findPathToken(ih);
@@ -231,8 +231,8 @@ describe('findPathToken', () => {
     expect(result!.start).toBe(5);
   });
 
-  test('detects !@path token (inject mode)', () => {
-    const ih = makeInput();
+  test('detects !@path token (inject mode)', async () => {
+    const ih = (await makeInput());
     ih.prompt = '!@src/utils';
     ih.cursorPos = 11;
     const result = findPathToken(ih);
@@ -241,8 +241,8 @@ describe('findPathToken', () => {
     expect(result!.start).toBe(0);
   });
 
-  test('detects bare path with slash', () => {
-    const ih = makeInput();
+  test('detects bare path with slash', async () => {
+    const ih = (await makeInput());
     ih.prompt = 'see src/core/foo';
     ih.cursorPos = 16;
     const result = findPathToken(ih);
@@ -250,16 +250,16 @@ describe('findPathToken', () => {
     expect(result!.prefix).toBe('src/core/foo');
   });
 
-  test('returns null for a plain word without path marker', () => {
-    const ih = makeInput();
+  test('returns null for a plain word without path marker', async () => {
+    const ih = (await makeInput());
     ih.prompt = 'hello';
     ih.cursorPos = 5;
     const result = findPathToken(ih);
     expect(result).toBeNull();
   });
 
-  test('returns null for empty cursor position', () => {
-    const ih = makeInput();
+  test('returns null for empty cursor position', async () => {
+    const ih = (await makeInput());
     ih.prompt = '';
     ih.cursorPos = 0;
     const result = findPathToken(ih);
@@ -270,8 +270,8 @@ describe('findPathToken', () => {
 // ── handlePathCompletion (via public state) ─────────────────────────────────
 
 describe('handlePathCompletion', () => {
-  test('returns false when allFiles is empty', () => {
-    const ih = makeInput();
+  test('returns false when allFiles is empty', async () => {
+    const ih = (await makeInput());
     ih.prompt = '@src/in';
     ih.cursorPos = 7;
     // filePicker.allFiles is [] by default
@@ -279,8 +279,8 @@ describe('handlePathCompletion', () => {
     expect(result).toBe(false);
   });
 
-  test('completes a path token when allFiles has matches', () => {
-    const ih = makeInput();
+  test('completes a path token when allFiles has matches', async () => {
+    const ih = (await makeInput());
     ih.prompt = '@src/in';
     ih.cursorPos = 7;
     // Inject test files directly
@@ -291,8 +291,8 @@ describe('handlePathCompletion', () => {
     expect(ih.prompt.startsWith('@src/input/')).toBe(true);
   });
 
-  test('cycles to next match on repeated Tab (start position tracking)', () => {
-    const ih = makeInput();
+  test('cycles to next match on repeated Tab (start position tracking)', async () => {
+    const ih = (await makeInput());
     ih.prompt = '@src/in';
     ih.cursorPos = 7;
     ih.filePicker.allFiles = ['src/input/handler.ts', 'src/input/file-picker.ts'];
@@ -311,8 +311,8 @@ describe('handlePathCompletion', () => {
     expect(second.startsWith('@src/input/')).toBe(true);
   });
 
-  test('saves undo state before mutating prompt', () => {
-    const ih = makeInput();
+  test('saves undo state before mutating prompt', async () => {
+    const ih = (await makeInput());
     ih.prompt = '@src/in';
     ih.cursorPos = 7;
     ih.filePicker.allFiles = ['src/input/handler.ts'];
@@ -328,8 +328,8 @@ describe('handlePathCompletion', () => {
 // ── command-mode arrow key navigation ─────────────────────────────────────────
 
 describe('command-mode arrow key navigation', () => {
-  test('left/right arrow keys move the cursor while in command mode', () => {
-    const ih = makeInput();
+  test('left/right arrow keys move the cursor while in command mode', async () => {
+    const ih = (await makeInput());
     ih.commandMode = true;
     ih.prompt = '/plan';
     ih.cursorPos = 5;
@@ -341,8 +341,8 @@ describe('command-mode arrow key navigation', () => {
     expect(ih.cursorPos).toBe(5);
   });
 
-  test('up/down arrow keys are consumed in command mode (cursor unchanged)', () => {
-    const ih = makeInput();
+  test('up/down arrow keys are consumed in command mode (cursor unchanged)', async () => {
+    const ih = (await makeInput());
     ih.commandMode = true;
     ih.prompt = '/plan';
     ih.cursorPos = 5;
@@ -357,8 +357,8 @@ describe('command-mode arrow key navigation', () => {
 // ── multiline prompt/history arrow navigation ───────────────────────────────
 
 describe('multiline prompt history navigation', () => {
-  test('up arrow moves within a multiline current prompt before recalling history', () => {
-    const ih = makeInput();
+  test('up arrow moves within a multiline current prompt before recalling history', async () => {
+    const ih = (await makeInput());
     const history = new InputHistory({ historyPath: '/tmp/gv-unused-history.json', persist: false });
     history.add('previous command');
     ih.setHistory(history);
@@ -382,8 +382,8 @@ describe('multiline prompt history navigation', () => {
     expect(ih.cursorPos).toBe('previous command'.length);
   });
 
-  test('down arrow moves within a multiline recalled history item before navigating forward', () => {
-    const ih = makeInput();
+  test('down arrow moves within a multiline recalled history item before navigating forward', async () => {
+    const ih = (await makeInput());
     const history = new InputHistory({ historyPath: '/tmp/gv-unused-history.json', persist: false });
     history.add('older command');
     history.add('line1\nline2\nline3');
@@ -413,8 +413,8 @@ describe('multiline prompt history navigation', () => {
 // ── autocomplete reset on space ─────────────────────────────────────────────
 
 describe('autocomplete reset on space in command mode', () => {
-  test('typing space after /plan hides autocomplete', () => {
-    const ih = makeInput();
+  test('typing space after /plan hides autocomplete', async () => {
+    const ih = (await makeInput());
     // Wire up a minimal CommandRegistry + AutocompleteEngine
     const registry = new CommandRegistry();
     registry.register({ name: 'plan', description: 'Run plan', handler: () => {} });
@@ -440,8 +440,8 @@ describe('autocomplete reset on space in command mode', () => {
     expect(ih.prompt).toBe('/plan ');
   });
 
-  test('autocomplete stays active while typing command name without space', () => {
-    const ih = makeInput();
+  test('autocomplete stays active while typing command name without space', async () => {
+    const ih = (await makeInput());
     const registry = new CommandRegistry();
     registry.register({ name: 'plan', description: 'Run plan', handler: () => {} });
     asTestAccess(ih).commandRegistry = registry;

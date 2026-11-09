@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { prepareConfiguredProjectContext } from '../platform/src/platform/knowledge/project-planning/configured-project.ts';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../platform/src/platform/runtime/services.ts';
@@ -54,13 +55,15 @@ let sharedIndexTimerAfterDispose: unknown;
 /** Kept so afterAll can put down the flush this file armed on purpose. */
 let sharedIndexRef: ProjectIndex | undefined;
 
-beforeAll(() => {
+beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'orchestrator-index-'));
   seedBenchmarkCache(root, 'goodvibes');
   agentCwd = mkdtempSync(join(tmpdir(), 'orchestrator-agent-cwd-'));
 
+  const configManager = new ConfigManager({ surfaceRoot: 'daemon', configDir: join(root, 'cfg'), workingDir: root, homeDir: root });
+  await prepareConfiguredProjectContext(configManager, root, undefined, { activate: true });
   services = createRuntimeServices({
-    configManager: new ConfigManager({ surfaceRoot: 'daemon', configDir: join(root, 'cfg'), workingDir: root, homeDir: root }),
+    configManager,
     runtimeBus: new RuntimeEventBus(),
     runtimeStore: createRuntimeStore(),
     surfaceRoot: 'goodvibes',

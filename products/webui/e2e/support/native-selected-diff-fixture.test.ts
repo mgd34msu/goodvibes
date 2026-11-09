@@ -143,6 +143,19 @@ describe("genuine native selected-hunk HTTP recordings", () => {
     expect(() => validateSelectedDiffCapture(wrongDiff)).toThrow(
       "Invalid host-written native diff revision"
     );
+    const wrongRevision = structuredClone(capture);
+    const response = JSON.parse(wrongRevision.session.diff!.body) as { nativeRevision: string };
+    response.nativeRevision = "checkpoint-diff:not-a-native-owner:1";
+    wrongRevision.session.diff!.body = JSON.stringify(response);
+    expect(() => validateSelectedDiffCapture(wrongRevision)).toThrow("Invalid selected-diff output: sessions.changes.get");
+    // This remains a schema-valid old-format label, but is not the saved
+    // commitment to these actual full diff bytes. It must reach the separate
+    // compatibility verifier rather than fail the outer shape check.
+    const wrongCommitment = structuredClone(capture);
+    const oldDiff = JSON.parse(wrongCommitment.session.diff!.body) as { nativeRevision: string };
+    oldDiff.nativeRevision = (oldDiff.nativeRevision.startsWith("0") ? "1" : "0") + oldDiff.nativeRevision.slice(1);
+    wrongCommitment.session.diff!.body = JSON.stringify(oldDiff);
+    expect(() => validateSelectedDiffCapture(wrongCommitment)).toThrow("Invalid host-written native diff revision");
     const wrongRoute = structuredClone(capture);
     wrongRoute.session.capture.path = "/api/sessions/steer";
     expect(() => validateSelectedDiffCapture(wrongRoute)).toThrow(

@@ -1,23 +1,38 @@
 /** UNRUN browser operator gestures; native manager/catalog behavior is covered
  * by engine/test/trigger-operator-migration.test.ts with actual saved state. */
-import { afterEach, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { invalidateClientLifetime } from '../../lib/client-lifetime';
+import { client as platformClient } from '../../lib/goodvibes';
+import { invalidateClientLifetime, tokenStore } from '../../lib/client-lifetime';
 import type { TriggerOperatorStatus } from '@goodvibes-jev/engine/platform/platform/triggers/browser';
 let status: TriggerOperatorStatus = { ownership: 'migration-required', migrationRequired: true,
   records: [{ id: 'watch', label: 'Build readiness', kind: 'condition', state: 'idle' }], message: 'Close older GoodVibes instances before migrating.' };
 const calls: unknown[] = [];
-mock.module('../../lib/goodvibes', () => ({ client: { operator: { watchers: { triggers: {
-  status: async () => status,
-  migrate: async (input: unknown) => { calls.push(input); return { migrated: true, status: { ...status, ownership: 'local', migrationRequired: false, message: 'This process owns trigger execution.' } }; },
-} } } } }));
+// Keep the real browser module and its semantic runner/confirmation helpers.
+// Only this operator's two transport methods are isolated for these gestures.
+const restoreMethods: (() => void)[] = [];
+beforeEach(async () => {
+  await tokenStore.setToken('synthetic-trigger-operator');
+  const operator = platformClient.operator.watchers.triggers;
+  const inspect = spyOn(operator, 'status').mockImplementation(async () => status);
+  const migrate = spyOn(operator, 'migrate').mockImplementation(async input => {
+    calls.push(input);
+    status = { ...status, ownership: 'local', migrationRequired: false, message: 'This process owns trigger execution.' };
+    return { migrated: true as const, status };
+  });
+  restoreMethods.push(() => inspect.mockRestore(), () => migrate.mockRestore());
+});
 const { TriggerRecoverySettings } = await import('./TriggerRecoverySettings');
 let mounted: Root | undefined, container: HTMLElement | undefined, client: QueryClient | undefined;
-afterEach(() => { if (mounted) flushSync(() => mounted!.unmount()); mounted = undefined; container?.remove(); client?.clear(); calls.length = 0;
-  status = { ownership: 'migration-required', migrationRequired: true, records: [{ id: 'watch', label: 'Build readiness', kind: 'condition', state: 'idle' }], message: 'Close older GoodVibes instances before migrating.' }; });
+afterEach(async () => {
+  if (mounted) flushSync(() => mounted!.unmount()); mounted = undefined; container?.remove(); client?.clear(); calls.length = 0;
+  for (const restore of restoreMethods.splice(0).reverse()) restore();
+  await tokenStore.clearToken();
+  status = { ownership: 'migration-required', migrationRequired: true, records: [{ id: 'watch', label: 'Build readiness', kind: 'condition', state: 'idle' }], message: 'Close older GoodVibes instances before migrating.' };
+});
 function render() { const selectedClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); client = selectedClient; container = document.createElement('div'); document.body.appendChild(container); mounted = createRoot(container);
   flushSync(() => mounted!.render(React.createElement(QueryClientProvider, { client: selectedClient }, React.createElement(TriggerRecoverySettings)))); }
 function click(element: Element | null) { if (!element) throw new Error('Expected actual control'); flushSync(() => element.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))); }

@@ -145713,7 +145713,7 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                   "revision": {
                                     "type": "string",
                                     "maxLength": 200,
-                                    "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                                    "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                                   },
                                   "selectedDiff": {
                                     "anyOf": [
@@ -146542,7 +146542,7 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                                     },
                                     "selectedDiff": {
                                       "anyOf": [
@@ -147200,7 +147200,7 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                         "revision": {
                                           "type": "string",
                                           "maxLength": 200,
-                                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                                         },
                                         "selectedDiff": {
                                           "anyOf": [
@@ -148022,7 +148022,7 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                           "revision": {
                                             "type": "string",
                                             "maxLength": 200,
-                                            "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                                            "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                                           },
                                           "selectedDiff": {
                                             "anyOf": [
@@ -149200,7 +149200,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -149400,7 +149400,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -149619,7 +149619,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -149744,7 +149744,7 @@ Start the single initial semantic admission of captured conversation text. Repla
             "revision": {
               "type": "string",
               "maxLength": 200,
-              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
             },
             "selectedDiff": {
               "anyOf": [
@@ -150038,7 +150038,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -150253,7 +150253,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -150461,7 +150461,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -150661,7 +150661,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -150899,7 +150899,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -151303,7 +151303,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -151503,7 +151503,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -151722,7 +151722,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -151847,7 +151847,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
             "revision": {
               "type": "string",
               "maxLength": 200,
-              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
             },
             "selectedDiff": {
               "anyOf": [
@@ -152141,7 +152141,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -152356,7 +152356,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -152564,7 +152564,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -152764,7 +152764,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -153002,7 +153002,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -153531,7 +153531,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -153731,7 +153731,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -153950,7 +153950,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -154075,7 +154075,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
             "revision": {
               "type": "string",
               "maxLength": 200,
-              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
             },
             "selectedDiff": {
               "anyOf": [
@@ -154369,7 +154369,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -154584,7 +154584,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -154792,7 +154792,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -154992,7 +154992,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -155230,7 +155230,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -155630,7 +155630,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -155830,7 +155830,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -156049,7 +156049,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -156174,7 +156174,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -156468,7 +156468,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -156683,7 +156683,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -156891,7 +156891,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -157091,7 +157091,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -157329,7 +157329,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -157750,7 +157750,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -157950,7 +157950,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -158169,7 +158169,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -158294,7 +158294,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
             "revision": {
               "type": "string",
               "maxLength": 200,
-              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
             },
             "selectedDiff": {
               "anyOf": [
@@ -158588,7 +158588,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -158803,7 +158803,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -159011,7 +159011,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -159211,7 +159211,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -159449,7 +159449,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -160039,7 +160039,7 @@ Read the selected host project ledger, without mutation authority or allowedActi
                               "revision": {
                                 "type": "string",
                                 "maxLength": 200,
-                                "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$"
+                                "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
                               },
                               "selectedDiff": {
                                 "anyOf": [

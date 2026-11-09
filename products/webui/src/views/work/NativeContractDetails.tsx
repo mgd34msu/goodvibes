@@ -173,10 +173,14 @@ function InputSnapshot({ snapshot }: { snapshot: Snapshot }) {
     ]} />
     <Disclosure summary={`Captured files (${snapshot.files.length})`}>
       {snapshot.files.length === 0 ? <Empty>No captured files recorded.</Empty> : <ul className="contract-tree__list" aria-label="Captured files">
-        {snapshot.files.map((file, i) => <li key={`${file.path}-${i}`}><Facts items={[
-          { label: 'Path', value: file.path }, { label: 'Kind', value: file.kind }, { label: 'Mode', value: file.mode },
-          { label: 'Object id', value: file.oid }, { label: 'Digest', value: file.digest }, { label: 'Identity', value: file.identity },
-        ]} /></li>)}
+        {snapshot.files.map((file, i) => <li key={`${file.path}-${i}`}>
+          <Facts items={[
+            { label: 'Path', value: file.path }, { label: 'Kind', value: file.kind }, { label: 'Mode', value: file.mode },
+          ]} />
+          {file.kind === 'missing' ? <Empty>Path was missing at capture.</Empty> : <Facts items={[
+            { label: 'Object id', value: file.oid }, { label: 'Digest', value: file.digest }, { label: 'Identity', value: file.identity },
+          ]} />}
+        </li>)}
       </ul>}
     </Disclosure>
   </Disclosure>;

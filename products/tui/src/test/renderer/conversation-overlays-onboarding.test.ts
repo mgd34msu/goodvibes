@@ -14,7 +14,7 @@ import { linesToText } from '../setup.ts';
 // registered inside the helper, for the reason its doc comment gives.
 disposeTestRuntimeServicesAfterAll();
 
-function makeInput(): InputHandler {
+async function makeInput(): Promise<InputHandler> {
   const history = new InfiniteBuffer();
   const input = new InputHandler(
     () => {},
@@ -24,7 +24,7 @@ function makeInput(): InputHandler {
     () => history,
     () => {},
     () => {},
-    createDefaultUiRuntimeServices(),
+    (await createDefaultUiRuntimeServices()),
   );
   input.setContentWidth(100);
   return input;
@@ -57,18 +57,18 @@ function wireModelPicker(input: InputHandler): unknown[] {
 }
 
 describe('applyConversationOverlays onboarding shell', () => {
-  test('onboarding owns the viewport, and the model picker it launched draws over it as a modal layer', () => {
+  test('onboarding owns the viewport, and the model picker it launched draws over it as a modal layer', async () => {
     const width = 100;
     const height = 20;
     const viewport = Array.from({ length: height }, () => createEmptyLine(width));
-    const input = makeInput();
+    const input = (await makeInput());
     input.openOnboardingWizard();
     input.modelPicker.openProviders(['openai', 'anthropic'], 'openai');
     const context = {
       input,
       conversation: {} as ConversationManager,
       commandRegistry: { getAll: () => [] } as never,
-      keybindingsManager: createDefaultUiRuntimeServices().shell.keybindingsManager,
+      keybindingsManager: (await createDefaultUiRuntimeServices()).shell.keybindingsManager,
     };
 
     const lines = applyConversationOverlays(viewport, { ...context, conversationWidth: width, viewportHeight: height });
@@ -82,8 +82,8 @@ describe('applyConversationOverlays onboarding shell', () => {
     expect(text).toContain('openai');
   });
 
-  test('guards duplicate onboarding modal pushes in the shared stack', () => {
-    const input = makeInput();
+  test('guards duplicate onboarding modal pushes in the shared stack', async () => {
+    const input = (await makeInput());
     input.onboardingWizard.open('new');
     input.modalOpened('onboarding');
     input.modelPicker.openProviders(['openai'], 'openai');
@@ -94,8 +94,8 @@ describe('applyConversationOverlays onboarding shell', () => {
     expect(input.modalStack).toEqual(['onboarding', 'modelPicker']);
   });
 
-  test('preserves modalReturnFocus while escape unwinds nested onboarding modals', () => {
-    const input = makeInput();
+  test('preserves modalReturnFocus while escape unwinds nested onboarding modals', async () => {
+    const input = (await makeInput());
     // The process indicator is the one non-composer focus; it is what a
     // nested modal stack must hand back when it fully unwinds.
     input.indicatorFocused = true;
@@ -120,8 +120,8 @@ describe('applyConversationOverlays onboarding shell', () => {
     expect(input.indicatorFocused).toBe(true);
   });
 
-  test('restores onboarding snapshot when a nested model picker is cancelled', () => {
-    const input = makeInput();
+  test('restores onboarding snapshot when a nested model picker is cancelled', async () => {
+    const input = (await makeInput());
     wireModelPicker(input);
     input.openOnboardingWizard({ mode: 'edit', preload: () => {} });
     input.onboardingWizard.setStep(3);
@@ -146,8 +146,8 @@ describe('applyConversationOverlays onboarding shell', () => {
     expect(input.onboardingWizard.getFieldValueLabel(primaryField)).toBe(originalLabel);
   });
 
-  test('keeps committed nested model picker selection and clears the cancel snapshot', () => {
-    const input = makeInput();
+  test('keeps committed nested model picker selection and clears the cancel snapshot', async () => {
+    const input = (await makeInput());
     const commits = wireModelPicker(input);
     input.openOnboardingWizard({ mode: 'edit', preload: () => {} });
     input.onboardingWizard.setStep(3);

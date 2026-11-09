@@ -30,8 +30,8 @@ function makeHookCommandContext(
   const conversationManager = {} as never;
   const hookApi = createRuntimeHookApi({
     dispatcher: {
-      listHooks: () => getTestHookDispatcher().listHooks(),
-      listChains: () => getTestHookDispatcher().getChains(),
+      listHooks: async () => (await getTestHookDispatcher()).listHooks(),
+      listChains: async () => (await getTestHookDispatcher()).getChains(),
     },
     workbench: hookWorkbench,
     listContracts: () => listHookPointContracts(),
@@ -76,20 +76,20 @@ describe('hooks command', () => {
   let tempDir: string;
   let hookWorkbench: HookWorkbench;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     originalHooksFile = configManager.get('tools.hooksFile') as string;
     tempDir = makeProjectTempDir('gv-hooks-command');
     configManager.set('tools.hooksFile', join(tempDir, 'hooks.json'));
-    getTestHookDispatcher().clear();
+    (await getTestHookDispatcher()).clear();
     hookWorkbench = new HookWorkbench(
-      getTestHookDispatcher(),
+      (await getTestHookDispatcher()),
       () => configManager.get('tools.hooksFile') as string,
     );
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     configManager.set('tools.hooksFile', originalHooksFile);
-    getTestHookDispatcher().clear();
+    (await getTestHookDispatcher()).clear();
   });
 
   test('scaffolds and simulates managed hooks through the command surface', async () => {
@@ -104,7 +104,7 @@ describe('hooks command', () => {
     await hooks!.handler(['scaffold', 'guard-edit', 'Pre:tool:*', 'command'], ctx);
     expect(existsSync(configManager.get('tools.hooksFile') as string)).toBe(true);
     expect(out.join('\n')).toContain('Scaffolded managed hook');
-    expect(getTestHookDispatcher().listHooks().length).toBe(1);
+    expect((await getTestHookDispatcher()).listHooks().length).toBe(1);
 
     out.length = 0;
     await hooks!.handler(['simulate', 'Pre:tool:edit'], ctx);

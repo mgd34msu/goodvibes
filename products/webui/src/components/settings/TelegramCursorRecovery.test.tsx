@@ -19,8 +19,11 @@ function render() {
   const root = createRoot(container); flushSync(() => root.render(React.createElement(TelegramCursorRecovery)));
   cleanups.push(() => { flushSync(() => root.unmount()); container.remove(); }); return container;
 }
+function findButton(container: HTMLElement, label: string) {
+  return [...container.querySelectorAll('button')].find(node => node.textContent === label);
+}
 function button(container: HTMLElement, label: string) {
-  const result = [...container.querySelectorAll('button')].find(node => node.textContent === label);
+  const result = findButton(container, label);
   if (!result) throw new Error(`Missing cursor recovery control ${label}`); return result;
 }
 beforeEach(async () => {
@@ -73,7 +76,8 @@ test('changing the connected host discards a pending old-host preview and its co
   const container = render(); button(container, 'Review saved Telegram cursor').click();
   await until(() => requests.length === 1);
   invalidateClientLifetime(); release();
-  await until(() => button(container, 'Review saved Telegram cursor').disabled === false);
+  await until(() => findButton(container, 'Review saved Telegram cursor')?.disabled === false);
+  expect(requests).toHaveLength(1); // No implicit new-host preview or retry.
   expect(container.textContent).not.toContain('@original_bot'); expect(container.querySelector('input[type="checkbox"]')).toBeNull();
   expect(requests.filter(request => request.path.endsWith('cursor-migration-commit'))).toHaveLength(0);
 });

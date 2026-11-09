@@ -1,3 +1,4 @@
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -24,7 +25,7 @@ const disposables = trackDisposables();
 
 const roots: string[] = [];
 
-function makeRuntime() {
+async function makeRuntime() {
   const root = join(tmpdir(), `gv-knowledge-isolation-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const workingDir = join(root, 'workspace');
   const homeDir = join(root, 'home');
@@ -43,6 +44,7 @@ function makeRuntime() {
     homeDir,
   });
 
+  await prepareConfiguredProjectContext(configManager, workingDir, 'knowledge-wiki.sqlite', { activate: true });
   return {
     configManager,
     services: disposables.add(createRuntimeServices({
@@ -64,7 +66,7 @@ afterEach(async () => {
 
 describe('runtime knowledge store isolation', () => {
   test('regular Knowledge/Wiki, Agent knowledge, and Home Graph use separate sqlite stores', async () => {
-    const { configManager, services } = makeRuntime();
+    const { configManager, services } = await makeRuntime();
     const readings = knowledgeIsolationReadings();
     const refused: Array<{ site: string | undefined; questions: readonly string[] }> = [];
     const port: JudgmentPort = {

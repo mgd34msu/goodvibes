@@ -68,5 +68,5 @@ export type {
   ProjectWorkPlanTaskUpdateInput,
 } from './types.js';
 
-export { prepareConfiguredProjectContext, createConfiguredPlanningStore } from './configured-project.js';
+export { prepareConfiguredProjectContext, assertConfiguredProjectContextReady, createConfiguredPlanningStore } from './configured-project.js';
 export type { ConfiguredProjectInspection } from './configured-project.js';

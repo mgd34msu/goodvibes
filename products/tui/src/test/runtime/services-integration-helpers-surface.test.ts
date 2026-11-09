@@ -37,8 +37,8 @@ beforeAll(() => {
 });
 
 describe('IntegrationHelperService continuity reads through the surface it was constructed with', () => {
-  test('a pointer + recovery snapshot written via the surface are reported by getContinuitySnapshot (via the read model /health continuity uses)', () => {
-    const services = getTestRuntimeServices();
+  test('a pointer + recovery snapshot written via the surface are reported by getContinuitySnapshot (via the read model /health continuity uses)', async () => {
+    const services = (await getTestRuntimeServices());
     const sessionId = 'continuity-fix-session';
 
     writeLastSessionPointer(sessionId, { surface: services.surface });
@@ -67,8 +67,8 @@ describe('IntegrationHelperService continuity reads through the surface it was c
     expect(direct.recoveryFilePresent).toBe(true);
   });
 
-  test('the same files are invisible to a legacy-scoped instance over the same directories; the shape of the original bug', () => {
-    const services = getTestRuntimeServices();
+  test('the same files are invisible to a legacy-scoped instance over the same directories; the shape of the original bug', async () => {
+    const services = (await getTestRuntimeServices());
     const sessionId = 'continuity-legacy-blind-session';
 
     writeLastSessionPointer(sessionId, { surface: services.surface });

@@ -25,7 +25,7 @@ const PAGE_DOWN = '\x1b[6~';
 const ESC = '\x1b';
 
 /** A main session: the input handler, the transcript scroll, and a turn that is running. */
-function mainSession() {
+async function mainSession() {
   const history = new InfiniteBuffer();
   for (let i = 0; i < LINES; i++) history.addLine(UIFactory.stringToLine(`line ${i}`, 80));
   const transcript = new TranscriptScroll();
@@ -41,7 +41,7 @@ function mainSession() {
     () => history,
     (delta) => transcript.scrollBy(delta, () => maxScroll),
     () => {},
-    createDefaultUiRuntimeServices(),
+    (await createDefaultUiRuntimeServices()),
   );
   input.setContentWidth(80);
   input.transcriptScroll = { scrolledBack: () => transcript.scrolledBack, toBottom: () => transcript.toBottom() };
@@ -53,8 +53,8 @@ function mainSession() {
 }
 
 describe('Esc while the transcript is scrolled back', () => {
-  test('during a running turn: Esc returns to the live bottom and never calls cancelGeneration; the next Esc at the bottom interrupts', () => {
-    const s = mainSession();
+  test('during a running turn: Esc returns to the live bottom and never calls cancelGeneration; the next Esc at the bottom interrupts', async () => {
+    const s = (await mainSession());
     expect(s.transcript.top).toBe(s.maxScroll);
     s.input.feed(WHEEL_UP);
     s.frame();
@@ -74,8 +74,8 @@ describe('Esc while the transcript is scrolled back', () => {
     expect(s.turn.running).toBe(false);
   });
 
-  test('PageUp scrolls the transcript too, and reaching the bottom with PageDown re-locks it', () => {
-    const s = mainSession();
+  test('PageUp scrolls the transcript too, and reaching the bottom with PageDown re-locks it', async () => {
+    const s = (await mainSession());
     s.input.feed(PAGE_UP);
     s.frame();
     expect(s.transcript.scrolledBack).toBe(true);
@@ -87,8 +87,8 @@ describe('Esc while the transcript is scrolled back', () => {
     expect(s.turn.cancels).toBe(0);
   });
 
-  test('the earlier steps keep their order while scrolled: the composer clears first, then back to the bottom, then the interrupt', () => {
-    const s = mainSession();
+  test('the earlier steps keep their order while scrolled: the composer clears first, then back to the bottom, then the interrupt', async () => {
+    const s = (await mainSession());
     s.input.feed(WHEEL_UP);
     s.frame();
     s.input.prompt = 'draft';
@@ -105,8 +105,8 @@ describe('Esc while the transcript is scrolled back', () => {
     expect(s.turn.cancels).toBe(1);
   });
 
-  test('a modal open while scrolled closes first and leaves the scroll and the turn alone', () => {
-    const s = mainSession();
+  test('a modal open while scrolled closes first and leaves the scroll and the turn alone', async () => {
+    const s = (await mainSession());
     s.input.feed(WHEEL_UP);
     s.frame();
     s.input.helpOverlayActive = true;

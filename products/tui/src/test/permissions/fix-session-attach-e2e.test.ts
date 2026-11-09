@@ -24,8 +24,8 @@ disposeTestRuntimeServicesAfterAll();
 describe('CI fix-session attach: end-to-end against the linked platform', () => {
   afterAll(() => resetTestRuntimeServices());
 
-  async function acceptedApprovalFor(callId: string): Promise<{ approvalBroker: ReturnType<typeof getTestRuntimeServices>['approvalBroker'] }> {
-    const { approvalBroker } = getTestRuntimeServices();
+  async function acceptedApprovalFor(callId: string): Promise<{ approvalBroker: Awaited<ReturnType<typeof getTestRuntimeServices>>['approvalBroker'] }> {
+    const { approvalBroker } = (await getTestRuntimeServices());
     await approvalBroker.start();
     // A ci:fix-session offer that auto-accepts through its local prompt, leaving
     // an APPROVED record stampFixSession can attach the spawned session to.
@@ -37,7 +37,7 @@ describe('CI fix-session attach: end-to-end against the linked platform', () => 
   }
 
   test('a stamped success carries a real, broker-resolvable session id (not an auto- job id) and arms the one-key jump', async () => {
-    const services = getTestRuntimeServices();
+    const services = (await getTestRuntimeServices());
     const { approvalBroker } = await acceptedApprovalFor('call-e2e-1');
 
     // The fix job runs a pinned fresh shared session; register it and get its real id.

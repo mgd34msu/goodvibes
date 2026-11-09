@@ -1,5 +1,6 @@
 /** Native source, checkpoints, and outcomes are unchanged paired-daemon wire captures. */
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { Page, Route } from "@playwright/test";
 import { firstJsonSchemaFailure } from "@goodvibes-jev/engine/transport-http";
@@ -7,6 +8,7 @@ import operatorContract from "@goodvibes-jev/engine/contracts/operator-contract.
 import {
   nativeConversationIntakeCaptureRequestSchema,
   nativeConversationIntakeLookupResultSchema,
+  nativeSelectedDiffSelectorSchema,
   selectNativeDiffHunk,
   type NativeConversationIntakeCaptureRequest,
 } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
@@ -131,13 +133,22 @@ export function validateSelectedDiffCapture(capture: SelectedDiffCapture): void 
     if (wire.status !== 200 || firstJsonSchemaFailure(method.outputSchema, body))
       throw new Error(`Invalid selected-diff output: ${wire.methodId}`);
     if (wire.methodId === "sessions.changes.get" || wire.methodId === "checkpoints.diff") {
-      const revision = recordedDiffRevision(wire);
-      if (!revision?.startsWith("checkpoint-diff:"))
+      const parsedRevision = nativeSelectedDiffSelectorSchema.safeParse({
+        kind: "session", revision: recordedDiffRevision(wire), fileIndex: 0, hunkIndex: 0,
+      });
+      if (!parsedRevision.success)
         throw new Error(`Invalid host-written native diff revision: ${wire.methodId}`);
+      const revision = parsedRevision.data.revision;
       const view = { methodId: wire.methodId, request: wire.requestBody ?? null, response: body };
       const previous = observedViews.get(revision);
       if (previous !== undefined && !isDeepStrictEqual(previous, view))
         throw new Error(`Changed recorded native diff view: ${wire.methodId}`);
+      // Genuine older captures bind their full diff bytes with this saved digest.
+      // Opaque current labels are validated by the native selector and exact
+      // recorded-view/source linkage below; they are never treated as a digest.
+      if (previous === undefined && /^[a-f0-9]{64}$/.test(revision)
+        && createHash("sha256").update(recordedUnifiedDiff(wire)).digest("hex") !== revision)
+        throw new Error(`Invalid host-written native diff revision: ${wire.methodId}`);
       observedViews.set(revision, view);
     }
     if (wire.methodId.startsWith("workLedger.intake."))

@@ -2,7 +2,7 @@
  * manager-streams.ts, the stream watcher kind's lifecycle.
  *
  * Split out of manager.ts so the supervisor file stays inside the 800-line
- * hand-authored cap. The logic is unchanged: spawn the long-lived command
+ * hand-authored cap. Spawn the long-lived command
  * through the injected stream host, feed every chunk to a StreamLineProcessor,
  * emit a batch when one is ready, and put a stream command that exits through
  * the same backoff ladder and breaker every other kind uses.
@@ -68,7 +68,8 @@ export async function startStreamTrigger(
   const runtime: StreamRuntime = { processor, streamId: null, timer: null, ready: false };
   owner.streams.set(id, runtime);
 
-  const started = await host.start({
+  let started: Awaited<ReturnType<TriggerStreamHost['start']>>;
+  try { started = await host.start({
     triggerId: id,
     command: spec.command,
     args: spec.args ?? [],
@@ -84,7 +85,10 @@ export async function startStreamTrigger(
       if (runtime.ready) { drainStreamTrigger(owner, id, true); handleStreamExit(owner, id, exitCode); }
       else runtime.pendingExit = { code: exitCode };
     },
-  });
+  }); } catch (error) {
+    if (owner.streams.get(id) === runtime) owner.streams.delete(id);
+    throw error;
+  }
   runtime.streamId = started.streamId;
   try { owner.assertCurrent?.(id, runtime); }
   catch (error) { host.stop(started.streamId); runtime.streamId = null; if (owner.streams.get(id) === runtime) owner.streams.delete(id); throw error; }
@@ -153,12 +157,19 @@ export function handleStreamExit(owner: StreamOwner, id: string, exitCode: numbe
   const record = owner.records.get(id);
   if (!record || record.definition.spec.kind !== 'stream') return;
   if (record.state === 'cancelled') return;
+  const runtime = owner.streams.get(id);
+  if (runtime) {
+    if (runtime.timer) clearInterval(runtime.timer);
+    runtime.timer = null; runtime.streamId = null; runtime.ready = false;
+    owner.streams.delete(id);
+  }
   const now = owner.now();
   const spec = record.definition.spec;
   if (spec.restart === false) {
     owner.records.set(id, {
       ...record,
       state: 'idle',
+      nextCheckAt: undefined,
       runs: [...record.runs, { at: now, outcome: 'skipped', detail: `stream command exited (${exitCode}); restart disabled` }],
       updatedAt: now,
     });

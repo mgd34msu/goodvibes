@@ -12,6 +12,7 @@
  */
 
 import { observeTriggers } from './manager-observer.js';
+import { restartDueStreams } from './manager-stream-restarts.js';
 import { TriggerStoreOwnershipError } from './store-owner.js';
 import { TriggerManagerWork } from './manager-work.js';
 import { randomUUID } from 'node:crypto';
@@ -62,6 +63,7 @@ export class TriggerManager {
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private supervisionTimer: ReturnType<typeof setInterval> | null = null;
   private inFlight = new Set<string>();
+  private readonly restartingStreams = new Set<string>();
   private loaded = false;
   private prepared = false;
   private observing = false;
@@ -100,13 +102,13 @@ export class TriggerManager {
     return this.lastRecovery;
   }
 
-  get executionOwnership(): 'local' | 'other-process' | 'migration-required' | 'unclaimed' { return this.migrationRequired ? 'migration-required' : this.observing ? 'other-process' : this.loaded ? 'local' : 'unclaimed'; }
+  get executionOwnership(): 'local' | 'other-process' | 'migration-required' | 'unclaimed' { return this.migrationRequired ? 'migration-required' : this.observing ? 'other-process' : this.loaded && !this.work.stopped ? 'local' : 'unclaimed'; }
+  /** Inspection never acquires execution ownership, migrates, sweeps or writes. */
+  inspectRecords(): readonly TriggerRecord[] { return observeTriggers(this.options, this.now()).records; }
 
   get bootId(): string {
     return this.daemonBootId;
   }
-
-  // ─── Lifecycle ──────────────────────────────────────────────────────────────
 
   /** Recover as execution owner, or inspect without effects when explicitly allowed. */
   load(readOnlyAllowed = false): TriggerRecoveryReport {
@@ -295,7 +297,6 @@ export class TriggerManager {
     catch (error) { this.failPersistence(error); }
   }
 
-  // ─── Grants ─────────────────────────────────────────────────────────────────
   registerGrant(input: RegisterGrantInput): TriggerActionGrant {
     this.requireEnabled('register an action grant');
     this.load();
@@ -310,7 +311,6 @@ export class TriggerManager {
     return [...this.grants.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
 
-  // ─── Trigger CRUD ───────────────────────────────────────────────────────────
   create(input: unknown): Promise<TriggerRecord> { return this.work.own(() => this.createOwned(input)); }
   private async createOwned(input: unknown): Promise<TriggerRecord> {
     this.requireEnabled('create a trigger');
@@ -440,11 +440,11 @@ export class TriggerManager {
     return next;
   }
 
-  // ─── Condition checks ───────────────────────────────────────────────────────
   /** Runs every condition trigger that is due. Respects the concurrency cap. */
   async tick(): Promise<void> {
     if (!this.config.enabled) return;
     this.load();
+    await restartDueStreams(this.streamOwner(), this.work, this.restartingStreams);
     const now = this.now();
     const due = [...this.records.values()].filter(
       (record) => record.definition.spec.kind === 'condition' && isDue(record, now) && !this.inFlight.has(record.definition.id),

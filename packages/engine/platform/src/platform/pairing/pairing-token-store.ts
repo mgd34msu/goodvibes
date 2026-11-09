@@ -488,6 +488,7 @@ export class PairingTokenManager {
         if (snapshot?.legacyRevoked === true || this.settingsObservedLegacyRevocation) return null;
         record = { kind: 'shared-token' };
       } else {
+        if (!snapshot?.tokens.length) return null;
         const hash = hashToken(input.token.trim());
         const paired = snapshot?.tokens.find(item => item.tokenHash === hash);
         if (!paired) return null;
@@ -550,7 +551,7 @@ export class PairingTokenManager {
    */
   authenticateNative(token: string): AuthenticatedNativePairingToken | null {
     const normalized = token.trim();
-    if (this.nativePersistenceFailed || !normalized.startsWith(TOKEN_PREFIX)) return null;
+    if (this.nativePersistenceFailed || !normalized.startsWith(TOKEN_PREFIX) || this.index.size === 0) return null;
     const hash = hashToken(normalized);
     const live = this.index.get(hash);
     if (!live) return null;
@@ -874,6 +875,7 @@ export class PairingTokenManager {
     try { snapshot = this.readPersisted(); } catch { return null; }
     if (!snapshot) return null;
     this.publish(snapshot);
+    if (this.index.size === 0) return null;
     const hash = hashToken(normalized);
     let record = this.index.get(hash);
     if (!record) return null;

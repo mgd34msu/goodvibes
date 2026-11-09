@@ -6,7 +6,8 @@
  * the legacy shared token can be turned off. Custody + revocation semantics,
  * proven against a temp file.
  */
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -21,6 +22,28 @@ function tempFile(): string {
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
 describe('PairingTokenManager', () => {
+  test('empty pairing stores have no verifier candidate to hash', () => {
+    const mgr = new PairingTokenManager(tempFile());
+    const minted = mgr.mint({ name: 'Original device' });
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      expect(mgr.authenticateNative(minted.token)?.tokenId).toBe(minted.id);
+      expect(hash).toHaveBeenCalledTimes(1);
+      expect(mgr.authenticate(minted.token)?.id).toBe(minted.id);
+      expect(hash).toHaveBeenCalledTimes(2);
+      expect(mgr.captureSettingsAuthority({ kind: 'pairing-token', token: minted.token })).not.toBeNull();
+      expect(hash).toHaveBeenCalledTimes(3);
+      expect(mgr.revoke(minted.id)).toBe(true);
+      hash.mockClear();
+      for (const store of [mgr, new PairingTokenManager(tempFile())]) {
+        expect(store.authenticateNative(minted.token)).toBeNull();
+        expect(store.authenticate(minted.token)).toBeNull();
+        expect(store.captureSettingsAuthority({ kind: 'pairing-token', token: minted.token })).toBeNull();
+      }
+      expect(hash).not.toHaveBeenCalled();
+    } finally { hash.mockRestore(); }
+  });
+
   test('mint returns the secret once; the secret is never persisted or listed', () => {
     const file = tempFile();
     const mgr = new PairingTokenManager(file);

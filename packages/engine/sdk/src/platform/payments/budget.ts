@@ -27,6 +27,7 @@
  * including across restarts. Elapsed time cannot prove that a charge failed.
  */
 import { dayKey, type DayKey } from './day.js';
+import { samePaymentEvidence } from './evidence-equality.js';
 import type { BudgetPool, MinorUnits } from './types.js';
 
 export interface BudgetLimits {
@@ -84,6 +85,22 @@ export const MAX_RESERVATIONS = 256;
 export interface BudgetStateSnapshot {
   readonly spend: readonly SpendRecord[];
   readonly reservations: readonly BudgetReservation[];
+  readonly reconciliations?: readonly CheckoutBudgetSettlement[];
+}
+/** Durable once-only accounting receipt. Kept independently of daily spend
+ * pruning so an old interrupted owner reconciliation cannot run twice. */
+export interface CheckoutBudgetSettlement {
+  readonly operationId: string;
+  readonly purchaseId: string;
+  readonly outcome: 'purchased' | 'not-purchased';
+  readonly atMs: number;
+  readonly reservation: BudgetReservation | null;
+  readonly spend: SpendRecord | null;
+}
+/** Construction-owned continuity around one bookkeeping transition. */
+export interface CheckoutBudgetSettlementOwner {
+  assertCurrent(): void;
+  settled(reservation: BudgetReservation | null, spend: SpendRecord | null, receipt: CheckoutBudgetSettlement): void;
 }
 
 /**
@@ -96,11 +113,15 @@ export interface BudgetStateSnapshot {
 export class BudgetLedger {
   private spend: SpendRecord[] = [];
   private reservations: BudgetReservation[] = [];
+  private reconciliations: CheckoutBudgetSettlement[] = [];
 
   constructor(initial?: BudgetStateSnapshot) {
     if (initial !== undefined) {
       this.spend = initial.spend.map(record => Object.freeze({ ...record }));
       this.reservations = initial.reservations.map(record => Object.freeze({ ...record }));
+      this.reconciliations = (initial.reconciliations ?? []).map(record => Object.freeze({ ...record,
+        reservation: record.reservation === null ? null : Object.freeze({ ...record.reservation }),
+        spend: record.spend === null ? null : Object.freeze({ ...record.spend }) }));
     }
   }
 
@@ -227,8 +248,43 @@ export class BudgetLedger {
   }
 
   state(): BudgetStateSnapshot {
-    return { spend: [...this.spend], reservations: [...this.reservations] };
+    return { spend: [...this.spend], reservations: [...this.reservations],
+      ...(this.reconciliations.length === 0 ? {} : { reconciliations: [...this.reconciliations] }) };
   }
+
+  /** Apply the original hold and its receipt together. The daemon persists
+   * this whole snapshot in one atomic write, rather than inferring a previous
+   * settlement from the absence of a reservation after a crash. */
+  settleReconciliation(receipt: CheckoutBudgetSettlement, owner?: CheckoutBudgetSettlementOwner): void {
+    owner?.assertCurrent();
+    const previous = this.reconciliations.find(row => row.operationId === receipt.operationId);
+    if (previous) {
+      if (!samePaymentEvidence(previous, receipt)) throw new Error('The original payment accounting settlement differs.');
+      return;
+    }
+    const held = this.reservations.find(row => row.id === receipt.purchaseId) ?? null;
+    const spent = this.spend.find(row => row.purchaseId === receipt.purchaseId) ?? null;
+    if (!samePaymentEvidence(held, receipt.reservation) || !samePaymentEvidence(spent, receipt.spend)) throw new Error('The original payment accounting changed.');
+    let finalSpend = spent;
+    if (held) {
+      if (spent || held.retainUntilSettled !== true || held.id !== receipt.purchaseId) throw new Error('The original payment hold is unavailable.');
+      this.reservations = this.reservations.filter(row => row !== held);
+      if (receipt.outcome === 'purchased') {
+        finalSpend = Object.freeze({ purchaseId: held.id, atMs: receipt.atMs,
+          itemMinorUnits: held.itemMinorUnits, overageMinorUnits: held.overageMinorUnits, toleranceMinorUnits: held.toleranceMinorUnits });
+        this.spend.push(finalSpend);
+      }
+    }
+    const stored = Object.freeze({ ...receipt, reservation: held === null ? null : Object.freeze({ ...held }),
+      spend: spent === null ? null : Object.freeze({ ...spent }) });
+    this.reconciliations.push(stored);
+    owner?.settled(null, finalSpend, stored);
+    owner?.assertCurrent();
+  }
+
+  /** Ensure preceding settlement is durable before removing its crash journal.
+   * Memory ledgers have no durable sink; the daemon overrides this boundary. */
+  flush(assertCurrent?: () => void): void { assertCurrent?.(); }
 
   /**
    * Drop spend records that can no longer affect any pool.
@@ -238,9 +294,11 @@ export class BudgetLedger {
    * daemon-lifetime leak with no decision riding on it. The audit ledger, not
    * this, is the long-term record.
    */
-  prune(nowMs: number): void {
+  prune(nowMs: number, retainPendingSpend?: (purchaseId: string) => boolean): void {
     const cutoff = nowMs - 2 * 24 * 60 * 60 * 1000;
-    this.spend = this.spend.filter((record) => record.atMs >= cutoff);
+    const settled = new Set(this.reconciliations.map(record => record.purchaseId));
+    this.spend = this.spend.filter(record => record.atMs >= cutoff
+      || (!settled.has(record.purchaseId) && retainPendingSpend?.(record.purchaseId) === true));
   }
 }
 

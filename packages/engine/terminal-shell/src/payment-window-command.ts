@@ -1,4 +1,4 @@
-import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation,
+import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation,
   type PaymentWindowView, type PaymentOperationView } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
@@ -144,13 +144,42 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
         await refresh();
       } catch { fail(true); }
     };
+    const reconcile = async (operation: PaymentOperationView, outcome: 'purchased' | 'not-purchased'): Promise<void> => {
+      try {
+        loading('Recording your merchant-history finding — Escape closes this view');
+        await authenticate();
+        const result = await connection.run(async (operator, signal) => readPaymentOperation(await operator.invoke(
+          'payments.purchase.reconcile', { purchaseId: operation.purchaseId, operationId: operation.operationId,
+            outcome, inspectedMerchantHistory: true, confirm: true },
+          { signal, headers: { 'x-goodvibes-explicit-user-request': 'true' } },
+        )));
+        if (result.purchaseId !== operation.purchaseId || result.operationId !== operation.operationId || result.outcome !== `owner-confirmed-${outcome}`) throw new Error('Mismatched reconciliation.');
+        report(`[payments] ${paymentOperationDescription(result)}`);
+        await refresh();
+      } catch {
+        report('[payments] Could not confirm completed reconciliation. Refresh /payments pending and repeat only the finding already saved. Do not submit another order.');
+        finish();
+      }
+    };
+    const confirmFinding = (operation: PaymentOperationView, outcome: 'purchased' | 'not-purchased') => {
+      const description = `Only continue after inspecting the merchant’s order history and your payment statement for this original checkout.\n\nFinding: ${outcome === 'purchased' ? 'an order was placed' : 'no order was placed'}.\n\nThis records your finding and settles original bookkeeping. It never places another order. A no-order finding releases an unspent hold; already committed spend is not credited. If the result is still unknown, close this view and keep the hold.`;
+      show(`Confirm finding for ${text(operation.purchaseId)}`, [
+        { id: 'confirm', label: 'I inspected merchant history; record this finding', detail: description },
+        { id: 'back', label: 'Go back without changing this purchase', detail: description },
+      ], result => { if (result.item.id === 'confirm') void reconcile(operation, outcome); else chooseOperation(operation); });
+    };
     const chooseOperation = (operation: PaymentOperationView) => {
       const description = `${paymentOperationDescription(operation)}\n\nUpdated: ${new Date(operation.updatedAtMs).toLocaleString()}`;
       const choices: SelectionItem[] = [{ id: 'refresh', label: 'Refresh purchase status', detail: description }];
       if (isLivePaymentOperation(operation.state) && operation.state !== 'cancelling') choices.push({ id: 'stop', label: 'Stop this checkout', detail: `${description}\n\nStopping does not undo a merchant submission. Wait for final status.` });
+      if (canReconcilePaymentOperation(operation)) {
+        if (operation.outcome !== 'owner-reconciliation-pending-not-purchased') choices.push({ id: 'purchased', label: 'Merchant history confirms an order was placed', detail: description });
+        if (operation.outcome !== 'owner-reconciliation-pending-purchased') choices.push({ id: 'not-purchased', label: 'Merchant history confirms no order was placed', detail: description });
+      }
       show(`Checkout ${text(operation.purchaseId)} · ${operation.state}`, choices, result => {
         if (result.item.id === 'stop') { void stop(operation); return; }
         if (result.item.id === 'refresh') { void refresh(); return; }
+        if (result.item.id === 'purchased' || result.item.id === 'not-purchased') { confirmFinding(operation, result.item.id); return; }
         finish();
       });
     };

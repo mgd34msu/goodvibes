@@ -92,6 +92,7 @@ import { HandlerError, registerCatalogHandlers } from './handler-plumbing.js';
 import type { TypedHandler, Unregister } from './handler-plumbing.js';
 import { CheckoutServiceHolder, checkoutApproveHandler, checkoutBeginHandler, checkoutFillCardHandler } from './checkout-handlers.js';
 import { purchaseWindowStatusHandler, purchaseWindowAnswerHandler } from './window-handlers.js';
+import { purchaseReconciliationHandler } from './reconciliation-handler.js';
 import type { CheckoutComposition } from './checkout-handlers.js';
 import { CardStoreUnreadableError } from './card-store.js';
 import type { DaemonCardStore } from './card-store.js';
@@ -114,6 +115,7 @@ export const ATTACHED_PAYMENTS_METHOD_IDS: readonly string[] = [
   'payments.purchase.approve',
   'payments.purchase.deny',
   'payments.purchase.cancel',
+  'payments.purchase.reconcile',
 ];
 
 /**
@@ -422,7 +424,7 @@ function buildPaymentsGatewayService(deps: PaymentsHandlerDeps, holder: Checkout
     async listPurchases(input) {
       return overStore('Reading purchase history', async () => {
         const result = deps.purchases.list(input);
-        return { purchases: result.purchases.map(purchaseView), total: result.total };
+        return { purchases: result.purchases.map(purchaseView), total: result.total, reconciliations: result.reconciliations };
       });
     },
   };
@@ -602,6 +604,7 @@ export function registerPaymentsMethods(
       { id: 'payments.checkout.begin', handler: checkoutBeginHandler(deps, checkoutServiceHolder) as TypedHandler<unknown, unknown> },
       { id: 'payments.checkout.fillCard', handler: checkoutFillCardHandler(deps, checkoutServiceHolder) as TypedHandler<unknown, unknown> },
       { id: 'payments.purchase.status', handler: purchaseWindowStatusHandler(deps.checkout, checkoutServiceHolder.operations) },
+      { id: 'payments.purchase.reconcile', handler: purchaseReconciliationHandler(checkoutServiceHolder.reconciliations), options: { confirm: true } },
       ...(['approve', 'deny', 'cancel'] as const).map(action => ({
         id: `payments.purchase.${action}`, handler: purchaseWindowAnswerHandler(deps.checkout, action, checkoutServiceHolder.operations), options: { confirm: true },
       })),

@@ -2,6 +2,8 @@
  * capability is part of this view. A stored status never authorizes a submit. */
 export const PAYMENT_OPERATION_STATES = ['accepted', 'running', 'cancelling', 'completed', 'refused', 'cancelled', 'attention', 'interrupted', 'uncertain', 'failed'] as const;
 export type PaymentOperationState = typeof PAYMENT_OPERATION_STATES[number];
+/** Shared with the catalog and browser client before generated facade refresh. */
+export const PAYMENT_PURCHASE_RECONCILE_HTTP = { method: 'POST', path: '/api/payments/purchase/reconcile' } as const;
 export interface PaymentOperationView {
   readonly purchaseId: string;
   readonly operationId: string;
@@ -21,6 +23,13 @@ export interface PaymentOperationCancellation {
 }
 export function isLivePaymentOperation(state: PaymentOperationState): boolean {
   return state === 'accepted' || state === 'running' || state === 'cancelling';
+}
+/** A current paired owner must inspect merchant history first. These controls
+ * settle original bookkeeping only; they never resume a browser submission. */
+export function canReconcilePaymentOperation(operation: PaymentOperationView): boolean {
+  return !isLivePaymentOperation(operation.state)
+    && (operation.state === 'uncertain' || operation.state === 'attention'
+      || (operation.state === 'completed' && operation.outcome === 'submitted-unverified'));
 }
 const REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   'disabled': 'Payments are disabled or this daemon is not the elected payment host.',
@@ -53,6 +62,9 @@ const REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   'merchant-not-recognised-undeliverable': 'Approval for the unrecognised merchant could not be delivered.',
 };
 export function paymentOperationDescription(operation: PaymentOperationView): string {
+  if (operation.outcome === 'owner-confirmed-purchased') return 'You confirmed this order in the merchant’s history. Original payment accounting is settled; no new order was submitted.';
+  if (operation.outcome === 'owner-confirmed-not-purchased') return 'You confirmed no order was placed. The original unspent hold was released; any already committed spend remains recorded without crediting a budget. No new order was submitted.';
+  if (operation.outcome?.startsWith('owner-reconciliation-pending-')) return 'Your merchant-history finding was saved, but payment bookkeeping has not finished. Refresh and repeat that same finding; do not place another order.';
   switch (operation.state) {
     case 'accepted': return 'Accepted for processing. No purchase outcome has been recorded yet.';
     case 'running': return 'The daemon is processing this checkout. Review any purchase notice before answering.';
@@ -92,7 +104,7 @@ export function readPaymentOperation(value: unknown): PaymentOperationView {
     || typeof row['state'] !== 'string' || !(PAYMENT_OPERATION_STATES as readonly string[]).includes(row['state'])
     || !(row['phase'] === null || (typeof row['phase'] === 'string' && ['deciding', 'awaiting-window', 'arming-payment', 'submit-pending', 'submitted'].includes(row['phase'])))
     || !['createdAtMs', 'updatedAtMs'].every(key => typeof row[key] === 'number' && Number.isSafeInteger(row[key]) && row[key] >= 0 && row[key] <= 8_640_000_000_000_000)
-    || !(row['outcome'] === null || (typeof row['outcome'] === 'string' && /^(?:purchased|submitted-unverified|refunded|refused(?::[a-z-]+)?|cancelled|decision-unavailable|decision-disabled|reply-source-unavailable|challenge:(?:3d-secure|captcha|otp|unknown))$/.test(row['outcome'])))
+    || !(row['outcome'] === null || (typeof row['outcome'] === 'string' && /^(?:purchased|submitted-unverified|refunded|owner-(?:confirmed|reconciliation-pending)-(?:purchased|not-purchased)|refused(?::[a-z-]+)?|cancelled|decision-unavailable|decision-disabled|reply-source-unavailable|challenge:(?:3d-secure|captcha|otp|unknown))$/.test(row['outcome'])))
     || !(row['totalMinorUnits'] === null || (typeof row['totalMinorUnits'] === 'number' && Number.isSafeInteger(row['totalMinorUnits']) && row['totalMinorUnits'] >= 0))
     || !(row['currency'] === null || (typeof row['currency'] === 'string' && /^[A-Z]{3}$/.test(row['currency'])))) return fail();
   return Object.freeze({ purchaseId: row['purchaseId'], operationId: row['operationId'], state: row['state'] as PaymentOperationState,

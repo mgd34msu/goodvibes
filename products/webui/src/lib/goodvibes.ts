@@ -14,7 +14,7 @@ import { resolveDaemonRefusal } from './daemon-refusal';
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
 import { browserDecisionPolicy } from './decision-policy';
 import type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentOperationView, PaymentOperationCancellation } from '@goodvibes-jev/engine/sdk/platform/payments';
-import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentOperationCancellation } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
+import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentOperation, readPaymentOperationCancellation, PAYMENT_PURCHASE_RECONCILE_HTTP } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
 import { readClientCompatibilityFloor, recordObservedClientCompatibilityFloor } from './client-compatibility';
 // The union profile.forget accepts as a target (a field id OR a raw line index), named in
 // lib/owner-profile.ts beside the readers for the same verbs' output. The generated
@@ -560,6 +560,17 @@ async function stopPurchaseOperation(input: Pick<PaymentOperationView, 'purchase
   const result = readPaymentOperationCancellation(await requestJson(route.path, { method: 'POST',
     body: { purchaseId, operationId, confirm: true }, explicitUserRequest: true, interpretRefusal: false, signal }));
   if (result.purchaseId !== purchaseId || result.operationId !== operationId) throw new Error('The stop acknowledgement did not match the selected purchase. Refresh its status.');
+  return result;
+}
+async function reconcilePurchaseOperation(input: Pick<PaymentOperationView, 'purchaseId' | 'operationId'>,
+  outcome: 'purchased' | 'not-purchased', signal?: AbortSignal): Promise<PaymentOperationView> {
+  const purchaseId = input.purchaseId, operationId = input.operationId;
+  const result = readPaymentOperation(await requestJson(PAYMENT_PURCHASE_RECONCILE_HTTP.path, { method: PAYMENT_PURCHASE_RECONCILE_HTTP.method,
+    body: { purchaseId, operationId, outcome, inspectedMerchantHistory: true, confirm: true },
+    explicitUserRequest: true, interpretRefusal: false, signal }));
+  if (result.purchaseId !== purchaseId || result.operationId !== operationId || result.outcome !== `owner-confirmed-${outcome}`) {
+    throw new Error('The reconciliation did not match the selected purchase. Refresh its status before taking action.');
+  }
   return result;
 }
 
@@ -1906,6 +1917,7 @@ export const sdk = {
       purchase: {
         status: readPurchaseWindows,
         stopOperation: stopPurchaseOperation,
+        reconcile: reconcilePurchaseOperation,
         approve: (input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal) => answerPurchaseWindow('approve', input, signal),
         deny: (input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal) => answerPurchaseWindow('deny', input, signal),
         cancel: (input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal) => answerPurchaseWindow('cancel', input, signal),

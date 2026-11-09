@@ -158,6 +158,15 @@ export const PAYMENTS_PURCHASE_CANCEL_OUTPUT_SCHEMA = { oneOf: [
   PAYMENTS_PURCHASE_ANSWER_OUTPUT_SCHEMA,
   objectSchema({ purchaseId: STRING_SCHEMA, operationId: STRING_SCHEMA, accepted: { const: true, type: 'boolean' }, mayHaveSubmitted: BOOLEAN_SCHEMA }, ['purchaseId', 'operationId', 'accepted', 'mayHaveSubmitted']),
 ] };
+export const PAYMENTS_PURCHASE_RECONCILE_INPUT_SCHEMA = objectSchema({
+  purchaseId: STRING_SCHEMA, operationId: STRING_SCHEMA, outcome: enumSchema(['purchased', 'not-purchased']),
+  inspectedMerchantHistory: { type: 'boolean', const: true }, confirm: { type: 'boolean', const: true },
+}, ['purchaseId', 'operationId', 'outcome', 'inspectedMerchantHistory', 'confirm']);
+export const PAYMENTS_PURCHASE_RECONCILE_OUTPUT_SCHEMA = PAYMENT_OPERATION_SCHEMA;
+const PAYMENT_RECONCILIATION_SCHEMA = objectSchema({
+  purchaseId: STRING_SCHEMA, operationId: STRING_SCHEMA, outcome: enumSchema(['purchased', 'not-purchased']),
+  principalId: STRING_SCHEMA, atMs: NUMBER_SCHEMA, merchantDomain: STRING_SCHEMA, totalMinorUnits: NUMBER_SCHEMA, currency: STRING_SCHEMA,
+}, ['purchaseId', 'operationId', 'outcome', 'principalId', 'atMs', 'merchantDomain', 'totalMinorUnits', 'currency']);
 
 /** One purchase, as the audit ledger recorded it. */
 const PURCHASE_RECORD_SCHEMA = objectSchema(
@@ -223,7 +232,7 @@ export const PAYMENTS_PURCHASES_LIST_INPUT_SCHEMA = objectSchema(
 );
 
 export const PAYMENTS_PURCHASES_LIST_OUTPUT_SCHEMA = objectSchema(
-  { purchases: arraySchema(PURCHASE_RECORD_SCHEMA), total: NUMBER_SCHEMA },
+  { purchases: arraySchema(PURCHASE_RECORD_SCHEMA), total: NUMBER_SCHEMA, reconciliations: arraySchema(PAYMENT_RECONCILIATION_SCHEMA) },
   ['purchases', 'total'],
 );
 

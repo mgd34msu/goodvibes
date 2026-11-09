@@ -48,6 +48,9 @@ function fixture(options: { readonly window?: PaymentWindowView; readonly princi
     }
     if (url.pathname.endsWith('/status')) return Response.json({ windows: options.operation ? [] : [view], operations: options.operation ? [options.operation] : [] });
     if (options.answerStatus) return Response.json({ error: 'private transport diagnostic' }, { status: options.answerStatus });
+    if (url.pathname.endsWith('/reconcile') && options.operation && body && typeof body === 'object' && 'outcome' in body) {
+      return Response.json({ ...options.operation, state: 'completed', outcome: `owner-confirmed-${String(body.outcome)}` });
+    }
     if (options.operation) return Response.json({ purchaseId: options.operation.purchaseId, operationId: options.operation.operationId, accepted: true, mayHaveSubmitted: true });
     const action = url.pathname.split('/').at(-1);
     return Response.json({ purchaseId: view.purchaseId, windowId: view.windowId, accepted: true,
@@ -90,6 +93,22 @@ test('only a direct owner command opens the actual payment picker', async () => 
   expect(f.modal.title).toBe('Purchases');
   expect(f.modal.items[0]?.detail).toContain(window.notice);
   expect(f.requests.every(request => !request.headers.has('x-goodvibes-explicit-user-request'))).toBe(true);
+});
+
+test('the shared terminal requires merchant-history confirmation before reconciling an uncertain original checkout', async () => {
+  const operation: PaymentOperationView = { purchaseId: 'uncertain-checkout', operationId: 'original-operation', state: 'uncertain', phase: 'submit-pending',
+    createdAtMs: 1, updatedAtMs: 2, outcome: null, totalMinorUnits: 2000, currency: 'USD' };
+  const f = fixture({ operation }); await f.open(); f.choose('operation-0');
+  f.choose('not-purchased');
+  expect(f.requests.some(request => request.url.pathname.endsWith('/reconcile'))).toBe(false);
+  expect(f.modal.filteredItems.some(item => item.detail?.includes('never places another order'))).toBe(true);
+  f.choose('confirm');
+  await until(() => f.messages.some(message => message.includes('You confirmed no order was placed')));
+  const sent = f.requests.filter(request => request.url.pathname.endsWith('/reconcile'));
+  expect(sent).toHaveLength(1);
+  expect(sent[0]?.body).toEqual({ purchaseId: operation.purchaseId, operationId: operation.operationId, outcome: 'not-purchased', inspectedMerchantHistory: true, confirm: true });
+  expect(sent[0]?.headers.get('x-goodvibes-explicit-user-request')).toBe('true');
+  expect(f.requests.some(request => request.url.pathname.includes('/checkout/'))).toBe(false);
 });
 
 test('operation status and stop are available through the actual shared terminal picker after a window disappears', async () => {

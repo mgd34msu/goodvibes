@@ -148,7 +148,10 @@ export interface PaymentsGatewayService {
     readonly twoDigitYear: boolean | undefined;
   }): Promise<PaymentFillCardResult>;
   listPurchases(input: { readonly limit: number; readonly dayKey: string | undefined }):
-    Promise<{ purchases: readonly PaymentPurchaseView[]; total: number }>;
+    Promise<{ purchases: readonly PaymentPurchaseView[]; total: number; reconciliations?: readonly {
+      readonly purchaseId: string; readonly operationId: string; readonly outcome: 'purchased' | 'not-purchased';
+      readonly principalId: string; readonly atMs: number; readonly merchantDomain: string; readonly totalMinorUnits: number; readonly currency: string;
+    }[] }>;
 }
 
 /** The shape `payments.checkout.begin` hands the service, already validated. */
@@ -528,7 +531,8 @@ export function createPaymentsPurchasesListHandler(service: PaymentsGatewayServi
       limit,
       dayKey: typeof rawDay === 'string' && rawDay.trim().length > 0 ? rawDay.trim() : undefined,
     });
-    return { purchases: result.purchases, total: result.total };
+    return { purchases: result.purchases, total: result.total,
+      ...(result.reconciliations === undefined ? {} : { reconciliations: result.reconciliations }) };
   };
 }
 

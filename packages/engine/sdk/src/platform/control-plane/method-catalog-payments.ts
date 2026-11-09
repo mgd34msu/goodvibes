@@ -27,6 +27,7 @@
  */
 import { methodDescriptor } from './method-catalog-shared.js';
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { PAYMENT_PURCHASE_RECONCILE_HTTP } from '../payments/operation-view.js';
 import {
   PAYMENTS_BUDGET_STATUS_INPUT_SCHEMA,
   PAYMENTS_BUDGET_STATUS_OUTPUT_SCHEMA,
@@ -48,9 +49,18 @@ import {
   PAYMENTS_PURCHASE_ANSWER_OUTPUT_SCHEMA,
   PAYMENTS_PURCHASE_CANCEL_INPUT_SCHEMA,
   PAYMENTS_PURCHASE_CANCEL_OUTPUT_SCHEMA,
+  PAYMENTS_PURCHASE_RECONCILE_INPUT_SCHEMA,
+  PAYMENTS_PURCHASE_RECONCILE_OUTPUT_SCHEMA,
 } from './operator-contract-schemas-payments.js';
 
 export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDescriptor[] = [
+  methodDescriptor({
+    id: 'payments.purchase.reconcile', title: 'Record the Merchant Order Finding', category: 'payments',
+    scopes: ['write:payments'], access: 'admin', dangerous: true,
+    description: 'After inspecting the merchant’s order history, explicitly record whether this exact uncertain or unverified checkout placed an order. Requires current paired admin authority, write:payments, confirm: true and inspectedMerchantHistory: true. The saved finding cannot be changed by a retry. Settles only original purchase/budget bookkeeping after its actual executor has drained; never submits or resumes an order. Missing local receipts never imply no charge. A no-order finding releases an original unspent hold but never credits already committed spend.',
+    http: PAYMENT_PURCHASE_RECONCILE_HTTP,
+    inputSchema: PAYMENTS_PURCHASE_RECONCILE_INPUT_SCHEMA, outputSchema: PAYMENTS_PURCHASE_RECONCILE_OUTPUT_SCHEMA,
+  }),
   methodDescriptor({
     id: 'payments.purchase.status', title: 'Purchase Operations and Windows', category: 'payments', scopes: ['read:payments'],
     description: 'Read durable checkout operation status and actual live approval/veto windows. Optionally select one purchase, including after reconnect or restart. An accepted operation is not a completed purchase; uncertain submissions must be checked with the merchant and are never automatically retried. Reading does not extend a deadline or resume execution. Complete purchase records are available through payments.purchases.list.',

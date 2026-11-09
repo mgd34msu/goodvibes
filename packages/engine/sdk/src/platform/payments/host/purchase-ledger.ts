@@ -8,6 +8,35 @@ import { acquireCrossProcessLock } from '../../workspace/checkpoint/cross-proces
 import { capturePurchaseRecord } from '../purchase-record-codec.js';
 import type { PurchaseLedger } from '../payment-ports.js';
 import type { PurchaseRecord } from '../purchase-record.js';
+import { samePaymentEvidence } from '../evidence-equality.js';
+import { drainOwned } from '@goodvibes-jev/judgment';
+import type { PaymentReconciliationCheckpoint } from './reconciliation-checkpoint.js';
+
+export interface OwnerPurchaseReconciliation {
+  readonly purchaseId: string;
+  readonly operationId: string;
+  readonly outcome: 'purchased' | 'not-purchased';
+  readonly principalId: string;
+  readonly atMs: number;
+  readonly merchantDomain: string;
+  readonly totalMinorUnits: number;
+  readonly currency: string;
+}
+function readReconciliations(value: unknown): readonly OwnerPurchaseReconciliation[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new PaymentPurchaseLedgerError('unavailable');
+  const seen = new Set<string>();
+  return Object.freeze(value.map((entry: unknown) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new PaymentPurchaseLedgerError('unavailable');
+    const row = entry as Record<string, unknown>;
+    if (Object.keys(row).length !== 8 || !['purchaseId', 'operationId', 'principalId', 'merchantDomain'].every(key => typeof row[key] === 'string' && row[key].trim())
+      || (row['outcome'] !== 'purchased' && row['outcome'] !== 'not-purchased')
+      || !['atMs', 'totalMinorUnits'].every(key => typeof row[key] === 'number' && Number.isSafeInteger(row[key]) && row[key] >= 0)
+      || typeof row['currency'] !== 'string' || !/^[A-Z]{3}$/.test(row['currency']) || seen.has(row['operationId'] as string)) throw new PaymentPurchaseLedgerError('unavailable');
+    seen.add(row['operationId'] as string);
+    return Object.freeze({ ...row }) as unknown as OwnerPurchaseReconciliation;
+  }));
+}
 
 export interface StoredPurchase extends PurchaseRecord { readonly merchantDiscovered: boolean }
 const PURCHASES_FILE_VERSION = 1;
@@ -28,14 +57,20 @@ interface LedgerSnapshot {
   readonly rows: readonly StoredPurchase[];
   readonly byId: ReadonlyMap<string, StoredPurchase>;
 }
-export interface DaemonPurchaseLedgerOptions { readonly filePath: string }
+export interface DaemonPurchaseLedgerOptions { readonly filePath: string; readonly beforeReconciliationWrite?: (() => void) | undefined }
 export interface PurchaseListQuery { readonly limit: number; readonly dayKey: string | undefined }
 
 export class DaemonPurchaseLedger implements PurchaseLedger {
   private readonly filePath: string;
   private cached: LedgerSnapshot | undefined;
   private unavailable = false;
-  constructor(options: DaemonPurchaseLedgerOptions) { this.filePath = options.filePath; }
+  private readonly beforeReconciliationWrite: (() => void) | undefined;
+  constructor(options: DaemonPurchaseLedgerOptions) { this.filePath = options.filePath; this.beforeReconciliationWrite = options.beforeReconciliationWrite; }
+
+  private declareReconciliation(): void {
+    const result: unknown = this.beforeReconciliationWrite?.();
+    if (result !== undefined) { drainOwned(result); throw new PaymentPurchaseLedgerError('unavailable'); }
+  }
 
   private read(): LedgerSnapshot {
     if (this.unavailable) throw new PaymentPurchaseLedgerError('unavailable');
@@ -64,6 +99,7 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error();
       const envelope = raw as Readonly<Record<string, unknown>>;
       if (envelope['version'] !== PURCHASES_FILE_VERSION || !Array.isArray(envelope['purchases'])) throw new Error();
+      if (readReconciliations(envelope['purchaseReconciliations']).length > 0) this.declareReconciliation();
       const rows: StoredPurchase[] = [], byId = new Map<string, StoredPurchase>();
       for (const value of envelope['purchases'] as readonly unknown[]) {
         const row = capturePurchaseRecord(value);
@@ -121,6 +157,40 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
 
   assertAvailable(): void { this.read(); }
 
+  /** Append the owner's finding beside the original receipts. Never invent a
+   * merchant receipt, tax/shipping breakdown or refund from that observation. */
+  async recordOwnerReconciliation(checkpoint: PaymentReconciliationCheckpoint, current: () => void): Promise<void> {
+    const original = checkpoint.journal ?? checkpoint.purchase;
+    if (!original || original.totalMinorUnits === null) throw new PaymentPurchaseLedgerError('invalid-record');
+    const event: OwnerPurchaseReconciliation = Object.freeze({ purchaseId: checkpoint.purchaseId, operationId: checkpoint.operationId,
+      outcome: checkpoint.outcome, principalId: checkpoint.principalId, atMs: checkpoint.atMs,
+      merchantDomain: original.merchantDomain, totalMinorUnits: original.totalMinorUnits, currency: original.currency });
+    let release: (() => void) | undefined;
+    try {
+      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { strictOwnership: true, totalTimeoutMs: 10_000 });
+      current();
+      const previous = this.read(), events = readReconciliations(previous.envelope['purchaseReconciliations']);
+      const prior = events.find(row => row.operationId === event.operationId);
+      if (prior) { if (!samePaymentEvidence(prior, event)) throw new PaymentPurchaseLedgerError('unavailable'); return; }
+      if (!samePaymentEvidence(previous.byId.get(checkpoint.purchaseId) ?? null, checkpoint.purchase)) throw new PaymentPurchaseLedgerError('unavailable');
+      const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: previous.rows,
+        purchaseReconciliations: [...events, event] };
+      current(); this.declareReconciliation(); current();
+      const contents = `${JSON.stringify(envelope, null, 2)}\n`;
+      atomicWriteFileSync(this.filePath, contents, { mode: 0o600, mkdirp: true,
+        assertCurrent: () => { current(); this.assertFileCurrent(previous.observation); } });
+      const observation = readFileObservation(this.filePath);
+      if (!observation.bytes.equals(Buffer.from(contents))) throw new Error();
+      this.cached = { ...previous, observation, envelope };
+    } catch (error) {
+      // As with merchant receipts, uncertain publication is inspected on a
+      // fresh host rather than appended again through a poisoned writer.
+      if (error instanceof PaymentPurchaseLedgerError) throw error;
+      this.unavailable = true;
+      throw new PaymentPurchaseLedgerError('write-uncertain');
+    } finally { release?.(); }
+  }
+
   /** Exact recorded submission lookup used by real boot recovery. */
   async has(purchaseId: string): Promise<boolean> {
     const row = this.read().byId.get(purchaseId);
@@ -135,10 +205,11 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
    * a verified order from the existence of an unverified submission record. */
   get(purchaseId: string): StoredPurchase | null { return this.read().byId.get(purchaseId) ?? null; }
 
-  list(query: PurchaseListQuery): { purchases: readonly StoredPurchase[]; total: number } {
-    const rows = this.read().rows;
+  list(query: PurchaseListQuery): { purchases: readonly StoredPurchase[]; total: number; reconciliations: readonly OwnerPurchaseReconciliation[] } {
+    const snapshot = this.read(), rows = snapshot.rows;
     const matching = query.dayKey === undefined ? rows : rows.filter(row => row.dayKey === query.dayKey);
     const limit = Number.isFinite(query.limit) ? Math.min(Math.max(1, Math.floor(query.limit)), MAX_PURCHASE_LIST_LIMIT) : MAX_PURCHASE_LIST_LIMIT;
-    return { purchases: [...matching].reverse().slice(0, limit), total: matching.length };
+    return { purchases: [...matching].reverse().slice(0, limit), total: matching.length,
+      reconciliations: [...readReconciliations(snapshot.envelope['purchaseReconciliations'])].reverse().slice(0, limit) };
   }
 }

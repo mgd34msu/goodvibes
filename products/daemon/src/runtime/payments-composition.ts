@@ -128,11 +128,16 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
   });
   const purchases = new DaemonPurchaseLedger({
     filePath: controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-purchases.json'),
+    beforeReconciliationWrite: declareNativeData ? () => declareNativeData('payment-operation-reconciliation-v2') : undefined,
   });
+  const operations = new DurablePaymentOperations(controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-operations'),
+    declareNativeData ? () => declareNativeData('payment-operation-reconciliation-v2') : undefined);
   const budget = new DurableBudgetLedger(
     controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-budget.json'),
     Date.now,
     declareNativeData ? () => declareNativeData('payment-retained-holds-v2') : undefined,
+    declareNativeData ? () => declareNativeData('payment-operation-reconciliation-v2') : undefined,
+    id => operations.get(id)?.outcome?.startsWith('owner-reconciliation-pending-') === true,
   );
   const checkout: CheckoutComposition = {
     seam: options.checkoutSeam,
@@ -157,7 +162,7 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     // makes, the `submit-pending` flush before the merchant submit included,
     // lands here before the flow proceeds, so a crash in the one ambiguous
     // window leaves a record a restart can disclose instead of nothing.
-    operations: new DurablePaymentOperations(controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-operations')),
+    operations,
     requests: new ProtectedPaymentRequests(controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-requests'),
       declareNativeData ? version => declareNativeData(version === 2 ? 'payment-window-checkpoints-v2' : 'payment-window-checkpoints-v1') : undefined,
       () => declareNativeData?.('payment-reply-history-v1'),

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { isLivePaymentOperation, paymentOperationDescription, type PaymentWindowView, type PaymentOperationView } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
+import { isLivePaymentOperation, canReconcilePaymentOperation, paymentOperationDescription, type PaymentWindowView, type PaymentOperationView } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
 import { sdk } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { minorUnitsToMajorText } from '../../lib/money';
@@ -17,13 +17,15 @@ export function PaymentWindows() {
   const active = useRef<AbortController | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  const [finding, setFinding] = useState<{ operation: PaymentOperationView; outcome: 'purchased' | 'not-purchased' } | null>(null);
+  const [inspected, setInspected] = useState(false);
   const identity = useSyncExternalStore(subscribeClientLifetime, () => getClientLifetime().revision, () => 0);
   const windows = useQuery({ queryKey: [...QUERY_KEY, identity], queryFn: ({ signal }) => sdk.operator.payments.purchase.status(signal),
     refetchInterval: 2000, retry: false, gcTime: 0 });
   useEffect(() => () => active.current?.abort(), []);
   useEffect(() => subscribeClientLifetime(() => {
     active.current?.abort(); active.current = null;
-    setPending(null); setMessage('');
+    setPending(null); setMessage(''); setFinding(null); setInspected(false);
   }), []);
 
   const answer = async (window: PaymentWindowView, action: 'approve' | 'deny' | 'cancel') => {
@@ -68,6 +70,23 @@ export function PaymentWindows() {
     }
   };
 
+  const reconcile = async () => {
+    if (active.current || !finding || !inspected) return;
+    const selected = finding, controller = new AbortController(); active.current = controller;
+    setPending(selected.operation.operationId); setMessage('');
+    try {
+      const result = await sdk.operator.payments.purchase.reconcile(selected.operation, selected.outcome, controller.signal);
+      if (controller.signal.aborted) return;
+      setMessage(paymentOperationDescription(result)); setFinding(null); setInspected(false);
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setMessage(`${formatError(error)} Refresh status and repeat only the finding already saved. Do not place another order.`);
+    } finally {
+      if (active.current === controller) active.current = null;
+      if (!controller.signal.aborted) { setPending(null); void queryClient.invalidateQueries({ queryKey: ['payments'] }); }
+    }
+  };
+
   return <SettingsBlock title="Purchases" description="Track accepted checkouts and read the exact notice before answering. Approval needs a yes; an in-budget veto proceeds when its stated deadline passes without an objection. Answers and stopping require a paired owner connection.">
     <Button size="sm" onClick={() => { void windows.refetch(); }} disabled={windows.isFetching}>Refresh purchases</Button>
     {windows.error && <p role="alert">{formatError(windows.error)}</p>}
@@ -94,6 +113,18 @@ export function PaymentWindows() {
       {isLivePaymentOperation(operation.state) && <Button variant="danger" disabled={pending !== null || operation.state === 'cancelling'} onClick={() => { void stop(operation); }}>
         {pending === operation.operationId || operation.state === 'cancelling' ? 'Stopping…' : 'Stop checkout'}
       </Button>}
+      {canReconcilePaymentOperation(operation) && <div>
+        <p>Inspect the merchant’s order history and your payment statement. If the outcome is still unknown, leave this purchase unchanged and keep its hold.</p>
+        <Button disabled={pending !== null || operation.outcome === 'owner-reconciliation-pending-not-purchased'} onClick={() => { setFinding({ operation, outcome: 'purchased' }); setInspected(false); }}>An order was placed</Button>
+        <Button disabled={pending !== null || operation.outcome === 'owner-reconciliation-pending-purchased'} onClick={() => { setFinding({ operation, outcome: 'not-purchased' }); setInspected(false); }}>No order was placed</Button>
+      </div>}
+      {finding?.operation.operationId === operation.operationId && <fieldset disabled={pending !== null}>
+        <legend>Confirm merchant-history finding</legend>
+        <p>You are recording that {finding.outcome === 'purchased' ? 'an order was placed' : 'no order was placed'} for checkout {operation.purchaseId}. This settles original bookkeeping and never submits another order. A no-order finding releases an unspent hold; already committed spend is not credited.</p>
+        <label><input type="checkbox" checked={inspected} onChange={event => setInspected(event.target.checked)} /> I inspected the merchant’s order history and payment statement for this exact checkout.</label>
+        <Button disabled={!inspected || pending !== null} onClick={() => { void reconcile(); }}>{pending === operation.operationId ? 'Recording finding…' : 'Record this finding'}</Button>
+        <Button variant="ghost" onClick={() => { setFinding(null); setInspected(false); }}>Leave purchase unchanged</Button>
+      </fieldset>}
     </section>)}
   </SettingsBlock>;
 }

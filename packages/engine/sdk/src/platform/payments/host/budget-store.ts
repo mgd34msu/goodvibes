@@ -19,6 +19,8 @@ import type {
   BudgetStateSnapshot,
   SpendRecord,
   PoolSnapshot,
+  CheckoutBudgetSettlement,
+  CheckoutBudgetSettlementOwner,
 } from '../budget.js';
 
 const BUDGET_FILE_VERSION = 2;
@@ -27,6 +29,7 @@ interface BudgetFile {
   readonly version: number;
   readonly spend: readonly SpendRecord[];
   readonly reservations: readonly BudgetReservation[];
+  readonly reconciliations?: readonly CheckoutBudgetSettlement[];
 }
 
 /**
@@ -111,10 +114,22 @@ function loadInitialState(filePath: string): LoadedBudget {
   }
   if (typeof parsed !== 'object' || parsed === null) return invalid();
   const file = parsed as Partial<BudgetFile>;
-  if ((file.version !== 1 && file.version !== BUDGET_FILE_VERSION)
+  if ((file.version !== 1 && file.version !== BUDGET_FILE_VERSION && file.version !== 3)
     || !Array.isArray(file.spend) || !Array.isArray(file.reservations)
     || !file.spend.every(isSpendRecord) || !file.reservations.every(isReservation)) return invalid();
   const spend = file.spend;
+  const reconciliations = file.reconciliations ?? [];
+  if (!Array.isArray(reconciliations) || (file.version === 3 && reconciliations.length === 0) || (file.version !== 3 && reconciliations.length > 0)
+    || !reconciliations.every((entry: unknown) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+      const row = entry as Record<string, unknown>;
+      return Object.keys(row).length === 6 && typeof row['operationId'] === 'string' && !!row['operationId']
+        && typeof row['purchaseId'] === 'string' && !!row['purchaseId']
+        && (row['outcome'] === 'purchased' || row['outcome'] === 'not-purchased') && isValidTimestampMs(row['atMs'])
+        && (row['reservation'] === null || (isReservation(row['reservation']) && row['reservation'].id === row['purchaseId'] && row['reservation'].retainUntilSettled === true))
+        && (row['spend'] === null || (isSpendRecord(row['spend']) && row['spend'].purchaseId === row['purchaseId']))
+        && !(row['reservation'] !== null && row['spend'] !== null);
+    }) || new Set(reconciliations.map(entry => entry.operationId)).size !== reconciliations.length) return invalid();
   const reservations = file.reservations.map(record => file.version === 1
     ? { ...record, retainUntilSettled: true as const } : record);
   if (new Set(spend.map(record => record.purchaseId)).size !== spend.length
@@ -126,7 +141,7 @@ function loadInitialState(filePath: string): LoadedBudget {
       toleranceMinorUnits: entry.toleranceMinorUnits, expiresAtMs: entry.expiresAtMs,
       retainUntilSettled: entry.retainUntilSettled === true })) },
   );
-  return { state: { spend, reservations }, ...(file.version === 1 ? { migrate: true as const } : {}) };
+  return { state: { spend, reservations, ...(reconciliations.length === 0 ? {} : { reconciliations }) }, ...(file.version === 1 ? { migrate: true as const } : {}) };
 }
 
 export class PaymentBudgetUnavailableError extends Error {
@@ -144,6 +159,8 @@ export class PaymentBudgetUnavailableError extends Error {
 export class DurableBudgetLedger extends BudgetLedger {
   private readonly filePath: string;
   private readonly beforeFormatWrite: (() => void) | undefined;
+  private readonly beforeReconciliationWrite: (() => void) | undefined;
+  private readonly retainPendingSpend: ((purchaseId: string) => boolean) | undefined;
   /**
    * Set when a write to disk failed and was not retried at that moment.
    * Checked at the START of every mutating method below, before its own
@@ -159,20 +176,24 @@ export class DurableBudgetLedger extends BudgetLedger {
    * "now", rather than being pruned out from under a scenario that has nothing
    * to do with retention.
    */
-  constructor(filePath: string, now: () => number = Date.now, beforeFormatWrite?: () => void) {
+  constructor(filePath: string, now: () => number = Date.now, beforeFormatWrite?: () => void, beforeReconciliationWrite?: () => void,
+    retainPendingSpend?: (purchaseId: string) => boolean) {
     const loaded = loadInitialState(filePath);
     super(loaded.state);
     this.filePath = filePath;
     this.beforeFormatWrite = beforeFormatWrite;
+    this.beforeReconciliationWrite = beforeReconciliationWrite;
+    this.retainPendingSpend = retainPendingSpend;
     this.unavailable = loaded.unavailable === true;
     if (this.unavailable) return;
     // An existing v2 hold can have been imported from another supported
     // installation. Admit its reader requirement before exposing accounting,
     // even when neither migration nor pruning needs to rewrite the file.
-    try { this.declareRetainedHolds(); }
+    try { this.declareRetainedHolds(); this.declareReconciliations(); }
     catch { this.unavailable = true; return; }
     const before = super.state().spend.length;
-    super.prune(now());
+    try { super.prune(now(), this.retainPendingSpend); }
+    catch { this.unavailable = true; return; }
     if (loaded.migrate || super.state().spend.length !== before) {
       try { this.persist(); }
       catch {
@@ -191,6 +212,20 @@ export class DurableBudgetLedger extends BudgetLedger {
   }
 
   override state(): BudgetStateSnapshot { this.assertAvailable(); return super.state(); }
+
+  override flush(assertCurrent?: () => void): void { this.assertAvailable(); this.writeToDisk(assertCurrent); }
+
+  override settleReconciliation(receipt: CheckoutBudgetSettlement, owner?: CheckoutBudgetSettlementOwner): void {
+    this.assertAvailable();
+    owner?.assertCurrent();
+    // Declare before any incompatible accounting publication. The operation's
+    // owner checkpoint has already bound this exact immutable receipt.
+    const declared: unknown = this.beforeReconciliationWrite?.();
+    if (declared !== undefined) { drainOwned(declared); throw new PaymentBudgetUnavailableError(); }
+    owner?.assertCurrent();
+    super.settleReconciliation(receipt, owner);
+    this.writeToDisk(owner ? () => owner.assertCurrent() : undefined);
+  }
 
   override reserve(input: {
     readonly id: string;
@@ -264,7 +299,7 @@ export class DurableBudgetLedger extends BudgetLedger {
     this.assertAvailable();
     this.retryPendingPersist();
     const before = super.state().spend.length;
-    super.prune(nowMs);
+    super.prune(nowMs, this.retainPendingSpend);
     if (super.state().spend.length !== before) this.persist();
   }
 
@@ -300,19 +335,27 @@ export class DurableBudgetLedger extends BudgetLedger {
     this.writeToDisk();
   }
 
-  private writeToDisk(): void {
+  private writeToDisk(assertCurrent?: () => void): void {
     // Ordinary spend rows are readable by v1. The incompatible fact is a
     // hold that must survive expiry/day rollover; publish its reader floor
     // before that fact can reach disk. Early compatible writes keep rollback.
     this.declareRetainedHolds();
-    const contents: BudgetFile = { version: BUDGET_FILE_VERSION, ...super.state() };
-    atomicWriteFileSync(this.filePath, `${JSON.stringify(contents, null, 2)}\n`, { mode: 0o600, mkdirp: true });
+    this.declareReconciliations();
+    assertCurrent?.();
+    const state = super.state();
+    const contents: BudgetFile = { version: state.reconciliations?.length ? 3 : BUDGET_FILE_VERSION, ...state };
+    atomicWriteFileSync(this.filePath, `${JSON.stringify(contents, null, 2)}\n`, { mode: 0o600, mkdirp: true, assertCurrent });
     this.persistPending = false;
   }
 
   private declareRetainedHolds(): void {
     if (!super.state().reservations.some(reservation => reservation.retainUntilSettled === true)) return;
     const declared: unknown = this.beforeFormatWrite?.();
+    if (declared !== undefined) { drainOwned(declared); throw new PaymentBudgetUnavailableError(); }
+  }
+  private declareReconciliations(): void {
+    if (!super.state().reconciliations?.length) return;
+    const declared: unknown = this.beforeReconciliationWrite?.();
     if (declared !== undefined) { drainOwned(declared); throw new PaymentBudgetUnavailableError(); }
   }
 }

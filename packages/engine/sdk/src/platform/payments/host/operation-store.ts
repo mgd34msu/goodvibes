@@ -1,7 +1,10 @@
 /** One durable metadata file per checkout identity. Populated exclusive
  * publication prevents another process/retry replacing an admitted request.
  * A strict execution lease spans its actual work, independently of its socket.
- * Status files contain no raw request/page text, card data or credentials. */
+ * Public status projects references and outcomes only. Private v2 bookkeeping
+ * checkpoints retain the original journal/receipt facts (including item and
+ * window notice), mode 0600. No protected request, raw quote, card material or
+ * credential is moved into operation metadata. */
 import { closeSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeFileAtomic } from '../../utils/atomic-json-store.js';
@@ -9,6 +12,8 @@ import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import { readFileObservation, type FileObservation } from '../../utils/file-observation.js';
 import { tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
 import { readPaymentOperation, type PaymentOperationView } from '../operation-view.js';
+import { drainOwned } from '@goodvibes-jev/judgment';
+import { capturePaymentReconciliation, type PaymentReconciliationCheckpoint } from './reconciliation-checkpoint.js';
 
 export class PaymentOperationStoreError extends Error {
   override readonly name = 'PaymentOperationStoreError';
@@ -24,13 +29,18 @@ export function checkoutRequestId(value: unknown): string {
   return value;
 }
 const absent = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
-interface StoredOperation { readonly version: 1; readonly principalId: string | null; readonly operation: PaymentOperationView }
+interface StoredOperation { readonly version: 1 | 2; readonly principalId: string | null; readonly operation: PaymentOperationView; readonly reconciliation?: PaymentReconciliationCheckpoint }
 function parse(bytes: Uint8Array): StoredOperation {
   const raw: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new PaymentOperationStoreError('unavailable');
   const row = raw as Record<string, unknown>;
-  if (Object.keys(row).length !== 3 || row['version'] !== 1 || !(row['principalId'] === null || (typeof row['principalId'] === 'string' && row['principalId']))) throw new PaymentOperationStoreError('unavailable');
-  return Object.freeze({ version: 1, principalId: row['principalId'] as string | null, operation: readPaymentOperation(row['operation']) });
+  if (!(row['principalId'] === null || (typeof row['principalId'] === 'string' && row['principalId']))) throw new PaymentOperationStoreError('unavailable');
+  const operation = readPaymentOperation(row['operation']);
+  if (row['version'] === 1 && Object.keys(row).length === 3) return Object.freeze({ version: 1, principalId: row['principalId'] as string | null, operation });
+  if (row['version'] !== 2 || Object.keys(row).length !== 4) throw new PaymentOperationStoreError('unavailable');
+  const reconciliation = capturePaymentReconciliation(row['reconciliation']);
+  if (reconciliation.purchaseId !== operation.purchaseId || reconciliation.operationId !== operation.operationId) throw new PaymentOperationStoreError('unavailable');
+  return Object.freeze({ version: 2, principalId: row['principalId'] as string | null, operation, reconciliation });
 }
 function flushDirectory(path: string): void { const fd = openSync(path, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } }
 
@@ -40,7 +50,9 @@ export interface PaymentOperationWriter {
   readonly purchaseId: string;
   readonly principalId: string | null;
   read(): PaymentOperationView;
-  update(operation: PaymentOperationView): void;
+  update(operation: PaymentOperationView, assertCurrent?: () => void): void;
+  reconciliation(): PaymentReconciliationCheckpoint | null;
+  beginReconciliation(checkpoint: PaymentReconciliationCheckpoint, assertCurrent: () => void): void;
   assertCurrent(): void;
   release(): void;
 }
@@ -48,13 +60,19 @@ export interface PaymentRecoveryLease { assertCurrent(): void; release(): void }
 export class DurablePaymentOperations {
   private readonly known = new Set<string>();
   private observedIndex = false;
-  constructor(private readonly directory: string) {}
+  constructor(private readonly directory: string, private readonly beforeReconciliationWrite?: () => void) {}
+
+  private declareReconciliation(): void {
+    const result: unknown = this.beforeReconciliationWrite?.();
+    if (result !== undefined) { drainOwned(result); throw new PaymentOperationStoreError('unavailable'); }
+  }
   private path(id: string): string { return join(this.directory, `${Buffer.from(checkoutRequestId(id)).toString('base64url')}.json`); }
   private lock(id: string): string { return join(this.directory, '.owners', `${Buffer.from(checkoutRequestId(id)).toString('base64url')}.lock`); }
 
   get(id: string): PaymentOperationView | null {
     try {
       const row = parse(readFileObservation(this.path(id)).bytes);
+      if (row.version === 2) this.declareReconciliation();
       if (row.operation.purchaseId !== id) throw new Error();
       this.known.add(id); return row.operation;
     } catch (error) {
@@ -181,6 +199,7 @@ export class DurablePaymentOperations {
     const release = this.acquire(id); if (!release) return null;
     try {
       const observation = readFileObservation(this.path(id)), row = parse(observation.bytes);
+      if (row.version === 2) this.declareReconciliation();
       if (row.operation.purchaseId !== id) throw new Error();
       this.known.add(id); return this.writer(id, row, observation, release);
     } catch { release(); throw new PaymentOperationStoreError('unavailable'); }
@@ -219,19 +238,32 @@ export class DurablePaymentOperations {
         if (file.physical !== observed.physical || !file.bytes.equals(observed.bytes)) throw new Error();
       } catch { failed = true; throw new PaymentOperationStoreError('unavailable'); }
     };
+    const save = (stored: StoredOperation, ownerCurrent?: () => void) => {
+      ownerCurrent?.();
+      if (stored.version === 2) this.declareReconciliation();
+      ownerCurrent?.();
+      const contents = `${JSON.stringify(stored)}\n`;
+      try {
+        atomicWriteFileSync(path, contents, { mode: 0o600, assertCurrent: () => { ownerCurrent?.(); assertCurrent(); } });
+        const file = readFileObservation(path);
+        if (!file.bytes.equals(Buffer.from(contents))) throw new Error();
+        row = stored; observed = file;
+        this.indexOperation(stored.operation);
+      } catch { failed = true; throw new PaymentOperationStoreError('unavailable'); }
+    };
     return Object.freeze({ purchaseId: id, principalId: initial.principalId, assertCurrent,
       read: () => { assertCurrent(); return row.operation; },
-      update: (operation: PaymentOperationView) => {
+      reconciliation: () => { assertCurrent(); return row.reconciliation ?? null; },
+      beginReconciliation: (input: PaymentReconciliationCheckpoint, ownerCurrent: () => void) => {
+        assertCurrent(); const reconciliation = capturePaymentReconciliation(input);
+        if (row.reconciliation || reconciliation.purchaseId !== id || reconciliation.operationId !== row.operation.operationId) throw new PaymentOperationStoreError('invalid');
+        save({ ...row, version: 2, reconciliation, operation: { ...row.operation, state: 'uncertain',
+          outcome: `owner-reconciliation-pending-${reconciliation.outcome}`, updatedAtMs: reconciliation.atMs } }, ownerCurrent);
+      },
+      update: (operation: PaymentOperationView, ownerCurrent?: () => void) => {
         assertCurrent(); const next = readPaymentOperation(operation);
         if (next.purchaseId !== id || next.operationId !== initial.operation.operationId || next.createdAtMs !== initial.operation.createdAtMs) throw new PaymentOperationStoreError('invalid');
-        const stored: StoredOperation = { ...row, operation: next }, contents = `${JSON.stringify(stored)}\n`;
-        try {
-          atomicWriteFileSync(path, contents, { mode: 0o600, assertCurrent });
-          const file = readFileObservation(path);
-          if (!file.bytes.equals(Buffer.from(contents))) throw new Error();
-          row = stored; observed = file;
-          this.indexOperation(next);
-        } catch { failed = true; throw new PaymentOperationStoreError('unavailable'); }
+        save({ ...row, operation: next }, ownerCurrent);
       },
       release: () => { if (released) return; released = true; releaseLease(); },
     });

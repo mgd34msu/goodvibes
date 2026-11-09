@@ -15,6 +15,7 @@ import { retainResumedCheckoutHold } from '../resumed-hold.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.js';
 import { BrowserPageConnectionError } from '../../browser/browser-page-connection-data.js';
+import { PurchaseReconciliations } from './purchase-reconciliation.js';
 /**
  * checkout-handlers.ts, `payments.checkout.begin` / `payments.checkout.fillCard`.
  *
@@ -365,6 +366,7 @@ export class CheckoutServiceHolder {
   private readonly registry: CheckoutRegistry;
   private readonly recovery: CheckoutRecovery;
   readonly operations: CheckoutOperations;
+  readonly reconciliations: PurchaseReconciliations;
   private readonly work = new OwnedWork();
   private readonly abort = new AbortController();
   private closed = false;
@@ -381,11 +383,14 @@ export class CheckoutServiceHolder {
     this.retireContinuation = deps.checkout.retireContinuation?.bind(deps.checkout);
     this.operations = new CheckoutOperations(deps.checkout.operations, journal, deps.purchases,
       (input, id, owner) => this.runAdmittedCheckout(input, id, owner), deps.now, deps.checkout.requests, deps.checkout.replies);
+    this.reconciliations = new PurchaseReconciliations({ operations: deps.checkout.operations, journal,
+      purchases: deps.purchases, budget: deps.budget, isPaymentsLeader: deps.isPaymentsLeader, now: deps.now });
     this.registry = new CheckoutRegistry({ list: () => journal.list(), remove: id => journal.remove(id),
       put: async record => { await journal.put(record); this.operations.progress(record); } });
     this.recovery = new CheckoutRecovery({ registry: this.registry, journal,
       ledger: deps.budget, purchases: deps.purchases, notifier: deps.checkout.notifier,
-      retainInterrupted: id => deps.checkout.operations.retainRecovery(id),
+      retainInterrupted: id => deps.checkout.operations.get(id)?.outcome?.startsWith('owner-reconciliation-pending-')
+        ? null : deps.checkout.operations.retainRecovery(id),
       isPaymentsLeader: deps.isPaymentsLeader, now: deps.now });
   }
 
@@ -396,6 +401,7 @@ export class CheckoutServiceHolder {
   }
 
   async recoverInterruptedCheckouts() {
+    if (this.deps.isPaymentsLeader()) await this.reconciliations.recover();
     if (this.restoreWindow && !this.windowsRetained && this.deps.isPaymentsLeader()) {
       await this.operations.retainInterruptedWindows((request, current) => {
         if (!request.window) throw new CheckoutOwnershipError();
@@ -487,6 +493,7 @@ export class CheckoutServiceHolder {
     try { if (this.service) jobs.push(this.service.close()); } catch (error) { errors.push(error); }
     try { jobs.push(this.recovery.close()); } catch (error) { errors.push(error); }
     try { jobs.push(this.operations.close()); } catch (error) { errors.push(error); }
+    try { jobs.push(this.reconciliations.close()); } catch (error) { errors.push(error); }
     jobs.push(this.work.join());
     void Promise.allSettled(jobs).then(results => {
       for (const result of results) if (result.status === 'rejected') errors.push(result.reason);

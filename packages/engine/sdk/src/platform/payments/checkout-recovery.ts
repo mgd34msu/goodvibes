@@ -263,6 +263,7 @@ export class CheckoutRecovery {
       current();
       message = describeInterruption(record, verdict, { recordVerified: verified });
       if (verified === true) {
+        this.settleRecordedBudget(record, current);
         await this.deps.registry.close(record.purchaseId);
         current();
         action = 'closed';
@@ -277,6 +278,7 @@ export class CheckoutRecovery {
       current();
       message = describeInterruption(record, verdict, { recordVerified: verified });
       if (verified === true) {
+        this.settleRecordedBudget(record, current);
         await this.deps.registry.close(record.purchaseId);
         current();
         action = 'closed';
@@ -334,6 +336,24 @@ export class CheckoutRecovery {
       () => has.call(this.deps.purchases, purchaseId),
       'The purchases lookup', current, io,
     );
+  }
+
+  /** A merchant receipt may have reached disk while commit() still had a
+   * failed durable write pending. Finish exactly its original hold before
+   * removing the crash journal. Never mint a replacement reservation. */
+  private settleRecordedBudget(record: InFlightCheckout, current: () => void): void {
+    current();
+    const ledger = this.deps.ledger, state = ledger.state();
+    const hold = state.reservations.find(entry => entry.id === record.reservationId);
+    const spent = state.spend.find(entry => entry.purchaseId === record.purchaseId);
+    if (hold) {
+      if (spent || hold.id !== record.purchaseId || hold.retainUntilSettled !== true || !record.draw
+        || hold.itemMinorUnits !== record.draw.itemMinorUnits || hold.overageMinorUnits !== record.draw.overageMinorUnits
+        || hold.toleranceMinorUnits !== record.draw.toleranceMinorUnits) throw new CheckoutOwnershipError();
+      current();
+      if (!ledger.commit(hold.id, record.updatedAtMs)) throw new CheckoutOwnershipError();
+    }
+    current(); ledger.flush(current); current();
   }
 
   /**

@@ -47,6 +47,8 @@ export type {
   BudgetStateSnapshot,
   PoolSnapshot,
   SpendRecord,
+  CheckoutBudgetSettlement,
+  CheckoutBudgetSettlementOwner,
 } from './budget.js';
 
 export { readShippingTiers, walkShippingLadder } from './shipping.js';
@@ -283,5 +285,5 @@ export type {
   PaymentFillCardResult,
 } from './payments-gateway-service.js';
 
-export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation } from './operation-view.js';
+export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation, PAYMENT_PURCHASE_RECONCILE_HTTP } from './operation-view.js';
 export type { PaymentOperationView, PaymentOperationState, PaymentOperationCancellation } from './operation-view.js';

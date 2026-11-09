@@ -427,6 +427,7 @@ export class CheckoutOperations {
       try {
         const current = writer.read();
         if (!isDeepStrictEqual(current, previous)) continue;
+        if (writer.reconciliation()) continue;
         const retained = entries.find(row => row.purchaseId === current.purchaseId);
         let state: PaymentOperationView['state'] = 'uncertain', outcome = current.outcome;
         let total = current.totalMinorUnits, currency = current.currency;

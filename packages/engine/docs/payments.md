@@ -1160,6 +1160,40 @@ while a window waits; a healthy newer ledger is allowed. A recorded
 `submitted-unverified` event proves the submission was recorded, not that the
 merchant confirmed the purchase. Recovery preserves that distinction.
 
+#### Resolving an uncertain merchant submission
+
+Open Payments in the WebUI or type `/payments pending` in the TUI or Agent.
+For an uncertain checkout, merchant verification challenge, or an unverified
+submission, first inspect that merchant’s order history and your payment
+statement. Choose **An order was placed** or **No order was placed**, then
+confirm that you inspected this exact checkout. If the result is still unknown,
+leave the purchase unchanged: its unresolved money remains held.
+
+`payments.purchase.reconcile` records that explicit finding against the original
+`purchaseId` and `operationId`. It requires a current paired administrative
+connection with `write:payments`, an explicit owner request, `confirm: true`,
+and `inspectedMerchantHistory: true`. Classic policy can reconcile existing
+funds. No model interprets the finding, no browser is resumed, and no new order
+is submitted. The original executor must have actually drained and released its
+execution lease before reconciliation can begin.
+
+The finding is saved durably before accounting changes. A repeated request with
+the same finding resumes bookkeeping; a conflicting finding refuses. A confirmed
+order commits only its original retained hold. A no-order finding releases only
+an original unspent hold; it does not credit an already committed spend or
+invent a refund. Accounting and its once-only settlement receipt share one
+durable budget write, and the receipt survives daily spend pruning. The crash
+journal closes only after that write is confirmed. An interrupted reconciliation
+keeps its saved finding and resumes bookkeeping on the next payment-host start;
+the owner can also refresh and repeat that same finding.
+
+Original merchant receipts retain their verified or unverified provenance.
+The owner’s finding is a separate append-only `reconciliations` entry in purchase
+history; when no receipt exists, no tax/shipping breakdown or merchant receipt
+is fabricated. Final operation status says `owner-confirmed-purchased` or
+`owner-confirmed-not-purchased`. A missing local receipt alone never means an
+order failed, and reconciliation does not authorize submitting it again.
+
 Card material on a page that outlived the process is the composition's to
 clear: recovery calls a composition-supplied cleanup hook for checkouts
 interrupted while arming the payment, typed so payments code receives no
@@ -1926,17 +1960,20 @@ verb.
 | `payments.purchase.approve` / `.deny` | paired admin owner, `write:payments`, explicit confirmation | Answers the exact live window; approve acknowledges an in-budget veto too. | live windows |
 | `payments.purchase.cancel` | paired admin owner, `write:payments`, explicit confirmation | Objects to a live window, or requests stopping the exact admitted operation. Does not undo an order. | yes |
 | `payments.purchase.status` | `read:payments` | Durable operation status and live windows, optionally for one original purchase ID. | yes |
+| `payments.purchase.reconcile` | paired admin owner, `write:payments`, explicit inspected-history confirmation | Records an owner’s merchant-history finding and settles original accounting without another submit. | yes |
 
 The original seven SDK verbs, the pre-checkout `payments.checkout.approve`,
-and the four live-window methods are attached by the daemon payment composition.
+the four live-window methods, and explicit purchase reconciliation are attached
+by the daemon payment composition.
 `payments.checkout.begin` requires a stable `requestId`, saved by the caller
 before sending. Its `accepted` response acknowledges durable admission, not a
 merchant order. A retry using the same ID never creates another executor;
 after a lost response, query that ID through `payments.purchase.status`.
 The background operation retains the original paired owner, host/browser and
 payment settings, with a daemon-owned cancellation lifetime. Request disconnect
-alone does not stop it. Startup status reconciliation is implemented; browser
-resumption and delivery backfill remain unfinished (§8.6).
+alone does not stop it. Eligible interrupted windows use the original-authority
+restoration path (§8.6.1); uncertain submissions require merchant-history
+inspection and explicit reconciliation rather than another submit.
 
 Settings are not in this list on purpose: they are ordinary daemon-owned config
 and travel the existing `config.get`/`config.set` path, which is what makes a

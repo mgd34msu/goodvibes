@@ -41,6 +41,13 @@ beforeEach(async () => {
     const body: unknown = typeof options?.body === 'string' ? JSON.parse(options.body) : undefined;
     requests.push({ path: url.pathname, headers: new Headers(options?.headers), body });
     if (url.pathname === '/api/payments/purchase/status') return Response.json({ windows: pending ? [window] : [], operations });
+    if (url.pathname === '/api/payments/purchase/reconcile') {
+      await delay;
+      if (answerStatus !== 200) return Response.json({ error: 'FAILED_PRECONDITION', message: 'Purchase finding remains unresolved.' }, { status: answerStatus });
+      const operation = operations[0]; if (!operation || !body || typeof body !== 'object' || !('outcome' in body)) throw new Error('Missing reconciliation fixture');
+      const result = { ...operation, state: 'completed' as const, outcome: `owner-confirmed-${String(body.outcome)}` };
+      operations = [result]; return Response.json(result);
+    }
     if (url.pathname === '/api/payments/purchase/cancel') {
       await delay;
       if (answerStatus !== 200) return Response.json({ error: 'FAILED_PRECONDITION', message: 'This purchase is no longer current.' }, { status: answerStatus });
@@ -63,6 +70,45 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) cleanup();
   globalThis.fetch = originalFetch;
   await tokenStore.clearToken();
+});
+
+test('merchant reconciliation requires a separate inspected-history confirmation and posts the exact original operation once', async () => {
+  pending = false;
+  operations = [{ purchaseId: 'uncertain-order', operationId: 'original-operation', state: 'uncertain', phase: 'submit-pending',
+    createdAtMs: 1, updatedAtMs: 2, outcome: null, totalMinorUnits: 2500, currency: 'USD' }];
+  const container = render();
+  await until(() => container.textContent?.includes('uncertain-order') === true);
+  button(container, 'An order was placed').click();
+  await until(() => container.textContent?.includes('Confirm merchant-history finding') === true);
+  const confirm = button(container, 'Record this finding');
+  expect(confirm.disabled).toBe(true);
+  expect(requests.filter(request => request.path.endsWith('/reconcile'))).toHaveLength(0);
+  const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
+  if (!checkbox) throw new Error('Missing explicit inspection control');
+  flushSync(() => checkbox.click());
+  expect(confirm.disabled).toBe(false);
+  confirm.click();
+  await until(() => container.textContent?.includes('You confirmed this order') === true);
+  const sent = requests.filter(request => request.path.endsWith('/reconcile'));
+  expect(sent).toHaveLength(1);
+  expect(sent[0]?.body).toEqual({ purchaseId: 'uncertain-order', operationId: 'original-operation', outcome: 'purchased', inspectedMerchantHistory: true, confirm: true });
+  expect(sent[0]?.headers.get('x-goodvibes-explicit-user-request')).toBe('true');
+  expect(sent[0]?.headers.get('authorization')).toBe('Bearer fixture-paired-owner-token');
+  expect(requests.some(request => request.path.includes('/checkout/'))).toBe(false);
+});
+
+test('an unknown merchant result and a cancelled confirmation leave the purchase unchanged', async () => {
+  pending = false;
+  operations = [{ purchaseId: 'unknown-order', operationId: 'unknown-operation', state: 'attention', phase: 'submit-pending',
+    createdAtMs: 1, updatedAtMs: 2, outcome: 'challenge:otp', totalMinorUnits: 2500, currency: 'USD' }];
+  const container = render();
+  await until(() => container.textContent?.includes('unknown-order') === true);
+  expect(container.textContent).toContain('leave this purchase unchanged and keep its hold');
+  button(container, 'No order was placed').click();
+  await until(() => container.textContent?.includes('Confirm merchant-history finding') === true);
+  button(container, 'Leave purchase unchanged').click();
+  await until(() => !container.querySelector('fieldset'));
+  expect(requests.filter(request => request.path.endsWith('/reconcile'))).toHaveLength(0);
 });
 
 test('the visible notice and deadline lead to one exact owner answer through the real browser transport', async () => {

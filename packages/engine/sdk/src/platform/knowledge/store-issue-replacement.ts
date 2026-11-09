@@ -2,7 +2,7 @@ import type { SQLiteStore } from '../state/sqlite-store.js';
 import type { KnowledgeIssueRecord, KnowledgeIssueUpsertInput, KnowledgeNodeRecord, KnowledgeSourceRecord } from './types.js';
 import { prepareKnowledgeIssueRecord, writeKnowledgeIssueRow } from './store-node-issue-writes.js';
 import { getKnowledgeSpaceId } from './spaces.js';
-import { homeGraphIssueId } from './home-graph/helpers.js';
+import { createHash } from 'node:crypto';
 export class KnowledgeIssueReplacementHeldError extends Error {
   override readonly name = 'KnowledgeIssueReplacementHeldError';
   constructor(readonly reason: 'stale' | 'malformed' | 'budget') { super(`Guarded issue replacement held (${reason}).`); }
@@ -12,6 +12,7 @@ interface IssueReplacementView {
   readonly issues: Map<string, KnowledgeIssueRecord>;
   readonly sources: ReadonlyMap<string, KnowledgeSourceRecord>;
   readonly nodes: ReadonlyMap<string, KnowledgeNodeRecord>;
+  readonly beforeIssueWrite?: ((record: KnowledgeIssueRecord) => void) | undefined;
 }
 function operatorReviewed(issue: KnowledgeIssueRecord): boolean {
   const review = issue.metadata.review;
@@ -24,7 +25,11 @@ export function isLegacyHomeGraphQualityIssue(issue: KnowledgeIssueRecord, space
     && issue.metadata.generated === true && issue.metadata.homeGraph === true
     && ['homegraph.device.missing_manual', 'homegraph.device.unknown_battery'].includes(issue.code)
     && typeof issue.nodeId === 'string' && issue.sourceId === undefined && issue.metadata.subjectId === issue.nodeId
-    && issue.id === homeGraphIssueId(spaceId, issue.code, issue.nodeId);
+    // Actual earlier saved codec only: this distinguishes a known prior plain-
+    // namespace generator from unrelated issues in that same namespace. It is
+    // not authentication or review authority. Current/opaque rows never hash.
+    && /^hg-issue-[0-9a-f]{24}$/.test(issue.id)
+    && issue.id === `hg-issue-${createHash('sha256').update(`${spaceId}:${issue.code}:${issue.nodeId}`).digest('hex').slice(0,24)}`;
 }
 /** Ordinary namespace replacement, never operator authority; no await between final guard and commit. */
 export function commitGuardedKnowledgeIssueReplacement(view: IssueReplacementView,
@@ -58,6 +63,7 @@ export function commitGuardedKnowledgeIssueReplacement(view: IssueReplacementVie
   const prepared = inputs.map((input) => prepareKnowledgeIssueRecord(view, input));
   const active = new Set(prepared.map(({ record }) => record.id));
   const removed = previous.filter((issue) => !active.has(issue.id) && issue.status !== 'resolved' && !operatorReviewed(issue));
+  for (const { record, preserve } of prepared) if (!preserve) view.beforeIssueWrite?.(record);
   // Snapshot/abort callback runs once, after normalization and before every mutation.
   beforeWrite();
   view.sqlite.run('SAVEPOINT knowledge_guarded_issue_replacement');

@@ -236,6 +236,7 @@ export class KnowledgeStore {
   private readonly declareNativeExecutionFormat: (() => void) | undefined;
   private readonly declareNativeCiFormat: (() => void) | undefined;
   private readonly declareNativeSettlementFormat: (() => void) | undefined;
+  private readonly beforeIssueWrite: (record: KnowledgeIssueRecord) => void;
   private readonly beforeSemanticNodeWrite: (record: KnowledgeNodeRecord) => void;
   private readonly declareSemanticSourceFormat: (() => void) | undefined;
   private readonly ledgerStorage = new Map<string, KnowledgeWorkLedgerStorage>();
@@ -271,6 +272,9 @@ export class KnowledgeStore {
     this.declareNativeExecutionFormat = declareNativeData ? () => declareNativeData('native-execution-bindings-v2') : undefined;
     this.declareNativeCiFormat = declareNativeData ? () => declareNativeData('native-ci-continuations-v2') : undefined;
     this.declareNativeSettlementFormat = declareNativeData ? () => declareNativeData('native-settlements-v2') : undefined;
+    this.beforeIssueWrite = record => {
+      if (record.metadata.homeGraphQualityIdentityVersion === 1) assertKnowledgeWriteCurrent(() => declareNativeData?.('homegraph-quality-identities-v1'));
+    };
     this.beforeSemanticNodeWrite = record => {
       if (record.metadata.semanticIdentityVersion === 1) assertKnowledgeWriteCurrent(() => declareNativeData?.('knowledge-semantic-identities-v1'));
       if (record.metadata.homeGraphIdentityVersion === 1) assertKnowledgeWriteCurrent(() => declareNativeData?.('homegraph-object-identities-v1'));
@@ -1110,7 +1114,7 @@ export class KnowledgeStore {
     input = captureKnowledgeStoreInput(input);
     await this.init();
     await applyKnowledgeImport(this, { sqlite: this.sqlite, sources: this.sources, extractions: this.extractions, nodes: this.nodes,
-      nodeRevisions: this.nodeRevisions, edges: this.edges, issues: this.issues, beforeNodeWrite: this.beforeSemanticNodeWrite }, input,
+      nodeRevisions: this.nodeRevisions, edges: this.edges, issues: this.issues, beforeNodeWrite: this.beforeSemanticNodeWrite, beforeIssueWrite: this.beforeIssueWrite }, input,
     (node) => this.prepareNodeMutation(node), this.nodeActivationConfidenceFloor, this.nodeActivationScope, options);
   }
 
@@ -1125,7 +1129,7 @@ export class KnowledgeStore {
     input = copyKnowledgeRepresentation(input, captureKnowledgeStoreInput(input));
     await this.init();
     return applyKnowledgeImport(this, { sqlite: this.sqlite, sources: this.sources, extractions: this.extractions, nodes: this.nodes,
-      nodeRevisions: this.nodeRevisions, edges: this.edges, issues: this.issues, beforeNodeWrite: this.beforeSemanticNodeWrite,
+      nodeRevisions: this.nodeRevisions, edges: this.edges, issues: this.issues, beforeNodeWrite: this.beforeSemanticNodeWrite, beforeIssueWrite: this.beforeIssueWrite,
       nodePublished: (record, previous, snapshot) => {
         nativePublicationApply(nativePublicationSet, nativeNodePublications, [record, Object.freeze({ store: this, previous: previous ? new WeakRef(previous) : undefined, snapshot })]);
       } }, input,
@@ -1315,7 +1319,7 @@ export class KnowledgeStore {
   /** Whole-pass ordinary replacement; preserves terminal and operator-reviewed issues. */
   async replaceIssuesGuarded(inputs: readonly KnowledgeIssueUpsertInput[], namespace: string, beforeWrite: () => void, legacyHomeGraphIssues: readonly KnowledgeIssueRecord[] = []): Promise<KnowledgeIssueRecord[]> {
     await this.init();
-    const records = commitGuardedKnowledgeIssueReplacement({ sqlite: this.sqlite, issues: this.issues, sources: this.sources, nodes: this.nodes }, inputs, namespace, beforeWrite, legacyHomeGraphIssues);
+    const records = commitGuardedKnowledgeIssueReplacement({ sqlite: this.sqlite, issues: this.issues, sources: this.sources, nodes: this.nodes, beforeIssueWrite: this.beforeIssueWrite }, inputs, namespace, beforeWrite, legacyHomeGraphIssues);
     await this.sqlite.save();
     return records;
   }
@@ -1324,6 +1328,7 @@ export class KnowledgeStore {
     await this.init();
     const { record, preserve } = prepareKnowledgeIssueRecord({ issues: this.issues, sources: this.sources, nodes: this.nodes }, input, mutation);
     if (preserve) return record;
+    this.beforeIssueWrite(record);
     writeKnowledgeIssueRow(this.sqlite, record);
     this.issues.set(record.id, record);
     await this.sqlite.save();
@@ -1346,6 +1351,7 @@ export class KnowledgeStore {
     const nodeView = new Map(this.nodes);
     for (const { record } of nodes) nodeView.set(record.id, record);
     const issues = input.issues.map((issue) => prepareKnowledgeIssueRecord({ issues: this.issues, sources: this.sources, nodes: nodeView }, issue));
+    for (const issue of issues) if (!issue.preserve) this.beforeIssueWrite(issue.record);
     beforeWrite();
     assertPreparedNodeWrites(this, prepared, this.nodeActivationScope);
     commitKnowledgeNodeIssueWrites({ sqlite: this.sqlite, nodes: this.nodes, issues: this.issues, nodeRevisions: this.nodeRevisions, beforeNodeWrite: this.beforeSemanticNodeWrite },
@@ -1359,6 +1365,7 @@ export class KnowledgeStore {
     const lifecycle = prepareKnowledgeIssueUpsert(this.issues.get(record.id), record, undefined, true);
     if (lifecycle.preserve) return;
     record = { ...record, status: lifecycle.status, metadata: lifecycle.metadata };
+    this.beforeIssueWrite(record);
     this.sqlite.run(`
       INSERT OR REPLACE INTO knowledge_issues (
         id, severity, code, message, status, source_id, node_id, metadata, created_at, updated_at

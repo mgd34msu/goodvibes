@@ -171,6 +171,31 @@ describe('knowledge issue lifecycle authority', () => {
     expect(edited.issue.status).toBe('open');
   });
 
+  test('fresh recurrence observes the current lifecycle while delayed earlier producers remain stale', async () => {
+    const { store } = createStores();
+    const input = { id: 'recurring-issue', severity: 'warning' as const, code: 'missing', message: 'Missing property' };
+    const first = await store.upsertIssue({ ...input, metadata: { subjectFingerprint: 'property-a' } });
+    const resolvedFirst = (await reviewKnowledgeIssue(store, { issueId: input.id, action: 'resolve', reviewer: 'owner' })).issue;
+    const second = await store.upsertIssue({ ...input, metadata: { subjectFingerprint: 'property-b' } });
+    const resolvedSecond = (await reviewKnowledgeIssue(store, { issueId: input.id, action: 'resolve', reviewer: 'owner' })).issue;
+
+    for (const delayed of [first, resolvedFirst]) {
+      expect(await store.upsertIssue({ ...delayed, status: 'open' })).toEqual(resolvedSecond);
+    }
+    expect(await store.upsertIssue({ ...input, metadata: { subjectFingerprint: 'property-a' } })).toEqual(resolvedSecond);
+
+    const recurring = await store.upsertIssue({ ...resolvedSecond, status: 'open',
+      metadata: { ...resolvedSecond.metadata, subjectFingerprint: 'property-a' } });
+    expect(recurring.status).toBe('open');
+    expect(recurring.metadata.subjectFingerprint).toBe('property-a');
+    expect(recurring.metadata.issueLifecycle).not.toEqual(resolvedSecond.metadata.issueLifecycle);
+    expect(recurring.metadata.review).toBeUndefined();
+    expect(recurring.metadata.suppression).toBeUndefined();
+    for (const delayed of [second, resolvedSecond]) {
+      expect(await store.upsertIssue({ ...delayed, status: 'open' })).toEqual(recurring);
+    }
+  });
+
   test('an older issue edit stops before node writes when a newer decision lands during its source await', async () => {
     const h = await fixture(); const started = deferred(); const release = deferred();
     const issue = await h.store.upsertIssue({ nodeId: h.gap.id, sourceId: h.source.id, severity: 'info', code: 'gap', message: h.gap.title });

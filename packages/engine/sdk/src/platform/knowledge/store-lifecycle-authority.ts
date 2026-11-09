@@ -41,6 +41,7 @@ export function prepareKnowledgeIssueUpsert(
   const next = readFingerprint(input.metadata?.subjectFingerprint);
   const changed = Boolean(previous && next && previous !== next);
   const retired = readStrings(lifecycle.retiredFingerprints);
+  const observedCurrentLifecycle = typeof lifecycle.id === 'string' && incomingLifecycle.id === lifecycle.id;
   // A captured old record cannot undo a later review/reopen, even when both
   // lifecycles happen to have status open. Sparse producer inputs have no token.
   // Pre-token persisted snapshots cannot prove they observed an operator reopen.
@@ -51,7 +52,9 @@ export function prepareKnowledgeIssueUpsert(
     && typeof lifecycle.id === 'string' && incomingLifecycle.id !== lifecycle.id;
   const stale = !mutation && (unversionedResolution
     || (typeof incomingLifecycle.id === 'string' && incomingLifecycle.id !== lifecycle.id)
-    || (changed && next !== undefined && retired.includes(next)));
+    // A real source can return to earlier facts. An observation of the current
+    // lifecycle distinguishes that recurrence from an older delayed producer.
+    || (changed && next !== undefined && retired.includes(next) && !observedCurrentLifecycle));
   if (existing && (stale || (!mutation && existing.status === 'resolved' && !changed))) {
     return { preserve: true, status: existing.status, metadata: existing.metadata };
   }

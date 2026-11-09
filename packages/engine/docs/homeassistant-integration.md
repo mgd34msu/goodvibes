@@ -655,9 +655,12 @@ Home Graph quality issues are generated from the current graph but review
 decisions are durable. When a user or LLM resolves/rejects an issue through
 `POST /api/homeassistant/home-graph/facts/review`, the SDK records review and
 suppression metadata separately from the generated issue row. Later sync or
-quality refreshes do not reopen that issue unless the subject fingerprint
-changes. For known quality issues, semantic review values can also update the
-underlying node facts:
+quality refreshes keep the saved issue ID and do not reopen that issue unless
+relevant device or related-entity evidence changes. Reordering related entities,
+refreshing a model, or adding administrative annotations does not erase an
+existing review. Deleting and recreating a related entity with the same relevant
+facts preserves the review. For known quality issues, semantic review values
+can also update the underlying node facts:
 
 ```json
 {

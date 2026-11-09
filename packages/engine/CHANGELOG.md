@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Remove hash-derived Home Graph quality issue IDs. Reuse saved subject/code
+  identities and select new opaque IDs once. Reuse existing comparison digests
+  for unchanged native inputs, preserve reviews when related evidence is
+  recreated unchanged, and distinguish genuine recurring facts from delayed
+  older results through the existing issue lifecycle.
+
 - Remove unused Home Graph triage hashing from new or forced attempts that do
   not settle. Compute the saved comparison only when used, and require a fresh
   reading after the provider or configuration changes even if its model name

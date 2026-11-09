@@ -1,14 +1,12 @@
 import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
 import type { HomeGraphNodeIdentity } from './node-identity-plan.js';
 import { HomeGraphObjectIdentityError } from './identity-errors.js';
-import { createHash } from 'node:crypto';
 import type {
   KnowledgeEdgeRecord,
   KnowledgeNodeKind,
   KnowledgeNodeRecord,
   KnowledgeSourceRecord,
   KnowledgeReferenceKind,
-  KnowledgeIssueUpsertInput,
 } from '../types.js';
 import {
   isGeneratedKnowledgeSource,
@@ -77,10 +75,6 @@ export function nodeKindForHomeGraphObject(kind: HomeGraphObjectKind | HomeGraph
 
 export function objectKindForNodeKind(kind: HomeGraphNodeKind): HomeGraphObjectKind {
   return OBJECT_KIND_BY_NODE[kind] ?? 'entity';
-}
-
-export function homeGraphIssueId(spaceId: string, code: string, subjectId: string): string {
-  return `hg-issue-${stableHash(`${spaceId}:${code}:${subjectId}`)}`;
 }
 
 export function buildHomeGraphMetadata(
@@ -215,31 +209,6 @@ export function targetToReference(target: HomeGraphKnowledgeTarget): {
     id: target.id,
     nodeKind: nodeKindForHomeGraphObject(target.kind),
   };
-}
-
-export function buildIssue(
-  spaceId: string,
-  installationId: string,
-  code: string,
-  message: string,
-  subject: { readonly nodeId?: string; readonly sourceId?: string },
-): KnowledgeIssueUpsertInput {
-  const subjectId = subject.nodeId ?? subject.sourceId ?? message;
-  return {
-    id: homeGraphIssueId(spaceId, code, subjectId),
-    severity: 'warning',
-    code,
-    message,
-    ...subject,
-    metadata: buildHomeGraphMetadata(spaceId, installationId, {
-      namespace: `homegraph:${spaceId}:quality`,
-      subjectId,
-    }),
-  };
-}
-
-export function stableHash(value: string, length = 24): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, length);
 }
 
 export function uniqueStrings(values: Iterable<string | undefined | null>): string[] {

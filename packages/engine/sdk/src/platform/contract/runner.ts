@@ -1019,7 +1019,9 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     runs.set(contract.id, run);
     const sourceSignal = getContractActionSignal(contract);
     if (sourceSignal) {
-      const cancel = () => cancelRun(run, 'Original source owner cancelled');
+      // Runner shutdown retires this signal too. Its normal disposal path
+      // preserves both contract and workstream checkpoints for restart.
+      const cancel = () => { if (!disposed) cancelRun(run, 'Original source owner cancelled'); };
       sourceSignal.addEventListener('abort', cancel, { once: true });
       run.abort.signal.addEventListener('abort', () => sourceSignal.removeEventListener('abort', cancel), { once: true });
       if (sourceSignal.aborted) cancel();
@@ -1386,7 +1388,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     dispose: () => {
       if (disposed) return;
       disposed = true;
-      placementAbort.abort(new Error('Contract runner is disposed'));
       for (const run of new Set([...runs.values(), ...settling.values()])) {
         const json = serializeContract(run.contract, now());
         const copy = json === null ? null : deserializeContract(json);
@@ -1400,6 +1401,10 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       // cancellation can publish failed item states or late cleanup events.
       detachStore();
       detachPlanSync();
+      // Admitted source signals include placementAbort. Retiring it before
+      // the snapshot and writer detach would persist a user cancellation
+      // instead of the resumable state above.
+      placementAbort.abort(new Error('Contract runner is disposed'));
       for (const run of runs.values()) {
         run.unsubscribeEngine?.();
         run.unsubscribeEngine = null;

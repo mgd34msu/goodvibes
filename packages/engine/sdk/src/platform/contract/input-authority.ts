@@ -219,8 +219,12 @@ export function isCapturedInputPath(path: string): boolean {
 
 function stateOf(token: ContractInputAuthority): Authority {
   const state = authorities.get(token);
-  if (!state || state.revoked) throw new Error('captured input authority is missing or revoked');
+  if (!state) throw new Error('captured input authority is missing or revoked');
+  // Cancellation revokes this token synchronously. Preserve the owning signal's
+  // reason when a later invocation observes that retirement.
   state.signal?.throwIfAborted();
+  state.admission.signal?.throwIfAborted();
+  if (state.revoked) throw new Error('captured input authority is missing or revoked');
   assertAdmission(state.admission, !inReadBatch(token));
   return state;
 }

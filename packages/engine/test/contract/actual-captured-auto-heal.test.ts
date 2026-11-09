@@ -455,7 +455,9 @@ test('actual captured repair resumes with a fresh authority/backend for the same
     await f.resume(); await expect(assertContractInputAuthority(oldAuthority)).rejects.toThrow();
     const contract = await f.settle();
     const rebound = f.runtime.agentManager.list().find((record) => record.contractRole === 'unit' && record.id !== oldMember.id);
-    expect(rebound).toBeDefined(); expect(rebound?.workingDirectory).toBe(oldMember.workingDirectory);
+    expect(rebound, JSON.stringify({ status: contract.status, error: contract.error, state: f.state(),
+      units: contract.units.map(unit => ({ id: unit.id, status: unit.status })) })).toBeDefined();
+    expect(rebound?.workingDirectory).toBe(oldMember.workingDirectory);
     expect(getContractInputAuthority(rebound!)).toBeDefined(); expect(getContractInputAuthority(rebound!)).not.toBe(oldAuthority);
     expect(contract.status, JSON.stringify({ error: contract.error, results: [...f.results] })).toBe('passed');
     expect(contract.commit?.status).toBe('applied'); expect(f.repairRequests).toHaveLength(2);

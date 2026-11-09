@@ -325,8 +325,8 @@ describe('WorktreeIsolationManager: claim-time creation + concurrent non-conflic
     // The worktree + branch are KEPT, never silently dropped.
     expect(second.worktreePath).toBeDefined();
     expect(existsSync(second.worktreePath!)).toBe(true);
-    const branches = runGit(root, ['branch', '--list', 'ws/*']);
-    expect(branches).toContain(second.worktreeBranch!);
+    const branch = runGit(root, ['show-ref', '--verify', `refs/heads/${second.worktreeBranch!}`]);
+    expect(branch).toContain(` refs/heads/${second.worktreeBranch!}`);
 
     const keptEvent = events.find((e) => e.type === 'item-worktree-kept' && e.itemId === 'item-second');
     expect(keptEvent).toBeDefined();

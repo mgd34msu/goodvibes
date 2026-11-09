@@ -279,7 +279,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       // A failed best-of-N sibling is semantically terminal before its real
       // executor exits. Winner selection must not remove that live tree.
       while (activeItems.has(item.id)) await activeItems.get(item.id);
-      await worktreeIsolation.cleanupTerminated(workstream, item);
+      if (!disposed) await worktreeIsolation.cleanupTerminated(workstream, item);
     },
     diffItem: (item) => worktreeIsolation.diffItem(item),
     judge: deps.judgeAttempts,
@@ -407,8 +407,9 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     item.completedAt = now();
     item.failureReason = reason;
     emit({ type: 'item-failed', workstreamId: workstream.id, itemId: item.id, reason });
-    // Worktree fail/kill cleanup: remove only if clean, else KEEP (data safety).
-    if (workstream.isolation === 'worktree' && !activeItems.has(item.id)) {
+    // Shutdown preserves the saved worktree for restart, including a clean
+    // read-only candidate awaiting verification. Live fail/kill still reclaims.
+    if (!disposed && workstream.isolation === 'worktree' && !activeItems.has(item.id)) {
       void worktreeIsolation.cleanupTerminated(workstream, item).catch((error) => {
         logger.error('orchestration engine: worktree cleanup after item failure did not complete', {
           itemId: item.id, error: summarizeError(error),
@@ -668,7 +669,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
           try {
             // kill marks an item failed immediately, but its executor can still
             // be unwinding. Only reclaim its tree after the actual phase exits.
-            if (workstream.isolation === 'worktree' && currentState(item) === 'failed') {
+            if (!disposed && workstream.isolation === 'worktree' && currentState(item) === 'failed') {
               await worktreeIsolation.cleanupTerminated(workstream, item);
             }
           } finally {

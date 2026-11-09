@@ -4,6 +4,19 @@
 
 ### Fixed
 
+- Allow standalone audible bells through the shared full-screen output guard.
+  Completion and approval notifications work in TUI and Agent while direct
+  diagnostic text and cursor controls remain captured above the footer.
+
+- Preserve contract and workstream restart checkpoints when the runner shuts
+  down. Retiring its source signal no longer records an owner cancellation or
+  kills saved work before recovery. Clean worktrees awaiting verification also
+  survive shutdown. Explicit owner cancellation still cancels.
+  Captured input invocations retain the original cancellation reason.
+
+- Include compiled reader metadata in Darwin native execution archives and
+  validate its source and complete payload cohort after relocation.
+
 - Report Decision Router readiness through the runtime metadata used by the
   model selector. A configured General route can be selected without assigning
   credentials to the virtual provider; answering providers keep their own

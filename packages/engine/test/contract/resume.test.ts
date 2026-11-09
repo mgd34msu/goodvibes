@@ -9,8 +9,8 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
  * runner over the same repository resumes it with `resumeAll()`.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { uptime } from 'node:os';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { JudgmentError } from '@goodvibes-jev/judgment';
@@ -178,10 +178,10 @@ test('changed final-content policy rechecks retained work before resuming an uns
     (contract) => fixing && contract.status === 'fixing',
     'the unstarted repair to retain its rejection',
   );
-  let retained = '',
-    rounds = 0;
+  let retained: Contract['units'] = [];
+  let rounds = 0;
   editContract(root, id!, (contract) => {
-    retained = JSON.stringify(contract.units);
+    retained = structuredClone(contract.units);
     rounds = contract.fixRounds;
     const index = contract.decisions.findLastIndex((decision) => decision.targetId === `${id}.final-answer-review`);
     const decision = contract.decisions[index]!;
@@ -209,7 +209,7 @@ test('changed final-content policy rechecks retained work before resuming an uns
   await waitFor(() => terminal(second, id!), 'fresh policy validation to complete');
   const done = contractIn(second, id!);
   expect(done.status).toBe('passed');
-  expect(JSON.stringify(done.units)).toBe(retained);
+  expect(done.units).toEqual(retained);
   expect(done.fixRounds).toBe(rounds);
   expect(planners).toBe(0);
   expect(reviews).toBe(1);
@@ -251,8 +251,8 @@ test.each(['changed-passes', 'changed-fails', 'unchanged'])(
       (contract) => ['fixing', 'awaiting-owner'].includes(contract.status) && contract.checks.length === 1,
       'the retained final-check rejection',
     );
-    let units = '',
-      oldQuestion = '';
+    let units: Contract['units'] = [];
+    let oldQuestion = '';
     editContract(root, id!, (contract) => {
       contract.statusBeforeOwner = 'fixing';
       contract.status = 'awaiting-owner';
@@ -282,7 +282,7 @@ test.each(['changed-passes', 'changed-fails', 'unchanged'])(
           unmetCriterionIds: [],
           decisionIds: contract.checks.at(-1)!.decisionIds,
         });
-      units = JSON.stringify(contract.units);
+      units = structuredClone(contract.units);
       oldQuestion = contract.escalations.find((item) => item.resolvedAt === undefined)!.id;
       if (scenario !== 'unchanged') {
         const decision = contract.decisions.findLast((item) => item.targetId === `${id}.final-answer-review`)!;
@@ -314,7 +314,7 @@ test.each(['changed-passes', 'changed-fails', 'unchanged'])(
       );
     const done = contractIn(second, id!),
       old = done.escalations.find((item) => item.id === oldQuestion)!;
-    expect(JSON.stringify(done.units)).toBe(units);
+    expect(done.units).toEqual(units);
     expect(second.agentsOf('u1')).toEqual([]);
     expect(old.reply).toBeUndefined();
     expect(done.checks.length).toBe(scenario === 'unchanged' ? 1 : 2);
@@ -665,7 +665,9 @@ test.each([false, true])(
             : undefined,
       });
       await resumed.runner.resumeAll();
-      expect((await ended(resumed, contract.id)).status).toBe('passed');
+      const done = await ended(resumed, contract.id);
+      expect(done.status, JSON.stringify({ error: done.error, decisions: done.decisions.slice(-6),
+        units: done.units.map(unit => ({ id: unit.id, status: unit.status })) })).toBe('passed');
       expect(failures).toBe(1);
       expect(unitIn(resumed, contract.id, 'u1').checks).toHaveLength(1);
       expect(unitIn(resumed, contract.id, 'u1').lastOutput).toBe('First private report.');
@@ -1184,14 +1186,14 @@ describe('the deliverable steps run again', () => {
       root,
       ids: [id],
     } = await interrupt({ plan: oneUnitPlan(1), scripts }, finished, 'the accepted parser');
-    let retainedUnits = '';
+    let retainedUnits: Omit<Contract['units'][number], 'usage'>[] = [];
     editContract(root, id!, (contract) => {
       rewind(contract, 'judging');
       contract.status = 'failed';
       contract.failureKind = 'judgment-unavailable';
       contract.error = 'the deliverable could not be judged: request rejected (HTTP 400)';
       contract.completedAt = Date.now();
-      retainedUnits = JSON.stringify(contract.units.map(({ usage: _usage, ...unit }) => unit));
+      retainedUnits = structuredClone(contract.units.map(({ usage: _usage, ...unit }) => unit));
     });
     const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
     const report = await h.runner.resumeAll();
@@ -1200,7 +1202,7 @@ describe('the deliverable steps run again', () => {
     expect(done.status).toBe('passed');
     expect(done.failureKind).toBeUndefined();
     expect(done.error).toBeUndefined();
-    expect(JSON.stringify(done.units.map(({ usage: _usage, ...unit }) => unit))).toBe(retainedUnits);
+    expect(done.units.map(({ usage: _usage, ...unit }) => unit)).toEqual(retainedUnits);
     expect(done.checks.at(-1)!.trigger).toBe('resume');
     expect(done.decisions.some((decision) => decision.reason.startsWith('Recovered a historical final-verifier request failure'))).toBe(
       true,
@@ -1334,7 +1336,10 @@ describe('zombies', () => {
     const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
     await h.runner.resumeAll();
     expectReaped(h, id!, 'no loadable workstream snapshot');
-    expect(existsSync(`${snapshot}.unrecognized`)).toBe(true);
+    const saved = readdirSync(dirname(snapshot)).filter(name => name.startsWith('g1.json.') && name.endsWith('.unrecognized'));
+    expect(saved).toHaveLength(1);
+    expect(readFileSync(join(dirname(snapshot), saved[0]!), 'utf8')).toBe('{ not a snapshot');
+    expect(existsSync(snapshot)).toBe(false);
   }, 30_000);
 
   test('worktree mode: a missing contract worktree reaps the contract, naming the path', async () => {

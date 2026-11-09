@@ -2,7 +2,8 @@
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, fsyncSync, linkSync, lstatSync, openSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
+import { captureOwnedJson } from '../gate/judgment-input.js';
 import type { JevDecisionBinding } from '@goodvibes-jev/judgment/decisions';
 import { createAtomicTempPath, writeFileAtomic } from '../utils/atomic-json-store.js';
 import { readFileObservation } from '../utils/file-observation.js';
@@ -12,6 +13,9 @@ import { CONTRACT_ORIGINS, isContractId, type ContractView, type StartContractIn
 import { captureNativeContractSource } from './native-source.js';
 import { delegationForbidden } from './batteries/request-shape.js';
 const nativeAdmissionApply = Reflect.apply, nativeRequestGet = WeakMap.prototype.get, nativeRequestSet = WeakMap.prototype.set, freezeNativeAdmission = Object.freeze;
+interface NativeDurableKey { readonly identity: string; filename?: string }
+const nativeKeys = new WeakMap<DurableContractKey, NativeDurableKey>();
+const nativeKey = (value: DurableContractKey) => nativeAdmissionApply(nativeRequestGet, nativeKeys, [value]) as NativeDurableKey | undefined;
 const nativeRequests = new WeakMap<DurableContractRequest, { revision?: string }>();
 const nativeRequest = (value: DurableContractRequest) => nativeAdmissionApply(nativeRequestGet, nativeRequests, [value]) as { revision?: string } | undefined;
 
@@ -130,24 +134,49 @@ function freeze<T>(value: T): T {
 const KEY_FIELDS = ['workId', 'criteriaId', 'criteriaRevision', 'attemptId'];
 const BINDING_FIELDS = ['sourceId', 'inputRevision', 'actionId', 'actionRevision', 'authorityId', 'authorityRevision', 'scopeId', 'scopeRevision'];
 
-/** Stable criteria-set identity for native work whose criteria are an ordered array without an ID. */
+/** Historical criteria reference recipe, verified only for an actual saved
+ * criteria:<64hex> source/admission in native-decisions. Fresh requests issue an
+ * opaque criteria-v2 label once. Kept public for earlier API consumers.
+ * @deprecated Historical saved-reference compatibility; do not issue fresh IDs.
+ */
 export function criteriaSetIdForWork(workId: string): string {
   if (!references({ workId }, ['workId'])) throw new DurableContractAdmissionError('invalid');
   return `criteria:${createHash('sha256').update(workId).digest('hex')}`;
 }
 
-export function durableKeyHash(key: DurableContractKey): string {
-  if (!references(key, KEY_FIELDS)) throw new DurableContractAdmissionError('invalid');
-  return createHash('sha256').update(canonical(key)).digest('hex');
+/** Capture exactly four original printable references. Neither Object.freeze,
+ * a copied JSON field nor a foreign prototype can claim this private cache. */
+export function freezeDurableKey(value: DurableContractKey): DurableContractKey {
+  if (nativeKey(value)) return value;
+  let captured: unknown;
+  try { captured = captureOwnedJson(value, nodeTypes.isProxy); }
+  catch { throw new DurableContractAdmissionError('invalid'); }
+  if (!references(captured, KEY_FIELDS)) throw new DurableContractAdmissionError('invalid');
+  const fields = captured as Record<string, string>;
+  const key = freezeNativeAdmission({ workId: fields['workId']!, criteriaId: fields['criteriaId']!,
+    criteriaRevision: fields['criteriaRevision']!, attemptId: fields['attemptId']! });
+  nativeAdmissionApply(nativeRequestSet, nativeKeys, [key, { identity: JSON.stringify([key.workId, key.criteriaId, key.criteriaRevision, key.attemptId]) }]);
+  return key;
 }
 
-/** Exact, bounded native IDs for private maps and key comparisons. No prompt,
- * credential, or serialized request belongs in this bookkeeping identity.
- * Persisted filename/SQLite digest migration is a separate storage operation.
+/** Existing on-disk receipt, key-lock and execution-lease namespace. Four
+ * arbitrary256-byte printable references cannot form one portable filename.
+ * This one bounded digest preserves that exact tuple without a new registry,
+ * extra lookup I/O or long reversible directory paths. It is NOT authority,
+ * privacy, a content commitment or a currentness check. Reuse only the actual
+ * constructor's immutable key; mutable/foreign copies independently validate.
+ * Actual saved v1 SQLite key/settlement readers also reproduce this old recipe.
  */
+export function durableKeyHash(key: DurableContractKey): string {
+  const captured = freezeDurableKey(key), held = nativeKey(captured)!;
+  if (held.filename !== undefined) return held.filename;
+  const digest = createHash('sha256').update(canonical(captured)).digest('hex');
+  held.filename = digest; return digest;
+}
+
+/** Exact bounded private map/SQL identity, with no serialized input or hash. */
 export function durableKeyIdentity(key: DurableContractKey): string {
-  if (!references(key, KEY_FIELDS)) throw new DurableContractAdmissionError('invalid');
-  return JSON.stringify([key.workId, key.criteriaId, key.criteriaRevision, key.attemptId]);
+  const captured = freezeDurableKey(key); return nativeKey(captured)!.identity;
 }
 
 /** Compare owned requests after freezeDurableRequest admission. Migrating the
@@ -162,11 +191,17 @@ export function sameDurableRequest(first: DurableContractRequest, second: Durabl
 export function freezeDurableRequest(value: DurableContractRequest): DurableContractRequest {
   if (nativeRequest(value)) return value;
   // Clone before the first await: caller mutation cannot change the operation being admitted.
-  let detached: unknown;
-  try { detached = JSON.parse(canonical(value)); } catch { throw new DurableContractAdmissionError('invalid'); }
+  let detached: unknown, capturedKey: DurableContractKey;
+  try {
+    if (!record(value) || nodeTypes.isProxy(value)) throw new Error();
+    const keySlot = Object.getOwnPropertyDescriptor(value, 'key');
+    if (!keySlot || !('value' in keySlot)) throw new Error();
+    capturedKey = freezeDurableKey(keySlot.value as DurableContractKey);
+    detached = JSON.parse(canonical(value));
+  } catch { throw new DurableContractAdmissionError('invalid'); }
   if (!record(detached) || Object.keys(detached).length !== 3
     || !references(detached['key'], KEY_FIELDS) || !references(detached['binding'], BINDING_FIELDS)
-    || !record(detached['input'])) throw new DurableContractAdmissionError('invalid');
+    || !record(detached['input']) || !isDeepStrictEqual(detached['key'], capturedKey)) throw new DurableContractAdmissionError('invalid');
   const input = detached['input'];
   if (typeof input['ask'] !== 'string' || input['ask'].length === 0
     || typeof input['sessionId'] !== 'string' || input['sessionId'].length === 0
@@ -185,6 +220,9 @@ export function freezeDurableRequest(value: DurableContractRequest): DurableCont
       || source.criteriaId !== key['criteriaId'] || source.criteriaRevision !== key['criteriaRevision']) throw new DurableContractAdmissionError('invalid');
     input['nativeSource'] = source;
   }
+  // Preserve only a genuine immutable key after independently comparing the
+  // complete captured key. Request/body copies cannot supply a cache flag.
+  detached['key'] = capturedKey;
   const request = freeze(detached as unknown as DurableContractRequest);
   nativeAdmissionApply(nativeRequestSet, nativeRequests, [request, {}]); return request;
 }
@@ -275,7 +313,7 @@ export class DurableContractAdmissions {
       const value = readAdmissionIndexJson(path);
       if (!record(value) || Object.keys(value).length !== 3 || value['schemaVersion'] !== 1
         || value['contractId'] !== contractId || !references(value['key'], KEY_FIELDS)) throw new Error();
-      return freeze(value['key'] as unknown as DurableContractKey);
+      return freezeDurableKey(value['key'] as unknown as DurableContractKey);
     } catch { throw new DurableContractAdmissionError('invalid'); }
   }
 
@@ -334,6 +372,7 @@ export class DurableContractAdmissions {
   }
 
   private envelope(key: DurableContractKey): { admission: DurableContractAdmission; checkpoint: string; indexed: boolean } | null {
+    key = freezeDurableKey(key);
     const path = this.path(key);
     if (!admissionPathExists(path)) return null;
     try {
@@ -391,6 +430,7 @@ export class DurableContractAdmissions {
 
   /** Retain the original actual file read; public parsed JSON cannot mint it. */
   checkpointRead(key: DurableContractKey): OwnedContractCheckpointRead {
+    key = freezeDurableKey(key);
     const expected = this.checkpoint(key);
     const receipt = readOwnedContractCheckpoint(this.path(key), 'durable-admission');
     if (ownedContractCheckpointText(receipt) !== expected) throw new DurableContractAdmissionError('checkpoint');

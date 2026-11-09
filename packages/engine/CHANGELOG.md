@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Reuse durable contract filename digests for original immutable keys instead
+  of repeatedly hashing the same four references. Preserve existing receipt and
+  lease filenames, and reject changed or accessor-backed key captures.
+
 - Keep exact Unicode, punctuation, case, qualifiers and subject sets when reusing
   semantic facts. New facts use full opaque IDs; existing facts keep their saved
   ID only after an exact stored claim and scope match. Ambiguous historical

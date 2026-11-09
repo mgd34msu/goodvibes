@@ -33,7 +33,7 @@ import type { ContractIntegrationInspection } from './integration-inspection-wir
  * turn to the unit and is held and nudged exactly as a sub-agent is); no
  * engine runs and no sub-agent is spawned.
  */
-import { assertDurableCheckpoint, DurableContractAdmissions, DurableContractAdmissionError, durableKeyIdentity, durablePayloadRevision, sameDurableRequest, freezeDurableRequest, parseDurableAdmission, type DurableContractAdmission, type DurableContractBoundary, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from './durable-admission.js';
+import { assertDurableCheckpoint, DurableContractAdmissions, DurableContractAdmissionError, freezeDurableKey, durableKeyIdentity, durablePayloadRevision, sameDurableRequest, freezeDurableRequest, parseDurableAdmission, type DurableContractAdmission, type DurableContractBoundary, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from './durable-admission.js';
 import { resolveContractGitPlacement, resolveContractIsolation, resolveContractBase } from './git-placement.js';
 import { existsSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
@@ -708,7 +708,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     if (disposed) throw new Error('Contract runner is disposed');
     if (deps.durableAdmission === undefined) throw new DurableContractAdmissionError('boundary');
     // Detach the key before lock acquisition can yield to caller code.
-    const frozenKey = Object.freeze({ ...key });
+    const frozenKey = freezeDurableKey(key);
     const release = await durableAdmissions.lock(frozenKey);
     try {
       if (disposed) throw new Error('Contract runner is disposed');

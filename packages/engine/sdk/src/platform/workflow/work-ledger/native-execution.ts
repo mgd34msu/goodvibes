@@ -15,7 +15,7 @@ import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { realpathSync } from 'node:fs';
 import type { DecisionLog, EntryType, JudgmentPort } from '@goodvibes-jev/judgment';
 import { decideAutonomous } from '../../gate/autonomous-decision.js';
-import { durableKeyIdentity, durablePayloadRevision, sameDurableRequest, type DurableContractAdmission, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from '../../contract/durable-admission.js';
+import { durableKeyIdentity, freezeDurableKey, durablePayloadRevision, sameDurableRequest, type DurableContractAdmission, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from '../../contract/durable-admission.js';
 import { captureNativeContractSource } from '../../contract/native-source.js';
 import type { ContractRunner } from '../../contract/runner.js';
 import type { ContractIntegrationInspection } from '../../contract/integration-inspection-wire.js';
@@ -93,7 +93,7 @@ function captureTarget(value: NativeWorkExecutionTarget): NativeWorkExecutionTar
     || ![target.workRevision, target.criteriaRevision, target.attemptRevision].every(revision => Number.isSafeInteger(revision) && revision >= 0)) throw new NativeWorkExecutionError('invalid');
   return target;
 }
-function captureKey(value: DurableContractKey): DurableContractKey { const key = Object.freeze({ ...value }); durableKeyIdentity(key); return key; }
+function captureKey(value: DurableContractKey): DurableContractKey { return freezeDurableKey(value); }
 function workFor(current: NativeWorkExecutionTransaction, target: NativeWorkExecutionTarget, principal: string) {
   const work = current.ledger.works.find(item => item.id === target.workId);
   const attempt = current.ledger.attempts.find(item => item.id === target.attemptId);

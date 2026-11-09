@@ -142,3 +142,20 @@ test('an actual earlier criteria spelling is verified once per original admissio
     });
   } finally { hash.mockRestore(); }
 });
+
+// UNRUN: a prototype callback cannot manufacture the old privacy-reference
+// cache for a criteria digest that does not belong to its actual saved work.
+test('late WeakMap overrides cannot launder an unverified historical criteria reference', async () => {
+  await recorded(async (fake) => {
+    const value = contract({}, 'different-original-work'), admission = value.durableAdmission!;
+    const get = WeakMap.prototype.get, apply = Reflect.apply;
+    try {
+      WeakMap.prototype.get = function(key) {
+        if (key === admission) return { workId: admission.key.workId, criteriaId: value.nativeSource!.criteriaId };
+        return apply(get, this, [key]);
+      };
+      await expect(decide(value)).rejects.toMatchObject({ problem: 'card-material' });
+      expect(fake.requests).toHaveLength(0);
+    } finally { WeakMap.prototype.get = get; }
+  });
+});

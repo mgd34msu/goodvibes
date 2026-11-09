@@ -243,7 +243,10 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
     let repair: { problems: readonly PlanProblem[]; previousPlan: string } | undefined;
     const candidateId = `${brief.targetId}.f${round}.candidate`;
     const { output: priorEvidence, ...target } = brief;
-    const binding = hashState(JSON.stringify({ ask: contract.ask, inputId: contract.inputSnapshot?.id ?? null,
+    // Only the immutable worktree result can reuse a saved planner candidate.
+    // Shared/session results have no such identity and always replan; hashing
+    // their complete work/owner-read evidence would have no matching consumer.
+    const binding = input.resultRevision === undefined ? undefined : hashState(JSON.stringify({ ask: contract.ask, inputId: contract.inputSnapshot?.id ?? null,
       resultRevision: input.resultRevision ?? null, target,
       output: brief.scope === 'deliverable' ? renderContractAnswer(contract) : priorEvidence,
       finalAnswerReview: brief.scope === 'deliverable' ? contract.decisions.findLast(decision => decision.targetId === `${contract.id}.final-answer-review`)?.reason ?? null : null,

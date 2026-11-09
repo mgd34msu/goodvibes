@@ -469,6 +469,9 @@ test.each(['interrupted', 'privacy-refused', 'verifier-refused'])(
     expect(done.units[0]!.answer).toBe('Original draft with an unsupported archive claim.');
     // A shared-directory proposal has no immutable result revision: an explicit
     // process restart must regenerate it rather than reuse an unbound candidate.
+    for (const candidate of done.decisions.filter(decision => decision.action === 'planned' && decision.targetId === `${id}.f1.candidate`)) {
+      expect(JSON.parse(candidate.reason)).not.toHaveProperty('binding');
+    }
     expect(plannerRuns).toBe(condition === 'verifier-refused' ? 2 : 1);
     if (condition === 'verifier-refused') {
       expect(requestFailures).toBe(1);

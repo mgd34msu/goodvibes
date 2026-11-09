@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Skip repair-candidate hashing for shared/session work, whose planner output
+  cannot be reused after restart. Keep the existing saved comparison only when
+  an immutable worktree result actually supports candidate reuse.
+
 - Apply the same decision endpoint validation in settings, terminal selection
   and transport. WebUI destination/provider changes disable the previous target
   credential until the user explicitly chooses it; invalid addresses make no

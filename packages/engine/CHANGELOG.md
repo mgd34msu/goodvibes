@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Remove unused Home Graph triage hashing from new or forced attempts that do
+  not settle. Compute the saved comparison only when used, and require a fresh
+  reading after the provider or configuration changes even if its model name
+  stays the same. Preserve acknowledged writes if later cache readback fails.
+
 - Drain rejected work thrown by synchronous decision-source restrictions before
   reporting the retired source. Refused capture, retry and recording checks
   cannot leave a separate rejected promise unobserved.

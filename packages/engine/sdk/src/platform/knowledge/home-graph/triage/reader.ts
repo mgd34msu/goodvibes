@@ -1,5 +1,5 @@
 import { requireSemanticKnowledge } from '../../decision-policy.js';
-import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { checkAnswers, toJson, type JudgmentPort, type YesNoReading, type JsonValue } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
 import { freezeSupport } from '../../semantic/verification/projection.js';
@@ -81,9 +81,14 @@ export async function prepareHomeGraphTriageReadings(inputs: readonly TriageRead
   const abort = () => stop(new Held('aborted'));
   options.signal?.addEventListener('abort', abort, { once: true });
   const timer = timeoutMs === undefined || timeoutMs === 0 ? undefined : setTimeout(() => stop(new Held('budget')), timeoutMs);
-  const check = () => { if (held) throw held; if (options.signal?.aborted) throw new Held('aborted'); };
+  let owner: JudgmentPortCapture | undefined;
+  const check = () => {
+    if (held) throw held; if (options.signal?.aborted) throw new Held('aborted');
+    try { owner?.assertCurrent(); } catch { throw new Held('stale'); }
+  };
   const run = async () => {
-    check(); const port = validatedPort(judgmentPort('engine.knowledge.homegraph-triage'));
+    check(); owner = captureJudgmentPort('engine.knowledge.homegraph-triage', { signal: controller.signal });
+    const port = validatedPort(owner.port);
     const settings = { signal: controller.signal, site: 'engine.knowledge.homegraph-triage' };
     const plans: TriageReadingPlan[] = []; let next = 0;
     await Promise.all(Array.from({ length: Math.min(LIMITS.concurrency, snapshots.length) }, async () => {

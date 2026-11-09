@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import type { JsonValue } from '@goodvibes-jev/judgment';
 import type { KnowledgeIssueRecord, KnowledgeNodeRecord } from '../../types.js';
 import { hasKnowledgeNodeOperatorReview } from '../../store-node-authority.js';
-import { readRecord, stableHash } from '../helpers.js';
+import { readRecord } from '../helpers.js';
 import { homeGraphTriageApplicability, homeGraphBatteryFacts, homeGraphManualFact } from './batteries.js';
 import { HomeGraphTriageHeldError as Held, type TriageReadInput } from './types.js';
 
@@ -52,11 +53,14 @@ function copyString(target: Record<string, JsonValue>, record: Record<string, un
   target[key] = record[key];
 }
 export function triageCacheFingerprint(input: TriageReadInput, issue: KnowledgeIssueRecord, node: KnowledgeNodeRecord | undefined, policy: { model: string; minConfidence: number; category?: string | undefined }): string {
-  return stableHash(JSON.stringify({
+  // Saved issue triage compares this exact input, ephemeral owner guidance and
+  // policy between runs without retaining another private prompt body. This is
+  // the existing 96-bit cache key recipe, not authentication or operator review.
+  return createHash('sha256').update(JSON.stringify({
     issue: input.issue, subject: input.subject, guidance: input.ruleGuidance, policy,
     issueId: issue.id, nodeId: issue.nodeId, sourceId: issue.sourceId,
     lifecycle: issue.metadata.issueLifecycle, issueReview: issue.metadata.review,
     nodeReview: node?.metadata.review,
     batteries: [homeGraphTriageApplicability, homeGraphBatteryFacts, homeGraphManualFact].map(({ name, version }) => ({ name, version })),
-  }));
+  })).digest('hex').slice(0, 24);
 }

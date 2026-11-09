@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeStore } from '../../store.js';
 import type { KnowledgeIssueRecord, KnowledgeNodeRecord, KnowledgeNodeUpsertInput, KnowledgeIssueUpsertInput } from '../../types.js';
 import { KnowledgeNodeMutationHeldError } from '../../store-node-authority.js';
@@ -7,14 +8,19 @@ export interface TriageApplication {
   readonly issue: KnowledgeIssueRecord;
   readonly node?: KnowledgeNodeRecord | undefined;
   readonly plan: TriageReadingPlan;
-  readonly fingerprint: string;
+  readonly fingerprint: () => string;
   readonly category?: string | undefined;
 }
 /** Ordinary producer writes only. Automatic recommendations never mint review authority. */
-export async function applyTriageReadings(store: KnowledgeStore, applications: readonly TriageApplication[], signal?: AbortSignal): Promise<void> {
+export async function applyTriageReadings(store: KnowledgeStore, applications: readonly TriageApplication[], signal?: AbortSignal, assertCurrent?: () => void): Promise<void> {
   const issues = new Map(applications.map(({ issue }) => [issue.id, JSON.stringify(issue)]));
   const nodes = new Map(applications.flatMap(({ node }) => node ? [[node.id, JSON.stringify(node)] as const] : []));
   const guard = () => {
+    if (signal?.aborted) throw new Held('aborted');
+    try {
+      const current: unknown = assertCurrent?.();
+      if (current !== undefined) { drainOwned(current); throw new Held('stale'); }
+    } catch (error) { drainOwned(error); throw new Held('stale'); }
     if (signal?.aborted) throw new Held('aborted');
     for (const [id, snapshot] of issues) if (JSON.stringify(store.getIssue(id)) !== snapshot) throw new Held('stale');
     for (const [id, snapshot] of nodes) if (JSON.stringify(store.getNode(id)) !== snapshot) throw new Held('stale');
@@ -39,7 +45,7 @@ export async function applyTriageReadings(store: KnowledgeStore, applications: r
     issueInputs.push({ id: issue.id, severity: issue.severity, code: issue.code,
       message: issue.message, status: plan.action === 'reject' ? 'resolved' : 'open',
       sourceId: issue.sourceId, nodeId: issue.nodeId,
-      metadata: { ...issue.metadata, triage: { fingerprint, action: plan.action, category,
+      metadata: { ...issue.metadata, triage: { fingerprint: fingerprint(), action: plan.action, category,
         confidence: plan.probability * 100, probability: plan.probability, applied: plan.action === 'reject',
         origin: plan.origin, source: 'homegraph-triage', model: plan.model, requestedModel: plan.requestedModel,
         decisionIds: plan.decisionIds, batteries: plan.batteries, decidedAt: Date.now() },

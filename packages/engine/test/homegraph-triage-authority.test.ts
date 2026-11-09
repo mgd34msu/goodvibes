@@ -2,12 +2,14 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { bindJudgmentPortAuthority, installJudgmentPort, JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { runHomeGraphIssueTriage } from '../sdk/src/platform/knowledge/home-graph/triage.js';
+import * as triageProjection from '../sdk/src/platform/knowledge/home-graph/triage/projection.js';
+import { applyTriageReadings } from '../sdk/src/platform/knowledge/home-graph/triage/application.js';
 import { reviewHomeGraphFact } from '../sdk/src/platform/knowledge/home-graph/review.js';
 import { reviewKnowledgeNodeRecord } from '../sdk/src/platform/knowledge/service-node-admin.js';
 
@@ -197,4 +199,97 @@ describe('automatic triage respects operator authority and frozen state', () => 
     const afterReview = JSON.stringify(store.getNode(node.id)); const fake = readings(); await run({ force: true });
     expect(fake.requests).toHaveLength(0); expect(JSON.stringify(store.getNode(node.id))).toBe(afterReview); expect(store.getIssue(issues[0]!.id)!.status).toBe('open');
   });
+});
+
+
+test('new, forced and cold candidates hash only answered publication; held attempts hash no triage fingerprint', async () => {
+  const f = await fixture(), fake = readings('review'), hash = spyOn(triageProjection, 'triageCacheFingerprint');
+  try {
+    expect((await f.run()).reviewed).toBe(1); expect(hash).toHaveBeenCalledTimes(1);
+    hash.mockClear(); expect((await f.run()).skipped).toBe(1); expect(hash).toHaveBeenCalledTimes(1);
+    hash.mockClear(); expect((await f.run({ force: true })).reviewed).toBe(1); expect(hash).toHaveBeenCalledTimes(1);
+    expect(fake.requests).toHaveLength(2);
+    readings('reject', 0.8); hash.mockClear();
+    expect((await f.run({ force: true })).processed).toBe(0); expect(hash).not.toHaveBeenCalled();
+  } finally { hash.mockRestore(); await f.store.close(); }
+});
+
+test('same-model provider replacement and restoration require fresh acknowledged reads before cache reuse', async () => {
+  const f = await fixture(), first = readings('review');
+  try {
+    expect((await f.run()).reviewed).toBe(1); expect((await f.run()).skipped).toBe(1); expect(first.requests).toHaveLength(1);
+    const second = readings('review'); expect(second.port.model).toBe(first.port.model);
+    expect((await f.run()).reviewed).toBe(1); expect((await f.run()).skipped).toBe(1); expect(second.requests).toHaveLength(1);
+    installJudgmentPort(first.port);
+    expect((await f.run()).reviewed).toBe(1); expect(first.requests).toHaveLength(2); expect((await f.run()).skipped).toBe(1);
+  } finally { await f.store.close(); }
+});
+
+test('actual configuration source incarnation invalidates same-port cache and refuses a retired in-flight owner', async () => {
+  const f = await fixture(), fake = fakePort((_name, question) => choiceAnswer(question, 'review', 0.97));
+  let incarnation: object = {}, retireAfterRead = false;
+  const port: JudgmentPort = { ...fake.port, async ask(request) {
+    const result = await fake.port.ask(request); if (retireAfterRead) incarnation = {}; return result;
+  } };
+  bindJudgmentPortAuthority(port, () => {
+    const current = incarnation;
+    return { identity: current, assertCurrent() { if (incarnation !== current) throw new JudgmentAuthorityRetiredError(); } };
+  });
+  installJudgmentPort(port);
+  try {
+    expect((await f.run()).reviewed).toBe(1); expect((await f.run()).skipped).toBe(1);
+    incarnation = {};
+    expect((await f.run()).reviewed).toBe(1); expect(fake.requests).toHaveLength(2);
+    const before = f.snapshot(); retireAfterRead = true;
+    expect((await f.run({ force: true })).processed).toBe(0); expect(f.snapshot()).toBe(before);
+    retireAfterRead = false;
+    expect((await f.run()).reviewed).toBe(1); expect(fake.requests).toHaveLength(4);
+    expect((await f.run()).skipped).toBe(1);
+  } finally { await f.store.close(); }
+});
+
+test('reopened native store conservatively retriages saved fingerprints once without persisting provider identities', async () => {
+  const f = await fixture(), fake = readings('review'); let reopened: KnowledgeStore | undefined;
+  try {
+    await f.run(); const saved = f.store.getIssue(f.issues[0]!.id)!.metadata.triage;
+    expect(saved).toHaveProperty('fingerprint'); expect(saved).not.toHaveProperty('providerIdentity');
+    reopened = await f.reload();
+    const run = () => runHomeGraphIssueTriage({ store: reopened!, knowledgeSpaceId: spaceId });
+    expect((await run()).reviewed).toBe(1); expect(fake.requests).toHaveLength(2);
+    expect((await run()).skipped).toBe(1); expect(fake.requests).toHaveLength(2);
+  } finally { await reopened?.close(); await f.store.close(); }
+});
+
+test('application rejects an asynchronous or throwing source restriction before any ordinary write', async () => {
+  const f = await fixture(), before = f.snapshot();
+  const application = { issue: f.issues[0]!, node: f.node, fingerprint: () => 'actual-answered-fingerprint',
+    plan: { reference: 'issue-1', action: 'review' as const, probability: 0.97, facts: {}, decisionIds: [],
+      model: 'jev-1.13.0', requestedModel: 'jev-latest', origin: 'automatic-judgment' as const, batteries: [] } };
+  try {
+    for (const restrict of [async () => { throw new Error('Synthetic retired owner'); },
+      () => { throw new Error('Synthetic retired owner'); },
+      () => { throw Promise.reject(new Error('Synthetic thrown rejected owner restriction')); }]) {
+      await expect(applyTriageReadings(f.store, [application], undefined, restrict)).rejects.toMatchObject({ reason: 'stale' });
+      expect(f.snapshot()).toBe(before);
+    }
+  } finally { await f.store.close(); }
+});
+
+test('a thrown rejected readback after acknowledged commit is drained without hiding committed review or warming reuse', async () => {
+  const f = await fixture(), fake = readings('review');
+  const publish = f.store.applyGuardedNodeIssueWrites.bind(f.store), read = f.store.getIssue.bind(f.store);
+  let committed = false, failReadback = true;
+  const publication = spyOn(f.store, 'applyGuardedNodeIssueWrites').mockImplementation(async (...args) => {
+    await publish(...args); committed = true;
+  });
+  const readback = spyOn(f.store, 'getIssue').mockImplementation(id => {
+    if (committed && failReadback) { failReadback = false; throw Promise.reject(new Error('Synthetic rejected postcommit readback')); }
+    return read(id);
+  });
+  try {
+    expect((await f.run()).reviewed).toBe(1);
+    expect(read(f.issues[0]!.id)!.metadata.triage).toHaveProperty('fingerprint');
+    expect((await f.run()).reviewed).toBe(1); expect(fake.requests).toHaveLength(2);
+    expect((await f.run()).skipped).toBe(1);
+  } finally { readback.mockRestore(); publication.mockRestore(); await f.store.close(); }
 });

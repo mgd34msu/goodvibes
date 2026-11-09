@@ -16,7 +16,8 @@
  * them (onFailoverRetry: continueTurnAfterFailover), on one shared bus, with
  * the turn wiring subscribed first as in main.ts.
  */
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, mock, spyOn, test } from 'bun:test';
+import { installFullScreenTerminalOutputGuard } from '@goodvibes-jev/engine/terminal-shell/terminal-output-guard';
 import { wireTurnEventHandlers, type WireTurnEventHandlersOptions } from '../../core/turn-event-wiring.ts';
 import { wireStreamEventMetrics, type WireStreamEventMetricsOptions, type StreamMetrics } from '../../core/stream-event-wiring.ts';
 import type { WebhookNotifier } from '@goodvibes-jev/engine/sdk/platform/integrations';
@@ -62,6 +63,8 @@ interface HarnessOptions {
   readonly synchronousRetry?: boolean;
   readonly retryMissing?: boolean;
   readonly memory?: Promise<void>;
+  readonly nativeBell?: boolean;
+  readonly nativeNotify?: boolean;
 }
 
 function harness(opts: HarnessOptions = {}) {
@@ -118,8 +121,8 @@ function harness(opts: HarnessOptions = {}) {
     } as unknown as WebhookNotifier,
     focusTracker: tracker,
     terminalNotifier: { notify: (_signal: string, message: string) => { terminal.push(message); } },
-    notifyDesktop: (title: string, body: string) => { desktop.push({ title, body }); },
-    ringBell: () => { bells.push(now); },
+    ...(opts.nativeNotify ? {} : { notifyDesktop: (title: string, body: string) => { desktop.push({ title, body }); } }),
+    ...(opts.nativeBell ? {} : { ringBell: () => { bells.push(now); } }),
     _failoverRetryGraceMs: opts.graceMs ?? 5_000,
     _clock: () => now,
   } as unknown as WireTurnEventHandlersOptions;
@@ -192,6 +195,32 @@ describe('one desktop popup per turn: the TUI owns it, the Orchestrator hands it
     await flush();
     expect(h.desktop).toHaveLength(0);
     expect(h.bells).toHaveLength(1);
+  });
+
+  test.each([12_000, 65_000])('the actual default %ims completion bell passes the full-screen guard', async durationMs => {
+    const writes: string[] = [], captures: number[] = [];
+    const output = spyOn(process.stdout, 'write').mockImplementation((...args: unknown[]) => {
+      writes.push(String(args[0]));
+      const callback = args.at(-1); if (typeof callback === 'function') callback();
+      return true;
+    });
+    const tty = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+    const suppression = process.env['GOODVIBES_SUPPRESS_NOTIFY'];
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    process.env['GOODVIBES_SUPPRESS_NOTIFY'] = '1';
+    const guard = installFullScreenTerminalOutputGuard({ stdout: process.stdout, active: true, onCapture: count => { captures.push(count); } });
+    const h = harness({ nativeBell: true, nativeNotify: true });
+    try {
+      h.turn('TURN_SUBMITTED', { turnId: 'default-bell', prompt: ASK }); h.advance(durationMs);
+      h.turn('TURN_COMPLETED', { turnId: 'default-bell', response: 'ok', stopReason: 'completed' }); await flush();
+      expect(writes).toEqual(['\x07']); expect(captures).toEqual([]);
+      process.stdout.write('Unrelated direct diagnostic\n');
+      expect(writes).toEqual(['\x07']); expect(captures).toEqual([1]);
+    } finally {
+      h.close(); guard.dispose(); output.mockRestore();
+      if (tty) Object.defineProperty(process.stdout, 'isTTY', tty); else Reflect.deleteProperty(process.stdout, 'isTTY');
+      if (suppression === undefined) delete process.env['GOODVIBES_SUPPRESS_NOTIFY']; else process.env['GOODVIBES_SUPPRESS_NOTIFY'] = suppression;
+    }
   });
 
   test('behavior.notifyOnComplete off keeps the desktop popup and the bell off, as it did for the Orchestrator popup', async () => {

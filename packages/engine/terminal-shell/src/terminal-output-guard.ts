@@ -5,7 +5,9 @@
  *
  * `installTerminalOutputGuard` is the primitive: it monkeypatches the given
  * streams and console methods, records every intercepted write, and restores
- * everything on dispose. Installing a second guard before the first is
+ * everything on dispose. A standalone BEL passes through without changing the
+ * compositor layout; mixed text and other control output stay guarded.
+ * Installing a second guard before the first is
  * disposed first disposes that first guard, so the restore chain always
  * unwinds against the real underlying write rather than an intermediate
  * patch, without this, a second install's "original" would actually be the
@@ -106,6 +108,13 @@ function chunkToText(chunk: unknown): string {
   return String(chunk);
 }
 
+// A standalone audible bell cannot move the cursor or write into the footer.
+// SDK completion/approval notifications share this path with direct host bells.
+// Never allow text or other control sequences merely because they contain BEL.
+function isStandaloneBell(chunk: unknown): boolean {
+  return chunk === '\x07' || (chunk instanceof Uint8Array && chunk.byteLength === 1 && chunk[0] === 7);
+}
+
 function normalizeText(text: string): string {
   return text.replace(ANSI_RE, '').replace(/\r/g, '').trim();
 }
@@ -186,7 +195,7 @@ export function installTerminalOutputGuard(options: TerminalOutputGuardOptions):
   const shouldPassThrough = (): boolean => !active || allowDepth > 0 || disposed;
 
   stdout.write = ((...args: unknown[]) => {
-    if (shouldPassThrough()) {
+    if (shouldPassThrough() || isStandaloneBell(args[0])) {
       return originalStdoutWrite(...args);
     }
     record('stdout', chunkToText(args[0]));
@@ -195,7 +204,7 @@ export function installTerminalOutputGuard(options: TerminalOutputGuardOptions):
   }) as WritableStreamLike['write'];
 
   stderr.write = ((...args: unknown[]) => {
-    if (shouldPassThrough()) {
+    if (shouldPassThrough() || isStandaloneBell(args[0])) {
       return originalStderrWrite(...args);
     }
     record('stderr', chunkToText(args[0]));

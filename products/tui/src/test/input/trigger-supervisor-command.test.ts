@@ -6,6 +6,8 @@ import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { GatewayMethodCatalog, registerTriggerSupervisorGatewayMethods } from '@goodvibes-jev/engine/sdk/platform/control-plane';
 import { TriggerManager } from '@goodvibes-jev/engine/sdk/platform/triggers';
 import type { OpenSelection } from '@goodvibes-jev/engine/terminal-shell/selection-modal';
+import { SelectionModal } from '../../input/selection-modal.ts';
+import { renderSelectionModalOverlay } from '../../renderer/selection-modal-overlay.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerTriggerCommands } from '../../input/commands/trigger-supervisor.ts';
 import { beginTuiHostPairing, completeTuiHostPairing } from '../../runtime/tui-host-credential-store.ts';
@@ -60,16 +62,17 @@ async function fixture() {
   })).status).toBe('paired');
   const messages: string[] = [];
   let selection: Parameters<OpenSelection>[3] | undefined, selectionSignal: AbortSignal | undefined;
+  let offered: { title: string; items: Parameters<OpenSelection>[1]; options: Parameters<OpenSelection>[2] } | undefined;
   const context = { print: (message: string) => messages.push(message), renderRequest() {}, invokedByModel: false,
     platform: { configManager: config }, workspace: { shellPaths: { homeDirectory: root } },
-    openSelection: ((_title, _items, options, callback) => { selection = callback; selectionSignal = options?.signal; }) as OpenSelection,
+    openSelection: ((title, items, options, callback) => { offered = { title, items, options }; selection = callback; selectionSignal = options?.signal; }) as OpenSelection,
   } as unknown as CommandContext;
   const registry = new CommandRegistry(); registerTriggerCommands(registry);
   cleanup.push(async () => { selection?.(null); supervisor.shutdown(); await supervisor.join(); await server.stop(true); rmSync(root, { recursive: true, force: true }); });
   return { root, old, supervisor, config, messages, requests, registry, context,
     open: (args = ['migrate']) => registry.executeFromOwner('triggers', args, context),
     choose: (id: string) => { expect(selection).toBeDefined(); selection!({ action: 'select', item: { id, label: id } }); },
-    signal: () => selectionSignal,
+    signal: () => selectionSignal, offered: () => offered,
     setPrincipal: () => { principalId = 'pairing:replacement-owner'; }, setReadOnly: () => { scopes = ['read:watchers']; },
     holdAuth: (wait: Promise<void>) => { authWait = wait; } };
 }
@@ -158,3 +161,31 @@ test('an actual independently completed migration is not automatically retried o
   expect(f.requests.filter(value => value.path.includes('watchers.triggers.migrate'))).toHaveLength(1);
   expect(f.messages.join('\n')).not.toContain('Migration completed');
 });
+
+
+for (const [width, height] of [[80, 24], [120, 40]] as const) {
+  test(`actual trigger migration explanation precedes uninterrupted choices at ${width}x${height}`, async () => {
+    const f = await fixture(); await f.open(); const offered = f.offered();
+    if (!offered) throw new Error('Actual daemon trigger command did not offer its owner selection');
+    const requests = f.requests.length, modal = new SelectionModal();
+    modal.open(offered.title, offered.items, offered.options);
+    const frame = () => renderSelectionModalOverlay(modal, width, height).lines.map(line => line.map(cell => cell.char).join(''));
+    const check = () => {
+      const lines = frame();
+      const keep = lines.findIndex(line => line.includes('Keep triggers stopped'));
+      const migrate = lines.findIndex(line => line.includes('I closed all older GoodVibes'));
+      expect(keep).toBeGreaterThan(0); expect(migrate).toBe(keep + 1);
+      const details = lines.flatMap((line, row) => line.includes('Build readiness') ? [row] : []);
+      expect(details.length).toBeGreaterThan(0); expect(details.every(row => row < keep)).toBe(true);
+      return keep;
+    };
+    try {
+      const top = check();
+      modal.scrollContext(20); expect(check()).toBe(top); expect(modal.getSelected()?.id).toBe('keep');
+      modal.moveDown(); expect(check()).toBe(top); expect(modal.contextScroll).toBe(0); expect(modal.getSelected()?.id).toBe('migrate');
+      expect(f.requests).toHaveLength(requests);
+      expect(f.requests.some(value => value.path.includes('watchers.triggers.migrate'))).toBe(false);
+      expect(f.supervisor.executionOwnership).toBe('migration-required');
+    } finally { modal.close(); }
+  });
+}

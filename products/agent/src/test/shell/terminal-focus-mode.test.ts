@@ -13,7 +13,8 @@
  * the write happens, then clean up the listener so it doesn't leak into other
  * test files' process-level state.
  */
-import { describe, expect, test, afterEach } from 'bun:test';
+import { describe, expect, test, afterEach, spyOn } from 'bun:test';
+import { installFullScreenTerminalOutputGuard } from '@goodvibes-jev/engine/terminal-shell/terminal-output-guard';
 import {
   FOCUS_DISABLE,
   FOCUS_ENABLE,
@@ -136,6 +137,27 @@ describe('wrapRequestPermissionWithApprovalAlert', () => {
     // Unknown tool metadata stays generic; no args or command strings leak.
     expect(notified[0]!.message).not.toContain('args');
     expect((result as { approved: boolean }).approved).toBe(true); // original handler's resolution is unchanged
+  });
+
+  test('the actual SDK approval bell passes the installed full-screen guard without leaking direct output', async () => {
+    const writes: string[] = [], captures: number[] = [];
+    const output = spyOn(process.stdout, 'write').mockImplementation((...args: unknown[]) => { writes.push(String(args[0])); return true; });
+    const tty = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+    const suppression = process.env['GOODVIBES_SUPPRESS_NOTIFY'];
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    process.env['GOODVIBES_SUPPRESS_NOTIFY'] = '1';
+    const guard = installFullScreenTerminalOutputGuard({ stdout: process.stdout, active: true, onCapture: count => { captures.push(count); } });
+    try {
+      const wrapped = wrapRequestPermissionWithApprovalAlert(async () => ({ approved: true, remember: false }), { focusTracker: new FocusTracker() });
+      expect(await wrapped(makeRequest())).toEqual({ approved: true, remember: false });
+      expect(writes).toEqual(['\x07']); expect(captures).toEqual([]);
+      process.stdout.write('Unexpected direct approval diagnostic\n');
+      expect(writes).toEqual(['\x07']); expect(captures).toEqual([1]);
+    } finally {
+      guard.dispose(); output.mockRestore();
+      if (tty) Object.defineProperty(process.stdout, 'isTTY', tty); else Reflect.deleteProperty(process.stdout, 'isTTY');
+      if (suppression === undefined) delete process.env['GOODVIBES_SUPPRESS_NOTIFY']; else process.env['GOODVIBES_SUPPRESS_NOTIFY'] = suppression;
+    }
   });
 
   test('fires when the terminal is known to be unfocused', async () => {

@@ -3,8 +3,8 @@
  * "notifications").
  *
  * ↑↓ move, Enter goes to what the notification is about (when it is about
- * something that can be opened), x dismisses the selected one, ctrl+x clears
- * them all. Opening the modal marks everything as seen.
+ * something that can be opened), PageUp/Down scroll its details, x dismisses
+ * the selected one, ctrl+x clears them all. Opening marks everything as seen.
  */
 import type { InputToken } from '@goodvibes-jev/engine/sdk/platform/core';
 import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.js';
@@ -24,6 +24,8 @@ export interface NotificationsModalOptions {
 export class NotificationsModal implements SurfaceModal, NotificationsModalView {
     readonly name = 'notifications';
     selectedIndex = 0;
+    contextScroll = 0;
+    setContextScroll = (offset: number): void => { this.contextScroll = offset; };
     status: string | null = null;
     /** Unread when the modal opened (opening marks everything seen). */
     readonly unread: number;
@@ -36,6 +38,7 @@ export class NotificationsModal implements SurfaceModal, NotificationsModalView 
         feed.markAllSeen();
         this.unsubscribe = feed.subscribe(() => {
             this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, this.entries.length - 1));
+            this.contextScroll = 0;
         });
     }
     get entries(): readonly NotificationFeedEntry[] {
@@ -57,6 +60,7 @@ export class NotificationsModal implements SurfaceModal, NotificationsModalView 
         if (count === 0)
             return;
         this.selectedIndex = Math.max(0, Math.min(count - 1, this.selectedIndex + delta));
+        this.contextScroll = 0;
     }
     private dismissSelected(): void {
         const entry = this.selected();
@@ -99,6 +103,7 @@ export class NotificationsModal implements SurfaceModal, NotificationsModalView 
             const count = this.entries.length;
             this.options.feed.clear();
             this.selectedIndex = 0;
+            this.contextScroll = 0;
             this.status = count > 0 ? `Cleared ${count} notification${count === 1 ? '' : 's'}.` : null;
             return;
         }
@@ -106,15 +111,15 @@ export class NotificationsModal implements SurfaceModal, NotificationsModalView 
             this.move(-1);
         else if (key === 'down')
             this.move(1);
-        else if (key === 'pageup')
-            this.move(-10);
-        else if (key === 'pagedown')
-            this.move(10);
-        else if (key === 'home')
+        else if (key === 'pageup' || key === 'pagedown')
+            this.contextScroll = Math.max(0, this.contextScroll + (key === 'pageup' ? -8 : 8));
+        else if (key === 'home') {
             this.selectedIndex = 0;
-        else if (key === 'end')
+            this.contextScroll = 0;
+        } else if (key === 'end') {
             this.selectedIndex = Math.max(0, this.entries.length - 1);
-        else if (key === 'enter')
+            this.contextScroll = 0;
+        } else if (key === 'enter')
             this.goTo(host);
     }
     render(screenWidth: number, screenHeight: number): SurfaceLayer {

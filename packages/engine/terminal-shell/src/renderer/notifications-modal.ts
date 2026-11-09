@@ -14,7 +14,8 @@
  *   ⏎ go to   x dismiss   ctrl+x clear all
  *
  * Severity is the dot's color (critical red, warning amber, info blue, debug
- * faint). A collapsed burst shows its true count. A body wraps under its title.
+ * faint). A collapsed burst shows its true count. The selected body's details
+ * appear in a separate viewport above the uninterrupted notification list.
  */
 
 import { activeTokens } from './theme.js';
@@ -33,6 +34,8 @@ export interface NotificationsModalView {
   readonly status: string | null;
   /** Clock for the Today/Earlier split (tests pass a fixed value). */
   readonly now: number;
+  readonly contextScroll?: number;
+  readonly setContextScroll?: (offset: number) => void;
 }
 
 function dayStart(ts: number): number {
@@ -58,13 +61,6 @@ function dot(entry: NotificationFeedEntry, unread: boolean): { mark: string; fg:
   return { mark: unread || entry.level === 'critical' || entry.level === 'warning' ? '●' : '○', fg };
 }
 
-/** A body's lines as one row description: a list row keeps no line breaks, so lines are joined with a visible separator, never run together. */
-export function bodyLine(body: string | undefined): string | undefined {
-  if (body === undefined) return undefined;
-  const lines = body.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
-  return lines.length > 0 ? lines.join(' \u00b7 ') : undefined;
-}
-
 /** Rows in display order, with the entry index each item row stands for (-1 for headers). */
 function notificationRows(view: NotificationsModalView): { rows: KitRow[]; entryAt: number[] } {
   const rows: KitRow[] = [];
@@ -82,7 +78,7 @@ function notificationRows(view: NotificationsModalView): { rows: KitRow[]; entry
     const count = entry.collapsedCount > 1 ? `×${entry.collapsedCount} · ` : '';
     rows.push({
       label: entry.title,
-      desc: bodyLine(entry.body),
+      detail: entry.body,
       right: `${count}${whenText(entry.timestamp, view.now)}`,
       mark,
       markFg: fg,
@@ -99,7 +95,7 @@ export function renderNotificationsModal(view: NotificationsModalView, screenWid
   const f = beginModal(screenWidth, screenHeight, {
     title: 'Notifications',
     sub: view.unread > 0 ? `${view.unread} unread` : undefined,
-    hints: empty ? [] : [['⏎', 'go to'], ['x', 'dismiss'], ['ctrl+x', 'clear all']],
+    hints: empty ? [] : [['↑↓', 'move'], ['pgup pgdn', 'details'], ['⏎', 'go to'], ['x', 'dismiss'], ['ctrl+x', 'clear all']],
   });
   const bottom = view.status ? f.bottom - 2 : f.bottom;
   if (empty) {
@@ -108,7 +104,10 @@ export function renderNotificationsModal(view: NotificationsModalView, screenWid
       { text: 'Agent, task, workflow and security notices collect here as they happen; warnings and critical ones also show as a toast in the top right.', style: { fg: t.textMuted } },
     ], bottom);
   } else {
-    const result = drawList(f.canvas, { mouseNavigation: true, rows: notificationRows(view).rows, top: f.top, bottom, x0: f.l, x1: f.r, scrollKey: { owner: view, name: 'list' } });
+    const result = drawList(f.canvas, { mouseNavigation: true, rows: notificationRows(view).rows, top: f.top, bottom, x0: f.l, x1: f.r,
+      context: { height: view.entries.some(entry => entry.body?.trim()) ? Math.floor((bottom - f.top + 1) * 0.4) : 0,
+        offset: view.contextScroll ?? 0, setOffset: offset => view.setContextScroll?.(offset) },
+      scrollKey: { owner: view, name: 'list' } });
     f.hintRight = scrollCountText(result.above, result.below);
   }
   if (view.status) drawTextBlock(f.canvas, f.l, f.bottom, f.r - f.l + 1, [{ text: view.status, style: { fg: t.textMuted } }], f.bottom);

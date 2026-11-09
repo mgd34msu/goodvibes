@@ -45,3 +45,7 @@ export {
   type ClusterGroupRouteContext,
   type ClusterGroupVerbs,
 } from './http/cluster-group-routes.js';
+
+/** Products compose the actual authenticated dispatcher through this public surface. */
+export { DaemonControlPlaneHelper } from './control-plane.js';
+export type { DaemonControlPlaneContext } from './control-plane.js';

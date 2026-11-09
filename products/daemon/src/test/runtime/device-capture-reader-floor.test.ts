@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
-import { createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE } from '@goodvibes-jev/engine/sdk/platform/runtime/native-reader-compatibility';
+import { createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { createDevicePostureServices } from '../../runtime/device-posture-composition.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
 const roots: string[] = [];

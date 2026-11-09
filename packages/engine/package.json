@@ -1278,10 +1278,25 @@
       "types": "./toolchain/dist/index.d.ts",
       "import": "./toolchain/dist/index.js"
     },
+    "./toolchain/release-publication": {
+      "bun": "./toolchain/src/lib/release-publication.ts",
+      "types": "./toolchain/dist/lib/release-publication.d.ts",
+      "import": "./toolchain/dist/lib/release-publication.js"
+    },
     "./toolchain/test-runner": {
       "bun": "./toolchain/src/test-runner/index.ts",
       "types": "./toolchain/dist/test-runner/index.d.ts",
       "import": "./toolchain/dist/test-runner/index.js"
+    },
+    "./toolchain/testing/payments": {
+      "bun": "./toolchain/src/testing/payments.ts",
+      "types": "./toolchain/dist/testing/payments.d.ts",
+      "import": "./toolchain/dist/testing/payments.js"
+    },
+    "./toolchain/testing/suite-release": {
+      "bun": "./toolchain/src/testing/suite-release.ts",
+      "types": "./toolchain/dist/testing/suite-release.d.ts",
+      "import": "./toolchain/dist/testing/suite-release.js"
     },
     "./toolchain/config": {
       "bun": "./toolchain/src/config.ts",

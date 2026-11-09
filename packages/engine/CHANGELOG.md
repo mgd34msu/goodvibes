@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Publish release archives, companion files and metadata through unique staging
+  directories without replacing existing outputs. Failed or concurrent builds
+  preserve files that belong to another invocation.
+
 - Keep card-field input capture separate from its judgment result. Preserve
   distinct receipt-bearing recipients on the same payment channel, and declare
   reader compatibility before saving or adopting those checkpoints.

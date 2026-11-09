@@ -15,7 +15,7 @@
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUNDLE_ROOT_DIR, bundleAssetName, packBundle } from './pack-bundle';
 import { installTestCleanup, makeProjectTempDir } from './helpers/project-temp';
@@ -114,3 +114,95 @@ test('the suite can reuse the original archive pin while same-inode edits or ide
     expect(() => packed.assertCurrent()).toThrow('Packed WebUI archive changed');
   }
 });
+
+test('existing private staging and existing archive/checksum outputs are preserved', () => {
+  const root = scratch('pack-preserve'), dist = buildDist(root), out = join(root, 'release');
+  mkdirSync(join(out, '.pack-staging'), { recursive: true });
+  writeFileSync(join(out, '.pack-staging', 'foreign.txt'), 'another build');
+  const first = packBundle({ distDir: dist, outDir: out, version: '3.1.2' });
+  const archive = readFileSync(first.archivePath), manifest = readFileSync(first.checksumPath);
+  expect(() => packBundle({ distDir: dist, outDir: out, version: '3.1.2' })).toThrow();
+  expect(readFileSync(first.archivePath).equals(archive)).toBe(true);
+  expect(readFileSync(first.checksumPath).equals(manifest)).toBe(true);
+  expect(readFileSync(join(out, '.pack-staging', 'foreign.txt'), 'utf8')).toBe('another build');
+  first.assertCurrent();
+});
+
+test('an existing checksum refuses publication and rolls back only the new archive', () => {
+  const root = scratch('pack-existing-sums'), dist = buildDist(root), out = join(root, 'release');
+  mkdirSync(out); writeFileSync(join(out, 'SHA256SUMS.txt'), 'foreign manifest');
+  expect(() => packBundle({ distDir: dist, outDir: out, version: '3.1.2' })).toThrow();
+  expect(readFileSync(join(out, 'SHA256SUMS.txt'), 'utf8')).toBe('foreign manifest');
+  expect(existsSync(join(out, bundleAssetName('3.1.2')))).toBe(false);
+  expect(readdirSync(out)).toEqual(['SHA256SUMS.txt']);
+});
+
+test('suite checksum cleanup preserves replacements and leaves archive custody usable after its own removal', () => {
+  const root = scratch('pack-checksum-owner'), dist = buildDist(root);
+  const first = packBundle({ distDir: dist, outDir: join(root, 'first'), version: '3.1.2' });
+  first.removeOwnedChecksum(); first.removeOwnedChecksum(); first.assertCurrent();
+  expect(existsSync(first.checksumPath)).toBe(false);
+  const second = packBundle({ distDir: dist, outDir: join(root, 'second'), version: '3.1.2' });
+  writeFileSync(second.checksumPath + '.foreign', 'foreign replacement');
+  renameSync(second.checksumPath + '.foreign', second.checksumPath);
+  expect(() => second.removeOwnedChecksum()).toThrow();
+  expect(readFileSync(second.checksumPath, 'utf8')).toBe('foreign replacement'); second.assertCurrent();
+  writeFileSync(second.archivePath + '.foreign', 'foreign archive'); renameSync(second.archivePath + '.foreign', second.archivePath);
+  expect(() => second.removeOwnedArchive()).toThrow(); expect(readFileSync(second.archivePath, 'utf8')).toBe('foreign archive');
+});
+
+test('an output symlink and a recursively nested output are refused before touching build inputs', () => {
+  const root = scratch('pack-alias'), dist = buildDist(root), nested = join(dist, 'not-created', 'release');
+  expect(() => packBundle({ distDir: dist, outDir: nested, version: '3.1.2' })).toThrow('outside');
+  expect(existsSync(join(dist, 'not-created'))).toBe(false);
+  const out = join(root, 'release'); mkdirSync(out);
+  const foreign = join(root, 'foreign'); writeFileSync(foreign, 'foreign bytes');
+  symlinkSync(foreign, join(out, bundleAssetName('3.1.2')));
+  expect(() => packBundle({ distDir: dist, outDir: out, version: '3.1.2' })).toThrow();
+  expect(readlinkSync(join(out, bundleAssetName('3.1.2')))).toBe(foreign);
+  expect(readFileSync(foreign, 'utf8')).toBe('foreign bytes');
+  const alias = join(root, 'dist-alias'); symlinkSync(dist, alias, 'dir');
+  expect(() => packBundle({ distDir: dist, outDir: join(alias, 'nested'), version: '3.1.2' })).toThrow('outside');
+  expect(existsSync(join(dist, 'nested'))).toBe(false);
+  const nestedAlias = join(root, 'assets-alias'); symlinkSync(join(dist, 'assets'), nestedAlias, 'dir');
+  expect(() => packBundle({ distDir: dist, outDir: `${nestedAlias}/../nested`, version: '3.1.2' })).toThrow();
+  expect(existsSync(join(dist, 'nested'))).toBe(false);
+});
+
+test('invalid versions cannot create arbitrary archive paths or output directories', () => {
+  const root = scratch('pack-invalid-version'), dist = buildDist(root), out = join(root, 'not-created');
+  for (const version of ['../../foreign', '3.1.2/../foreign', '3.1.2\nforeign', '3.1.2' + 'x'.repeat(250)]) {
+    expect(() => packBundle({ distDir: dist, outDir: out, version })).toThrow('version');
+  }
+  expect(existsSync(out)).toBe(false);
+});
+
+test('concurrent actual CLI publishers select one complete winner without deleting its files', async () => {
+  const root = scratch('pack-concurrent'), dist = buildDist(root), out = join(root, 'release');
+  const children = [0, 1].map(() => Bun.spawn([process.execPath, import.meta.dir + '/pack-bundle.ts', '--dist', dist, '--out', out, '--version', '3.1.2'], {
+    stdout: 'pipe', stderr: 'pipe',
+  }));
+  const results = await Promise.all(children.map(async child => {
+    const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    return { code, stdout, stderr };
+  }));
+  expect(results.map(result => result.code).sort()).toEqual([0, 1]);
+  const archive = join(out, bundleAssetName('3.1.2'));
+  expect(listArchive(archive)).toContain(`${BUNDLE_ROOT_DIR}/index.html`);
+  expect(readFileSync(join(out, 'SHA256SUMS.txt'), 'utf8')).toContain(`  ${bundleAssetName('3.1.2')}\n`);
+  expect(readdirSync(out).some(name => name.startsWith('.pack-staging-'))).toBe(false);
+}, 10_000);
+
+test('actual tar failure cleans only this attempt staging and publishes no partial archive', async () => {
+  const root = scratch('pack-failure'), dist = buildDist(root), out = join(root, 'release'), bin = join(root, 'bin');
+  mkdirSync(bin); mkdirSync(join(out, '.pack-staging'), { recursive: true });
+  writeFileSync(join(out, '.pack-staging', 'foreign'), 'preserved');
+  writeFileSync(join(bin, 'tar'), '#!/bin/sh\nexit 17\n', { mode: 0o755 });
+  const child = Bun.spawn([process.execPath, import.meta.dir + '/pack-bundle.ts', '--dist', dist, '--out', out, '--version', '3.1.2'], {
+    env: { ...process.env, PATH: bin + ':' + process.env.PATH }, stdout: 'pipe', stderr: 'pipe',
+  });
+  const [code, , stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  expect(code, stderr).toBe(1);
+  expect(readdirSync(out)).toEqual(['.pack-staging']);
+  expect(readFileSync(join(out, '.pack-staging', 'foreign'), 'utf8')).toBe('preserved');
+}, 10_000);

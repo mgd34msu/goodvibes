@@ -1,6 +1,6 @@
 /** Agent fixtures adapt the platform's shared native release fixture. */
-import { terminalFixturePayload, installTerminalFixture, terminalFixtureRelease } from '../../../../../packages/engine/test/_helpers/suite-release-fixture.ts';
-export { fixtureDigest, suiteArchive as fixtureTarGz } from '../../../../../packages/engine/test/_helpers/suite-release-fixture.ts';
+import { terminalFixturePayload, installTerminalFixture, terminalFixtureRelease } from '@goodvibes-jev/engine/toolchain/testing/suite-release';
+export { fixtureDigest, suiteArchive as fixtureTarGz } from '@goodvibes-jev/engine/toolchain/testing/suite-release';
 export function agentFixturePayload(platform: NodeJS.Platform, arch: string, version: string, source: string) {
   return terminalFixturePayload('goodvibes-agent', platform, arch, version, source);
 }

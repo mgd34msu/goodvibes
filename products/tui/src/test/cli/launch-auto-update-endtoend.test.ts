@@ -5,7 +5,7 @@ import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { rollbackUpdate } from '../../input/commands/update-runtime.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import { fixtureDigest, installTerminalFixture, terminalFixtureRelease } from '../../../../../packages/engine/test/_helpers/suite-release-fixture.ts';
+import { fixtureDigest, installTerminalFixture, terminalFixtureRelease } from '@goodvibes-jev/engine/toolchain/testing/suite-release';
 const END_TO_END_BUDGET_MS = 180_000;
 const OLD = '3.1.2', NEXT = '3.1.3', TAG = `v${NEXT}`, GITHUB = 'https://github.com/mgd34msu/goodvibes';
 const launchModule = join(import.meta.dir, '..', '..', 'cli', 'launch-auto-update.ts');

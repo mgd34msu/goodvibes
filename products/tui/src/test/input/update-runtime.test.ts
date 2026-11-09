@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { suiteReleaseFixture } from '../../../../../packages/engine/test/_helpers/suite-release-fixture.ts';
+import { suiteReleaseFixture } from '@goodvibes-jev/engine/toolchain/testing/suite-release';
 import { applyUpdate, checkForUpdate, createUpdateSwapProgress, detectDaemonServiceManaged, rollbackUpdate, UPDATE_ABORTED_MESSAGE,
   type ApplyUpdateOptions, type RunCommand } from '../../input/commands/update-runtime.ts';
 import type { UpdateFetchLike } from '../../runtime/update-check.ts';

@@ -35,12 +35,13 @@
  *   bun run scripts/pack-bundle.ts                 # writes release/ from dist/
  *   bun run scripts/pack-bundle.ts --dist <dir> --out <dir> --version <x.y.z>
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { captureExistingDirectory } from '../../../packages/engine/sdk/src/platform/utils/atomic-json-store.js';
-import { fileObservationIdentity, readFileObservation } from '../../../packages/engine/sdk/src/platform/utils/file-observation.js';
+import { createReleaseStage, planReleaseDirectory } from '@goodvibes-jev/engine/toolchain/release-publication';
+import type { PublishedReleaseFile } from '@goodvibes-jev/engine/toolchain/release-publication';
+import { readFileObservation } from '@goodvibes-jev/engine/sdk/platform/utils';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -49,6 +50,7 @@ export const BUNDLE_ROOT_DIR = 'goodvibes-webui';
 
 /** The release-asset name for a version. Mirrored by the suite installer. */
 export function bundleAssetName(version: string): string {
+  if (version.length > 128 || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) throw new Error('A release version is required.');
   return `goodvibes-webui-bundle-${version}.tar.gz`;
 }
 
@@ -80,63 +82,53 @@ export interface PackedBundle {
   readonly size: number;
   /** Original archive custody, allowing the suite to reuse this real pin. */
   assertCurrent(): void;
+  /** Remove only this invocation's original temporary standalone checksum. */
+  removeOwnedChecksum(): void;
+  /** Failure compensation, preserving any later replacement. */
+  removeOwnedArchive(): void;
 }
 
 export function packBundle(options: PackBundleOptions): PackedBundle {
   const { distDir, outDir, version } = options;
-  if (!existsSync(join(distDir, 'index.html'))) {
-    throw new Error(
-      `${distDir} holds no index.html; that is the file the daemon serves at / and falls back to for app routes, so this is not a bundle. Run the build first.`,
-    );
-  }
-
   const assetName = bundleAssetName(version);
-  const archivePath = join(outDir, assetName);
-  // The archive's single top-level directory has to be the contract name, and
-  // the build's output directory is `dist`. Stage a renamed copy rather than
-  // relying on a tar transform, which differs between GNU and BSD tar.
-  const staging = join(outDir, '.pack-staging');
-  rmSync(staging, { recursive: true, force: true });
-  mkdirSync(staging, { recursive: true });
-  run(['cp', '-R', distDir, join(staging, BUNDLE_ROOT_DIR)], ROOT);
-
-  mkdirSync(outDir, { recursive: true });
-  rmSync(archivePath, { force: true });
-  // Deterministic: sorted entries, zeroed ownership, epoch timestamps, and a
-  // gzip header that records neither a name nor a time.
-  run(
-    [
-      'tar',
-      '--sort=name',
-      '--owner=0',
-      '--group=0',
-      '--numeric-owner',
-      '--mtime=@0',
-      '--format=gnu',
-      '--use-compress-program=gzip -9 -n',
-      '-cf',
-      archivePath,
-      '-C',
-      staging,
-      BUNDLE_ROOT_DIR,
-    ],
-    ROOT,
-  );
-  rmSync(staging, { recursive: true, force: true });
-
-  const parent = captureExistingDirectory(outDir), selected = join(parent.canonical, assetName);
-  parent.assertCurrent(); const captured = readFileObservation(selected), physical = captured.physical; parent.assertCurrent();
-  const assertCurrent = () => {
-    parent.assertCurrent();
-    if (fileObservationIdentity(selected) !== physical) throw new Error('Packed WebUI archive changed before publication.');
-    parent.assertCurrent();
-  };
-  const digest = createHash('sha256').update(captured.bytes).digest('hex');
-  assertCurrent();
-  const checksumPath = join(outDir, 'SHA256SUMS.txt');
-  writeFileSync(checksumPath, `${digest}  ${assetName}\n`);
-  assertCurrent();
-  return Object.freeze({ assetName, archivePath, checksumPath, sha256: digest, size: captured.bytes.length, assertCurrent });
+  const dist = realpathSync(distDir), planned = planReleaseDirectory(outDir);
+  const inside = relative(dist, planned);
+  if (inside === '' || (!inside.startsWith('..' + '/') && inside !== '..' && !isAbsolute(inside))) {
+    throw new Error('Release output must be outside the built dist directory.');
+  }
+  if (!existsSync(join(dist, 'index.html'))) {
+    throw new Error(`${distDir} holds no index.html; that is the file the daemon serves at / and falls back to for app routes, so this is not a bundle. Run the build first.`);
+  }
+  const staging = createReleaseStage(outDir, '.pack-staging-');
+  let archive: PublishedReleaseFile | undefined, checksum: PublishedReleaseFile | undefined;
+  try {
+    staging.assertCurrent();
+    run(['cp', '-R', dist, join(staging.path, BUNDLE_ROOT_DIR)], ROOT);
+    staging.assertCurrent();
+    // Sorted entries, zero ownership and epoch times; gzip records no name/time.
+    run(['tar', '--sort=name', '--owner=0', '--group=0', '--numeric-owner', '--mtime=@0',
+      '--format=gnu', '--use-compress-program=gzip -9 -n', '-cf', join(staging.path, assetName),
+      '-C', staging.path, BUNDLE_ROOT_DIR], ROOT);
+    archive = staging.publish(assetName, assetName);
+    archive.assertCurrent();
+    const captured = readFileObservation(archive.path);
+    const retainedArchive = archive;
+    const assertCurrent = () => {
+      try { retainedArchive.assertCurrent(); } catch { throw new Error('Packed WebUI archive changed before publication.'); }
+    };
+    const digest = createHash('sha256').update(captured.bytes).digest('hex');
+    assertCurrent();
+    checksum = staging.publishBytes('SHA256SUMS.txt', Buffer.from(`${digest}  ${assetName}\n`));
+    const retainedChecksum = checksum;
+    staging.cleanup(); assertCurrent(); retainedChecksum.assertCurrent();
+    return Object.freeze({ assetName, archivePath: join(outDir, assetName), checksumPath: join(outDir, 'SHA256SUMS.txt'),
+      sha256: digest, size: captured.bytes.length, assertCurrent, removeOwnedChecksum: () => retainedChecksum.removeOwned(),
+      removeOwnedArchive: () => retainedArchive.removeOwned() });
+  } catch (error) {
+    for (const original of [checksum, archive]) { try { original?.removeOwned(); } catch { /* preserve later foreign outputs and primary error */ } }
+    try { staging.cleanup(); } catch { /* original directory replacement is never adopted */ }
+    throw error;
+  }
 }
 
 if (import.meta.main) {

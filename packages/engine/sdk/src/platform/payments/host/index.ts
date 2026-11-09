@@ -76,3 +76,6 @@ export { PaymentReplyHistoryError } from '../reply-history.js';
 export type { PaymentReplyHistory, PaymentReplyHistoryWindow, PaymentReplyHistoryBinding, PaymentReplyHistoryEntry, PaymentReplyReceiveCoverage } from '../reply-history.js';
 export type { RetainedPaymentReplyHistory } from '../reply-history-owner.js';
 export type { RestoredCheckoutWindow } from './checkout-handlers.js';
+
+/** Lossless operation reference only; pairing still validates the issued grant. */
+export { paymentContinuationBinding } from './continuation-binding.js';

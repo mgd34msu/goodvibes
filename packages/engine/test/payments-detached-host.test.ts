@@ -111,7 +111,8 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
   const operation = f.operations.get(body.requestId); if (!operation) throw new Error('Missing admitted operation');
   const saved = await new ProtectedPaymentRequests(join(root, 'requests')).read(body.requestId, operation.operationId, () => {});
   expect(saved.input.item).toBe('Fixture item'); expect(saved.input.requestedMax).toBe('9.00');
-  expect(saved.principalId).toBe(helper.describeAuthenticatedPrincipal(paired.token).principalId);
+  const principal = helper.describeAuthenticatedPrincipal(paired.token); if (!principal) throw new Error('Missing actual paired principal');
+  expect(saved.principalId).toBe(principal.principalId);
   expect(saved.host.authority.tokenId).toBe(paired.id);
   expect(capturedPages).toBe(1); expect(saved.host.browser).toEqual(originalBrowser);
   expect(saved.host.browserControls).toEqual(originalControls);

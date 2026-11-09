@@ -233,7 +233,7 @@ describe('the contracts.* methods', () => {
     const listed = await rest(helper, READ, 'GET', '/api/contracts?includeTerminal=true');
     expect((listed.body as { contracts: { id: string }[] }).contracts.map((entry) => entry.id)).toEqual([id]);
 
-    const hosted = floor.start({ ask: 'Other work.', sessionId: 'hosted-1', origin: 'hosted', projectRoot: HOSTED_ROOT, selectedModel: HOSTED_MODEL });
+    const hosted = await floor.start({ ask: 'Other work.', sessionId: 'hosted-1', origin: 'hosted', projectRoot: HOSTED_ROOT, selectedModel: HOSTED_MODEL });
     const escalationId = escalate(floor, hosted.contract.id, 'Contract asks.');
     const replied = await rest(helper, WRITE, 'POST', `/api/contracts/${hosted.contract.id}/reply`, { escalationId, text: 'Yes.' });
     expect(replied.body).toMatchObject({ escalationId, action: 'approved' });

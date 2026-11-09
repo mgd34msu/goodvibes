@@ -707,6 +707,7 @@ describe('the checkout registry is shared across begin and fillCard, not rebuilt
     await operationWhere(secondId, value => value.state === 'failed');
     // The second executor fails before acquiring the original page claim.
     // The earlier purchase and its waiting hold remain owned.
+    if (typeof first['purchaseId'] !== 'string') throw new Error('Missing original operation');
     const records = await sharedJournal.list(); expect(records).toHaveLength(1);
     expect(records[0]?.purchaseId).toBe(first['purchaseId']); expect(records[0]?.phase).toBe('awaiting-window');
   });

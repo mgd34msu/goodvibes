@@ -39,7 +39,7 @@ test('updates all installed products, browser driver, WebUI and native companion
   expect(result.directoryPaths).toContain(f.webui);
   expect(JSON.parse(readFileSync(join(f.webui, '.goodvibes-release.json'), 'utf8')).version).toBe('3.1.3');
   const rollback = rollbackSuiteUpdate({ ...f.options, currentVersion: '3.1.3' }); expect(rollback.version).toBe('3.1.2');
-  for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+  for (const [path, bytes] of f.original) expect(readFileSync(path).equals(bytes)).toBe(true);
   for (const directory of [f.driver, f.webui]) expect(readFileSync(join(directory, 'original.txt'), 'utf8')).toBe('Retained original directory');
   expect(readdirSync(f.root).filter(name => name.endsWith('.update-transaction'))).toEqual([]);
 });
@@ -47,7 +47,7 @@ test('updates all installed products, browser driver, WebUI and native companion
 test('a missing companion prevents every selected product and directory replacement', async () => {
   const f = fixture(); f.release.delete('sqlite-darwin-x64.dylib.json');
   await expect(applySuiteUpdate(f.options)).rejects.toThrow('missing');
-  for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+  for (const [path, bytes] of f.original) expect(readFileSync(path).equals(bytes)).toBe(true);
   expect(readFileSync(join(f.driver, 'original.txt'), 'utf8')).toBe('Retained original directory');
 });
 
@@ -58,7 +58,7 @@ test('a failed native product rename restores already-committed directory assets
     realUpdateFileIo.rename(from, to);
   } };
   await expect(applySuiteUpdate({ ...f.options, io })).rejects.toThrow();
-  for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+  for (const [path, bytes] of f.original) expect(readFileSync(path).equals(bytes)).toBe(true);
   for (const directory of [f.driver, f.webui]) expect(readFileSync(join(directory, 'original.txt'), 'utf8')).toBe('Retained original directory');
 });
 

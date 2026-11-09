@@ -138,7 +138,7 @@ test('status is read-scoped, immutable and does not extend a deadline or invent 
 });
 
 test('surface decoders reject mismatched/extra/private fields and invalid deadlines without echoing them', () => {
-  const valid = { purchaseId: 'purchase', windowId: 'window', kind: 'approval', notice: 'Owner notice', deadlineMs: 1 };
+  const valid = { purchaseId: 'purchase', windowId: 'window', kind: 'approval' as const, notice: 'Owner notice', deadlineMs: 1 };
   expect(readPaymentWindowStatus({ windows: [valid], operations: [] }).windows).toEqual([valid]);
   for (const value of [{ windows: [{ ...valid, deadlineMs: Infinity }], operations: [] }, { windows: [{ ...valid, cardNumber: 'Private fixture content' }], operations: [] }, { windows: [valid, valid], operations: [] }]) {
     expect(() => readPaymentWindowStatus(value)).toThrow('invalid purchase-window response');

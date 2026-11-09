@@ -247,7 +247,7 @@ test('admission waits for durable original facts and binds original storage meth
   expect(saved.input.item).toBe(original.input.item); expect(saved.evidence).toEqual(original.evidence);
   if (!saved.host.continuation) throw new Error('Original grant was not durably retained');
   expect(pairing.readNativeContinuation(saved.host.continuation)).toEqual(authority);
-  body.item = 'changed during persistence'; source.assertCurrent = () => { throw new Error('replacement callback'); };
+  Reflect.set(body, 'item', 'changed during persistence'); source.assertCurrent = () => { throw new Error('replacement callback'); };
   source.issueContinuation = () => { throw new Error('replacement issuer'); };
   source.revokeContinuation = () => { throw new Error('replacement revoker'); };
   wrapper.retain = async () => { throw new Error('replacement retain'); }; wrapper.remove = async () => { throw new Error('replacement remove'); };

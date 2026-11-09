@@ -49,7 +49,7 @@ test('graceful checkpoint copies retain exact native nested descriptors without 
     retainOriginalReviewDescriptors(f.contract, copy);
     expect(f.nested(copy.units).checks[0]!.reviewedFiles![0]).toBe(f.descriptor);
     expect(serializeContract(copy, 1)).toContain('nativeFileObservation');
-    const wrong = structuredClone(f.contract); f.nested(wrong.units).id = 'foreign-leaf';
+    const wrong = structuredClone(f.contract); Reflect.set(f.nested(wrong.units), 'id', 'foreign-leaf');
     expect(() => retainOriginalReviewDescriptors(f.contract, wrong)).toThrow('unavailable');
   } finally { f.close(); }
 });

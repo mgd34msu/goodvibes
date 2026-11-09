@@ -37,6 +37,7 @@ test('pre-notice native registration preserves an already-owned long poll and ke
 test('restart restores the exact original selector but requires actual drained queue quiet', async () => {
   const f = fixture(), before = f.attach(), span = before.progress.retain('purchase-1', 100);
   if (!span.selector) throw new Error('Missing original native selector');
+  const selector = span.selector;
   before.cursor.save(501, () => {}); before.close(); f.at(200);
   const after = f.attach(), restored = after.progress.restore(span.selector); let complete = false;
   const waiting = restored.waitFor(100, 250, after.lifetime.signal, scope).then(assertCurrent => { complete = true; return assertCurrent; });
@@ -44,13 +45,14 @@ test('restart restores the exact original selector but requires actual drained q
   await Promise.resolve(); expect(complete).toBe(false);
   const empty = after.progress.beginRequest(); f.at(270); after.progress.completeRequest(empty, true);
   const current = await waiting; expect(() => current()).not.toThrow();
-  expect(() => after.progress.restore({ ...span.selector, offsetAtStart: 999 })).toThrow();
-  expect(() => after.progress.restore({ ...span.selector, purchaseId: 'another-purchase' })).toThrow();
+  expect(() => after.progress.restore({ ...selector, offsetAtStart: 999 })).toThrow();
+  expect(() => after.progress.restore({ ...selector, purchaseId: 'another-purchase' })).toThrow();
 });
 
 test.each(['scoped-gap', 'conflict', 'retention', 'clock', 'compatibility-confirmation', 'same-bytes-replacement'] as const)('native restart cannot turn %s into quiet original reception', async reason => {
   const f = fixture(), before = f.attach(), pin = before.progress.retain('purchase-1', 100);
   if (!pin.selector) throw new Error('Missing native span');
+  const selector = pin.selector;
   before.cursor.save(501, () => {});
   if (reason === 'scoped-gap') before.progress.gap(scope);
   if (reason === 'conflict') before.progress.gap();
@@ -59,7 +61,7 @@ test.each(['scoped-gap', 'conflict', 'retention', 'clock', 'compatibility-confir
   f.at(reason === 'retention' ? 100 + TELEGRAM_UPDATE_RETENTION_MS : reason === 'clock' ? 99 : 200);
   const after = f.attach();
   if (reason === 'same-bytes-replacement') writeFileSync(f.path, readFileSync(f.path));
-  await expect(Promise.resolve().then(() => after.progress.restore(pin.selector).waitFor(100, 200, after.lifetime.signal, scope))).rejects.toThrow();
+  await expect(Promise.resolve().then(() => after.progress.restore(selector).waitFor(100, 200, after.lifetime.signal, scope))).rejects.toThrow();
 });
 
 test('one recipient gap survives restart without revoking another actual recipient', async () => {

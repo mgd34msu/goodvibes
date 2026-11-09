@@ -292,7 +292,7 @@ test('group and final checks receive actual plan-validation and unit-acceptance 
       const recorded = done.decisions.find(decision => decision.targetId === `${id}.final-answer-review`)!;
       const review = JSON.parse(recorded.reason);
       expect(review.passed).toBe(true);
-      expect(review.outputDigest).toBe(protocol.outputDigest);
+      expect(review.outputDigest).toBe(hashState(checkedOutputs.get(evidence)!));
       expect(recorded.decisionIds).toEqual(review.decisionIds);
       expect(done.checks.at(-1)!.decisionIds).toEqual(expect.arrayContaining([...assessment.decisionIds, ...review.decisionIds]));
     }

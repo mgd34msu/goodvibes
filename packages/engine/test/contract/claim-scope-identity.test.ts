@@ -57,7 +57,7 @@ test('historical saved passage commitments/questions remain exact while invalid 
   const question = scopedClaimQuestion({ type: 'noul', instructions: 'Supported?' }, scope, hashState(output));
   expect(question.instructions).toMatchObject({ claimScope: { ...scope, outputDigest: hashState(output) } });
   const fresh = answerClaimScopes(output)[0]!;
-  expect(completeAnswerClaimCoverage(output, [{ ...fresh, textDigest: scope.textDigest }])).toBe(false);
+  expect(completeAnswerClaimCoverage(output, [{ ...fresh, textDigest: scope.textDigest } as unknown as typeof fresh])).toBe(false);
   expect(completeAnswerClaimCoverage(output, [{ ...fresh, version: 3 } as unknown as typeof fresh])).toBe(false);
   let invoked = 0;
   expect(completeAnswerClaimCoverage(output, [{ ...fresh, get outputDigest() { invoked++; return 'foreign'; } }])).toBe(false);

@@ -34,8 +34,8 @@ for (const mode of ['ordinary', 'draft', 'durable'] as const) {
     const h = harness(), started = Promise.withResolvers<void>(), resume = Promise.withResolvers<void>();
     const chosen = spyOn(types, 'newContractId').mockReturnValue(id);
     const locate = spyOn(placement, 'resolveContractGitPlacement').mockImplementation(async () => { started.resolve(); await resume.promise; return { isolation: 'shared' }; });
-    const begin = (attempt = 'attempt') => mode === 'durable' ? h.runner.startDurable(request(h.root, attempt)) : mode === 'draft'
-      ? h.runner.startFromPlan({ ...input(h.root), draft: oneUnitPlan() }) : h.runner.start(input(h.root));
+    const begin = async (attempt = 'attempt') => mode === 'durable' ? h.runner.startDurable(request(h.root, attempt)) : mode === 'draft'
+      ? h.runner.startFromPlan({ ...input(h.root), draft: { goal: 'Keep the original requested work', units: [{ id: 'u1', title: 'Original work', brief: 'Keep the original requested work', dependsOn: [] }] } }) : h.runner.start(input(h.root));
     try {
       const first = begin(); void first.catch(() => {}); await started.promise;
       expect(h.manager.list()).toHaveLength(0); expect(h.runner.list()).toHaveLength(0);
@@ -203,7 +203,7 @@ test('a real claim appearing after the initial absent probe still fences the act
   const claimPath = join(path, '.goodvibes', 'contracts', '.creation-claims', `${id}.lock`);
   const original = fs.lstatSync, apply = Reflect.apply;
   let injected = false, reservation: ReturnType<ContractStore['reserveCreation']> | undefined;
-  const probe = spyOn(fs, 'lstatSync').mockImplementation((...args) => {
+  const probe = spyOn(fs, 'lstatSync').mockImplementation(((...args: Parameters<typeof fs.lstatSync>) => {
     if (!injected && String(args[0]) === claimPath) {
       injected = true;
       try { return apply(original, fs, args); }
@@ -214,7 +214,7 @@ test('a real claim appearing after the initial absent probe still fences the act
       }
     }
     return apply(original, fs, args);
-  });
+  }) as typeof fs.lstatSync);
   try { expect(() => reader.load(id)).toThrow('still being created'); expect(injected).toBe(true); }
   finally { probe.mockRestore(); reservation?.release(); }
   expect(reader.load(id)?.id).toBe(id);

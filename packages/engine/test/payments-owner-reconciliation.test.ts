@@ -116,6 +116,7 @@ test('an identical-value hold reissued while the ledger append awaits is not the
   const replacement = f.budget.reserve({ id: initial.id, itemMinorUnits: initial.itemMinorUnits, overageMinorUnits: initial.overageMinorUnits,
     toleranceMinorUnits: initial.toleranceMinorUnits, limits: LIMITS, nowMs: initial.createdAtMs,
     timezone: 'UTC', ttlMs: initial.expiresAtMs - initial.createdAtMs, retainUntilSettled: true });
+  if (!replacement) throw new Error('Missing replacement hold');
   expect(replacement).toEqual(initial); expect(replacement).not.toBe(initial);
   resume.release(); await expect(pending).rejects.toThrow();
   expect(f.budget.state().reservations[0]).toBe(replacement);

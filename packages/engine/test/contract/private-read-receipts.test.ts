@@ -139,5 +139,7 @@ test('full opaque contract IDs preserve native private receipt archives', () => 
   const f = fixture(newContractId()); preserveDeclaredReadReceipts(f.contract);
   expect(existsSync(f.path)).toBe(true); expect(lstatSync(f.path).mode & 0o777).toBe(0o600);
   expect(readPrivateReceiptArchives(f.contract)[0]?.path).toBe(f.relativePath);
-  expect(readNativePrivateReceiptArchives(f.contract, [f.relativePath, 'review-artifacts/repository-review/findings.json'])[0]?.retainedPrivateReferences).toHaveLength(1);
+  const receipt = readNativePrivateReceiptArchives(f.contract, [f.relativePath, 'review-artifacts/repository-review/findings.json'])[0];
+  if (!receipt || !('retainedPrivateReferences' in receipt)) throw new Error('Missing actual private reference contents');
+  expect(receipt.retainedPrivateReferences).toHaveLength(1);
 });

@@ -120,16 +120,17 @@ describe('durable admission reverse identity', () => {
     expect(() => f.store.findByContractId(admission.contractId)).toThrow('invalid');
   });
 
-  test('independent processes racing different keys publish exactly one contract-ID owner', async () => {
+  for (const preparedParents of [true, false]) test(`independent processes racing different keys publish exactly one contract-ID owner (prepared parents=${preparedParents})`, async () => {
     const f = fixture(), admissions = [f.make('race-a'), f.make('race-b')];
+    if (preparedParents) mkdirSync(join(f.directory, '.by-contract'), { recursive: true });
     const module = fileURLToPath(new URL('../../sdk/src/platform/contract/durable-admission.ts', import.meta.url));
     const children = admissions.map(admission => {
-      const code = `import { DurableContractAdmissions } from ${JSON.stringify(module)};
+      const code = `import { DurableContractAdmissions, DurableContractAdmissionError } from ${JSON.stringify(module)};
         const start = new Promise(resolve => process.stdin.once('data', resolve));
         process.stdout.write('ready\\n'); await start;
         try { new DurableContractAdmissions(${JSON.stringify(f.root)}).write(${JSON.stringify(admission)}, 'checkpoint');
           process.stdout.write(JSON.stringify({ state: 'committed' }) + '\\n'); }
-        catch(error) { process.stdout.write(JSON.stringify({ state: error.code ?? 'failed' }) + '\\n'); }
+        catch(error) { process.stdout.write(JSON.stringify({ state: error.code ?? 'failed', typed: error instanceof DurableContractAdmissionError }) + '\\n'); }
         process.stdin.pause();`;
       return Bun.spawn([process.execPath, '-e', code], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
     });
@@ -159,11 +160,25 @@ describe('durable admission reverse identity', () => {
       }));
       expect(await Promise.all(children.map(child => child.exited))).toEqual([0, 0]);
       expect(await Promise.all(errors)).toEqual(['', '']);
-      const states = output.map(text => (JSON.parse(text) as { state: string }).state);
-      expect([...states].sort()).toEqual(['committed', 'conflict']);
+      const results = output.map(text => JSON.parse(text) as { state: string; typed?: boolean });
+      const states = results.map(result => result.state);
+      expect(states.filter(state => state === 'committed')).toHaveLength(1);
+      const refused = results.find(result => result.state !== 'committed')!;
+      expect(refused.typed).toBe(true);
+      // Independently appearing first-use parents are unknown custody and
+      // refuse as invalid. Prepared parents exercise the exact reverse-leaf
+      // collision and must report conflict; no arbitrary failure is accepted.
+      if (preparedParents) expect(refused.state).toBe('conflict');
+      else expect(['invalid', 'conflict']).toContain(refused.state);
       const winner = states.indexOf('committed'), loser = winner === 0 ? 1 : 0;
-      expect(f.store.findByContractId(admissions[winner]!.contractId)).toEqual(admissions[winner]);
+      const winnerAdmission = admissions[winner]!;
+      const forward = readFileSync(f.path(winnerAdmission.key)), reverse = readFileSync(f.index(winnerAdmission.contractId));
+      expect(JSON.parse(forward.toString())).toEqual({ admission: winnerAdmission, checkpoint: 'checkpoint' });
+      expect(JSON.parse(reverse.toString())).toEqual({ schemaVersion: 1, contractId: winnerAdmission.contractId, key: winnerAdmission.key });
+      expect(f.store.findByContractId(winnerAdmission.contractId)).toEqual(winnerAdmission);
       expect(f.store.read(admissions[loser]!.key)).toBeNull();
+      expect(readFileSync(f.path(winnerAdmission.key)).equals(forward)).toBe(true);
+      expect(readFileSync(f.index(winnerAdmission.contractId)).equals(reverse)).toBe(true);
     } finally {
       clearTimeout(deadline);
       for (const child of children) if (child.exitCode === null) child.kill();

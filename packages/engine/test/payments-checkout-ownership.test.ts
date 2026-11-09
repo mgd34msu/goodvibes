@@ -777,7 +777,7 @@ async function resumedFixture() {
   const resume = { checkpoint, prepare(owner: { readonly assertCurrent?: (() => void) | undefined }) {
     owner.assertCurrent?.(); prepared++;
     return { deliveries: Promise.resolve(checkpoint.record.windowDeliveries ?? []), deadlineMs: Promise.resolve(checkpoint.record.windowDeadlineMs ?? 0),
-      async awaitAnswer(deadlineMs: number) { owner.assertCurrent?.(); expect(deadlineMs).toBe(checkpoint.record.windowDeadlineMs);
+      async awaitAnswer(deadlineMs: number) { owner.assertCurrent?.(); expect(checkpoint.record.windowDeadlineMs).toBe(deadlineMs);
         return { answer: 'acknowledge' as const, channel: 'operator' as const }; }, cancel() {} };
   } };
   Reflect.set(f.deps, 'resumeWindow', resume);
@@ -801,7 +801,7 @@ test('a resumed purchase excludes only its own hold when deciding, preserving an
   const f = await resumedFixture();
   const other = f.ledger.reserve({ id: 'other-purchase', itemMinorUnits: 3_000, overageMinorUnits: 0, toleranceMinorUnits: 0,
     limits: f.deps.limits, nowMs: f.deps.now(), timezone: 'UTC', retainUntilSettled: true });
-  expect(other).not.toBeNull();
+  expect(other).not.toBeNull(); if (!other) throw new Error('Missing independent reservation');
   expect((await f.run()).kind).toBe('purchased'); expect(f.prepared()).toBe(1);
   expect(f.ledger.state().reservations).toEqual([other]);
 });

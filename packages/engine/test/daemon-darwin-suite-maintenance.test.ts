@@ -16,9 +16,14 @@ for (const initiallyBusy of [false, true]) test(`Darwin daemon maintains the com
   const updater = new DaemonAutoUpdater({ currentVersion: '3.1.2', execPath, platform: 'darwin', arch: 'x64',
     suite: { configManager: { get: key => key === 'controlPlane.webui.bundleDir' ? f.webui : undefined } },
     releasesLatestUrl: 'https://fixture.invalid/releases/latest',
-    fetchImpl: async url => url.endsWith('/latest')
-      ? new Response(null, { status: 302, headers: { location: 'https://fixture.invalid/releases/tag/v3.1.3' } })
-      : f.fetchImpl(url),
+    fetchImpl: async url => {
+      if (!url.endsWith('/latest')) return f.fetchImpl(url);
+      const response = new Response(null, { status: 302, headers: { location: 'https://fixture.invalid/releases/tag/v3.1.3' } });
+      // A real manual fetch carries the original request URL; constructed
+      // Responses otherwise default to an empty URL and fail redirect custody.
+      Object.defineProperty(response, 'url', { value: url });
+      return response;
+    },
     isIdle: () => idle, receipts,
     serviceActions: { isSupervised: () => true, adoptIntoService: () => { throw new Error('Unexpected adoption'); },
       restartService: () => { restarts++; return { status: 'accepted' }; } },
@@ -30,9 +35,10 @@ for (const initiallyBusy of [false, true]) test(`Darwin daemon maintains the com
     await updater.tick();
     if (initiallyBusy) {
       expect(updater.snapshot().appliedVersion).toBeNull(); expect(restarts).toBe(0);
-      for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+      for (const [path, bytes] of f.original) expect(readFileSync(path).equals(bytes)).toBe(true);
       idle = true; await updater.tick();
     }
+    expect(updater.snapshot().lastCheckFailure).toBeNull();
     expect(updater.snapshot().appliedVersion).toBe('3.1.3'); expect(restarts).toBe(1);
     expect(receipts.list().some(receipt => receipt.text.includes('installed suite:') && receipt.text.includes('goodvibes-agent'))).toBe(true);
     const current = inspectDaemonUpdateInstallation(execPath, 'darwin', 'x64', '', realUpdateFileIo);
@@ -41,6 +47,6 @@ for (const initiallyBusy of [false, true]) test(`Darwin daemon maintains the com
     expect(current?.readers?.formats).toContain('knowledge-schema-v12');
     const restored = rollbackSuiteUpdate({ execPath, platform: 'darwin', arch: 'x64', currentVersion: '3.1.3', webuiDirectory: f.webui });
     expect(restored.version).toBe('3.1.2'); expect(restored.programs).toHaveLength(3);
-    for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+    for (const [path, bytes] of f.original) expect(readFileSync(path).equals(bytes)).toBe(true);
   } finally { updater.stop(); await updater.drainHandover(); f.cleanup(); }
 });

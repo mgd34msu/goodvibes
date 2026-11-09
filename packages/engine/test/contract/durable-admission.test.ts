@@ -333,6 +333,7 @@ describe('native durable contract admission', () => {
     try {
       await expect(h.runner.startDurable(request(h.root))).rejects.toMatchObject({ code: 'checkpoint' });
       expect(contractId).toBeDefined(); await h.runner.join(contractId!);
+      if (typeof original !== 'string') throw new Error('Missing original prepared checkpoint');
       expect(new DurableContractAdmissions(h.root).checkpoint(key)).toBe(original);
       await expect(new DurableContractAdmissions(h.root).lease(key)).rejects.toThrow('cross-process-lock');
       expect(checks).toBe(0); expect(h.agentsOf('u1')).toHaveLength(0);

@@ -4,7 +4,7 @@ import * as crypto from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from '../_helpers/project-temp.js';
-import { hashState } from '@goodvibes-jev/judgment';
+import { hashState, toJson } from '@goodvibes-jev/judgment';
 import { contractWorkReceipts, workReceiptIdentity } from '../../sdk/src/platform/contract/work-receipts.js';
 import { currentFileObservations, currentFileMatchesText, isCurrentNativeFileObservation } from '../../sdk/src/platform/contract/current-file-observations.js';
 import { reviewedFileFromObservation, reviewedFileVersionState } from '../../sdk/src/platform/contract/review-file-observations.js';
@@ -73,7 +73,7 @@ test('actual owned checkpoint restart preserves unchanged refusal and repair sou
   // Both actual consumers are used: completion's evidence digest and the
   // repair candidate's workReceiptIdentity source scope.
   const refusalDigest = hashState({ currentFiles: originalFiles });
-  const repairDigest = hashState(workReceiptIdentity(contractWorkReceipts(f.contract, { readObservations: true })));
+  const repairDigest = hashState(toJson(workReceiptIdentity(contractWorkReceipts(f.contract, { readObservations: true }))));
   f.store.hold(f.contract); expect(f.store.write(f.contract.id)).toBe(true);
   const envelope = JSON.parse(readFileSync(contractPath(f.root, f.contract.id), 'utf8'));
   expect(envelope.nativeFileLabels.entries).toHaveLength(2);
@@ -82,7 +82,7 @@ test('actual owned checkpoint restart preserves unchanged refusal and repair sou
   expect(JSON.stringify(restored)).not.toContain('nativeFileObservation');
   const restoredFiles = observe(restored);
   expect(hashState({ currentFiles: restoredFiles })).toBe(refusalDigest);
-  expect(hashState(workReceiptIdentity(contractWorkReceipts(restored, { readObservations: true })))).toBe(repairDigest);
+  expect(hashState(toJson(workReceiptIdentity(contractWorkReceipts(restored, { readObservations: true }))))).toBe(repairDigest);
   expect(currentFileMatchesText(restoredFiles[0]!, 'Ready.\n')).toBe(true);
   expect(currentFileMatchesText(structuredClone(restoredFiles[0]!), 'Ready.\n')).toBe(false);
   // Public import cannot seed those labels, even from the same saved bytes.

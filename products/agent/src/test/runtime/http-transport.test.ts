@@ -11,6 +11,7 @@ import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import { createHttpTransport } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
+import type { RuntimeServices } from '../../runtime/services.ts';
 import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -68,6 +69,7 @@ async function reservePort(): Promise<number> {
 
 describe('HttpTransport', () => {
   let daemon: DaemonServer;
+  let runtimeServices: RuntimeServices | undefined;
   let tempRoot: string;
   let workingDir: string;
   let homeDir: string;
@@ -82,7 +84,7 @@ describe('HttpTransport', () => {
     mkdirSync(homeDir, { recursive: true });
     const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: join(homeDir, '.goodvibes', 'tui'), workingDir, homeDir });
     seedProviderMetadataCacheFixture({ configManager, homeDirectory: homeDir, workingDirectory: workingDir });
-    const runtimeServices = (await createPreparedAgentRuntimeServices({
+    runtimeServices = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       runtimeStore: createRuntimeStore(),
@@ -104,7 +106,11 @@ describe('HttpTransport', () => {
   });
 
   afterEach(async () => {
-    await daemon?.stop();
+    const failures: unknown[] = [];
+    try { await daemon?.stop(); } catch (error) { failures.push(error); }
+    try { await runtimeServices?.close(); } catch (error) { failures.push(error); }
+    try { await runtimeServices?.workspaceCheckpointManager.drain(); } catch (error) { failures.push(error); }
+    if (failures.length) throw new AggregateError(failures, 'Transport fixture teardown failed');
     rmSync(tempRoot, { recursive: true, force: true });
   });
 

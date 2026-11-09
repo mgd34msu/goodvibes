@@ -56,7 +56,7 @@ import { MemoryConsolidationScheduler } from '../state/memory-consolidation-sche
 import { PowerManager, wireRuntimePower, createUnavailablePowerSeam, type PowerPlatformSeam } from '../power/index.js';
 import { emitProviderVoiceUsage } from './emitters/providers.js';
 import { AppendOnlyRetentionScheduler, runStartupAppendOnlySweep } from './retention/append-only-registry.js';
-import { createAsyncDisposalScope, registerRuntimePollers } from './disposal.js';
+import { createAsyncDisposalScope, createRuntimeStopRequests, registerRuntimePollers } from './disposal.js';
 import { composeJudgment, type JudgmentServices } from './judgment-services.js';
 import type { BrowserJudgmentCapability } from '@goodvibes-jev/engine/daemon-api';
 import { resolveMemoryVectorDbPath } from '../state/memory-vector-store.js';
@@ -425,7 +425,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   });
   const localUserAuthManager = new UserAuthManager({ bootstrapFilePath: shellPaths.resolveUserPath(surfaceRoot, 'auth-users.json'), bootstrapCredentialPath: shellPaths.resolveUserPath(surfaceRoot, 'auth-bootstrap.txt') });
   // Per-pairing named revocable operator tokens (device-scoped); consulted by the operator-auth path. The cap is read per mint, so a `device.nodes.maxPaired` change applies to the next pairing without a restart.
-  const pairingTokens = new PairingTokenManager(controlPlaneStorePath(shellPaths, surfaceRoot, 'pairing-tokens.json'), { maxPaired: () => configManager.get('device.nodes.maxPaired') });
+  const pairingTokens = new PairingTokenManager(controlPlaneStorePath(shellPaths, surfaceRoot, 'pairing-tokens.json'), { maxPaired: () => configManager.get('device.nodes.maxPaired'), nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter() });
   const profileManager = new ProfileManager(shellPaths.resolveUserPath(surfaceRoot, 'profiles'));
   const bookmarkManager = new BookmarkManager(shellPaths.resolveUserPath(surfaceRoot, 'bookmarks'));
   const sessionManager = new SessionManager(workingDirectory, { surfaceRoot });
@@ -659,8 +659,11 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     },
   });
   const knowledgeStore = createConfiguredPlanningStore(configManager, REGULAR_KNOWLEDGE_DB_FILE, { nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), family: 'wiki' });
+  disposalScope.registry.add('knowledge store', () => knowledgeStore.close());
   const agentKnowledgeStore = new KnowledgeStore({ nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, family: 'agent' });
+  disposalScope.registry.add('agent knowledge store', () => agentKnowledgeStore.close());
   const homeGraphKnowledgeStore = new KnowledgeStore({ nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE, family: 'home-graph' });
+  disposalScope.registry.add('home graph knowledge store', () => homeGraphKnowledgeStore.close());
   configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: configManager.getControlPlaneConfigDir(), stores: [knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore] });
   const knowledgeSemanticLlm = createProviderBackedKnowledgeSemanticLlm(providerRegistry, {
     maxConcurrent: 1,
@@ -1089,11 +1092,12 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   disposalScope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: externalPermissionHost }));
   // Teardown for every poller started above. RuntimePollerOwners is all-required,
   // so a poller added to this graph later cannot compile without being named here.
+  const stopRequests = createRuntimeStopRequests(disposalScope.registry, { homeGraphService, memoryGovernor, watcherRegistry });
   registerRuntimePollers(disposalScope.registry, {
-    stopConfigWatch, watcherRegistry, storeSnapshotScheduler, appendOnlyRetentionScheduler,
+    stopConfigWatch, watcherRegistry: { dispose: stopRequests.watchers }, storeSnapshotScheduler, appendOnlyRetentionScheduler,
     memoryConsolidationScheduler, codeIndexReindexScheduler, sessionOrchestration,
-    knowledgeService, agentKnowledgeService, contractRunner: contracts, homeGraphService,
-    processRegistry, memoryGovernor, triggerManager, agentOrchestrator, cancelHostedAgentRuns: () => cancelAllAgentRuns(agentManager),
+    knowledgeService, agentKnowledgeService, contractRunner: contracts, homeGraphService: { dispose: stopRequests.homeGraph },
+    processRegistry, memoryGovernor: { stop: stopRequests.memoryGovernor }, triggerManager, agentOrchestrator, cancelHostedAgentRuns: () => cancelAllAgentRuns(agentManager),
   });
   // Contracts left on disk resume once the services are up.
   void resumeContracts(contractRunner, workingDirectory);
@@ -1203,8 +1207,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     fileUndoManager,
     workspaceCheckpointManager,
     integrationHelpers,
-    dispose: (): void => disposalScope.dispose(),
-    close: (): Promise<void> => disposalScope.close(),
+    dispose: (): void => { stopRequests.request(); disposalScope.dispose(); },
+    close: (): Promise<void> => { stopRequests.request(); return disposalScope.close(); },
     async rerootStores(newWorkingDir: string): Promise<void> {
       const newMemoryDbPath = join(newWorkingDir, '.goodvibes', surfaceRoot, 'memory.sqlite');
       await memoryStore.reroot(newMemoryDbPath);

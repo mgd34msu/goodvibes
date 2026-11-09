@@ -1,6 +1,6 @@
 import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
@@ -12,6 +12,7 @@ import { createFeatureFlagManager } from '@/runtime/index.ts';
 import { createRealtimeTransport } from '@/runtime/index.ts';
 import { createAuthenticatedWebSocket } from '../helpers/authenticated-websocket.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
+import type { RuntimeServices } from '../../runtime/services.ts';
 import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -28,7 +29,7 @@ function createTransportFeatureFlags() {
   return featureFlags;
 }
 
-async function waitFor<T>(fn: () => T | undefined | null, timeoutMs = 3_000, intervalMs = 10): Promise<T> {
+async function waitFor<T>(fn: () => Promise<T | undefined | null> | T | undefined | null, timeoutMs = 3_000, intervalMs = 10): Promise<T> {
   const startedAt = Date.now();
   for (;;) {
     const value = await fn();
@@ -69,6 +70,7 @@ async function reservePort(): Promise<number> {
 
 describe('RealtimeTransport', () => {
   let daemon: DaemonServer;
+  let runtimeServices: RuntimeServices | undefined;
   let tempRoot: string;
   let workingDir: string;
   let homeDir: string;
@@ -83,7 +85,7 @@ describe('RealtimeTransport', () => {
     mkdirSync(homeDir, { recursive: true });
     const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: join(homeDir, '.goodvibes', 'tui'), workingDir, homeDir });
     seedProviderMetadataCacheFixture({ configManager, homeDirectory: homeDir, workingDirectory: workingDir });
-    const runtimeServices = (await createPreparedAgentRuntimeServices({
+    runtimeServices = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       runtimeStore: createRuntimeStore(),
@@ -105,7 +107,11 @@ describe('RealtimeTransport', () => {
   });
 
   afterEach(async () => {
-    await daemon?.stop();
+    const failures: unknown[] = [];
+    try { await daemon?.stop(); } catch (error) { failures.push(error); }
+    try { await runtimeServices?.close(); } catch (error) { failures.push(error); }
+    try { await runtimeServices?.workspaceCheckpointManager.drain(); } catch (error) { failures.push(error); }
+    if (failures.length) throw new AggregateError(failures, 'Transport fixture teardown failed');
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
@@ -150,29 +156,56 @@ describe('RealtimeTransport', () => {
       seen.push({ type: event.type, agentId: event.agentId });
     });
     await new Promise((resolve) => setTimeout(resolve, 100));
-    const task = await transport.operator.tasks.submit({ task: 'cancel me over realtime transport' });
-    expect(task.agentId).toEqual(expect.any(String));
-    expect(task.agentId?.length).toBeGreaterThan(0);
-    const taskRecord = await waitFor(async () => {
-      const tasks = await transport.operator.tasks.list();
-      return tasks.find((entry) => entry.title === 'cancel me over realtime transport') ?? null;
+    if (!runtimeServices) throw new Error('The original transport runtime was not composed');
+    const services = runtimeServices;
+    const releaseStartup = Promise.withResolvers<void>();
+    const startupEntered = Promise.withResolvers<AbortSignal>();
+    const startForOwner = services.contractRunner.startForOwner.bind(services.contractRunner);
+    // Task admission publishes a pending contract owner, hence a queued task.
+    // Hold the genuine start boundary so this transport test can cancel that
+    // exact admitted owner without depending on a configured model planner.
+    const startup = spyOn(services.contractRunner, 'startForOwner').mockImplementation(async (record, options = {}) => {
+      if (!options.signal) throw new Error('The real Agent start must retain its cancellation signal');
+      startupEntered.resolve(options.signal);
+      await releaseStartup.promise;
+      return startForOwner(record, options);
     });
-    expect(taskRecord).toEqual(expect.objectContaining({
-      title: 'cancel me over realtime transport',
-      id: task.agentId,
-      owner: task.agentId,
-      status: 'running',
-    }));
+    let agentId: string | undefined;
     try {
+      const task = await transport.operator.tasks.submit({ task: 'cancel me over realtime transport' });
+      agentId = task.agentId;
+      if (!agentId) throw new Error('The admitted task must name its actual agent');
+      expect(agentId).toEqual(expect.any(String));
+      expect(agentId?.length).toBeGreaterThan(0);
+      const signal = await startupEntered.promise;
+      const taskRecord = await waitFor(async () => {
+        const tasks = await transport.operator.tasks.list();
+        return tasks.find(entry => entry.id === agentId) ?? null;
+      });
+      expect(taskRecord).toEqual(expect.objectContaining({
+        title: 'cancel me over realtime transport', id: agentId, owner: agentId, status: 'queued',
+      }));
+      expect(signal.aborted).toBe(false);
       await waitFor(() => seen[0]);
-      await transport.operator.tasks.cancel(taskRecord!.id);
+      await transport.operator.tasks.cancel(taskRecord.id);
+      expect(signal.aborted).toBe(true);
+      releaseStartup.resolve();
+      await services.agentManager.join(agentId);
+      const cancelled = await transport.operator.tasks.list();
+      expect(cancelled.find(entry => entry.id === agentId)?.status).toBe('cancelled');
     } finally {
-      unsubscribe();
+      releaseStartup.resolve();
+      try {
+        if (agentId) {
+          services.agentManager.cancel(agentId);
+          await services.agentManager.join(agentId);
+        }
+      } finally { startup.mockRestore(); unsubscribe(); }
     }
 
     expect(seen[0]).toEqual({
       type: 'AGENT_SPAWNING',
-      agentId: task.agentId!,
+      agentId,
     });
     const snapshot = await transport.snapshot();
     expect(snapshot.kind).toBe('realtime');

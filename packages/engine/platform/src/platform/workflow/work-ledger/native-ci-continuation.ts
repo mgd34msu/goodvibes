@@ -11,9 +11,9 @@ import type { CiWatchSubscription, FixSessionBrief } from '../../ci-watch/types.
 import { durablePayloadRevision, durableKeyIdentity, type DurableStartedContract } from '../../contract/durable-admission.js';
 import { nativeContractSourceForAdmission } from '../../contract/native-source.js';
 import type { ContractView, NativeContractSource } from '../../contract/types.js';
-import type { NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativeWorkExecutionHost } from './native-execution.js';
+import type { NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativePairedExecutionSnapshot, NativeWorkExecutionHost } from './native-execution.js';
 import type { NativeExecutionOriginal, NativeWorkExecutionRecord, NativeWorkExecutionStorage, NativeWorkExecutionTarget } from './native-execution-types.js';
-import { captureNativeCiIssue, nativeCiIssueCommitment, captureNativeCiWatchIdentity, nativeCiWatchCommitment, captureNativeCiFailure, nativeCiFailureCommitment, nativeCiConsumption, nativeCiSuccessorId, nativeCiLedgerSourceMetadata, nativeCiLedgerSourceMatches, nativeCiSourceBinding, parseNativeCiContinuation, type NativeCiContinuationRecord, type NativeCiContinuationTransaction, type NativeCiContinuationOriginal } from './native-ci-continuation-types.js';
+import { captureNativeCiIssue, nativeCiIssueCommitment, captureNativeCiWatchIdentity, nativeCiWatchCommitment, captureNativeCiFailure, nativeCiFailureCommitment, nativeCiConsumption, nativeCiSuccessorId, nativeCiLedgerSourceMetadata, nativeCiLedgerSourceMatches, nativeCiSourceBinding, nativeCiHistoricalSourceBinding, parseNativeCiContinuation, type NativeCiContinuationRecord, type NativeCiContinuationTransaction, type NativeCiContinuationOriginal } from './native-ci-continuation-types.js';
 
 export type NativeCiGrantOwner = Pick<PairingTokenManager, 'readNativeContinuation' | 'withNativeContinuation' | 'consumeNativeContinuation' | 'revokeNativeContinuation' | 'bindNativeContinuationWatch' | 'issueNativeContinuationFromGrant' | 'revokeNativeContinuationsForSource'>;
 export interface NativeCiContinuationPolicy { capture(version?: 1 | 2): string; current(version?: 1 | 2): string; scopes(): readonly string[]; onDidInvalidate(listener: () => void): () => void; }
@@ -240,10 +240,13 @@ export function createNativeCiContinuationHost(deps: {
       if (!owned.record.watch || !isDeepStrictEqual(owned.record.watch, bound)) throw new Error('Saved CI watch does not match its issued native continuation');
       return operation(owned.record, undefined, current.original.record ?? current.original.intent ?? undefined, owned.successorExecution?.record ?? owned.successorExecution?.intent ?? undefined);
     },
-    revokeSource(request: NativeWorkExecutionRecord['request'], assertCurrent: () => void): void {
+    revokeSource(request: NativeWorkExecutionRecord['request'], assertCurrent: () => void, authority: NativePairedExecutionSnapshot): void {
       // This private index survives missing/edited CI handoff records. Cancellation
       // of a consumed successor also retires its parent grant and descendants.
-      deps.grants?.revokeNativeContinuationsForSource(nativeCiSourceBinding(deps.projectId, request), assertCurrent);
+      deps.grants?.revokeNativeContinuationsForSource(nativeCiSourceBinding(deps.projectId, request), assertCurrent,
+        request.key.criteriaId === 'criteria-v2:' + request.key.workId ? {
+          authority, legacyBinding: () => nativeCiHistoricalSourceBinding(deps.projectId, request),
+        } : undefined);
     },
     async revokeWatch(watch: CiWatchSubscription): Promise<void> {
       const bound = captureNativeCiWatchIdentity(watch); if (!bound.continuationId) return;

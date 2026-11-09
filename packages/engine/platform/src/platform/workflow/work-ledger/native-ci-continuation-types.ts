@@ -104,9 +104,17 @@ export function nativeCiSuccessorId(record: NativeCiContinuationRecord): string 
   if (proof) proof.legacySuccessor = id; return id;
 }
 export function nativeCiSourceBinding(projectId: string, request: Pick<DurableContractRequest, 'key' | 'binding' | 'input'>): string {
-  if (/^criteria-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(request.key.criteriaId)) {
+  // requestFor retains the actual ledger work ID in this tuple. Work IDs
+  // include the work-* prefix and may be supplied by an embedder's clock;
+  // a bare UUID shape is not the current native producer contract.
+  if (request.key.criteriaId === 'criteria-v2:' + request.key.workId) {
     if (!/^[0-9a-f]{64}$/.test(request.binding.actionId)) throw new Error('Invalid native source action token'); return request.binding.actionId;
   }
+  return nativeCiHistoricalSourceBinding(projectId, request);
+}
+/** Exact saved pre-correction root-grant recipe. Only an actual unmarked
+ * persisted grant candidate may require it for a current native request. */
+export function nativeCiHistoricalSourceBinding(projectId: string, request: Pick<DurableContractRequest, 'key' | 'binding' | 'input'>): string {
   const { authorityId, authorityRevision, scopeId, scopeRevision } = request.binding;
   return nativeCiDigest({ projectId, projectRoot: request.input.projectRoot, key: request.key, authorityId, authorityRevision, scopeId, scopeRevision });
 }

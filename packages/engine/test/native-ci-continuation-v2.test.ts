@@ -1,7 +1,7 @@
 /** Regression source UNRUN during the coding-first pass. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
@@ -17,7 +17,7 @@ afterEach(async () => { for (const store of stores.splice(0)) await store.close(
 const oldDigest = (value: unknown): string => crypto.createHash('sha256').update(JSON.stringify(value, (_key, item: unknown) => item !== null && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)).digest('hex');
 function issued() {
-  const key = { workId: 'original-work', criteriaId: 'criteria-v2:' + opaqueUuid(), criteriaRevision: '1', attemptId: 'original-attempt' };
+  const key = { workId: 'original-work', criteriaId: 'criteria-v2:original-work', criteriaRevision: '1', attemptId: 'original-attempt' };
   const issue = captureNativeCiIssue(2, { projectId: 'project', originalKey: key, originalPayloadRevision: 'a'.repeat(64), principalId: 'paired-fixture', authorityRevision: 'paired-incarnation',
     authorityScopes: ['read:work-ledger', 'write:work-ledger', 'write:fleet'], scopeId: 'owned-workspace', scopeRevision: 'scope-incarnation',
     ledgerSource: { version: 3, sourceId: opaqueUuid(), sourceRevision: 'b'.repeat(64), inputId: 'input', sessionId: 'session' },
@@ -114,11 +114,14 @@ test('actual native watch issuer and owner registries reject later WeakMap proto
 test('actual KnowledgeStore CI publication declares the v2 floor before SQL mutation and preserves unsupported saved records', async () => {
   const root = mkdtempSync(join(tmpdir(), 'native-ci-v2-')); roots.push(root); const file = join(root, 'knowledge.sqlite'); let denied = true; const formats: string[] = [];
   const store = new KnowledgeStore({ dbPath: file, nativeDataWriter: { declare(format) { formats.push(format); if (format === 'native-ci-continuations-v2' && denied) throw new Error('Synthetic old CI reader'); } } }); stores.push(store);
-  const storage = (await store.openNativeWorkExecutionStorage('project')).continuations!, record = issued(), before = readFileSync(file);
+  const storage = (await store.openNativeWorkExecutionStorage('project')).continuations!, record = issued();
+  const image = () => existsSync(file) ? readFileSync(file) : undefined;
+  const before = image(); // An unmodified empty store intentionally stays absent.
   await expect(storage.transaction(record.id, record.issue.originalKey, () => ({ next: record, value: undefined }), () => {})).rejects.toThrow('old CI reader');
-  expect(readFileSync(file)).toEqual(before); denied = false;
+  expect(image()).toEqual(before); denied = false;
   await storage.transaction(record.id, record.issue.originalKey, () => ({ next: record, value: undefined }), () => {});
-  expect(formats).toContain('native-ci-continuations-v2'); const saved = storage.current(record.id).record!;
+  expect(formats).toContain('native-ci-continuations-v2'); const saved = storage.current(record.id).record!, savedBytes = readFileSync(file);
   await expect(storage.transaction(record.id, record.issue.originalKey, () => ({ next: { ...saved, version: 3 } as unknown as typeof saved, value: undefined }), () => {})).rejects.toThrow();
   expect(storage.current(record.id, undefined, { record: saved }).record).toEqual(saved);
+  expect(readFileSync(file)).toEqual(savedBytes);
 });

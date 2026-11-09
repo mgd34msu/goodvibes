@@ -32,6 +32,8 @@ import { AtomicWriteDurabilityError, confirmFileDurable, readJsonFileOrQuarantin
 import { logger } from '../utils/logger.js';
 import { SettingsAuthorityUnavailableError, runSynchronousSettingsOperation } from '../security/settings-authority.js';
 import { NativeContinuationOwner, nativeContinuationParents, type NativeContinuationParents } from './native-continuation-owner.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 
 const TOKEN_PREFIX = 'gvp_';
 /** Do not thrash the disk stamping last-seen on every request. */
@@ -60,6 +62,8 @@ interface PairingOwnerLock {
 export interface NativeContinuationGrant { readonly id: string; readonly binding: string; }
 export interface NativeContinuationAuthority extends AuthenticatedNativePairingToken { readonly scopes: readonly string[]; }
 interface StoredNativeContinuationGrant extends NativeContinuationGrant {
+  /** New writers supply the actual native action token as the source binding. */
+  readonly sourceBindingVersion?: 2;
   readonly sourceBinding: string;
   readonly successorSourceBinding: string | null;
   readonly parent: (NativeContinuationGrant & { readonly consumption: string }) | null;
@@ -83,6 +87,7 @@ interface PairingTokenSnapshot {
   /** Once true, the legacy single shared token no longer authenticates. */
   legacyRevoked?: boolean | undefined;
 }
+class UnsupportedNativeSourceBindingError extends Error {}
 
 /** The redacted, wire-safe view of a pairing token, no hash, no secret. */
 export interface PublicPairingToken {
@@ -137,6 +142,10 @@ function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
     throw new Error('pairing token store is not a JSON object');
   }
   const snapshot = parsed as Partial<PairingTokenSnapshot>;
+  if (Array.isArray(snapshot.continuations) && snapshot.continuations.some(grant => grant
+    && Object.hasOwn(grant, 'sourceBindingVersion') && grant.sourceBindingVersion !== 2)) {
+    throw new UnsupportedNativeSourceBindingError('Unsupported native source binding');
+  }
   if (!Array.isArray(snapshot.tokens)) throw new Error('pairing token store is missing its tokens array');
   if (snapshot.legacyRevoked !== undefined && typeof snapshot.legacyRevoked !== 'boolean') {
     throw new Error('pairing token store has an invalid legacy revocation flag');
@@ -168,7 +177,7 @@ function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
     if (!Array.isArray(snapshot.continuations)) throw new Error('Invalid native continuation grants');
     const grants = new Set<string>();
     for (const grant of snapshot.continuations) {
-      if (!grant || Object.keys(grant).length !== 13 || typeof grant.id !== 'string' || !/^continuation-[0-9a-f-]{36}$/.test(grant.id)
+      if (!grant || Object.keys(grant).length !== (grant.sourceBindingVersion === 2 ? 14 : 13) || typeof grant.id !== 'string' || !/^continuation-[0-9a-f-]{36}$/.test(grant.id)
         || !isStoredBinding(grant.binding) || !isStoredBinding(grant.sourceBinding)
         || (grant.successorSourceBinding !== null && !isStoredBinding(grant.successorSourceBinding))
         || ((grant.consumption === null) !== (grant.successorSourceBinding === null)) || !isStoredBinding(grant.tokenRevision)
@@ -230,6 +239,7 @@ export class PairingLimitReachedError extends Error {
 
 /** How the store learns the live cap. Absent ⇒ unbounded, exactly as before. */
 export interface PairingTokenManagerOptions {
+  readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
   /**
    * Reads `device.nodes.maxPaired` at mint time. A function, not a number, so a
    * cap change takes effect on the next pairing without re-constructing the
@@ -255,6 +265,7 @@ export class PairingTokenManager {
   private settingsFaulted = false;
   private readonly settingsAuthorities = new WeakMap<SettingsPairingAuthority, SettingsPairingAuthorityRecord>();
   private readonly readMaxPaired: (() => number | undefined) | null;
+  private readonly nativeDataWriter: NativeDataWriteOwner | undefined;
   private readonly continuationOwner: NativeContinuationOwner;
   // Read-only compatibility with actually issued v1 grants. Cache the exact
   // published inputs; normal native reads/issuance do not enter this path.
@@ -265,6 +276,7 @@ export class PairingTokenManager {
     this.filePath = filePath;
     this.continuationOwner = new NativeContinuationOwner(filePath);
     this.readMaxPaired = options.maxPaired ?? null;
+    this.nativeDataWriter = options.nativeDataWriter;
     this.snapshot = { tokens: [] };
     let lock: PairingOwnerLock | undefined;
     try {
@@ -276,10 +288,10 @@ export class PairingTokenManager {
         this.settingsCleanInitialAbsence = observed === null;
         this.settingsInitializationVerified = true;
         this.snapshot = observed ?? { tokens: [] };
-      } catch {
+      } catch (error) {
         this.settingsFaulted = true;
         // Retain ordinary recovery, with the observed strict failure latched.
-        this.snapshot = this.load();
+        if (!(error instanceof UnsupportedNativeSourceBindingError)) this.snapshot = this.load();
       }
     } catch {
       this.settingsFaulted = true;
@@ -416,6 +428,13 @@ export class PairingTokenManager {
       try {
         lock.assertOwned();
         if (result.changed) {
+          if (snapshot.continuations?.some(grant => grant.sourceBindingVersion === 2)) {
+            try {
+              const declared: unknown = this.nativeDataWriter?.declare('pairing-native-source-bindings-v2');
+              if (declared !== undefined) { drainOwned(declared); throw new Error('Native source binding declaration must be synchronous'); }
+            } catch (error) { drainOwned(error); throw error; }
+            lock.assertOwned();
+          }
           writeJsonFileAtomic(this.filePath, snapshot, { mode: 0o600, trailingNewline: false, durable: true });
           this.settingsObservedStore = true;
         } else if (nativeRecovery && persisted !== null) {
@@ -657,7 +676,7 @@ export class PairingTokenManager {
       try { ownerRoot = this.continuationOwner.ensure(); }
       catch (error) { this.nativePersistenceFailed = true; this.settingsFaulted = true; throw error; }
     }
-    const grant: StoredNativeContinuationGrant = { id: `continuation-${randomUUID()}`, binding, sourceBinding, successorSourceBinding: null, parent, tokenId: expected.tokenId,
+    const grant: StoredNativeContinuationGrant = { id: `continuation-${randomUUID()}`, binding, sourceBindingVersion: 2, sourceBinding, successorSourceBinding: null, parent, tokenId: expected.tokenId,
       tokenRevision, ownerRoot, watchBinding: null, scopes: [...expected.scopes].sort(), createdAt: Date.now(), consumption: null, revoked: false };
     (snapshot.continuations ??= []).push(grant); assertCurrent();
     return { changed: true, value: Object.freeze({ id: grant.id, binding: grant.binding }) };
@@ -737,14 +756,37 @@ export class PairingTokenManager {
   }
 
   /** Only an authenticated native owner supplies the exact source-incarnation guard. */
-  revokeNativeContinuationsForSource(sourceBinding: string, assertCurrent: () => void): void {
+  revokeNativeContinuationsForSource(sourceBinding: string, assertCurrent: () => void, compatibility?: {
+    readonly authority: NativeContinuationAuthority;
+    readonly legacyBinding: () => string;
+  }): void {
     if (typeof sourceBinding !== 'string' || !/^[0-9a-f]{64}$/.test(sourceBinding)) throw new Error('Invalid native source binding');
     this.mutate(snapshot => {
       assertCurrent();
-      const sources = snapshot.revokedNativeSources ??= []; const changed = !sources.includes(sourceBinding);
-      if (changed) sources.push(sourceBinding);
+      const bindings = new Set([sourceBinding]);
+      if (compatibility) {
+        const expected = compatibility.authority, token = snapshot.tokens.find(item => item.id === expected.tokenId);
+        if (!token || expected.kind !== 'pairing-token' || expected.authorityId !== expected.principalId
+          || expected.principalId !== pairingPrincipalId(token.id) || expected.authorityRevision !== token.id) throw new Error('Native source owner changed');
+        // Only actual pre-marker root grants can have the earlier producer bug.
+        // A current marked grant never causes a historical recipe calculation.
+        const candidates = snapshot.continuations?.filter(grant => !grant.revoked && grant.parent === null
+          && grant.sourceBindingVersion === undefined && grant.tokenId === token.id
+          && grant.sourceBinding !== sourceBinding && grant.successorSourceBinding !== sourceBinding
+          && JSON.stringify(grant.scopes) === JSON.stringify([...expected.scopes].sort())
+          && this.continuationCustodyMatches(grant, token)) ?? [];
+        if (candidates.length) {
+          let legacy: unknown;
+          try { legacy = compatibility.legacyBinding(); } catch (error) { drainOwned(error); throw error; }
+          if (typeof legacy !== 'string' || !/^[0-9a-f]{64}$/.test(legacy)) { drainOwned(legacy); throw new Error('Invalid historical native source binding'); }
+          assertCurrent();
+          if (candidates.some(grant => grant.sourceBinding === legacy)) bindings.add(legacy);
+        }
+      }
+      const sources = snapshot.revokedNativeSources ??= []; let changed = false;
+      for (const binding of bindings) if (!sources.includes(binding)) { sources.push(binding); changed = true; }
       if (snapshot.continuations) snapshot.continuations = snapshot.continuations.map(grant =>
-        grant.sourceBinding === sourceBinding || grant.successorSourceBinding === sourceBinding ? { ...grant, revoked: true } : grant);
+        bindings.has(grant.sourceBinding) || (grant.successorSourceBinding !== null && bindings.has(grant.successorSourceBinding)) ? { ...grant, revoked: true } : grant);
       assertCurrent(); return { changed, value: undefined };
     });
   }

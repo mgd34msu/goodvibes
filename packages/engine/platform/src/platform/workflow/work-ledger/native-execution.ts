@@ -462,7 +462,7 @@ export function createNativeWorkExecutionHost(deps: {
       };
       assertCancellation(); validated = true; validatedKey = durableKeyIdentity(request.key);
       if ('receipt' in original && original.receipt) contractIds.add(original.receipt.contractId);
-      continuations.revokeSource(request, assertCancellation); privateRevocationCommitted = deps.continuationGrants !== undefined;
+      continuations.revokeSource(request, assertCancellation, expected); privateRevocationCommitted = deps.continuationGrants !== undefined;
       if (!preventedHere) await authority.withCurrent(expected, async assertAuthority => deps.scopes.withCurrentScope(expectedScope, async assertScope =>
         deps.storage.transactionByAttempt(attemptId, current => {
           assertOpen(); assertAuthority(); assertScope();

@@ -191,6 +191,23 @@ export async function replayTestOwnerLogs(files: readonly TestOwnerLog[], deadli
   }
 }
 
+/** A direct Agent selection uses the same issued project root as its CI groups.
+ * Match the actual product root, rather than fencing an arbitrary caller cwd. */
+function agentProjectTmpParent(testArgs: readonly string[]): string | undefined {
+  let cwd: string | undefined;
+  for (let index = 0; index < testArgs.length; index++) {
+    const argument = testArgs[index]!;
+    if (argument === '--cwd') {
+      const selected = testArgs[++index];
+      if (!selected) throw new Error('--cwd requires a test working directory');
+      cwd = resolve(ENGINE_ROOT, selected);
+    } else if (argument.startsWith('--cwd=')) cwd = resolve(ENGINE_ROOT, argument.slice('--cwd='.length));
+  }
+  if (cwd === undefined) return undefined;
+  const agentRoot = realpathSync(resolve(ENGINE_ROOT, '../../products/agent'));
+  return realpathSync(cwd) === agentRoot ? join(agentRoot, '.test-tmp') : undefined;
+}
+
 /** Resolve every child selection inside the single workspace/build lease. */
 export async function runTests(resolvePlans: () => readonly (readonly string[])[] = () => [resolveTestArgs()], projectTmpParent?: string): Promise<void> {
   const expectedParentPid = process.ppid;
@@ -249,7 +266,12 @@ export async function runTests(resolvePlans: () => readonly (readonly string[])[
                 ...(output ? { deadlineAt, stdout: output, stderr: output } : {}),
                 argv: [...timeoutArgs, ...testArgs],
                 cwd: ENGINE_ROOT,
-                ...(projectTmpRoot ? { fixtureEnv: { GOODVIBES_TEST_PROJECT_TMP_ROOT: projectTmpRoot } } : {}),
+                ...(projectTmpRoot ? { fixtureEnv: {
+                  GOODVIBES_TEST_PROJECT_TMP_ROOT: projectTmpRoot,
+                  // Set before Bun starts: some native spawn APIs retain their
+                  // startup environment instead of later process.env changes.
+                  GIT_CEILING_DIRECTORIES: projectTmpRoot,
+                } } : {}),
                 env: {
                   ...process.env,
                   ...testTmpEnv(runTmpDir),
@@ -258,7 +280,12 @@ export async function runTests(resolvePlans: () => readonly (readonly string[])[
                 },
               });
             };
-            return projectTmpParent ? await withRunTmpDir(projectTmpParent, async projectRoot => {
+            const selectedProjectParent = projectTmpParent ?? agentProjectTmpParent(testArgs);
+            if (selectedProjectParent && !projectTmpParent) {
+              mkdirSync(selectedProjectParent, { recursive: true });
+              sweepStaleTmpDirs(selectedProjectParent, RUN_TMP_PREFIX, STALE_RUN_MS);
+            }
+            return selectedProjectParent ? await withRunTmpDir(selectedProjectParent, async projectRoot => {
               try { return await execute(projectRoot); }
               catch (error) { retainRunTmpDir(projectRoot, 'Owned test lifecycle did not establish complete child settlement'); throw error; }
             }) : await execute();

@@ -19,6 +19,7 @@
 import { SecretsManager } from '../config/secrets.ts';
 import { StepUpService } from '@goodvibes-jev/engine/platform/daemon';
 import { PairingTokenManager } from '@goodvibes-jev/engine/platform/platform/pairing';
+import type { NativeDataWriteOwner } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 interface CredentialCompositionInput {
   readonly workingDirectory: string;
@@ -30,6 +31,7 @@ interface CredentialCompositionInput {
   readonly daemonHomeDirectory?: string | undefined;
   readonly configManager: ConstructorParameters<typeof SecretsManager>[0]['configManager'];
   readonly pairingTokenPath: string;
+  readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
 }
 
 export function composeCredentialServices(input: CredentialCompositionInput): {
@@ -49,6 +51,6 @@ export function composeCredentialServices(input: CredentialCompositionInput): {
     // Shared between the ceremony gateway verbs and the relay gate's verifier,
     // so both check a step-up against the same store.
     stepUpService: new StepUpService({ secrets: secretsManager }),
-    pairingTokens: new PairingTokenManager(input.pairingTokenPath),
+    pairingTokens: new PairingTokenManager(input.pairingTokenPath, { nativeDataWriter: input.nativeDataWriter }),
   };
 }

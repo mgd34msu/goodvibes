@@ -160,6 +160,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       workingDirectory, homeDirectory, configManager,
       daemonHomeDirectory: options.daemonHomeDirectory,
       pairingTokenPath: controlPlaneStorePath(shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'pairing-tokens.json'),
+      nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(),
     });
     const judgment = composeJudgment({ config: configManager, secrets: secretsManager, env: process.env, stateRoot: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT), disposal: disposalScope.registry });
     const browserJudgment = options.createBrowserJudgment ? options.createBrowserJudgment(judgment)

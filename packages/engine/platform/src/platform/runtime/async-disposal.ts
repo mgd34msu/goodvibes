@@ -4,6 +4,8 @@ import { summarizeError } from '../utils/error-display.js';
 export interface AsyncDisposalRegistry {
   /** Late registration immediately starts cleanup; it never reopens the scope. */
   add(label: string, dispose: () => void | Promise<void>): void;
+  /** Read-only identity check for a child stop that re-enters this scope. */
+  isClosingDrain?(value: unknown): boolean;
 }
 
 export interface AsyncDisposalScope {
@@ -97,6 +99,7 @@ export function createAsyncDisposalScope(scopeName: string): AsyncDisposalScope 
   }
   return {
     registry: {
+      isClosingDrain: value => closing !== undefined && value === closing,
       add(label, dispose) {
         const entry = { label, dispose };
         if (!started) { entries.push(entry); return; }

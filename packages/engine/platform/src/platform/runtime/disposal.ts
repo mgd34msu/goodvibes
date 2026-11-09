@@ -82,6 +82,66 @@ export function createDisposalScope(scopeName: string): DisposalScope {
   };
 }
 
+/** Request independent cancellation before an unrelated asynchronous drain.
+ * The graph still registers each returned callback in its normal dependency
+ * order. Repeated requests return the original drain and never stop twice. */
+export function createRuntimeStopRequests(registry: AsyncDisposalRegistry, owners: {
+  readonly homeGraphService: { dispose(): void | Promise<void> };
+  readonly memoryGovernor: { stop(): void };
+  readonly watcherRegistry: { dispose(): void };
+  readonly conversationRewind?: (() => void | Promise<void>) | undefined;
+}): {
+  readonly request: () => void;
+  readonly homeGraph: () => void | Promise<void>;
+  readonly memoryGovernor: () => void;
+  readonly watchers: () => void;
+  readonly conversationRewind: () => void | Promise<void>;
+} {
+  function originalStop(label: string, stop: () => void | Promise<void>): () => void | Promise<void> {
+    let requested = false;
+    let drain: void | Promise<void> = undefined;
+    return () => {
+      if (!requested) {
+        requested = true;
+        // A borrowed stop may re-enter graph.close before returning its own
+        // drain. Expose this original child reservation before that callback.
+        const reservation = Promise.withResolvers<void>();
+        drain = reservation.promise;
+        void reservation.promise.catch(() => {});
+        try {
+          const result = stop();
+          if (registry.isClosingDrain?.(result)) throw new Error('A cleanup callback cannot await its own scope close.');
+          // Match the scope's void-callback semantics: primitive return values
+          // do not describe asynchronous cleanup. A real native promise stays
+          // the memoized drain; any reentrant reader holds its reserved proxy.
+          if (result && typeof result.then === 'function') {
+            drain = Promise.resolve(result);
+            void drain.catch(() => {});
+            reservation.resolve(drain);
+          } else { drain = undefined; reservation.resolve(); }
+        } catch (error) {
+          // Record once in the existing scope, then release the reservation.
+          // Rejecting it too would report the same stop failure twice.
+          registry.add(label, () => { throw error; });
+          drain = undefined; reservation.resolve();
+        }
+      }
+      return drain;
+    };
+  }
+  const homeGraph = originalStop('home graph cancellation', () => owners.homeGraphService.dispose());
+  const governor = originalStop('memory governor stop', () => owners.memoryGovernor.stop());
+  const watchers = originalStop('watcher timer stop', () => owners.watcherRegistry.dispose());
+  const rewind = originalStop('rewind cancellation', () => owners.conversationRewind?.());
+  return {
+    request: () => { homeGraph(); rewind(); governor(); watchers(); },
+    homeGraph,
+    memoryGovernor: () => { governor(); },
+    watchers: () => { watchers(); },
+    conversationRewind: rewind,
+  };
+}
+
 /**
  * Every poller owner a composed runtime graph holds.
  *

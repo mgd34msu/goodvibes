@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, type Stats } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { trackTempDir } from './temp-registry.ts';
+import { RUN_TMP_PREFIX } from '@goodvibes-jev/engine/toolchain/test-runner';
 
 const PROJECT_TMP_PARENT = join(process.cwd(), '.test-tmp');
 let projectTmpRoot: {
@@ -32,7 +33,7 @@ export function projectTestTmpRoot(): string {
       root = resolve(supplied);
       const identity = lstatSync(root);
       const owner: unknown = JSON.parse(readFileSync(join(root, '.goodvibes-test-owner.json'), 'utf8'));
-      if (dirname(root) !== realpathSync(parent) || !basename(root).startsWith('goodvibes-platform-testrun-')
+      if (dirname(root) !== realpathSync(parent) || !basename(root).startsWith(RUN_TMP_PREFIX)
         || identity.isSymbolicLink() || realpathSync(root) !== root
         || !owner || typeof owner !== 'object' || !('version' in owner) || owner.version !== 1
         || !('pid' in owner) || owner.pid !== process.ppid
@@ -45,6 +46,12 @@ export function projectTestTmpRoot(): string {
       parentDev: parentIdentity.dev, parentIno: parentIdentity.ino, parentOwned: Boolean(supplied) };
   }
   if (!assertProjectTestTmpCurrent()) throw new Error('The owned Agent project test root no longer exists');
+  // The canonical runner supplies this boundary at process start too. Retain
+  // it for Git clients that explicitly read the live environment, including
+  // raw local test invocations that create their own original project root.
+  const ceilings = process.env.GIT_CEILING_DIRECTORIES?.split(delimiter).filter(Boolean) ?? [];
+  if (!ceilings.includes(projectTmpRoot.path)) ceilings.push(projectTmpRoot.path);
+  process.env.GIT_CEILING_DIRECTORIES = ceilings.join(delimiter);
   return projectTmpRoot.path;
 }
 

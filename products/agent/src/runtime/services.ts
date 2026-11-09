@@ -10,7 +10,7 @@ import { shell as runtimeShell, operations as runtimeOperations } from '@goodvib
 // reimplemented here, so "which pollers exist" has exactly one answer across
 // both compositions: RuntimePollerOwners is all-required, and a poller added to
 // this fork's graph later cannot compile without being named for teardown.
-import { createAsyncDisposalScope, registerRuntimePollers } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
+import { createAsyncDisposalScope, createRuntimeStopRequests, registerRuntimePollers } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import type { shell as RuntimeShell, bootstrap as RuntimeBootstrap } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { applyRawSecretLiteralHandling, type SecretsManager } from '../config/secrets.ts';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.ts';
@@ -773,8 +773,7 @@ export function describeMemoryConsolidationReceipt(receipt: MemoryConsolidationR
 export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeServices {
   assertConfiguredProjectContextReady(options.configManager, options.workingDir, GOODVIBES_AGENT_KNOWLEDGE_DB_FILE);
   const disposalScope = createAsyncDisposalScope('RuntimeServices');
-  let homeGraphClosing: Promise<void> | undefined;
-  let conversationRewindClosing: Promise<void> | undefined;
+  let knowledgeStopRequests: ReturnType<typeof createRuntimeStopRequests> | undefined;
   const workingDirectory = options.workingDir;
   const homeDirectory = options.homeDirectory;
   const surface = createSessionSurface({
@@ -996,8 +995,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   registerTerminalKnowledgeCleanup(disposalScope.registry, {
     closeAgentStore: () => agentKnowledgeStore.close(),
     closeHomeGraphStore: () => homeGraphKnowledgeStore.close(),
-    rewindDrain: () => conversationRewindClosing,
-    homeGraphDrain: () => homeGraphClosing,
+    rewindDrain: () => knowledgeStopRequests?.conversationRewind(),
+    homeGraphDrain: () => knowledgeStopRequests?.homeGraph(),
   });
 
   const daemonConfigClient: DaemonConfigClient = createDaemonConfigClient(daemonVerbs);
@@ -1142,6 +1141,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const pairingTokensForDaemonGradeView = (): PairingTokenManager =>
     (surfaceScopedPairingTokens ??= new PairingTokenManager(
       shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'pairing-tokens.json'),
+      { nativeDataWriter: configManager.getNativeDataWriter() },
     ));
   // AGENT-LOCAL DUTY: the register this product's automation runs its jobs on.
   //
@@ -2190,9 +2190,16 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     detachSessionWriteLedger();
     clearAgentSessionWrites();
   };
+  const stopRequests = createRuntimeStopRequests(disposalScope.registry, {
+    homeGraphService,
+    memoryGovernor,
+    watcherRegistry,
+    conversationRewind: () => conversationRewindHost.stop(),
+  });
+  knowledgeStopRequests = stopRequests;
   registerRuntimePollers(disposalScope.registry, {
     stopConfigWatch,
-    watcherRegistry,
+    watcherRegistry: { dispose: stopRequests.watchers },
     storeSnapshotScheduler,
     appendOnlyRetentionScheduler,
     memoryConsolidationScheduler,
@@ -2207,19 +2214,13 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     agentKnowledgeService,
     contractRunner,
     processRegistry,
-    memoryGovernor,
+    memoryGovernor: { stop: stopRequests.memoryGovernor },
     triggerManager,
     // Named here rather than registered separately below: RuntimePollerOwners
     // is all-required precisely so a poller cannot be forgotten, and this fork
     // had been registering the home-graph service by hand where the contract
     // could not see it.
-    homeGraphService: {
-      dispose: () => {
-        homeGraphClosing = homeGraphService.dispose();
-        // The scope observes the same rejection when its drain entry runs.
-        void homeGraphClosing.catch(() => {});
-      },
-    },
+    homeGraphService: { dispose: stopRequests.homeGraph },
     agentOrchestrator,
     // By dispose() time the registries and bus these runs report through are
     // already down, so a run still described as "running" is orphaned rather
@@ -2235,10 +2236,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   disposalScope.registry.add('session write ledger', disposeSessionWriteLedgerOnce);
   // The client seams stop immediately; the rewind release is drained below.
   disposalScope.registry.add('inbound session dispatch', () => sessionDispatch.stop());
-  disposalScope.registry.add('conversation rewind host', () => {
-    conversationRewindClosing = conversationRewindHost.stop();
-    void conversationRewindClosing.catch(() => {});
-  });
+  // Request the original release now; its dependent stores remain open until
+  // the earlier terminal-knowledge entry drains this same retained promise.
+  disposalScope.registry.add('conversation rewind host', () => { stopRequests.conversationRewind(); });
   disposalScope.registry.add('hosted session registry', () => hostedSessions.dispose());
   // The two installed routing clients go down with the graph that installed
   // them. They are process-wide by design (five settings writers reach them
@@ -2425,10 +2425,12 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     disposeSessionWriteLedger: disposeSessionWriteLedgerOnce,
     dispose: (): void => {
       researchScreeningLifetime.abort();
+      stopRequests.request();
       disposalScope.dispose();
     },
     close: (): Promise<void> => {
       researchScreeningLifetime.abort();
+      stopRequests.request();
       return disposalScope.close();
     },
     integrationHelpers,

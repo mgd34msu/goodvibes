@@ -71,6 +71,7 @@ describe('DraftSyncStore', () => {
       expect(store.resolveReferenceId(reference)).toBe(id);
       expect(store.list()[0]?.wireReference).toBe(reference);
       expect((await store.upsert({ id, message: 'edited' })).draft.wireReference).toBe(reference);
+      await store.save(); // The ordinary sync handler explicitly publishes after upsert.
       await store.close(); store = makeStore(dir, cipher); await store.init();
       expect(store.get(id)?.wireReference).toBe(reference);
       expect(store.resolveReferenceId(reference)).toBe(id);
@@ -81,14 +82,15 @@ describe('DraftSyncStore', () => {
 
   test('only actual pre-field rows match old handles; old explicit writers preserve new labels', async () => {
     const id = 'draft-20261011000001-deadbeef';
-    await store.upsert({ id, message: 'retained original body' }); await store.close();
+    await store.upsert({ id, message: 'retained original body' }); await store.save(); await store.close();
     const old = new HandlerSqliteStore({ workingDirectory: dir, fileName: 'drafts.sqlite', schema: [] });
     await old.init();
     old.run('DROP INDEX idx_drafts_wireReference');
     old.run('ALTER TABLE drafts DROP COLUMN wireReference');
     old.run('ALTER TABLE drafts DROP COLUMN legacyWireReference');
-    const ciphertext = old.get('SELECT bodyEnc FROM drafts WHERE id = ?', [id]);
-    await old.close();
+    const ciphertext = old.get<{ bodyEnc: string }>('SELECT bodyEnc FROM drafts WHERE id = ?', [id]);
+    expect(ciphertext).not.toBeNull();
+    await old.save(); await old.close();
     const handle = historicalChannelDraftWireReference(id);
     store = makeStore(dir, cipher); await store.init();
     const canonical = store.get(id)!.wireReference;
@@ -101,13 +103,13 @@ describe('DraftSyncStore', () => {
     const oldWriter = new HandlerSqliteStore({ workingDirectory: dir, fileName: 'drafts.sqlite', schema: [] });
     await oldWriter.init();
     oldWriter.run('UPDATE drafts SET title = ? WHERE id = ?', ['old reader edit', id]);
-    expect(oldWriter.get('SELECT wireReference FROM drafts WHERE id = ?', [id])).toEqual({ wireReference: canonical });
-    expect(oldWriter.get('SELECT bodyEnc FROM drafts WHERE id = ?', [id])).toEqual(ciphertext);
+    expect(oldWriter.get<{ wireReference: string }>('SELECT wireReference FROM drafts WHERE id = ?', [id])).toEqual({ wireReference: canonical });
+    expect(oldWriter.get<{ bodyEnc: string }>('SELECT bodyEnc FROM drafts WHERE id = ?', [id])).toEqual(ciphertext);
     // Already ambiguous data from an actual old explicit-column writer is
     // retained, but no historical handle may arbitrarily choose either row.
     oldWriter.run('INSERT INTO drafts (id, version, createdAt, updatedAt, status, bodyEnc) VALUES (?,1,?,?,?,?)',
       [handle, '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 'draft', 'enc:ZGlmZmVyZW50']);
-    await oldWriter.close();
+    await oldWriter.save(); await oldWriter.close();
     store = makeStore(dir, cipher); await store.init();
     expect(store.get(id)).toMatchObject({ wireReference: canonical, title: 'old reader edit' });
     // Both a direct ID and an actual old content-derived alias match: refuse.
@@ -143,13 +145,15 @@ describe('DraftSyncStore', () => {
 
   test('opening an existing store removes body digests and preserves encrypted drafts', async () => {
     const { draft } = await store.upsert({ message: 'private draft', webhook: 'private hook', title: 'Retain this draft' });
-    await store.close();
+    await store.save(); await store.close();
     const existing = new HandlerSqliteStore({ workingDirectory: dir, fileName: 'drafts.sqlite', schema: [] });
     await existing.init();
     let ciphertext: unknown;
     try {
       existing.run("ALTER TABLE drafts ADD COLUMN messageDigest TEXT NOT NULL DEFAULT 'previous-body-digest'");
       ciphertext = existing.get('SELECT bodyEnc, webhookEnc FROM drafts WHERE id = ?', [draft.id]);
+      expect(ciphertext).not.toBeNull();
+      await existing.save();
     } finally { await existing.close(); }
     // Upgrade does not need the key just to remove display-only metadata.
     store = makeStore(dir, { async encrypt() { throw new Error('Unexpected encryption'); }, async decrypt() { throw new Error('Unexpected decryption'); } });
@@ -160,7 +164,7 @@ describe('DraftSyncStore', () => {
     await upgraded.init();
     try {
       expect(upgraded.all<{ name: string }>('PRAGMA table_info(drafts)').some(column => column.name === 'messageDigest')).toBe(false);
-      expect(upgraded.get('SELECT bodyEnc, webhookEnc FROM drafts WHERE id = ?', [draft.id])).toEqual(ciphertext);
+      expect(upgraded.get<{ bodyEnc: string; webhookEnc: string }>('SELECT bodyEnc, webhookEnc FROM drafts WHERE id = ?', [draft.id])).toEqual(ciphertext);
     } finally { await upgraded.close(); }
   });
 

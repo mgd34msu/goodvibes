@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { AutomationJobStore, getNextAutomationOccurrence, type AutomationJob } from '../sdk/src/platform/automation/index.ts';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.ts';
 import { KnowledgeScheduleService } from '../sdk/src/platform/knowledge/scheduling.ts';
+import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema-version.ts';
 import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.ts';
 
 function oldJob(): AutomationJob {
@@ -72,7 +73,7 @@ test('knowledge cron phases survive the real SQLite store and older rows migrate
     // Simulate a previously written schedule row that predates the phase field.
     const older = new SQLiteStore(dbPath);
     try {
-      await older.init();
+      await older.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
       older.run('UPDATE knowledge_schedules SET schedule = ? WHERE id = ?', [JSON.stringify(schedule), saved.id]);
       await older.save();
     } finally { older.close(); }

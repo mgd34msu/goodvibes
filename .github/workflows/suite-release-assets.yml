@@ -80,6 +80,8 @@ jobs:
       group: native-release-publication-${{ inputs.tag }}
       cancel-in-progress: false
     needs: package
+    outputs:
+      source: ${{ steps.admit.outputs.source }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -92,6 +94,7 @@ jobs:
           pattern: suite-release-*
           path: ${{ runner.temp }}/suite-archives
       - name: Admit complete same-source suite
+        id: admit
         env:
           RELEASE_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ github.token }}
@@ -108,3 +111,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: python3 .github/scripts/publish-missing-suite-assets.py "$RUNNER_TEMP/suite-assets" "$RELEASE_TAG"
+
+  published-install-acceptance:
+    # Packaging-only callers have not published anything and must not run this.
+    needs: collect
+    if: inputs.publish_existing && needs.collect.result == 'success'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/reusable-published-install-acceptance.yml
+    with:
+      tag: ${{ inputs.tag }}
+      source: ${{ needs.collect.outputs.source }}
+      tooling-sha: ${{ github.sha }}

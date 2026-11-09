@@ -1,6 +1,7 @@
 """Admit flat, hashed same-source release assets from native publisher jobs."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -17,6 +18,7 @@ while ref['type'] == 'tag':
     ref = api(f'git/tags/{ref["sha"]}')['object']
 assert ref['type'] == 'commit'
 source = ref['sha']
+assert re.fullmatch(r'[a-f0-9]{40}', source), 'Release source must be one commit ID'
 destination.mkdir(parents=True, exist_ok=False)
 targets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']
 for target in targets:
@@ -45,3 +47,8 @@ for target in targets:
             else:
                 target_file.write_bytes(payload)
         print(json.dumps({'target': target, 'tag': tag, 'sourceCommit': source, 'admittedFiles': len(metadata['files'])}))
+# Expose the exact tag commit already used for every admitted target only after
+# the complete collection succeeds. A failed/mixed collection grants no output.
+if output := os.environ.get('GITHUB_OUTPUT'):
+    with open(output, 'a', encoding='utf-8') as stream:
+        stream.write(f'source={source}\n')

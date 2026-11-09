@@ -2,7 +2,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, type AcceptanceSteps } from './accept-published-suite.mjs';
 
 const roots: string[] = [];
@@ -79,4 +79,35 @@ test('public producer proof reads only real program sidecars, never archive-only
     await expect(readPublishedReaders({ target, tag: 'v3.1.2', source: 'a'.repeat(40), assets }, load)).rejects.toThrow('cohort is missing');
     await expect(readPublishedReaders({ target, tag: 'v3.1.2', source: 'b'.repeat(40), assets: new Set([...assets, `goodvibes-agent-${suffix}.reader-ci-artifact.json`]) }, load)).rejects.toThrow();
   }
+});
+
+test('both actual publication workflows await one shared four-native-target acceptance matrix', () => {
+  const object = (value: unknown): Record<string, unknown> => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected workflow mapping.');
+    return value as Record<string, unknown>;
+  };
+  const workflow = (name: string) => object(Bun.YAML.parse(readFileSync(resolve(import.meta.dir, '../.github/workflows', name), 'utf8')));
+  const release = object(workflow('release.yml').jobs), suite = object(workflow('suite-release-assets.yml').jobs);
+  const reusable = './.github/workflows/reusable-published-install-acceptance.yml';
+  const fresh = object(release['published-install-acceptance']), existing = object(suite['published-install-acceptance']);
+  expect(fresh.uses).toBe(reusable); expect(existing.uses).toBe(reusable);
+  expect(fresh.needs).toEqual(['verify-tag-version', 'github-release']); expect(existing.needs).toBe('collect');
+  expect(fresh.if).toBe("needs.github-release.result == 'success'");
+  expect(existing.if).toBe("inputs.publish_existing && needs.collect.result == 'success'");
+  expect(object(existing.with).source).toBe('${{ needs.collect.outputs.source }}');
+  expect(object(object(suite.collect).outputs).source).toBe('${{ steps.admit.outputs.source }}');
+  for (const caller of [fresh, existing]) expect(object(caller.with)['tooling-sha']).toBe('${{ github.sha }}');
+  const definition = workflow('reusable-published-install-acceptance.yml');
+  const native = object(object(definition.jobs)['native-install']);
+  const include = object(object(native.strategy).matrix).include;
+  expect(include).toEqual([
+    { target: 'linux-x64', runner: 'ubuntu-24.04' }, { target: 'linux-arm64', runner: 'ubuntu-22.04-arm' },
+    { target: 'darwin-x64', runner: 'macos-15-intel' }, { target: 'darwin-arm64', runner: 'macos-15' },
+  ]);
+  expect(native['runs-on']).toBe('${{ matrix.runner }}');
+  const steps = native.steps; if (!Array.isArray(steps)) throw new Error('Expected native steps.');
+  expect(steps.map(object).find(step => String(step.uses).startsWith('actions/checkout@'))?.with)
+    .toEqual({ ref: '${{ inputs.tooling-sha }}' });
+  expect(steps.map(object).find(step => step.name === 'Download, install, serve and uninstall the published suite')?.run)
+    .toBe('node scripts/accept-published-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET"');
 });

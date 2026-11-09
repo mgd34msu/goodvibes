@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { verificationSources } from '../sdk/src/platform/core/verification/source.js';
 import { citedReadSources, nativeReadReceipts } from '../sdk/src/platform/core/verification/read-receipts.js';
 import { observeReadContent, clipReadContent } from '../sdk/src/platform/tools/read/observation.js';
@@ -58,6 +59,28 @@ test('changed source bytes retain the failed integrity fact and cannot acquire s
   expect(ledger.records[0][2]).toBeNull();
   expect(ledger.records[0][5].readObservationIntegrity).toBe(false);
   expect(JSON.stringify(original)).toBe(before);
+});
+
+// Regression source; execution remains deferred until all coding is finished.
+test.each([false, true])('receipt projection checks each original returned body only once (truncated: %s)', truncated => {
+  const { input } = observedRead(truncated);
+  const sources = verificationSources(input), hash = spyOn(crypto, 'createHash');
+  try {
+    const view = nativeReadReceipts(sources);
+    expect(view.receipts).toHaveLength(1); expect(view.reads).toHaveLength(1);
+    expect(hash).toHaveBeenCalledTimes(1);
+  } finally { hash.mockRestore(); }
+});
+
+test('invalid observation offsets never become source coverage even with matching returned-text checksum', () => {
+  const { input, result, file } = observedRead();
+  file.readObservation.startLine = Number.MAX_SAFE_INTEGER;
+  input.transcript[1]!.content = JSON.stringify(result);
+  const view = nativeReadReceipts(verificationSources(input));
+  expect(view.reads).toHaveLength(0);
+  const ledger = JSON.parse(view.ledgers[0]!.source.text);
+  expect(ledger.records[0][2]).toBeNull();
+  expect(ledger.records[0][5].readObservationIntegrity).toBe(false);
 });
 
 test('a mixed outline and source read credits only authenticated source lines', () => {

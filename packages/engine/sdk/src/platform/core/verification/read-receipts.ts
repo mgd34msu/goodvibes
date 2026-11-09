@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-import { returnedReadRows } from '../../tools/read/observation.js';
+import { validatedReadContent } from '../../tools/read/observation.js';
 import { issueVerificationSource, verificationExecutionGroups } from './source.js';
 import type { VerificationSource, VerificationSourceOwner } from './types.js';
 
@@ -74,12 +73,8 @@ export function nativeReadReceipts(sources: readonly VerificationSource[], own: 
       if (file.content === undefined && (file.error !== undefined || file.binary === true)) { files.push(file); continue; }
       const observed = file.readObservation;
       if (typeof file.path !== 'string' || typeof file.content !== 'string') { valid = false; break; }
-      const authenticated = object(observed)
-        && Number.isSafeInteger(observed.startLine) && Number(observed.startLine) >= 1
-        && Number.isSafeInteger(observed.completeLines) && Number(observed.completeLines) >= 0
-        && typeof observed.numbered === 'boolean' && typeof observed.truncated === 'boolean'
-        && observed.contentSha256 === createHash('sha256').update(file.content).digest('hex');
-      if (!authenticated) {
+      const validated = validatedReadContent({ content: file.content, readObservation: observed });
+      if (!validated) {
         const { content: _content, ...metadata } = file;
         const structuredView = observed === undefined && ['outline', 'symbols', 'ast'].includes(String(file.extract));
         files.push({ ...metadata, returnedLines: null, returnedText: { kind: structuredView ? file.extract : 'unverified-source-text',
@@ -88,11 +83,11 @@ export function nativeReadReceipts(sources: readonly VerificationSource[], own: 
             integrityProblem: 'Returned source text has missing or mismatched native line provenance. Credit no source-line coverage from this record. The original bytes and claimed metadata remain retained for retrieval.' }) });
         continue;
       }
-      const rows = returnedReadRows({ content: file.content, readObservation: observed });
-      if (rows.length !== observed.completeLines) { valid = false; break; }
+      const { observation, rows } = validated;
+      if (rows.length !== observation.completeLines) { valid = false; break; }
       const { content: _content, ...metadata } = file;
       files.push({ ...metadata, returnedLines: rows.length ? {
-        start: observed.startLine, end: Number(observed.startLine) + rows.length - 1,
+        start: observation.startLine, end: observation.startLine + rows.length - 1,
       } : null });
       groupReads.push({ path: file.path, ...(typeof file.resolvedPath === 'string' ? { resolvedPath: file.resolvedPath } : {}),
         sourceIds: group.map(source => source.id), rows, reference: group[0]!.reference });

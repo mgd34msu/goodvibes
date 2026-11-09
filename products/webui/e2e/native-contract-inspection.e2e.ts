@@ -63,7 +63,10 @@ for (const fixture of CAPTURED_CONTRACTS) {
       await expect(detail.getByText(criterion.text, { exact: true }).first()).toBeVisible();
     }
     for (const check of [...record.checks, ...record.groups.flatMap((group) => group.checks), ...record.units.flatMap((unit) => unit.checks)]) {
-      await expect(detail.getByText(check.evidenceDigest, { exact: true }).first()).toBeVisible();
+      const recorded = detail.locator('details').filter({ has: page.getByText(check.id, { exact: true }) }).last();
+      if (check.evidenceDigest !== undefined) {
+        await expect(recorded.getByText(check.evidenceDigest, { exact: true })).toBeVisible();
+      } else await expect(recorded.getByText('Evidence digest', { exact: true })).toHaveCount(0);
     }
 
     if (record.nativeSource) {
@@ -132,8 +135,9 @@ for (const fixture of CAPTURED_CONTRACTS) {
       for (const file of record.inputSnapshot.files) {
         const row = capture.getByRole('list', { name: 'Captured files', exact: true }).locator(':scope > li').filter({ hasText: file.path });
         await expect(fact(row, 'Path')).toHaveText(file.path);
-        if (file.digest) await expect(fact(row, 'Digest')).toHaveText(file.digest);
-        if (file.oid) await expect(fact(row, 'Object id')).toHaveText(file.oid);
+        if ('digest' in file && file.digest) await expect(fact(row, 'Digest')).toHaveText(file.digest);
+        if ('oid' in file && file.oid) await expect(fact(row, 'Object id')).toHaveText(file.oid);
+        if ('identity' in file && file.identity) await expect(fact(row, 'Identity')).toHaveText(file.identity);
       }
       await capture.scrollIntoViewIfNeeded();
       await screenshot(page, `${fixture.name}-captured-input`);

@@ -22,16 +22,17 @@ const configManager = new ConfigManager({ surfaceRoot: 'tui',
   configDir: makeProjectTempDir('gv-hooks-config'),
 });
 
-function makeHookCommandContext(
+async function makeHookCommandContext(
   out: string[],
   hookWorkbench: HookWorkbench,
-): CommandContext {
+): Promise<CommandContext> {
+  const dispatcher = await getTestHookDispatcher();
   const providerRegistry = {} as never;
   const conversationManager = {} as never;
   const hookApi = createRuntimeHookApi({
     dispatcher: {
-      listHooks: async () => (await getTestHookDispatcher()).listHooks(),
-      listChains: async () => (await getTestHookDispatcher()).getChains(),
+      listHooks: () => dispatcher.listHooks(),
+      listChains: () => dispatcher.getChains(),
     },
     workbench: hookWorkbench,
     listContracts: () => listHookPointContracts(),
@@ -99,7 +100,7 @@ describe('hooks command', () => {
     expect(hooks).toBeDefined();
 
     const out: string[] = [];
-    const ctx = makeHookCommandContext(out, hookWorkbench);
+    const ctx = await makeHookCommandContext(out, hookWorkbench);
 
     await hooks!.handler(['scaffold', 'guard-edit', 'Pre:tool:*', 'command'], ctx);
     expect(existsSync(configManager.get('tools.hooksFile') as string)).toBe(true);
@@ -141,7 +142,7 @@ describe('hooks command', () => {
     }, null, 2));
 
     const out: string[] = [];
-    const ctx = makeHookCommandContext(out, hookWorkbench);
+    const ctx = await makeHookCommandContext(out, hookWorkbench);
     ctx.session.runtime.sessionId = 'sess-hooks-import';
 
     await hooks!.handler(['inspect', bundlePath], ctx);

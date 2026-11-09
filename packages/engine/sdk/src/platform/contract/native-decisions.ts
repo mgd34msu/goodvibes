@@ -50,6 +50,8 @@ export interface NativeContractDecisionRecord {
   readonly stage: NativeContractStage;
   readonly targetId: string;
   readonly decision: JevDecision;
+  /** Deferred records bind the saved operation input; other records reuse
+   * their already-issued action incarnation and need no content commitment. */
   readonly operationRevision: string;
 }
 export interface NativeContractDecisionState {
@@ -261,14 +263,14 @@ export async function decideNativeContract(contract: Contract, services: NativeC
     const evidence = snapshotJudgmentInput(input.state()) as EntryType;
     const conditions = [...(owner.host.conditions?.(structuredClone(contract), input.stage, input.targetId) ?? [])];
     const capturedConditions = conditions.map(condition => ({ ref: { ...condition.ref }, description: condition.description }));
-    const operationRevision = hashState({ action: input.action, allowAct: input.allowAct, evidence, source, continuations: input.continuations } as unknown as EntryType);
-    // This is one offered action's incarnation, not a content checksum.
-    // active() below compares the exact owned evidence and condition facts.
-    // The persisted operationRevision comparison above/below still supports
-    // existing deferred records until that saved format is migrated.
-    const actionRevision = crypto.randomUUID();
+    // Only a real pending deferral needs a compact restart comparison. Its
+    // exact earlier saved recipe remains unchanged; ordinary outcomes have no
+    // consumer for another hash of the complete operation input.
+    let retainedOperationRevision: string | undefined;
+    const deferredOperationRevision = () => retainedOperationRevision ??= hashState({ action: input.action,
+      allowAct: input.allowAct, evidence, source, continuations: input.continuations } as unknown as EntryType);
     const previous = state.pending[key];
-    if (previous?.decision.outcome === 'defer' && previous.operationRevision === operationRevision) {
+    if (previous?.decision.outcome === 'defer' && previous.operationRevision === deferredOperationRevision()) {
       const until = previous.decision.until;
       const condition = conditions.find(candidate => candidate.ref.id === until.id);
       if (condition === undefined) throw new JudgmentError('invalid-request', 'Registered native resume condition is unavailable');
@@ -287,6 +289,9 @@ export async function decideNativeContract(contract: Contract, services: NativeC
       continue;
     }
     delete state.pending[key];
+    // This is the offered action's incarnation. active() below checks exact
+    // owned evidence and condition facts; the label does not authenticate them.
+    const actionRevision = crypto.randomUUID();
     const binding: JevDecisionBinding = { sourceId: contract.nativeSource!.sourceId, inputRevision: contract.nativeSource!.inputRevision,
       actionId: `${contract.id}:${key}`, actionRevision, ...expectedAuthority };
     const active = () => {
@@ -310,7 +315,8 @@ export async function decideNativeContract(contract: Contract, services: NativeC
       conditions: capturedConditions, allowAct: input.allowAct, assertCurrent: active, signal: input.signal,
     });
     result.assertCurrent();
-    const record: NativeContractDecisionRecord = { schemaVersion: 1, stage: input.stage, targetId: input.targetId, operationRevision, decision: result.decision };
+    const record: NativeContractDecisionRecord = { schemaVersion: 1, stage: input.stage, targetId: input.targetId,
+      operationRevision: result.decision.outcome === 'defer' ? deferredOperationRevision() : actionRevision, decision: result.decision };
     state.history.push(record);
     try { owner.host.onDecision?.(contract.id, structuredClone(record)); } catch { /* An observer cannot decide or duplicate execution. */ }
     if (result.decision.outcome === 'defer') {

@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Hash complete native operation input only when saving or matching an actual
+  deferred decision. Ordinary decision history reuses its existing action
+  incarnation; saved deferred comparisons and exact live claim guards remain.
+
 - Avoid hashing successful private-source screening merely to deduplicate work
   in flight. Compare the already-owned pending inputs directly, and retain a
   compact commitment only when recording or matching an actual unsettled input

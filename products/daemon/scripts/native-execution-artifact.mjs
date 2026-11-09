@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto';
 import { chmodSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inspectTerminalReaderArtifact } from '@goodvibes-jev/engine/toolchain';
+import { parseClientReaderArtifact } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 
 export const NATIVE_EXECUTION_TARGETS = Object.freeze(['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']);
 const MANIFEST = 'native-execution-artifact.json';
@@ -11,7 +13,7 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = path => JSON.parse(readFileSync(path, 'utf8'));
 
 /** CI execution ownership is separate from the Linux install/update receipt. */
-export function nativeExecutionMembers(product, target) {
+export function nativeExecutionPayloadMembers(product, target) {
   assert(NATIVE_EXECUTION_TARGETS.includes(target), 'Unsupported native execution target');
   const config = json(join(product, 'toolchain.config.json'));
   assert.deepEqual(config.build.targets.map(row => row.key), NATIVE_EXECUTION_TARGETS, 'Every configured native target requires execution');
@@ -41,6 +43,24 @@ export function nativeExecutionMembers(product, target) {
     members.push({ path: library, mode: 0o644 }, { path: library + '.json', mode: 0o644 });
   }
   return Object.freeze(members.map(member => Object.freeze(member)));
+}
+
+/** The reader is part of the executed Darwin installation: native data writers
+ * require it even when explicit homes disable automatic update ownership. */
+export function nativeExecutionMembers(product, target) {
+  const payloads = nativeExecutionPayloadMembers(product, target);
+  return target.startsWith('darwin-')
+    ? Object.freeze([...payloads, Object.freeze({ path: payloads[0].path + '.readers.json', mode: 0o644 })]) : payloads;
+}
+
+function inspectReaderSource(reader, expectedOwner, payloads) {
+  const parsed = parseClientReaderArtifact(reader);
+  assert.deepEqual({ packageName: parsed.packageName, version: parsed.version, target: parsed.target,
+    sourceCommit: parsed.sourceCommit, sourceTree: parsed.sourceTree, headCommit: parsed.headCommit, files: parsed.files },
+  { packageName: expectedOwner.packageName, version: expectedOwner.version, target: expectedOwner.target,
+    sourceCommit: expectedOwner.sourceCommit, sourceTree: expectedOwner.sourceTree, headCommit: expectedOwner.headCommit,
+    files: payloads.map(({ path, sha256, mode, size }) => ({ path, sha256, mode, size })) }, 'Native reader source or complete payload cohort differs');
+  return parsed;
 }
 
 function observe(path, root, directoryRevisions = true) {
@@ -102,17 +122,33 @@ function inspectSqliteCompanion(product, target, retained, artifactOwner) {
     sourceUrl: row.sqliteRuntime.sourceUrl, sourceSha3: row.sqliteRuntime.sourceSha3, sha256: library.sha256, size: library.size }, 'Native SQLite supplier/byte provenance differs');
 }
 
-export function recordNativeExecutionArtifact(product, source) {
+export function recordNativeExecutionArtifact(product, source, { inspectReader = inspectTerminalReaderArtifact } = {}) {
   const expectedOwner = owner(product, source);
-  const members = nativeExecutionMembers(product, source.target), root = join(product, 'native');
+  const members = nativeExecutionPayloadMembers(product, source.target), root = join(product, 'native');
   // Recording creates one new root entry; keep physical ancestry and file
   // revisions here, then retain directory revisions for the immutable consumer.
   const retained = retainNativeExecutionFiles(root, members, { directoryRevisions: false });
   inspectSqliteCompanion(product, source.target, retained, expectedOwner);
-  const artifact = { ...expectedOwner, files: retained.files.map(({ path, mode, sha256, size }) => ({ path, sha256, mode, size })) };
-  retained.assertCurrent();
+  const files = [...retained.files];
+  let readerOwner;
+  if (source.target.startsWith('darwin-')) {
+    // Known current native builder command, not a probe of an installed older
+    // binary. Reuse the already verified real payload pins, never hash twice.
+    const reader = inspectReaderSource(inspectReader({ directory: root, packageName: expectedOwner.packageName,
+      version: expectedOwner.version, target: source.target, sourceCommit: source.sourceCommit, sourceTree: source.sourceTree,
+      headCommit: source.headCommit, files: retained.files.map(({ path, sha256, mode, size }) => ({ path, sha256, mode, size })),
+      assertCurrent: retained.assertCurrent }), expectedOwner, retained.files);
+    retained.assertCurrent();
+    const member = nativeExecutionMembers(product, source.target).at(-1);
+    writeFileSync(join(root, member.path), JSON.stringify(reader, null, 2) + '\n', { flag: 'wx', mode: member.mode });
+    retained.assertCurrent();
+    readerOwner = retainNativeExecutionFiles(root, [member], { directoryRevisions: false });
+    files.push(...readerOwner.files);
+  }
+  const artifact = { ...expectedOwner, files: files.map(({ path, mode, sha256, size }) => ({ path, sha256, mode, size })) };
+  retained.assertCurrent(); readerOwner?.assertCurrent();
   writeFileSync(join(root, MANIFEST), JSON.stringify(artifact, null, 2) + '\n', { flag: 'wx', mode: 0o644 });
-  retained.assertCurrent();
+  retained.assertCurrent(); readerOwner?.assertCurrent();
   return Object.freeze(artifact);
 }
 
@@ -129,7 +165,14 @@ export function verifyNativeExecutionArtifact(product, source, { allowEarlierAtt
   const actual = { ...expectedOwner, ...(allowEarlierAttempt ? { runAttempt: stored.runAttempt } : {}),
     files: retained.files.slice(0, -1).map(({ path, sha256, mode, size }) => ({ path, sha256, mode, size })) };
   assert.deepEqual(stored, actual, 'Restored native execution artifact differs from source, run/attempt, target or bytes');
-  inspectSqliteCompanion(product, source.target, retained, expectedOwner); retained.assertCurrent();
+  inspectSqliteCompanion(product, source.target, retained, expectedOwner);
+  if (source.target.startsWith('darwin-')) {
+    const payloads = nativeExecutionPayloadMembers(product, source.target);
+    const reader = retained.files.find(file => file.path === members.at(-1).path);
+    assert(reader, 'Native reader metadata is missing');
+    inspectReaderSource(JSON.parse(reader.bytes.toString('utf8')), expectedOwner, retained.files.slice(0, payloads.length));
+  }
+  retained.assertCurrent();
   return Object.freeze({ artifact: Object.freeze(actual), members, retained });
 }
 

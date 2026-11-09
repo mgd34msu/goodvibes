@@ -21,6 +21,8 @@ const [sourceCommit, headCommit, ...extra] = process.argv.slice(2);
 assert(sourceCommit && headCommit && extra.length === 0, 'Usage: verify-native-execution.mjs <checkout SHA> <head SHA>');
 const source = nativeExecutionSource(product, sourceCommit, headCommit);
 const original = verifyNativeExecutionArtifact(product, source, { allowEarlierAttempt: true });
+assert.equal(original.members.length, 5, 'Darwin execution requires all four native payloads and its actual reader metadata');
+assert.equal(original.members.at(-1).path, original.members[0].path + '.readers.json', 'Darwin reader must use its actual adjacent installed name');
 const root = mkdtempSync(join(realpathSync(tmpdir()), 'daemon-native-execution-'));
 const artifacts = join(root, 'artifacts'), work = join(root, 'foreign-work'), home = join(root, 'home');
 const tree = join(root, 'tree'), daemon = join(root, 'selected-daemon');

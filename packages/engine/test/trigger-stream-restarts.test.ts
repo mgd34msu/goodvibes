@@ -45,26 +45,39 @@ test('operator inspection of an unclaimed supervisor never creates state or acqu
 
 test('overlapping ticks admit one restart and the host observes the durable reservation first', async () => {
   const f = fixture(); await f.manager.create(definition); f.starts[0]!.onExit(1); f.advance(100);
-  const returned = Promise.withResolvers<{ streamId: string; pid: number }>(); let launches = 0;
+  const returned = Promise.withResolvers<{ streamId: string; pid: number }>(), entered = Promise.withResolvers<void>(); let launches = 0;
   f.host.start = input => {
-    launches += 1; f.starts.push(input);
+    launches += 1; f.starts.push(input); entered.resolve();
     const stored = loadTriggerSnapshot(f.path).snapshot?.triggers[0];
     expect(stored?.state).toBe('running'); expect(stored?.lastError).toContain('acknowledgement unobserved');
     return returned.promise;
   };
   const first = f.manager.supervisionTick(), second = f.manager.supervisionTick();
-  expect(launches).toBe(1); returned.resolve({ streamId: 'actual-restart', pid: 5 });
-  await Promise.all([first, second]); expect(launches).toBe(1); expect(f.manager.get('stream')?.state).toBe('running');
+  try {
+    await Promise.race([entered.promise, first.then(() => { throw new Error('Restart settled before the host entered'); })]);
+    expect(launches).toBe(1); returned.resolve({ streamId: 'actual-restart', pid: 5 });
+    await Promise.all([first, second]); expect(launches).toBe(1); expect(f.manager.get('stream')?.state).toBe('running');
+  } finally {
+    returned.resolve({ streamId: 'actual-restart', pid: 5 }); await Promise.allSettled([first, second]);
+  }
 });
 
 test('shutdown drains an entered restart and stops only its actual late returned handle', async () => {
   const f = fixture(); await f.manager.create(definition); f.starts[0]!.onExit(1); f.advance(100);
-  const returned = Promise.withResolvers<{ streamId: string; pid: number }>(); f.host.start = () => returned.promise;
-  const restarting = f.manager.supervisionTick(); f.manager.shutdown();
-  let drained = false; const joined = f.manager.join().then(() => { drained = true; });
-  await Promise.resolve(); expect(drained).toBe(false);
-  returned.resolve({ streamId: 'late-original', pid: 8 }); await restarting; await joined;
-  expect(f.stopped).toEqual(['late-original']); expect(drained).toBe(true);
+  const returned = Promise.withResolvers<{ streamId: string; pid: number }>(), entered = Promise.withResolvers<void>();
+  f.host.start = () => { entered.resolve(); return returned.promise; };
+  const restarting = f.manager.supervisionTick(); let joined: Promise<void> | undefined;
+  try {
+    await Promise.race([entered.promise, restarting.then(() => { throw new Error('Restart settled before the host entered'); })]);
+    f.manager.shutdown();
+    let drained = false; joined = f.manager.join().then(() => { drained = true; });
+    await Promise.resolve(); expect(drained).toBe(false);
+    returned.resolve({ streamId: 'late-original', pid: 8 }); await restarting; await joined;
+    expect(f.stopped).toEqual(['late-original']); expect(drained).toBe(true);
+  } finally {
+    f.manager.shutdown(); returned.resolve({ streamId: 'late-original', pid: 8 });
+    await Promise.allSettled([restarting, ...(joined ? [joined] : [])]);
+  }
 });
 
 test('disabled and cancelled streams never restart; restart-disabled stream requires an explicit reset', async () => {

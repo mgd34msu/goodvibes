@@ -21,7 +21,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { timingSafeEqual, createHash, scryptSync, randomBytes } from 'node:crypto';
+import { scryptSync, randomBytes } from 'node:crypto';
 import {
   UserAuthManager,
   type ScryptParams,
@@ -560,15 +560,15 @@ describe('shared-token constant-time comparison', () => {
     } as const;
   }
 
-  test('SHA-256 hashing ensures same-size buffers regardless of token length', () => {
-    // The fix hashes both sides with SHA-256 so lengths are always 32 bytes
-    const shortHash = createHash('sha256').update('abc').digest();
-    const longHash = createHash('sha256').update('abcdefghijklmnopqrstuvwxyz123456789').digest();
-    expect(shortHash.length).toBe(32);
-    expect(longHash.length).toBe(32);
-    // timingSafeEqual must not throw on equal-length buffers
-    expect(() => timingSafeEqual(shortHash, longHash)).not.toThrow();
-    expect(timingSafeEqual(shortHash, longHash)).toBe(false);
+  test('the real token comparator accepts exact tokens and rejects prefix/length changes without throwing', () => {
+    for (const token of ['abc', 'abcdefghijklmnopqrstuvwxyz123456789']) {
+      const context = makeContext(token);
+      expect(authenticateOperatorToken(token, context)?.kind).toBe('shared-token');
+      for (const changed of [token.slice(1), token + 'x', 'x' + token]) {
+        expect(() => authenticateOperatorToken(changed, context)).not.toThrow();
+        expect(authenticateOperatorToken(changed, context)).toBeNull();
+      }
+    }
   });
 
   test('different-length token does not match (no false positive from length collapse)', () => {

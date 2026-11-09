@@ -14,7 +14,8 @@
  *      bundle nobody can serve.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUNDLE_ROOT_DIR, bundleAssetName, packBundle } from './pack-bundle';
 import { installTestCleanup, makeProjectTempDir } from './helpers/project-temp';
@@ -97,4 +98,19 @@ describe('pack-bundle', () => {
     packBundle({ distDir: dist, outDir: out, version: '1.12.1' });
     expect(() => readFileSync(join(out, '.pack-staging', BUNDLE_ROOT_DIR, 'index.html'))).toThrow();
   });
+});
+
+
+test('the suite can reuse the original archive pin while same-inode edits or identical-byte replacement retire it', () => {
+  const root = scratch('pack-original-pin'), dist = buildDist(root);
+  for (const replacement of ['edit', 'replace'] as const) {
+    const packed = packBundle({ distDir: dist, outDir: join(root, replacement), version: '3.1.2' });
+    const bytes = readFileSync(packed.archivePath);
+    expect(packed.size).toBe(bytes.length);
+    // Independent expected release checksum, not a second producer hash.
+    expect(packed.sha256).toBe(createHash('sha256').update(bytes).digest('hex')); packed.assertCurrent();
+    if (replacement === 'edit') { const changed = Buffer.from(bytes); changed[0] = changed[0]! ^ 1; writeFileSync(packed.archivePath, changed); }
+    else { writeFileSync(packed.archivePath + '.foreign', bytes); renameSync(packed.archivePath + '.foreign', packed.archivePath); }
+    expect(() => packed.assertCurrent()).toThrow('Packed WebUI archive changed');
+  }
 });

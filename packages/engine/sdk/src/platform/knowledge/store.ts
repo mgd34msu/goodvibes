@@ -945,6 +945,7 @@ export class KnowledgeStore {
           // or replace a historical ID selected from metadata. Older generic
           // callers without an artifact tuple keep their exact-ID CAS below.
           if ((selected.source && selected.source.id !== input.id) || selected.generation !== generation) {
+            snapshotJudgmentInput(write);
             throw new KnowledgeSourcePublicationHeldError('state-changed');
           }
         }

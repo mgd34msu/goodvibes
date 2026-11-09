@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { rm } from 'node:fs/promises';
 import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.ts';
@@ -13,9 +12,16 @@ import { makeProjectTempDir } from './_helpers/project-temp.ts';
 const TOKEN = 'xoxb-synthetic-slack-inbox-fixture';
 const RAW = 'Private synthetic text from UPRIVATE';
 const NOW = 2_000_000;
-const digest = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 16);
+// Stable synthetic host-approved labels exercise mapper/adapter custody; this
+// fixture does not implement or test the production privacy transformation.
+const senderLabels = new Map<string, string>();
+const senderLabel = (sender: string) => {
+  let label = senderLabels.get(sender);
+  if (!label) { label = `ffffffffffff${(senderLabels.size + 1).toString(16).padStart(4, '0')}`; senderLabels.set(sender, label); }
+  return label;
+};
 // This fixture is an explicit host admission result, not a production redactor.
-const mapper: SlackInboxMapper = input => ({ fromDigest: digest(input.senderId),
+const mapper: SlackInboxMapper = input => ({ fromDigest: senderLabel(input.senderId),
   subjectPreview: 'Mapped fixture subject', bodyPreview: 'Mapped fixture body' });
 type Request = { method: string; params: URLSearchParams; request: Parameters<SlackInboxHttp>[1] };
 type Reply = { ok: boolean; body: unknown };
@@ -157,7 +163,7 @@ describe('structured classification and explicit mapping', () => {
     expect(result.items.map(i => i.kind)).toEqual(['reaction', 'mention', 'thread', 'dm', 'dm', 'dm']);
     expect(result.items.every(i => i.routeId === 'route-fixture')).toBe(true);
     expect(result.items[0]!.id).toBe('slack:D1:1000.001000');
-    expect(result.items[0]!.fromDigest).toBe(digest('USELF'));
+    expect(result.items[0]!.fromDigest).toBe(senderLabel('USELF'));
     expect(seen).toHaveLength(6);
     const serialized = JSON.stringify(result);
     for (const raw of [TOKEN, RAW, 'USELF', 'UOTHER', 'rawSender', 'rawText']) expect(serialized).not.toContain(raw);
@@ -194,7 +200,7 @@ describe('structured classification and explicit mapping', () => {
   test.each(['late-raw', 'late-throw'] as const)('mapper snapshots validated primitives once: %s', async mode => {
     const reads: Array<{ fromDigest: number; subjectPreview: number; bodyPreview: number }> = [];
     const routeDigests: string[] = [];
-    const fields = { fromDigest: digest('UOTHER'), subjectPreview: 'Mapped fixture subject', bodyPreview: 'Mapped fixture body' };
+    const fields = { fromDigest: senderLabel('UOTHER'), subjectPreview: 'Mapped fixture subject', bodyPreview: 'Mapped fixture body' };
     const f = fixture({ mapItem: () => {
       const count = { fromDigest: 0, subjectPreview: 0, bodyPreview: 0 };
       reads.push(count);

@@ -4,10 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.ts';
 import { nativeCiSourceBinding } from '../sdk/src/platform/workflow/work-ledger/native-ci-continuation-types.ts';
-import { createHash } from 'node:crypto';
-// Synthetic old-format grants exercise the exact historical persisted recipe.
-const nativeCiDigest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value, (_key, item: unknown) => item !== null && typeof item === 'object' && !Array.isArray(item)
-  ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)).digest('hex');
+// Cancellation needs distinct syntactically valid synthetic bindings, not a
+// digest of fixture labels or a reproduction of a historical record recipe.
+const fixtureBindings = new Map<string, string>();
+function fixtureBinding(label: string): string {
+  let binding = fixtureBindings.get(label);
+  if (!binding) { binding = 'a'.repeat(56) + (fixtureBindings.size + 1).toString(16).padStart(8, '0'); fixtureBindings.set(label, binding); }
+  return binding;
+}
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, {recursive: true, force: true}); });
 const guard = () => {};
@@ -16,9 +20,9 @@ function fixture() {
   const file = join(dir, 'pairing.json'); const manager = new PairingTokenManager(file);
   const paired = manager.mint({name: 'Synthetic native owner'});
   const authority = {...manager.authenticateNative(paired.token)!, scopes: ['write:work-ledger']};
-  const source = nativeCiDigest('source'), successor = nativeCiDigest('successor');
+  const source = fixtureBinding('source'), successor = fixtureBinding('successor');
   return {file, manager, paired, authority, source, successor,
-    issue(binding = nativeCiDigest('issued'), sourceBinding = source) { return manager.issueNativeContinuation(paired.token, authority, binding, guard, sourceBinding); }};
+    issue(binding = fixtureBinding('issued'), sourceBinding = source) { return manager.issueNativeContinuation(paired.token, authority, binding, guard, sourceBinding); }};
 }
 test('private source digest separates project, root, exact key, owner incarnation and workspace incarnation', () => {
   const request = {key: {workId: 'w', criteriaId: 'c', criteriaRevision: '1', attemptId: 'a'}, binding: {authorityId: 'owner', authorityRevision: 'owner-v1', scopeId: 'scope', scopeRevision: 'scope-v1', sourceId: 'source', inputRevision: 'input', actionId: 'action', actionRevision: 'action-v1'}, input: {ask: 'Synthetic source', projectRoot: '/owned/root', sessionId: 'fixture', origin: 'external' as const}};
@@ -26,28 +30,28 @@ test('private source digest separates project, root, exact key, owner incarnatio
   for (const key of Object.keys(request.key)) variants.push(nativeCiSourceBinding('project', {...request, key: {...request.key, [key]: 'other'}}));
   for (const key of ['authorityId', 'authorityRevision', 'scopeId', 'scopeRevision']) variants.push(nativeCiSourceBinding('project', {...request, binding: {...request.binding, [key]: 'other'}}));
   expect(variants.every(value => value !== baseline)).toBe(true); expect(new Set(variants).size).toBe(variants.length);
-  const f = fixture(); const grants = [baseline, ...variants].map((source, i) => f.issue(nativeCiDigest(`binding-${i}`), source));
+  const f = fixture(); const grants = [baseline, ...variants].map((source, i) => f.issue(fixtureBinding(`binding-${i}`), source));
   f.manager.revokeNativeContinuationsForSource(baseline, guard);
   expect(f.manager.readNativeContinuation(grants[0]!)).toBeNull();
   for (const grant of grants.slice(1)) expect(f.manager.readNativeContinuation(grant)).toEqual(f.authority);
 });
 test('cancellation source tombstone defeats restored grant entries and changed issuance binding after restart', () => {
   const f = fixture(); const parent = f.issue();
-  f.manager.consumeNativeContinuation(parent, nativeCiDigest('consume'), guard, f.successor);
-  const child = f.manager.issueNativeContinuationFromGrant(parent, nativeCiDigest('consume'), f.authority, nativeCiDigest('child'), guard, f.successor);
+  f.manager.consumeNativeContinuation(parent, fixtureBinding('consume'), guard, f.successor);
+  const child = f.manager.issueNativeContinuationFromGrant(parent, fixtureBinding('consume'), f.authority, fixtureBinding('child'), guard, f.successor);
   const prior = JSON.parse(readFileSync(f.file, 'utf8')).continuations;
   f.manager.revokeNativeContinuationsForSource(f.successor, guard);
   const cancelled = JSON.parse(readFileSync(f.file, 'utf8')); cancelled.continuations = prior; writeFileSync(f.file, JSON.stringify(cancelled));
   const owner = new PairingTokenManager(f.file);
   expect(owner.readNativeContinuation(parent)).toBeNull(); expect(owner.readNativeContinuation(child)).toBeNull();
-  expect(() => owner.issueNativeContinuation(f.paired.token, f.authority, nativeCiDigest('fresh-binding'), guard, f.successor)).toThrow('cancelled');
-  expect(() => owner.consumeNativeContinuation(parent, nativeCiDigest('consume'), guard, f.successor)).toThrow();
+  expect(() => owner.issueNativeContinuation(f.paired.token, f.authority, fixtureBinding('fresh-binding'), guard, f.successor)).toThrow('cancelled');
+  expect(() => owner.consumeNativeContinuation(parent, fixtureBinding('consume'), guard, f.successor)).toThrow();
 });
 test('failed provenance guard writes no cancellation and unissued-source tombstones prevent later issuance', () => {
   const f = fixture(); const grant = f.issue(); const prior = readFileSync(f.file, 'utf8'); let calls = 0;
   expect(() => f.manager.revokeNativeContinuationsForSource(f.source, () => { if (++calls === 2) throw new Error('source no longer current'); })).toThrow();
   expect(readFileSync(f.file, 'utf8')).toBe(prior); expect(f.manager.readNativeContinuation(grant)).toEqual(f.authority);
   f.manager.revokeNativeContinuationsForSource(f.successor, guard);
-  expect(() => f.issue(nativeCiDigest('late-handoff'), f.successor)).toThrow('cancelled');
+  expect(() => f.issue(fixtureBinding('late-handoff'), f.successor)).toThrow('cancelled');
   expect(f.manager.readNativeContinuation(grant)).toEqual(f.authority);
 });

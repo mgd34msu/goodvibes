@@ -39,6 +39,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { captureExistingDirectory } from '../../../packages/engine/sdk/src/platform/utils/atomic-json-store.js';
+import { fileObservationIdentity, readFileObservation } from '../../../packages/engine/sdk/src/platform/utils/file-observation.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -55,10 +57,6 @@ function flag(name: string): string | undefined {
   if (index === -1) return undefined;
   const value = process.argv[index + 1];
   return value !== undefined && !value.startsWith('--') ? value : undefined;
-}
-
-function sha256OfFile(path: string): string {
-  return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
 function run(command: string[], cwd: string): void {
@@ -79,6 +77,9 @@ export interface PackedBundle {
   readonly archivePath: string;
   readonly checksumPath: string;
   readonly sha256: string;
+  readonly size: number;
+  /** Original archive custody, allowing the suite to reuse this real pin. */
+  assertCurrent(): void;
 }
 
 export function packBundle(options: PackBundleOptions): PackedBundle {
@@ -123,10 +124,19 @@ export function packBundle(options: PackBundleOptions): PackedBundle {
   );
   rmSync(staging, { recursive: true, force: true });
 
-  const digest = sha256OfFile(archivePath);
+  const parent = captureExistingDirectory(outDir), selected = join(parent.canonical, assetName);
+  parent.assertCurrent(); const captured = readFileObservation(selected), physical = captured.physical; parent.assertCurrent();
+  const assertCurrent = () => {
+    parent.assertCurrent();
+    if (fileObservationIdentity(selected) !== physical) throw new Error('Packed WebUI archive changed before publication.');
+    parent.assertCurrent();
+  };
+  const digest = createHash('sha256').update(captured.bytes).digest('hex');
+  assertCurrent();
   const checksumPath = join(outDir, 'SHA256SUMS.txt');
   writeFileSync(checksumPath, `${digest}  ${assetName}\n`);
-  return { assetName, archivePath, checksumPath, sha256: digest };
+  assertCurrent();
+  return Object.freeze({ assetName, archivePath, checksumPath, sha256: digest, size: captured.bytes.length, assertCurrent });
 }
 
 if (import.meta.main) {

@@ -1,5 +1,4 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -9,6 +8,8 @@ import { AutomationManager, assertRetainedAutomationTargetCurrent, projectRetain
 import { AutomationJobStore } from '../sdk/src/platform/automation/store/jobs.ts';
 import { snapshotJudgmentInput } from '../sdk/src/platform/gate/judgment-input.ts';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.ts';
+import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.ts';
+import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema-version.ts';
 import { ProjectPlanningService } from '../sdk/src/platform/knowledge/project-planning/service.ts';
 import { findCardNumberShapes } from '../sdk/src/platform/security/card-shapes.ts';
 import { automationMutationFixture } from './_helpers/automation-mutation-fixture.ts';
@@ -179,36 +180,35 @@ async function planning() {
   const clock = spyOn(Date, 'now').mockReturnValue(70_000); cleanup.push(() => clock.mockRestore());
   const fake = fakePort(name => { if (name !== 'specified') throw new Error(`Unexpected planning question: ${name}`); return noulAnswer(0.01); });
   const previous = installJudgmentPort(fake.port); cleanup.push(() => { installJudgmentPort(previous); });
-  const path = join(directory, 'planning.sqlite'); const store = new KnowledgeStore({ dbPath: path }); cleanup.push(() => store.close());
-  const service = new ProjectPlanningService(store);
+  const path = join(directory, 'planning.sqlite'); let store = new KnowledgeStore({ dbPath: path }); cleanup.push(() => store.close());
+  let service = new ProjectPlanningService(store);
   const state = { goal: 'Preserve retry history', scope: 'Retry helper only', executionApproved: true,
     tasks: [{ id: 'retry', title: 'Keep retry records', verification: ['Run retry tests'] }], metadata: { active: true, owner: 'tui' },
   };
   await service.upsertState({ projectId: 'proj', state });
   const first = await service.getState({ projectId: 'proj' });
   if (!first.source) throw new Error('Planning fixture lost its native source');
-  // Find a card-shaped SHA from the actual complete row. A fixed salt stops
-  // working when the stored format changes, even though the boundary is sound.
-  const raw = store.getSourceSnapshot({ id: first.source.id }).raw;
-  if (!raw || typeof raw.metadata !== 'string') throw new Error('Planning fixture lost its raw metadata');
-  const metadata = JSON.parse(raw.metadata) as Record<string, unknown>;
-  let diagnosticSalt: string | undefined;
-  for (let candidate = 0; candidate < 20_000; candidate++) {
-    const salt = `safe-fixture-${candidate}`;
-    const entries = Object.entries({ ...raw, metadata: JSON.stringify({ ...metadata, diagnosticSalt: salt }) })
-      .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
-    const generation = createHash('sha256').update(JSON.stringify(entries)).digest('hex');
-    if (findCardNumberShapes(generation, 1).length) { diagnosticSalt = salt; break; }
-  }
-  if (!diagnosticSalt) throw new Error('Could not construct the card-shaped native fingerprint fixture');
-  await store.upsertSource({ ...first.source, metadata: { ...first.source.metadata, diagnosticSalt } });
+  // A native opaque revision can incidentally contain PAN-shaped digits. Seed
+  // that exact valid historical SQLite value without hashing unrelated source
+  // bytes or brute-forcing random revisions. Restore the understood native
+  // trigger before reopening; every later conditional write uses the real one.
+  await store.close();
+  const setup = new SQLiteStore(path, { coordinated: true }); await setup.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
+  try {
+    const trigger = setup.exec("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='knowledge_sources_revision_update'")[0]?.values[0]?.[0];
+    if (typeof trigger !== 'string') throw new Error('Native source revision trigger is missing');
+    setup.run('DROP TRIGGER knowledge_sources_revision_update');
+    setup.run('UPDATE knowledge_sources SET gv_revision = ? WHERE id = ?', ['aaaa4111111111111111bbbbbbbbbbbb', first.source.id]);
+    setup.run(trigger); await setup.save();
+  } finally { setup.close(); }
+  store = new KnowledgeStore({ dbPath: path }); await store.init(); service = new ProjectPlanningService(store);
   const selected = await service.getState({ projectId: 'proj' });
   if (!selected.source || !selected.revision) throw new Error('Planning fixture lost its native revision');
   expect(findCardNumberShapes(selected.revision.generation, 1)).toHaveLength(1);
   return { store, service, path, fake, state, selected: { ...selected, source: selected.source, revision: selected.revision } };
 }
 
-test('a real full-row card-shaped fingerprint supports selected and native conditional planning publication', async () => {
+test('an actual saved card-shaped opaque revision supports selected and native conditional planning publication', async () => {
   const f = await planning();
   const result = await f.service.applyStateAction({ projectId: 'proj', expected: { kind: 'revision', revision: f.selected.revision }, action: { kind: 'dismiss' } });
   expect(result).toMatchObject({ applied: true, state: { metadata: { active: false } } });

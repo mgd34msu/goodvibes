@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { rm } from 'node:fs/promises';
 import { InboxCursorStore } from '../sdk/src/platform/intake/cursor-store.ts';
@@ -20,9 +19,16 @@ const SELF = '111';
 const OTHER = '222';
 const CHANNEL = '333';
 const CHANNEL2 = '444';
-const digest = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 16);
+// Stable synthetic host-approved labels exercise mapper/adapter custody; this
+// fixture does not implement or test the production privacy transformation.
+const senderLabels = new Map<string, string>();
+const senderLabel = (sender: string) => {
+  let label = senderLabels.get(sender);
+  if (!label) { label = `ffffffffffff${(senderLabels.size + 1).toString(16).padStart(4, '0')}`; senderLabels.set(sender, label); }
+  return label;
+};
 // This is a synthetic host admission decision, not a production redactor.
-const mapper: DiscordInboxMapper = input => ({ fromDigest: digest(input.senderId),
+const mapper: DiscordInboxMapper = input => ({ fromDigest: senderLabel(input.senderId),
   subjectPreview: 'Mapped subject', bodyPreview: 'Mapped body' });
 const snowflake = (ms: number, sequence = 0) => ((BigInt(ms - EPOCH) << 22n) + BigInt(sequence)).toString();
 function message(ms: number, extra: Record<string, unknown> = {}, sequence = 0): Record<string, unknown> {
@@ -192,15 +198,15 @@ describe('Discord structured mapping and privacy boundary', () => {
     const result = await f.adapter.poll({ limit: 50 });
     expect(result.items.map(item => item.kind)).toEqual(['reaction', 'mention', 'thread', 'dm', 'dm']);
     expect(result.items.map(item => item.id)).toEqual([0, 1, 2, 3, 5].map(i => `discord:${CHANNEL}:${snowflake(BASE + i)}`));
-    expect(result.items.at(-1)?.fromDigest).toBe(digest(CHANNEL));
-    expect(result.items[0]).toMatchObject({ provider: 'discord', unread: true, fromDigest: digest(SELF), bodyPreview: 'Mapped body' });
+    expect(result.items.at(-1)?.fromDigest).toBe(senderLabel(CHANNEL));
+    expect(result.items[0]).toMatchObject({ provider: 'discord', unread: true, fromDigest: senderLabel(SELF), bodyPreview: 'Mapped body' });
     expect(JSON.stringify(result)).not.toContain(RAW);
   });
   test('sender fallback is not evidence of own-message authorship', async () => {
     const f = fixture({ listDmChannels: async () => catalog([SELF]),
       reply: historyFixture(() => ok([message(BASE, { author: undefined, reactions: [{}] })])) });
     const result = await f.adapter.poll({ limit: 50 });
-    expect(result.items[0]?.kind).toBe('dm'); expect(result.items[0]?.fromDigest).toBe(digest(SELF));
+    expect(result.items[0]?.kind).toBe('dm'); expect(result.items[0]?.fromDigest).toBe(senderLabel(SELF));
   });
   test('snowflake is canonical watermark even if optional timestamp is absent, malformed or inconsistent', async () => {
     const f = fixture({ reply: historyFixture(() => ok([
@@ -217,7 +223,7 @@ describe('Discord structured mapping and privacy boundary', () => {
     const result = await f.adapter.poll({ limit: 50, since: 0 });
     expect(result.state).toBe('ready'); expect(result.items[0]?.receivedAt).toBe(cutoff - 1);
     expect(Number.isSafeInteger(result.items[0]?.receivedAt)).toBe(true);
-    expect(result.items[0]?.fromDigest).toBe(digest(maximum));
+    expect(result.items[0]?.fromDigest).toBe(senderLabel(maximum));
   });
   test.each(['0', '-1', '01', '1.2', '1e2', '18446744073709551616', '999999999999999999999', 123, null])('rejects malformed message snowflake %p', async id => {
     const f = fixture({ reply: historyFixture(() => ok([message(BASE, { id })])) });
@@ -242,20 +248,20 @@ describe('Discord structured mapping and privacy boundary', () => {
   test('mapper receives raw fields and only admitted projected primitives leave adapter', async () => {
     const inputs: unknown[] = [];
     const f = fixture({ mapItem: input => { inputs.push(input); return {
-      fromDigest: digest(input.senderId), subjectPreview: 'Approved', bodyPreview: 'Safe', raw: RAW, senderId: OTHER,
+      fromDigest: senderLabel(input.senderId), subjectPreview: 'Approved', bodyPreview: 'Safe', raw: RAW, senderId: OTHER,
     }; } });
     const { store, poller } = await integrated(f);
     await poller.pollOnce();
     expect(inputs).toEqual([{ senderId: OTHER, channelId: CHANNEL, subject: 'Direct message', text: RAW }]);
     expect(store.listItems({ limit: 50 })).toHaveLength(1);
     const aggregate = aggregateInbox({ store, poller }, { limit: 50 });
-    expect(aggregate.items[0]).toMatchObject({ from: digest(OTHER), bodyPreview: 'Safe' });
+    expect(aggregate.items[0]).toMatchObject({ from: senderLabel(OTHER), bodyPreview: 'Safe' });
     expect(JSON.stringify([aggregate, f.logs])).not.toContain(RAW);
   });
   test('reads each mapper primitive exactly once for both validation and projection', async () => {
     const reads = { fromDigest: 0, subjectPreview: 0, bodyPreview: 0 };
     const f = fixture({ mapItem: () => ({
-      get fromDigest() { return ++reads.fromDigest === 1 ? digest(OTHER) : RAW; },
+      get fromDigest() { return ++reads.fromDigest === 1 ? senderLabel(OTHER) : RAW; },
       get subjectPreview() { return ++reads.subjectPreview === 1 ? 'Safe' : RAW; },
       get bodyPreview() { return ++reads.bodyPreview === 1 ? 'Safe' : RAW; },
     }) });
@@ -269,7 +275,7 @@ describe('Discord structured mapping and privacy boundary', () => {
     f.ctx.logger.warn = async (...args) => { f.logs.push(args); throw new Error(RAW); };
     const result = await f.adapter.poll({ limit: 50 });
     expect(result.state).toBe('ready'); expect(result.items[0]).not.toHaveProperty('routeId');
-    expect(routes).toEqual([{ provider: 'discord', fromDigest: digest(OTHER), kind: 'dm' }]);
+    expect(routes).toEqual([{ provider: 'discord', fromDigest: senderLabel(OTHER), kind: 'dm' }]);
     expect(f.logs).toEqual([['Discord route resolution failed']]);
   });
   test('resolved route is retained', async () => {

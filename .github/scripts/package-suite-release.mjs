@@ -26,6 +26,7 @@ assert.equal(JSON.parse(readFileSync('package.json')).version, tag.slice(1));
 run('git', ['diff', '--exit-code', 'HEAD']);
 mkdirSync(destination, { recursive: true });
 const files = {};
+const retainedReleaseSources = [];
 const put = (path, name = basename(path)) => {
   const bytes = readFileSync(path);
   const hash = createHash('sha256').update(bytes).digest('hex');
@@ -96,11 +97,12 @@ try {
 } finally { rmSync(addonStage, {recursive:true,force:true}); }
 if (target === 'linux-x64') {
   run('bun', ['run', 'build'], join(root, 'products/webui'));
-  run('bun', ['scripts/pack-bundle.ts', '--out', destination, '--version', tag.slice(1)], join(root, 'products/webui'));
-  rmSync(join(destination, 'SHA256SUMS.txt'), { force: true });
-  const bundle = `goodvibes-webui-bundle-${tag.slice(1)}.tar.gz`;
-  const bytes = readFileSync(join(destination, bundle));
-  files[bundle] = { sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length };
+  const { packBundle } = await import(pathToFileURL(join(root, 'products/webui/scripts/pack-bundle.ts')).href);
+  const packed = packBundle({ distDir: join(root, 'products/webui/dist'), outDir: resolve(destination), version: tag.slice(1) });
+  packed.assertCurrent();
+  rmSync(packed.checksumPath, { force: true });
+  files[packed.assetName] = { sha256: packed.sha256, size: packed.size };
+  retainedReleaseSources.push(packed.assertCurrent);
   const staging = join(destination, '.browser'); mkdirSync(staging);
   try {
     const require = createRequire(join(root, 'packages/engine/package.json'));
@@ -113,5 +115,6 @@ if (target === 'linux-x64') {
   } finally { rmSync(staging, { recursive: true, force: true }); }
 }
 run('git', ['diff', '--exit-code', 'HEAD']);
+for (const assertCurrent of retainedReleaseSources) assertCurrent();
 writeFileSync(join(destination, `suite-release-source-${target}.json`), JSON.stringify({ schema: 1, tag, sourceCommit: source, target, files }, null, 2) + '\n');
 console.log(JSON.stringify({ tag, sourceCommit: source, target, files: Object.keys(files) }));

@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -38,7 +37,7 @@ function fixture(kind: 'config' | 'secret-config' | 'subscription' = 'config') {
   const manager = new PermissionManager(undefined, createPermissionConfigReader(config), new PolicyRuntimeState());
   const registry = new ToolRegistry(manager);
   const controller = new AbortController();
-  let assertSource = () => {}, afterFirst = () => {}, writes = 0;
+  let assertSource = () => {}, afterFirst = () => {}, writes = 0, projectionSequence = 0;
   registry.register({ definition: { name: CHILD, description: 'Apply a synthetic registration-owned settings plan.',
     parameters: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'], additionalProperties: false }, sideEffects: ['state'] },
     async execute(args, options) {
@@ -59,7 +58,7 @@ function fixture(kind: 'config' | 'secret-config' | 'subscription' = 'config') {
       const effect = { kind, key: 'provider.model', configured: true };
       return { status: 'projected', args: request.args, settingsMutation,
         settingsAdmissionEvidence: { kind: 'agent-settings', operation: 'set', key: 'provider.model', effect,
-          revision: createHash('sha256').update(JSON.stringify(effect)).digest('hex') },
+          revision: `synthetic-settings-${++projectionSequence}` },
         assertCurrent: request.assertCurrent };
     } } });
   registry.register({ definition: { name: PARENT, description: 'Apply two exact registered child settings plans.', parameters: {} },

@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Screen unproven canonical source writes before reporting a stale source
+  revision. Reuse the WebUI archive's original release checksum and stop
+  computing an unused checksum of the native artifact receipt itself.
+
 - Stop fleet polling before shutting down the trigger manager and waiting for
   its active children, preventing reads against the closed store during daemon
   shutdown.

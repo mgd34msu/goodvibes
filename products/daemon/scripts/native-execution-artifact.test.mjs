@@ -35,6 +35,9 @@ function fixture(target) {
 for (const target of NATIVE_EXECUTION_TARGETS) {
   test(`${target} records/restores only its fixed source-declared companions`, () => {
     const f = fixture(target); const verified = verifyNativeExecutionArtifact(f.product, f.source);
+    assert.equal(verified.retained.files.at(-1).path, 'native-execution-artifact.json');
+    assert.equal(Object.hasOwn(verified.retained.files.at(-1), 'sha256'), false);
+    assert(verified.artifact.files.every(file => /^[0-9a-f]{64}$/.test(file.sha256)));
     assert.equal(verified.artifact.target, target); assert.equal(verified.artifact.runAttempt, '2'); verified.retained.assertCurrent();
     assert.equal(f.members.length, target.startsWith('linux-') ? 5 : 4);
     assert.deepEqual(verified.artifact.files.map(file => file.path), f.members.map(file => file.path));

@@ -64,7 +64,9 @@ export function retainNativeExecutionFiles(root, members, { directoryRevisions =
     const bytes = readFileSync(full);
     assert.equal(observe(full, root, directoryRevisions).identity, before.identity, 'Native execution payload changed while read');
     assert.equal(bytes.length, before.size);
-    return Object.freeze({ ...member, sha256: digest(bytes), size: bytes.length, identity: before.identity, bytes });
+    // The manifest is parsed and compared against these independently computed
+    // payload pins; no consumer uses a digest of the manifest itself.
+    return Object.freeze({ ...member, ...(member.path === MANIFEST ? {} : { sha256: digest(bytes) }), size: bytes.length, identity: before.identity, bytes });
   });
   const assertCurrent = () => {
     for (const file of retained) {

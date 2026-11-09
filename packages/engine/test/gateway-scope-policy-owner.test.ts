@@ -1,5 +1,4 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -32,7 +31,7 @@ function fixture() {
   const config = new ConfigManager(options); const catalog = new GatewayMethodCatalog({ includeBuiltins: false });
   const remove = catalog.register(method(), handler);
   const owner = catalog.attachScopePolicyOwner(() => config.invalidateExternalPolicy());
-  const revision = () => createHash('sha256').update(JSON.stringify([config.getDurableConfigurationIncarnation(), owner.current().revision])).digest('hex');
+  const revision = () => JSON.stringify([config.getDurableConfigurationIncarnation(), owner.current().revision]);
   const capture = () => { config.captureDurableConfigurationIncarnation(); return revision(); };
   return { dir, options, config, catalog, owner, remove, capture, revision };
 }
@@ -42,7 +41,7 @@ test('initial catalog construction and unchanged restart preserve durable scope 
   const nextConfig = new ConfigManager(f.options); const nextCatalog = new GatewayMethodCatalog({ includeBuiltins: false });
   nextCatalog.register(method(), handler);
   const nextOwner = nextCatalog.attachScopePolicyOwner(() => nextConfig.invalidateExternalPolicy());
-  const after = createHash('sha256').update(JSON.stringify([nextConfig.getDurableConfigurationIncarnation(), nextOwner.current().revision])).digest('hex');
+  const after = JSON.stringify([nextConfig.getDurableConfigurationIncarnation(), nextOwner.current().revision]);
   expect(after).toBe(before);
   expect(readFileSync(`${f.config.getConfigPath()}.policy-epoch.json`, 'utf8')).toBe(disk);
 });
@@ -110,7 +109,7 @@ test('removal and re-addition cannot revive a durable grant across restart', () 
   expect(f.owner.current().revision).toBe(catalogBefore); expect(f.revision()).not.toBe(before);
   const restarted = new ConfigManager(f.options);
   expect(restarted.getDurableConfigurationIncarnation()).toBe(f.config.getDurableConfigurationIncarnation());
-  expect(createHash('sha256').update(JSON.stringify([restarted.getDurableConfigurationIncarnation(), catalogBefore])).digest('hex')).not.toBe(before);
+  expect(JSON.stringify([restarted.getDurableConfigurationIncarnation(), catalogBefore])).not.toBe(before);
 });
 
 test('same-name source replacement revokes even when its scope union is unchanged', () => {

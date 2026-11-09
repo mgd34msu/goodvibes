@@ -53,3 +53,32 @@ test('scoped staging treats a real pathspec-shaped filename as data and preserve
     expect(readFileSync(join(root, 'owner.txt'), 'utf8')).toBe('Unrelated owner edit');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test('scoped ignore checks preserve literal whitespace-bearing filenames and ignored owner data', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'scoped-literal-ignore-'));
+  try {
+    git(root, 'init', '-q'); git(root, 'config', 'user.name', 'Fixture');
+    git(root, 'config', 'user.email', 'fixture@example.invalid');
+    writeFileSync(join(root, '.gitignore'), 'ignored-*\n');
+    writeFileSync(join(root, 'owner.txt'), 'Original owner content');
+    git(root, 'add', '.'); git(root, 'commit', '-qm', 'Original');
+    const selected = [' leading space.txt', 'line\nbreak.txt', '-leading-dash.txt', ':(glob)*'];
+    for (const name of selected) writeFileSync(join(root, name), `Selected ${name}`);
+    const ignored = 'ignored-line\nbreak.txt';
+    writeFileSync(join(root, ignored), 'Ignored owner data');
+    writeFileSync(join(root, 'owner.txt'), 'Unrelated owner edit');
+    const result = await new AgentWorktree(root).commitWorkingTree('Only literal selected results', [...selected, ignored]);
+    expect(result.hash).toBeTruthy();
+    expect(result.skippedIgnored).toEqual([ignored]);
+    const names = git(root, 'ls-tree', '--name-only', '-z', 'HEAD').split('\0');
+    for (const name of selected) {
+      expect(names).toContain(name);
+      expect(git(root, 'show', `HEAD:${name}`)).toBe(`Selected ${name}`);
+    }
+    expect(names).not.toContain(ignored);
+    expect(readFileSync(join(root, ignored), 'utf8')).toBe('Ignored owner data');
+    expect(git(root, 'show', 'HEAD:owner.txt')).toBe('Original owner content');
+    expect(readFileSync(join(root, 'owner.txt'), 'utf8')).toBe('Unrelated owner edit');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

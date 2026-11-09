@@ -265,7 +265,7 @@ export function confirmFileDurable(filePath: string): void {
 
 interface AtomicDirectoryOwner { readonly canonical: string; readonly durabilityDirectories: readonly string[]; assertCurrent(): void; assertPhysicalCurrent(): void }
 const atomicDirectoryStamp = (stat: BigIntStats): string => {
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Atomic file parent is not a physical directory');
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw Object.assign(new Error('Atomic file parent is not a physical directory'), { code: 'ENOTDIR' });
   return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.birthtimeNs].join(':');
 };
 const atomicFileStamp = (stat: BigIntStats): string => [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.nlink,
@@ -448,6 +448,15 @@ export function writeFileAtomic(filePath: string, contents: string | Uint8Array,
     // No borrowed callback or async gap is allowed between the identity proof
     // and the native rename into the retained original physical parent.
     attempted = true; renameSync(tmpPath, target); published = true;
+    if (!onEffect && !durable) {
+      // A plain atomic write promises complete publication, with the latest
+      // concurrent writer winning. A later valid rename may already replace
+      // our image; it cannot undo this completed rename. Only a borrowed
+      // publication observer or durability receipt needs the exact live image.
+      parent.assertCurrent();
+      const completedFd = fd; fd = undefined; closeSync(completedFd);
+      return;
+    }
     // rename changes ctime. Capture the new exact descriptor/path stamp before
     // any borrowed observer may advance its own source receipt.
     publishedImage = observePublished();

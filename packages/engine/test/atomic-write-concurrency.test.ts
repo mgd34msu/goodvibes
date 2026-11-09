@@ -160,8 +160,8 @@ describe('atomic write under a concurrent writer of the same store', () => {
 
     expect(firstErr).not.toContain('ENOENT');
     expect(secondErr).not.toContain('ENOENT');
-    expect(firstExit).toBe(0);
-    expect(secondExit).toBe(0);
+    expect(firstExit, firstErr).toBe(0);
+    expect(secondExit, secondErr).toBe(0);
 
     // Whoever renamed last owns the file, and it is one writer's whole
     // snapshot, never a mixture and never a truncated one.

@@ -31,7 +31,8 @@ function readIndex(path: string): FileObservation | null {
 
 function assertIndex(path: string, original: FileObservation | null): void {
   try {
-    if (original === null || fileObservationIdentity(path) !== original.physical) throw new Error('Original Git index changed');
+    const current = fileObservationIdentity(path);
+    if (original === null || current !== original.physical) throw new Error('Original Git index changed');
   } catch (error) {
     if (original === null && (error as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw error;
@@ -154,9 +155,11 @@ export class AgentWorktree {
         trackedDeleted = maybeDeleted.filter((p) => trackedSet.has(p));
       }
       const existingPaths = [...onDisk, ...trackedDeleted];
-      // checkIgnore returns the subset git ignores; it returns [] (does NOT throw) when nothing
-      // is ignored, so it is safe to call unconditionally on the whole candidate set.
-      const ignored = existingPaths.length > 0 ? await git.checkIgnore(existingPaths) : [];
+      // check-ignore consumes filenames, not staging pathspecs. Keep leading
+      // dashes/pathspec-like names literal and preserve whitespace with NULs.
+      const ignored = existingPaths.length > 0
+        ? (await git.raw(['--literal-pathspecs', 'check-ignore', '-z', '--', ...existingPaths])).split('\0').filter(Boolean)
+        : [];
       root.assertCurrent();
       const ignoredSet = new Set(ignored);
       const stageable = existingPaths.filter((p) => !ignoredSet.has(p));

@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { JsonValue } from '@goodvibes-jev/judgment';
 import { summarizeError } from '../utils/error-display.js';
-import type { ContractInputFile } from './input-snapshot.js';
+import { originalContractInputFileDigest, type ContractInputFile } from './input-snapshot.js';
 import { ownedContractCheckpointText, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 
 const inputIdentity = (stat: BigIntStats): string => `${stat.dev}:${stat.ino}:${stat.mode}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
@@ -158,6 +158,7 @@ export function currentFileObservations(cwd: string, paths: readonly string[], o
       const expected = options.inputFile, expectedOid = expected?.oid;
       if (expected && (expected.path !== path || expected.kind !== 'file' || !expectedOid || expected.identity !== inputIdentity(before)))
         throw new Error('Current file no longer belongs to the selected captured input.');
+      const originalInput = expected?.digest === undefined ? undefined : originalContractInputFileDigest(expected, root, path);
       const fd = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       let bytes: Buffer;
       try {
@@ -168,7 +169,11 @@ export function currentFileObservations(cwd: string, paths: readonly string[], o
           throw new Error('Current file changed while reading.');
         assertCurrent();
       } finally { closeSync(fd); }
-      const sha256 = expected?.digest === undefined ? undefined : createHash('sha256').update(bytes).digest('hex');
+      // Fresh native input already bound this original physical leaf's bytes.
+      // Its exact owner may lend that commitment, but copied/foreign expected
+      // files still require a complete independent byte comparison.
+      originalInput?.assertCurrent();
+      const sha256 = expected?.digest === undefined ? undefined : originalInput?.digest ?? createHash('sha256').update(bytes).digest('hex');
       if (expected?.digest !== undefined && sha256 !== expected.digest) throw new Error('Current file does not match its captured publication input.');
       const binary = bytes.includes(0), text = options.includeText && !binary ? bytes.toString('utf8') : undefined;
       let retired = false;

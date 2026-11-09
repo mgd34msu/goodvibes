@@ -55,6 +55,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { types } from 'node:util';
 
 /**
  * How long an answered prompt stays spendable.
@@ -91,6 +92,20 @@ export interface OwnerApproval {
   readonly contentFingerprint: string | null;
 }
 
+const fingerprintApply = Reflect.apply, fingerprintGet = WeakMap.prototype.get, fingerprintSet = WeakMap.prototype.set;
+const fingerprintIsProxy = types.isProxy, fingerprintFrozen = Object.isFrozen, fingerprintPrototype = Object.getPrototypeOf;
+const fingerprintDescriptors = Object.getOwnPropertyDescriptors;
+const immutableFingerprints = new WeakMap<object, string | null>();
+/** Native captured payment requests are immutable ordinary field records. Do
+ * not extend this reuse to frozen getters, proxies or mutable borrowed input. */
+function immutableFingerprintFields(fields: object): boolean {
+  if (fingerprintIsProxy(fields)) return false;
+  const prototype: unknown = fingerprintPrototype(fields);
+  return (prototype === Object.prototype || prototype === null) && fingerprintFrozen(fields)
+    && Object.values(fingerprintDescriptors(fields)).every(descriptor => 'value' in descriptor
+      && (descriptor.value === undefined || typeof descriptor.value === 'string'));
+}
+
 /**
  * A stable digest of the fields about to leave the machine.
  *
@@ -111,17 +126,23 @@ export function fingerprintOutwardContent(
   fields: Readonly<Record<string, string | undefined>> | undefined,
 ): string | null {
   if (fields === undefined) return null;
+  const object = fields !== null && typeof fields === 'object' && !fingerprintIsProxy(fields) ? fields : undefined;
+  const remembered = object === undefined ? undefined : fingerprintApply(fingerprintGet, immutableFingerprints, [object]) as string | null | undefined;
+  if (remembered !== undefined) return remembered;
+  const retain = object !== undefined && immutableFingerprintFields(object);
   const normalized = Object.entries(fields)
     .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
     .map(([name, value]) => [name, value.replace(/\s+/g, ' ').trim()] as const)
     .sort((left, right) => (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0));
-  if (normalized.length === 0) return null;
+  if (normalized.length === 0) { if (retain) fingerprintApply(fingerprintSet, immutableFingerprints, [object!, null]); return null; }
   const hash = createHash('sha256');
   for (const [name, value] of normalized) {
     // Length-prefixed so `{a:'xy'}` and `{ax:'y'}` cannot digest alike.
     hash.update(`${String(name.length)}:${name}${String(value.length)}:${value}`);
   }
-  return hash.digest('hex');
+  const result = hash.digest('hex');
+  if (retain) fingerprintApply(fingerprintSet, immutableFingerprints, [object!, result]);
+  return result;
 }
 
 export function grantOwnerApproval(input: {
@@ -262,12 +283,15 @@ export class OwnerApprovalStore {
     readonly content?: Readonly<Record<string, string | undefined>> | undefined;
   }): OwnerApproval | null {
     this.sweep();
-    const wanted = fingerprintOutwardContent(input.content);
-    const index = this.approvals.findIndex(
-      (approval) =>
-        approval.action === input.action
-        && (wanted === null || approval.contentFingerprint === null || approval.contentFingerprint === wanted),
-    );
+    let wanted: string | null = null, compared = false;
+    const index = this.approvals.findIndex((approval) => {
+      if (approval.action !== input.action) return false;
+      if (approval.contentFingerprint === null) return true;
+      // Ordinary sends with no matching pending grant need no commitment.
+      // Several bound candidates compare this same input at most once.
+      if (!compared) { wanted = fingerprintOutwardContent(input.content); compared = true; }
+      return wanted === null || approval.contentFingerprint === wanted;
+    });
     if (index < 0) return null;
     const [approval] = this.approvals.splice(index, 1);
     return approval ?? null;

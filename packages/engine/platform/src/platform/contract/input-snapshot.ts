@@ -73,6 +73,26 @@ interface InputOwnerObservation {
 // Physical proof belongs to this exact admitted receipt only. No source bytes
 // are retained; copied/restored JSON must independently check its saved hashes.
 const inputOwnerObservations = new WeakMap<ContractInputSnapshot, InputOwnerObservation>();
+interface OriginalInputFileDigest {
+  readonly digest: string;
+  readonly assertCurrent: () => void;
+}
+interface BoundInputFileDigest {
+  readonly root: string;
+  readonly path: string;
+  readonly observation: InputFileObservation;
+  readonly proof: OriginalInputFileDigest;
+}
+const originalInputFileDigests = new WeakMap<ContractInputFile, BoundInputFileDigest>();
+/** Only a complete independently admitted input read can supply this digest.
+ * Public file identities/copies cannot skip a reader's cold byte comparison.
+ * The caller still owns its actual read and must recheck after reading bytes.
+ */
+export function originalContractInputFileDigest(file: ContractInputFile, root: string, path: string): OriginalInputFileDigest | undefined {
+  const original = originalInputFileDigests.get(file);
+  if (!original || original.root !== root || original.path !== path) return undefined;
+  original.proof.assertCurrent(); return original.proof;
+}
 function safePath(path: string): boolean {
   return path.length > 0 && !isAbsolute(path) && !path.includes('\\') && !path.includes('\0') && path.split('/').every((part) => part !== '' && part !== '.' && part !== '..');
 }
@@ -449,6 +469,18 @@ async function assertContractInputOwnerOriginal(snapshot: ContractInputSnapshot,
   for (const file of observation.files.values()) file.assertCurrent();
   observation.index = selectedIndex;
   inputOwnerObservations.set(original, observation);
+  for (const file of original.files) {
+    const physical = observation.files.get(file.path);
+    if (physical?.file.digest === undefined || originalInputFileDigests.get(file)?.observation === physical) continue;
+    // Retain only this small file's data slots, not another complete manifest
+    // scan for every publication target. The full owner assertion above still
+    // checks the original receipt as a whole before its proof is registered.
+    const metadata = retainOwnedJson(file, nodeTypes.isProxy);
+    const proof = Object.freeze({ digest: physical.file.digest, assertCurrent() {
+      metadata.assertCurrent(); physical.assertCurrent();
+    } });
+    originalInputFileDigests.set(file, { root, path: physical.file.path, observation: physical, proof });
+  }
 }
 
 /** Historical readers retain the recorded repository identity without requiring live owner files/HEAD. */

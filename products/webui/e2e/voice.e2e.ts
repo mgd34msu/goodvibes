@@ -18,7 +18,10 @@ import { expectNoHorizontalScroll, only, PHONE, expectBottomSheet } from './supp
 
 test.use({
   permissions: ['microphone'],
-  launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] },
+  launchOptions: {
+    ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}),
+    args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+  },
 });
 
 async function seedAssistantReply(page: import('@playwright/test').Page): Promise<void> {
@@ -29,14 +32,21 @@ async function seedAssistantReply(page: import('@playwright/test').Page): Promis
   await expect(page.locator('.message.assistant')).toHaveCount(1, { timeout: 15_000 });
 }
 
-test('reads a reply aloud with the shared voice, then stops on demand', async ({ page }) => {
+test('Classic reads a saved reply aloud with the shared voice, then stops on demand', async ({ page }) => {
   await installFakeAudio(page);
-  await installChatMockDaemon(page);
+  const daemon = await installChatMockDaemon(page, { decisionPolicy: 'Classic - Off' });
   const voice = await installVoiceRoutes(page);
+  const judgments: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/judgment/batteries/run') judgments.push(request.url()); });
 
   await page.goto('/?view=chat');
   await expect(page.locator('.app-shell')).toBeVisible();
   await seedAssistantReply(page);
+  const saved = daemon.messagesOf(daemon.sessionIds()[0]!).find(message => message.role === 'assistant');
+  if (!saved) throw new Error('Expected the original fixture reply');
+  const originalRevision = saved.contentRevision;
+  expect(originalRevision.length).toBeGreaterThan(0);
+  expect(daemon.messagesOf(saved.sessionId).find(message => message.id === saved.id)?.contentRevision).toBe(originalRevision);
 
   const speak = page.locator('.message.assistant button[aria-label="Read this reply aloud"]').first();
   await expect(speak).toBeVisible();
@@ -54,7 +64,30 @@ test('reads a reply aloud with the shared voice, then stops on demand', async ({
   await stop.click();
   await expect(page.locator('.message.assistant button[aria-label="Read this reply aloud"]').first()).toBeVisible();
 
+  const composer = page.locator('textarea[aria-label="Message GoodVibes"]');
+  await composer.fill('Say hello again');
+  await page.locator('.send-button').click();
+  await expect(page.locator('.message.assistant')).toHaveCount(2);
+  const nextReply = daemon.messagesOf(saved.sessionId).filter(message => message.role === 'assistant').at(-1);
+  expect(nextReply?.contentRevision.length).toBeGreaterThan(0);
+  expect(nextReply?.contentRevision).not.toBe(originalRevision);
+  expect(daemon.messagesOf(saved.sessionId).find(message => message.id === saved.id)?.contentRevision).toBe(originalRevision);
+  expect(judgments).toEqual([]);
   await expectNoHorizontalScroll(page);
+});
+
+test('a saved reply without its owner revision cannot be read aloud even in Classic', async ({ page }) => {
+  await installFakeAudio(page);
+  const daemon = await installChatMockDaemon(page, { decisionPolicy: 'Classic - Off' });
+  const voice = await installVoiceRoutes(page);
+  await page.goto('/?view=chat'); await seedAssistantReply(page);
+  const saved = daemon.messagesOf(daemon.sessionIds()[0]!).find(message => message.role === 'assistant');
+  if (!saved) throw new Error('Expected the original fixture reply');
+  Reflect.deleteProperty(saved, 'contentRevision');
+  await page.reload();
+  const unavailable = page.locator('.message.assistant button[aria-label="Read aloud unavailable, The saved reply is still loading."]').first();
+  await expect(unavailable).toBeVisible(); await expect(unavailable).toBeDisabled();
+  expect(voice.ttsRequests).toEqual([]);
 });
 
 test('offers an honest refusal when no voice provider is configured', async ({ page }) => {

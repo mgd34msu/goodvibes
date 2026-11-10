@@ -69,6 +69,8 @@
 }
 
 .settings-field-desc {
+  /* Schema prose can contain unbroken JSON examples or environment names. */
+  overflow-wrap: anywhere;
   margin: var(--space-1) 0 0;
   color: var(--text-2);
   font-size: var(--text-meta);

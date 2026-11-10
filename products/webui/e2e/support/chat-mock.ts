@@ -15,6 +15,7 @@
  */
 
 import type { Page, Route } from '@playwright/test';
+import type { DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 import { describeOriginPostureForMock } from './mock-daemon';
 
 const TOKEN_KEY = 'goodvibes.webui.token';
@@ -26,6 +27,7 @@ interface StoredMessage {
   sessionId: string;
   role: Role;
   content: string;
+  contentRevision: string;
   attachments: { artifactId: string; label?: string }[];
   createdAt: number;
   supersededAt?: number;
@@ -64,6 +66,8 @@ export interface ChatMockDaemon {
 }
 
 export interface ChatMockOptions {
+  /** Explicit observed fixture policy; never an execution grant or live-model claim. */
+  decisionPolicy?: DecisionModelPolicy;
   /**
    * Hold assistant replies instead of appending them instantly: the turn
    * stays visibly active so specs can exercise Stop, steering, and the
@@ -92,17 +96,18 @@ export interface ChatMockOptions {
   replyCode?: string;
 }
 
-function json(route: Route, body: unknown, status = 200) {
+function chatJson(route: Route, body: unknown, status = 200, policy: DecisionModelPolicy = 'Default - On') {
   return route.fulfill({
     status,
     contentType: 'application/json',
     headers: { 'access-control-allow-origin': '*',
-      'x-goodvibes-decision-policy': JSON.stringify({ policy: 'Default - On', operation: 'decision', reason: null, revision: 0 }) },
+      'x-goodvibes-decision-policy': JSON.stringify({ policy, operation: policy === 'Classic - Off' ? 'classic' : 'decision', reason: policy === 'Classic - Off' ? 'selected' : null, revision: 0 }) },
     body: JSON.stringify(body),
   });
 }
 
 export async function installChatMockDaemon(page: Page, options: ChatMockOptions = {}): Promise<ChatMockDaemon> {
+  const json = (route: Route, body: unknown, status = 200) => chatJson(route, body, status, options.decisionPolicy);
   const sessions = new Map<string, StoredSession>();
   const messages = new Map<string, StoredMessage[]>();
   const titleUpdates: { sessionId: string; title: string }[] = [];
@@ -151,7 +156,7 @@ export async function installChatMockDaemon(page: Page, options: ChatMockOptions
       role: 'assistant',
       content: `${label}\n\n\`\`\`js\n${options.replyCode ?? `console.log('reply ${seq}');`}\n\`\`\``,
       attachments: [],
-      createdAt: nextTime(),
+      createdAt: nextTime(), contentRevision: nextId('revision'),
       ...(options.assistantReplyMemoryRecordIds?.length
         ? { metadata: { memory: { recordIds: options.assistantReplyMemoryRecordIds } } }
         : {}),
@@ -270,7 +275,7 @@ export async function installChatMockDaemon(page: Page, options: ChatMockOptions
       const attachments = Array.isArray(body?.attachments) ? (body.attachments as StoredMessage['attachments']) : [];
       const turnActive = heldTurns.has(id);
       const userMsg: StoredMessage = {
-        id: nextId('u'), sessionId: id, role: 'user', content, attachments, createdAt: nextTime(),
+        id: nextId('u'), sessionId: id, role: 'user', content, attachments, createdAt: nextTime(), contentRevision: nextId('revision'),
         ...(turnActive ? { deliveryState: 'queued' as const } : {}),
       };
       list.push(userMsg);
@@ -333,7 +338,7 @@ export async function installChatMockDaemon(page: Page, options: ChatMockOptions
       list.push({
         id: nextId('a'), sessionId: id, role: 'assistant',
         content: 'This partial reply was being generated when',
-        attachments: [], createdAt: nextTime(),
+        attachments: [], createdAt: nextTime(), contentRevision: nextId('revision'),
         deliveryState: 'cancelled', inReplyTo: turnUserId,
       });
       messages.set(id, list);
@@ -356,18 +361,18 @@ export async function installChatMockDaemon(page: Page, options: ChatMockOptions
         list.push({
           id: nextId('a'), sessionId: id, role: 'assistant',
           content: 'This partial reply was being generated when',
-          attachments: [], createdAt: nextTime(),
+          attachments: [], createdAt: nextTime(), contentRevision: nextId('revision'),
           deliveryState: 'cancelled', inReplyTo: interrupted,
         });
       }
       const userMsg: StoredMessage = {
-        id: nextId('u'), sessionId: id, role: 'user', content, attachments: [], createdAt: nextTime(),
+        id: nextId('u'), sessionId: id, role: 'user', content, attachments: [], createdAt: nextTime(), contentRevision: nextId('revision'),
       };
       list.push(userMsg);
       messages.set(id, list);
       list.push({
         id: nextId('a'), sessionId: id, role: 'assistant',
-        content: `Steered reply`, attachments: [], createdAt: nextTime(), inReplyTo: userMsg.id,
+        content: `Steered reply`, attachments: [], createdAt: nextTime(), contentRevision: nextId('revision'), inReplyTo: userMsg.id,
       });
       return json(route, {
         sessionId: id, messageId: userMsg.id, steered: true, turnStarted: true,
@@ -419,7 +424,7 @@ export async function installChatMockDaemon(page: Page, options: ChatMockOptions
         }
       }
       const newUser: StoredMessage = {
-        id: nextId('u'), sessionId: id, role: 'user', content, attachments: [], createdAt: nextTime(), revisionOf: target.id,
+        id: nextId('u'), sessionId: id, role: 'user', content, attachments: [], createdAt: nextTime(), contentRevision: nextId('revision'), revisionOf: target.id,
       };
       list.push(newUser);
       messages.set(id, list);

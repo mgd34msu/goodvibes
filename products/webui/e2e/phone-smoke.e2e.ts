@@ -70,6 +70,17 @@ test('Settings: every section renders full-screen on a phone with no horizontal 
     // link opens straight on its section.
     await expect(dialog.locator(section === 'general' ? '.settings-nav' : '.settings-pane')).not.toBeEmpty();
     await expectNoHorizontalScroll(page);
+    if (section !== 'general') {
+      // A clipped scroll pane can hide overflow from the document measure.
+      // Keep complete schema descriptions readable, including budget JSON and
+      // GOODVIBES_JUDGMENT_MONITOR on the composite Models page.
+      const widths = await dialog.locator('.settings-pane').evaluate(pane => ({
+        pane: { scroll: pane.scrollWidth, width: pane.clientWidth },
+        descriptions: [...pane.querySelectorAll('.settings-field-desc')].map(el => ({ scroll: el.scrollWidth, width: el.clientWidth })),
+      }));
+      expect(widths.pane.scroll, `${section} pane`).toBeLessThanOrEqual(widths.pane.width + 1);
+      for (const description of widths.descriptions) expect(description.scroll, `${section} full description`).toBeLessThanOrEqual(description.width + 1);
+    }
     // The head's buttons (back to the list, close) clear the touch floor.
     await expectTappable(page, '.settings-pane-head .gv-icon-button', `${section} settings head button`);
   }

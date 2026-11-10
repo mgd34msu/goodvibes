@@ -25,7 +25,7 @@ import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-
  *
  * ── Whose composition this drives ────────────────────────────────────────
  *
- * `buildDaemonGatewayCatalog(services)` builds the catalog THE DAEMON composes
+ * `gateway(services)` builds the catalog THE DAEMON composes
  * over this graph, the agent's own `services.gatewayMethods` carries no handler
  * for any of these any more, and that absence is itself pinned in
  * daemon/gateway-ws-only-invokable.test.ts.
@@ -41,6 +41,7 @@ import { buildDaemonGatewayCatalog } from '../helpers/daemon-gateway.ts';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MemoryGovernorSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
+import { createDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { ConfigManager } from '../../config/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
@@ -49,8 +50,16 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 describe('voice-setup + memory-governance composition', () => {
   let root = '';
+  let runtime: RuntimeServices | undefined;
+  let catalogScope: ReturnType<typeof createDisposalScope> | undefined;
+  const gateway = (services: RuntimeServices) => {
+    if (!catalogScope || runtime !== services) throw new Error('Original fixture catalog owner missing');
+    return buildDaemonGatewayCatalog(services, { disposal: catalogScope.registry });
+  };
 
-  afterEach(() => {
+  afterEach(async () => {
+    try { catalogScope?.dispose(); } finally { await runtime?.close(); }
+    catalogScope = undefined; runtime = undefined;
     if (root) rmSync(root, { recursive: true, force: true });
     root = '';
   });
@@ -64,7 +73,7 @@ describe('voice-setup + memory-governance composition', () => {
     mkdirSync(homeDir, { recursive: true });
     mkdirSync(configDir, { recursive: true });
     const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir, homeDir, configDir });
-    return (await createPreparedAgentRuntimeServices({
+    runtime = await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       runtimeBus: new RuntimeEventBus(),
@@ -72,13 +81,13 @@ describe('voice-setup + memory-governance composition', () => {
       configManager,
       workingDir,
       homeDirectory: homeDir,
-    }));
+    });
+    catalogScope = createDisposalScope('voice memory fixture daemon catalog');
+    return runtime;
   }
 
-  function cleanup(services: RuntimeServices): void {
-    services.memoryGovernor.stop();
-    services.providerRegistry.stopWatching();
-    services.configManager.stopWatchingConfigFiles();
+  async function cleanup(services: RuntimeServices): Promise<void> {
+    try { catalogScope?.dispose(); } finally { await services.close(); }
   }
 
   test('services.voiceSetup is present and its status() reflects the real (fresh, not-provisioned) managed runtime', async () => {
@@ -92,7 +101,7 @@ describe('voice-setup + memory-governance composition', () => {
       expect(typeof status.tts.engine).toBe('string');
       expect(status.tts.engine.length).toBeGreaterThan(0);
     } finally {
-      cleanup(services);
+      await cleanup(services);
     }
   });
 
@@ -100,12 +109,12 @@ describe('voice-setup + memory-governance composition', () => {
     const services = (await makeServices());
     try {
       const direct = services.voiceSetup.status();
-      const viaGateway = await buildDaemonGatewayCatalog(services).invoke('voice.local.status', {
+      const viaGateway = await gateway(services).invoke('voice.local.status', {
         context: {},
       });
       expect(viaGateway).toEqual(direct);
     } finally {
-      cleanup(services);
+      await cleanup(services);
     }
   });
 
@@ -127,7 +136,7 @@ describe('voice-setup + memory-governance composition', () => {
       // Carried at every surfacing, because it is what the published numbers mean.
       expect(status.recallIsSyntheticOnly).toBe(true);
     } finally {
-      cleanup(services);
+      await cleanup(services);
     }
   });
 
@@ -135,15 +144,15 @@ describe('voice-setup + memory-governance composition', () => {
     const services = (await makeServices());
     try {
       const direct = services.voiceSetup.wakeStatus();
-      const viaGateway = await buildDaemonGatewayCatalog(services).invoke('voice.wake.status', { context: {} });
+      const viaGateway = await gateway(services).invoke('voice.wake.status', { context: {} });
       expect(viaGateway).toEqual(direct);
       // provision downloads ~3.7 MB, and model.get reads bytes that a fresh host
       // does not have, so these assert the handler is REGISTERED, which is the
       // failure mode a cataloged-but-unhandled verb has.
-      expect(buildDaemonGatewayCatalog(services).get('voice.wake.provision')?.invokable).toBe(true);
-      expect(buildDaemonGatewayCatalog(services).get('voice.wake.model.get')?.invokable).toBe(true);
+      expect(gateway(services).get('voice.wake.provision')?.invokable).toBe(true);
+      expect(gateway(services).get('voice.wake.model.get')?.invokable).toBe(true);
     } finally {
-      cleanup(services);
+      await cleanup(services);
     }
   });
 
@@ -155,10 +164,10 @@ describe('voice-setup + memory-governance composition', () => {
       // handler rather than refusing with "no internal handler", proving
       // voiceSetup was genuinely wired into the catalog, not merely
       // constructed and left unregistered.
-      const descriptor = buildDaemonGatewayCatalog(services).get('voice.local.install');
+      const descriptor = gateway(services).get('voice.local.install');
       expect(descriptor?.invokable).toBe(true);
     } finally {
-      cleanup(services);
+      await cleanup(services);
     }
   });
 
@@ -198,14 +207,14 @@ describe('voice-setup + memory-governance composition', () => {
       services.memoryGovernor.stop();
       expect(timerOf()).toBeNull();
     } finally {
-      cleanup(services);
+      await cleanup(services);
     }
   });
 
   test('ops.memory.get serves the genuine live governor snapshot over the gateway', async () => {
     const services = (await makeServices());
     try {
-      const viaGateway = await buildDaemonGatewayCatalog(services).invoke('ops.memory.get', { context: {} }) as MemoryGovernorSnapshot;
+      const viaGateway = await gateway(services).invoke('ops.memory.get', { context: {} }) as MemoryGovernorSnapshot;
       // Real values from the real sampler, a live process has a nonzero RSS.
       expect(viaGateway.rssMb).toBeGreaterThan(0);
       expect(viaGateway.heapUsedMb).toBeGreaterThan(0);
@@ -222,7 +231,7 @@ describe('voice-setup + memory-governance composition', () => {
       expect(direct.tier).toBe(viaGateway.tier);
       expect(direct.budgetMb).toBe(viaGateway.budgetMb);
     } finally {
-      cleanup(services);
+      await cleanup(services);
     }
   });
 });

@@ -23,7 +23,7 @@
  *
  * ── Whose composition this drives ────────────────────────────────────────
  *
- * `buildDaemonGatewayCatalog(services)` builds the catalog THE DAEMON composes
+ * `buildDaemonGatewayCatalog(services, { disposal: catalogScope.registry })` builds the catalog THE DAEMON composes
  * over this graph. The Agent's own `services.gatewayMethods` carries no handler
  * for any of these, which is itself pinned in
  * daemon/gateway-ws-only-invokable.test.ts.
@@ -33,12 +33,19 @@
  * the daemon's composition is the difference between verifying a contract and
  * asserting that a client answers its own question.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { ConversationManager } from '../../core/conversation.ts';
 import { recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { registerSessionConversation, unregisterSessionConversation } from '../../runtime/conversation-rewind-port.ts';
 import { getTestRuntimeServices } from '../helpers/runtime-services.ts';
+import { createDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { buildDaemonGatewayCatalog } from '../helpers/daemon-gateway.ts';
+
+let catalogScope = createDisposalScope('rewind fixture daemon catalog');
+afterEach(() => {
+  catalogScope.dispose();
+  catalogScope = createDisposalScope('rewind fixture daemon catalog');
+});
 
 interface RewindPlanResult {
   readonly sessionId: string;
@@ -59,7 +66,7 @@ interface RewindApplyResult {
 describe('rewind.plan/apply conversation scope (live conversationRewindPort, platform 1.6.1)', () => {
   test('rewind.plan reports the conversation store as available (a real port is wired) but nothing to drop for an unregistered session', async () => {
     const services = (await getTestRuntimeServices());
-    const result = await buildDaemonGatewayCatalog(services).invoke('rewind.plan', {
+    const result = await buildDaemonGatewayCatalog(services, { disposal: catalogScope.registry }).invoke('rewind.plan', {
       methodId: 'rewind.plan',
       body: { sessionId: 'no-such-session-ever-registered', scope: 'conversation' },
     } as never) as RewindPlanResult;
@@ -95,7 +102,7 @@ describe('rewind.plan/apply conversation scope (live conversationRewindPort, pla
 
       registerSessionConversation(sessionId, conversation);
 
-      const plan = await buildDaemonGatewayCatalog(services).invoke('rewind.plan', {
+      const plan = await buildDaemonGatewayCatalog(services, { disposal: catalogScope.registry }).invoke('rewind.plan', {
         methodId: 'rewind.plan',
         body: { sessionId, turnId: 'turn-1', scope: 'conversation' },
       } as never) as RewindPlanResult;
@@ -106,7 +113,7 @@ describe('rewind.plan/apply conversation scope (live conversationRewindPort, pla
       expect(plan.conversation?.messagesToDrop).toBeGreaterThan(0);
       expect(plan.token).toBeTruthy();
 
-      const applied = await buildDaemonGatewayCatalog(services).invoke('rewind.apply', {
+      const applied = await buildDaemonGatewayCatalog(services, { disposal: catalogScope.registry }).invoke('rewind.apply', {
         methodId: 'rewind.apply',
         body: { sessionId, turnId: 'turn-1', scope: 'conversation', confirm: true, token: plan.token },
       } as never) as RewindApplyResult;
@@ -135,7 +142,7 @@ describe('rewind.plan/apply conversation scope (live conversationRewindPort, pla
       recordTurnAnchor(sessionId, { turnId: 'turn-1', label: 'only turn', messageCount: conversation.getMessageCount(), at: Date.now() });
       registerSessionConversation(sessionId, conversation);
 
-      const applied = await buildDaemonGatewayCatalog(services).invoke('rewind.apply', {
+      const applied = await buildDaemonGatewayCatalog(services, { disposal: catalogScope.registry }).invoke('rewind.apply', {
         methodId: 'rewind.apply',
         body: { sessionId, turnId: 'turn-1', scope: 'conversation' },
       } as never) as RewindApplyResult;

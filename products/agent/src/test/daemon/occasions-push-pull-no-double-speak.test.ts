@@ -50,6 +50,7 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import { buildDaemonGatewayCatalog } from '../helpers/daemon-gateway.ts';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { makeLongLivedProjectTempDir } from '../helpers/project-temp.ts';
 import { type RuntimeServices } from '../../runtime/services.ts';
@@ -74,7 +75,7 @@ interface Harness {
 }
 
 const roots: string[] = [];
-const runtimes: RuntimeServices[] = [];
+const runtimes: Array<{ services: RuntimeServices; catalogScope: ReturnType<typeof createDisposalScope> }> = [];
 const restoreReadings: Array<() => void> = [];
 
 async function harness(): Promise<Harness> {
@@ -128,7 +129,8 @@ async function harness(): Promise<Harness> {
     homeDirectory: root,
     getConversationTitle: () => 'occasions-push-test',
   }));
-  runtimes.push(services);
+  const catalogScope = createDisposalScope('occasions fixture daemon catalog');
+  runtimes.push({ services, catalogScope });
   const readDiagnostic = authoredPrivacyAnswer({ parts: [
     [errorText('No agent conversation sender is '), errorSpan('sender'), errorText(', so a message addressed to the agent has nowhere to land. The agent product registers one through ChannelDeliveryRouter.agentDelivery.register().')],
     [errorText('This runtime has no active conversation to land a message in yet.')],
@@ -151,7 +153,7 @@ async function harness(): Promise<Harness> {
     said,
     invoke: async (id, body = {}, readingAvailable = true) => {
       const previous = installJudgmentPort(readingAvailable ? services.judgment.port : undefined);
-      try { return await buildDaemonGatewayCatalog(services).invoke(id, { methodId: id, body } as never); }
+      try { return await buildDaemonGatewayCatalog(services, { disposal: catalogScope.registry }).invoke(id, { methodId: id, body } as never); }
       finally { installJudgmentPort(previous); }
     },
   };
@@ -166,10 +168,15 @@ function registerSender(h: Harness): () => void {
   );
 }
 
-afterAll(() => {
+afterAll(async () => {
   for (const restore of restoreReadings.splice(0)) restore();
-  for (const runtime of runtimes.splice(0).reverse()) runtime.dispose();
-  for (const root of roots) rmSync(root, { recursive: true, force: true });
+  const failures: unknown[] = [];
+  for (const { services, catalogScope } of runtimes.splice(0).reverse()) {
+    try { catalogScope.dispose(); } catch (error) { failures.push(error); }
+    try { await services.close(); } catch (error) { failures.push(error); }
+  }
+  if (failures.length) throw new AggregateError(failures, 'Occasions fixture cleanup failed');
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 describe('the seeded profile is this runtime\'s own, never the real home', () => {

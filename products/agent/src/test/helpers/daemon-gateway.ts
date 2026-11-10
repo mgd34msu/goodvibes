@@ -50,7 +50,7 @@ export interface DaemonGatewayCatalogOptions {
   /** Override the conversation port; defaults to this process's live registry. */
   readonly conversationRewindPort?: Parameters<typeof attachWsOnlyGatewayVerbHandlers>[1]['conversationRewindPort'];
   /** Own resources composed by this fixture catalog, separately from its runtime graph. */
-  readonly disposal?: Parameters<typeof attachWsOnlyGatewayVerbHandlers>[1]['disposal'];
+  readonly disposal: NonNullable<Parameters<typeof attachWsOnlyGatewayVerbHandlers>[1]['disposal']>;
 }
 
 /**
@@ -60,23 +60,23 @@ export interface DaemonGatewayCatalogOptions {
  * observes what a daemon over this graph does, not a narrower stand-in that
  * happens to answer.
  */
-const cached = new WeakMap<RuntimeServices, GatewayMethodCatalog>();
+const cached = new WeakMap<RuntimeServices, WeakMap<DaemonGatewayCatalogOptions['disposal'], GatewayMethodCatalog>>();
 
 export function buildDaemonGatewayCatalog(
   services: RuntimeServices,
-  options: DaemonGatewayCatalogOptions = {},
+  options: DaemonGatewayCatalogOptions,
 ): GatewayMethodCatalog {
-  // One catalog per graph, like a daemon has. Rebuilding per call would give
-  // each verb a fresh store, so a `principals.create` followed by a
-  // `principals.list` would read an empty registry and the round-trip a suite
-  // is asserting would never be observable.
-  const existing = cached.get(services);
-  const cacheable = options.conversationRewindPort === undefined && options.disposal === undefined;
+  // A catalog owns stores/watchers independently from the runtime graph.
+  // Reuse only within that exact fixture disposal lifetime, never across scopes.
+  let owners = cached.get(services);
+  if (!owners) { owners = new WeakMap(); cached.set(services, owners); }
+  const cacheable = options.conversationRewindPort === undefined;
+  const existing = owners.get(options.disposal);
   if (existing && cacheable) return existing;
   const catalog = new GatewayMethodCatalog();
   const view = services.asDaemonGradeView();
   attachWsOnlyGatewayVerbHandlers(catalog, {
-    ...(options.disposal ? { disposal: options.disposal } : {}),
+    disposal: options.disposal,
     // Platform runtime 2.0.8: the control-plane store resolver refuses a blank
     // surface segment, so this helper names its surface like any host.
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
@@ -104,6 +104,6 @@ export function buildDaemonGatewayCatalog(
     workingDirectory: services.workingDirectory,
     conversationRewindPort: options.conversationRewindPort ?? createSessionConversationRewindPort(),
   });
-  if (cacheable) cached.set(services, catalog);
+  if (cacheable) owners.set(options.disposal, catalog);
   return catalog;
 }

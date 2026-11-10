@@ -5,9 +5,10 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
-import { createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE, realUpdateFileIo, UpdateTransactionError } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { applyVerifiedUpdate, createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE, parseDaemonCiArtifact, realUpdateFileIo, UpdateTransactionError } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { DAEMON_CI_PAYLOADS, recordDaemonCiArtifact } from '../../../scripts/ci-artifact.ts';
 import { assertNativeInstallHost, installDaemonNative, parseNativeInstallArgs, readDaemonInstallOwner, rollbackDaemonNative, type DaemonInstallOwner } from '../../../scripts/install-native.ts';
+import { targetPaths } from '../../cli/native-installation.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
 import { nativeReaderProbeScript, nativeRuntimeProvenance, writeV1NativeArtifactFixture } from '../helpers/native-runtime-provenance.ts';
 
@@ -61,12 +62,31 @@ nativeTest('offline install pins each source once and independently verifies the
   const f = await fixture(), hash = spyOn(crypto, 'createHash');
   try {
     await f.install();
-    // Five cold source member pins, one new installation receipt pin, then
-    // six actual destination-stage checksum checks. No repeated source pass.
-    expect(hash).toHaveBeenCalledTimes(12);
+    // Five independent cold source pins and five downloaded payload checks.
+    // The fixed local receipt is derived inside the same native transaction;
+    // it has no manufactured checksum or receipt-only digest computation.
+    expect(hash).toHaveBeenCalledTimes(10);
     expect(state(f.prefix).slice(0, DAEMON_CI_PAYLOADS.length)).toEqual(DAEMON_CI_PAYLOADS.map(path => readFileSync(join(f.source, 'native', path), 'utf8')));
     expect(transientFiles(f.prefix)).toEqual([]);
   } finally { hash.mockRestore(); }
+});
+
+nativeTest('a generated receipt cannot redirect the fixed native receipt target or omit payload verification', async () => {
+  const f = await fixture(), artifact = parseDaemonCiArtifact(JSON.parse(readFileSync(join(f.source, 'native/ci-artifact.json'), 'utf8')), first.target);
+  const targets = targetPaths(f.prefix, first.target); let fetched = 0;
+  await expect(applyVerifiedUpdate({ native: true, targets: targets.map((target, index) => index === targets.length - 1
+    ? { ...target, path: join(f.prefix, 'foreign-receipt.json') } : target),
+    generatedDaemonReceipt: { artifact, version: first.version }, downloadBaseUrl: 'https://offline.invalid',
+    fetchImpl: async () => { fetched++; return new Response('must not fetch'); },
+  })).rejects.toThrow('receipt target');
+  expect(fetched).toBe(0); expect(existsSync(f.prefix)).toBe(false);
+  const manifest = targets.slice(0, -1).map((target, index) => `${artifact.files[index]!.sha256}  ${target.assetName}`).join('\n');
+  await expect(applyVerifiedUpdate({ native: true, targets, generatedDaemonReceipt: { artifact, version: first.version },
+    downloadBaseUrl: 'https://offline.invalid', fetchImpl: async url => {
+      fetched++; return new Response(url.endsWith('/SHA256SUMS.txt') ? manifest : 'foreign payload');
+    },
+  })).rejects.toThrow('checksum mismatch');
+  expect(fetched).toBe(2); expect(existsSync(f.prefix)).toBe(false);
 });
 
 nativeTest('upgrade, idempotent retry and full kept-previous rollback retain one coherent receipt/artifact cohort', async () => {

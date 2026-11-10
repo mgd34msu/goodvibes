@@ -61,7 +61,6 @@ import {
 } from './settings-reader-floor.js';
 import { VERSION } from '../version.js';
 import { logger } from '../utils/logger.js';
-import { writeFatalLine } from '../daemon/fatal-boot-report.js';
 
 /** What the reader did with a setting it could not ingest. */
 export type SettingsIngestionAction = 'skipped' | 'refused';
@@ -444,13 +443,14 @@ export function screenSettingsForIngestion(
 
 /**
  * Report settings problems through the host's diagnostic stream and activity log.
- * Fatal refusals use the synchronous descriptor writer so they survive process
- * exit. Recoverable notices use the replaceable stream, allowing a full-screen
- * renderer to capture them without writing below its footer.
+ * A refused reload can leave the application running with its accepted settings.
+ * All ingestion notices therefore use the replaceable stream, allowing a
+ * full-screen renderer to capture them. The boot-exit owner reports fatal
+ * failures separately through its synchronous descriptor writer.
  */
 export function announceIngestionNotice(
   entry: SettingsIngestionNotice,
-  write: (line: string) => void = entry.action === 'refused' ? writeFatalLine : line => { process.stderr.write(line); },
+  write: (line: string) => void = line => { process.stderr.write(line); },
 ): void {
   const verb = entry.action === 'refused' ? 'REFUSED' : 'skipped';
   const line = `goodvibes settings: ${verb} ${entry.key} in ${entry.file}, ${entry.reason}. ${entry.remedy}`;
@@ -466,7 +466,7 @@ export function announceIngestionNotice(
 
 /** A one-line, owner-facing summary of one notice, for a startup receipt. */
 export function describeIngestionNotice(entry: SettingsIngestionNotice): string {
-  const verb = entry.action === 'refused' ? 'refused to start over' : 'ignored';
+  const verb = entry.action === 'refused' ? 'refused' : 'ignored';
   return `Settings: ${verb} ${entry.key} in ${entry.file}, ${entry.reason}. ${entry.remedy}`;
 }
 
@@ -476,7 +476,7 @@ export interface IngestSettingsOptions {
   readonly diagnosticMode?: 'default' | 'structural' | undefined;
   /** This reader's version, compared against the file's recorded floor. */
   readonly readerVersion?: string | undefined;
-  /** Override diagnostic output. Refusals default to fd 2; recoverable notices use the host stream. */
+  /** Override diagnostic output. All notices default to the replaceable host stderr stream. */
   readonly write?: ((line: string) => void) | undefined;
   /** Called for every notice, refusals included, before a refusal throws. */
   readonly onNotice?: ((entry: SettingsIngestionNotice) => void) | undefined;

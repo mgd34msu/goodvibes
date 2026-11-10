@@ -8,6 +8,7 @@ import {
   sha256, swapFileAtomically, UpdateTransactionError,
   type UpdateFetchLike, type UpdateFileIo, type UpdateTarget,
 } from '../platform/src/platform/runtime/self-update.js';
+import { withVerifiedUpdateStage } from '../platform/src/platform/runtime/verified-update-stage.js';
 
 const targets: readonly UpdateTarget[] = [
   { label: 'daemon', path: '/fixture/daemon', assetName: 'daemon', executable: true },
@@ -251,6 +252,33 @@ describe('owned update transaction fault matrix', () => {
       expect(unhandled).toEqual([]);
       expect(state.contents()).toEqual(initial);
     } finally { process.off('unhandledRejection', listener); }
+  });
+
+  for (const operation of ['update', 'rollback'] as const) test(`${operation} drains thrown rejected admission work and preserves its original cause before live renames`, async () => {
+    const state = memory(), unhandled: unknown[] = [];
+    const observe = (reason: unknown) => { unhandled.push(reason); }; process.on('unhandledRejection', observe);
+    let rejected: Promise<never> | undefined;
+    try {
+      const beforeCommit = () => { rejected = Promise.reject(new Error('borrowed admission failed')); throw rejected; };
+      const error = await failure(() => operation === 'update' ? apply(state.io, { beforeCommit }) : rollbackKeptPrevious(targets, state.io, beforeCommit));
+      expect(error.cause).toBe(rejected);
+      expect(error.receipt).toMatchObject({ phase: 'admission', committed: false, recoveryRequired: false });
+      expect(state.operations.some(operation => operation.startsWith('rename '))).toBe(false);
+      expect(state.contents()).toEqual(initial);
+      await new Promise<void>(resolve => setImmediate(resolve)); expect(unhandled).toEqual([]);
+    } finally { process.off('unhandledRejection', observe); }
+  });
+
+  test('verified staging drains returned work when the synchronous postguard refuses it', async () => {
+    const unhandled: unknown[] = [], retired = new Error('original staging owner retired');
+    const observe = (reason: unknown) => { unhandled.push(reason); }; process.on('unhandledRejection', observe);
+    let active = true;
+    try {
+      expect(() => withVerifiedUpdateStage([], false, () => { if (!active) throw retired; }, () => {
+        active = false; return Promise.reject(new Error('borrowed stage returned work'));
+      })).toThrow(retired);
+      await new Promise<void>(resolve => setImmediate(resolve)); expect(unhandled).toEqual([]);
+    } finally { process.off('unhandledRejection', observe); }
   });
 
   test('final synchronous admission rejection cleans stages and changes no live/backup file', async () => {

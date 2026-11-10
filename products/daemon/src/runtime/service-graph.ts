@@ -932,7 +932,11 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     // completes the facade phase. Where boot is configured, plugin acquisition
     // must also settle before native continuation reads become available. Runtime
     // catalog mutations thereafter revoke first, rather than counting startup work.
-    continuationScopeOwner = prepareGatewayScopePolicyOwner(gatewayMethods, () => configManager.invalidateExternalPolicy(), options.createBootOperations !== undefined);
+    const gatewayPolicyRevision = configManager.getDurableGatewayPolicyRevision;
+    continuationScopeOwner = prepareGatewayScopePolicyOwner(gatewayMethods, () => configManager.invalidateExternalPolicy(), options.createBootOperations !== undefined, snapshot => {
+      if (configManager.getDurableGatewayPolicyRevision !== gatewayPolicyRevision) throw new Error('Gateway configuration policy owner changed');
+      return gatewayPolicyRevision.call(configManager, snapshot);
+    });
     disposalScope.registry.add('native CI gateway scope owner', retireContinuationScope);
     const handlerOptions = {
       paymentContinuationOwner: { pairing: pairingTokens, scopes: continuationScopeOwner },

@@ -5,7 +5,8 @@ import { observeImportFile } from './prepared-import.js';
 import { PreparedSettingsTarget } from './prepared-target.js';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { types as nativeTypes } from 'node:util';
+import { isDeepStrictEqual, types as nativeTypes } from 'node:util';
+import { VERSION } from '../version.js';
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
@@ -89,6 +90,11 @@ export interface PermissionConfigurationOwner {
   readMode(): Readonly<{ mode: GoodVibesConfig['permissions']['mode']; autoApprove: boolean }>;
   captureRevision(): () => boolean;
 }
+// These are source-declared public literals, captured before any owner input.
+const DURABLE_PUBLIC_DEFAULTS = structuredClone(DEFAULT_CONFIG_SNAPSHOT);
+const DURABLE_REPLAY_FIELDS = new Map(CONFIG_SCHEMA.map(setting => [setting.key,
+  { type: setting.type, enumValues: setting.enumValues ? [...setting.enumValues] : undefined }]));
+
 let permissionConfigurationOwner: (receiver: unknown, snapshotAccessor: unknown) => PermissionConfigurationOwner | undefined;
 
 /** Available only for the real manager and its original permission snapshot accessor. */
@@ -396,6 +402,7 @@ export class ConfigManager {
   private _fileWatch: ConfigFileWatchHandle | null = null;
   /** Settings the last load could not ingest. See ./settings-ingestion.ts. */
   private ingestionNotices: SettingsIngestionNotice[] = [];
+  private readonly ingestionNoticeListeners = new Set<(notice: SettingsIngestionNotice) => void>();
   private readonly unknownSettingForms = new UnknownSettingFormsQueue();
 
   private readonly nativeDataWriter: import('../runtime/native-reader-compatibility.js').NativeDataWriteOwner | undefined;
@@ -464,7 +471,7 @@ export class ConfigManager {
     this.daemonTierOwner = !this.readOnly && overrides.ownsDaemonTier === true;
 
     this.durablePolicy = new DurablePolicyEpochOwner([this.configPath, this.projectConfigPath, this.sharedTierPath, this.daemonTierPath, join(this.configDir, 'settings-sync.json')]
-      .filter((path): path is string => path !== null), !this.readOnly, () => this.nativeDataWriter?.declare('configuration-policy-epochs-v2'));
+      .filter((path): path is string => path !== null), !this.readOnly, format => this.nativeDataWriter?.declare(format));
     try { this.load(); } finally { this.hydrating = false; }
 
     // Apply constructor overrides (CLI args, etc.) after load
@@ -661,15 +668,44 @@ export class ConfigManager {
   getConfigurationIncarnation(): number { return this.#permissionIncarnation; }
 
   /** Actual persisted policy owners, safe to compare after restart. Never a permission grant. */
-  getDurableConfigurationIncarnation(): string {
+  getDurableConfigurationIncarnation(version: 1 | 2 = 2): string {
     if (!this.durablePolicy) throw new Error('Durable configuration policy ownership is unavailable');
-    return this.durablePolicy.current(this.#config);
+    return this.durablePolicy.current(this.#config, version === 1 ? undefined : this.durablePolicyReplay(), version);
   }
 
   /** Establish durable owner history for a live new source, never for recovery. */
   captureDurableConfigurationIncarnation(): string {
     if (!this.durablePolicy) throw new Error('Durable configuration policy ownership is unavailable');
-    return this.durablePolicy.capture(this.#config);
+    return this.durablePolicy.capture(this.#config, this.durablePolicyReplay());
+  }
+
+  /** Exact public loading recipe, never the private effective configuration.
+   * Source epochs already bind every accepted persisted contribution. Unknown
+   * string/object runtime inputs cannot be proven after restart and stay cold. */
+  private durablePolicyReplay(): unknown | undefined {
+    if (!isDeepStrictEqual(DEFAULT_CONFIG_SNAPSHOT, DURABLE_PUBLIC_DEFAULTS) || !/^\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/i.test(VERSION)) return undefined;
+    const overlays: Array<readonly [string, string, unknown]> = [];
+    for (const [kind, values] of [['default', this.runtimeState.defaults], ['override', this.runtimeState.overrides]] as const) {
+      for (const [key, value] of values) {
+        if (kind === 'default' && this.runtimeState.sources.has(key)) continue;
+        if (isDeepStrictEqual(readDotPath(this.runtimeState.nonRuntime, key).value, value)) continue;
+        const schema = DURABLE_REPLAY_FIELDS.get(key);
+        const safe = schema?.type === 'boolean' && typeof value === 'boolean'
+          || schema?.type === 'number' && typeof value === 'number' && Number.isFinite(value) && !Object.is(value, -0)
+          || schema?.type === 'enum' && typeof value === 'string' && schema.enumValues?.includes(value);
+        if (!safe) return undefined;
+        overlays.push([kind, key, value]);
+      }
+    }
+    return { code: 1, platformVersion: VERSION, defaults: DURABLE_PUBLIC_DEFAULTS,
+      hostDefaults: [...this.hostSettings.defaults()].sort(([a], [b]) => a.localeCompare(b)),
+      overlays: overlays.sort(([a, keyA], [b, keyB]) => a.localeCompare(b) || keyA.localeCompare(keyB)) };
+  }
+
+  /** Native catalog composition supplies only registered public descriptor data. */
+  getDurableGatewayPolicyRevision(snapshot: unknown): string {
+    if (!this.durablePolicy) throw new Error('Durable configuration policy ownership is unavailable');
+    return this.durablePolicy.snapshotRevision('gateway', snapshot);
   }
 
   /** Actual host policy owners call this synchronously before runtime policy effects. */
@@ -1463,13 +1499,25 @@ export class ConfigManager {
   getIngestionQuarantine(): readonly SettingsIngestionNotice[] {
     return this.ingestionNotices;
   }
+  /** Live diagnostic notices for this manager; the terminal host owns the returned subscription. */
+  subscribeIngestionNotices(listener: (notice: SettingsIngestionNotice) => void): () => void {
+    this.ingestionNoticeListeners.add(listener);
+    return () => { this.ingestionNoticeListeners.delete(listener); };
+  }
+  private recordIngestionNotice(notice: SettingsIngestionNotice): void {
+    this.ingestionNotices.push(notice);
+    for (const listener of this.ingestionNoticeListeners) {
+      try { drainOwned(listener(Object.freeze({ ...notice }))); }
+      catch (error) { drainOwned(error); } // A diagnostic observer cannot change settings admission.
+    }
+  }
   /** Once a judgment port is installed: announces unknown keys that read as newer forms of known settings. */
   announceUnknownSettingForms(): Promise<void> { return this.unknownSettingForms.start(this.ingestionSink()); }
   /** Where an ingestion notice is filed; see ./manager-ingestion.ts. */
   private ingestionSink(): IngestionNoticeSink {
     return {
       diagnosticMode: this.diagnosticMode,
-      record: (entry) => { this.ingestionNotices.push(entry); },
+      record: (entry) => { this.recordIngestionNotice(entry); },
       receipt: (id, text) => { this.migrationReceipt(id, text); },
       unknown: (file, keys) => { this.unknownSettingForms.keep(file, keys, this.ingestionSink()); },
     };
@@ -1492,7 +1540,7 @@ export class ConfigManager {
           remedy: 'Fix the stored value; until then this host setting uses its declared restrictive default',
         };
         announceIngestionNotice(notice);
-        this.ingestionNotices.push(notice);
+        this.recordIngestionNotice(notice);
       }
     }
     return ingested;

@@ -1,4 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
+import { createHash } from 'node:crypto';
+import * as crypto from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,7 +32,7 @@ function fixture() {
   const options = { configDir: dir, surfaceRoot: 'daemon' };
   const config = new ConfigManager(options); const catalog = new GatewayMethodCatalog({ includeBuiltins: false });
   const remove = catalog.register(method(), handler);
-  const owner = catalog.attachScopePolicyOwner(() => config.invalidateExternalPolicy());
+  const owner = catalog.attachScopePolicyOwner(() => config.invalidateExternalPolicy(), snapshot => config.getDurableGatewayPolicyRevision(snapshot));
   const revision = () => JSON.stringify([config.getDurableConfigurationIncarnation(), owner.current().revision]);
   const capture = () => { config.captureDurableConfigurationIncarnation(); return revision(); };
   return { dir, options, config, catalog, owner, remove, capture, revision };
@@ -40,7 +42,7 @@ test('initial catalog construction and unchanged restart preserve durable scope 
   const f = fixture(); const before = f.capture(); const disk = readFileSync(`${f.config.getConfigPath()}.policy-epoch.json`, 'utf8');
   const nextConfig = new ConfigManager(f.options); const nextCatalog = new GatewayMethodCatalog({ includeBuiltins: false });
   nextCatalog.register(method(), handler);
-  const nextOwner = nextCatalog.attachScopePolicyOwner(() => nextConfig.invalidateExternalPolicy());
+  const nextOwner = nextCatalog.attachScopePolicyOwner(() => nextConfig.invalidateExternalPolicy(), snapshot => nextConfig.getDurableGatewayPolicyRevision(snapshot));
   const after = JSON.stringify([nextConfig.getDurableConfigurationIncarnation(), nextOwner.current().revision]);
   expect(after).toBe(before);
   expect(readFileSync(`${f.config.getConfigPath()}.policy-epoch.json`, 'utf8')).toBe(disk);
@@ -64,7 +66,7 @@ test('unchanged guards reuse one immutable scope snapshot and actual replacement
 });
 
 test('method/event registration and removal refresh snapshots while rejected and absent mutations retain the current state', () => {
-  const f = fixture(); const first = f.owner.current();
+  const f = fixture(); f.capture(); const first = f.owner.current();
   expect(f.catalog.unregister('absent')).toBe(false); expect(f.catalog.unregisterEvent('absent')).toBe(false);
   f.catalog.clearPluginMethods('absent'); expect(f.owner.current()).toBe(first);
   expect(() => f.catalog.register(method(), handler)).toThrow(); expect(f.owner.current()).toBe(first);
@@ -107,8 +109,9 @@ test('removal and re-addition cannot revive a durable grant across restart', () 
   const f = fixture(); const before = f.capture(); const catalogBefore = f.owner.current().revision;
   f.catalog.unregister('synthetic.write'); f.catalog.register(method(), handler);
   expect(f.owner.current().revision).toBe(catalogBefore); expect(f.revision()).not.toBe(before);
+  const reissued = f.config.captureDurableConfigurationIncarnation();
   const restarted = new ConfigManager(f.options);
-  expect(restarted.getDurableConfigurationIncarnation()).toBe(f.config.getDurableConfigurationIncarnation());
+  expect(restarted.getDurableConfigurationIncarnation()).toBe(reissued);
   expect(JSON.stringify([restarted.getDurableConfigurationIncarnation(), catalogBefore])).not.toBe(before);
 });
 
@@ -148,7 +151,7 @@ test('returned descriptors and borrowed input arrays cannot bypass scope mutatio
 test('clean retirement preserves durable history and older graph teardown cannot invalidate a successor graph', () => {
   const f = fixture(); f.capture(); const before = f.config.getDurableConfigurationIncarnation();
   const successorCatalog = new GatewayMethodCatalog({ includeBuiltins: false }); successorCatalog.register(method(), handler);
-  const successor = successorCatalog.attachScopePolicyOwner(() => f.config.invalidateExternalPolicy());
+  const successor = successorCatalog.attachScopePolicyOwner(() => f.config.invalidateExternalPolicy(), snapshot => f.config.getDurableGatewayPolicyRevision(snapshot));
   f.owner.close(); f.remove(); f.owner.close();
   expect(() => f.owner.current()).toThrow(); expect(f.config.getDurableConfigurationIncarnation()).toBe(before);
   expect(() => f.catalog.attachScopePolicyOwner(() => f.config.invalidateExternalPolicy())).toThrow('retired');
@@ -203,4 +206,22 @@ test('rejected asynchronous scope preconditions are drained without changing the
     expect(catalog.get('synthetic.write')).not.toBeNull();
     expect(owner.current()).toBe(original);
   } finally { process.off('unhandledRejection', observe); owner.close(); }
+});
+
+
+test('actual saved catalog-policy expectations verify unchanged and refuse changed registration, while fresh revisions do not hash', () => {
+  const f = fixture(); f.capture();
+  // Independent published-v1 serializer over this declared catalog fixture.
+  const expected = createHash('sha256').update(JSON.stringify({ methods: [['synthetic.write', 'plugin', 'synthetic-plugin', 'admin',
+    ['http'], ['write:synthetic'], ['POST', '/synthetic'], null, false, true]], events: [] })).digest('hex');
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    f.owner.current(); expect(hash).not.toHaveBeenCalled();
+    const saved = f.owner.current(1); expect(saved.revision).toBe(expected);
+    for (let index = 0; index < 8; index++) expect(f.owner.current(1)).toBe(saved);
+    expect(hash).toHaveBeenCalledTimes(1);
+    f.catalog.register({ ...method(), pluginId: 'changed-plugin' }, handler, { replace: true });
+    expect(f.owner.current(1).revision).not.toBe(expected); expect(hash).toHaveBeenCalledTimes(2);
+    f.owner.current(); expect(hash).toHaveBeenCalledTimes(2);
+  } finally { hash.mockRestore(); f.owner.close(); }
 });

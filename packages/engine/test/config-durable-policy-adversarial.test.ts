@@ -241,7 +241,7 @@ describe('epoch custody and crash boundaries', () => {
     manager.setRuntimeOverride('behavior.autoApprove', false);
     expect(() => manager.getDurableConfigurationIncarnation()).toThrow();
     expect(() => readFileSync(`${manager.getConfigPath()}.policy-epoch.json`)).toThrow();
-    expect(manager.captureDurableConfigurationIncarnation()).toMatch(/^[0-9a-f]{64}$/);
+    expect(manager.captureDurableConfigurationIncarnation()).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   test('held/crash-left mutation lock prevents current() from accepting old state', () => {

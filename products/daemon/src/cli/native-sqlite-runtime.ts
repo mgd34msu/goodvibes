@@ -91,6 +91,12 @@ export interface DaemonSqliteAdmission {
   readonly provenancePath: string;
   assertCurrent(): void;
 }
+function assertSqliteLifetime(check: (() => void) | undefined): void {
+  let result: unknown;
+  try { result = check?.(); } catch (error) { drainOwned(error); throw error; }
+  if (result !== undefined) { drainOwned(result); throw new Error('Native SQLite lifetime must be synchronous'); }
+}
+
 /** Run before importing any service module that can construct a database. */
 export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}): DaemonSqliteAdmission | undefined {
   const { platform = process.platform, arch = process.arch, execPath = process.execPath,
@@ -108,6 +114,9 @@ export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}):
     || expected.sqliteVersion !== runtime.sqliteVersion || expected.sourceUrl !== runtime.sourceUrl || expected.sourceSha3 !== runtime.sourceSha3
     || !/^[0-9a-f]{64}$/.test(expected.sha256) || !Number.isSafeInteger(expected.size) || expected.size < 32
     || Object.keys(expected).length !== 9) throw new Error('Native SQLite compiled producer owner is absent or invalid');
+  // Refuse a retired owner before opening metadata or hashing a native library.
+  // Preselection and postselection guards below remain independently live.
+  if (assertCurrent !== undefined) assertSqliteLifetime(assertCurrent);
   const cohortRoot = dirname(execPath);
   const libraryPath = join(cohortRoot, runtime.libraryPath);
   const provenancePath = join(cohortRoot, runtime.provenancePath);
@@ -125,20 +134,20 @@ export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}):
   assertDaemonSqliteArchitecture(bytes, runtime.target);
   const current = () => {
     signal?.throwIfAborted();
-    const result = assertCurrent?.();
-    if (result !== undefined) { drainOwned(result); throw new Error('Native SQLite lifetime must be synchronous'); }
+    assertSqliteLifetime(assertCurrent);
     if (retainedFile(libraryPath, cohortRoot, true) !== libraryOwner || retainedFile(provenancePath, cohortRoot, true) !== provenanceOwner) throw new Error('Native SQLite companion changed before database construction');
   };
   current();
-  if (!setCustomSQLite(libraryPath)) throw new Error('Bun refused the retained native SQLite runtime before database construction');
+  let selected: unknown;
+  try { selected = setCustomSQLite(libraryPath); } catch (error) { drainOwned(error); throw error; }
+  if (selected !== true) { drainOwned(selected); throw new Error('Bun refused the retained native SQLite runtime before database construction'); }
   current();
   // The synchronous loader selection above retains strict directory clocks
   // across native admission. Later sibling publication is legitimate; keep the
   // actual original files/physical ancestors rather than their child clocks.
   const librarySource = retainedFile(libraryPath, cohortRoot), provenanceSource = retainedFile(provenancePath, cohortRoot);
   return Object.freeze({ owner: expected, execPath, libraryPath, provenancePath, assertCurrent() {
-    signal?.throwIfAborted(); const result: unknown = assertCurrent?.();
-    if (result !== undefined) { drainOwned(result); throw new Error('Native SQLite lifetime must be synchronous'); }
+    signal?.throwIfAborted(); assertSqliteLifetime(assertCurrent);
     if (retainedFile(libraryPath, cohortRoot) !== librarySource || retainedFile(provenancePath, cohortRoot) !== provenanceSource) throw new Error('Original native SQLite source changed');
     signal?.throwIfAborted();
   } });

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { describeIngestionNotice } from '@goodvibes-jev/engine/platform/platform/config';
 import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } from '@goodvibes-jev/engine/terminal-shell/native-ingress';
 import { readShellFrameFacts, createShellSubmissionPorts } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
 import { join } from 'node:path';
@@ -1087,6 +1088,9 @@ async function main() {
     renderRequested = true;
     renderScheduler.schedule();
   });
+  unsubs.push(configManager.subscribeIngestionNotices((notice) => {
+    if (!lifecycle.isTerminalRestored()) systemMessageRouter.high(describeIngestionNotice(notice));
+  }));
   const terminalOutputGuard = installFullScreenTerminalOutputGuard({
     stdout,
     stderr: process.stderr,

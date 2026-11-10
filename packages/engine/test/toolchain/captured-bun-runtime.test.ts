@@ -8,6 +8,8 @@ import { parseToolchainConfig, type BinaryTarget, type BuildConfig } from '../..
 import { assertCapturedBunRuntimeElf, provideCapturedBunRuntime } from '../../toolchain/src/lib/captured-bun-runtime.ts';
 import { runBuildBinaries } from '../../toolchain/src/lib/build-binaries.ts';
 import type { Exec } from '../../toolchain/src/lib/effects.ts';
+import { assertDaemonNativePayloadPins, sha256 } from '../../platform/src/platform/runtime/self-update.js';
+import { nativeDescriptorFixture } from '../_helpers/daemon-native-cohort.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -142,4 +144,23 @@ test('config accepts only the reviewed runtime version', () => {
   const config = (version: string) => JSON.stringify({ packageName: 'fixture', build: { appEntrypoint: 'app.ts', outDir: 'dist', addonOutDir: 'dist/lib', prebuild: [], targets: [{ ...cross, capturedBunRuntime: version }] } });
   expect(parseToolchainConfig(config('1.3.14')).build?.targets[0]?.capturedBunRuntime).toBe('1.3.14');
   expect(() => parseToolchainConfig(config('latest'))).toThrow('capturedBunRuntime');
+});
+
+
+test('saved build provenance refuses a later Bun-only replacement even with consistent current artifact member pins', () => {
+  // The other four members are schema-only in this focused provenance test;
+  // they have no byte-verification consumer and need no computed fixture pins.
+  const descriptor = nativeDescriptorFixture({ version: '1.2.3' }).artifact;
+  const original = Buffer.from('original build-checked Bun payload');
+  const originalPin = sha256(original);
+  const originalFiles = descriptor.files.map((file, index) => index === 1 ? { ...file, sha256: originalPin, size: original.length } : file);
+  const metadata = Buffer.from(JSON.stringify({ version: '1.3.14', target: descriptor.target, source: 'build-interpreter', sha256: originalPin,
+    upstreamSource: 'https://github.com/oven-sh/bun/tree/bun-v1.3.14' }));
+  assertDaemonNativePayloadPins({ ...descriptor, files: originalFiles }, originalFiles, metadata);
+  const changed = Buffer.concat([original, Buffer.from('later same-member replacement')]);
+  // This is the later artifact producer's genuine changed-body pin. Every
+  // member agrees with its descriptor, so only the independently retained
+  // build-time provenance rejects the replacement before publication.
+  const files = originalFiles.map((file, index) => index === 1 ? { ...file, sha256: sha256(changed), size: changed.length } : file);
+  expect(() => assertDaemonNativePayloadPins({ ...descriptor, files }, files, metadata)).toThrow('Bun runtime provenance is invalid');
 });

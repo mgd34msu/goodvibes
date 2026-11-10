@@ -101,6 +101,10 @@ export function provideCapturedBunRuntime(options: ProvideCapturedBunRuntimeOpti
       copyFileSync(source, runtime);
       chmodSync(runtime, 0o755);
       assertCapturedBunRuntimeElf(runtime, distribution.machine);
+      // Later artifact capture compares its independently pinned Bun member
+      // against this build-time expectation. A replacement between the trusted
+      // interpreter probe and publication must not acquire new provenance just
+      // because the release producer hashes its current bytes.
       const sha256 = createHash('sha256').update(readFileSync(runtime)).digest('hex');
       if (pinnedPackage && sha256 !== distribution.sha256) throw new Error('Bun runtime payload does not match the pinned official binary');
       if (sameHost) ordinaryBun(runtime, version, exec);

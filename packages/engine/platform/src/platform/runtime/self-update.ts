@@ -30,7 +30,7 @@ import { captureUpdateFileIo, createOwnedNativeUpdateFile, retainNativeUpdateDir
 export { captureUpdateFileIo, realUpdateFileIo, retainNativeUpdateDirectory, type NativeUpdateDirectoryOwner, type UpdateFileIo } from './update-file-io.js';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { compareSemanticVersions, parseSemanticVersion } from './semantic-version.js';
-import { assertDaemonNativePayloadPins, createDaemonNativeRenameGuard, inspectDaemonNativeInstallation, parseDaemonCiArtifact, resolveDaemonNativeTargets, retainDaemonNativeFiles, type DaemonNativeTarget, type DaemonNativeRenameGuard, type DaemonPreviousReader, type DaemonInstallationReceipt } from './daemon-native-cohort.js';
+import { assertDaemonNativePayloadPins, createDaemonNativeRenameGuard, inspectDaemonNativeInstallation, parseDaemonCiArtifact, resolveDaemonNativeTargets, retainDaemonNativeFiles, type DaemonNativeTarget, type DaemonNativeRenameGuard, type DaemonPreviousReader, type DaemonInstallationReceipt, type DaemonCiArtifact } from './daemon-native-cohort.js';
 import { assertNativeReaderCompatible, NATIVE_READER_REQUIREMENT_FILE, NATIVE_PREVIOUS_READER_RECEIPT_FORMAT, parseNativeReaderCapabilities, type NativeReaderCapabilities } from './native-reader-compatibility.js';
 export { DAEMON_NATIVE_TARGETS, DAEMON_INSTALLATION_RECEIPT, assertDaemonNativePayloadBytes, assertDaemonNativePayloadPins, inspectDaemonNativeInstallation,
   parseDaemonCiArtifact, parseDaemonInstallationReceipt, resolveDaemonInstallationReaders, resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles,
@@ -312,7 +312,8 @@ interface TransactionPaths {
   readonly claim: string;
 }
 function assertSynchronousCurrent(current: (() => void) | undefined): void {
-  const result = current?.();
+  let result: unknown;
+  try { result = current?.(); } catch (error) { drainOwned(error); throw error; }
   if (result !== undefined) {
     drainOwned(result);
     throw new Error('update current restriction must complete synchronously without returning a value');
@@ -448,7 +449,8 @@ function transact(
     phase = 'admission';
     nativeGuard = restrictions.prepareNativeGuard?.();
     if (restrictions.readerExecPath) readerLease = acquireUpdateReaderLease(restrictions.readerExecPath, io, physical);
-    const admission = beforeCommit?.();
+    let admission: unknown;
+    try { admission = beforeCommit?.(); } catch (error) { drainOwned(error); throw error; }
     if (admission !== undefined) { drainOwned(admission); throw new Error('beforeCommit must complete synchronously without returning a value'); }
     current();
     phase = 'commit'; commit((from, to) => move(from, to, false)); committed = true;
@@ -549,6 +551,10 @@ export interface ApplyVerifiedUpdateOptions extends UpdateRequestOptions {
     /** Actual outgoing program's compiled readers and original installation
      * owner. Host-only input; candidate version strings establish no support. */
     readonly currentReader?: DaemonCurrentReader };
+  /** Offline first-install companion. All five payloads still require their
+   * independently expected source pins. The updater itself derives the sixth
+   * fixed receipt after payload admission; it has no synthetic release pin. */
+  readonly generatedDaemonReceipt?: { readonly artifact: DaemonCiArtifact; readonly version: string };
   /** Preserve physical ownership for an already admitted complete native cohort. */
   readonly native?: boolean;
   /** Explicit installation root for the shared saved-data reader lease. */
@@ -568,6 +574,19 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     targets: options.targets.map((target) => ({ ...target })), ...(options.daemonNative ? { daemonNative: { ...options.daemonNative,
       ...(options.daemonNative.additionalTargets ? { additionalTargets: options.daemonNative.additionalTargets.map(target => ({ ...target })) } : {}) } } : {}) };
   validateTargets(options.targets);
+  let generatedReceipt: { readonly artifact: DaemonCiArtifact; readonly version: string; readonly target: UpdateTarget } | undefined;
+  if (options.generatedDaemonReceipt) {
+    if (!options.native || options.daemonNative) throw new Error('Generated daemon receipt requires one offline native cohort');
+    const candidate = options.generatedDaemonReceipt;
+    const artifact = parseDaemonCiArtifact(structuredClone(candidate.artifact), candidate.artifact.target);
+    const version = normalizeVersion(candidate.version), executable = options.targets[0];
+    const expected = executable && resolveDaemonNativeTargets(executable.path, 'linux', artifact.target.slice('linux-'.length));
+    if (!parseSemanticVersion(version) || !expected || options.targets.length !== expected.length || expected.some((target, index) => {
+      const actual = options.targets[index];
+      return !actual || actual.path !== target.path || actual.label !== target.label || actual.executable !== target.executable;
+    }) || artifact.schema === 2 && artifact.readers.version !== version) throw new Error('Generated daemon receipt target or version is invalid');
+    generatedReceipt = { artifact, version, target: options.targets[options.targets.length - 1]! };
+  }
   const native = options.daemonNative;
   const readerExecPath = options.readerExecPath ?? native?.execPath ?? (options.native ? options.targets[0]?.path : undefined);
   if (readerExecPath && (!isAbsolute(readerExecPath) || resolve(readerExecPath) !== readerExecPath)) throw new Error('Native reader executable must be absolute and normalized');
@@ -589,27 +608,33 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     if (!expected || JSON.stringify(options.targets) !== JSON.stringify([...expected, ...(native.additionalTargets ?? [])]) || !parseSemanticVersion(normalizeVersion(native.version))) throw new Error('Native daemon update target identity is invalid');
     daemonTargets = expected;
     const io = options.io ?? realUpdateFileIo;
+    if (native.allowLegacyBinary && (!io.observe || !io.readFile || !io.observe(native.execPath))) throw new Error('Legacy daemon binary is not retained');
+    // Preserve original ownership before the first await. Genuine native I/O
+    // retains physical facts only; borrowed adapters still retain exact bytes.
+    assertNativeCurrent = retainDaemonNativeFiles(expected, io);
+    if (currentReaders) { assertSynchronousCurrent(readerGuard); assertNativeCurrent(); }
+  }
+  const admitInstalledNative = (): void => {
+    if (!native) return;
+    const io = options.io ?? realUpdateFileIo, expected = daemonTargets;
+    assertNativeCurrent?.();
+    if (currentReaders) assertSynchronousCurrent(readerGuard);
     let installed: DaemonInstallationReceipt | null = null;
     if (native.allowLegacyBinary) {
       if (!io.observe || !io.readFile || !io.observe(native.execPath)) throw new Error('Legacy daemon binary is not retained');
-      // An existing receipt is already a native installation and must be complete.
       if (io.exists(expected[expected.length - 1]!.path)) installed = inspectDaemonNativeInstallation(native.execPath, native.platform, native.arch, '', io);
     } else {
       installed = inspectDaemonNativeInstallation(native.execPath, native.platform, native.arch, '', io);
       if (!installed) throw new Error('No complete owned native daemon installation is available');
     }
-    assertNativeCurrent = retainDaemonNativeFiles(expected, io);
     if (currentReaders) {
-      assertSynchronousCurrent(readerGuard);
       if (!installed || installed.version !== currentReaders.version) throw new Error('Outgoing native reader does not own the installed version');
-      // A v2 receipt already carries its producer's evidence. Only the older
-      // receipt needs the actual running program to preserve its support.
       if (installed.artifact.schema === 1) previousReader = { version: installed.version,
         artifact: { ...installed.artifact, schema: 2, readers: currentReaders } };
       assertSynchronousCurrent(readerGuard);
-      assertNativeCurrent();
     }
-  }
+    assertNativeCurrent?.();
+  };
   for (const target of options.targets) {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(target.assetName)) throw new Error(`invalid update asset filename: ${target.assetName}`);
   }
@@ -622,11 +647,19 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     const checksumText = await manifestResponse.text();
     const checksums = parseChecksumFile(checksumText);
     signal.throwIfAborted();
+    const readerAsset = native ? daemonTargets[daemonTargets.length - 1]!.assetName.replace(/\.ci-artifact\.json$/, '.reader-ci-artifact.json') : undefined;
+    const readerPin = readerAsset === undefined ? undefined : checksums.get(readerAsset);
+    if (readerAsset !== undefined) {
+      const entries = checksumText.split(/\r?\n/).filter(line => line.trim().split(/\s+/).some(token => token === readerAsset || token === '*' + readerAsset));
+      if ((readerPin !== undefined || entries.length !== 0) && (readerPin === undefined || entries.length !== 1)) throw new Error('Native daemon reader artifact checksum is missing or ambiguous');
+    }
     // A missing later member makes the whole cohort unverifiable. Require all
     // pins before downloading or hashing even its otherwise valid first member.
-    const pinnedTargets = options.targets.map(target => ({
+    const payloadTargets = generatedReceipt ? options.targets.slice(0, -1) : options.targets;
+    const pinnedTargets = payloadTargets.map(target => ({
       target, expected: requireChecksum(target.assetName, checksums.get(target.assetName)),
     }));
+    admitInstalledNative(); signal.throwIfAborted();
     const verified: StagedUpdate[] = [];
     for (const { target, expected } of pinnedTargets) {
       const url = `${options.downloadBaseUrl}/${target.assetName}`;
@@ -640,17 +673,26 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       verifiedMembers.set(target.path, { path: target.path, assetName: target.assetName, sha256: pin, size: buffer.length, mode: target.executable ? 0o755 : 0o644 });
       verified.push({ target, buffer });
     }
+    if (generatedReceipt) {
+      const { artifact, version, target } = generatedReceipt;
+      const payloads = verified.map(member => {
+        const pin = verifiedMembers.get(member.target.path); if (!pin) throw new Error('Native daemon verified source member is missing');
+        return { pin, bytes: member.buffer };
+      });
+      assertDaemonNativePayloadPins(artifact, payloads.map(member => member.pin), payloads[3]?.bytes);
+      // This local transformation shares the same claims/compensation and exact
+      // stage-byte checks as every native member. It was never downloaded and
+      // has no independently expected checksum to compute or verify.
+      verified.push({ target, buffer: Buffer.from(JSON.stringify({ schema: 1,
+        packageName: '@goodvibes-jev/daemon', version, artifact }, null, 2) + '\n') });
+    }
     if (native) {
       const descriptorIndex = verified.findIndex(member => member.target.path === daemonTargets[daemonTargets.length - 1]?.path);
       const descriptor = verified[descriptorIndex];
       if (!descriptor) throw new Error('Native daemon source manifest is missing');
       const target: DaemonNativeTarget = native.arch === 'x64' ? 'linux-x64' : 'linux-arm64';
       let artifact = parseDaemonCiArtifact(JSON.parse(descriptor.buffer.toString('utf8')), target);
-      const readerAsset = descriptor.target.assetName.replace(/\.ci-artifact\.json$/, '.reader-ci-artifact.json');
-      const readerPin = checksums.get(readerAsset);
-      const readerEntries = checksumText.split(/\r?\n/).filter(line => line.trim().split(/\s+/).some(token => token === readerAsset || token === '*' + readerAsset));
-      if ((readerPin !== undefined || readerEntries.length !== 0) && (readerPin === undefined || readerEntries.length !== 1)) throw new Error('Native daemon reader artifact checksum is missing or ambiguous');
-      if (readerPin !== undefined) {
+      if (readerAsset !== undefined && readerPin !== undefined) {
         const response = await options.fetchImpl(`${options.downloadBaseUrl}/${readerAsset}`, { signal });
         signal.throwIfAborted();
         if (!response.ok) throw new Error('Native daemon reader artifact download failed');
@@ -748,7 +790,8 @@ export function rollbackKeptPrevious(
   const skipped: RollbackTarget[] = [];
   transact('rollback', paths, io, () => {}, () => {
     if (options.requireComplete && paths.some(path => !io.exists(path.previous))) throw new Error('Previous native cohort is incomplete; refusing partial rollback');
-    const result = beforeCommit?.();
+    let result: unknown;
+    try { result = beforeCommit?.(); } catch (error) { drainOwned(error); throw error; }
     if (result !== undefined) {
       drainOwned(result);
       throw new Error('beforeCommit must complete synchronously without returning a value');

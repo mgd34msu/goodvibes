@@ -215,9 +215,12 @@ export function grantedGatewayScopes(catalog: Pick<GatewayMethodCatalog, 'getAll
   return [...scopes].sort();
 }
 
+export type GatewayPolicySnapshot = Readonly<{ methods: readonly unknown[]; events: readonly unknown[] }>;
+export type GatewayPolicyRevision = (snapshot: GatewayPolicySnapshot) => string;
+
 export interface GatewayScopePolicyOwner {
   /** Exact immutable registered scope state. Requires this still-attached owner. */
-  current(): Readonly<{ revision: string; scopes: readonly string[] }>;
+  current(version?: 1 | 2): Readonly<{ revision: string; scopes: readonly string[] }>;
   /** Scope membership alone needs no serialized catalog revision or digest. */
   grantedScopes(): readonly string[];
   close(): void;
@@ -242,6 +245,8 @@ export class GatewayMethodCatalog {
   private scopePolicyRetired = false;
   private scopePolicyState: object = {};
   private scopePolicySnapshot: ReturnType<GatewayScopePolicyOwner['current']> | undefined;
+  private scopePolicyLegacySnapshot: ReturnType<GatewayScopePolicyOwner['current']> | undefined;
+  private scopePolicyData: GatewayPolicySnapshot | undefined;
   private scopePolicyScopesSnapshot: readonly string[] | undefined;
 
   /**
@@ -250,7 +255,7 @@ export class GatewayMethodCatalog {
    * The callback is an owner precondition, never an authority reconstructed from
    * a stored watch, grant identifier, or caller-supplied scope list.
    */
-  attachScopePolicyOwner(beforeMutation: () => void): GatewayScopePolicyOwner {
+  attachScopePolicyOwner(beforeMutation: () => void, revisionForSnapshot?: GatewayPolicyRevision): GatewayScopePolicyOwner {
     if (this.scopePolicyOwner || this.scopePolicyRetired) throw new Error('Gateway scope policy owner is already attached or retired');
     const owner = { beforeMutation }; this.scopePolicyOwner = owner;
     const grantedScopes = () => {
@@ -260,33 +265,51 @@ export class GatewayMethodCatalog {
       if (this.scopePolicyOwner !== owner || this.scopePolicyChanging || this.scopePolicyState !== state) throw new Error('Gateway scopes changed while reading');
       this.scopePolicyScopesSnapshot = scopes; return scopes;
     };
+    const revision = (data: GatewayPolicySnapshot): string => {
+      const state = this.scopePolicyState;
+      let result: unknown;
+      try { result = revisionForSnapshot!(data); } catch (error) { drainOwned(error); throw error; }
+      if (typeof result !== 'string' || !result || result.length > 4096) { drainOwned(result); throw new Error('Gateway policy revision must be a bounded synchronous value'); }
+      if (this.scopePolicyOwner !== owner || this.scopePolicyChanging || this.scopePolicyState !== state) throw new Error('Gateway policy owner changed during revision read');
+      return result;
+    };
     return Object.freeze({
       grantedScopes,
-      current: () => {
+      current: (version: 1 | 2 = 2) => {
         if (this.scopePolicyOwner !== owner || this.scopePolicyChanging) throw new Error('Gateway scope policy owner is unavailable');
-        if (this.scopePolicySnapshot) return this.scopePolicySnapshot;
+        if (version === 1 && this.scopePolicyLegacySnapshot) return this.scopePolicyLegacySnapshot;
+        if (this.scopePolicySnapshot && version === 2) {
+          if (revisionForSnapshot && revision(this.scopePolicyData!) !== this.scopePolicySnapshot.revision) throw new Error('Gateway scope policy durable owner changed');
+          return this.scopePolicySnapshot;
+        }
         const state = this.scopePolicyState;
         const methods = [...this.methods].sort(([a], [b]) => a.localeCompare(b)).map(([id, entry]) => {
           const value = entry.descriptor;
           return [id, value.source, value.pluginId ?? null, value.access, [...value.transport].sort(), [...value.scopes].sort(),
-            value.http ? [value.http.method, value.http.path] : null, value.invokable, value.dangerous ?? false, typeof entry.handler === 'function'];
+            value.http ? [value.http.method, value.http.path] : null, value.invokable ?? null, value.dangerous ?? false, typeof entry.handler === 'function'];
         });
         const events = [...this.events].sort(([a], [b]) => a.localeCompare(b)).map(([id, entry]) => {
           const value = entry.descriptor;
           return [id, value.source, value.pluginId ?? null, [...value.transport].sort(), [...value.scopes].sort(),
             [...(value.domains ?? [])].sort(), [...(value.wireEvents ?? [])].sort()];
         });
-        // Saved native CI grants compare this registered method/event policy
-        // after restart. Keep one compact commitment per catalog generation;
-        // membership-only readers use grantedScopes() without computing it.
-        // The current attached owner and durable revocation precondition, not
-        // this checksum, establish authority.
-        const snapshot = Object.freeze({ revision: createHash('sha256').update(JSON.stringify({ methods, events })).digest('hex'),
-          scopes: grantedScopes() });
+        // Original native composition can persist this nonprivate exact tuple.
+        // Standalone catalogs use an owner-local label and are cold after restart.
+        const data: GatewayPolicySnapshot = { methods, events };
+        const pending: object[] = [data];
+        while (pending.length) { const value = pending.pop()!; for (const nested of Object.values(value)) if (nested !== null && typeof nested === 'object') pending.push(nested); Object.freeze(value); }
+        if (version === 1) {
+          // Only actual saved CI1 readers request this representation. It binds
+          // their independently retained original registered-policy expectation.
+          const legacy = Object.freeze({ revision: createHash('sha256').update(JSON.stringify(data)).digest('hex'), scopes: grantedScopes() });
+          if (this.scopePolicyOwner !== owner || this.scopePolicyChanging || this.scopePolicyState !== state) throw new Error('Gateway policy changed while reading saved-format expectation');
+          this.scopePolicyLegacySnapshot = legacy; return legacy;
+        }
+        const snapshot = Object.freeze({ revision: revisionForSnapshot ? revision(data) : randomUUID(), scopes: grantedScopes() });
         if (this.scopePolicyOwner !== owner || this.scopePolicyChanging || this.scopePolicyState !== state) {
           throw new Error('Gateway scope policy changed while reading its registered state');
         }
-        this.scopePolicySnapshot = snapshot;
+        this.scopePolicyData = data; this.scopePolicySnapshot = snapshot;
         return snapshot;
       },
       close: () => {
@@ -294,7 +317,7 @@ export class GatewayMethodCatalog {
         // Daemon retirement is not a policy withdrawal. Reconstructed startup
         // may recover unchanged durable grants. This instance cannot reattach
         // or mint durable custody after teardown starts.
-        this.scopePolicyRetired = true; this.scopePolicyOwner = undefined; this.scopePolicySnapshot = undefined; this.scopePolicyScopesSnapshot = undefined;
+        this.scopePolicyRetired = true; this.scopePolicyOwner = undefined; this.scopePolicySnapshot = undefined; this.scopePolicyData = undefined; this.scopePolicyLegacySnapshot = undefined; this.scopePolicyScopesSnapshot = undefined;
       },
     });
   }
@@ -302,7 +325,7 @@ export class GatewayMethodCatalog {
   private invalidateScopePolicySnapshot(): void {
     if (!this.scopePolicyOwner) return;
     this.scopePolicyState = {};
-    this.scopePolicySnapshot = undefined;
+    this.scopePolicySnapshot = undefined; this.scopePolicyData = undefined; this.scopePolicyLegacySnapshot = undefined;
     this.scopePolicyScopesSnapshot = undefined;
   }
 
@@ -311,7 +334,8 @@ export class GatewayMethodCatalog {
     if (this.scopePolicyChanging) throw new Error('Gateway scope policy mutation is reentrant');
     this.scopePolicyChanging = true;
     try {
-      const result: unknown = owner.beforeMutation();
+      let result: unknown;
+      try { result = owner.beforeMutation(); } catch (error) { drainOwned(error); throw error; }
       if (result !== undefined) {
         drainOwned(result);
         throw new Error('Gateway scope policy mutation must be synchronous');
@@ -502,4 +526,4 @@ export class GatewayMethodCatalog {
     return entry.handler(invocation);
   }
 }
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';

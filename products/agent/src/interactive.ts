@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { describeIngestionNotice } from '@goodvibes-jev/engine/platform/platform/config';
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } from '@goodvibes-jev/engine/terminal-shell/native-ingress';
 import { readShellFrameFacts, createShellSubmissionPorts } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
@@ -1000,6 +1001,9 @@ async function main() {
       }),
     });
   }
+  unsubs.push(configManager.subscribeIngestionNotices((notice) => {
+    if (!exiting) systemMessageRouter.high(describeIngestionNotice(notice));
+  }));
   const terminalOutputGuard = installFullScreenTerminalOutputGuard({
     stdout,
     stderr: process.stderr,

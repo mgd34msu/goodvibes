@@ -3,6 +3,7 @@ import * as childProcess from 'node:child_process';
 import { compileDaemonSqliteLibrary } from '../../../scripts/build-sqlite-runtime.ts';
 import { createHash } from 'node:crypto';
 import * as crypto from 'node:crypto';
+import * as nativeFs from 'node:fs';
 import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -30,7 +31,7 @@ test('selects each declared architecture after captured owner, bytes and metadat
   for (const arch of ['x64', 'arm64'] as const) {
     const f = fixture(arch); const events: string[] = [];
     initializeDaemonNativeSqlite({ ...f.options, assertCurrent: () => { events.push('current'); }, setCustomSQLite: path => { expect(path).toBe(f.library); events.push('select'); return true; } });
-    expect(events).toEqual(['current', 'select', 'current']);
+    expect(events).toEqual(['current', 'current', 'select', 'current']);
   }
 });
 
@@ -161,4 +162,50 @@ test.each(['x64', 'arm64'] as const)('Darwin SQLite compiler keeps Apple --sdk s
       '-Wl,-install_name,@rpath/libsqlite3.dylib', source, '-o', library,
     ], { cwd: dirname(source), stdio: 'inherit', timeout: 120_000 });
   } finally { compile.mockRestore(); }
+});
+
+
+test('thrown rejected lifetime work drains and cannot select SQLite or continue an old admission', async () => {
+  const f = fixture(), unhandled: unknown[] = [], normal = new Error('original native restriction');
+  const observe = (error: unknown) => { unhandled.push(error); }; process.on('unhandledRejection', observe);
+  let calls = 0, failure: unknown, rejected: Promise<never> | undefined;
+  const hash = spyOn(crypto, 'createHash'), open = spyOn(nativeFs, 'openSync'), read = spyOn(nativeFs, 'readSync'), stat = spyOn(nativeFs, 'lstatSync');
+  try {
+    try { initializeDaemonNativeSqlite({ ...f.options, assertCurrent() { rejected = Promise.reject(new Error('borrowed async restriction')); throw rejected; },
+      setCustomSQLite: () => { calls++; return true; } }); } catch (error) { failure = error; }
+    expect(failure).toBe(rejected); expect(calls).toBe(0);
+    expect(hash).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled(); expect(stat).not.toHaveBeenCalled();
+    let active = true;
+    const admitted = initializeDaemonNativeSqlite({ ...f.options, assertCurrent() {
+      if (!active) { rejected = Promise.reject(new Error('retired async restriction')); throw rejected; }
+    }, setCustomSQLite: () => { calls++; return true; } });
+    if (!admitted) throw new Error('Expected actual native admission');
+    expect(calls).toBe(1); expect(hash).toHaveBeenCalledTimes(1); expect(open).toHaveBeenCalled(); expect(read).toHaveBeenCalled(); expect(stat).toHaveBeenCalled(); active = false;
+    try { admitted.assertCurrent(); } catch (error) { failure = error; }
+    expect(failure).toBe(rejected); expect(calls).toBe(1);
+    expect(() => initializeDaemonNativeSqlite({ ...f.options, assertCurrent() { throw normal; }, setCustomSQLite: () => { calls++; return true; } })).toThrow(normal);
+    await new Promise<void>(resolve => setImmediate(resolve)); expect(unhandled).toEqual([]);
+  } finally { hash.mockRestore(); open.mockRestore(); read.mockRestore(); stat.mockRestore(); process.off('unhandledRejection', observe); }
+});
+
+test('the actual native selection boundary requires true and drains rejected returned or thrown work', async () => {
+  const f = fixture(), unhandled: unknown[] = [];
+  const observe = (error: unknown) => { unhandled.push(error); }; process.on('unhandledRejection', observe);
+  try {
+    for (const kind of ['returned', 'thrown'] as const) {
+      let failure: unknown, rejected: Promise<never> | undefined;
+      const select = (): boolean => {
+        rejected = Promise.reject(new Error('borrowed native selection rejected'));
+        if (kind === 'thrown') throw rejected;
+        return rejected as unknown as boolean;
+      };
+      try { initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: select }); } catch (error) { failure = error; }
+      if (kind === 'thrown') expect(failure).toBe(rejected);
+      else expect(failure).toBeInstanceOf(Error);
+    }
+    let calls = 0;
+    expect(initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => { calls++; return true; } })).toBeDefined();
+    expect(calls).toBe(1);
+    await new Promise<void>(resolve => setImmediate(resolve)); expect(unhandled).toEqual([]);
+  } finally { process.off('unhandledRejection', observe); }
 });

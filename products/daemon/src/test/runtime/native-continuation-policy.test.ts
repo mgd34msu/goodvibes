@@ -19,27 +19,30 @@ function fixture() {
     changeScope: (revision: string, nextScopes = scopes) => { scopeRevision = revision; scopes = nextScopes; } };
 }
 
-test('fresh CI2 policy compares opaque actual revisions directly; only historical CI1 adoption uses its saved recipe', () => {
+test('fresh CI2 policy is hash-free while actual saved CI1 expectations retain their verifier', () => {
   let configuration = 'opaque-configuration-original', scope = 'opaque-scope-original';
   const original = { captureDurableConfigurationIncarnation: () => configuration, getDurableConfigurationIncarnation: () => configuration, onDidChangeIncarnation: (_listener: () => void) => () => {} };
   const selected = { current: () => ({ revision: scope, scopes: ['read:work-ledger'] }) }, policy = createDaemonContinuationPolicy(original, selected);
+  const expectedLegacy = createHash('sha256').update(JSON.stringify([configuration, scope])).digest('hex');
   const hash = spyOn(crypto, 'createHash'), count = () => hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
   try {
     const issued = policy.capture(2); expect(issued).toBe(JSON.stringify([configuration, scope]));
     for (let i = 0; i < 20; i++) expect(policy.current(2)).toBe(issued);
     expect(count()).toBe(0);
-    const legacy = policy.current(1); expect(count()).toBe(1);
+    const legacy = policy.current(1); expect(legacy).toBe(expectedLegacy); expect(count()).toBe(1);
+    expect(() => policy.capture(1)).toThrow('fresh issuance');
     for (let i = 0; i < 20; i++) expect(policy.current(1)).toBe(legacy);
     expect(count()).toBe(1);
     configuration = 'opaque-configuration-next'; scope = 'opaque-scope-next'; expect(policy.current(2)).not.toBe(issued);
     const successor = policy.capture(2); expect(successor).toBe(JSON.stringify([configuration, scope])); expect(count()).toBe(1);
+    expect(policy.current(1)).not.toBe(expectedLegacy); expect(count()).toBe(2);
     expect(createDaemonContinuationPolicy(original, selected).current(2)).toBe(successor);
   } finally { hash.mockRestore(); }
 });
 
-test('current live checks preserve the existing saved native CI policy representation', () => {
+test('current live checks preserve the exact newly issued native CI2 tuple', () => {
   const f = fixture(), binding = f.policy.capture();
-  const expected = createHash('sha256').update(JSON.stringify([f.configuration.getDurableConfigurationIncarnation(), f.owner.current().revision])).digest('hex');
+  const expected = JSON.stringify([f.configuration.getDurableConfigurationIncarnation(), f.owner.current().revision]);
   expect(binding).toBe(expected);
   for (let i = 0; i < 20; i++) expect(f.policy.current()).toBe(binding);
   expect(f.policy.capture()).toBe(binding);
@@ -54,6 +57,17 @@ test('a restarted owner recovers the original persisted binding from actual dura
   // Recovery observes; it does not establish new configuration history.
   expect(reopened.current()).toBe(saved.policyRevision);
   expect(reopened.current()).toBe(saved.policyRevision);
+});
+
+test('an actual saved CI1 binding survives unchanged restart and refuses changed policy', () => {
+  const f = fixture(); f.configuration.captureDurableConfigurationIncarnation();
+  const expected = createHash('sha256').update(JSON.stringify([f.configuration.getDurableConfigurationIncarnation(1), f.owner.current().revision])).digest('hex');
+  const path = join(f.root, 'saved-ci1-policy.json'); writeFileSync(path, JSON.stringify({ policyRevision: expected }));
+  const saved = JSON.parse(readFileSync(path, 'utf8')) as { policyRevision: string };
+  const reopened = createDaemonContinuationPolicy(f.restart(), f.owner);
+  expect(reopened.current(1)).toBe(saved.policyRevision);
+  f.changeScope('changed-workspace-policy'); expect(reopened.current(1)).not.toBe(saved.policyRevision);
+  expect(readFileSync(path, 'utf8')).toBe(JSON.stringify({ policyRevision: expected }));
 });
 
 test('real configuration mutation and restoration cannot revive a prior continuation', () => {

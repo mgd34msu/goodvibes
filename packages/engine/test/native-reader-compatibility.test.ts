@@ -1,8 +1,10 @@
 /** Real retained-hold files and canonical native publication, not version labels alone. */
-import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
+import * as nativeFs from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, parseNativeReaderCapabilities, NativeDataCompatibilityError,
   NATIVE_READER_REQUIREMENT_FILE, type AdmittedNativeDataPublisher } from '../platform/src/platform/runtime/native-reader-compatibility.js';
 import { applyVerifiedUpdate, realUpdateFileIo, resolveDaemonNativeTargets, UpdateTransactionError, type UpdateFetchLike } from '../platform/src/platform/runtime/self-update.js';
@@ -200,22 +202,28 @@ for (const profile of ['old-version', 'same-version-unknown', 'same-version-miss
     const floor = '/native-reader-fixture/' + NATIVE_READER_REQUIREMENT_FILE;
     const memory = nativeMemoryIo({ ...previous.installation(execPath), ...(hasRequirement ? { [floor]: Buffer.from(requirement()) } : {}) });
     const targets = resolveDaemonNativeTargets(execPath, 'linux', 'x64'); if (!targets) throw new Error('Native fixture target unavailable');
-    let checked = false;
+    let checked = false, installedReads = 0, readsAtManifest = -1, candidateFetches = 0;
     const readFile = memory.io.readFile;
     const io = { ...memory.io, readFile(path: string) {
+      installedReads++;
       if (path === floor) { checked = true; for (const target of targets) expect(memory.io.exists(target.path + '.update-transaction')).toBe(true); }
       return readFile(path);
     } };
     const fetchImpl: UpdateFetchLike = async url => {
       const name = url.slice(url.lastIndexOf('/') + 1);
+      if (name !== 'SHA256SUMS.txt') candidateFetches++;
       const bytes = name === 'SHA256SUMS.txt' ? Buffer.from(candidate.checksumManifest) : candidate.assets[name];
       if (!bytes) throw new Error('Unexpected fixture download');
-      return { ok: true, status: 200, url, headers: { get: () => null }, text: async () => bytes.toString(), arrayBuffer: async () => Uint8Array.from(bytes).buffer };
+      return { ok: true, status: 200, url, headers: { get: () => null }, text: async () => { if (name === 'SHA256SUMS.txt') readsAtManifest = installedReads; return bytes.toString(); }, arrayBuffer: async () => Uint8Array.from(bytes).buffer };
     };
+    const hash = profile === 'malformed-reader-pin' || profile === 'ambiguous-reader-pin' ? spyOn(crypto, 'createHash') : undefined;
+    try {
     const apply = applyVerifiedUpdate({ targets, io, fetchImpl, downloadBaseUrl: `https://fixture.invalid/v${candidateVersion}`, platform: 'linux',
       daemonNative: { execPath, platform: 'linux', arch: 'x64', version: candidateVersion } });
     if (profile === 'malformed-reader-pin' || profile === 'ambiguous-reader-pin') {
       await expect(apply).rejects.toThrow('reader artifact checksum'); expect(checked).toBe(false);
+      expect(candidateFetches).toBe(0); expect(readsAtManifest).toBeGreaterThan(0); expect(installedReads).toBe(readsAtManifest);
+      expect(hash).not.toHaveBeenCalled();
       for (const [path, bytes] of Object.entries(previous.installation(execPath))) expect(memory.files.get(path)).toEqual(bytes);
       expect(memory.mutations).toEqual([]);
     } else if (profile === 'foreign-reader-profile') {
@@ -237,5 +245,49 @@ for (const profile of ['old-version', 'same-version-unknown', 'same-version-miss
         else expect(actual).toEqual(bytes);
       }
     }
+    } finally { hash?.mockRestore(); }
   });
 }
+
+
+test('native stat-only source retention rejects invalid reader manifests before installed byte IO and still fences manifest-await replacement', async () => {
+  const prefix = mkdtempSync(join(tmpdir(), 'native-reader-preflight-')); roots.push(prefix);
+  const execPath = join(prefix, 'goodvibes-daemon'), previous = nativeCohortFixture({ version: '3.1.2', daemonBytes: 'original native fixture' });
+  for (const [path, bytes] of Object.entries(previous.installation(execPath))) {
+    mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, bytes);
+    chmodSync(path, path === execPath || path === execPath + '.bun' ? 0o755 : 0o644);
+  }
+  const candidate = nativeCohortReleaseFixture({ version: '3.1.2', daemonBytes: 'candidate fixture', readers: nativeReaderCapabilities('3.1.2') });
+  const readerAsset = 'goodvibes-daemon-linux-x64.reader-ci-artifact.json';
+  const originalLine = candidate.checksumManifest.split('\n').find(line => line.endsWith('  ' + readerAsset));
+  if (!originalLine) throw new Error('Actual reader pin is missing');
+  const targets = resolveDaemonNativeTargets(execPath, 'linux', 'x64'); if (!targets) throw new Error('Native target is missing');
+  let manifest = candidate.checksumManifest, bodyFetches = 0, replaceDuringManifest = false;
+  const fetchImpl: UpdateFetchLike = async url => {
+    const name = url.slice(url.lastIndexOf('/') + 1);
+    if (name !== 'SHA256SUMS.txt') bodyFetches++;
+    const bytes = name === 'SHA256SUMS.txt' ? Buffer.from(manifest) : candidate.assets[name];
+    if (!bytes) throw new Error('Unexpected candidate body');
+    return { ok: true, status: 200, url, headers: { get: () => null }, text: async () => {
+      if (replaceDuringManifest) {
+        const replacement = execPath + '.foreign'; writeFileSync(replacement, previous.members[0]!.bytes); chmodSync(replacement, 0o755); renameSync(replacement, execPath);
+      }
+      return bytes.toString();
+    }, arrayBuffer: async () => Uint8Array.from(bytes).buffer };
+  };
+  const apply = () => applyVerifiedUpdate({ targets, io: realUpdateFileIo, fetchImpl, downloadBaseUrl: 'https://fixture.invalid/current', platform: 'linux',
+    daemonNative: { execPath, platform: 'linux', arch: 'x64', version: '3.1.2' } });
+  const hash = spyOn(crypto, 'createHash'), reads = spyOn(nativeFs, 'readFileSync');
+  try {
+    for (const bad of [candidate.checksumManifest + originalLine + '\n', candidate.checksumManifest.replace(originalLine, 'not-a-digest  ' + readerAsset)]) {
+      manifest = bad; await expect(apply()).rejects.toThrow('reader artifact checksum');
+      expect(hash).not.toHaveBeenCalled(); expect(reads).not.toHaveBeenCalled(); expect(bodyFetches).toBe(0);
+    }
+    manifest = candidate.checksumManifest; replaceDuringManifest = true;
+    await expect(apply()).rejects.toThrow('installation changed during preparation');
+    expect(hash).not.toHaveBeenCalled(); expect(reads).not.toHaveBeenCalled(); expect(bodyFetches).toBe(0);
+    replaceDuringManifest = false;
+    await apply(); expect(hash).toHaveBeenCalled(); expect(reads).toHaveBeenCalled(); expect(bodyFetches).toBeGreaterThan(0);
+    expect(readFileSync(execPath)).toEqual(candidate.members[0]!.bytes);
+  } finally { hash.mockRestore(); reads.mockRestore(); }
+});

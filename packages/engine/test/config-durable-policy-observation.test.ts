@@ -1,5 +1,5 @@
-/** Released v3.1.1 bindings remain readable while unchanged guards stop
- * re-reading/fsyncing policy files and recomputing their v1 commitments. */
+/** Public recovery uses exact sourced replay data; actual private/saved-v1
+ * expectations require compact verification without persisting private values. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import * as crypto from 'node:crypto';
@@ -40,66 +40,54 @@ function releasedBinding(file: string, epoch: { readonly incarnation: string; re
   return releasedDigest([[[file, epoch.incarnation, epoch.fileIdentity]], effective]);
 }
 
-for (const present of [true, false]) test(`a published-v1 policy record opens unchanged after restart (present=${present})`, () => {
+for (const present of [true, false]) test(`actual saved v1 source/frame expectations recover unchanged (present=${present})`, () => {
   const f = fixture(); if (!present) rmSync(f.file);
   const epoch = { version: 1, incarnation: randomUUID(), fileIdentity: releasedFileIdentity(f.file) };
   atomic.writeJsonFileAtomic(f.epoch, epoch, { durable: true, mode: 0o600 });
-  const original = readFileSync(f.epoch), effective = { behavior: { autoApprove: false }, label: 'actual-v1-fixture' };
-  const expected = releasedBinding(f.file, epoch, effective);
+  const effective = { behavior: { autoApprove: false }, label: 'actual-v1-fixture' };
+  const expected = releasedBinding(f.file, epoch, effective), original = readFileSync(f.epoch);
   for (let restart = 0; restart < 2; restart++) {
-    const owner = new DurablePolicyEpochOwner([f.file], true);
-    for (let repeat = 0; repeat < 5; repeat++) expect(owner.current(effective)).toBe(expected);
-    expect(readFileSync(f.epoch)).toEqual(original);
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      const owner = new DurablePolicyEpochOwner([f.file], true);
+      for (let repeat = 0; repeat < 8; repeat++) expect(owner.current(effective, undefined, 1)).toBe(expected);
+      expect(hash).toHaveBeenCalledTimes(present ? 3 : 2);
+      expect(readFileSync(f.epoch)).toEqual(original);
+      const beforeFresh = hash.mock.calls.length;
+      const fresh = owner.capture(effective, { code: 1, publicPolicy: false });
+      expect(fresh).not.toBe(expected); expect(owner.current(effective, undefined, 1)).toBe(expected);
+      expect(hash).toHaveBeenCalledTimes(beforeFresh);
+      expect(readFileSync(f.epoch)).toEqual(original);
+    } finally { hash.mockRestore(); }
   }
 });
 
-test('newly issued policy history uses private physical facts without an extra source-content commitment', () => {
-  const f = fixture(), effective = { behavior: { autoApprove: false } };
-  const owner = new DurablePolicyEpochOwner([f.file], true), binding = owner.capture(effective);
-  const epoch = JSON.parse(readFileSync(f.epoch, 'utf8'));
-  expect(Object.keys(epoch).sort()).toEqual(['fileIdentity', 'incarnation', 'version']);
-  expect(epoch.version).toBe(2); expect(epoch.fileIdentity).toStartWith('policy-file-v2:[');
-  expect(binding).toBe(releasedBinding(f.file, epoch, effective));
+test('changed original bytes or effective private policy cannot match a saved v1 expectation', () => {
+  for (const kind of ['source', 'effective'] as const) {
+    const f = fixture(), effective = { behavior: { autoApprove: false }, privateSetting: 'original' };
+    const epoch = { version: 1, incarnation: randomUUID(), fileIdentity: releasedFileIdentity(f.file) };
+    atomic.writeJsonFileAtomic(f.epoch, epoch, { durable: true, mode: 0o600 });
+    const expected = releasedBinding(f.file, epoch, effective), owner = new DurablePolicyEpochOwner([f.file], true);
+    expect(owner.current(effective, undefined, 1)).toBe(expected);
+    if (kind === 'source') {
+      writeFileSync(f.file, '{"behavior":{"autoApprove":true}}');
+      expect(() => owner.current(effective, undefined, 1)).toThrow('ownership is unavailable');
+    } else expect(owner.current({ ...effective, privateSetting: 'changed' }, undefined, 1)).not.toBe(expected);
+  }
 });
 
-test('fresh capture, repeated currentness and a source mutation hash only the final private configuration frame', () => {
+test('a private publication computes one expectation and unchanged live guards never rehash it', () => {
   const f = fixture(), effective = { policy: 'same', credential: 'synthetic-private-config-value' };
-  const owner = new DurablePolicyEpochOwner([f.file], true);
-  const hash = spyOn(crypto, 'createHash');
+  const owner = new DurablePolicyEpochOwner([f.file], true), hash = spyOn(crypto, 'createHash');
   try {
     const original = owner.capture(effective);
-    expect(hash).toHaveBeenCalledTimes(1);
+    const epoch = JSON.parse(readFileSync(f.epoch, 'utf8')); expect(epoch.version).toBe(2);
+    expect(epoch.fileIdentity).toStartWith('policy-file-v2:[');
     for (let repeat = 0; repeat < 10; repeat++) expect(owner.current(effective)).toBe(original);
-    expect(hash).toHaveBeenCalledTimes(1);
-    owner.advance();
-    writeFileSync(f.file, '{"behavior":{"autoApprove":true}}');
-    owner.reconcile();
+    owner.advance(); writeFileSync(f.file, '{"behavior":{"autoApprove":true}}'); owner.reconcile();
     expect(owner.current({ ...effective, policy: 'changed' })).not.toBe(original);
-    expect(hash).toHaveBeenCalledTimes(2);
-    expect(readFileSync(f.epoch, 'utf8')).not.toContain(effective.credential);
-  } finally { hash.mockRestore(); }
-});
-
-test('an actual v1 owner advances to physical facts only at mutation intent and never revives its old binding', () => {
-  const f = fixture(), effective = { policy: 'existing' };
-  const epoch = { version: 1, incarnation: randomUUID(), fileIdentity: releasedFileIdentity(f.file) };
-  atomic.writeJsonFileAtomic(f.epoch, epoch, { durable: true, mode: 0o600 });
-  const original = releasedBinding(f.file, epoch, effective);
-  const owner = new DurablePolicyEpochOwner([f.file], true);
-  expect(owner.current(effective)).toBe(original);
-  expect(JSON.parse(readFileSync(f.epoch, 'utf8')).version).toBe(1);
-  const hash = spyOn(crypto, 'createHash');
-  try {
-    owner.advance(); owner.reconcile();
-    const advanced = JSON.parse(readFileSync(f.epoch, 'utf8'));
-    expect(advanced.version).toBe(2);
-    expect(advanced.incarnation).not.toBe(epoch.incarnation);
-    expect(advanced.fileIdentity).toStartWith('policy-file-v2:[');
-    expect(hash).not.toHaveBeenCalled();
-    expect(owner.current(effective)).not.toBe(original);
-    expect(hash).toHaveBeenCalledTimes(1);
-    const restarted = new DurablePolicyEpochOwner([f.file], true);
-    expect(restarted.current(effective)).toBe(owner.current(effective));
+    expect(hash).toHaveBeenCalledTimes(1); expect(readFileSync(f.epoch, 'utf8')).not.toContain(effective.credential);
+    expect(readFileSync(f.file + '.policy-configuration-v3.json', 'utf8')).not.toContain(effective.credential);
   } finally { hash.mockRestore(); }
 });
 
@@ -117,7 +105,7 @@ test('malformed physical facts stay unavailable and are never repaired by mutati
   }
 });
 
-test('unchanged live guards reuse the confirmed durable record, while a restart confirms its own record', () => {
+test('unchanged live guards reuse confirmed sources and saved private frames recover across restart', () => {
   const f = fixture(), effective = { policy: 'same' };
   const owner = new DurablePolicyEpochOwner([f.file], true), original = owner.capture(effective);
   const confirm = atomic.confirmFileDurable; const confirmed: string[] = [];
@@ -129,17 +117,18 @@ test('unchanged live guards reuse the confirmed durable record, while a restart 
     expect(confirmed).toContain(f.epoch);
     const afterRestart = confirmed.length;
     expect(restarted.current(effective)).toBe(original);
-    expect(confirmed).toHaveLength(afterRestart);
+    expect(confirmed).toHaveLength(afterRestart + 1);
+    expect(confirmed.at(-1)).toBe(f.file + '.policy-configuration-v3.json');
+    for (let repeat = 0; repeat < 8; repeat++) expect(restarted.current(effective)).toBe(original);
+    expect(confirmed).toHaveLength(afterRestart + 1);
   } finally { observation.mockRestore(); }
 });
 
 test('mutated effective values cannot reuse the previous binding for the same physical files', () => {
   const f = fixture(), effective = { permissions: { allow: false }, extensions: ['first'] };
   const owner = new DurablePolicyEpochOwner([f.file], true), original = owner.capture(effective);
-  const epoch = JSON.parse(readFileSync(f.epoch, 'utf8'));
   effective.permissions.allow = true; effective.extensions.push('second');
-  const changed = owner.current(effective);
-  expect(changed).not.toBe(original); expect(changed).toBe(releasedBinding(f.file, epoch, effective));
+  expect(() => owner.current(effective)).toThrow('ownership is unavailable');
 });
 
 test('private effective configuration frames never become enumerable owner metadata', () => {

@@ -1,5 +1,5 @@
 /** Construction-only bridge from the product graph to completed host registration. */
-import type { GatewayMethodCatalog, GatewayScopePolicyOwner } from './method-catalog.js';
+import type { GatewayMethodCatalog, GatewayScopePolicyOwner, GatewayPolicyRevision } from './method-catalog.js';
 
 type BootstrapPhase = 'facade' | 'boot';
 const pending = new WeakMap<GatewayMethodCatalog, (phase: BootstrapPhase) => void>();
@@ -25,7 +25,7 @@ export function waitForGatewayScopePolicyBootstrap(catalog: GatewayMethodCatalog
 
 /** Native policy reads refuse until every initial host registration phase has completed. */
 export function prepareGatewayScopePolicyOwner(catalog: GatewayMethodCatalog, beforeMutation: () => void,
-  needsBoot = false): GatewayScopePolicyOwner {
+  needsBoot = false, revisionForSnapshot?: GatewayPolicyRevision): GatewayScopePolicyOwner {
   if (prepared.has(catalog)) throw new Error('Gateway scope bootstrap is already owned or retired');
   prepared.add(catalog);
   const ready: Readiness = { state: 'pending', listeners: new Set() }; readiness.set(catalog, ready);
@@ -35,12 +35,12 @@ export function prepareGatewayScopePolicyOwner(catalog: GatewayMethodCatalog, be
     if (closed || active) throw new Error('Gateway scope bootstrap is no longer current');
     phases.add(phase);
     if (!phases.has('facade') || (needsBoot && !phases.has('boot'))) return;
-    active = catalog.attachScopePolicyOwner(beforeMutation); pending.delete(catalog);
+    active = catalog.attachScopePolicyOwner(beforeMutation, revisionForSnapshot); pending.delete(catalog);
     ready.state = 'active'; for (const listener of [...ready.listeners]) listener();
   };
   pending.set(catalog, complete);
   return Object.freeze({
-    current() { if (closed || !active) throw new Error('Gateway scope bootstrap is incomplete or retired'); return active.current(); },
+    current(version: 1 | 2 = 2) { if (closed || !active) throw new Error('Gateway scope bootstrap is incomplete or retired'); return active.current(version); },
     grantedScopes() { if (closed || !active) throw new Error('Gateway scope bootstrap is incomplete or retired'); return active.grantedScopes(); },
     close() { if (closed) return; closed = true; ready.state = 'closed';
       for (const listener of [...ready.listeners]) listener();

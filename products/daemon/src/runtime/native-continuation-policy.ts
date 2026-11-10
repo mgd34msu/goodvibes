@@ -1,11 +1,10 @@
-/** Compare actual configuration/scope incarnations directly. Fresh CI2 stores
- * their exact opaque revision tuple; old CI1 grants retain their original
- * digest recipe only on actual legacy capture/adoption, never every guard. */
+/** Fresh policy tuples compare exact ordinary revisions. Actual saved CI1 grants
+ * retain their independently expected private-frame verification recipe. */
 import { createHash } from 'node:crypto';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 type ConfigurationOwner = Pick<ConfigManager, 'captureDurableConfigurationIncarnation' | 'getDurableConfigurationIncarnation' | 'onDidChangeIncarnation'>;
-interface ScopeOwner { current(): { readonly revision: string; readonly scopes: readonly string[] } }
+interface ScopeOwner { current(version?: 1 | 2): { readonly revision: string; readonly scopes: readonly string[] } }
 interface PolicySnapshot { readonly configuration: string; readonly scope: string }
 const CHANGED = 'native-continuation-policy-changed';
 
@@ -18,7 +17,8 @@ export function createDaemonContinuationPolicy(configuration: ConfigurationOwner
   const subscribe = configuration.onDidChangeIncarnation.bind(configuration);
   const methods = { capture: configuration.captureDurableConfigurationIncarnation, current: configuration.getDurableConfigurationIncarnation,
     scope: scope.current, subscribe: configuration.onDidChangeIncarnation };
-  let snapshot: PolicySnapshot | undefined; let legacyBinding: string | undefined;
+  let snapshot: PolicySnapshot | undefined;
+  let savedSnapshot: PolicySnapshot | undefined, savedBinding: string | undefined;
   let retired = false;
   const assertReaders = () => {
     if (retired || configuration.captureDurableConfigurationIncarnation !== methods.capture || configuration.getDurableConfigurationIncarnation !== methods.current
@@ -27,9 +27,9 @@ export function createDaemonContinuationPolicy(configuration: ConfigurationOwner
       throw new Error('Native continuation policy owner changed');
     }
   };
-  const read = (establish: boolean) => {
+  const read = (establish: boolean, version: 1 | 2 = 2) => {
     assertReaders();
-    const configurationRevision = establish ? capture() : current(), selected = readScope();
+    const configurationRevision = establish ? capture() : current(version), selected = readScope(version);
     assertReaders();
     if (typeof configurationRevision !== 'string' || !configurationRevision || typeof selected.revision !== 'string' || !selected.revision) {
       throw new Error('Native continuation policy revision is unavailable');
@@ -39,19 +39,26 @@ export function createDaemonContinuationPolicy(configuration: ConfigurationOwner
   const same = (value: { readonly configuration: string; readonly scope: string }): boolean =>
     snapshot !== undefined && value.configuration === snapshot.configuration && value.scope === snapshot.scope;
   const establish = (value: { readonly configuration: string; readonly scope: string }): void => {
-    snapshot = Object.freeze({ ...value }); legacyBinding = undefined;
+    snapshot = Object.freeze({ ...value });
   };
   const binding = (version: 1 | 2): string => {
     if (!snapshot) throw new Error('Native continuation policy is unavailable');
-    if (version === 2) return JSON.stringify([snapshot.configuration, snapshot.scope]);
-    // Existing private CI1 grants independently compare this exact saved value.
-    return legacyBinding ??= createHash('sha256').update(JSON.stringify([snapshot.configuration, snapshot.scope])).digest('hex');
+    if (version === 1) throw new Error('Historical native continuation policy requires fresh issuance');
+    return JSON.stringify([snapshot.configuration, snapshot.scope]);
   };
   return Object.freeze({
-    capture(version: 1 | 2 = 1): string {
+    capture(version: 1 | 2 = 2): string {
+      if (version === 1) { assertReaders(); throw new Error('Historical native continuation policy requires fresh issuance'); }
       const selected = read(true); if (!same(selected)) establish(selected); return binding(version);
     },
-    current(version: 1 | 2 = 1): string {
+    current(version: 1 | 2 = 2): string {
+      if (version === 1) {
+        const selected = read(false, 1);
+        if (!savedSnapshot || selected.configuration !== savedSnapshot.configuration || selected.scope !== savedSnapshot.scope) {
+          savedSnapshot = Object.freeze(selected); savedBinding = undefined;
+        }
+        return savedBinding ??= createHash('sha256').update(JSON.stringify([selected.configuration, selected.scope])).digest('hex');
+      }
       const selected = read(false);
       if (!snapshot) establish(selected);
       return same(selected) ? binding(version) : CHANGED;

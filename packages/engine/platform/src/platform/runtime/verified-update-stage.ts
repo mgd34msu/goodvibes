@@ -1,3 +1,4 @@
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** platform-owned pin evidence for one synchronous native update admission. Pins
  * were computed during download verification; retained staging proves these
  * same bytes remain selected. A token is neither serializable authority nor
@@ -18,7 +19,13 @@ export function withVerifiedUpdateStage<T>(members: readonly VerifiedUpdateMembe
   const stage = Object.freeze({}) as VerifiedUpdateStage;
   const owner: StageOwner = { active: true, native, assertCurrent, members: Object.freeze(members.map(member => Object.freeze({ ...member }))) };
   owners.set(stage, owner);
-  try { assertCurrent(); const result = operation(stage); assertCurrent(); return result; }
+  try {
+    assertCurrent();
+    let result: T;
+    try { result = operation(stage); } catch (error) { drainOwned(error); throw error; }
+    try { assertCurrent(); } catch (error) { drainOwned(result); drainOwned(error); throw error; }
+    return result;
+  }
   finally { owner.active = false; }
 }
 /** Only real native staging may substitute its already-verified release pins

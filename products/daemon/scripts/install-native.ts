@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
-  applyVerifiedUpdate, captureUpdateFileIo, realUpdateFileIo, rollbackKeptPrevious, sha256, UpdateTransactionError,
+  applyVerifiedUpdate, captureUpdateFileIo, realUpdateFileIo, rollbackKeptPrevious, UpdateTransactionError,
   assertDaemonNativePayloadPins, retainDaemonNativeFiles, assertNativeReaderCompatible, resolveDaemonInstallationReaders, type UpdateFileIo, type UpdateFetchLike,
 } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { retainVerifiedDaemonCiArtifact } from './ci-artifact.ts';
@@ -88,18 +88,16 @@ export async function installDaemonNative(options: InstallDaemonNativeOptions): 
   assertDaemonNativePayloadPins(artifact, nativeArtifactPins(verified.retained, join(artifactRoot, 'native'), paths), buffers[3]);
   assertSourceCurrent();
   const receipt: InstallationReceipt = { schema: 1, packageName: PACKAGE, version: owner.version, artifact };
-  buffers.push(Buffer.from(JSON.stringify(receipt, null, 2) + '\n'));
-  const hashes = [...artifact.files.map(file => file.sha256), sha256(buffers[buffers.length - 1]!)];
-  const checksums = targets.map((target, index) => `${hashes[index]}  ${target.assetName}`).join('\n');
+  const checksums = targets.slice(0, -1).map((target, index) => `${artifact.files[index]!.sha256}  ${target.assetName}`).join('\n');
   // This adapter only serves captured local bytes. It cannot fall through to fetch.
   const readLocal: UpdateFetchLike = async url => {
     if (url === `${LOCAL_ORIGIN}/SHA256SUMS.txt`) return new Response(checksums);
     const index = targets.findIndex(target => url === `${LOCAL_ORIGIN}/${target.assetName}`);
-    return index < 0 ? new Response(null, { status: 404 }) : new Response(new Uint8Array(buffers[index]!));
+    return index < 0 || index >= buffers.length ? new Response(null, { status: 404 }) : new Response(new Uint8Array(buffers[index]!));
   };
   const alreadyInstalled = new Error('Identical daemon cohort already installed');
   try {
-    await applyVerifiedUpdate({ fetchImpl: readLocal, downloadBaseUrl: LOCAL_ORIGIN, targets, platform: 'linux', native: true,
+    await applyVerifiedUpdate({ fetchImpl: readLocal, downloadBaseUrl: LOCAL_ORIGIN, targets, platform: 'linux', native: true, generatedDaemonReceipt: { artifact, version: owner.version },
       ...(signal ? { signal } : {}), ...(io ? { io } : {}),
       assertCurrent: assertSourceCurrent,
       beforeCommit: () => {

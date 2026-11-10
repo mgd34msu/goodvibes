@@ -32702,6 +32702,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "unavailable",
                               "aborted",
                               "invalid-response",
+                              "internal",
                               "unrecorded"
                             ]
                           },
@@ -40457,6 +40458,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "unavailable",
                                     "aborted",
                                     "invalid-response",
+                                    "internal",
                                     "unrecorded"
                                   ]
                                 },
@@ -48316,6 +48318,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   "unavailable",
                                   "aborted",
                                   "invalid-response",
+                                  "internal",
                                   "unrecorded"
                                 ]
                               },

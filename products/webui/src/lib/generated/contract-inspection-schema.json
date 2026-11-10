@@ -1942,6 +1942,7 @@
                       "unavailable",
                       "aborted",
                       "invalid-response",
+                      "internal",
                       "unrecorded"
                     ]
                   },

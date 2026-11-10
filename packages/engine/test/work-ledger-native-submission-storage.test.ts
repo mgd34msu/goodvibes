@@ -1,13 +1,12 @@
 /** Owned synthetic fixtures; no external source, credentials, runner, or provider. */
-import * as nativeFs from 'node:fs';
-import { afterEach, expect, test } from 'bun:test';
+import * as atomicStore from '../platform/src/platform/utils/atomic-json-store.js';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
 import { SQLiteStore, loadSqlJsEngine, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
-import type { SQLitePublicationIO } from '../platform/src/platform/state/sqlite-store-persistence.js';
 import { createWorkLedger, migrateLegacyWorkLedgerState, readWorkLedgerState } from '../platform/src/platform/workflow/work-ledger/service.js';
 import { criteriaSetIdForWork, freezeDurableRequest } from '../platform/src/platform/contract/durable-admission.js';
 import { parseNativeWorkExecutionIntent } from '../platform/src/platform/workflow/work-ledger/native-execution-types.js';
@@ -125,12 +124,18 @@ test('blank, oversized and untrusted native command fields cannot mutate storage
 
 for (const phase of ['before', 'after'] as const) test(`${phase}-publication error never exposes half a submission and exact retry reconciles once`, async () => {
   const f = await open(); const original = readFileSync(f.file);
-  const persistence = (f.store as unknown as { sqlite: { persistence: { io: SQLitePublicationIO } } }).sqlite.persistence;
-  let fail = true; persistence.io = { ...nativeFs,
-    renameSync(from, to) { if (phase === 'before' && fail) { fail = false; throw new Error('owned publication failure'); } nativeFs.renameSync(from, to); },
-    fsyncSync(fd) { if (phase === 'after' && fail && nativeFs.fstatSync(fd).isDirectory()) { fail = false; throw new Error('owned durable ambiguity'); } nativeFs.fsyncSync(fd); },
-  };
-  expect(await f.service.execute(command, f.actor)).toMatchObject({ kind: 'indeterminate' });
+  const write = atomicStore.writeFileAtomic; let failed = false;
+  const fail = () => { failed = true; throw new Error('Owned native submission publication failure'); };
+  const fault = spyOn(atomicStore, 'writeFileAtomic').mockImplementation((selected, bytes, options) => {
+    if (selected !== f.file || failed) return write(selected, bytes, options);
+    if (phase === 'before') return fail();
+    return write(selected, bytes, { ...options, onEffect: published => {
+      options?.onEffect?.(published); if (published) fail();
+    } });
+  });
+  try { expect(await f.service.execute(command, f.actor)).toMatchObject({ kind: 'indeterminate' }); }
+  finally { fault.mockRestore(); }
+  expect(failed).toBe(true);
   const visible = await f.storage.read() as WorkLedgerState;
   if (phase === 'before') { expect(readFileSync(f.file)).toEqual(original); expect(visible).toMatchObject({ revision: 0, works: [], attempts: [], receipts: [], history: [] }); }
   else expect(visible).toMatchObject({ revision: 1 });

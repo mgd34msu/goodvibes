@@ -171,7 +171,7 @@ test('emitted native physical owner mismatch after rename retains honest recover
   } catch (error) { failure = error; }
   assert.equal(replaced, true); assert.ok(failure instanceof UpdateTransactionError);
   assert.equal(failure.receipt.committed, false); assert.equal(failure.receipt.recoveryRequired, true);
-  assert.match(failure.message, /rename result is unknown/);
+  assert.match(failure.message, /cohort not committed; recovery required, blind retry is fenced/);
   assert.deepEqual(readFileSync(f.execPath), f.next[0]); assert.deepEqual(readFileSync(f.execPath + '.previous'), f.old[0]);
   assert.equal(existsSync(f.execPath + '.update-transaction'), true);
 });

@@ -34,7 +34,7 @@ async function bundleConsumer(source: boolean): Promise<BrowserSurface> {
     symlinkSync(JUDGMENT_ROOT, join(scope, 'judgment'), 'dir');
     writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
     const entry = join(dir, 'consumer.ts');
-    const battery = (path: string) => JSON.stringify(join(ENGINE_ROOT, `sdk/${source ? 'src' : 'dist'}/platform/${path}.${source ? 'ts' : 'js'}`));
+    const battery = (path: string) => JSON.stringify(join(ENGINE_ROOT, `platform/${source ? 'src' : 'dist'}/platform/${path}.${source ? 'ts' : 'js'}`));
     writeFileSync(entry, `
       import * as wake from '${PUBLIC_ENTRY}';
       import * as judgment from '@goodvibes-jev/judgment/decisions';
@@ -63,20 +63,20 @@ async function bundleConsumer(source: boolean): Promise<BrowserSurface> {
       // The package resolver really used the requested condition, and the
       // formerly leaking modules are present rather than optimized away.
       for (const suffix of [
-        `sdk/${tree}/platform/voice/wake/runtime.${extension}`,
-        `sdk/${tree}/platform/utils/batteries/display-payload.${extension}`,
-        `sdk/${tree}/platform/types/batteries/retry-wait.${extension}`,
-        `sdk/${tree}/platform/routing/batteries/provider.${extension}`,
-        `sdk/${tree}/platform/utils/native-error-summary.${extension}`,
-        `sdk/${tree}/platform/types/error-values.${extension}`,
+        `platform/${tree}/platform/voice/wake/runtime.${extension}`,
+        `platform/${tree}/platform/utils/batteries/display-payload.${extension}`,
+        `platform/${tree}/platform/types/batteries/retry-wait.${extension}`,
+        `platform/${tree}/platform/routing/batteries/provider.${extension}`,
+        `platform/${tree}/platform/utils/native-error-summary.${extension}`,
+        `platform/${tree}/platform/types/error-values.${extension}`,
         `judgment/${tree}/decisions.${extension}`,
       ]) expect(paths.some((path) => path.endsWith(suffix)), `missing ${suffix}`).toBe(true);
       // Inspect actual bundle inputs and their edges. Provider runtime modules,
       // host APIs and stores must stay outside the browser bundle.
       const edges = Object.values(graph.inputs).flatMap((input) => input.imports);
-      const forbidden = /(?:^|\/)(?:node:|bun:)|sqlite|AsyncLocalStorage|judgment\/(?:src|dist)\/(?:index\.|log\/|port\/(?:client|transport|failover))|sdk\/(?:src|dist)\/platform\/logging\//;
+      const forbidden = /(?:^|\/)(?:node:|bun:)|sqlite|AsyncLocalStorage|judgment\/(?:src|dist)\/(?:index\.|log\/|port\/(?:client|transport|failover))|platform\/(?:src|dist)\/platform\/logging\//;
       expect([...paths, ...edges.map((edge) => edge.path)].filter((path) => forbidden.test(path))).toEqual([]);
-      expect(paths.filter((path) => /sdk\/(?:src|dist)\/platform\/providers\//.test(path))).toEqual([]);
+      expect(paths.filter((path) => /platform\/(?:src|dist)\/platform\/providers\//.test(path))).toEqual([]);
       expect(edges.filter((edge) => edge.external)).toEqual([]);
       // Browser cancellation APIs are real intrinsics. This realm has no process,
       // Bun, require, fetch, database or storage globals. The real module

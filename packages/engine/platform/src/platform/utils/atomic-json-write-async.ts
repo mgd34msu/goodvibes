@@ -19,6 +19,20 @@ function invoke(callback: (() => void) | undefined): void {
   const result: unknown = callback?.(); if (result !== undefined) { if (nodeTypes.isPromise(result)) nativeApply(nativeThen, result, [undefined, () => {}]); throw new Error('Atomic JSON owner callbacks must complete synchronously.'); }
 }
 const sync = (fd: number) => new Promise<void>((resolve, reject) => { fsync(fd, error => { if (error) reject(error); else resolve(); }); });
+// Reserve in call order, before a borrowed serializer or any asynchronous IO.
+// Only publication/durability is serialized; each call still captures its own
+// bytes and stages them on its original FD immediately. No payloads live here.
+const publications = new Map<string, Promise<void>>();
+function reservePublication(target: string): { previous: Promise<void> | undefined; release(): void } {
+  const previous = publications.get(target);
+  let complete!: () => void;
+  const pending = new Promise<void>(resolve => { complete = resolve; });
+  publications.set(target, pending);
+  return { previous, release() {
+    if (publications.get(target) === pending) publications.delete(target);
+    complete();
+  } };
+}
 export async function writeJsonFileAtomicAsync(filePath: string, value: unknown, options: AsyncAtomicJsonWriteOptions = {}): Promise<void> {
   const guard = options.assertCurrent?.bind(options), notification = options.onEffect?.bind(options), mode = options.mode ?? 0o600;
   const mkdirp = options.mkdirp !== false, indent = options.indent === undefined ? 2 : options.indent, newline = options.trailingNewline !== false;
@@ -26,6 +40,7 @@ export async function writeJsonFileAtomicAsync(filePath: string, value: unknown,
   let parent: ReturnType<typeof prepareAtomicPublicationDirectory> | undefined, temporary: string | undefined, target: string | undefined;
   let fd: number | undefined, original: BigIntStats | undefined, prepared: BigIntStats | undefined, publishedImage: BigIntStats | undefined;
   let attempted = false, published = false, publicationNotified = false, modeReady = false;
+  let publication: ReturnType<typeof reservePublication> | undefined;
   const current = () => { invoke(guard); parent?.assertCurrent(); };
   const effect = (isPublished = false) => {
     if (isPublished) { if (publicationNotified) return; publicationNotified = true; }
@@ -49,6 +64,7 @@ export async function writeJsonFileAtomicAsync(filePath: string, value: unknown,
     if (!leaf || leaf === '.' || leaf === '..' || absolute.endsWith(sep) || absolute.includes('\0')) throw new Error('Atomic JSON publication requires a file target.');
     parent = prepareAtomicPublicationDirectory(dirname(absolute), { mkdirp, assertCurrent: current, onEffect: notification ? () => effect() : undefined }); current();
     target = join(parent.canonical, leaf);
+    publication = reservePublication(target);
     // Capture the selected parent before invoking a borrowed serializer.
     const json = indent === null ? JSON.stringify(value) : JSON.stringify(value, null, indent);
     if (json === undefined) throw new TypeError('Atomic JSON value did not serialize to a document.');
@@ -70,6 +86,10 @@ export async function writeJsonFileAtomicAsync(filePath: string, value: unknown,
       } catch (failure) { reject(failure); }
     }); });
     current(); temporaryCurrent(); await sync(fd); current(); temporaryCurrent();
+    // A previous same-process writer must finish checking its original image
+    // before this call can replace it. Failed writers release the same queue;
+    // their failure never supplies authority to this call's retained sources.
+    if (publication.previous) { await publication.previous; current(); temporaryCurrent(); }
     // No await or borrowed callback separates this proof from native rename.
     attempted = true; renameSync(temporary, target); published = true;
     publishedImage = observePublished(); if (notification) { effect(true); publishedCurrent(); }
@@ -101,5 +121,11 @@ export async function writeJsonFileAtomicAsync(filePath: string, value: unknown,
     }
     if (error instanceof AtomicWriteDurabilityError) throw error;
     throw new AtomicWriteDurabilityError(filePath, published ? 'published-indeterminate' : 'before-publication', error);
+  } finally {
+    // An early serializer/staging failure must not let its successor skip an
+    // older live publication. Keep the original predecessor chain intact even
+    // when this call failed before reaching the ordinary queue wait above.
+    if (publication?.previous) await publication.previous;
+    publication?.release();
   }
 }

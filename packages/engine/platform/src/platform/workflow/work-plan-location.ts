@@ -5,7 +5,7 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { randomUUID } from 'node:crypto';
 import { closeSync, constants, fchmodSync, fsyncSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, unlinkSync, writeFileSync, type BigIntStats } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { captureExistingDirectory, confirmFileDurable } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 interface Project { readonly projectId: string; readonly projectRoot: string }
@@ -28,6 +28,11 @@ const nativePlanFilename = (value: unknown): value is string => typeof value ===
 const stamp = (stat: BigIntStats) => [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.nlink, stat.size, stat.birthtimeNs, stat.mtimeNs, stat.ctimeNs].join(':');
 const sameFile = (a: BigIntStats, b: BigIntStats) => a.dev === b.dev && a.ino === b.ino && a.uid === b.uid && a.gid === b.gid && a.birthtimeNs === b.birthtimeNs;
 function unavailable(): never { throw new Error('Work plan ownership changed or is unreadable; existing plans and assignments were left untouched.'); }
+/** Initial readonly discovery may race an ordinary first activation. This is
+ * never a permission to replace an already retained parent, assignment or plan. */
+class InitialDirectoryAppeared extends Error {
+  constructor(readonly assertOriginalParents: () => void) { super('Work plan initial directory appeared during discovery.'); }
+}
 function invoke(callback: (() => void) | undefined): void { const result: unknown = callback?.(); if (result !== undefined) { drainOwned(result); unavailable(); } }
 /** Actual existing configured directory aliases are retained. Missing children
  * are created one level at a time below the already checked original parent.
@@ -38,7 +43,11 @@ function directoryOwner(directory: string, create: boolean, options: LocationOpt
   while (!lstatSync(parent, { throwIfNoEntry: false })) { absent.unshift(parent); const next = dirname(parent); if (next === parent) unavailable(); parent = next; }
   const held = [captureExistingDirectory(parent)];
   const physical = () => { for (const selected of held) selected.assertCurrent(); };
-  const current = () => { invoke(options.assertCurrent); physical(); if (!create) for (const path of absent) if (lstatSync(path, { throwIfNoEntry: false })) unavailable(); };
+  const current = () => { invoke(options.assertCurrent); physical(); if (!create) for (const path of absent) {
+    const entry = lstatSync(path, { bigint: true, throwIfNoEntry: false }); if (!entry) continue;
+    if (!entry.isDirectory() || entry.isSymbolicLink() || (process.geteuid && entry.uid !== BigInt(process.geteuid()))) unavailable();
+    throw new InitialDirectoryAppeared(physical);
+  } };
   for (const path of absent) {
     current(); if (!create) return { exists: false, current, physical };
     let entry = lstatSync(path, { bigint: true, throwIfNoEntry: false }), created = false;
@@ -89,7 +98,7 @@ function findExisting(directory: string, project: Project) {
     match = { planFile: file, planId: value.id };
   }
   const current = () => { const actual = names(directory).filter(planFilename).sort(); if (actual.length !== members.length || actual.some((name, index) => name !== members[index])) unavailable(); for (const check of retained) check(); };
-  current(); return { ...match, unassignedFiles, current };
+  current(); return { ...match, unassignedFiles, hasOriginals: members.length > 0, current };
 }
 function location(directory: string, assignment: Assignment, assertCurrent: () => void, assertParentsCurrent: () => void): WorkPlanLocation {
   return Object.freeze({ path: join(directory, assignment.planFile), planId: assignment.planId, registered: true,
@@ -98,13 +107,26 @@ function location(directory: string, assignment: Assignment, assertCurrent: () =
 export function resolveWorkPlanLocation(directory: string, project: Project, options: LocationOptions = {}): WorkPlanLocation {
   const readOnly = options.readOnly === true, restriction = options.assertCurrent?.bind(options), notification = options.onEffect?.bind(options);
   options = Object.freeze({ readOnly, assertCurrent: restriction, onEffect: notification });
+  // At most the configured ancestry plus the two internal directories can
+  // appear during initial discovery. A flapping/retired namespace fails closed.
+  const limit = resolve(directory).split(sep).length + 2;
+  for (let attempt = 0;; attempt++) {
+    const source = { retained: false };
+    try { return resolveLocation(directory, project, options, source); }
+    catch (error) {
+      if (!(error instanceof InitialDirectoryAppeared) || !readOnly || source.retained || attempt >= limit) throw error;
+      error.assertOriginalParents();
+    }
+  }
+}
+function resolveLocation(directory: string, project: Project, options: LocationOptions, source: { retained: boolean }): WorkPlanLocation {
+  const readOnly = options.readOnly === true;
   const directoryGuard = directoryOwner(directory, !readOnly, options), owners = join(directory, '.project-owners'), nativeDirectory = join(directory, '.native-plans');
   const ownerGuard = directoryOwner(owners, !readOnly, options, true), selectedRows: Array<() => void> = [];
-  let nativeGuard = directoryOwner(nativeDirectory, false, options, true);
+  const nativeGuard = directoryOwner(nativeDirectory, !readOnly, options, true);
   const parentsCurrent = () => { directoryGuard.physical(); ownerGuard.physical(); nativeGuard.physical(); };
   const current = () => { directoryGuard.current(); ownerGuard.current(); nativeGuard.current(); for (const check of selectedRows) check(); };
   const selectedLocation = (assignment: Assignment) => {
-    if (!readOnly && nativePlanFilename(assignment.planFile) && !nativeGuard.exists) nativeGuard = directoryOwner(nativeDirectory, true, options, true);
     current(); return location(directory, assignment, current, parentsCurrent);
   };
   current(); const nativeFiles = names(nativeDirectory), ownerFiles = names(owners); current(); let highest = -1;
@@ -113,9 +135,9 @@ export function resolveWorkPlanLocation(directory: string, project: Project, opt
   let existing: ReturnType<typeof findExisting> | undefined;
   for (let slot = 0; slot < MAX_PROJECTS; slot++) {
     current(); const path = join(owners, `${slot}.json`), assigned = readAssignment(path, slot);
-    if (assigned) { selectedRows.push(assigned.current); if (sameProject(assigned.value, project)) { if (!options.readOnly) { confirmFileDurable(path); current(); } return selectedLocation(assigned.value); } continue; }
+    if (assigned) { source.retained = true; selectedRows.push(assigned.current); if (sameProject(assigned.value, project)) { if (!options.readOnly) { confirmFileDurable(path); current(); } return selectedLocation(assigned.value); } continue; }
     if (slot <= highest) throw new Error('Work plan project assignment is missing; saved plan files were left untouched.');
-    existing ??= findExisting(directory, project); existing.current();
+    existing ??= findExisting(directory, project); if (existing.hasOriginals) source.retained = true; existing.current();
     if (options.readOnly) return Object.freeze({ path: join(directory, existing.planFile ?? `.native-plans/${slot}.json`), planId: existing.planId ?? null, registered: false,
       unassignedPaths: Object.freeze(existing.unassignedFiles.map(file => join(directory, file))), assertCurrent: () => { current(); existing!.current(); }, assertParentsCurrent: parentsCurrent });
     const proposed: Assignment = { version: 1, ...project, planId: existing.planId ?? `wp-${randomUUID()}`, planFile: existing.planFile ?? `.native-plans/${slot}.json`, unassignedFiles: existing.unassignedFiles };

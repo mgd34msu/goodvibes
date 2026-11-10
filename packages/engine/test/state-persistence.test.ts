@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { JsonFileStore } from '../platform/src/platform/state/json-file-store.ts';
+import { JsonFileStore, JsonFileStoreParseError } from '../platform/src/platform/state/json-file-store.ts';
 import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
 import { ProjectIndex } from '../platform/src/platform/state/project-index.ts';
 import { FileStateCache } from '../platform/src/platform/state/file-cache.ts';
@@ -51,7 +51,8 @@ describe('state persistence failures', () => {
     const file = join(dir, 'state.json');
     writeFileSync(file, '{bad', 'utf-8');
 
-    await expect(new JsonFileStore(file).load()).rejects.toThrow('JsonFileStore failed to load');
+    await expect(new JsonFileStore(file).load()).rejects.toBeInstanceOf(JsonFileStoreParseError);
+    expect(readFileSync(file, 'utf8')).toBe('{bad');
   });
 
   test('PersistentStore concurrent saves do not race on a shared tmp path', async () => {
@@ -86,7 +87,7 @@ describe('state persistence failures', () => {
 
     const loaded = await store.load();
     expect(loaded).not.toBeNull();
-    expect(['first', 'second', 'third']).toContain(loaded!.value);
+    expect(loaded!.value).toBe('third');
     expect(readdirSync(dir).filter((entry) => entry.includes('.tmp'))).toEqual([]);
   });
 
@@ -187,7 +188,8 @@ describe('state persistence failures', () => {
     // load() starts a housekeeping interval before it rejects, so the instance
     // has to be reachable for teardown rather than constructed inline.
     const kv = disposables.add(new KVState({ stateDir, sessionId: '1234abcd' }));
-    await expect(kv.load()).rejects.toThrow('JsonFileStore failed to load');
+    await expect(kv.load()).rejects.toBeInstanceOf(JsonFileStoreParseError);
+    expect(readFileSync(join(stateDir, 'session_1234abcd.json'), 'utf8')).toBe('{bad');
   });
 
   test('KVState treats a corrupt LEGACY file as absent: the fallback may only recover data, never fail a clean session', async () => {

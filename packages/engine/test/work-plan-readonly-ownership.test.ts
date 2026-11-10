@@ -24,6 +24,36 @@ test('two readonly openers freeze a shared real assignment only when actual work
   expect(existsSync(f.directory)).toBe(false); first.addItem('First saved work'); second.addItem('Second saved work');
   expect(first.filePath).toBe(second.filePath); expect(first.getActivePlan().id).toBe(second.getActivePlan().id); expect(first.listItems().map(item => item.title)).toEqual(['First saved work', 'Second saved work']);
 });
+test('initial readonly discovery can observe another genuine first activation without making its own effects', () => {
+  const f = fixture(); let activated = false, effects = 0, saved: string | undefined, bytes: Buffer | undefined;
+  const selected = resolveWorkPlanLocation(f.directory, f.options, { readOnly: true, onEffect() { effects++; }, assertCurrent() {
+    if (activated) return; activated = true;
+    const writer = new WorkPlanStore(f.options); writer.addItem('Genuine concurrent first work');
+    saved = writer.filePath; bytes = readFileSync(saved);
+  } });
+  expect(activated).toBe(true); expect(selected.path).toBe(saved!); expect(selected.registered).toBe(true); expect(effects).toBe(0);
+  selected.assertCurrent(); expect(readFileSync(selected.path)).toEqual(bytes!);
+  expect(readdirSync(join(f.directory, '.project-owners'))).toEqual(['0.json']);
+});
+test('a returned missing readonly view cannot adopt a later genuine activation', () => {
+  const f = fixture(), selected = resolveWorkPlanLocation(f.directory, f.options, { readOnly: true });
+  const writer = new WorkPlanStore(f.options); writer.addItem('Later work'); const bytes = readFileSync(writer.filePath);
+  expect(() => selected.assertCurrent()).toThrow(); expect(selected.registered).toBe(false);
+  expect(readFileSync(writer.filePath)).toEqual(bytes);
+});
+test.each(['physical', 'alias'] as const)('initial readonly retry never adopts a replaced original %s parent', kind => {
+  const f = fixture(), original = join(f.root, 'original'), foreign = join(f.root, 'foreign'), alias = join(f.root, 'selected');
+  mkdirSync(original); mkdirSync(foreign); if (kind === 'alias') symlinkSync(original, alias);
+  const home = kind === 'alias' ? alias : original, directory = join(home, '.goodvibes', 'test', 'work-plans'); let changed = false;
+  expect(() => resolveWorkPlanLocation(directory, { ...f.options, homeDirectory: home }, { readOnly: true, assertCurrent() {
+    if (changed) return; changed = true;
+    if (kind === 'alias') { rmSync(alias); symlinkSync(foreign, alias); }
+    else { renameSync(original, `${original}.retained`); mkdirSync(original); }
+    mkdirSync(directory, { recursive: true }); writeFileSync(join(directory, 'foreign.json'), 'Foreign preserved bytes');
+  } })).toThrow();
+  expect(readFileSync(join(directory, 'foreign.json'), 'utf8')).toBe('Foreign preserved bytes');
+  expect(readdirSync(directory)).toEqual(['foreign.json']);
+});
 test('same-size original assignment replacement during a borrowed effect cannot publish through its copied JSON', () => {
   const f = fixture(), store = new WorkPlanStore(f.options); store.addItem('Existing'); const oldBytes = readFileSync(store.filePath), assignment = join(f.directory, '.project-owners', '0.json'); let replaced = false;
   expect(() => store.addItem('Must not publish', {}, { onEffect() { if (replaced) return; replaced = true; const bytes = readFileSync(assignment); renameSync(assignment, `${assignment}.retained`); writeFileSync(assignment, bytes); } })).toThrow();

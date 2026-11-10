@@ -62,6 +62,39 @@ function nativeRequest(template: typeof nativeRoute | typeof nativeTurn, prompt:
   return JSON.parse(JSON.stringify(template).split(JSON.stringify(nativePrompt)).join(JSON.stringify(prompt)));
 }
 
+/** Current native v2 uses opaque labels and explicit operation incarnations.
+ * Parameterize only these named host fields, retaining their actual relations;
+ * the captured semantic body, complete questions/model and all other keys stay exact.
+ * This is a synthetic wire fixture, never a native authority/receipt issuer. */
+function matchesCurrentNative(body: unknown, prompt: string, kind: 'route' | 'turn'): boolean {
+  const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!record(body) || !record(body.state) || !record(body.state.binding)) return false;
+  const binding = body.state.binding;
+  if (stable(Object.keys(binding).sort()) !== stable(Object.keys(nativeRoute.state.binding).sort())) return false;
+  const ids = ['sourceId', 'authorityId', 'authorityRevision', 'scopeId', 'scopeRevision'] as const;
+  const opaque = /^[a-p]{8}-[a-p]{4}-e[a-p]{3}-[i-l][a-p]{3}-[a-p]{12}$/;
+  if (!ids.every(key => typeof binding[key] === 'string' && binding[key].length === 36 && opaque.test(binding[key]))
+    || new Set(ids.map(key => binding[key])).size !== ids.length
+    || typeof binding.inputRevision !== 'string' || binding.inputRevision.length !== 64 || !/^[a-f0-9]{64}$/.test(binding.inputRevision)
+    || binding.actionId !== `${binding.sourceId}:admission`
+    // These fixtures cover the first ordinary source, with no proposal/retry.
+    || binding.actionRevision !== `${kind === 'route' ? 'routing' : 'ordinary-turn'}:g2:p0:none`) return false;
+  if (kind === 'route') {
+    const expected = JSON.parse(JSON.stringify(nativeRequest(nativeRoute, prompt))) as typeof nativeRoute;
+    Object.assign(expected.state.binding, binding);
+    expected.state.originalSource.sourceRevision = binding.inputRevision;
+    return stable(body) === stable(expected);
+  }
+  const expected = JSON.parse(JSON.stringify(nativeRequest(nativeTurn, prompt))) as typeof nativeTurn;
+  Object.assign(expected.state.binding, binding); Object.assign(expected.state.input.binding, binding);
+  expected.state.originalSource.sourceRevision = binding.inputRevision;
+  expected.state.input.evidence[0]!.revision = binding.inputRevision;
+  expected.state.input.evidence[1]!.revision = 'ordinary-turn:g2:p0:none';
+  expected.state.input.offeredChoices.continuations[0]!.ref.id = `${binding.sourceId}:resolve`;
+  expected.state.input.offeredChoices.continuations[0]!.ref.revision = binding.inputRevision;
+  return stable(body) === stable(expected);
+}
+
 /** Recorded cancellation diagnostics; only the bounded measured duration may vary. */
 function matchesCancelledTurnTiming(body: unknown): boolean {
   if (!body || typeof body !== 'object' || !('state' in body) || !body.state || typeof body.state !== 'object' || !('durationMs' in body.state)) return false;
@@ -107,10 +140,10 @@ export function e2eJudgmentAnswers(body: unknown, ownedRoot?: string): { kind: '
     fits_0: { type: 'noul', noul: 0 }, fits_1: { type: 'noul', noul: 0 },
   } };
   for (const prompt of prompts) {
-    if (nativeFixtureShape(body) === nativeFixtureShape(nativeRequest(nativeRoute, prompt))) return { kind: 'native-route', answers: {
+    if (matchesCurrentNative(body, prompt, 'route') || nativeFixtureShape(body) === nativeFixtureShape(nativeRequest(nativeRoute, prompt))) return { kind: 'native-route', answers: {
       route: { type: 'choice', choice: 'converse', confidence: 0.99, probabilities: { converse: 0.99, answer: 0.005, contract: 0.005 } },
     } };
-    if (nativeFixtureShape(body) === nativeFixtureShape(nativeRequest(nativeTurn, prompt))) return { kind: 'native-turn', answers: {
+    if (matchesCurrentNative(body, prompt, 'turn') || nativeFixtureShape(body) === nativeFixtureShape(nativeRequest(nativeTurn, prompt))) return { kind: 'native-turn', answers: {
       disposition: { type: 'choice', choice: 'act', confidence: 0.99, probabilities: { act: 0.99, reject: 0.005, revise_0: 0.005 } },
     } };
     if (serialized === stable({ ...conversationRoute, state: { request: prompt } })) return { kind: 'route', answers: {

@@ -1,7 +1,9 @@
-/** Regression source intentionally unrun during the coding-first pass. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { chmodSync, existsSync, linkSync, readFileSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { SecretsManager } from '../platform/src/platform/config/secrets.js';
+import { createAtRestCipher, createDaemonCredentialStore } from '../platform/src/platform/config/daemon-credential-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handler-sqlite-store.js';
 import { writeFileAtomic } from '../platform/src/platform/state/durable-file-io.js';
@@ -106,4 +108,48 @@ test('new workspace and managed ancestors publish exact private permissions desp
     }
     expect(statSync(database.dbPath).mode & 0o777).toBe(0o600);
   } finally { process.umask(previous); }
+});
+
+
+test('actual first credential key creation may tighten the original shared ancestor without retiring SQLite', async () => {
+  const root = makeProjectTempDir('handler-sqlite-secret-private-ancestor'), shared = join(root, '.goodvibes');
+  mkdirSync(shared); chmodSync(shared, 0o755);
+  const original = statSync(shared), database = store(root); await database.init();
+  database.run('INSERT INTO notes (value) VALUES (?)', ['Before actual cipher initialization']); await database.save();
+  expect(statSync(shared).mode & 0o777).toBe(0o755);
+  const secrets = new SecretsManager({ projectRoot: root, globalHome: root, daemonHome: join(root, 'daemon'), surfaceRoot: 'private-sqlite-fixture' });
+  const cipher = createAtRestCipher(createDaemonCredentialStore(secrets), 'PRIVATE_SQLITE_FIXTURE_' + randomUUID());
+  const encrypted = await cipher.encrypt('Original private encryption fixture');
+  expect(await cipher.decrypt(encrypted)).toBe('Original private encryption fixture');
+  const tightened = statSync(shared);
+  expect(tightened.ino).toBe(original.ino); expect(tightened.dev).toBe(original.dev); expect(tightened.uid).toBe(original.uid);
+  expect(tightened.mode & 0o777).toBe(0o700);
+  database.run('INSERT INTO notes (value) VALUES (?)', ['After actual key publication']); await database.save();
+  await database.persistTransaction(transaction => { transaction.run('INSERT INTO notes (value) VALUES (?)', ['Actual staged publication']); }, () => {});
+  const reopened = store(root); await reopened.init();
+  expect(reopened.all('SELECT value FROM notes')).toEqual([
+    { value: 'Before actual cipher initialization' }, { value: 'After actual key publication' }, { value: 'Actual staged publication' },
+  ]);
+  expect(statSync(database.dbPath).mode & 0o777).toBe(0o600);
+});
+
+test('a shared ancestor cannot widen again after its private permission transition was observed', async () => {
+  const root = makeProjectTempDir('handler-sqlite-ancestor-widen'), shared = join(root, '.goodvibes');
+  mkdirSync(shared); chmodSync(shared, 0o755);
+  const database = store(root); await database.init(); database.run('INSERT INTO notes (value) VALUES (?)', ['Keep original']); await database.save();
+  chmodSync(shared, 0o700); await database.save(); const before = readFileSync(database.dbPath);
+  chmodSync(shared, 0o755); database.run('INSERT INTO notes (value) VALUES (?)', ['Must not publish']);
+  await expect(database.save()).rejects.toThrow('unavailable'); expect(readFileSync(database.dbPath)).toEqual(before);
+});
+
+test.each(['directory', 'symlink'] as const)('same private permissions do not admit a replaced live %s ancestor', async kind => {
+  const root = makeProjectTempDir('handler-sqlite-ancestor-replaced'), database = store(root); await database.init();
+  database.run('INSERT INTO notes (value) VALUES (?)', ['Keep original bytes']); await database.save();
+  const before = readFileSync(database.dbPath), shared = join(root, '.goodvibes'), original = shared + '.retained';
+  renameSync(shared, original);
+  if (kind === 'directory') mkdirSync(shared, { mode: 0o700 }); else symlinkSync(original, shared);
+  database.run('INSERT INTO notes (value) VALUES (?)', ['Must not adopt another ancestor']);
+  await expect(database.save()).rejects.toThrow('unavailable');
+  expect(readFileSync(join(original, 'tui', 'operator', 'private.sqlite'))).toEqual(before);
+  if (kind === 'directory') expect(existsSync(join(shared, 'tui'))).toBe(false);
 });

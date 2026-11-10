@@ -10,6 +10,27 @@ function stamp(stat: BigIntStats): string {
   return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.birthtimeNs].join(':');
 }
 const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
+interface RetainedDirectory { readonly path: string; identity: string; mode: bigint }
+function directoryIdentity(stat: BigIntStats): string {
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw unavailable();
+  // Children and shared private writers may change directory metadata. The
+  // physical owner, owner access and special bits remain the original facts.
+  return [stat.dev, stat.ino, stat.mode & ~0o077n, stat.uid, stat.gid, stat.birthtimeNs].join(':');
+}
+function retainDirectory(path: string, stat = lstatSync(path, { bigint: true })): RetainedDirectory {
+  return { path, identity: directoryIdentity(stat), mode: stat.mode };
+}
+function assertDirectoryCurrent(entry: RetainedDirectory): void {
+  const current = lstatSync(entry.path, { bigint: true });
+  if (directoryIdentity(current) !== entry.identity) throw unavailable();
+  if (current.mode !== entry.mode) {
+    // The real SecretsManager keyfile owner tightens a shared .goodvibes
+    // ancestor to0700 on its first write. Accept only that privacy reduction;
+    // once observed, widening again cannot recover the earlier permission.
+    if ((current.mode & 0o777n) !== 0o700n) throw unavailable();
+    entry.mode = current.mode;
+  }
+}
 /** Existing explicitly selected workspace aliases resolve once to their physical
  * root. A missing workspace never traverses an alias while creating ancestors. */
 function workspaceRoot(workingDirectory: string, create: boolean, assertCurrent: () => void): string {
@@ -19,23 +40,23 @@ function workspaceRoot(workingDirectory: string, create: boolean, assertCurrent:
   const selected = resolve(workingDirectory), parsed = parse(selected);
   const parts = selected.slice(parsed.root.length).split(sep).filter(Boolean);
   const paths = [parsed.root]; for (const part of parts) paths.push(join(paths.at(-1) ?? parsed.root, part));
-  const existing: Array<{ path: string; identity: string }> = [], absent: string[] = [];
+  const existing: RetainedDirectory[] = [], absent: string[] = [];
   for (const path of paths) {
-    try { existing.push({ path, identity: stamp(lstatSync(path, { bigint: true })) }); }
+    try { existing.push(retainDirectory(path)); }
     catch (error) { if (!missing(error)) throw error; absent.push(path); }
   }
   const current = () => {
     synchronous(assertCurrent);
-    if (existing.some(entry => stamp(lstatSync(entry.path, { bigint: true })) !== entry.identity)) throw unavailable();
+    for (const entry of existing) assertDirectoryCurrent(entry);
   };
   for (const path of absent) {
     current(); mkdirSync(path, { mode: 0o700 });
     const original = lstatSync(path, { bigint: true });
-    const retained = { path, identity: stamp(original) }; existing.push(retained); current();
+    const retained = retainDirectory(path, original); existing.push(retained); current();
     // Explicit permission publication is independent of a restrictive umask.
     chmodSync(path, 0o700); const after = lstatSync(path, { bigint: true });
     if (after.dev !== original.dev || after.ino !== original.ino || !after.isDirectory() || after.isSymbolicLink()) throw unavailable();
-    retained.identity = stamp(after); current();
+    retained.identity = directoryIdentity(after); retained.mode = after.mode; current();
   }
   current(); return realpathSync(selected);
 }
@@ -47,21 +68,22 @@ export function capturePrivateSqliteDirectory(workingDirectory: string, options:
   synchronous(options.assertCurrent);
   const root = workspaceRoot(workingDirectory, options.create, options.assertCurrent), directory = join(root, '.goodvibes', 'tui', 'operator');
   const paths = [root, join(root, '.goodvibes'), join(root, '.goodvibes', 'tui'), directory];
-  const retained: Array<{ path: string; identity: string }> = [], absent: string[] = [];
+  const retained: RetainedDirectory[] = [], absent: string[] = [];
   for (const path of paths) {
-    try { retained.push({ path, identity: stamp(lstatSync(path, { bigint: true })) }); }
+    try { retained.push(retainDirectory(path)); }
     catch (error) { if (!options.create || !missing(error)) throw error; absent.push(path); }
   }
   const current = () => {
     synchronous(options.assertCurrent);
-    if (realpathSync(workingDirectory) !== root || retained.some(entry => stamp(lstatSync(entry.path, { bigint: true })) !== entry.identity)) throw unavailable();
+    if (realpathSync(workingDirectory) !== root) throw unavailable();
+    for (const entry of retained) assertDirectoryCurrent(entry);
   };
   for (const path of absent) {
     current(); mkdirSync(path, { mode: 0o700 });
-    const original = lstatSync(path, { bigint: true }); const created = { path, identity: stamp(original) }; retained.push(created); current();
+    const original = lstatSync(path, { bigint: true }); const created = retainDirectory(path, original); retained.push(created); current();
     chmodSync(path, 0o700); const after = lstatSync(path, { bigint: true });
     if (after.dev !== original.dev || after.ino !== original.ino || !after.isDirectory() || after.isSymbolicLink()) throw unavailable();
-    created.identity = stamp(after); current();
+    created.identity = directoryIdentity(after); created.mode = after.mode; current();
   }
   current();
   const selected = lstatSync(directory, { bigint: true });
@@ -74,7 +96,7 @@ export function capturePrivateSqliteDirectory(workingDirectory: string, options:
       const after = fstatSync(fd, { bigint: true });
       if (after.dev !== selected.dev || after.ino !== selected.ino || stamp(lstatSync(directory, { bigint: true })) !== stamp(after)) throw unavailable();
       const retainedDirectory = retained.find(entry => entry.path === directory);
-      if (!retainedDirectory) throw unavailable(); retainedDirectory.identity = stamp(after);
+      if (!retainedDirectory) throw unavailable(); retainedDirectory.identity = directoryIdentity(after); retainedDirectory.mode = after.mode;
     } finally { closeSync(fd); }
   }
   current(); return Object.freeze({ directory, assertCurrent: current });

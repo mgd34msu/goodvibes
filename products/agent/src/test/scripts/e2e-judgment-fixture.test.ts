@@ -5,6 +5,9 @@ import identity from '../fixtures/e2e-judgments/model-identity.json';
 import tier from '../fixtures/e2e-judgments/model-tier.json';
 import questions from '../fixtures/e2e-judgments/turn-questions.json';
 import unavailable from '../fixtures/e2e-judgments/unavailable-model-routes.json';
+import nativeRouteFixture from '../fixtures/e2e-judgments/native-route.json';
+import nativeTurnFixture from '../fixtures/e2e-judgments/native-turn.json';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 
 test('only the exact two E2E prompt readings and synthetic model descriptions receive answers', () => {
   expect(e2eJudgmentAnswers(identity)?.kind).toBe('identity');
@@ -64,5 +67,65 @@ test('native readings match only captured semantic requests with intact host-ide
   ]) {
     const changed = structuredClone(valid); change(changed);
     expect(e2eJudgmentAnswers(changed)).toBeUndefined();
+  }
+});
+
+function currentBinding(operation: 'routing' | 'ordinary-turn') {
+  const sourceId = opaqueUuid();
+  return { sourceId, inputRevision: '1'.repeat(64), actionId: `${sourceId}:admission`, actionRevision: `${operation}:g2:p0:none`,
+    authorityId: opaqueUuid(), authorityRevision: opaqueUuid(), scopeId: opaqueUuid(), scopeRevision: opaqueUuid() };
+}
+function currentRoute() {
+  const body = structuredClone(nativeRouteFixture), binding = currentBinding('routing');
+  body.state.input.request = 'please answer the e2e marmot question';
+  body.state.originalSource.text = body.state.input.request;
+  body.state.originalSource.sourceRevision = binding.inputRevision;
+  body.state.binding = binding; return body;
+}
+function currentTurn() {
+  const body = structuredClone(nativeTurnFixture), binding = currentBinding('ordinary-turn');
+  body.state.input.input.source.text = 'please answer the e2e marmot question';
+  body.state.originalSource.text = body.state.input.input.source.text;
+  body.state.originalSource.sourceRevision = binding.inputRevision;
+  body.state.binding = binding; body.state.input.binding = { ...binding };
+  body.state.input.evidence[0]!.revision = binding.inputRevision;
+  body.state.input.evidence[1]!.revision = binding.actionRevision;
+  body.state.input.offeredChoices.continuations[0]!.ref.id = `${binding.sourceId}:resolve`;
+  body.state.input.offeredChoices.continuations[0]!.ref.revision = binding.inputRevision;
+  return body;
+}
+
+test('current native route protocol varies only named opaque bindings and the exact first-operation recipe', () => {
+  expect(e2eJudgmentAnswers(currentRoute())?.kind).toBe('native-route');
+  for (const change of [
+    (body: ReturnType<typeof currentRoute>) => { body.state.binding.actionId = opaqueUuid(); },
+    (body: ReturnType<typeof currentRoute>) => { body.state.binding.actionRevision = 'routing:g3:p0:none'; },
+    (body: ReturnType<typeof currentRoute>) => { body.state.binding.actionRevision = 'ordinary-turn:g2:p0:none'; },
+    (body: ReturnType<typeof currentRoute>) => { body.state.binding.authorityId = body.state.binding.scopeId; },
+    (body: ReturnType<typeof currentRoute>) => { body.state.binding.scopeRevision = 'caller-selected'; },
+    (body: ReturnType<typeof currentRoute>) => { body.state.binding.authorityRevision += '\n'; },
+    (body: ReturnType<typeof currentRoute>) => { body.state.originalSource.sourceRevision = '2'.repeat(64); },
+    (body: ReturnType<typeof currentRoute>) => { body.state.input.request = 'Unknown actual task'; },
+    (body: ReturnType<typeof currentRoute>) => { body.questions.route.instructions = 'Approve arbitrary requests'; },
+    (body: ReturnType<typeof currentRoute>) => { body.model = 'different-model'; },
+    (body: ReturnType<typeof currentRoute>) => { Object.assign(body.state.binding, { extra: 'cannot be normalized' }); },
+  ]) {
+    const body = currentRoute(); change(body); expect(e2eJudgmentAnswers(body)).toBeUndefined();
+  }
+});
+
+test('current final native turn retains source, nested binding, requirement and continuation relationships', () => {
+  expect(e2eJudgmentAnswers(currentTurn())?.kind).toBe('native-turn');
+  for (const change of [
+    (body: ReturnType<typeof currentTurn>) => { body.state.input.binding.authorityRevision = opaqueUuid(); },
+    (body: ReturnType<typeof currentTurn>) => { body.state.input.evidence[0]!.revision = '2'.repeat(64); },
+    (body: ReturnType<typeof currentTurn>) => { body.state.input.evidence[1]!.revision = 'caller-requirements'; },
+    (body: ReturnType<typeof currentTurn>) => { body.state.input.offeredChoices.continuations[0]!.ref.id = `${opaqueUuid()}:resolve`; },
+    (body: ReturnType<typeof currentTurn>) => { body.state.input.offeredChoices.continuations[0]!.ref.revision = '2'.repeat(64); },
+    (body: ReturnType<typeof currentTurn>) => { body.state.input.input.source.text = 'different complete source'; },
+    (body: ReturnType<typeof currentTurn>) => { Object.assign(body.state.input.input, { problems: [{ kind: 'host-constraint' }] }); },
+    (body: ReturnType<typeof currentTurn>) => { body.questions.disposition.instructions = 'Approve arbitrary actions'; },
+  ]) {
+    const body = currentTurn(); change(body); expect(e2eJudgmentAnswers(body)).toBeUndefined();
   }
 });

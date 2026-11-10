@@ -154,15 +154,14 @@ async function promoteRepairSourcesWithinBudget(
       usefulness, signal, context.shouldStop, generatedClaims.rememberGenerated, assertRequestCurrent, context.objectProfiles ?? []);
   };
   const processedSourceIds: string[] = [];
-  let sufficientCount: {
+  let completedCount: {
     readonly sourceIds: readonly string[];
     readonly prepared: Awaited<ReturnType<typeof countUsable>>;
   } | undefined;
   const reachedRepairTarget = async () => {
     const prepared = await countUsable(processedSourceIds);
-    if (!prepared.repairComplete) return false;
-    sufficientCount = { sourceIds: Object.freeze([...processedSourceIds]), prepared };
-    return true;
+    completedCount = { sourceIds: Object.freeze([...processedSourceIds]), prepared };
+    return prepared.repairComplete;
   };
   if (context.enrichSource) {
     for (const [index, sourceId] of sourceIds.entries()) {
@@ -191,6 +190,7 @@ async function promoteRepairSourcesWithinBudget(
         await promote([sourceId]);
         await linkSubjects([sourceId]);
         const recoveryUsefulness = await countUsable(processedSourceIds);
+        completedCount = { sourceIds: Object.freeze([...processedSourceIds]), prepared: recoveryUsefulness };
         await context.store.batch(async () => {
           recoveryUsefulness.assertCurrent();
           await updateRefinementTask(context.store, context.store.getRefinementTask(task.id) ?? task, 'applying', 'Repair source enrichment did not finish for one accepted source.', {
@@ -212,14 +212,15 @@ async function promoteRepairSourcesWithinBudget(
   const promotionSourceIds = processedSourceIds.length > 0 ? exactKnowledgeIds(processedSourceIds) : sourceIds;
   if (processedSourceIds.length === 0) await promote(sourceIds);
   let finalUsefulness: Awaited<ReturnType<typeof countUsable>>;
-  if (sufficientCount && completedLinkSourceIds
-    && sameSourceIds(sufficientCount.sourceIds, promotionSourceIds)
+  if (completedCount && completedLinkSourceIds
+    && sameSourceIds(completedCount.sourceIds, promotionSourceIds)
     && sameSourceIds(completedLinkSourceIds, promotionSourceIds)) {
-    // The identical complete link/count pass already settled. Keep its original
-    // native read set through bookkeeping instead of publishing it a second time.
+    // A complete false coverage reading also settled its link/count pass. Keep
+    // that original live evidence through task bookkeeping; a changed source
+    // must hold, never trigger silent re-adoption or a duplicate publication.
     await beginNextPass();
-    sufficientCount.prepared.assertCurrent();
-    finalUsefulness = sufficientCount.prepared;
+    completedCount.prepared.assertCurrent();
+    finalUsefulness = completedCount.prepared;
   } else {
     await linkSubjects(promotionSourceIds);
     finalUsefulness = await countUsable(promotionSourceIds);

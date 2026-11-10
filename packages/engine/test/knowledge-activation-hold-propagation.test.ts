@@ -196,7 +196,18 @@ describe('required activation holds across knowledge refresh catches', () => {
   test('repair still promotes captured evidence and updates its task after an ordinary enrichment failure', async () => {
     const item = await fixture(), { gap, task } = await repairTask(item);
     let phase: 'promotion' | 'fallback' = 'promotion';
-    repairReadings(() => phase);
+    const fake = repairReadings(() => phase);
+    const upsertTask = item.store.upsertRefinementTask.bind(item.store);
+    let recovery: { requests: number; fact: ReturnType<KnowledgeStore['getNode']>; revisions: ReturnType<KnowledgeStore['listNodeRevisions']>; edges: ReturnType<KnowledgeStore['listEdges']> } | undefined;
+    item.store.upsertRefinementTask = async input => {
+      const saved = await upsertTask(input);
+      if (saved.trace.at(-1)?.message === 'Repair source enrichment did not finish for one accepted source.') {
+        const fact = item.store.listNodes().find(node => node.title === 'Display and picture specifications');
+        recovery = { requests: fake.requests.length, fact: fact ?? null,
+          revisions: fact ? item.store.listNodeRevisions(fact.id) : [], edges: item.store.listEdges() };
+      }
+      return saved;
+    };
     const result = await promoteRepairSources({ store: item.store, enrichSource: async () => {
       await captureRepairText(item); phase = 'fallback'; throw new Error('Synthetic extraction worker unavailable');
     // This complete recovery/publication fixture took 64 seconds on CI. Its
@@ -210,8 +221,42 @@ describe('required activation holds across knowledge refresh catches', () => {
     const currentTask = reopened.getRefinementTask(task.id)!;
     expect(currentTask.state).toBe('applying'); expect(currentTask.promotedFactCount).toBe(2);
     expect(currentTask.trace.some((entry) => entry.message === 'Repair source enrichment did not finish for one accepted source.')).toBe(true);
+    expect(recovery).toBeDefined(); expect(recovery?.fact).not.toBeNull();
+    expect(fake.requests.length).toBe(recovery!.requests);
+    expect(item.store.getNode(recovery!.fact!.id)).toBe(recovery!.fact);
+    expect(item.store.listNodeRevisions(recovery!.fact!.id)).toEqual(recovery!.revisions);
+    expect(item.store.listEdges()).toEqual(recovery!.edges);
     expectProtected(reopened, item);
   }, 120_000);
+
+  test('a completed negative recovery count refuses changed original evidence instead of recomputing or publishing progress', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'knowledge-recovery-negative-')); roots.push(root);
+    const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); await store.init();
+    try {
+      const observed = { id: 'empty-repair-gap', kind: 'knowledge_gap' as const, slug: 'empty-repair-gap', title: 'Missing captured observations',
+        status: 'active' as const, metadata: metadata() };
+      const gap = await upsertObservedKnowledgeNode(store, observed, 'research-task', observed, () => observed);
+      const source = await store.upsertSource({ connectorId: 'synthetic', sourceType: 'manual', title: 'Original empty manual', status: 'indexed', metadata: metadata() });
+      const task = await store.upsertRefinementTask({ spaceId, gapId: gap.id, state: 'applying', trigger: 'manual' });
+      const fake = fakePort(() => { throw new Error('An empty fact set must not ask a semantic question'); }); installJudgmentPort(fake.port);
+      const upsertTask = store.upsertRefinementTask.bind(store);
+      let recoveryTask: ReturnType<KnowledgeStore['getRefinementTask']>;
+      store.upsertRefinementTask = async input => {
+        const saved = await upsertTask(input);
+        if (saved.trace.at(-1)?.message === 'Repair source enrichment did not finish for one accepted source.') {
+          recoveryTask = saved;
+          await store.upsertExtraction({ sourceId: source.id, extractorId: 'synthetic', format: 'text', excerpt: 'A newly arrived independent source observation.', metadata: metadata() });
+        }
+        return saved;
+      };
+      await expect(promoteRepairSources({ store, enrichSource: async () => { throw new Error('Synthetic ordinary enrichment failure'); } },
+        spaceId, gap, [source.id], task, Date.now() + 60_000)).rejects.toMatchObject({ reason: 'stale' });
+      expect(recoveryTask!).toBeDefined(); expect(store.getRefinementTask(task.id)).toBe(recoveryTask!);
+      expect(store.getRefinementTask(task.id)?.trace.at(-1)?.message).toBe('Repair source enrichment did not finish for one accepted source.');
+      expect(store.listNodes().filter(node => node.kind === 'fact')).toEqual([]);
+      expect(fake.requests).toHaveLength(0);
+    } finally { await store.close(); }
+  });
 });
 
 async function repairTask(item: Fixture) {

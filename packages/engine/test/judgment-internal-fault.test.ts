@@ -28,7 +28,7 @@ test('an unknown borrowed port fault is recorded as internal and cannot activate
 test('the strict WebUI boundary and native inspection schema preserve actual internal attempt evidence', async () => {
   const attempt = { attempt: 1, endpointIndex: 0, endpointKind: 'local' as const, requestedModel: 'jev-latest',
     latencyMs: 1, dispatched: false, outcome: 'internal' as const };
-  const lineage = { logicalRequestId: 'original-logical-call', attempts: [attempt] };
+  const lineage = { logicalRequestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', attempts: [attempt] };
   const port = withWebuiAnswerBoundary({ model: 'jev-latest', async ask() {
     throw new JudgmentError('internal', PRIVATE, { status: 503, requestId: PRIVATE, lineage });
   } });

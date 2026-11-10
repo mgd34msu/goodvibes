@@ -14,6 +14,7 @@ import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/e
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { prepareKnowledgeScopeSelection, KnowledgeScopeSelectionHeldError } from '../platform/src/platform/knowledge/scope-selection.js';
 import { knowledgeNodeContentRevisionTriggers } from '../platform/src/platform/knowledge/store-node-content-revisions.js';
+import * as nativeReadSchema from '../platform/src/platform/state/knowledge-schema-read-plan.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [], databases: SQLiteStore[] = [];
 afterEach(async () => {
@@ -42,6 +43,44 @@ function instrument(sqlite: SQLiteStore) {
   });
   return Object.assign(() => ({ opened, closed }), { privateImages: () => ({ opened: privateOpened, closed: privateClosed }) });
 }
+
+test('closed native schema validation reuses only its original accepted physical baseline and never certifies callback images', async () => {
+  const { store, source, sqlite } = await fixture();
+  const validate = nativeReadSchema.validateNativeKnowledgeReadSchema;
+  const validation = spyOn(nativeReadSchema, 'validateNativeKnowledgeReadSchema').mockImplementation(input => validate(input));
+  const frame = () => store.assertRecordSnapshotFrame(() => { store.getEdgeWindowGeneration([`source:${source.id}`]); });
+  try {
+    // A real acknowledged same-byte save creates a fresh accepted native
+    // baseline. It must be validated once before any private read can reuse it.
+    await sqlite.save(); validation.mockClear();
+    frame(); expect(validation).toHaveBeenCalledTimes(1);
+    for (let index = 0; index < 4; index++) frame();
+    expect(validation).toHaveBeenCalledTimes(1);
+    // Even a successful closed proof cannot certify a callback-exposed image.
+    const fullValidator: unknown = Reflect.get(sqlite, 'validateCurrentSchema');
+    if (typeof fullValidator !== 'function') throw new Error('Missing original full schema validator');
+    let fullCalls = 0;
+    const descriptor = Object.getOwnPropertyDescriptor(sqlite, 'validateCurrentSchema')!;
+    Object.defineProperty(sqlite, 'validateCurrentSchema', { ...descriptor, value(db: SqlDatabase) {
+      fullCalls++; return Reflect.apply(fullValidator, sqlite, [db]);
+    } });
+    try { sqlite.readPersisted(db => { expect(db.exec('SELECT id FROM knowledge_sources')[0]?.values[0]?.[0]).toBe(source.id); }); }
+    finally { Object.defineProperty(sqlite, 'validateCurrentSchema', descriptor); }
+    expect(fullCalls).toBe(1);
+    await sqlite.save(); validation.mockClear(); frame();
+    expect(validation).toHaveBeenCalledTimes(1); frame(); expect(validation).toHaveBeenCalledTimes(1);
+    // A foreign same-byte physical file never receives the accepted token.
+    const saved = readFileSync(store.storagePath);
+    renameSync(store.storagePath, `${store.storagePath}.original`); writeFileSync(store.storagePath, saved, { mode: 0o600 });
+    frame(); expect(validation).toHaveBeenCalledTimes(2); frame(); expect(validation).toHaveBeenCalledTimes(3);
+    const engine = await loadSqlJsEngine(), invalid = new engine.Database(saved);
+    try {
+      invalid.run('DROP TRIGGER knowledge_sources_revision_insert'); writeFileSync(store.storagePath, invalid.export());
+    } finally { invalid.close(); }
+    const invalidBytes = readFileSync(store.storagePath);
+    expect(() => frame()).toThrow(); expect(readFileSync(store.storagePath)).toEqual(invalidBytes);
+  } finally { validation.mockRestore(); }
+});
 async function fixture(filename = path(), observeValidation?: (db: SqlDatabase) => void) {
   // KnowledgeStore starts init in its constructor. Install the observation
   // before construction, preserving the real schema validator and its options.

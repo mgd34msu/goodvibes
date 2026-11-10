@@ -1267,19 +1267,23 @@ let captureActivationPublication: (store: SQLiteStore, nodeId: string, generatio
 export function captureSQLiteActivationPublication(store: SQLiteStore, nodeId: string, generation: string): () => 'pending' | 'published' {
   return captureActivationPublication(store, nodeId, generation);
 }
+type NativeSchemaValidationAcknowledgment = {
+  readonly persistence: SQLiteStorePersistence;
+  readonly baseline: SQLiteBaselineObservation;
+  readonly engine: SqlJsStatic;
+  readonly plan: NativeKnowledgeSchemaReadPlan;
+  readonly validator: SqliteStoreInitOptions['validateCurrentSchema'];
+  readonly schemaVersion: number;
+};
 export class SQLiteStore {
   #activationPublication: Readonly<{ physical: string | undefined }> = nativeFreeze({ physical: undefined });
   #activationPublicationFailures = 0;
   static { captureActivationPublication = (store, nodeId, generation) => store.#captureActivationPublication(nodeId, generation); }
   readonly #artifactReferencePath: string | null;
-  #validatedNativeSchema: {
-    readonly persistence: SQLiteStorePersistence;
-    readonly baseline: SQLiteBaselineObservation;
-    readonly engine: SqlJsStatic;
-    readonly plan: NativeKnowledgeSchemaReadPlan;
-    readonly validator: SqliteStoreInitOptions['validateCurrentSchema'];
-    readonly schemaVersion: number;
-  } | undefined;
+  #validatedNativeSchema: NativeSchemaValidationAcknowledgment | undefined;
+  // Closed native read validation is a distinct acknowledgment. It cannot
+  // certify borrowed callback databases or bypass the full schema validator.
+  #validatedNativeReadSchema: NativeSchemaValidationAcknowledgment | undefined;
   #artifactReferenceOrigin: { readonly persistence: SQLiteStorePersistence; readonly engine: SqlJsStatic; readonly schemaVersion: number; readonly path: string } | undefined;
   private db: SqlDatabase | null = null;
   private readonly dbPath: string | null;
@@ -2376,6 +2380,11 @@ export class SQLiteStore {
     const known = this.#validatedNativeSchema;
     const previouslyValidated = Boolean(baseline && nativePlan && known?.baseline === baseline && known.persistence === persistence
       && known.engine === engine && known.plan === plan && known.validator === validator && known.schemaVersion === schemaVersion);
+    const knownRead = this.#validatedNativeReadSchema;
+    const closedNativeRead = privateReadPlan === plan && nativeKnowledgeSchemaReadPlanMatches(privateReadPlan, validator, schemaVersion);
+    const previouslyValidatedRead = Boolean(closedNativeRead && baseline && knownRead?.baseline === baseline
+      && knownRead.persistence === persistence && knownRead.engine === engine && knownRead.plan === privateReadPlan
+      && knownRead.validator === validator && knownRead.schemaVersion === schemaVersion);
     const assertNativeSchemaSource = () => {
       assertNativeEngineIdentity(engine);
       if (this.db !== local || this.imageEpoch !== epoch || this.persistence !== persistence || this.sqlEngine !== engine || this.nativeSchemaReadPlan !== plan
@@ -2397,8 +2406,12 @@ export class SQLiteStore {
         throw new Error('SQLiteStore: persisted schema changed; reopen the store before writing');
       }
       let fullyValidated = false;
-      if (data !== null && nativeKnowledgeSchemaReadPlanMatches(privateReadPlan, this.validateCurrentSchema, this.schemaVersion)
-        && validateNativeKnowledgeReadSchema({ exec: (sql, params, config) => readDatabaseRow(current, sql, params ?? [], config) })) {
+      if (data !== null && closedNativeRead && (previouslyValidatedRead
+        || validateNativeKnowledgeReadSchema({ exec: (sql, params, config) => readDatabaseRow(current, sql, params ?? [], config) }))) {
+        assertNativeSchemaSource();
+        if (!previouslyValidatedRead && baseline && persistence && engine && plan) {
+          this.#validatedNativeReadSchema = { persistence, baseline, engine, plan, validator, schemaVersion };
+        }
         this.privateSchemaImages.add(current);
         const frame = this.persistedReadFrame, state = privateMapGet(ownedDatabases, current), origin = frame ? privateMapGet(nativeReadFrameIdentities, frame)?.identity : undefined;
         if (entryEvidence && origin && state && frame) privateMapSet(nativeReadImages, frame, nativeFreeze({ db: current, store: this, origin,

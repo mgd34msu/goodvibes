@@ -12,7 +12,7 @@ import { wireFleetNeedsInputPush } from '../../runtime/fleet-needs-input-push.js
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 function config(values: Record<string, unknown>): ConfigManager {
-  return { get: (key: string) => values[key] } as unknown as ConfigManager;
+  return { get: (key: string) => values[key], getNativeDataWriter: () => undefined } as unknown as ConfigManager;
 }
 function unexpected(): never { throw new Error('Unexpected fixture host effect'); }
 
@@ -63,15 +63,15 @@ test('trigger composition reads its live enable flag and preserves the scoped st
     action: { kind: 'agent-turn' },
   };
   try {
-    expect(existsSync(join(root, 'tui', 'triggers.json'))).toBe(false);
+    expect(existsSync(join(root, 'tui', 'triggers-v2.json'))).toBe(false);
     await expect(manager.create(definition)).rejects.toThrow('trigger family is off');
     values['watchers.triggers.enabled'] = true;
     const record = await manager.create(definition);
     expect(record.definition.id).toBe('fixture-trigger');
-    expect(existsSync(join(root, 'tui', 'triggers.json'))).toBe(true);
+    expect(existsSync(join(root, 'tui', 'triggers-v2.json'))).toBe(true);
     values['watchers.triggers.enabled'] = false;
     await expect(manager.create({ ...definition, id: 'second-fixture' })).rejects.toThrow('trigger family is off');
-  } finally { manager.shutdown(); }
+  } finally { await manager.shutdown(); }
 });
 
 test('fleet notice wiring attaches the shared snapshot bridge and reads fresh surface presence per call', () => {

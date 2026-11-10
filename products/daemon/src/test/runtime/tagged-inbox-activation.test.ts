@@ -7,7 +7,7 @@ import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runt
 import type { OwnedInboxSource, OwnedInboxTagging } from '@goodvibes-jev/engine/platform/platform/intake';
 import { attachDaemonInboxTagging, type DaemonTriagePermissionHost } from '../../runtime/tagged-inbox-composition.js';
 import { registerOwnedMailInbox } from '../../runtime/owned-inbox-mail.js';
-import type { HandlerContext } from '../../daemon/handlers/context.js';
+import { createHandlerContext } from '../helpers/handler-context.js';
 import type { RoutingRegistration } from '../../daemon/handlers/index.js';
 import type { DaemonInboxControls } from '../../runtime/daemon-handler-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
@@ -71,7 +71,7 @@ function rootFixture() {
   } };
   return { host, input, configs, secrets, get reads() { return reads; } };
 }
-const context = {} as HandlerContext, routing = {} as RoutingRegistration;
+const routing = {} as RoutingRegistration;
 test('canonical root subscribes before async factory startup and startup ABA refuses tag ownership', async () => {
   const f = rootFixture(); const ready = Promise.withResolvers<void>(), entered = Promise.withResolvers<void>();
   let captured!: DaemonInboxControls;
@@ -79,12 +79,12 @@ test('canonical root subscribes before async factory startup and startup ABA ref
     captured = controls; expect(f.configs.size).toBe(1); expect(f.secrets.size).toBe(1); entered.resolve(); await ready.promise;
     controls.createTriageTagging!({ ...request, source: source().owner });
     return { async close() {} };
-  }, context, routing, { gatePolling() {} }, f.input, f.host);
+  }, createHandlerContext(), routing, { gatePolling() {} }, f.input, f.host);
   await entered.promise; for (const listener of f.secrets) { listener('alias'); listener('alias'); }
   ready.resolve(); await expect(creating).rejects.toThrow('revoked'); expect(f.reads).toBe(0); expect(f.configs.size).toBe(0); expect(f.secrets.size).toBe(0);
   expect(() => captured.createTriageTagging!({ ...request, source: source().owner })).toThrow();
 });
 test('unused explicit root capability performs no credential reads and all subscriptions retire', async () => {
-  const f = rootFixture(); const registration = await registerOwnedMailInbox(() => ({ async close() {} }), context, routing, { gatePolling() {} }, f.input, f.host);
+  const f = rootFixture(); const registration = await registerOwnedMailInbox(() => ({ async close() {} }), createHandlerContext(), routing, { gatePolling() {} }, f.input, f.host);
   expect(f.reads).toBe(0); await registration.close(); expect(f.configs.size).toBe(0); expect(f.secrets.size).toBe(0);
 });

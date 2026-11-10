@@ -390,6 +390,11 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
     methodIds: ['channels.drafts.list', 'channels.drafts.get', 'channels.drafts.save', 'channels.drafts.delete'],
   },
   {
+    family: 'watchers.triggers recovery',
+    reason: 'The composed platform trigger supervisor registers status and explicit owner migration through registerTriggerRecoveryMethods in runtime/service-graph.ts.',
+    methodIds: ['watchers.triggers.status', 'watchers.triggers.migrate'],
+  },
+  {
     family: 'payments.* (budget / cards / purchases / checkout)',
     reason:
       "This repo's own payments surface (daemon/handlers/payments), composed by runtime/payments-composition.ts. "
@@ -410,6 +415,7 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
       'payments.purchases.list',
       'payments.checkout.approve', 'payments.checkout.begin', 'payments.checkout.fillCard',
       'payments.purchase.status', 'payments.purchase.approve', 'payments.purchase.deny', 'payments.purchase.cancel',
+      'payments.purchase.reconcile',
     ],
   },
 ];

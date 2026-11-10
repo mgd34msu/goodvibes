@@ -214,10 +214,10 @@ describe('verified native lifecycle admission', () => {
     expect(() => resolveInstalledDaemonUpdateArtifact(defaultHome, f.options)).toThrow();
   });
 
-  test('wrong running version and unsupported installation target stay unarmed', () => {
+  test('wrong running version, unowned Darwin selection and unsupported architecture stay unarmed', () => {
     const f = installedFixture();
     expect(() => resolveInstalledDaemonUpdateArtifact(defaultHome, { ...f.options, version: '9.9.8-test' })).toThrow();
-    expect(resolveInstalledDaemonUpdateArtifact(defaultHome, { ...f.options, platform: 'darwin' })).toBeUndefined();
+    expect(() => resolveInstalledDaemonUpdateArtifact(defaultHome, { ...f.options, platform: 'darwin' })).toThrow('Original compiled Darwin daemon selection is unavailable');
     expect(resolveInstalledDaemonUpdateArtifact(defaultHome, { ...f.options, arch: 'riscv64' })).toBeUndefined();
   });
 

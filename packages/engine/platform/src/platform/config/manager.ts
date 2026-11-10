@@ -1775,6 +1775,8 @@ export class ConfigManager {
       this.resetHostSetting(definition.key as ConfigKey, definition.default);
       if (key !== undefined) return;
     }
+    const previousValues = CONFIG_SCHEMA.filter(setting => !this.hostSettings.has(setting.key) && (key === undefined || setting.key === key))
+      .map(setting => ({ key: setting.key, value: detachedConfigValue(readDotPath(this.#config, setting.key).value) }));
     const staged = this.runtimeState.fork();
     staged.retire(key);
     if (key === undefined) {
@@ -1807,6 +1809,7 @@ export class ConfigManager {
     // Earlier files can have been replaced if a later write throws. Preserve
     // the complete live state; the next accepted load reconciles those bytes.
     this.publishState(staged, effective);
+    for (const previous of previousValues) this.notifyPersistedChange(previous.key, previous.value);
   }
 }
 

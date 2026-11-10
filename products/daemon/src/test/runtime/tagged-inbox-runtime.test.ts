@@ -121,7 +121,7 @@ test('production tag handle rejects after root close without any late provider w
 
 test('production email uses the canonical root mail service and UID mirror before explicit admitted tagging', async () => {
   const f = await fixture('email'); await f.poll(); const inbox = await f.inbox();
-  expect(inbox.items).toHaveLength(1); expect(inbox.items[0]!.id).toMatch(/^email:[a-f0-9]+:0000000007:0000000042$/);
+  expect(inbox.items).toHaveLength(1); expect(inbox.items[0]!.id).toMatch(/^email:[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}:0000000007:0000000042$/);
   expect(inbox.items[0]!.bodyPreview).toBe('Synthetic body'); expect(f.mailSockets.length).toBeGreaterThan(0);
   f.reject();
   await expect(f.handle.applyTags(inbox.items[0]!.id, ['GoodVibes/Priority'], {

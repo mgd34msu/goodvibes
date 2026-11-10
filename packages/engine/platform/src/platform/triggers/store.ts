@@ -184,8 +184,16 @@ export class TriggerSnapshotStore {
   constructor(readonly storePath: string, private readonly beforeWrite?: (() => void) | undefined, previousStorePath?: string, private readonly beforePlatformToolWrite?: (() => void) | undefined) {
     this.name = basename(storePath); this.reportName = basename(getTriggerReapReportPath(storePath));
     this.cutoverName = `${this.name}.cutover.json`;
-    this.files = new TriggerFileOwner(storePath, this.reportName, [this.cutoverName]);
-    if (previousStorePath) { this.previousName = basename(previousStorePath); this.previousFiles = new TriggerFileOwner(previousStorePath, 'triggers-reaped.json'); }
+    // Both generations normally share a directory. One retained owner must
+    // acknowledge its own creation of that originally absent parent; a second
+    // missing-parent observation would incorrectly classify it as foreign.
+    const sharedParent = previousStorePath !== undefined && dirname(previousStorePath) === dirname(storePath);
+    this.files = new TriggerFileOwner(storePath, this.reportName, [this.cutoverName,
+      ...(sharedParent ? [basename(previousStorePath!), 'triggers-reaped.json'] : [])]);
+    if (previousStorePath) {
+      this.previousName = basename(previousStorePath);
+      this.previousFiles = sharedParent ? this.files : new TriggerFileOwner(previousStorePath, 'triggers-reaped.json');
+    }
   }
   /** Explicit operator acknowledgement; this is not a process-exclusion proof. */
   acceptPreviousMigration(): void { this.migrationAccepted = true; }

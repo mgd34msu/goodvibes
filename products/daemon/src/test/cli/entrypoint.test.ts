@@ -16,11 +16,11 @@ import { NATIVE_READER_REQUIREMENT_FILE, nativeReaderCapabilities } from '@goodv
 
 const entrypoint = fileURLToPath(new URL('../../../dist/cli/entrypoint.js', import.meta.url));
 const packageVersion = (JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
-function launch(args: string[], composed = false, root = makeOwnedTempDir('daemon-built-cli')) {
+function launch(args: string[], composed = false, root = makeOwnedTempDir('daemon-built-cli'), source = false) {
   const home = join(root, 'home'); const cwd = join(root, 'work');
   mkdirSync(home, { recursive: true }); mkdirSync(cwd, { recursive: true });
   const child = spawn(process.execPath, [composed
-    ? fileURLToPath(new URL('../helpers/daemon-cli-child.ts', import.meta.url)) : entrypoint, ...args], {
+    ? fileURLToPath(new URL('../helpers/daemon-cli-child.ts', import.meta.url)) : source ? fileURLToPath(new URL('../../cli/entrypoint.ts', import.meta.url)) : entrypoint, ...args], {
     cwd, stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, HOME: home, GOODVIBES_HOME: home, GOODVIBES_DAEMON_HOME: join(root, 'daemon'),
       GOODVIBES_WORKING_DIR: cwd, XDG_CONFIG_HOME: join(root, 'xdg'),
@@ -207,13 +207,14 @@ test('shipped emitted entrypoint serves complete fresh-install inbox membership 
   } finally { await fx.close(); }
 }, 30_000);
 
-test('shipped entrypoint refuses configured provider intake without trusted account admission', async () => {
+for (const mode of ['shipped', 'source'] as const) test(`${mode} entrypoint refuses configured provider intake without trusted account admission`, async () => {
   const root = makeOwnedTempDir('daemon-production-refusal');
   mkdirSync(join(root, 'daemon'), { recursive: true });
   writeFileSync(join(root, 'daemon', 'settings.json'), JSON.stringify({ cluster: { enabled: false }, relay: { enabled: false },
     surfaces: { slack: { enabled: true } } }));
-  const result = await oneShot(['serve', '--hostname', '127.0.0.1', '--port', '41379'], root);
-  expect(result.code).toBe(1); expect(result.stdout).not.toContain('host started');
+  const fixture = launch(['serve', '--hostname', '127.0.0.1', '--port', '41379'], false, root, mode === 'source');
+  const code = await fixture.waitForExit();
+  expect(code).toBe(1); expect(fixture.output().stdout).not.toContain('host started');
 }, 30_000);
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

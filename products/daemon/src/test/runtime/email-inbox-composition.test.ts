@@ -327,10 +327,17 @@ for (const phase of ['screening', 'commit'] as const) for (const mutation of ['a
     const f = fixture(); await f.host.start(); const before = stored(f.storePath); const held = gate(); const reached = gate();
     if (phase === 'screening') f.provider.holdSource(held.promise);
     else {
-      const write = fs.writeFile;
-      keep(spyOn(fs, 'writeFile').mockImplementation(async (...args: Parameters<typeof fs.writeFile>) => {
-        if (String(args[0]).startsWith(`${f.storePath}.`)) { reached.resolve(); await held.promise; }
-        return write(...args);
+      const open = fs.open;
+      keep(spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+        const handle = await open(...args);
+        if (String(args[0]).startsWith(`${f.storePath}.`)) {
+          const write = handle.writeFile.bind(handle);
+          handle.writeFile = async (...input: Parameters<typeof handle.writeFile>) => {
+            reached.resolve(); await held.promise;
+            return write(...input);
+          };
+        }
+        return handle;
       }));
     }
     const polling = f.poll();

@@ -88,9 +88,10 @@ async function waitStatus(f: Fixture, identity: NativeWorkExecutionRequest, pred
 }
 const unitRequests = (f: Fixture) => f.requests.filter(request => request.systemPrompt?.includes('Execute this existing native work unit yourself'));
 
-test('generated criteria digest with a card-shaped digit span executes through the real native daemon graph', async () => {
+test('stable work-derived criterion reference executes without regenerating the historical card-shaped digest', async () => {
   const workId = 'work-a73a83d8-d064-4be3-8217-012ebfe72275';
-  const criteriaId = 'criteria:d6b72d9f28026994604091a0bbac8dfa87467c68300f6960922429de420bbdfb';
+  const criteriaId = `criteria-v2:${workId}`;
+  const historicalCriteriaId = 'criteria:d6b72d9f28026994604091a0bbac8dfa87467c68300f6960922429de420bbdfb';
   const create = ledger.createWorkLedger;
   // Control only the host's generated work identity; all storage, source,
   // authority, admission, decision, runner and HTTP paths remain production code.
@@ -109,11 +110,12 @@ test('generated criteria digest with a card-shaped digit span executes through t
     expect(unitRequests(f)).toHaveLength(1);
     const contract = f.contracts()[0]!;
     expect(contract.nativeSource!.criteriaId).toBe(criteriaId);
+    expect(contract.nativeSource!.criteriaId).not.toBe(historicalCriteriaId);
     expect(contract.durableAdmission!.key).toMatchObject({ workId, criteriaId });
     const plans = contract.nativeDecisions!.history.filter(record => record.stage === 'plan');
     expect(plans).toHaveLength(1);
     expect(plans[0]!.decision.outcome).toBe('act');
-    expect(plans[0]!.decision.evidence).toContainEqual({ id: criteriaId.slice('criteria:'.length), revision: '1' });
+    expect(plans[0]!.decision.evidence).toContainEqual({ id: criteriaId, revision: '1' });
     expect(plans[0]!.decision.judgmentDecisionIds.length).toBeGreaterThan(0);
     expect(operationJudgmentRequests(f.judgmentRequests).some(request => request.context?.site === 'contract.native.plan')).toBe(true);
   } finally { try { await f?.stop(); } finally { generated.mockRestore(); } }

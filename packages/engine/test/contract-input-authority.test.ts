@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { ConfigManager } from '../platform/src/platform/config/index.js';
 import { createClientRuntimeServices } from '../platform/src/platform/runtime/bootstrap.js';
 import { createRuntimeStore, RuntimeEventBus } from '../platform/src/platform/runtime/state.js';
@@ -432,8 +433,8 @@ for (const viewKind of ['snapshot', 'member'] as const) {
             // Failure classification is audit-only, not a saved content proof.
             // Its exact input was checked on the observed request above.
             expect(decisions[0]!.stateHash).toBeUndefined();
-            expect(decisions[0]!.context).toEqual(failureRequests[0]!.context);
-            expect(decisions[0]!.questions).toEqual(failureRequests[0]!.questions);
+            expect(isDeepStrictEqual(decisions[0]!.context, failureRequests[0]!.context)).toBe(true);
+            expect(isDeepStrictEqual(decisions[0]!.questions, failureRequests[0]!.questions)).toBe(true);
             const failedId = access === 'concurrent' ? secondId! : id;
             const failed = runtime.agentManager.getStatus(failedId)!;
             expect(failed.status).toBe('failed');

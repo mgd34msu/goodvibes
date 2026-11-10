@@ -172,6 +172,7 @@ describe('registered use', () => {
       ['incoming question deleted', strictForwarder.replace('const context', 'delete request.questions.original; const context')],
       ['dynamic scope mutation', strictForwarder.replace('const context', "eval('mutate'); const context")],
     ]) {
+      if (typeof reason !== 'string' || typeof source !== 'string') throw new Error('Incomplete authored forwarding fixture');
       const findings = sourceFindings(path, source, registered);
       expect(findings.some(finding => finding.message.includes('request built inline')), reason).toBe(true);
     }

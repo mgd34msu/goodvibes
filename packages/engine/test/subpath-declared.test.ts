@@ -65,7 +65,7 @@ describe('every shipped capability is importable from the published package', ()
     expect(existsSync(join(PLATFORM_DIR, 'payments', 'index.ts'))).toBe(true);
   });
 
-  test('every declared platform subpath names an existing sdk source module', () => {
+  test('every declared platform subpath names an existing platform source module', () => {
     // The workspace consumes the engine from source through the exports map's
     // source condition, so every ./platform/platform entry must name a module under
     // platform/src that exists; one pointing anywhere else, or at nothing, fails

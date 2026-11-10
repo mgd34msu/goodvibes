@@ -194,7 +194,7 @@ async function get(path: string): Promise<{ status: number; body: unknown }> {
 // ---------------------------------------------------------------------------
 
 describe('Workers wrangler: smoke', () => {
-  test('platform loads and factory produces a valid sdk object through wrangler bundling pipeline', async () => {
+  test('platform loads and factory produces a valid platform object through wrangler bundling pipeline', async () => {
     const { status, body } = await get('/smoke');
     expect(status).toBe(200);
 

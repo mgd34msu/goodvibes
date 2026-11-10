@@ -10,7 +10,7 @@ afterEach(() => {
   stopRoundtripServers();
 });
 
-describe('sdk live roundtrip', () => {
+describe('platform live roundtrip', () => {
   test('round-trips login and authenticated control calls through daemon routes', async () => {
     const { platformClient, tokenStore } = createRoundtripPlatform(createRoundtripServer());
 

@@ -11,7 +11,7 @@ import {
 import { GoodVibesError } from '../errors/dist/index.js';
 import enginePackage from '../package.json' with { type: 'json' };
 
-describe('daemon sdk', () => {
+describe('daemon API', () => {
   test('builds control route handlers from injected host services', async () => {
     const handlers = createDaemonControlRouteHandlers({
       authToken: 'shared-token',

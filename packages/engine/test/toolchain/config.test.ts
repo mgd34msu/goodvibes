@@ -98,10 +98,10 @@ describe('toolchain config', () => {
     const full = {
       packageName: '@goodvibes-jev/tui',
       enginePin: {
-        enginePackage: '@goodvibes-jev/engine/platform',
+        enginePackage: '@goodvibes-jev/engine',
         pinSource: 'dependencies',
         lockfile: 'bun.lock',
-        overlayMarker: 'node_modules/@goodvibes-jev/engine/platform/.local-sdk-overlay.json',
+        overlayMarker: 'node_modules/@goodvibes-jev/engine/.local-engine-overlay.json',
         sourceRoots: ['src'],
         enforceExportsMap: false,
       },

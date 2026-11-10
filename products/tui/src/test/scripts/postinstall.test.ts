@@ -135,7 +135,7 @@ describe('end-to-end: the download-verify loop shape from installPlatformBinarie
  * The wake-word model is installed as part of installing, and the rule that
  * makes that acceptable is that it can never fail the install. These cover the
  * TUI's own seam; the policy's never-throw contract (offline, DNS, HTTP error,
- * unwritable tree, a provisioner that itself threw) is exercised in the SDK.
+ * unwritable tree, a provisioner that itself threw) is exercised in the engine.
  */
 describe('the wake-word model install step in postinstall', () => {
   test('postinstall exposes the step, and running it in a source checkout is a stated skip', async () => {

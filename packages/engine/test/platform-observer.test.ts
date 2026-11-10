@@ -172,7 +172,7 @@ describe('PlatformObserver: TransportObserver callbacks', () => {
     const capture = captureConsole('warn', /onError/);
     try {
       const result = invokeObserver(
-        () => (observer as { onError?: (e: Error) => void }).onError?.(new Error('sdk error')),
+        () => (observer as { onError?: (e: Error) => void }).onError?.(new Error('platform error')),
         { label: 'onError' },
       );
       expect(result.ok).toBe(false);

@@ -31,8 +31,8 @@ function withPreconnect(
 
 const fetchStub = withPreconnect(async () => createJsonResponse({ ok: true }));
 
-describe('sdk platform integrations', () => {
-  test('creates a generic composed sdk surface', () => {
+describe('platform integrations', () => {
+  test('creates a generic composed platform surface', () => {
     const platformClient = createGoodVibesPlatform({
       baseUrl: 'http://127.0.0.1:3210',
       authToken: 'token-123',

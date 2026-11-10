@@ -11,7 +11,7 @@ name: CI
 #                  uploaded so e2e-smoke drives these exact bytes
 #   e2e-smoke      the built binary in a real terminal: startup draws the main
 #                  screen, and a first turn against a scripted model is drawn
-#   package-gate   the SDK-pin agreement, the package.json publish shape, the
+#   package-gate   the engine-pin agreement, the package.json publish shape, the
 #                  tarball contents, and a `bun add -g` of the packed tarball
 #                  whose installed command launches
 #
@@ -128,7 +128,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Package gate: the pre-tag half of the publish path. publish:check runs the
-  # SDK-pin agreement (overlay absent, exact pin, installed == pin, lockfile
+  # engine-pin agreement (overlay absent, exact pin, installed == pin, lockfile
   # resolves the pin, npm-only imports), the package.json publish shape, and the
   # npm pack dry run against the required and forbidden tarball paths.
   # package:install-check packs the tarball, installs it with `bun add -g` into
@@ -143,7 +143,7 @@ jobs:
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
       - name: Setup
         uses: ./.github/actions/setup
-      - name: Publish check (SDK pin, package.json shape, tarball contents)
+      - name: Publish check (engine pin, package.json shape, tarball contents)
         run: bun run publish:check
       - name: Package install check (bun add -g of the packed tarball, then launch)
         run: bun run package:install-check

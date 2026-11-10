@@ -13,7 +13,7 @@ const definition: HostBooleanSetting = { key: KEY, type: 'boolean', default: tru
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture(hostSettings: readonly HostBooleanSetting[] = [definition]) {
-  const root = mkdtempSync(join(tmpdir(), 'sdk-host-setting-'));
+  const root = mkdtempSync(join(tmpdir(), 'platform-host-setting-'));
   roots.push(root);
   const workingDir = join(root, 'project');
   mkdirSync(workingDir);

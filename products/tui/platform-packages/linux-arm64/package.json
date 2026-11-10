@@ -14,9 +14,9 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mgd34msu/goodvibes-tui.git"
+    "url": "git+https://github.com/mgd34msu/goodvibes.git"
   },
-  "homepage": "https://github.com/mgd34msu/goodvibes-tui",
+  "homepage": "https://github.com/mgd34msu/goodvibes",
   "publishConfig": {
     "access": "public"
   },

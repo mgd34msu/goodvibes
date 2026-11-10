@@ -14,7 +14,7 @@ function createJsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-describe('sdk auth helpers', () => {
+describe('platform auth helpers', () => {
   test('persists login tokens into a writable token store', async () => {
     const seenAuth: string[] = [];
     const tokenStore = createMemoryTokenStore();

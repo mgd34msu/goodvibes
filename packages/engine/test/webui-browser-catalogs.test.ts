@@ -36,7 +36,7 @@ test('public catalogs and the real palette caller exclude server provider, loggi
       const graph = JSON.parse(readFileSync(metafile, 'utf8')) as Graph;
       const paths = Object.keys(graph.inputs).map((path) => path.replaceAll('\\', '/'));
       const edges = Object.values(graph.inputs).flatMap((input) => input.imports);
-      const forbidden = /(?:^|\/)(?:node:|bun:)|sqlite|AsyncLocalStorage|judgment\/(?:src|dist)\/(?:index\.|log\/|port\/(?:client|transport|failover))|sdk\/(?:src|dist)\/platform\/(?:logging|providers)\//;
+      const forbidden = /(?:^|\/)(?:node:|bun:)|sqlite|AsyncLocalStorage|judgment\/(?:src|dist)\/(?:index\.|log\/|port\/(?:client|transport|failover))|platform\/(?:src|dist)\/platform\/(?:logging|providers)\//;
       expect([...paths, ...edges.map((edge) => edge.path)].filter((path) => forbidden.test(path))).toEqual([]);
       // Bun records unused re-export edges as external in its input metadata.
       // The emitted IIFE must be self-contained, with no remaining import edges.

@@ -149,7 +149,7 @@ describe('createOpenTelemetryObserver: onAuthTransition', () => {
 
 describe('createOpenTelemetryObserver: onError', () => {
   function makePlatformError(kind = 'network', category = 'transport'): Parameters<NonNullable<PlatformObserver['onError']>>[0] {
-    const err = Object.assign(new Error('sdk test error'), {
+    const err = Object.assign(new Error('platform test error'), {
       kind,
       category,
       recoverable: false,

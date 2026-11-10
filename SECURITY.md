@@ -41,13 +41,13 @@ so this is a targeted lock refresh without an additional override. Regression
 tests exercise both actual consumer paths and reject excessive indexed-map
 offsets before allocating a flattened map.
 
-The published SDK keeps Bash LSP bundled as a first-class feature. The
+The published engine keeps Bash LSP bundled as a first-class feature. The
 `bash-language-server@5.6.0 -> editorconfig@2.0.1 -> minimatch@10.0.1` chain is
 handled as a graph-level vendor patch: `vendor/bash-language-server` copies the
 upstream `bash-language-server@5.6.0` package and changes
 `dependencies.editorconfig` to `3.0.2`, whose dependency range resolves to the
 fixed `minimatch@~10.2.4` line (the root `overrides.minimatch` separately pins
-`^10.2.5` for source-workspace installs). Release staging rewrites the published SDK
+`^10.2.5` for source-workspace installs). Release staging rewrites the published engine
 dependency to `file:vendor/bash-language-server` and projects its runtime leaves
 into the installable engine manifest, because npm does not install dependencies
 of that linked directory. Explicit Bash zod/tree-sitter aliases preserve the
@@ -78,7 +78,7 @@ been removed. Its registry publish/install and dependency-specific regression
 tests are intentionally retired. The independent release dry-run, install smoke
 checks and high-severity dependency audit remain enabled.
 
-Application roots that audit the SDK dependency graph should set their own
+Application roots that audit the engine dependency graph should set their own
 root-level overrides for the non-vendored packages if their package manager does
 not inherit dependency-package overrides:
 
@@ -133,7 +133,7 @@ Reporters will be notified when the vulnerability is confirmed, when a fix is st
 
 ## Scope
 
-Security-sensitive areas in this SDK include:
+Security-sensitive areas in this platform include:
 
 - Bearer-token handling
 - Session login flows
@@ -146,7 +146,7 @@ Security-sensitive areas in this SDK include:
 
 The full security model covers authentication modes, token management, secret handling, and daemon hardening. See [docs/security.md](./packages/engine/docs/security.md).
 
-When building with this SDK:
+When building with this platform:
 
 - Prefer bearer tokens for service-to-service and mobile companion clients
 - Use secure storage for persisted tokens

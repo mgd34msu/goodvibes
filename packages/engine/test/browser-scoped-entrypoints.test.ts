@@ -120,7 +120,7 @@ describe('scoped browser platform entrypoints', () => {
     expect(enginePackage.exports['./platform/browser/homeassistant']).toEqual({ bun: './platform/src/browser-homeassistant.ts', types: './platform/dist/browser-homeassistant.d.ts', import: './platform/dist/browser-homeassistant.js' });
   });
 
-  test('knowledge browser sdk routes only regular knowledge methods', async () => {
+  test('knowledge browser platform routes only regular knowledge methods', async () => {
     const transport = createRecordingFetch({
       ready: true,
       storagePath: '/tmp/goodvibes',
@@ -158,7 +158,7 @@ describe('scoped browser platform entrypoints', () => {
     ).rejects.toThrow('is not available from this scoped browser platform entrypoint');
   });
 
-  test('knowledge browser sdk exposes companion chat helpers and session event stream', async () => {
+  test('knowledge browser platform exposes companion chat helpers and session event stream', async () => {
     const calls: string[] = [];
     const fetchImpl = (async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -235,7 +235,7 @@ describe('scoped browser platform entrypoints', () => {
     expect(events).toEqual([{ type: 'turn.delta', sessionId: 'chat-1', turnId: 'turn-1', delta: 'Hi' }]);
   });
 
-  test('home assistant browser sdk routes only home graph methods', async () => {
+  test('home assistant browser platform routes only home graph methods', async () => {
     const transport = createRecordingFetch({ ok: true });
     const platformClient = createBrowserHomeAssistantPlatform({
       baseUrl: 'https://daemon.example.test',
@@ -250,7 +250,7 @@ describe('scoped browser platform entrypoints', () => {
     ).rejects.toThrow('is not available from this scoped browser platform entrypoint');
   });
 
-  test('agent browser sdk routes knowledge methods to the isolated agent knowledge wiki', async () => {
+  test('agent browser platform routes knowledge methods to the isolated agent knowledge wiki', async () => {
     const transport = createRecordingFetch({
       ready: true,
       storagePath: '/tmp/goodvibes-agent',

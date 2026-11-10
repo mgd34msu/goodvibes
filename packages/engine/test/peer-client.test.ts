@@ -23,7 +23,7 @@ function withPreconnect(
   });
 }
 
-describe('peer sdk', () => {
+describe('peer client', () => {
   test('resolves templated peer contract paths', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const platformClient = createPeerApiClient({

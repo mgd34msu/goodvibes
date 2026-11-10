@@ -88,7 +88,7 @@ describe('every public platform module has a subpath export', () => {
     expect(
       unreachable,
       `these platform modules have an index.ts but no "./platform/<name>" entry in `
-      + `the engine package.json's ./sdk exports, so consumers cannot import them: ${unreachable.join(', ')}. `
+      + `the engine package.json's ./platform exports, so consumers cannot import them: ${unreachable.join(', ')}. `
       + 'Add the subpath, or add the module to INTERNAL_PLATFORM_MODULES if it is deliberately private.',
     ).toEqual([]);
   });

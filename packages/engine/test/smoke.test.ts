@@ -13,7 +13,7 @@ import {
 } from '../platform/src/daemon.ts';
 import { emitPresetChanged } from '../platform/src/platform/runtime/emitters/index.ts';
 
-describe('sdk public facades', () => {
+describe('platform public facades', () => {
   test('root re-exports contracts, transport, operator, and peer clients', () => {
     const { productVersion } = FOUNDATION_METADATA;
     expect(productVersion).toMatch(/^\d+\.\d+\.\d+(-[\w.]+)?$/);

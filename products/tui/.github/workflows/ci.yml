@@ -12,7 +12,7 @@ name: CI
 #                  uploaded so e2e-smoke drives these exact bytes
 #   e2e-smoke      the built binary in a real terminal: startup reaches the
 #                  input area, and a first turn against a scripted model
-#   package-gate   the SDK-pin agreement, the tarball contents and the
+#   package-gate   the engine-pin agreement, the tarball contents and the
 #                  installed bin shims, pre-tag
 #
 # Release-only checks (the perf budgets, the rest of the end-to-end set: daemon
@@ -128,7 +128,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Package gate: the pre-tag half of the publish path. publish:check runs the
-  # SDK-pin tri-agreement (overlay absent, exact-semver pin, installed == pin,
+  # engine-pin tri-agreement (overlay absent, exact-semver pin, installed == pin,
   # lockfile resolves the pin) plus the npm-specifier import sweep, which
   # otherwise ran for the first time INSIDE release.yml, after the GitHub
   # Release already existed. GOODVIBES_SKIP_NPM_AUTH_CHECK is the script's own
@@ -143,7 +143,7 @@ jobs:
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
       - name: Setup
         uses: ./.github/actions/setup
-      - name: Publish check (sdk-pin gate + lockfile agreement + tarball policy)
+      - name: Publish check (engine-pin gate + lockfile agreement + tarball policy)
         env:
           GOODVIBES_SKIP_NPM_AUTH_CHECK: "1"
         run: bun run publish:check

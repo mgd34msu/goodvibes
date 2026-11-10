@@ -120,7 +120,7 @@ afterAll(async () => {
 // ─── Smoke ───────────────────────────────────────────────────────────────────
 
 describe('Workers harness: smoke', () => {
-  test('platform loads and factory produces a valid sdk object', async () => {
+  test('platform loads and factory produces a valid platform object', async () => {
     const res = await mf.dispatchFetch('http://workers.test/smoke');
     expect(res.status).toBe(200);
 

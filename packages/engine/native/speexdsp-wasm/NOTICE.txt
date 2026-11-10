@@ -7,7 +7,7 @@ project. It is what `voice.wake.noiseSuppression: "speex"` runs, on every
 surface that runs it.
 
 Redistributing the module, as a file, or embedded in a JavaScript bundle as
-the SDK does, carries the BSD 3-clause conditions below, which REQUIRE that
+the platform does, carries the BSD 3-clause conditions below, which REQUIRE that
 this copyright notice, the condition list and the disclaimer be reproduced with
 it. That is why this notice is carried in the repository beside the artifact
 rather than left in the upstream tarball.
@@ -80,7 +80,7 @@ Written for this project
   native/speexdsp-wasm/speexdsp_config_types.h the fixed-width typedefs its
                                                configure script would generate
 
-These carry the SDK's own MIT license.
+These carry the engine's own MIT license.
 
 
 C runtime linked into the module

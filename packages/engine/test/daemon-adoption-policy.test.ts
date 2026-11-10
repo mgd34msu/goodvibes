@@ -30,7 +30,7 @@ describe('classifyDaemonProbe', () => {
     expect(classifyDaemonProbe({ identity: { kind: 'unauthorized' }, localVersion: '1.0.0', versionCompatible: compatible })).toBe('blocked');
     expect(classifyDaemonProbe({ identity: { kind: 'unknown' }, localVersion: '1.0.0', versionCompatible: compatible })).toBe('blocked');
   });
-  test('the platform build wins over the artifact version: daemon 1.28.x carrying sdk 2.x adopts on a 2.x surface', () => {
+  test('the platform build wins over the artifact version: daemon 1.28.x carrying platform 2.x adopts on a 2.x surface', () => {
     // The shipped defect: the daemon's own release number (1.28.x) was
     // band-checked against a surface's platform version (2.x), so every surface
     // refused the daemon it was released alongside and silently ran

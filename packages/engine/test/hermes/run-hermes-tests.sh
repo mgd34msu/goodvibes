@@ -40,7 +40,7 @@ if [ -z "$NO_BUILD" ]; then
   bun run build --cwd "$REPO_ROOT"
 else
   # --no-build was passed: verify dist exists before proceeding
-  if [ ! -f "$ENGINE_ROOT/sdk/dist/index.js" ]; then
+  if [ ! -f "$ENGINE_ROOT/platform/dist/index.js" ]; then
     echo "ERROR: --no-build was passed but packages/engine/platform/dist/index.js does not exist."
     echo "Run: bun run build (from repo root) before using --no-build."
     exit 1

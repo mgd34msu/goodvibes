@@ -24,7 +24,7 @@ function withPreconnect(
   });
 }
 
-describe('operator sdk', () => {
+describe('operator client', () => {
   test('resolves path params and query params from contract methods', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const platformClient = createOperatorApiClient({

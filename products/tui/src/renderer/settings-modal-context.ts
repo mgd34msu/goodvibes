@@ -248,7 +248,6 @@ export const { currentSettingValue, buildSettingContext } = createSettingContext
       if (owner) lines.push(`Part of feature: ${owner.name} (the header row above).`);
     }
 
-    lines.push('', entry.setting.description);
 
     return lines;
   },

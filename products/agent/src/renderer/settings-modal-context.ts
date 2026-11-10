@@ -241,7 +241,7 @@ export const { currentSettingValue, buildSettingContext } = createSettingContext
   label: getSettingLabel,
   source: (entry) => entry.effectiveSource ?? 'default',
   detail(entry) {
-    const lines: string[] = []; // The platform's own wording, not authored here, and never shown against 'stored'.
+    const lines: string[] = [];
     if (entry.setting.key === 'payments.cvvHandling' && entry.currentValue === 'prompt') {
       lines.push('', CVV_PROMPT_TRADEOFF_WARNING);
     }

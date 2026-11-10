@@ -11,6 +11,7 @@ interface SettingContextEntry {
     readonly key: string;
     readonly default: unknown;
     readonly type: string;
+    readonly description?: string | undefined;
     readonly enumValues?: readonly string[] | undefined;
   };
   readonly currentValue: unknown;
@@ -48,6 +49,7 @@ export function createSettingContext<Modal extends SettingContextModal, Entry ex
       `Default: ${formatDefaultValue(entry.setting.default)}`,
       `Type: ${entry.setting.type}${entry.setting.enumValues ? ` with ${entry.setting.enumValues.length} possible value(s)` : ''}`,
       `Source: ${policy.source(entry)}${entry.sourceLabel ? ` from ${entry.sourceLabel}` : ''}`,
+      ...(entry.setting.description ? ['', entry.setting.description] : []),
       ...policy.detail(entry),
     ];
     if (policy.routingKeys.includes(entry.setting.key))

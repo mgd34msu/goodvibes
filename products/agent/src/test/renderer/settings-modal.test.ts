@@ -123,6 +123,23 @@ describe('renderSettingsModal', () => {
     expect(new Set(positions).size).toBe(1);
   });
 
+  test('scalar setting description appears once above the uninterrupted rows', () => {
+    modal.selectTarget('display.collapseThreshold');
+    const entry = modal.getSelected();
+    if (!entry || entry.setting.key !== 'display.collapseThreshold') throw new Error('Expected actual scalar display setting');
+    expect(entry.setting.description).toBe('Line count threshold for collapsing tool output');
+    const context = settingContextLines(modal);
+    expect(context.filter(line => line === entry.setting.description)).toHaveLength(1);
+    const layer = renderSettingsModal(modal, 160, 60);
+    const lines = layer.lines.map(line => line.map(cell => cell.char).join(''));
+    const help = lines.findIndex(line => line.includes(entry.setting.description));
+    const first = lines.findIndex(line => /(?:◇\s+)?stream\s+(?:true|false)\s*$/.test(line));
+    expect(help).toBeGreaterThan(0); expect(first).toBeGreaterThan(help);
+    for (let index = 0; index < modal.currentItems.length; index++) {
+      expect(lines[first + index]).toContain(modal.currentItems[index]!.setting!.key.split('.').at(-1)!);
+    }
+  });
+
   test('is a kit modal layer that fits the screen', () => {
     const layer = renderSettingsModal(modal, W, 40);
     expect(layer.dim).toBe(true);

@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { FakeClusterClock, MemoryClusterBus, replicatedSecretKeyFor, type ClusterTransport } from '@goodvibes-jev/engine/platform/platform/cluster';
+import { FakeClusterClock, MemoryClusterBus, MAX_ENVELOPE_BYTES, replicatedSecretKeyFor, type ClusterTransport } from '@goodvibes-jev/engine/platform/platform/cluster';
 import { SecretsManager } from '../../config/secrets.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
 import { createClusterGroupComposition, type ClusterGroupComposition } from '../../runtime/cluster-group-composition.js';
@@ -63,7 +63,16 @@ test('remote applies do not echo/revise forever and ordinary housekeeping does n
   const f = fixture(), { master, standby } = await pair(f); await master.secrets.set(credentialKey, 'synthetic-one-event'); await waitFor(async () => await standby.secrets.get(credentialKey) === 'synthetic-one-event');
   // Wait behind a final explicit config event, so earlier serial seed work has drained.
   master.config.set('automation.enabled', false); await waitFor(() => standby.config.get('automation.enabled') === false);
-  await master.composition.runtime.runHousekeeping(); await waitFor(() => master.composition.runtime.replicationStatus()?.revision === standby.composition.runtime.replicationStatus()?.revision);
+  await master.composition.runtime.runHousekeeping();
+  for (const sent of configTraffic(f)) expect(Buffer.byteLength(sent.raw)).toBeLessThanOrEqual(MAX_ENVELOPE_BYTES);
+  await waitFor(() => master.composition.runtime.replicationStatus()?.revision === standby.composition.runtime.replicationStatus()?.revision);
+  const cold = node(f, 'cold', false); await cold.composition.start();
+  const key = master.composition.verbs.key(); if (!key.ok) throw Error(key.error);
+  const joined = await cold.composition.verbs.join({ groupId: master.composition.runtime.groupState!.groupId, joinKey: key.data.joinKey });
+  if (!joined.ok) throw Error(joined.error);
+  await waitFor(() => cold.composition.runtime.replicationStatus()?.revision === master.composition.runtime.replicationStatus()?.revision);
+  expect(cold.config.get('automation.enabled')).toBe(false);
+  for (const sent of configTraffic(f)) expect(Buffer.byteLength(sent.raw)).toBeLessThanOrEqual(MAX_ENVELOPE_BYTES);
   const revision = master.composition.runtime.replicationStatus()?.revision, read = spyOn(master.secrets, 'get');
   try {
     await master.composition.runtime.runHousekeeping(); await standby.composition.runtime.runHousekeeping();

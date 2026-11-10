@@ -343,7 +343,9 @@ test('held initial screening cannot suppress holder heartbeats or admit a second
   await a.registration.ready; await advance(clock, 2000); await until(() => remote.sourceCalls.length > 0);
   const b = await node(bus, clock, 'node-b', endpoints(), makeOwnedTempDir('cluster-held-initial-standby'), events);
   await b.registration.ready;
+  const beforeHeartbeats = bus.sent.filter(row => row.from === 'node-a' && JSON.parse(row.raw).type === 'HEARTBEAT').length;
   await advance(clock, 31000); await new Promise(resolve => setTimeout(resolve, 20));
+  expect(bus.sent.filter(row => row.from === 'node-a' && JSON.parse(row.raw).type === 'HEARTBEAT').length).toBeGreaterThan(beforeHeartbeats);
   expect(events).not.toContain('node-a:poll-drained');
   expect(events).not.toContain('node-b:poll-start');
   expect(a.enrollments).toBe(1); expect(a.coordinator.status().surfaces).toHaveLength(1);

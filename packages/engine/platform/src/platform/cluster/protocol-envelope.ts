@@ -139,6 +139,21 @@ export interface EnvelopeDraft {
   readonly body?: Readonly<Record<string, unknown>> | undefined;
 }
 
+/** Measure the actual unsigned UTF-8 image plus authenticator field overhead.
+ * The fixed group HMAC is 64 hex bytes; callback/identity signatures have their
+ * own wire shape and are checked once after their one actual authentication.
+ */
+function assertEnvelopeFits(envelope: ClusterEnvelope, signatureBytes: number): void {
+  if (Buffer.byteLength(JSON.stringify(envelope), 'utf8') + Buffer.byteLength(',"sig":""') + signatureBytes > MAX_ENVELOPE_BYTES) {
+    throw new Error('Cluster envelope exceeds the UTF-8 datagram size limit');
+  }
+}
+function serializeSignedEnvelope(envelope: SignedClusterEnvelope): string {
+  const raw = JSON.stringify(envelope);
+  if (Buffer.byteLength(raw, 'utf8') > MAX_ENVELOPE_BYTES) throw new Error('Cluster envelope exceeds the UTF-8 datagram size limit');
+  return raw;
+}
+
 /** Build and sign a datagram with the keyring's CURRENT generation. */
 export function encodeEnvelope(draft: EnvelopeDraft, keyring: ClusterKeyring): string {
   const surfaceId = draft.surfaceId ?? null;
@@ -160,8 +175,9 @@ export function encodeEnvelope(draft: EnvelopeDraft, keyring: ClusterKeyring): s
     ts: Math.trunc(draft.ts),
     body: draft.body ?? {},
   };
+  assertEnvelopeFits(envelope, 64);
   const signed: SignedClusterEnvelope = { ...envelope, sig: signEnvelope(envelope, groupKey) };
-  return JSON.stringify(signed);
+  return serializeSignedEnvelope(signed);
 }
 
 /**
@@ -202,8 +218,9 @@ export function encodeEnvelopeWith(
     ts: Math.trunc(draft.ts),
     body: draft.body ?? {},
   };
+  assertEnvelopeFits(envelope, 0);
   const signed: SignedClusterEnvelope = { ...envelope, sig: authenticate(canonicalizeEnvelope(envelope)) };
-  return JSON.stringify(signed);
+  return serializeSignedEnvelope(signed);
 }
 
 /**

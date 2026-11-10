@@ -1,5 +1,6 @@
 /** Private native identity registry. Exact facts stay on owner-only local disk;
- * only opaque IDs cross into inbox rows, selectors, locks and polling elections. */
+ * only opaque IDs cross into inbox rows, selectors and locks. Distributed
+ * elections separately retain the exact published cross-machine wire codec. */
 import { randomUUID } from 'node:crypto';
 import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,7 +8,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod/v4';
 import type { ProtectedSourceOwnerOptions } from '../../security/source-screening/types.js';
 import { updateInboxIdentityRegistry, captureRegistryOwner, synchronous, type InboxIdentityRegistryFormat } from './identity-registry.js';
-import { findSavedDiscordScope, findSavedDiscordTriage } from './discord-saved-scope.js';
+import { findSavedDiscordScope, findSavedDiscordTriage, publishedDiscordElectionScope } from './discord-saved-scope.js';
 
 const snowflake = z.string().regex(/^[1-9]\d{0,19}$/).refine(value => BigInt(value) < (1n << 64n));
 const metadata = z.string().min(1).max(4096);
@@ -25,7 +26,7 @@ const entrySchema = z.object({ binding: bindingSchema, id: opaqueId,
 }).strict();
 const registrySchema = z.object({ schema: z.literal(1), registries: z.array(revisionSchema).max(1024), scopes: z.array(entrySchema).max(1024) }).strict();
 type Registry = z.infer<typeof registrySchema>;
-interface IdentityData { readonly binding: DiscordInboxBinding; readonly scopeId: string; readonly triageFileName: string; readonly assertDirectoryCurrent: () => void }
+interface IdentityData { readonly configuredRegistry: boolean; electionScope?: string; readonly binding: DiscordInboxBinding; readonly scopeId: string; readonly triageFileName: string; readonly assertDirectoryCurrent: () => void }
 declare const discordIdentity: unique symbol;
 export interface DiscordInboxIdentity { readonly [discordIdentity]: true }
 const identities = new WeakMap<DiscordInboxIdentity, IdentityData>();
@@ -103,6 +104,7 @@ export async function acquireDiscordInboxIdentity(owner: DiscordInboxIdentityOwn
   options: { readonly configuredRegistry?: boolean } = {}): Promise<DiscordInboxIdentity> {
   owner = captureRegistryOwner(owner);
   const binding = captureDiscordInboxBinding(input), configuredRegistry = options.configuredRegistry === true;
+  let discoveredElectionScope: string | undefined;
   const { value: data, assertDirectoryCurrent } = await updateRegistry(owner, (registry, directory, current) => {
     const found = registry.scopes.find(entry => isDeepStrictEqual(entry.binding, binding));
     if (found) return { value: found, changed: false };
@@ -116,12 +118,23 @@ export async function acquireDiscordInboxIdentity(owner: DiscordInboxIdentityOwn
       }
     }
     current();
-    const saved = findSavedDiscordScope(binding, configuredRegistry, mirrors);
+    const historical = findSavedDiscordScope(binding, configuredRegistry, mirrors);
+    const saved = historical?.found ? historical.candidate : undefined;
+    discoveredElectionScope = historical?.candidate;
     const id = saved ?? randomUUID();
     const triageFileName = saved ? findSavedDiscordTriage(saved, triage) ?? `inbox-triage-discord-${randomUUID()}.sqlite` : `inbox-triage-discord-${randomUUID()}.sqlite`;
     const entry = { binding, id, triageFileName }; registry.scopes.push(entry); return { value: entry, changed: true };
   });
   synchronous(owner.assertCurrent);
   const identity = Object.freeze({}) as DiscordInboxIdentity;
-  identities.set(identity, { binding, scopeId: data.id, triageFileName: data.triageFileName, assertDirectoryCurrent }); return identity;
+  identities.set(identity, { configuredRegistry, electionScope: discoveredElectionScope, binding, scopeId: data.id, triageFileName: data.triageFileName, assertDirectoryCurrent }); return identity;
+}
+
+/** Only the genuine selected account may recover its published wire identity.
+ * Compute once per native selection; the local mirror/receipt UUID stays local.
+ */
+export function resolveDiscordInboxElectionScope(identity: DiscordInboxIdentity): string {
+  const found = identities.get(identity); if (!found) throw unavailable();
+  found.assertDirectoryCurrent();
+  return found.electionScope ??= publishedDiscordElectionScope(found.binding, found.configuredRegistry);
 }

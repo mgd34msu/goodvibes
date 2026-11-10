@@ -38,7 +38,7 @@ const GROUP_OWNED_TYPES: ReadonlySet<string> = new Set([
   // Config replication rides the same signed channel. Anything not listed here
   // is handed to the election, so a type added to the group layer and forgotten
   // here arrives at the wrong state machine and is silently ignored.
-  'CONFIG_SNAPSHOT', 'CONFIG_DELTA', 'CONFIG_PROPOSE', 'CONFIG_REQUEST',
+  'CONFIG_SNAPSHOT', 'CONFIG_SNAPSHOT_PART', 'CONFIG_DELTA', 'CONFIG_PROPOSE', 'CONFIG_REQUEST',
 ]);
 
 /**

@@ -5,9 +5,12 @@
  * set is asserted literally: a field quietly added or renamed is a datagram
  * that a peer on the previous build silently drops.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
+import { generateGroupSigningKeyPair, signWithIdentity, verifyWithIdentity } from '../platform/src/platform/cluster/group-crypto.js';
 import {
   canonicalizeEnvelope,
+  readUnverifiedEnvelope,
   decodeEnvelope,
   encodeEnvelope,
   encodeEnvelopeWith,
@@ -328,4 +331,37 @@ describe('a machine that is in no group', () => {
     expect(notices[0]).toStartWith('info:');
     expect(lines.filter((line) => line.startsWith('warn:'))).toHaveLength(0);
   });
+});
+
+
+test('oversized UTF-8 and exact HMAC overhead refuse before any authentication; valid wire signs once and independently verifies', () => {
+  const draft = { type: 'CONFIG_DELTA', nodeId: 'node-fixture', nodeVersion: '3.1.2', seq: 1, ts: 1000, body: {} };
+  const ring = keyring(), hmac = spyOn(crypto, 'createHmac');
+  try {
+    expect(() => encodeEnvelope({ ...draft, body: { text: '🌻'.repeat(10000) } }, ring)).toThrow('UTF-8 datagram size limit');
+    const empty = { v: 1, groupId: ring.groupId, keyGen: ring.currentGeneration, surfaceId: null, ...draft, body: { text: '' } };
+    const padding = MAX_ENVELOPE_BYTES - Buffer.byteLength(JSON.stringify(empty)) - 20;
+    expect(() => encodeEnvelope({ ...draft, body: { text: 'x'.repeat(padding) } }, ring)).toThrow('UTF-8 datagram size limit');
+    expect(hmac).toHaveBeenCalledTimes(0);
+    const raw = encodeEnvelope({ ...draft, body: { text: 'x'.repeat(padding - 100) } }, ring);
+    expect(hmac).toHaveBeenCalledTimes(1); expect(Buffer.byteLength(raw)).toBeLessThanOrEqual(MAX_ENVELOPE_BYTES);
+    expect(decodeEnvelope(raw, ring).envelope?.body).toEqual({ text: 'x'.repeat(padding - 100) });
+    expect(hmac).toHaveBeenCalledTimes(2); // independent received-wire authentication
+  } finally { hmac.mockRestore(); }
+});
+
+test('callback envelope preflight preserves real Ed25519 identity signatures and bounds its actual encoded output', () => {
+  const draft = { type: 'REJOIN', nodeId: 'node-fixture', nodeVersion: '3.1.2', seq: 1, ts: 1000, body: {} };
+  let calls = 0;
+  expect(() => encodeEnvelopeWith({ ...draft, body: { text: '🌻'.repeat(10000) } }, 'owned-group', () => { calls++; return 'never'; })).toThrow('UTF-8 datagram size limit');
+  expect(calls).toBe(0);
+  const keys = generateGroupSigningKeyPair();
+  const raw = encodeEnvelopeWith(draft, 'owned-group', canonical => { calls++; return signWithIdentity(keys, canonical); });
+  expect(calls).toBe(1); const parsed = readUnverifiedEnvelope(raw); expect(parsed).not.toBeNull();
+  if (!parsed) throw Error('Actual identity envelope was not readable');
+  expect(parsed.sig).toMatch(/^[A-Za-z0-9_-]{86}$/);
+  expect(verifyWithIdentity(keys.publicKey, canonicalizeEnvelope(parsed.envelope), parsed.sig)).toBe(true);
+  // A callback whose actual result cannot fit is invoked once, then refused.
+  expect(() => encodeEnvelopeWith(draft, 'owned-group', () => { calls++; return 'x'.repeat(MAX_ENVELOPE_BYTES); })).toThrow('UTF-8 datagram size limit');
+  expect(calls).toBe(2);
 });

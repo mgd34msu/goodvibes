@@ -1,11 +1,12 @@
-/** Exact account facts stay in a private native registry, never in selectors. */
+/** Exact account facts stay in a private native registry, never in local selectors.
+ * Distributed elections separately retain the published cross-machine codec. */
 import { randomUUID } from 'node:crypto';
 import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod/v4';
 import { captureRegistryOwner, synchronous, updateInboxIdentityRegistry, type InboxIdentityRegistryFormat, type InboxIdentityRegistryOwner as AccountInboxIdentityOwner } from './identity-registry.js';
-import { findSavedAccountInboxIdentity, findSavedOwnedTriageIdentity } from './saved-account-scope.js';
+import { findSavedAccountInboxIdentity, findSavedOwnedTriageIdentity, publishedAccountElectionScope } from './saved-account-scope.js';
 
 const metadata = z.string().min(1).max(500);
 const bindingSchema = z.discriminatedUnion('provider', [
@@ -59,7 +60,7 @@ const format: InboxIdentityRegistryFormat<Registry> = {
 };
 declare const identityBrand: unique symbol;
 export interface AccountInboxIdentity { readonly [identityBrand]: true }
-interface RetainedIdentity { readonly binding: AccountInboxBinding; readonly selectors: AccountInboxSelectors; readonly current: () => void }
+interface RetainedIdentity { readonly binding: AccountInboxBinding; readonly selectors: AccountInboxSelectors; readonly current: () => void; electionScope?: string }
 const identities = new WeakMap<AccountInboxIdentity, RetainedIdentity>();
 function captureBinding(input: AccountInboxBinding): AccountInboxBinding {
   const binding = bindingSchema.parse(input);
@@ -79,6 +80,7 @@ function savedFiles(directory: string): ReadonlySet<string> {
 async function acquireIdentity(owner: AccountInboxIdentityOwner, input: AccountInboxBinding): Promise<AccountInboxIdentity> {
   owner = captureRegistryOwner(owner);
   const binding = captureBinding(input);
+  let discoveredElectionScope: string | undefined;
   const result = await updateInboxIdentityRegistry(owner, format, (registry, directory, current) => {
     const found = registry.scopes.find(entry => isDeepStrictEqual(entry.binding, binding));
     if (found) return { value: found, changed: false };
@@ -87,13 +89,15 @@ async function acquireIdentity(owner: AccountInboxIdentityOwner, input: AccountI
     const native = binding.provider === 'owned-triage'
       ? registry.scopes.find(entry => entry.binding.provider === binding.providerId && entry.id === binding.accountScopeId) : undefined;
     if (native && ![...files].some(name => /^inbox-owned-[0-9a-f]{64}\.sqlite$/.test(name))) return { value: native, changed: false };
-    const saved = binding.provider === 'owned-triage' ? findSavedOwnedTriageIdentity(binding, files) : findSavedAccountInboxIdentity(binding, files);
+    const historical = binding.provider === 'owned-triage' ? undefined : findSavedAccountInboxIdentity(binding, files);
+    const saved = binding.provider === 'owned-triage' ? findSavedOwnedTriageIdentity(binding, files) : historical?.saved;
     // A native account already owns its selector pair. A default triage caller
     // must not create another namespace merely because it omitted the pair.
     // Preserve a real older generic mirror when one actually exists, however.
     if (binding.provider === 'owned-triage' && (!saved || !files.has(saved.mirrorFileName))) {
       if (native) return { value: native, changed: false };
     }
+    if (binding.provider !== 'owned-triage') discoveredElectionScope = historical?.scopeId;
     const id = saved?.scopeId ?? randomUUID();
     const provider = binding.provider === 'owned-triage' ? 'owned' : binding.provider;
     const entry: Entry = { binding, id, mirrorFileName: saved?.mirrorFileName ?? `inbox-${provider}-${id}.sqlite`,
@@ -103,7 +107,7 @@ async function acquireIdentity(owner: AccountInboxIdentityOwner, input: AccountI
   synchronous(owner.assertCurrent);
   const identity = Object.freeze({}) as AccountInboxIdentity;
   identities.set(identity, { binding, selectors: Object.freeze({ scopeId: result.value.id,
-    mirrorFileName: result.value.mirrorFileName, triageFileName: result.value.triageFileName }), current: result.assertDirectoryCurrent });
+    mirrorFileName: result.value.mirrorFileName, triageFileName: result.value.triageFileName }), current: result.assertDirectoryCurrent, electionScope: discoveredElectionScope });
   return identity;
 }
 export function acquireAccountInboxIdentity(owner: AccountInboxIdentityOwner, input: AccountInboxIdentityInput): Promise<AccountInboxIdentity> {
@@ -113,6 +117,17 @@ export function resolveAccountInboxIdentity(identity: AccountInboxIdentity, inpu
   const found = identities.get(identity);
   if (!found || !isDeepStrictEqual(found.binding, captureBinding(input))) throw unavailable();
   found.current(); return found.selectors;
+}
+/** One published v3.1.1 wire commitment per genuine clustered account selection.
+ * Local mirror UUIDs cannot coordinate independent machines. This exact codec
+ * remains necessary for the existing inboxSurface wire consumer, not authority,
+ * local equality or privacy against dictionary guesses. No prompt is retained.
+ */
+export function resolveAccountInboxElectionScope(identity: AccountInboxIdentity): string {
+  const found = identities.get(identity);
+  if (!found || found.binding.provider === 'owned-triage') throw unavailable();
+  found.current();
+  return found.electionScope ??= publishedAccountElectionScope(found.binding);
 }
 export async function acquireOwnedTriageIdentity(owner: AccountInboxIdentityOwner, providerId: string, accountScopeId: string): Promise<AccountInboxSelectors> {
   const binding = captureBinding({ provider: 'owned-triage', providerId, accountScopeId });

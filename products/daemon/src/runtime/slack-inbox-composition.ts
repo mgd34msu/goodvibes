@@ -7,7 +7,7 @@ import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { acquireCrossProcessLock } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import {
-  createSlackInboxOwner, acquireAccountInboxIdentity, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
+  createSlackInboxOwner, acquireAccountInboxIdentity, resolveAccountInboxElectionScope, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
   type SlackInboxAccount, type SlackInboxOwner, type InboxSurfaceRegistration, type InboxTriageAuthority,
 } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
@@ -104,6 +104,7 @@ function createSlackAccountFactory<T extends InboxSurfaceRegistration>(
       identity, account, screening: options.screening, assertCurrent: current,
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
     });
+    let electionScope = owner.scopeId;
     let eligibility: ReturnType<typeof ownInboxEligibility> | undefined;
     let unsubscribe: (() => void) | undefined;
     let release: (() => void) | undefined;
@@ -112,6 +113,7 @@ function createSlackAccountFactory<T extends InboxSurfaceRegistration>(
     // A registrar may yield before returning its actual storage owner.
     void constructed.promise.catch(() => {});
     try {
+      if (clustered) electionScope = resolveAccountInboxElectionScope(identity);
       if (requireFinalProof && typeof owner.acquireReadLease !== 'function') {
         throw new Error('Slack inbox source requires a generation-fenced read lease');
       }
@@ -132,14 +134,14 @@ function createSlackAccountFactory<T extends InboxSurfaceRegistration>(
           : { assertReadCurrent: owner.assertReadCurrent }),
         // Keep wire provider='slack'; only the owner/election discriminator is scoped.
         gatePolling: (_provider, control) => {
-          if (!clustered) return controls.gatePolling(`slack:${owner.scopeId}`, control);
+          if (!clustered) return controls.gatePolling(`slack:${electionScope}`, control);
           eligibility = ownInboxEligibility({ verify: async () => {
             const registration = await constructed.promise;
             await registration.ready;
             return owner.verifyEligibility!();
           }, control,
             ...(factories.eligibilityClock ? { clock: factories.eligibilityClock } : {}),
-            register: gated => controls.gatePollingOwned!(`slack:${owner.scopeId}`, gated),
+            register: gated => controls.gatePollingOwned!(`slack:${electionScope}`, gated),
           });
           return () => eligibility!.close();
         },

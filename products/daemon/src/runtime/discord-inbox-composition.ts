@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { acquireCrossProcessLock } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import { createInboxRouteResolver } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { ClusterClock } from '@goodvibes-jev/engine/platform/platform/cluster';
-import { acquireDiscordInboxIdentity, acquireDiscordInboxRegistryRevision, createDiscordInboxOwner, createOwnedTriagedInboxSource,
+import { acquireDiscordInboxIdentity, resolveDiscordInboxElectionScope, acquireDiscordInboxRegistryRevision, createDiscordInboxOwner, createOwnedTriagedInboxSource,
   type DiscordInboxOwnerOptions, type VerifiedDiscordInboxOwner, type OwnedInboxSource, type InboxTriageAuthority,
 } from '@goodvibes-jev/engine/platform/platform/intake';
 import { createMultiOwnerDaemonInboxFactory, type DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
@@ -136,6 +136,7 @@ export function createDiscordDaemonInboxSourceFactory(options: DiscordDaemonInbo
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       });
       startupCurrent();
+      const electionScope = clustered ? resolveDiscordInboxElectionScope(identity) : owner.scopeId;
       const storeFileName = `inbox-discord-${owner.scopeId}.sqlite`;
       release = await acquireCrossProcessLock(join(workingDirectory, '.goodvibes', 'tui', 'operator', `${storeFileName}.owner.lock`), {
         strictOwnership: true, totalTimeoutMs: 100,
@@ -146,14 +147,14 @@ export function createDiscordDaemonInboxSourceFactory(options: DiscordDaemonInbo
         adapters: new Map([['discord', owner.adapter]]), storeFileName, triageStoreFileName: owner.triageStoreFileName,
         ...(clustered ? { awaitInitialPoll: false } : {}), acquireReadLease: () => owner!.acquireReadLease(),
         gatePolling(_provider, control) {
-          if (!clustered) return controls.gatePolling(`discord:${owner!.scopeId}`, control);
+          if (!clustered) return controls.gatePolling(`discord:${electionScope}`, control);
           eligibility = ownInboxEligibility({ verify: async () => {
             const registration = await constructed.promise;
             await registration.ready;
             return owner!.verifyEligibility();
           }, control,
             ...(factories.eligibilityClock ? { clock: factories.eligibilityClock } : {}),
-            register: gated => controls.gatePollingOwned!(`discord:${owner!.scopeId}`, gated),
+            register: gated => controls.gatePollingOwned!(`discord:${electionScope}`, gated),
           });
           return () => eligibility!.close();
         },

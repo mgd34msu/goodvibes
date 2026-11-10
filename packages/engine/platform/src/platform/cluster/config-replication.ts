@@ -32,6 +32,7 @@
  * puts one in `/status`, a replicated secret is reported as a path and a
  * revision, never as a value.
  */
+import { CONFIG_SNAPSHOT_PART, CONFIG_BODY_LIMIT, ConfigSnapshotTransfers, prepareConfigSnapshotTransfer } from './config-snapshot-transfer.js';
 import { GroupConfigChangeRetiredError } from './group-config-changes.js';
 import { canonicalReplicatedSecretRef, ConfigReplicationPrivacyError, isSecretBearingConfigKey, localCredentialLiteral, publicCredentialPointer } from './config-replication-privacy.js';
 import { openSealedEnvelope, sealForMember, type NodeKeyMaterial } from './group-crypto.js';
@@ -60,6 +61,7 @@ import type { ClusterLogger } from './types.js';
 /** Message types this layer speaks. All group-key signed, like everything else. */
 export const CONFIG_MESSAGE_TYPES = {
   snapshot: 'CONFIG_SNAPSHOT',
+  snapshotPart: CONFIG_SNAPSHOT_PART,
   delta: 'CONFIG_DELTA',
   propose: 'CONFIG_PROPOSE',
   request: 'CONFIG_REQUEST',
@@ -132,6 +134,7 @@ export interface ConfigReplicationStatus {
 
 export class ConfigReplicationService {
   private document: ConfigReplicaDocument;
+  private readonly snapshots = new ConfigSnapshotTransfers();
   private lastAppliedFrom: string | null = null;
   private lastAppliedAt: number | null = null;
   private pendingProposals = 0;
@@ -146,9 +149,12 @@ export class ConfigReplicationService {
 
   /** Adopt a document read back from disk, or from a group this node just joined. */
   adopt(document: ConfigReplicaDocument): void {
+    this.snapshots.clear();
     this.pendingSets.clear(); this.pendingDeletes.clear(); this.pendingPersistence = null;
     this.document = this.publicDocument(document);
   }
+
+  retireSnapshotTransfers(): void { this.snapshots.clear(); }
 
   get replica(): ConfigReplicaDocument {
     return this.document;
@@ -365,7 +371,27 @@ export class ConfigReplicationService {
     assertCurrent();
     const entries = this.document.entries.filter((entry) => paths.includes(entry.path) && !entry.secret);
     if (entries.length === 0) return;
-    await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.delta, { entries });
+    const body = { entries };
+    if (Buffer.byteLength(JSON.stringify(body), 'utf8') <= CONFIG_BODY_LIMIT) await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.delta, body);
+    else await this.sendSnapshot(assertCurrent);
+  }
+
+  private async sendSnapshot(assertCurrent: () => void): Promise<void> {
+    assertCurrent();
+    const document = this.document;
+    // Serialization below captures this exact immutable wire image before
+    // yielding. A later legitimate revision does not revoke this older signed
+    // image; receivers merge its per-entry revisions. Membership/entered-change
+    // authority remains fenced through every send.
+    const current = assertCurrent;
+    const body = { document };
+    if (Buffer.byteLength(JSON.stringify(body), 'utf8') <= CONFIG_BODY_LIMIT) {
+      await this.send(current, CONFIG_MESSAGE_TYPES.snapshot, body);
+      return;
+    }
+    for (const part of prepareConfigSnapshotTransfer(document, document.revision)) {
+      await this.send(current, CONFIG_MESSAGE_TYPES.snapshotPart, { ...part });
+    }
   }
 
   /**
@@ -427,6 +453,10 @@ export class ConfigReplicationService {
         await this.onRequest(envelope, assertCurrent);
         assertCurrent();
         return;
+      case CONFIG_MESSAGE_TYPES.snapshotPart:
+        await this.onSnapshotPart(envelope, assertCurrent);
+        assertCurrent();
+        return;
       case CONFIG_MESSAGE_TYPES.snapshot:
         await this.onSnapshot(envelope, assertCurrent);
         assertCurrent();
@@ -446,7 +476,7 @@ export class ConfigReplicationService {
   private async onRequest(envelope: ClusterEnvelope, assertCurrent: () => void): Promise<void> {
     assertCurrent();
     if (!this.host.isMaster() || envelope.nodeId === this.host.nodeId) return;
-    await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.snapshot, { document: this.document });
+    await this.sendSnapshot(assertCurrent);
     assertCurrent();
     // Secrets are not in the document, so each one is sent sealed to the asker.
     const secrets = this.host.secrets();
@@ -466,6 +496,20 @@ export class ConfigReplicationService {
       });
       assertCurrent();
     }
+  }
+
+  private async onSnapshotPart(envelope: ClusterEnvelope, assertCurrent: () => void): Promise<void> {
+    if (envelope.nodeId === this.host.nodeId) return;
+    const complete = this.snapshots.accept(envelope, this.host.now(), assertCurrent);
+    if (!complete) return;
+    complete.assertCurrent(); assertCurrent();
+    let value: unknown;
+    try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(complete.bytes)); } catch { return; }
+    const incoming = readConfigReplicaDocument(value, isReplicatedConfigPath);
+    if (!incoming || incoming.groupId !== this.document.groupId || incoming.revision !== complete.revision) return;
+    const current = () => { complete.assertCurrent(); assertCurrent(); };
+    await this.applyDocument(mergeConfigReplica(this.document, this.publicDocument(incoming)), envelope.nodeId, current);
+    current();
   }
 
   private async onSnapshot(envelope: ClusterEnvelope, assertCurrent: () => void): Promise<void> {
@@ -677,6 +721,7 @@ export class ConfigReplicationService {
 
   /** Bound the document. Called from the group runtime's housekeeping pass. */
   sweep(now: number): void {
+    this.snapshots.expire(now);
     const assertCurrent = this.host.captureAuthority(); assertCurrent();
     const swept = sweepConfigReplica(this.document, now);
     if (swept.droppedTombstones === 0) return;

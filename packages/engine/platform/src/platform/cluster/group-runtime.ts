@@ -243,6 +243,7 @@ export class ClusterGroupRuntime {
     this.runtimeStopping = true;
     this.incoming.close();
     this.configChanges.stop();
+    this.replication?.retireSnapshotTransfers();
     this.networkStarted = false;
     this.membershipOperations.stop();
     this.keyringInstance = null;
@@ -449,6 +450,7 @@ export class ClusterGroupRuntime {
     this.membershipTransition = true;
     this.incoming.close();
     this.configChanges.suspend();
+    this.replication?.retireSnapshotTransfers();
     this.admissions.stop('this machine is changing its group membership');
     // Drain BEFORE entering the material queue: an old handler may itself be
     // waiting for a queued material write. Holding the queue here would deadlock.
@@ -466,6 +468,7 @@ export class ClusterGroupRuntime {
     // not assert rollback, retry it, erase evidence, or keep signing old keys.
     this.membershipOperations.markUnknown();
     this.configChanges.suspend();
+    this.replication?.retireSnapshotTransfers();
     this.admissions.stop('group membership persistence could not be confirmed');
     this.material = null; this.state = null; this.keyringInstance = null;
     this.unreadableMaterial = true;
@@ -875,6 +878,7 @@ export class ClusterGroupRuntime {
       case GROUP_MESSAGE_TYPES.rekey:
         await this.onRekey(envelope);
         return;
+      case CONFIG_MESSAGE_TYPES.snapshotPart:
       case CONFIG_MESSAGE_TYPES.snapshot:
       case CONFIG_MESSAGE_TYPES.delta:
       case CONFIG_MESSAGE_TYPES.propose:

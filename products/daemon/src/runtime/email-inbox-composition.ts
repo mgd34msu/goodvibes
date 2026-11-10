@@ -8,7 +8,7 @@ import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
 import { acquireCrossProcessLock } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
-import { createEmailInboxOwner, acquireAccountInboxIdentity, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
+import { createEmailInboxOwner, acquireAccountInboxIdentity, resolveAccountInboxElectionScope, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
   type EmailInboxAccount, type EmailInboxOwner, type InboxSurfaceRegistration, type InboxTriageAuthority } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
@@ -100,6 +100,7 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
         } });
       if (clustered && typeof owner.verifyEligibility !== 'function') throw new Error('Clustered email inbox requires an eligible owner');
       current();
+      const electionScope = clustered ? resolveAccountInboxElectionScope(identity) : owner.scopeId;
       const storeFileName = `inbox-email-${owner.scopeId}.sqlite`;
       release = await acquireCrossProcessLock(join(workingDirectory, '.goodvibes', 'tui', 'operator', `${storeFileName}.owner.lock`),
         { strictOwnership: true, totalTimeoutMs: 100 });
@@ -109,14 +110,14 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
         adapters: new Map([['email', selectedOwner.adapter]]), storeFileName, ...(clustered ? { awaitInitialPoll: false } : {}),
         acquireReadLease: () => selectedOwner.acquireReadLease(),
         gatePolling: (_provider, control) => {
-          if (!clustered) return controls.gatePolling(`email:${selectedOwner.scopeId}`, control);
+          if (!clustered) return controls.gatePolling(`email:${electionScope}`, control);
           eligibility = ownInboxEligibility({ verify: async () => {
             const registration = await constructed.promise;
             await registration.ready;
             return selectedOwner.verifyEligibility!();
           }, control,
             ...(factories.eligibilityClock ? { clock: factories.eligibilityClock } : {}),
-            register: gated => controls.gatePollingOwned!(`email:${selectedOwner.scopeId}`, gated),
+            register: gated => controls.gatePollingOwned!(`email:${electionScope}`, gated),
           });
           return () => eligibility!.close();
         },

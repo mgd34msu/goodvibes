@@ -7,7 +7,7 @@ export type { IntakeCredentialStore, IntakeCredentialSnapshot, IntakeLogger } fr
 export { createProtectedInboxMapper } from './protected-preview.js';
 export type { ProtectedInboxPreviewInput, ProtectedInboxPreviewFields } from './protected-preview.js';
 export { createEmailInboxOwner } from './providers/email-owner.js';
-export { acquireAccountInboxIdentity, resolveAccountInboxIdentity } from './providers/account-identity.js';
+export { acquireAccountInboxIdentity, resolveAccountInboxIdentity, resolveAccountInboxElectionScope } from './providers/account-identity.js';
 export type { AccountInboxIdentity, AccountInboxIdentityInput, AccountInboxIdentityOwner, AccountInboxSelectors, AccountInboxBinding } from './providers/account-identity.js';
 export type { EmailInboxAccount, EmailInboxOwnerOptions, EmailInboxOwner, EmailInboxReadLease, VerifiedEmailInboxOwner } from './providers/email-owner.js';
 export { createSlackInboxOwner } from './providers/slack-owner.js';
@@ -84,7 +84,7 @@ export type { OwnedInboxTagging, OwnedInboxTaggingOptions, OwnedInboxTagOperatio
 export { createDiscordInboxOwner } from './providers/discord-owner.js';
 export type { DiscordInboxAccount, DiscordInboxChannelScope, DiscordInboxOwnerOptions, DiscordInboxOwnerFactories, DiscordInboxOwner, VerifiedDiscordInboxOwner } from './providers/discord-owner.js';
 
-export { acquireDiscordInboxIdentity, acquireDiscordInboxRegistryRevision } from './providers/discord-identity.js';
+export { acquireDiscordInboxIdentity, acquireDiscordInboxRegistryRevision, resolveDiscordInboxElectionScope } from './providers/discord-identity.js';
 export type { DiscordInboxIdentity, DiscordInboxIdentityInput, DiscordInboxIdentityOwner } from './providers/discord-identity.js';
 
 export { createInactiveInboxRetentionOwner } from './inactive-retention.js';

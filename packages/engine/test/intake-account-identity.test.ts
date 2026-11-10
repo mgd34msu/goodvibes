@@ -3,7 +3,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { acquireAccountInboxIdentity, acquireOwnedTriageIdentity, resolveAccountInboxIdentity,
+import { acquireAccountInboxIdentity, acquireOwnedTriageIdentity, resolveAccountInboxIdentity, resolveAccountInboxElectionScope,
   type AccountInboxIdentity, type AccountInboxIdentityInput } from '../platform/src/platform/intake/providers/account-identity.js';
 import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.js';
 import { SqliteTriageStore } from '../platform/src/platform/intake/triage/store.js';
@@ -202,4 +202,42 @@ test.each(['account-inbox-identities-v1', 'inbox-triage-identities-v1'] as const
   const capabilities = nativeReaderCapabilities('3.1.2');
   expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo, { ...capabilities, formats: capabilities.formats.filter(item => item !== format) })).toThrow();
   expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo, capabilities)).not.toThrow();
+});
+
+
+test.each([slack, email])('clustered $provider selection preserves the published distributed key once while mirror UUIDs stay node-local', async input => {
+  const a = fixture(), b = fixture();
+  const first = await acquireAccountInboxIdentity(a.owner, input), second = await acquireAccountInboxIdentity(b.owner, input);
+  expect(resolveAccountInboxIdentity(first, input).scopeId).not.toBe(resolveAccountInboxIdentity(second, input).scopeId);
+  const expected = input.provider === 'slack'
+    ? 'abe9b1d8991935d465112e493d71d4c547c4049ae98550d7743b87e0c5ffc3bd'
+    : 'dfd0dd989833e15eed31e450c1a0e766c0a03bc5f9701b922bc305c80c6ebfd8';
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    for (let repeat = 0; repeat < 5; repeat++) expect(resolveAccountInboxElectionScope(first)).toBe(expected);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+    expect(resolveAccountInboxElectionScope(second)).toBe(expected);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(2);
+    expect(() => resolveAccountInboxElectionScope({ ...first } as AccountInboxIdentity)).toThrow();
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(2);
+    const changed: AccountInboxIdentityInput = input.provider === 'slack'
+      ? { provider: 'slack', account: { ...input.account, userId: 'U-DIFFERENT-ACCOUNT' } }
+      : { provider: 'email', account: { ...input.account, mailbox: 'Archive' } };
+    expect(resolveAccountInboxElectionScope(await acquireAccountInboxIdentity(a.owner, changed))).not.toBe(expected);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(3);
+  } finally { hash.mockRestore(); }
+});
+
+test('an unrelated actual old mirror lookup shares its computed account codec with subsequent clustered selection', async () => {
+  const f = fixture(), name = `inbox-slack-${'a'.repeat(64)}.sqlite`;
+  const mirror = new InboxCursorStore(f.root, name, { sweepIntervalMs: 0 }); await mirror.init(); await mirror.close();
+  const original = readFileSync(join(f.directory, name)), hash = spyOn(crypto, 'createHash');
+  try {
+    const identity = await acquireAccountInboxIdentity(f.owner, slack);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+    expect(resolveAccountInboxElectionScope(identity)).toBe('abe9b1d8991935d465112e493d71d4c547c4049ae98550d7743b87e0c5ffc3bd');
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+    expect(resolveAccountInboxIdentity(identity, slack).mirrorFileName).not.toBe(name);
+    expect(readFileSync(join(f.directory, name))).toEqual(original);
+  } finally { hash.mockRestore(); }
 });

@@ -1,10 +1,11 @@
 /** Regression source intentionally unrun during the coding-first pass. */
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
-import { acquireDiscordInboxIdentity, acquireDiscordInboxRegistryRevision, resolveDiscordInboxIdentity,
+import { acquireDiscordInboxIdentity, acquireDiscordInboxRegistryRevision, resolveDiscordInboxIdentity, resolveDiscordInboxElectionScope,
   type DiscordInboxIdentity, type DiscordInboxIdentityInput } from '../platform/src/platform/intake/providers/discord-identity.js';
 import { InboxCursorStore } from '../platform/src/platform/intake/cursor-store.js';
 import { SqliteTriageStore } from '../platform/src/platform/intake/triage/store.js';
@@ -106,7 +107,7 @@ test('physical registry replacement during publication is refused even when byte
 test('physical lock replacement with identical payload cannot authorize a registry publication', async () => {
   const f = fixture(), lock = `${f.path}.owner.lock`;
   const owner = { ...f.owner, beforeWrite() { const stage = `${lock}.replacement`; writeFileSync(stage, readFileSync(lock)); renameSync(stage, lock); } };
-  await expect(acquireDiscordInboxIdentity(owner, input())).rejects.toMatchObject({ name: 'Error', message: 'Original native lock owner changed' });
+  await expect(acquireDiscordInboxIdentity(owner, input())).rejects.toMatchObject({ name: 'Error', message: 'Inbox native identity registry is unavailable' });
   expect(existsSync(f.path)).toBe(false); expect(existsSync(lock)).toBe(true);
 });
 
@@ -161,4 +162,40 @@ test('simultaneous acquisitions of the same scope return one stable persisted se
   const f = fixture(), source = input();
   const [a, b] = await Promise.all([acquireDiscordInboxIdentity(f.owner, source), acquireDiscordInboxIdentity(f.owner, source)]);
   expect(resolveDiscordInboxIdentity(a, source)).toEqual(resolveDiscordInboxIdentity(b, source));
+});
+
+
+test('native Discord published bot/DM election key is shared across nodes and computed once per genuine selection', async () => {
+  const a = fixture(), b = fixture(), source = input([channelId, '100000000000000003']);
+  const first = await acquireDiscordInboxIdentity(a.owner, source, { configuredRegistry: true });
+  const otherSource = { ...source, channels: { ...source.channels, channelIds: [...source.channels.channelIds].reverse(), revision: 'another-node-local-revision' } };
+  const second = await acquireDiscordInboxIdentity(b.owner, otherSource, { configuredRegistry: true });
+  expect(resolveDiscordInboxIdentity(first, source).scopeId).not.toBe(resolveDiscordInboxIdentity(second, otherSource).scopeId);
+  // Independent deployed v3.1.1 codec, used by the actual wire comparison below.
+  const expected = historicalScope(source, true), hash = spyOn(crypto, 'createHash');
+  try {
+    for (let repeat = 0; repeat < 5; repeat++) expect(resolveDiscordInboxElectionScope(first)).toBe(expected);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(2);
+    expect(resolveDiscordInboxElectionScope(second)).toBe(expected);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(4);
+    expect(() => resolveDiscordInboxElectionScope({ ...first } as DiscordInboxIdentity)).toThrow();
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(4);
+    const changed = input(['100000000000000099']);
+    expect(resolveDiscordInboxElectionScope(await acquireDiscordInboxIdentity(a.owner, changed, { configuredRegistry: true }))).not.toBe(expected);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(6);
+  } finally { hash.mockRestore(); }
+});
+
+test('an unrelated actual old Discord mirror lookup shares both deployed wire computations with the native clustered selection', async () => {
+  const f = fixture(), source = input(), expected = historicalScope(source, true), name = `inbox-discord-${'a'.repeat(64)}.sqlite`;
+  const mirror = new InboxCursorStore(f.root, name, { sweepIntervalMs: 0 }); await mirror.init(); await mirror.close();
+  const original = readFileSync(join(f.directory, name)), hash = spyOn(crypto, 'createHash');
+  try {
+    const identity = await acquireDiscordInboxIdentity(f.owner, source, { configuredRegistry: true });
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(2);
+    expect(resolveDiscordInboxElectionScope(identity)).toBe(expected);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(2);
+    expect(resolveDiscordInboxIdentity(identity, source).scopeId).not.toBe('a'.repeat(64));
+    expect(readFileSync(join(f.directory, name))).toEqual(original);
+  } finally { hash.mockRestore(); }
 });

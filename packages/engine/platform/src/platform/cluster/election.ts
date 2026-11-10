@@ -134,6 +134,7 @@ export class SurfaceElection {
 
   private cancelProbe: (() => void) | null = null;
   private cancelHeartbeat: (() => void) | null = null;
+  private heartbeatWork: Promise<void> | undefined;
   private cancelElection: (() => void) | null = null;
   private cancelSettle: (() => void) | null = null;
   private cancelHandoff: (() => void) | null = null;
@@ -363,6 +364,9 @@ export class SurfaceElection {
       replayFromMs: handoff === 'gap' ? this.lastHolderHeartbeatAt : null,
       reason,
     };
+    // Startup may own a held provider read. Keep announcing the original
+    // holder while the serialized transition awaits that exact startup.
+    this.armHeartbeat();
     try {
       await this.host.startConsumer(this.surfaceId, context);
       this.consumerRunning = true;
@@ -382,7 +386,6 @@ export class SurfaceElection {
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    this.armHeartbeat();
     this.armYieldCheck();
     await this.send('HEARTBEAT');
   }
@@ -398,6 +401,9 @@ export class SurfaceElection {
     this.role = 'resigning';
     this.cancelHeartbeat?.();
     this.cancelHeartbeat = null;
+    // Transport failure is already reported by the heartbeat owner; join it
+    // without allowing a failed send to skip the actual consumer stop.
+    await Promise.allSettled([this.heartbeatWork]);
     this.cancelYieldCheck?.();
     this.cancelYieldCheck = null;
     if (this.consumerRunning) {
@@ -628,11 +634,21 @@ export class SurfaceElection {
   private armHeartbeat(): void {
     this.cancelHeartbeat?.();
     const tick = (): void => {
-      this.enqueue(async () => {
+      if (this.role !== 'master') return;
+      this.cancelHeartbeat = this.host.clock.setTimer(tick, this.host.timing.heartbeatMs);
+      if (this.heartbeatWork) return;
+      // Heartbeats report the retained holder, not a role transition. They must
+      // not queue behind its provider startup/drain. Own and join each send
+      // before RESIGN, so no late heartbeat can resurrect a retired holder.
+      const work = Promise.resolve().then(async () => {
         if (this.role !== 'master') return;
         this.host.ledger.noteHolder(this.surfaceId, this.host.nodeId, this.host.clock.monotonicNow());
         await this.send('HEARTBEAT');
-        this.cancelHeartbeat = this.host.clock.setTimer(tick, this.host.timing.heartbeatMs);
+      });
+      this.heartbeatWork = work;
+      void work.then(() => { if (this.heartbeatWork === work) this.heartbeatWork = undefined; }, () => {
+        if (this.heartbeatWork === work) this.heartbeatWork = undefined;
+        this.host.logger.error('cluster: holder heartbeat failed');
       });
     };
     this.cancelHeartbeat = this.host.clock.setTimer(tick, this.host.timing.heartbeatMs);

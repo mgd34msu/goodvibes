@@ -2,10 +2,10 @@
 import { expect, test } from 'bun:test';
 import { daemonReleaseArtifactDescriptors } from '../../../.github/scripts/stage-native-release-assets.mjs';
 import { nativeReaderCapabilities, parseDaemonCiArtifact } from '../platform/src/platform/runtime/self-update.js';
-import { nativeCohortFixture } from './_helpers/daemon-native-cohort.js';
+import { nativeDescriptorFixture } from './_helpers/daemon-native-cohort.js';
 
 test('public native descriptors preserve the released six-key v1 protocol and the exact richer CI evidence', () => {
-  const f = nativeCohortFixture({ version: '3.1.2', daemonBytes: 'compiled fixture', readers: nativeReaderCapabilities('3.1.2') });
+  const f = nativeDescriptorFixture({ version: '3.1.2', readers: nativeReaderCapabilities('3.1.2') });
   const bytes = Buffer.from(JSON.stringify(f.artifact)); const pair = daemonReleaseArtifactDescriptors(f.artifact, bytes);
   const compatible = JSON.parse(pair.compatible.toString('utf8'));
   // This fixed key set is the exact v3.1.1 parser contract, inspected from its tag.
@@ -16,7 +16,7 @@ test('public native descriptors preserve the released six-key v1 protocol and th
 });
 
 test('a profile from another source cannot be published beside an unrelated compatible descriptor', () => {
-  const f = nativeCohortFixture({ version: '3.1.2', daemonBytes: 'compiled fixture', readers: nativeReaderCapabilities('3.1.2') });
+  const f = nativeDescriptorFixture({ version: '3.1.2', readers: nativeReaderCapabilities('3.1.2') });
   const foreign = { ...f.artifact, sourceTree: 'f'.repeat(40) };
   expect(() => daemonReleaseArtifactDescriptors(f.artifact, Buffer.from(JSON.stringify(foreign)))).toThrow('reader evidence changed');
 });

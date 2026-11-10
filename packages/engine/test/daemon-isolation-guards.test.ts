@@ -35,7 +35,7 @@ import { join } from 'node:path';
 import type { ServiceCommandRunner } from '../platform/src/platform/daemon/service-handover.ts';
 import { recordDaemonStartAttempt } from '../platform/src/platform/daemon/lifecycle-marker.ts';
 import { applyVerifiedUpdate, inspectDaemonNativeInstallation, resolveDaemonNativeTargets, retainDaemonNativeFiles, rollbackKeptPrevious, type UpdateFileIo } from '../platform/src/platform/runtime/self-update.ts';
-import { nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
+import { nativeCohortFixture, nativeCohortReleaseFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
 import { DaemonLifecycleRuntime, type DaemonUpdateArtifact, type DaemonLifecycleRuntimeOptions } from '../platform/src/platform/daemon/facade-lifecycle.ts';
 import { describeSecretIsolation } from '../platform/src/platform/runtime/secrets-composition.ts';
 
@@ -307,7 +307,7 @@ for (const retire of ['payload', 'cancel'] as const) test(`${retire} retirement 
 
 test('native verified apply and rollback each permit the newly running artifact to promote', async () => {
   const native = nativePromotionInstallation(); const first = native.admit();
-  const next = nativeCohortFixture({ version: '2.0.0', daemonBytes: 'synthetic daemon 2.0.0' });
+  const next = nativeCohortReleaseFixture({ version: '2.0.0', daemonBytes: 'synthetic daemon 2.0.0' });
   const base = 'https://native-fixture.test/release'; const requests: string[] = [];
   await applyVerifiedUpdate({ targets: native.targets, io: native.memory.io, platform: 'linux', downloadBaseUrl: base,
     daemonNative: { execPath: native.execPath, platform: 'linux', arch: 'x64', version: '2.0.0' },

@@ -7,7 +7,7 @@ import { applyVerifiedUpdate, inspectDaemonNativeInstallation, realUpdateFileIo,
 import { performDaemonHandover, DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '../platform/src/platform/runtime/client/daemon-handover.ts';
 import { applyDaemonReleaseFeedMigrationPass } from '../platform/src/platform/config/manager-migration-passes.ts';
 import { DAEMON_RELEASES_LATEST_URL, migrateLegacyDaemonReleaseFeed } from '../platform/src/platform/config/schema-domain-update.ts';
-import { nativeCohortFixture } from './_helpers/daemon-native-cohort.ts';
+import { nativeCohortFixture, nativeCohortReleaseFixture } from './_helpers/daemon-native-cohort.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -17,7 +17,7 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'daemon-real-native-cohort-')); roots.push(root);
   const execPath = join(root, 'owned installation', `goodvibes-daemon-linux-${arch}`);
   const old = nativeCohortFixture({ version: '2.0.23', daemonBytes: 'original daemon', arch });
-  const next = nativeCohortFixture({ version: '2.0.24', daemonBytes: 'replacement daemon', arch });
+  const next = nativeCohortReleaseFixture({ version: '2.0.24', daemonBytes: 'replacement daemon', arch });
   for (const [path, bytes] of Object.entries(old.installation(execPath))) {
     mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, bytes);
     chmodSync(path, path === execPath || path.endsWith('.bun') ? 0o755 : 0o644);

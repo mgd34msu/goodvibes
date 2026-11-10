@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import {
   DAEMON_REPO_RELEASES_LATEST_URL,
   DAEMON_SPLIT_FLOOR_VERSION,
@@ -16,11 +17,12 @@ import {
   type RunCommandLike,
   type RunDaemonHandoverOptions,
 } from '../platform/src/platform/runtime/client/daemon-handover.ts';
-import type {
-  UpdateFetchLike,
-  UpdateFileIo,
+import {
+  resolveDaemonNativeTargets,
+  type UpdateFetchLike,
+  type UpdateFileIo,
 } from '../platform/src/platform/runtime/self-update.ts';
-import { nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
+import { nativeCohortFixture, nativeCohortReleaseFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
 
 // The legacy banner and filesystem are retained while the complete native
 // daemon installation is prepared. Every seam is local: the `--version`
@@ -53,20 +55,25 @@ function stubRunCommand(script: {
 /**
  * A fetch stub serving the daemon repository's release: a HEAD redirect naming
  * `tag`, a SHA256SUMS.txt, and the asset bytes themselves. `assets` decides
- * which asset names exist, everything else 404s, which is exactly how a
- * missing surface binary behaves against the daemon's real releases.
+ * which bytes are served. unavailableAssets leaves a genuine complete
+ * manifest in place while its advertised payload responds404.
  */
 function stubDaemonReleaseFetch(options: {
   readonly tag?: string;
   readonly assets?: Record<string, string>;
+  readonly checksumManifest?: string;
+  readonly unavailableAssets?: readonly string[];
   readonly requested?: string[];
 }): UpdateFetchLike {
   const tag = options.tag ?? SPLIT_TAG;
-  const cohort = nativeCohortFixture({ version: tag.replace(/^v/, ''), daemonBytes: 'new-daemon-bytes' });
-  const assets = options.assets ?? Object.fromEntries(Object.entries(cohort.assets).map(([name, bytes]) => [name, bytes.toString()]));
-  const manifest = Object.entries(assets)
-    .map(([name, body]) => `${Bun.SHA256.hash(body, 'hex')}  ${name}`)
-    .join('\n');
+  let release: { readonly assets: Record<string, string>; readonly manifest: string } | undefined;
+  const releaseAssets = () => {
+    if (release) return release;
+    if (options.assets !== undefined) return release = { assets: options.assets,
+      manifest: options.checksumManifest ?? '' };
+    const cohort = nativeCohortReleaseFixture({ version: tag.replace(/^v/, ''), daemonBytes: 'new-daemon-bytes' });
+    return release = { assets: Object.fromEntries(Object.entries(cohort.assets).map(([name, bytes]) => [name, bytes.toString()])), manifest: cohort.checksumManifest };
+  };
   return async (url: string) => {
     options.requested?.push(url);
     if (url === DAEMON_REPO_RELEASES_LATEST_URL) {
@@ -86,7 +93,8 @@ function stubDaemonReleaseFetch(options: {
     }
     const base = `${daemonReleaseDownloadBaseUrl(tag)}/`;
     const name = url.startsWith(base) ? url.slice(base.length) : null;
-    const body = name === 'SHA256SUMS.txt' ? manifest : name ? assets[name] : undefined;
+    const source = releaseAssets();
+    const body = name === 'SHA256SUMS.txt' ? source.manifest : name && !options.unavailableAssets?.includes(name) ? source.assets[name] : undefined;
     if (body === undefined) {
       return {
         ok: false,
@@ -109,9 +117,9 @@ function stubDaemonReleaseFetch(options: {
 }
 
 /** An in-memory filesystem standing in for the install directory. */
-function memoryIo(seed: Record<string, string> = {}): UpdateFileIo & { readonly files: Map<string, Buffer> } {
+function memoryIo(seed: Record<string, string> = {}): UpdateFileIo & { readonly files: Map<string, Buffer>; readonly mutations: readonly string[] } {
   const memory = nativeMemoryIo(Object.fromEntries(Object.entries(seed).map(([path, bytes]) => [path, Buffer.from(bytes)])));
-  return { ...memory.io, files: memory.files };
+  return { ...memory.io, files: memory.files, mutations: memory.mutations };
 }
 
 describe('parseDaemonVersionOutput', () => {
@@ -345,57 +353,75 @@ describe('performDaemonHandover', () => {
 
   test('an asset missing from the release is a refusal, not a silent skip', async () => {
     const io = memoryIo({ [DAEMON_PATH]: 'old-daemon-bytes' });
+    const requested: string[] = [];
     await expect(
       performDaemonHandover({
         runCommand: stubRunCommand({}),
-        fetchImpl: stubDaemonReleaseFetch({ assets: { 'something-else': 'x' } }),
+        fetchImpl: stubDaemonReleaseFetch({ unavailableAssets: [DAEMON_ASSET], requested }),
         binaryPath: DAEMON_PATH,
         assetName: DAEMON_ASSET,
         io,
       }),
     ).rejects.toThrow(/download failed \(404\)/);
+    expect(requested).toContain(`${daemonReleaseDownloadBaseUrl(SPLIT_TAG)}/${DAEMON_ASSET}`);
+    expect(io.mutations).toEqual([]);
     expect(io.files.get(DAEMON_PATH)?.toString()).toBe('old-daemon-bytes');
   });
 
   test('checksum-valid runtime metadata for a different target refuses the whole native release', async () => {
-    const fixture = nativeCohortFixture({ version: '2.0.23', daemonBytes: 'new-daemon-bytes' });
-    const metadata = JSON.stringify({ version: '1.3.14', target: 'linux-arm64', source: 'build-interpreter',
-      sha256: Bun.SHA256.hash('bun-2.0.23', 'hex'), upstreamSource: 'https://github.com/oven-sh/bun/tree/bun-v1.3.14' });
-    const artifact = { ...fixture.artifact, files: fixture.artifact.files.map(file => file.path.endsWith('.bun.json')
-      ? { ...file, sha256: Bun.SHA256.hash(metadata, 'hex'), size: Buffer.byteLength(metadata) } : file) };
-    const assets = { ...Object.fromEntries(Object.entries(fixture.assets).map(([name, bytes]) => [name, bytes.toString()])),
-      [`${DAEMON_ASSET}.bun.json`]: metadata, [`${DAEMON_ASSET}.ci-artifact.json`]: JSON.stringify(artifact) };
+    const fixture = nativeCohortReleaseFixture({ version: '2.0.23', daemonBytes: 'new-daemon-bytes', runtimeProvenanceTarget: 'linux-arm64' });
+    const assets = Object.fromEntries(Object.entries(fixture.assets).map(([name, bytes]) => [name, bytes.toString()]));
     const io = memoryIo({ [DAEMON_PATH]: 'old-daemon-bytes' });
     await expect(performDaemonHandover({ binaryPath: DAEMON_PATH, assetName: DAEMON_ASSET, io,
-      runCommand: stubRunCommand({}), fetchImpl: stubDaemonReleaseFetch({ assets }) })).rejects.toThrow(/provenance/);
+      runCommand: stubRunCommand({}), fetchImpl: stubDaemonReleaseFetch({ assets, checksumManifest: fixture.checksumManifest }) })).rejects.toThrow(/provenance/);
     expect(io.files.get(DAEMON_PATH)?.toString()).toBe('old-daemon-bytes');
     expect(io.files.has(`${DAEMON_PATH}.previous`)).toBe(false);
     expect(io.files.has(`${DAEMON_PATH}.bun`)).toBe(false);
   });
 
   test('checksum-valid artifact provenance without an exact source commit refuses publication', async () => {
-    const fixture = nativeCohortFixture({ version: '2.0.23', daemonBytes: 'new-daemon-bytes' });
-    const assets = { ...Object.fromEntries(Object.entries(fixture.assets).map(([name, bytes]) => [name, bytes.toString()])),
-      [`${DAEMON_ASSET}.ci-artifact.json`]: JSON.stringify({ ...fixture.artifact, sourceCommit: 'main' }) };
+    const fixture = nativeCohortReleaseFixture({ version: '2.0.23', daemonBytes: 'new-daemon-bytes', sourceCommit: 'main' });
+    const assets = Object.fromEntries(Object.entries(fixture.assets).map(([name, bytes]) => [name, bytes.toString()]));
     const io = memoryIo({ [DAEMON_PATH]: 'old-daemon-bytes' });
     await expect(performDaemonHandover({ binaryPath: DAEMON_PATH, assetName: DAEMON_ASSET, io,
-      runCommand: stubRunCommand({}), fetchImpl: stubDaemonReleaseFetch({ assets }) })).rejects.toThrow(/exact source/);
+      runCommand: stubRunCommand({}), fetchImpl: stubDaemonReleaseFetch({ assets, checksumManifest: fixture.checksumManifest }) })).rejects.toThrow(/exact source/);
     expect(io.files.get(DAEMON_PATH)?.toString()).toBe('old-daemon-bytes');
     expect(io.files.has(`${DAEMON_PATH}.previous`)).toBe(false);
   });
 
   for (const missing of [`${DAEMON_ASSET}.bun`, `${DAEMON_ASSET}.bun.LICENSE.md`, `${DAEMON_ASSET}.bun.json`, 'sqlite-vec-linux-x64.so', `${DAEMON_ASSET}.ci-artifact.json`]) {
     test(`a new release missing ${missing} leaves every legacy member in place`, async () => {
-      const fixture = nativeCohortFixture({ version: '2.0.23', daemonBytes: 'new-daemon-bytes' });
-      const assets = Object.fromEntries(Object.entries(fixture.assets).filter(([name]) => name !== missing).map(([name, bytes]) => [name, bytes.toString()]));
+      const requested: string[] = [];
       const io = memoryIo({ [DAEMON_PATH]: 'old-daemon-bytes' });
       await expect(performDaemonHandover({ binaryPath: DAEMON_PATH, assetName: DAEMON_ASSET, io,
-        runCommand: stubRunCommand({}), fetchImpl: stubDaemonReleaseFetch({ assets }) })).rejects.toThrow(/download failed/);
+        runCommand: stubRunCommand({}), fetchImpl: stubDaemonReleaseFetch({ unavailableAssets: [missing], requested }) })).rejects.toThrow(/download failed \(404\)/);
+      expect(requested).toContain(`${daemonReleaseDownloadBaseUrl(SPLIT_TAG)}/${missing}`);
+      expect(io.mutations).toEqual([]);
       expect(io.files.get(DAEMON_PATH)?.toString()).toBe('old-daemon-bytes');
       expect(io.files.has(`${DAEMON_PATH}.previous`)).toBe(false);
       expect(io.files.has(`${DAEMON_PATH}.bun`)).toBe(false);
     });
   }
+
+  test('a missing native descriptor pin refuses before every payload request, hash and install write', async () => {
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      // Only the declared names and pin shapes are read before this refusal;
+      // no payload will be fetched or compared, so no real pin is produced.
+      const targets = resolveDaemonNativeTargets(DAEMON_PATH, 'linux', 'x64');
+      if (!targets) throw new Error('Expected actual native handover target catalog');
+      expect(targets.at(-1)?.assetName).toBe(`${DAEMON_ASSET}.ci-artifact.json`);
+      const checksumManifest = targets.slice(0, -1).map(target => `${'a'.repeat(64)}  ${target.assetName}`).join('\n');
+      const requested: string[] = [], io = memoryIo({ [DAEMON_PATH]: 'old-daemon-bytes' });
+      await expect(performDaemonHandover({ binaryPath: DAEMON_PATH, assetName: DAEMON_ASSET, io,
+        runCommand: stubRunCommand({}), fetchImpl: stubDaemonReleaseFetch({ assets: {}, checksumManifest, requested }) }))
+        .rejects.toThrow(`no checksum entry for ${DAEMON_ASSET}.ci-artifact.json in SHA256SUMS.txt`);
+      expect(requested).toEqual([DAEMON_REPO_RELEASES_LATEST_URL, `${daemonReleaseDownloadBaseUrl(SPLIT_TAG)}/SHA256SUMS.txt`]);
+      expect(hash).not.toHaveBeenCalled();
+      expect(io.mutations).toEqual([]);
+      expect([...io.files.entries()]).toEqual([[DAEMON_PATH, Buffer.from('old-daemon-bytes')]]);
+    } finally { hash.mockRestore(); }
+  });
 
   test('a binary whose banner is unreadable cannot enter legacy native adoption', async () => {
     const io = memoryIo({ [DAEMON_PATH]: 'old-daemon-bytes' });

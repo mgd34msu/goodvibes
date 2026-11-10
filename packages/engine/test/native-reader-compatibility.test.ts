@@ -5,11 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, parseNativeReaderCapabilities, NativeDataCompatibilityError,
   NATIVE_READER_REQUIREMENT_FILE, type AdmittedNativeDataPublisher } from '../platform/src/platform/runtime/native-reader-compatibility.js';
-import { applyVerifiedUpdate, realUpdateFileIo, resolveDaemonNativeTargets, sha256, UpdateTransactionError, type UpdateFetchLike } from '../platform/src/platform/runtime/self-update.js';
+import { applyVerifiedUpdate, realUpdateFileIo, resolveDaemonNativeTargets, UpdateTransactionError, type UpdateFetchLike } from '../platform/src/platform/runtime/self-update.js';
 import { DurableBudgetLedger, PaymentBudgetUnavailableError } from '../platform/src/platform/payments/host/budget-store.js';
 import { BudgetLedger, type BudgetLimits } from '../platform/src/platform/payments/budget.js';
 import { tryAcquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
-import { nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.js';
+import { nativeCohortFixture, nativeCohortReleaseFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.js';
 import { TelegramOffsetStore } from '../platform/src/platform/channels/telegram/offset-store.js';
 
 const roots: string[] = [];
@@ -188,21 +188,14 @@ for (const profile of ['old-version', 'same-version-unknown', 'same-version-miss
     const candidateVersion = profile === 'old-version' ? '3.1.1' : '3.1.2';
     const readers = profile === 'old-version' || profile === 'same-version-unknown' ? undefined
       : profile === 'same-version-missing' ? { schema: 1 as const, version: candidateVersion, formats: [] } : nativeReaderCapabilities(candidateVersion);
-    const candidate = nativeCohortFixture({ version: candidateVersion, daemonBytes: 'candidate-reader', ...(readers ? { readers } : {}) });
-    if (profile === 'foreign-reader-profile') {
-      const name = 'goodvibes-daemon-linux-x64.reader-ci-artifact.json';
-      const changed = Buffer.from(JSON.stringify({ ...candidate.artifact, sourceTree: 'f'.repeat(40) }));
-      candidate.assets[name] = changed;
-      const pin = sha256(changed);
-      candidate.checksumManifest = candidate.checksumManifest.split('\n').map(line => line.endsWith('  ' + name) ? `${pin}  ${name}` : line).join('\n');
-    }
-    if (profile === 'malformed-reader-pin' || profile === 'ambiguous-reader-pin') {
+    const candidate = nativeCohortReleaseFixture({ version: candidateVersion, daemonBytes: 'candidate-reader', ...(readers ? { readers } : {}),
+      ...(profile === 'foreign-reader-profile' ? { readerSourceTree: 'f'.repeat(40) } : {}),
+      ...(profile === 'malformed-reader-pin' ? { readerChecksum: 'not-a-digest' } : {}) });
+    if (profile === 'ambiguous-reader-pin') {
       const name = 'goodvibes-daemon-linux-x64.reader-ci-artifact.json';
       const originalLine = candidate.checksumManifest.split('\n').find(line => line.endsWith('  ' + name));
       if (!originalLine) throw new Error('Reader fixture asset pin was not produced');
-      candidate.checksumManifest = profile === 'malformed-reader-pin'
-        ? candidate.checksumManifest.split('\n').map(line => line.endsWith('  ' + name) ? 'not-a-digest  ' + name : line).join('\n')
-        : candidate.checksumManifest + originalLine + '\n';
+      candidate.checksumManifest += originalLine + '\n';
     }
     const floor = '/native-reader-fixture/' + NATIVE_READER_REQUIREMENT_FILE;
     const memory = nativeMemoryIo({ ...previous.installation(execPath), ...(hasRequirement ? { [floor]: Buffer.from(requirement()) } : {}) });

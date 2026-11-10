@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
 import { parseDaemonInstallationReceipt, resolveDaemonInstallationReaders, nativeReaderCapabilities,
   type DaemonInstallationReceipt } from '../platform/src/platform/runtime/self-update.ts';
-import { nativeCohortFixture } from './_helpers/daemon-native-cohort.ts';
+import { nativeDescriptorFixture } from './_helpers/daemon-native-cohort.ts';
 
 function fixture() {
-  const previous = nativeCohortFixture({ version: '3.1.2', daemonBytes: 'outgoing-v1-reader' });
-  const current = nativeCohortFixture({ version: '3.1.3', daemonBytes: 'incoming-reader', readers: nativeReaderCapabilities('3.1.3') });
+  const previous = nativeDescriptorFixture({ version: '3.1.2' });
+  const current = nativeDescriptorFixture({ version: '3.1.3', readers: nativeReaderCapabilities('3.1.3') });
   const readers = nativeReaderCapabilities('3.1.2');
   const candidate = parseDaemonInstallationReceipt(JSON.parse(previous.receipt.toString()), 'linux-x64');
   const companion = parseDaemonInstallationReceipt({ ...JSON.parse(current.receipt.toString()),

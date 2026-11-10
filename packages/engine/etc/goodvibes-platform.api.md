@@ -13230,7 +13230,7 @@ export interface OperatorMethodOutputMap {
                     endpointKind: "hosted" | "local";
                     requestedModel: string;
                     latencyMs: number;
-                    outcome: "aborted" | "answered" | "invalid-request" | "invalid-response" | "rejected" | "unavailable" | "unrecorded";
+                    outcome: "aborted" | "answered" | "internal" | "invalid-request" | "invalid-response" | "rejected" | "unavailable" | "unrecorded";
                     requestId?: string;
                     status?: number;
                 };
@@ -14556,7 +14556,7 @@ export interface OperatorMethodOutputMap {
                         endpointKind: "hosted" | "local";
                         requestedModel: string;
                         latencyMs: number;
-                        outcome: "aborted" | "answered" | "invalid-request" | "invalid-response" | "rejected" | "unavailable" | "unrecorded";
+                        outcome: "aborted" | "answered" | "internal" | "invalid-request" | "invalid-response" | "rejected" | "unavailable" | "unrecorded";
                         requestId?: string;
                         status?: number;
                     };
@@ -15891,7 +15891,7 @@ export interface OperatorMethodOutputMap {
                         endpointKind: "hosted" | "local";
                         requestedModel: string;
                         latencyMs: number;
-                        outcome: "aborted" | "answered" | "invalid-request" | "invalid-response" | "rejected" | "unavailable" | "unrecorded";
+                        outcome: "aborted" | "answered" | "internal" | "invalid-request" | "invalid-response" | "rejected" | "unavailable" | "unrecorded";
                         requestId?: string;
                         status?: number;
                     };

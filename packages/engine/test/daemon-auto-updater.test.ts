@@ -32,7 +32,7 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import { redactSensitiveDataAsync } from '../platform/src/platform/utils/redaction.ts';
 import { installJudgmentPort, forgetFailureReadings } from '@goodvibes-jev/engine/errors';
 import { failureReadingsPort } from './_helpers/failure-readings.ts';
-import { nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
+import { nativeCohortFixture, nativeCohortReleaseFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
 let previousFailurePort: ReturnType<typeof installJudgmentPort>;
 beforeEach(async () => {
   forgetFailureReadings();
@@ -95,7 +95,7 @@ function releaseFetch(overrides: { latestTag?: string; assetName?: string; reade
   let release: { assets: Record<string, Buffer>; manifest: string } | undefined;
   const releaseAssets = () => {
     if (release) return release;
-    const cohort = nativeCohortFixture({ version: tag.replace(/^v/, ''), daemonBytes: NEW_DAEMON.toString(), ...(overrides.readers ? { readers: overrides.readers } : {}) });
+    const cohort = nativeCohortReleaseFixture({ version: tag.replace(/^v/, ''), daemonBytes: NEW_DAEMON.toString(), ...(overrides.readers ? { readers: overrides.readers } : {}) });
     const daemonPin = cohort.artifact.files.find(file => file.path === DAEMON_ASSET)?.sha256;
     if (!daemonPin || !cohort.assets[DAEMON_ASSET]?.equals(NEW_DAEMON)) throw new Error('Original daemon fixture bytes are required');
     const assets = { ...cohort.assets, [assetName]: NEW_DAEMON };

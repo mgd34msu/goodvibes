@@ -72,7 +72,7 @@ function source(value: unknown, previous?: NativeExecutionOriginal): Record<stri
   // Other callers first cross a descriptor-safe detached snapshot; cloning
   // that snapshot normalizes its null prototypes without touching getters.
   const captured = value && typeof value === 'object' && nativeApply(nativeWeakHas, decodedJson, [value])
-    ? value : clone(captureOwnedJson(value, isProxy));
+    ? value : clone(captureOwnedJson(value, rejectNonWireObject));
   if (captured === null || typeof captured !== 'object' || Array.isArray(captured)) throw new Error();
   if (previous && origin(previous) && !isDeepStrictEqual(immutable(captured as unknown as NativeExecutionOriginal), immutable(previous))) throw new Error();
   const request = value && typeof value === 'object' ? Object.getOwnPropertyDescriptor(value, 'request') : undefined;
@@ -81,6 +81,13 @@ function source(value: unknown, previous?: NativeExecutionOriginal): Record<stri
     Object.defineProperty(captured, 'request', { value: request.value, enumerable: true });
   }
   return captured as Record<string, unknown>;
+}
+/** Closed wire records cannot silently discard hidden fields during capture. */
+function rejectNonWireObject(value: object): boolean {
+  if (isProxy(value)) return true;
+  const array = Array.isArray(value);
+  return Reflect.ownKeys(value).some(key => typeof key !== 'string'
+    || (!(array && key === 'length') && Object.getOwnPropertyDescriptor(value, key)?.enumerable !== true));
 }
 function fields(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) && !isProxy(value) && Object.getPrototypeOf(value) === Object.prototype
@@ -133,8 +140,8 @@ function ownerCommitment(value: Omit<NativeRequestOwner, 'commitment'>): string 
  * only weak request provenance. Saved/copied JSON must independently verify. */
 export function bindNativeExecutionRequest(request: DurableContractRequest, projectId: string, owner: NativeExecutionOwnerFacts, authorityScopes: readonly string[]): DurableContractRequest {
   if (typeof projectId !== 'string' || !projectId) throw new NativeWorkExecutionError('invalid');
-  const input = clone(captureOwnedJson(request, isProxy)) as DurableContractRequest;
-  const facts = clone(captureOwnedJson({ owner, authorityScopes }, isProxy)) as { owner: NativeExecutionOwnerFacts; authorityScopes: string[] };
+  const input = clone(captureOwnedJson(request, rejectNonWireObject)) as DurableContractRequest;
+  const facts = clone(captureOwnedJson({ owner, authorityScopes }, rejectNonWireObject)) as { owner: NativeExecutionOwnerFacts; authorityScopes: string[] };
   if (!fields(facts.owner, ['principalId', 'authorityRevision', 'scopeId', 'scopeRevision']) || Object.values(facts.owner).some(value => typeof value !== 'string' || !value)
     || !scopeList(facts.authorityScopes)) throw new NativeWorkExecutionError('invalid');
   const data = { projectId, projectRoot: input.input.projectRoot, owner: freeze(facts.owner), authorityScopes: freeze([...facts.authorityScopes].sort()) };

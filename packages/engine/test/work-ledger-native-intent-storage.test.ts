@@ -80,6 +80,9 @@ test('intent parser is exact, detached, and contains no decision or runner recei
   expect(() => parseNativeWorkExecutionRecord({ ...f.record, generation: 1 })).toThrow('invalid');
   expect(() => parseNativeWorkExecutionIntent({ ...f.intent, [Symbol('receipt')]: 'hidden' })).toThrow('invalid');
   expect(() => parseNativeWorkExecutionIntent(Object.defineProperty({ ...f.intent }, 'receipt', { value: 'hidden' }))).toThrow('invalid');
+  expect(() => parseNativeWorkExecutionIntent({ ...f.intent, target: Object.defineProperty({ ...f.intent.target }, 'receipt', { value: 'hidden' }) })).toThrow('invalid');
+  expect(() => parseNativeWorkExecutionIntent({ ...f.intent, request: Object.defineProperty({ ...f.intent.request }, 'receipt', { value: 'hidden' }) })).toThrow('invalid');
+  expect(() => parseNativeWorkExecutionRecord(Object.defineProperty({ ...f.record }, 'generation', { value: 1 }))).toThrow('invalid');
   let getterCalls = 0;
   expect(() => parseNativeWorkExecutionIntent({ ...f.intent, get state() { getterCalls++; return 'admitting'; } })).toThrow('invalid');
   expect(getterCalls).toBe(0);

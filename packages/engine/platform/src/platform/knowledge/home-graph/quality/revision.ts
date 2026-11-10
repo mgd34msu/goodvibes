@@ -22,7 +22,9 @@ interface SubjectState {
   readonly entities: readonly Dependency[];
 }
 interface Capture {
+  readonly nodeId: string;
   readonly node: KnowledgeNodeRecord;
+  readonly generation: string;
   readonly dependency: Dependency | null;
   assertCurrent(): void;
 }
@@ -62,7 +64,7 @@ function capture(store: KnowledgeStore, node: KnowledgeNodeRecord): Capture {
   const selected = history.firstId && history.latestId ? {
     nodeId: node.id, incarnation: history.firstId, revisionId: history.latestId, generation: snapshot.generation,
   } : null;
-  return { node, dependency: selected, assertCurrent() {
+  return { nodeId: node.id, node, generation: snapshot.generation, dependency: selected, assertCurrent() {
     if (store.getNode(node.id) !== node || store.getRecordGeneration('node', node.id) !== snapshot.generation) throw new Held('stale');
   } };
 }
@@ -142,6 +144,19 @@ export function createQualityRevisionPlans(store: KnowledgeStore) {
         return { subjectRevision: revision, homeGraphQualityRevisionVersion: HOME_GRAPH_QUALITY_REVISION_VERSION, qualitySubjectState: state };
       } };
     },
-    assertCurrent() { for (const selected of captures.values()) selected.assertCurrent(); },
+    assertCurrent() {
+      if (captures.size === 0) return;
+      // One closed native read-set checks these same original rows together.
+      // It retains physical pre/post fences without repeating every native
+      // execution dependency probe for each row in the global quality guard.
+      store.assertRecordSnapshotFrame(() => {
+        const selected = [...captures.values()];
+        const generations = store.getRecordGenerations(selected.map(item => ({ kind: 'node' as const, id: item.nodeId })));
+        for (const [index, item] of selected.entries()) {
+          if (item.node.id !== item.nodeId || store.getNode(item.nodeId) !== item.node || generations[index] !== item.generation) throw new Held('stale');
+        }
+        return undefined;
+      });
+    },
   };
 }

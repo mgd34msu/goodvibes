@@ -21,6 +21,8 @@ import { readHomeGraphState } from '../platform/src/platform/knowledge/home-grap
 import { sameKnowledgeRecord } from '../platform/src/platform/knowledge/store-record-representation.js';
 import { recordKnowledgeNodeRevisions } from '../platform/src/platform/knowledge/store-node-history.js';
 import { createKnowledgeNodeOperatorMutation, retainKnowledgeNodeRecord } from '../platform/src/platform/knowledge/store-node-authority.js';
+import { createQualityRevisionPlans } from '../platform/src/platform/knowledge/home-graph/quality/revision.js';
+import { projectHomeGraphQualityInput } from '../platform/src/platform/knowledge/home-graph/quality/projection.js';
 let previous: JudgmentPort | undefined;
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 const spaceId = 'homeassistant:quality-fixture', installationId = 'quality-fixture';
@@ -59,6 +61,57 @@ function legacyHomeGraphQualityFingerprint(node: KnowledgeNodeRecord, code: stri
   if (code === 'homegraph.device.unknown_battery') return '099efb8aac110367ecc4485d';
   throw Error('Unexpected older fixture code');
 }
+
+describe('closed global Home Graph quality revision guard', () => {
+  function prepare(store: KnowledgeStore, node: KnowledgeNodeRecord, entity: KnowledgeNodeRecord) {
+    const plans = createQualityRevisionPlans(store);
+    const input = projectHomeGraphQualityInput('device-1', node, [entity], [], ['batteryApplicable', 'manualApplicable']);
+    for (const code of ['homegraph.device.missing_manual', 'homegraph.device.unknown_battery']) plans.prepare(code, node, [entity], input, undefined);
+    return plans;
+  }
+
+  test('an empty plan uses no native frame or generation read after its unused store closes', async () => {
+    const { store } = await fixture(), plans = createQualityRevisionPlans(store);
+    await store.close();
+    const frame = spyOn(store, 'assertRecordSnapshotFrame'), batch = spyOn(store, 'getRecordGenerations');
+    try {
+      expect(() => plans.assertCurrent()).not.toThrow();
+      expect(frame).not.toHaveBeenCalled(); expect(batch).not.toHaveBeenCalled();
+    } finally { frame.mockRestore(); batch.mockRestore(); }
+  });
+
+  test('checks the actual deduplicated original rows through one closed generation read', async () => {
+    const { store, node, entity } = await fixture(), plans = prepare(store, node, entity);
+    const batch = spyOn(store, 'getRecordGenerations'), single = spyOn(store, 'getRecordGeneration');
+    try {
+      expect(() => plans.assertCurrent()).not.toThrow();
+      expect(batch).toHaveBeenCalledTimes(1);
+      expect(batch).toHaveBeenCalledWith([{ kind: 'node', id: node.id }, { kind: 'node', id: entity.id }]);
+      expect(single).not.toHaveBeenCalled();
+    } finally { batch.mockRestore(); single.mockRestore(); }
+  });
+
+  test.each(['changed', 'removed', 'equal-replacement', 'mid-guard-write'] as const)('preserves original row custody after %s', async change => {
+    const { store, node, entity } = await fixture(), plans = prepare(store, node, entity);
+    const originalGetNode = store.getNode.bind(store);
+    let intercepted = false;
+    if (change === 'changed') await seedHomeAssistantObservation(store, { ...entity, summary: 'A changed actual entity observation.' });
+    if (change === 'removed') await store.deleteNode(entity.id);
+    const getNode = change === 'equal-replacement' || change === 'mid-guard-write'
+      ? spyOn(store, 'getNode').mockImplementation(id => {
+        const current = originalGetNode(id);
+        if (id !== entity.id) return current;
+        intercepted = true;
+        if (change === 'equal-replacement') return current ? { ...current } : current;
+        const sqlite = (store as unknown as { sqlite: SQLiteStore }).sqlite;
+        sqlite.run('UPDATE knowledge_nodes SET summary = ? WHERE id = ?', ['Attempted mutation during the closed generation frame.', entity.id]);
+        return current;
+      }) : undefined;
+    try { expect(() => plans.assertCurrent()).toThrow('stale'); }
+    finally { getNode?.mockRestore(); }
+    if (getNode) expect(intercepted).toBe(true);
+  });
+});
 
 describe('Home Graph whole-pass quality authority', () => {
   test('creates new issues with reading provenance, relation scope and no operator authority; settled no removes only ordinary issues', async () => {

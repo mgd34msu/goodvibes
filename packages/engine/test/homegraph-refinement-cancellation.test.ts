@@ -5,6 +5,9 @@ import { join } from 'node:path';
 import { runHomeGraphRefinement } from '../platform/src/platform/knowledge/home-graph/refinement.js';
 import { KnowledgeSemanticService } from '../platform/src/platform/knowledge/semantic/service.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { runHomeGraphIssueTriage } from '../platform/src/platform/knowledge/home-graph/triage.js';
+import { bindJudgmentPortAuthority, installJudgmentPort, JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
+import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-refinement-cancellation-'));
@@ -13,7 +16,8 @@ function fixture() {
   return { root, store, semantic };
 }
 
-function expectAbort(error: unknown): void {
+function expectAbort(error: unknown, signal: AbortSignal): void {
+  expect(error).toBe(signal.reason);
   expect(error).toBeInstanceOf(DOMException);
   if (!(error instanceof DOMException)) throw new Error('Refinement did not report owner cancellation');
   expect(error.name).toBe('AbortError');
@@ -28,7 +32,7 @@ test('a cancelled refinement owner never initializes its store or enters semanti
   try {
     const error = await runHomeGraphRefinement({ store, semanticService: semantic, signal: owner.signal })
       .then(() => 'completed', (failure: unknown) => failure);
-    expectAbort(error);
+    expectAbort(error, owner.signal);
     expect(init).not.toHaveBeenCalled();
     expect(improve).not.toHaveBeenCalled();
   } finally {
@@ -68,7 +72,7 @@ test('refinement passes its original signal to real semantic work and drains tha
     expect(settled).toBe(false);
     expect(semanticCompleted).toBe(false);
     release.resolve();
-    expectAbort(await outcome);
+    expectAbort(await outcome, owner.signal);
     expect(semanticCompleted).toBe(true);
     expect(improve).toHaveBeenCalledTimes(1);
     expect(store.listNodes()).toEqual([]);
@@ -103,7 +107,7 @@ for (const skipGapRefinement of [false, true]) {
       await new Promise<void>(resolve => setImmediate(resolve));
       expect(settled).toBe(false);
       release.resolve();
-      expectAbort(await outcome);
+      expectAbort(await outcome, owner.signal);
       expect(improve).not.toHaveBeenCalled();
       expect(store.listNodes()).toEqual([]);
       expect(store.listIssues()).toEqual([]);
@@ -113,6 +117,55 @@ for (const skipGapRefinement of [false, true]) {
       init.mockRestore(); improve.mockRestore();
       await semantic.dispose(); await store.close();
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+
+test('triage cancellation during initialization drains the accepted store and never captures a provider', async () => {
+  const { root, store, semantic } = fixture(), owner = new AbortController();
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const fake = fakePort(() => noulAnswer(0.99));
+  let captures = 0;
+  bindJudgmentPortAuthority(fake.port, () => { captures++; throw new Error('A cancelled initialization must not acquire a provider'); });
+  const previous = installJudgmentPort(fake.port), initialize = store.init.bind(store);
+  const init = spyOn(store, 'init').mockImplementation(async () => { entered.resolve(); await release.promise; await initialize(); });
+  let settled = false;
+  const outcome = runHomeGraphIssueTriage({ store, installationId: 'cancelled-triage', signal: owner.signal })
+    .finally(() => { settled = true; });
+  try {
+    await entered.promise; owner.abort(); await new Promise<void>(resolve => setImmediate(resolve));
+    expect(settled).toBe(false); expect(captures).toBe(0);
+    release.resolve();
+    expect(await outcome).toMatchObject({ ok: true, reason: 'triage-held-aborted', processed: 0, decisions: [] });
+    expect(captures).toBe(0); expect(fake.requests).toEqual([]);
+    expect(store.listNodes()).toEqual([]); expect(store.listIssues()).toEqual([]); expect(store.listRefinementTasks()).toEqual([]);
+  } finally {
+    release.resolve(); await outcome.catch(() => {}); init.mockRestore(); installJudgmentPort(previous);
+    await semantic.dispose(); await store.close(); rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const retirement of ['caller-abort', 'provider-retired'] as const) {
+  test(`triage capture reports ${retirement} without confusing cancellation and provider retirement`, async () => {
+    const { root, store, semantic } = fixture(), owner = new AbortController();
+    const fake = fakePort(() => noulAnswer(0.99)); let captures = 0;
+    bindJudgmentPortAuthority(fake.port, () => {
+      captures++;
+      if (retirement === 'provider-retired') throw new Error('The original provider authority retired');
+      owner.abort(); return { identity: Object.freeze({}), assertCurrent() {} };
+    });
+    const previous = installJudgmentPort(fake.port);
+    try {
+      const result = await runHomeGraphIssueTriage({ store, installationId: 'capture-retirement', signal: owner.signal })
+        .then(value => value, (error: unknown) => error);
+      if (retirement === 'caller-abort') {
+        expect(result).toMatchObject({ ok: true, reason: 'triage-held-aborted', processed: 0, decisions: [] });
+      } else expect(result).toBeInstanceOf(JudgmentAuthorityRetiredError);
+      expect(captures).toBe(1); expect(fake.requests).toEqual([]);
+      expect(store.listNodes()).toEqual([]); expect(store.listIssues()).toEqual([]); expect(store.listRefinementTasks()).toEqual([]);
+    } finally {
+      installJudgmentPort(previous); await semantic.dispose(); await store.close(); rmSync(root, { recursive: true, force: true });
     }
   });
 }

@@ -126,9 +126,17 @@ export async function runHomeGraphIssueTriage(input: HomeGraphSpaceInput & {
   const open = state.issues.filter(triageable);
   const empty = (configured: boolean, reason: string, skipped = 0): HomeGraphTriageResult => ({ ok: true, spaceId, configured,
     processed: 0, skipped, applied: 0, reviewed: 0, decisions: [], remaining: open.length, minConfidence, reason });
+  // The accepted initialization must drain, but an owner cancelled during it
+  // never acquires a provider. Preserve cancellation before provider capture
+  // can normalize that same signal as a retired reading authority.
+  if (input.signal?.aborted) return empty(true, 'triage-held-aborted');
   let owner: JudgmentPortCapture;
   try { owner = captureJudgmentPort('engine.knowledge.homegraph-triage', { signal: input.signal }); }
-  catch (error) { if (error instanceof JudgmentPortMissingError) return empty(false, 'triage-judgment-not-configured'); throw error; }
+  catch (error) {
+    if (input.signal?.aborted) return empty(true, 'triage-held-aborted');
+    if (error instanceof JudgmentPortMissingError) return empty(false, 'triage-judgment-not-configured');
+    throw error;
+  }
   const model = owner.port.model, warm = warmReadings(input.store, owner.identity);
   const assertCurrent = () => {
     if (input.signal?.aborted) throw new Held('aborted');
@@ -136,7 +144,6 @@ export async function runHomeGraphIssueTriage(input: HomeGraphSpaceInput & {
   };
   const limit = options.limit ?? HOME_GRAPH_TRIAGE_DEFAULT_LIMIT;
   if (!Number.isInteger(limit) || limit < 1 || limit > TRIAGE_READING_LIMITS.inputs) throw new Held('budget');
-  if (input.signal?.aborted) return empty(true, 'triage-held-aborted');
   const skipIds = new Set(options.skipIssueIds ?? []);
   let skipped = 0;
   const selected: Array<{ issue: KnowledgeIssueRecord; input: ReturnType<typeof projectTriageInput>; cacheReference: () => string; snapshot: TriageSnapshot }> = [];

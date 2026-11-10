@@ -678,11 +678,22 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           clock.mockRestore();
         }
       })();
+      const nativePlan = fixture.context.workspace.workPlanStore!.getActivePlan({ readOnly: true });
+      // Orchestration owns native items, not the unused outer plan metadata.
+      // Its producer clock projection precedes every actual privacy reading.
       expect(judgmentInputCardProblem({
         artifacts: artifacts.store.list().map(record => ({ ...record, createdAt: new Date(record.createdAt).toISOString(),
           ...(record.expiresAt === undefined ? {} : { expiresAt: new Date(record.expiresAt).toISOString() }) })),
-        workPlan: fixture.context.workspace.workPlanStore!.getActivePlan({ readOnly: true }),
+        workItems: nativePlan.items.map(item => ({ ...item, createdAt: new Date(item.createdAt).toISOString(),
+          updatedAt: new Date(item.updatedAt).toISOString(),
+          ...(item.completedAt === undefined ? {} : { completedAt: new Date(item.completedAt).toISOString() }) })),
       })).toBeUndefined();
+      // The detector still refuses a card-shaped UUID in an arbitrary raw plan.
+      // This is a copied negative control, never a substituted native owner.
+      expect(judgmentInputCardProblem({ ...nativePlan, id: 'wp-aaaaaaaa-aaaa-4aaa-4111-111111111111' })).toBe('card-material');
+      const requests: Parameters<JudgmentPort['ask']>[0][] = [];
+      const originalPort = judgmentPort('orchestration-visible-native-boundary-control');
+      installJudgmentPort({ ...originalPort, ask(request) { requests.push(request); return originalPort.ask(request); } });
       Object.assign(fixture.context.ops as unknown as Record<string, unknown>, {
         agentManager: {
           exportState: () => agents,
@@ -1056,8 +1067,15 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(subagents?.createRoute).toContain('agent { mode: "spawn"');
         expect(subagents?.batchCreateRoute).toContain('agent { mode: "batch-spawn"');
       }
+      expect(requests.length).toBeGreaterThan(0);
+      expect(nativePlan.id).not.toBe('');
+      for (const request of requests) {
+        expect(judgmentInputCardProblem(request.state)).toBeUndefined();
+        // The independently persisted outer plan ID is not part of this wire.
+        expect(JSON.stringify(request.state)).not.toContain(nativePlan.id);
+      }
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   }, 120_000);
 

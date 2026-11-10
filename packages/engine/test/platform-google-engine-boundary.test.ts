@@ -39,7 +39,13 @@ function fixture() {
     frames: () => [frame], mainFrame: () => frame, locator: () => locator,
     goto: async () => null, waitForLoadState: async () => {}, evaluate: async () => '',
   } as unknown as Page;
-  const sessions = { provisionReport: () => null, defaultSessionId: () => 's', page: async () => { await targetWait?.(); return { pageId: 'p', page }; } } as unknown as BrowserSessionManager;
+  const pageLifetime = new AbortController();
+  const sessions = { provisionReport: () => null, defaultSessionId: () => 's', page: async () => { await targetWait?.(); return { pageId: 'p', page }; },
+    async withPage<T>(sessionId: string, pageId: string, read: (selected: Page, current: () => void, signal: AbortSignal) => Promise<T>): Promise<T> {
+      const current = () => { if (sessionId !== 's' || pageId !== 'p') throw new Error('Unknown fixture page'); pageLifetime.signal.throwIfAborted(); };
+      current(); const result = await read(page, current, pageLifetime.signal); current(); return result;
+    },
+  } as unknown as BrowserSessionManager;
   const untrusted: UntrustedContentPort = { rule: 'Untrusted', originOf: url => new URL(url).origin, recordIngest() {},
     label: input => ({ trust: 'untrusted', surface: 'web-page', origin: input.origin, retrievedAt: 'synthetic', text: input.text, truncated: input.truncated === true, rule: 'Untrusted' }),
     evaluateOutwardEffect: async () => { await approvalWait?.(); return { allowed: true, reason: null, fix: null, untrustedOrigins: [] }; },
@@ -109,4 +115,14 @@ test('a safe accessible name cannot hide secret-bearing metadata from an upstrea
   } }]);
   await expect(rig.browser.snapshot()).rejects.toThrow();
   expect(fake.requests).toHaveLength(0);
+});
+
+
+test('the live original session fixture permits actual click and type locator effects', async () => {
+  installJudgmentPort(readings().port); const rig = fixture();
+  await rig.browser.navigate('https://console.cloud.google.com/auth/clients'); await rig.browser.snapshot();
+  await rig.browser.click('e1', { assertCurrent() {} });
+  await rig.browser.snapshot();
+  await rig.browser.type('e1', 'synthetic', { assertCurrent() {}, submit: true });
+  expect(rig.effects).toEqual(['click', 'fill', 'press']);
 });

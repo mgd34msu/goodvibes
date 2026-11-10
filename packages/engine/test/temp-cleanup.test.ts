@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createTempDirRegistry, drainTempDirsUntilSettled } from '../toolchain/src/test-runner/temp-registry.ts';
-import { withRunTmpDir } from '../toolchain/src/test-runner/test-run-tmp.ts';
+import { withRunTmpDir, RUN_TMP_PREFIX } from '../toolchain/src/test-runner/test-run-tmp.ts';
 import { runOwnedTestChild } from '../toolchain/src/test-runner/owned-test-child.ts';
 const roots: string[] = [];
 function scratch(): string { const p = mkdtempSync(join(tmpdir(), 'cleanup-proof-')); roots.push(p); return p; }
@@ -135,7 +135,7 @@ test('ordinary POSIX descendant is stopped before root removal', async () => {
 test('stale sweep requires dead known ownership and preserves evidence, links and live roots', async () => {
   const { sweepStaleTmpDirs } = await import('../toolchain/src/test-runner/stale-tmp-sweep.ts');
   const { utimesSync } = await import('node:fs');
-  const root = scratch(); const prefix = 'goodvibes-platform-testrun-';
+  const root = scratch(); const prefix = RUN_TMP_PREFIX;
   const make = (name: string, pid?: number): string => {
     const path = join(root, prefix + name); mkdirSync(path); const stat = lstatSync(path);
     if (pid !== undefined) writeFileSync(join(path, '.goodvibes-test-owner.json'), JSON.stringify({ version: 1, pid, dev: stat.dev, ino: stat.ino }));
@@ -170,7 +170,7 @@ test('hard-killed parent is detected by child watchdog; ordinary group dies and 
     expect(existsSync(data!.tmp)).toBe(true);
     const { utimesSync } = await import('node:fs'); utimesSync(data!.tmp, 1, 1);
     const { sweepStaleTmpDirs } = await import('../toolchain/src/test-runner/stale-tmp-sweep.ts');
-    sweepStaleTmpDirs(root, 'goodvibes-platform-testrun-', 1000);
+    sweepStaleTmpDirs(root, RUN_TMP_PREFIX, 1000);
     expect(existsSync(data!.tmp)).toBe(false);
   } finally {
     owner.kill('SIGKILL'); await owner.exited;
@@ -205,7 +205,7 @@ test('an independent registry rejects an intermediate link escaping the official
 });
 
 test('public runner startup reclaims only its stale known run roots', async () => {
-  const root = scratch(); const stale = join(root, 'goodvibes-platform-testrun-stale'); const unknown = join(root, 'goodvibes-platform-testrun-legacy');
+  const root = scratch(); const stale = join(root, `${RUN_TMP_PREFIX}stale`); const unknown = join(root, `${RUN_TMP_PREFIX}legacy`);
   mkdirSync(stale); mkdirSync(unknown); const identity = lstatSync(stale);
   writeFileSync(join(stale, '.goodvibes-test-owner.json'), JSON.stringify({ version: 1, pid: 2147483647, dev: identity.dev, ino: identity.ino }));
   const { utimesSync } = await import('node:fs'); utimesSync(stale, 1, 1); utimesSync(unknown, 1, 1);

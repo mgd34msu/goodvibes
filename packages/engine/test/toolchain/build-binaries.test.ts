@@ -115,8 +115,8 @@ describe('build-binaries run', () => {
  */
 const manifests: DependencyManifest[] = [
   {
-    name: '@goodvibes-jev/engine/platform',
-    path: 'node_modules/@goodvibes-jev/engine/platform/package.json',
+    name: '@goodvibes-jev/engine',
+    path: 'node_modules/@goodvibes-jev/engine/package.json',
     required: ['zustand'],
     optional: ['jsdom', '@mozilla/readability', 'openai'],
   },
@@ -178,7 +178,7 @@ describe('build-binaries optional-dependency screen', () => {
       provideAddon: () => true, exec, logger: captureLogger(),
       dependencyManifests: manifests,
       isPackageInstalled: installedExcept(['zustand']),
-    })).toThrow(/@goodvibes-jev\/engine\/sdk/);
+    })).toThrow('required by @goodvibes-jev/engine (node_modules/@goodvibes-jev/engine/package.json)');
   });
 
   test('a package declared optional by one manifest and required by another is required', () => {

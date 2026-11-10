@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LegacyImportJournal, type LegacyImportCommand } from '../terminal-shell/src/legacy-work-ledger-import-journal.js';
@@ -20,9 +20,9 @@ function setup() {
 }
 
 test('a delayed rejection for archived A cannot reject dispatched B', () => {
-  const f = setup(); const firstClient = new LegacyImportJournal(f.path); const secondClient = new LegacyImportJournal(f.path);
+  const f = setup(); const firstClient = new LegacyImportJournal(f.path); let secondClient: LegacyImportJournal | undefined;
   try {
-    firstClient.reserve(f.binding, () => f.first); firstClient.dispatch(f.binding, f.first);
+    firstClient.reserve(f.binding, () => f.first); secondClient = new LegacyImportJournal(f.path); firstClient.dispatch(f.binding, f.first);
     firstClient.record(f.binding, f.first, rejection);
     secondClient.reserve(f.binding, () => f.second, f.first.requestId);
     secondClient.dispatch(f.binding, f.second);
@@ -30,32 +30,34 @@ test('a delayed rejection for archived A cannot reject dispatched B', () => {
     expect(() => firstClient.record(f.binding, f.first, rejection)).toThrow('Import command changed');
     expect(secondClient.read(f.binding)).toMatchObject({ state: 'unknown', command: { requestId: 'B' }, attempts: 1, result: null });
     expect(secondClient.record(f.binding, f.second, { ...rejection, reason: 'Synthetic rejection of B' })).toMatchObject({ state: 'rejected', command: { requestId: 'B' } });
-  } finally { firstClient.close(); secondClient.close(); }
+  } finally { firstClient.close(); secondClient?.close(); }
 });
 
 test('admission for A cannot dispatch its replacement B', () => {
-  const f = setup(); const firstClient = new LegacyImportJournal(f.path); const secondClient = new LegacyImportJournal(f.path);
+  const f = setup(); const firstClient = new LegacyImportJournal(f.path); let secondClient: LegacyImportJournal | undefined;
   try {
     const admittedA = firstClient.reserve(f.binding, () => f.first);
+    secondClient = new LegacyImportJournal(f.path);
     secondClient.cancel(f.binding, f.first);
     secondClient.reserve(f.binding, () => f.second, f.first.requestId);
     expect(() => firstClient.dispatch(f.binding, admittedA.command)).toThrow('Import command changed');
     expect(admittedA.command.requestId).toBe('A');
     expect(secondClient.read(f.binding)).toMatchObject({ state: 'pending', command: { requestId: 'B' }, attempts: 0, result: null });
     expect(secondClient.dispatch(f.binding, f.second)).toMatchObject({ state: 'unknown', command: f.second, attempts: 1 });
-  } finally { firstClient.close(); secondClient.close(); }
+  } finally { firstClient.close(); secondClient?.close(); }
 });
 
 test('a stale cancellation for A cannot cancel pending B', () => {
-  const f = setup(); const firstClient = new LegacyImportJournal(f.path); const secondClient = new LegacyImportJournal(f.path);
+  const f = setup(); const firstClient = new LegacyImportJournal(f.path); let secondClient: LegacyImportJournal | undefined;
   try {
     firstClient.reserve(f.binding, () => f.first);
+    secondClient = new LegacyImportJournal(f.path);
     secondClient.cancel(f.binding, f.first);
     secondClient.reserve(f.binding, () => f.second, f.first.requestId);
     expect(() => firstClient.cancel(f.binding, f.first)).toThrow('Import command changed');
     expect(secondClient.read(f.binding)).toMatchObject({ state: 'pending', command: f.second, attempts: 0 });
     expect(secondClient.cancel(f.binding, f.second)).toMatchObject({ state: 'cancelled', command: f.second, attempts: 0 });
-  } finally { firstClient.close(); secondClient.close(); }
+  } finally { firstClient.close(); secondClient?.close(); }
 });
 
 test('command comparison includes the complete manifest and revision, not only the request ID', () => {
@@ -106,12 +108,26 @@ test('a stale client after process restart cannot mutate a replacement', async (
 });
 
 test('a stale dispatch snapshot cannot race recovery or replacement even with the same command', () => {
-  const f = setup(); const first = new LegacyImportJournal(f.path); const second = new LegacyImportJournal(f.path);
+  const f = setup(); const first = new LegacyImportJournal(f.path); let second: LegacyImportJournal | undefined;
   try {
     const pending = first.reserve(f.binding, () => f.first);
+    second = new LegacyImportJournal(f.path);
     const dispatched = second.dispatch(f.binding, f.first, pending);
     expect(() => first.dispatch(f.binding, f.first, pending)).toThrow('dispatch state changed');
     expect(first.read(f.binding)).toMatchObject({ state: 'unknown', attempts: 1 });
     expect(second.dispatch(f.binding, f.first, dispatched)).toMatchObject({ state: 'unknown', attempts: 2 });
-  } finally { first.close(); second.close(); }
+  } finally { first.close(); second?.close(); }
+});
+
+
+test('a journal that retained initial absence cannot adopt another first publisher by retrying an exclusive open', () => {
+  const f = setup(), first = new LegacyImportJournal(f.path), absent = new LegacyImportJournal(f.path);
+  try {
+    const original = first.reserve(f.binding, () => f.first), bytes = readFileSync(f.path);
+    expect(() => absent.reserve(f.binding, () => f.second)).toThrow('EEXIST');
+    expect(first.read(f.binding)).toEqual(original);
+    expect(readFileSync(f.path)).toEqual(bytes);
+    const reopened = new LegacyImportJournal(f.path);
+    try { expect(reopened.read(f.binding)).toEqual(original); } finally { reopened.close(); }
+  } finally { first.close(); absent.close(); }
 });

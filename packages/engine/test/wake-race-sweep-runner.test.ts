@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { RUN_TMP_PREFIX } from '../toolchain/src/test-runner/test-run-tmp.ts';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -25,7 +26,8 @@ function suite(root: string, name: string, body: string): void {
     import { test, expect } from 'bun:test';
     import { writeFileSync, mkdtempSync } from 'node:fs';
     import { tmpdir } from 'node:os';
-    import { join } from 'node:path';
+    import { basename, join } from 'node:path';
+import { RUN_TMP_PREFIX } from '../toolchain/src/test-runner/test-run-tmp.ts';
     test(${JSON.stringify(name)}, async () => { ${body} });
   `);
 }
@@ -72,7 +74,7 @@ function expectCleaned(root: string, name: string): void {
   const paths = JSON.parse(readFileSync(join(root, name), 'utf8')) as {
     temp: string; home: string; leaked: string; pid: number;
   };
-  expect(paths.temp).toContain('goodvibes-platform-testrun-');
+  expect(basename(paths.temp)).toStartWith(RUN_TMP_PREFIX);
   expect(paths.home).not.toBe(process.env.HOME);
   expect(existsSync(paths.temp)).toBe(false);
   expect(existsSync(paths.home)).toBe(false);

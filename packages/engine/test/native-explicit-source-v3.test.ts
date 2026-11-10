@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
-import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.js';
+import { PairingTokenManager, PairingTokenStoreBusyError } from '../platform/src/platform/pairing/pairing-token-store.js';
 import { WorkspaceRegistrationStore } from '../platform/src/platform/workspace/registration/store.js';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
@@ -41,8 +41,15 @@ async function fixture(declare?: (format: string) => void) {
 
 test('real paired explicit source v3 creates one opaque identity; concurrent/restarted replay preserves the full original event', async () => {
   const f = await fixture(), other = createNativeWorkSubmissionHost(f.deps); cleanup.push(() => other.close());
-  const [first, second] = await Promise.all([f.host.submit(f.input, f.authority), other.submit(f.input, f.authority)]);
-  expect(first.receipt).toEqual(second.receipt); expect([first.replayed, second.replayed].sort()).toEqual([false, true]);
+  const results = await Promise.allSettled([f.host.submit(f.input, f.authority), other.submit(f.input, f.authority)]);
+  const accepted = results.filter(result => result.status === 'fulfilled'), busy = results.filter(result => result.status === 'rejected');
+  expect(accepted).toHaveLength(1); expect(busy).toHaveLength(1);
+  expect(busy[0]!.reason).toBeInstanceOf(PairingTokenStoreBusyError);
+  expect(busy[0]!.reason).toMatchObject({ code: 'PAIRING_TOKEN_STORE_BUSY' });
+  const first = accepted[0]!.value;
+  const retry = results[0]!.status === 'rejected' ? f.host : other;
+  const second = await retry.submit(f.input, f.authority);
+  expect(first.receipt).toEqual(second.receipt); expect([first.replayed, second.replayed]).toEqual([false, true]);
   expect(first.receipt.source.version).toBe(3); expect(first.receipt.source.sourceId).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
   expect(first.receipt.source.sourceId).not.toContain(f.authority.current()!.principalId);
   const before = readFileSync(f.file), originalState = readWorkLedgerState(await f.storage.read(), 'project');
@@ -92,7 +99,7 @@ test('historical explicit v1 receipts and signatures remain exact when the new h
   const source = { version: 1, inputId: f.input.inputId, sessionId: f.deps.sessionId,
     sourceId: createHash('sha256').update(JSON.stringify({ projectId: 'project', principalId, inputId: f.input.inputId })).digest('hex'),
     sourceRevision: createHash('sha256').update(JSON.stringify({ version: 1, inputId: f.input.inputId, goal: f.input.goal, criteria: f.input.criteria })).digest('hex') };
-  const submitted = await f.ledger.service.execute({ type: 'submit_native', ...f.input, title: f.input.goal.trim(), source }, f.actor);
+  const submitted = await f.ledger.service.execute({ type: 'submit_native', requestId: f.input.requestId, expectedRevision: f.input.expectedRevision, goal: f.input.goal, criteria: f.input.criteria, title: f.input.goal.trim(), source }, f.actor);
   if (submitted.kind !== 'accepted' || submitted.event.type !== 'submit_native') throw new Error('Historical fixture not saved');
   const before = readFileSync(f.file), replay = await f.host.submit(f.input, f.authority);
   expect(replay.replayed).toBe(true); expect(replay.receipt.source).toMatchObject({ version: 1, sourceId: source.sourceId, sourceRevision: source.sourceRevision });

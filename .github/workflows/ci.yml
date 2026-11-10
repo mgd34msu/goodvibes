@@ -571,6 +571,9 @@ jobs:
         run: |
           bun products/daemon/scripts/ci-artifact.ts verify "$GITHUB_SHA" "$DAEMON_SOURCE_HEAD"
           node products/daemon/scripts/verify-binary.mjs --binary native/goodvibes-daemon-linux-arm64
+      - name: Verify installer open file identity on Darwin
+        if: matrix.platform == 'darwin'
+        run: bun packages/engine/scripts/test.ts --cwd ../.. scripts/installer-open-file-identity.test.ts
       - name: Verify and execute portable Darwin cohort
         if: matrix.platform == 'darwin'
         env:

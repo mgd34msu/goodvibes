@@ -94,6 +94,34 @@ VERIFY_SETTLE_SECS="${GOODVIBES_INSTALL_VERIFY_SETTLE_SECS:-1}"
 say() { printf '%s\n' "$*"; }
 fail() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 
+# Release-platform selectors can be overridden by callers of this shell
+# library. Descriptor observations must use the actual host's filesystem API.
+_INSTALLER_NATIVE_FILE_HOST=''
+installer_native_file_host() {
+  if [ -z "${_INSTALLER_NATIVE_FILE_HOST:-}" ]; then
+    _INSTALLER_NATIVE_FILE_HOST=$(command uname -s) || return 1
+  fi
+}
+
+# Darwin's /dev/fd entries do not reliably stat as the object held by the
+# descriptor. The system stat utility calls fstat(2) on stdin when given no
+# pathname, so redirect the retained descriptor without resolving /dev/fd.
+# Linux retains its existing -ef check. Follow the selected pathname just as
+# -ef does: callers reject symlinks where required, while shadow cleanup may
+# deliberately hold a package-manager symlink's target. Mode includes type.
+installer_open_file_matches() {
+  case "$1" in [0-9]) : ;; *) return 1 ;; esac
+  installer_native_file_host || return 1
+  case "$_INSTALLER_NATIVE_FILE_HOST" in
+    Darwin)
+      _installer_held_identity=$(/usr/bin/stat -f '%d:%i:%u:%g:%p' <&"$1") || return 1
+      _installer_current_identity=$(/usr/bin/stat -L -f '%d:%i:%u:%g:%p' -- "$2") || return 1
+      [ "$_installer_held_identity" = "$_installer_current_identity" ] ;;
+    Linux) [ "$2" -ef "/dev/fd/$1" ] ;;
+    *) return 1 ;;
+  esac
+}
+
 # Paths depend on $HOME; recomputed via functions so an overridden HOME (tests)
 # is always honored.
 systemd_daemon_unit_path() { printf '%s' "$HOME/.config/systemd/user/$SYSTEMD_DAEMON_UNIT"; }
@@ -454,10 +482,10 @@ expected_install_claim_identity() {
 
 install_claim_directories_current() {
   if [ "${_claim_purpose:-install}" = uninstall ]; then
-    [ "$INSTALL_CLAIM_DIR" -ef /dev/fd/0 ] || return 1
+    installer_open_file_matches 0 "$INSTALL_CLAIM_DIR" || return 1
   fi
-  [ ! -L "$INSTALL_CLAIM_DIR" ] && [ "$INSTALL_CLAIM_DIR" -ef /dev/fd/9 ] || return 1
-  [ ! -L "$INSTALL_CLAIM_OWNER" ] && [ "$INSTALL_CLAIM_OWNER" -ef /dev/fd/8 ] || return 1
+  [ ! -L "$INSTALL_CLAIM_DIR" ] && installer_open_file_matches 9 "$INSTALL_CLAIM_DIR" || return 1
+  [ ! -L "$INSTALL_CLAIM_OWNER" ] && installer_open_file_matches 8 "$INSTALL_CLAIM_OWNER" || return 1
 }
 
 release_install_claims() {
@@ -474,8 +502,8 @@ release_install_claims() {
     install_claim_directories_current || return 1
     [ -f "$_claim_reference" ] && [ ! -L "$_claim_reference" ] || return 1
     exec 3< "$_claim_reference"
-    if ! install_claim_directories_current || [ -L "$_claim_path" ] || [ ! "$_claim_path" -ef /dev/fd/3 ] \
-      || [ -L "$_claim_reference" ] || [ ! "$_claim_reference" -ef /dev/fd/3 ] \
+    if ! install_claim_directories_current || [ -L "$_claim_path" ] || ! installer_open_file_matches 3 "$_claim_path" \
+      || [ -L "$_claim_reference" ] || ! installer_open_file_matches 3 "$_claim_reference" \
       || [ "$(install_claim_file_identity "$_claim_path")" != "$_claim_expected" ] \
       || [ "$(install_claim_file_identity "$_claim_reference")" != "$_claim_expected" ]; then
       exec 3<&-
@@ -485,7 +513,7 @@ release_install_claims() {
     # The first unlink is an effect boundary. Never use its success to adopt
     # a replacement private reference or delete a reappeared foreign claim.
     if ! install_claim_directories_current || [ -e "$_claim_path" ] || [ -L "$_claim_path" ] \
-      || [ -L "$_claim_reference" ] || [ ! "$_claim_reference" -ef /dev/fd/3 ] \
+      || [ -L "$_claim_reference" ] || ! installer_open_file_matches 3 "$_claim_reference" \
       || [ "$(install_claim_file_identity "$_claim_reference")" != "$_claim_expected" ]; then
       exec 3<&-
       return 1
@@ -544,16 +572,16 @@ claim_release_install() {
   case "$_claim_purpose" in install|uninstall) : ;; *) fail 'Unknown suite claim purpose.' ;; esac
   command -v stat >/dev/null 2>&1 || fail 'The native stat utility is required to retain original installation ownership.'
   if [ "$_claim_purpose" = uninstall ]; then
-    [ -d "$INSTALL_DIR" ] && [ ! -L "$INSTALL_DIR" ] && [ "$INSTALL_DIR" -ef /dev/fd/0 ] || fail 'The original uninstall directory changed before exclusion.'
+    [ -d "$INSTALL_DIR" ] && [ ! -L "$INSTALL_DIR" ] && installer_open_file_matches 0 "$INSTALL_DIR" || fail 'The original uninstall directory changed before exclusion.'
   else mkdir -p "$INSTALL_DIR"
   fi
   INSTALL_CLAIM_DIR=$(CDPATH= cd -- "$INSTALL_DIR" && pwd -P) || fail 'Could not retain the installation directory.'
   # Publish only to the selected directory, even when the original option was
   # a relative path or symlink. The open descriptor detects its replacement.
   exec 9< "$INSTALL_CLAIM_DIR"
-  [ "$INSTALL_CLAIM_DIR" -ef /dev/fd/9 ] || fail 'Could not retain the selected installation directory.'
+  installer_open_file_matches 9 "$INSTALL_CLAIM_DIR" || fail 'Could not retain the selected installation directory.'
   if [ "$_claim_purpose" = uninstall ]; then
-    [ "$INSTALL_CLAIM_DIR" -ef /dev/fd/0 ] || fail 'The original uninstall directory changed before claiming.'
+    installer_open_file_matches 0 "$INSTALL_CLAIM_DIR" || fail 'The original uninstall directory changed before claiming.'
   fi
   INSTALL_DIR=$INSTALL_CLAIM_DIR
   WEBUI_ROOT="$INSTALL_DIR/webui"
@@ -570,13 +598,13 @@ claim_release_install() {
     (umask 077; set -C; printf 'GoodVibes suite installation %s\nInterrupted replacement: inspect installed programs and retained claims before recovery.\n' "$VERSION" > "$_claim_path") || fail 'Another update or interrupted installation owns this directory. Inspect its retained transaction files first.'
     INSTALL_CLAIM_COUNT=$((INSTALL_CLAIM_COUNT + 1))
     case "$_claim_product" in
-      goodvibes-daemon) exec 5< "$_claim_path"; _created_claim_fd=/dev/fd/5 ;;
-      goodvibes) exec 6< "$_claim_path"; _created_claim_fd=/dev/fd/6 ;;
-      goodvibes-agent) exec 7< "$_claim_path"; _created_claim_fd=/dev/fd/7 ;;
+      goodvibes-daemon) exec 5< "$_claim_path"; _created_claim_fd=5 ;;
+      goodvibes) exec 6< "$_claim_path"; _created_claim_fd=6 ;;
+      goodvibes-agent) exec 7< "$_claim_path"; _created_claim_fd=7 ;;
     esac
-    [ ! -L "$_claim_path" ] && [ "$_claim_path" -ef "$_created_claim_fd" ] || fail 'The original installation claim changed during capture.'
+    [ ! -L "$_claim_path" ] && installer_open_file_matches "$_created_claim_fd" "$_claim_path" || fail 'The original installation claim changed during capture.'
     _created_claim_id=$(install_claim_file_identity "$_claim_path") || fail 'Could not retain the original native installation claim.'
-    [ ! -L "$_claim_path" ] && [ "$_claim_path" -ef "$_created_claim_fd" ] || fail 'The native installation claim changed during observation.'
+    [ ! -L "$_claim_path" ] && installer_open_file_matches "$_created_claim_fd" "$_claim_path" || fail 'The native installation claim changed during observation.'
     case "$_claim_product" in
       goodvibes-daemon) INSTALL_DAEMON_CLAIM_ID=$_created_claim_id ;;
       goodvibes) INSTALL_TUI_CLAIM_ID=$_created_claim_id ;;
@@ -584,7 +612,7 @@ claim_release_install() {
     esac
     ln "$_claim_path" "$INSTALL_CLAIM_OWNER/$_claim_product" || fail 'The installer could not retain its transaction ownership. Inspect the retained claim before retrying.'
     [ ! -L "$_claim_path" ] && [ ! -L "$INSTALL_CLAIM_OWNER/$_claim_product" ] \
-      && [ "$_claim_path" -ef "$_created_claim_fd" ] && [ "$INSTALL_CLAIM_OWNER/$_claim_product" -ef "$_created_claim_fd" ] \
+      && installer_open_file_matches "$_created_claim_fd" "$_claim_path" && installer_open_file_matches "$_created_claim_fd" "$INSTALL_CLAIM_OWNER/$_claim_product" \
       || fail 'The original installation claim changed before retention.'
   done
   if [ "$_claim_purpose" = uninstall ]; then assert_install_claims; return 0; fi
@@ -2151,16 +2179,16 @@ publish_release_directory() (
   esac
   [ -d "$_directory_parent" ] && [ ! -L "$_directory_parent" ] || fail 'The original directory publication parent is unavailable.'
   exec 0< "$_directory_parent"
-  [ "$_directory_parent" -ef /dev/fd/0 ] || fail 'Could not retain the original directory publication parent.'
+  installer_open_file_matches 0 "$_directory_parent" || fail 'Could not retain the original directory publication parent.'
   [ -d "$_directory_source" ] && [ ! -L "$_directory_source" ] || fail 'Verified directory staging is unavailable.'
   exec 7< "$_directory_source"
-  [ "$_directory_source" -ef /dev/fd/7 ] || fail 'Verified directory staging changed.'
+  installer_open_file_matches 7 "$_directory_source" || fail 'Verified directory staging changed.'
   [ ! -e "$_directory_target.incoming" ] && [ ! -L "$_directory_target.incoming" ] || fail 'An existing incoming directory requires inspection; it was preserved.'
   _directory_had_old=0
   if [ -e "$_directory_target" ] || [ -L "$_directory_target" ]; then
     [ -d "$_directory_target" ] && [ ! -L "$_directory_target" ] || fail 'The existing directory target is a custom file or alias; it was preserved.'
     exec 6< "$_directory_target"
-    [ "$_directory_target" -ef /dev/fd/6 ] || fail 'Could not retain the original installed directory.'
+    installer_open_file_matches 6 "$_directory_target" || fail 'Could not retain the original installed directory.'
     _directory_had_old=1
   fi
   _directory_work=$(mktemp -d "$_directory_parent/.goodvibes-directory-install.XXXXXX") || fail 'Could not reserve private directory staging.'
@@ -2174,21 +2202,21 @@ publish_release_directory() (
 
   _directory_base_current() {
     (assert_install_claims) || return 1
-    [ ! -L "$_directory_parent" ] && [ "$_directory_parent" -ef /dev/fd/0 ] || return 1
-    [ ! -L "$_directory_work" ] && [ "$_directory_work" -ef /dev/fd/5 ] || return 1
+    [ ! -L "$_directory_parent" ] && installer_open_file_matches 0 "$_directory_parent" || return 1
+    [ ! -L "$_directory_work" ] && installer_open_file_matches 5 "$_directory_work" || return 1
   }
   _directory_claim_current() {
     _directory_base_current || return 1
     [ "$_directory_claim_owned" = 1 ] || return 1
-    [ ! -L "$_directory_claim" ] && [ "$_directory_claim" -ef /dev/fd/3 ] || return 1
-    [ ! -L "$_directory_work/claim" ] && [ "$_directory_work/claim" -ef /dev/fd/3 ] || return 1
+    [ ! -L "$_directory_claim" ] && installer_open_file_matches 3 "$_directory_claim" || return 1
+    [ ! -L "$_directory_work/claim" ] && installer_open_file_matches 3 "$_directory_work/claim" || return 1
   }
   _directory_original_current() {
     _directory_claim_current || return 1
-    [ ! -L "$_directory_source" ] && [ "$_directory_source" -ef /dev/fd/7 ] || return 1
-    [ ! -L "$_directory_incoming" ] && [ "$_directory_incoming" -ef /dev/fd/4 ] || return 1
+    [ ! -L "$_directory_source" ] && installer_open_file_matches 7 "$_directory_source" || return 1
+    [ ! -L "$_directory_incoming" ] && installer_open_file_matches 4 "$_directory_incoming" || return 1
     if [ "$_directory_had_old" = 1 ]; then
-      [ ! -L "$_directory_target" ] && [ "$_directory_target" -ef /dev/fd/6 ] || return 1
+      [ ! -L "$_directory_target" ] && installer_open_file_matches 6 "$_directory_target" || return 1
     else
       [ ! -e "$_directory_target" ] && [ ! -L "$_directory_target" ] || return 1
     fi
@@ -2198,7 +2226,7 @@ publish_release_directory() (
     rm -f "$_directory_claim" || return 1
     _directory_base_current || return 1
     [ ! -e "$_directory_claim" ] && [ ! -L "$_directory_claim" ] || return 1
-    [ ! -L "$_directory_work/claim" ] && [ "$_directory_work/claim" -ef /dev/fd/3 ] || return 1
+    [ ! -L "$_directory_work/claim" ] && installer_open_file_matches 3 "$_directory_work/claim" || return 1
     rm -f "$_directory_work/claim" || return 1
     _directory_base_current || return 1
     [ ! -e "$_directory_work/claim" ] && [ ! -L "$_directory_work/claim" ] || return 1
@@ -2208,19 +2236,19 @@ publish_release_directory() (
     _directory_claim_current || return 1
     # A throwing rename may already have completed. Inspect the exact retained
     # descriptors instead of treating an exit status as proof of rollback.
-    if [ "$_directory_incoming_owned" = 1 ] && [ ! -L "$_directory_target" ] && [ "$_directory_target" -ef /dev/fd/4 ]; then
+    if [ "$_directory_incoming_owned" = 1 ] && [ ! -L "$_directory_target" ] && installer_open_file_matches 4 "$_directory_target"; then
       [ ! -e "$_directory_incoming" ] && [ ! -L "$_directory_incoming" ] || return 1
       mv "$_directory_target" "$_directory_incoming" || :
       _directory_claim_current || return 1
-      [ ! -L "$_directory_incoming" ] && [ "$_directory_incoming" -ef /dev/fd/4 ] || return 1
+      [ ! -L "$_directory_incoming" ] && installer_open_file_matches 4 "$_directory_incoming" || return 1
     fi
     if [ "$_directory_had_old" = 1 ]; then
       if [ ! -e "$_directory_target" ] && [ ! -L "$_directory_target" ]; then
-        [ ! -L "$_directory_outgoing" ] && [ "$_directory_outgoing" -ef /dev/fd/6 ] || return 1
+        [ ! -L "$_directory_outgoing" ] && installer_open_file_matches 6 "$_directory_outgoing" || return 1
         mv "$_directory_outgoing" "$_directory_target" || :
       fi
       _directory_claim_current || return 1
-      [ ! -L "$_directory_target" ] && [ "$_directory_target" -ef /dev/fd/6 ] || return 1
+      [ ! -L "$_directory_target" ] && installer_open_file_matches 6 "$_directory_target" || return 1
     else
       [ ! -e "$_directory_target" ] && [ ! -L "$_directory_target" ] || return 1
     fi
@@ -2269,13 +2297,13 @@ publish_release_directory() (
     [ ! -e "$_directory_outgoing" ] && [ ! -L "$_directory_outgoing" ] || fail 'An unknown outgoing directory slot appeared.'
     mv "$_directory_target" "$_directory_outgoing" || fail 'Could not park the original directory.'
     _directory_claim_current || fail 'Original directory ownership changed after parking.'
-    [ ! -L "$_directory_outgoing" ] && [ "$_directory_outgoing" -ef /dev/fd/6 ] || fail 'The parked original directory changed.'
+    [ ! -L "$_directory_outgoing" ] && installer_open_file_matches 6 "$_directory_outgoing" || fail 'The parked original directory changed.'
   fi
   [ ! -e "$_directory_target" ] && [ ! -L "$_directory_target" ] || fail 'A foreign live directory appeared; it was preserved.'
-  [ ! -L "$_directory_incoming" ] && [ "$_directory_incoming" -ef /dev/fd/4 ] || fail 'The original incoming directory changed.'
+  [ ! -L "$_directory_incoming" ] && installer_open_file_matches 4 "$_directory_incoming" || fail 'The original incoming directory changed.'
   mv "$_directory_incoming" "$_directory_target" || fail 'Could not publish the retained incoming directory.'
   _directory_claim_current || fail 'Original directory ownership changed after publication.'
-  [ ! -L "$_directory_target" ] && [ "$_directory_target" -ef /dev/fd/4 ] || fail 'The directory rename result is unknown.'
+  [ ! -L "$_directory_target" ] && installer_open_file_matches 4 "$_directory_target" || fail 'The directory rename result is unknown.'
   _directory_done=1
 )
 
@@ -2709,12 +2737,25 @@ shadow_existing_path() (
   printf '%s/%s\n' "$shadow_existing_parent" "$(basename "$shadow_existing")"
 )
 
+# Keep both Darwin observations in the system BSD format, even when PATH
+# selects a GNU stat. The target is fstat of the held descriptor; the entry is
+# lstat of the selected pathname, preserving detection of symlink replacement.
 shadow_target_stamp() {
-  stat -L -c '%d:%i:%u:%g:%f:%s:%y:%z' /dev/fd/3 2>/dev/null || stat -L -f '%d:%i:%u:%g:%p:%z:%m:%c' /dev/fd/3
+  installer_native_file_host || return 1
+  case "$_INSTALLER_NATIVE_FILE_HOST" in
+    Darwin) /usr/bin/stat -f '%d:%i:%u:%g:%p:%z:%m:%c' <&3 ;;
+    Linux) stat -L -c '%d:%i:%u:%g:%f:%s:%y:%z' /dev/fd/3 ;;
+    *) return 1 ;;
+  esac
 }
 
 shadow_entry_stamp() {
-  stat -c '%d:%i:%u:%g:%f:%s:%y:%z' "$1" 2>/dev/null || stat -f '%d:%i:%u:%g:%p:%z:%m:%c' "$1"
+  installer_native_file_host || return 1
+  case "$_INSTALLER_NATIVE_FILE_HOST" in
+    Darwin) /usr/bin/stat -f '%d:%i:%u:%g:%p:%z:%m:%c' -- "$1" ;;
+    Linux) stat -c '%d:%i:%u:%g:%f:%s:%y:%z' "$1" ;;
+    *) return 1 ;;
+  esac
 }
 
 # Hold the original selected file and parent through the user's prompt. Only
@@ -2730,8 +2771,8 @@ confirm_shadow_removal() (
   shadow_confirm_stamp=$(shadow_entry_stamp "$shadow_confirm_copy") || return 1
   shadow_confirm_target_stamp=$(shadow_target_stamp) || return 1
   if shadow_confirm '  Remove it now?'; then
-    [ "$shadow_confirm_copy" -ef /dev/fd/3 ] || return 1
-    [ "$(dirname "$shadow_confirm_copy")" -ef /dev/fd/4 ] || return 1
+    installer_open_file_matches 3 "$shadow_confirm_copy" || return 1
+    installer_open_file_matches 4 "$(dirname "$shadow_confirm_copy")" || return 1
     [ "$(shadow_entry_stamp "$shadow_confirm_copy")" = "$shadow_confirm_stamp" ] || return 1
     run_shadow_removal "$shadow_confirm_plan" "$shadow_confirm_copy" "$shadow_confirm_command" "$shadow_confirm_real"
   elif [ "$SHADOW_HEADLESS_UNCONFIRMED" = 1 ]; then return 20
@@ -3016,8 +3057,8 @@ run_shadow_removal() (
   shadow_execute_manager=$(printf '%s' "$shadow_execute_plan" | cut -f3)
   shadow_execute_scope=$(printf '%s' "$shadow_execute_plan" | cut -f4)
   shadow_execute_bin=$(printf '%s' "$shadow_execute_plan" | cut -f5)
-  [ "$shadow_execute_path" -ef /dev/fd/3 ] || return 1
-  [ "$(dirname "$shadow_execute_path")" -ef /dev/fd/4 ] || return 1
+  installer_open_file_matches 3 "$shadow_execute_path" || return 1
+  installer_open_file_matches 4 "$(dirname "$shadow_execute_path")" || return 1
   [ "$(shadow_entry_stamp "$shadow_execute_path")" = "$shadow_confirm_stamp" ] || return 1
   [ "$(shadow_target_stamp)" = "$shadow_confirm_target_stamp" ] || return 1
   case "$shadow_execute_kind:$shadow_execute_manager" in
@@ -3260,7 +3301,7 @@ run_uninstall() (
     [ -d "$INSTALL_DIR" ] || fail 'The selected uninstall directory is unavailable; it was preserved.'
     _uninstall_original=$(CDPATH= cd -- "$INSTALL_DIR" && pwd -P) || fail 'Could not retain the original uninstall directory.'
     exec 0< "$_uninstall_original"
-    [ "$_uninstall_original" -ef /dev/fd/0 ] || fail 'The original uninstall directory changed.'
+    installer_open_file_matches 0 "$_uninstall_original" || fail 'The original uninstall directory changed.'
     INSTALL_DIR=$_uninstall_original
     WEBUI_ROOT="$INSTALL_DIR/webui"
     VERSION=${VERSION:-uninstall}
@@ -3312,8 +3353,8 @@ run_uninstall() (
   # .previous cleanup through a new alias outside this installation.
   _uninstall_library_current() {
     assert_install_claims
-    [ ! -L "$INSTALL_DIR/lib" ] && [ "$INSTALL_DIR/lib" -ef /dev/fd/3 ] \
-      && [ ! -L "$_uninstall_parent" ] && [ "$_uninstall_parent" -ef /dev/fd/4 ] \
+    [ ! -L "$INSTALL_DIR/lib" ] && installer_open_file_matches 3 "$INSTALL_DIR/lib" \
+      && [ ! -L "$_uninstall_parent" ] && installer_open_file_matches 4 "$_uninstall_parent" \
       || fail 'An original native library directory changed during uninstall; its remaining files were preserved.'
   }
   if [ -L "$INSTALL_DIR/lib" ]; then
@@ -3321,7 +3362,7 @@ run_uninstall() (
   elif [ -d "$INSTALL_DIR/lib" ]; then
     exec 3< "$INSTALL_DIR/lib"
     assert_install_claims
-    [ ! -L "$INSTALL_DIR/lib" ] && [ "$INSTALL_DIR/lib" -ef /dev/fd/3 ] || fail 'The original native library root changed.'
+    [ ! -L "$INSTALL_DIR/lib" ] && installer_open_file_matches 3 "$INSTALL_DIR/lib" || fail 'The original native library root changed.'
     for _uninstall_target in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
       case "$_uninstall_target" in darwin-*) _uninstall_vec=vec0.dylib ;; *) _uninstall_vec=vec0.so ;; esac
       for _uninstall_library in "sqlite-vec-$_uninstall_target/$_uninstall_vec" "sqlite-$_uninstall_target/libsqlite3.dylib" "sqlite-$_uninstall_target/libsqlite3.dylib.json"; do
@@ -3346,7 +3387,7 @@ run_uninstall() (
       done
     done
     assert_install_claims
-    [ ! -L "$INSTALL_DIR/lib" ] && [ "$INSTALL_DIR/lib" -ef /dev/fd/3 ] || fail 'The original native library root changed before cleanup.'
+    [ ! -L "$INSTALL_DIR/lib" ] && installer_open_file_matches 3 "$INSTALL_DIR/lib" || fail 'The original native library root changed before cleanup.'
     rmdir "$INSTALL_DIR/lib" 2>/dev/null || true
   elif [ -e "$INSTALL_DIR/lib" ]; then
     record_kept "$INSTALL_DIR/lib (custom non-directory path; not removed)"

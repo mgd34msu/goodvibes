@@ -527,6 +527,20 @@ describe('ci.yml: build once, restore everywhere', () => {
     }
   });
 
+  test('both restored Darwin lanes prove native installer descriptor identity before daemon execution', () => {
+    const execution = ci.jobs!['daemon-native-execution']!;
+    const list = steps(execution);
+    const identity = list.findIndex(step => step.name === 'Verify installer open file identity on Darwin');
+    const daemon = list.findIndex(step => step.name === 'Verify and execute portable Darwin cohort');
+    expect(identity).toBeGreaterThan(0); expect(daemon).toBeGreaterThan(identity);
+    expect(list[identity]?.if).toBe("matrix.platform == 'darwin'");
+    expect(list[identity]?.run).toBe('bun packages/engine/scripts/test.ts --cwd ../.. scripts/installer-open-file-identity.test.ts');
+    expect(list[identity]?.['continue-on-error']).toBeUndefined();
+    const restored = list.findIndex(step => step.name === 'Restore canonical workspace package output');
+    expect(restored).toBeLessThan(identity);
+    expect((execution.strategy?.matrix as { include: Array<{ platform: string }> }).include.filter(row => row.platform === 'darwin')).toHaveLength(2);
+  });
+
   test('the Bun lane retains the deterministic fake-IMAP race sweep', () => {
     const sweep = steps(ci.jobs!['platform-matrix']!).find((step) => step.run === 'bun run sweep:wake-race');
     expect(sweep).toBeDefined();
@@ -781,9 +795,60 @@ describe('release.yml: by-reference release', () => {
           encoding: 'utf8',
         });
         expect(result.status === 0, result.stderr).toBe(allowed);
-        expect(readFileSync(output, 'utf8')).toBe(allowed ? `tag=${tag}\n` : '');
+        expect(readFileSync(output, 'utf8')).toBe(allowed ? `tag=${tag}\nref=refs/tags/${tag}\n` : '');
       }
     } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test('candidate preparation binds a full source commit without creating or requiring a release tag', () => {
+    const verify = rel.jobs!['verify-tag-version']!;
+    const resolve = steps(verify).find(step => step.id === 'source')!;
+    expect(steps(verify).find(step => String(step.uses).startsWith('actions/checkout@'))).toHaveProperty('with.ref', '${{ steps.source.outputs.ref }}');
+    expect(runText(rel, 'verify-tag-version')).toContain('test "$(git rev-parse HEAD)" = "$CANDIDATE_SOURCE"');
+    const root = mkdtempSync(join(tmpdir(), 'gv-candidate-source-'));
+    try {
+      for (const [mode, source, allowed] of [['candidate', 'a'.repeat(40), true], ['candidate', 'main', false],
+        ['candidate', '', false], ['candidate', 'a'.repeat(39), false], ['release', 'a'.repeat(40), false]] as const) {
+        const output = join(root, 'output'); writeFileSync(output, '');
+        const result = spawnSync('bash', ['-e', '-c', String(resolve.run)], {
+          env: { ...process.env, RELEASE_TAG: 'v3.1.2', CALLER_REF: 'main', PUBLISH_NPM: 'true', RELEASE_MODE: mode, CANDIDATE_SOURCE: source, GITHUB_OUTPUT: output },
+          encoding: 'utf8',
+        });
+        expect(result.status === 0, result.stderr).toBe(allowed);
+        expect(readFileSync(output, 'utf8')).toBe(allowed ? `tag=v3.1.2\nref=${source}\n` : '');
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+    const prepare = rel.jobs!['prepare-native-assets']!;
+    expect(steps(prepare).find(step => step.name === 'Checkout released source')).toHaveProperty('with.ref', '${{ needs.verify-tag-version.outputs.sha }}');
+    expect(rel.jobs!['complete-suite-assets']).toHaveProperty('with.candidate-source', "${{ github.event.inputs.mode == 'candidate' && needs.verify-tag-version.outputs.sha || '' }}");
+    expect(rel.jobs!['complete-suite-assets']).toHaveProperty('with.publish_existing', false);
+    for (const name of ['verify-tag-version', 'release-verify', 'complete-suite-assets', 'prepare-native-assets', 'staged-install-acceptance']) {
+      const job = rel.jobs![name]!;
+      const results: Record<string, JobResult> = Object.fromEntries(needsOf(job).map(dependency => [dependency, 'success']));
+      expect(permitsPublication(job, results, 'workflow_dispatch', 'candidate'), name).toBe(true);
+    }
+    for (const name of ['publish-npm', 'github-release', 'dry-run']) {
+      const job = rel.jobs![name]!;
+      const results: Record<string, JobResult> = Object.fromEntries(needsOf(job).map(dependency => [dependency, 'success']));
+      expect(permitsPublication(job, results, 'workflow_dispatch', 'candidate'), `${name} must not execute for a candidate`).toBe(false);
+    }
+  });
+
+  test('candidate suite packaging refuses public completion and keeps exact-source CI ahead of its build', () => {
+    const suite = load('suite-release-assets.yml'), packaging = suite.jobs!['package']!;
+    const guard = steps(packaging).find(step => step.name === 'Require a nonpublishing immutable candidate')!;
+    for (const [source, publish, allowed] of [['a'.repeat(40), 'false', true], ['a'.repeat(40), 'true', false], ['main', 'false', false], ['', 'true', true]] as const) {
+      const result = spawnSync('bash', ['-e', '-c', String(guard.run)], { env: { ...process.env, CANDIDATE_SOURCE: source, PUBLISH_EXISTING: publish }, encoding: 'utf8' });
+      expect(result.status === 0, result.stderr).toBe(allowed);
+    }
+    expect(steps(packaging).filter(step => String(step.uses).startsWith('actions/checkout@'))[1]).toHaveProperty('with.ref', '${{ inputs.candidate-source || inputs.tag }}');
+    const verification = steps(packaging).findIndex(step => step.name === 'Require exact-source successful push CI');
+    const build = steps(packaging).findIndex(step => step.name === 'Build publisher tooling and engine');
+    expect(verification).toBeGreaterThan(0); expect(build).toBeGreaterThan(verification);
+    expect(runText(suite, 'package')).toContain('head_sha=$(cat "$RUNNER_TEMP/source-sha")&event=push&status=completed');
+    const complete = steps(suite.jobs!['collect']!).find(step => step.name === 'Complete existing published release')!;
+    expect(complete.if).toBe("inputs.publish_existing && inputs.candidate-source == ''");
+    expect(String(suite.jobs!['published-install-acceptance']!.if)).toContain("inputs.candidate-source == ''");
   });
 
   test('every caller job grants at least the permissions its called reusable workflow requests', () => {
@@ -982,11 +1047,9 @@ describe('release.yml: by-reference release', () => {
     expect(group).toContain('github.run_id');
   });
 
-  test('dispatch is dry-run unless mode=release', () => {
-    // A release-mode dispatch is now a first-class publish path (the zero-touch
-    // auto-release job dispatches release.yml with mode=release), so publish-npm
-    // runs on a push OR a release-mode dispatch, while the dry-run job is fenced
-    // off to a NON-release dispatch so it can never publish.
+  test('only release-mode dispatch can publish and candidate mode does not run the preview', () => {
+    // Candidate dispatch executes native preparation and acceptance. Public
+    // writes remain restricted to tag pushes and explicit release dispatch.
     const pubIf = String(rel.jobs!['publish-npm']!.if);
     expect(pubIf).toContain("github.event_name == 'push'");
     expect(pubIf).toContain("github.event_name == 'workflow_dispatch'");
@@ -1008,7 +1071,8 @@ describe('release.yml: by-reference release', () => {
     expect(inputs.mode).toBeTruthy();
     expect(inputs.mode?.default).toBe('dry-run');
     expect(inputs.mode?.type).toBe('choice');
-    expect(inputs.mode?.options).toEqual(expect.arrayContaining(['dry-run', 'release']));
+    expect(inputs.mode?.options).toEqual(['dry-run', 'candidate', 'release']);
+    expect(inputs.source).toBeDefined();
   });
 
   test('the changelog fallback body is a warning, never silent', () => {

@@ -13,11 +13,17 @@ assert re.fullmatch(r'v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?', tag)
 repository = 'mgd34msu/goodvibes'
 def api(path):
     return json.loads(subprocess.check_output(['gh', 'api', f'repos/{repository}/{path}'], text=True))
-ref = api(f'git/ref/tags/{tag}')['object']
-while ref['type'] == 'tag':
-    ref = api(f'git/tags/{ref["sha"]}')['object']
-assert ref['type'] == 'commit'
-source = ref['sha']
+assert len(sys.argv) in (4, 5), 'Expected archives, destination, version tag label, and optional candidate SHA'
+if len(sys.argv) == 5:
+    source = sys.argv[4]
+    assert re.fullmatch(r'[a-f0-9]{40}', source), 'Candidate source must be a full commit ID'
+    assert api(f'git/commits/{source}')['sha'] == source, 'Candidate commit resolution changed'
+else:
+    ref = api(f'git/ref/tags/{tag}')['object']
+    while ref['type'] == 'tag':
+        ref = api(f'git/tags/{ref["sha"]}')['object']
+    assert ref['type'] == 'commit'
+    source = ref['sha']
 assert re.fullmatch(r'[a-f0-9]{40}', source), 'Release source must be one commit ID'
 destination.mkdir(parents=True, exist_ok=False)
 targets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']

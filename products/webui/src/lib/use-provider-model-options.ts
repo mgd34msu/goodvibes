@@ -28,7 +28,7 @@ export function useProviderModelOptions(provider: unknown, catalog: unknown[], c
   useEffect(() => {
     if (!enabled || !provider) return;
     const providerId = bestId(provider);
-    if (declaredProviderCatalogId(providerId) !== undefined) return;
+    if (declaredProviderCatalogId(providerId) !== undefined || catalog.some(candidate => bestId(candidate) === providerId)) return;
     const explicit = new Set([providerId, ...providerModelSourceIds(provider)]);
     const keys = [...new Set(catalog.map(bestId))].filter(id => id && !explicit.has(id));
     if (!providerId || !keys.length || keys.length > 64) return;

@@ -14,7 +14,9 @@ export const CATALOG_PROVIDER_NAME_ALIASES: Readonly<Record<string, string>> = O
   'ai-gateway': 'vercel-ai-gateway',
 });
 
-const catalogIds = new Set(Object.values(CATALOG_PROVIDER_NAME_ALIASES));
+// The native virtual provider owns its sole `auto` model. It has no external
+// vendor relationship to infer, including when only its inline models exist.
+const catalogIds = new Set([...Object.values(CATALOG_PROVIDER_NAME_ALIASES), 'decision-router']);
 /** Undefined preserves interpretation for an undeclared/custom provider relationship. */
 export function declaredProviderCatalogId(providerId: string): string | undefined {
   if (Object.hasOwn(CATALOG_PROVIDER_NAME_ALIASES, providerId)) return CATALOG_PROVIDER_NAME_ALIASES[providerId];

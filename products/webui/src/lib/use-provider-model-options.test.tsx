@@ -18,7 +18,7 @@ function answer(request: Request, status: 'settled' | 'held' = 'settled') {
 }
 const provider = { providerId: 'custom-adapter' };
 const catalog = [{ providerId: 'inceptionlabs', models: ['model-fixture'] }];
-function mount() {
+function mount(initialProvider: unknown = provider, initialCatalog: unknown[] = catalog) {
   let result!: ReturnType<typeof useProviderModelOptions>;
   function Caller(props: { provider: unknown; catalog: unknown[]; session: string; enabled: boolean }) {
     result = useProviderModelOptions(props.provider, props.catalog, props.session, props.enabled);
@@ -26,7 +26,7 @@ function mount() {
   }
   const host = document.createElement('div'); const root = createRoot(host); let mounted = true;
   const render = (p = provider as unknown, c: unknown[] = catalog, session = 'session-a', enabled = true) => flushSync(() => root.render(<Caller provider={p} catalog={c} session={session} enabled={enabled} />));
-  render();
+  render(initialProvider, initialCatalog);
   return { host, render, result: () => result, unmount() { if (mounted) { mounted = false; flushSync(() => root.unmount()); } } };
 }
 async function until(check: () => boolean) { for (let i = 0; i < 100 && !check(); i++) await new Promise(resolve => setTimeout(resolve, 1)); expect(check()).toBe(true); }
@@ -75,12 +75,33 @@ test('unmount and client change revoke detached handlers even for explicit model
 
 test('declared registry aliases load locally and issue no semantic request for unrelated catalogs', async () => {
   await tokenStore.setToken('fixture-browser-owner'); respond = async () => { throw new Error('Known aliases must stay local'); };
-  const h = mount();
+  const h = mount({ providerId: 'inception' }, [...catalog, { providerId: 'openai', models: ['other'] }]);
   try {
-    h.render({ providerId: 'inception' }, [...catalog, { providerId: 'openai', models: ['other'] }]);
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(h.result().models.map(model => model.registryKey)).toEqual(['inceptionlabs:model-fixture']);
-    // The initial custom-provider mount was retired; no request belongs to the known alias render.
-    expect(requests.every(request => request.input.providerId !== 'inception')).toBe(true);
+    expect(requests).toEqual([]);
+  } finally { h.unmount(); }
+});
+
+test('an exact catalog ID selects only its existing models without asking about unrelated catalogs', async () => {
+  await tokenStore.setToken('fixture-browser-owner'); respond = async () => { throw new Error('Exact catalog identity must stay local'); };
+  const h = mount({ providerId: 'openrouter' }, [{ providerId: 'openrouter', models: ['openai/known', 'free'] }, ...catalog]);
+  try {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(requests).toEqual([]);
+    expect(h.result().models.map(model => model.registryKey)).toEqual(['openrouter:openai/known', 'openrouter:free']);
+    expect(h.result().hasCurrentModel('openrouter:free')).toBe(true);
+    expect(h.result().hasCurrentModel('inceptionlabs:model-fixture')).toBe(false);
+  } finally { h.unmount(); }
+});
+
+test('the native virtual router owns its inline auto model without a semantic vendor match', async () => {
+  await tokenStore.setToken('fixture-browser-owner'); respond = async () => { throw new Error('Native auto model must stay local'); };
+  const h = mount({ providerId: 'decision-router', runtime: { models: { models: ['auto'] } } }, [...catalog, { providerId: 'openai', models: ['other'] }]);
+  try {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(requests).toEqual([]); expect(h.result().models.map(model => model.registryKey)).toEqual(['decision-router:auto']);
+    const detached = h.result(); expect(detached.hasCurrentModel('decision-router:auto')).toBe(true);
+    h.unmount(); expect(detached.hasCurrentModel('decision-router:auto')).toBe(false);
   } finally { h.unmount(); }
 });

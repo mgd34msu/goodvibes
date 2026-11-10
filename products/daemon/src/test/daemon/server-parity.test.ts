@@ -3224,7 +3224,12 @@ async function proveAutonomousRead(): Promise<void> {
     const detailBody = await detail.json() as { task: { id: string; kind: string } };
     expect(detailBody.task.id).toBe(submitBody.agentId);
     expect(detailBody.task.kind).toBe('agent');
-    const owner = runtimeServices.agentManager.getStatus(submitBody.agentId);
+    // HTTP admission acknowledges the queued agent before asynchronous contract
+    // preparation binds its owner role. Observe that binding before inspecting it.
+    const owner = await waitFor(() => {
+      const record = runtimeServices.agentManager.getStatus(submitBody.agentId);
+      return record?.contractRole === 'owner' ? record : undefined;
+    });
     expect(owner?.contractRole).toBe('owner');
     expect(typeof owner?.contractId).toBe('string');
     const contract = runtimeServices.contractRunner.get(owner!.contractId!);

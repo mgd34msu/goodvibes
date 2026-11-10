@@ -33323,6 +33323,7 @@
                               "unavailable",
                               "aborted",
                               "invalid-response",
+                              "internal",
                               "unrecorded"
                             ]
                           },
@@ -41078,6 +41079,7 @@
                                     "unavailable",
                                     "aborted",
                                     "invalid-response",
+                                    "internal",
                                     "unrecorded"
                                   ]
                                 },
@@ -48937,6 +48939,7 @@
                                   "unavailable",
                                   "aborted",
                                   "invalid-response",
+                                  "internal",
                                   "unrecorded"
                                 ]
                               },

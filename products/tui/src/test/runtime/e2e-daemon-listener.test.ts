@@ -13,7 +13,7 @@ function own(server: Bun.Server<undefined>): Bun.Server<undefined> {
 
 async function freshHome(): Promise<E2EHome> {
   // Only provider metadata is needed; no model or compiled TUI is launched.
-  const home = await makeHome({ baseURL: 'http://127.0.0.1:1/v1', requests: [], stop() {} });
+  const home = await makeHome({ baseURL: 'http://127.0.0.1:1/v1', requests: [], async stop() {} });
   homes.push(home);
   return home;
 }
@@ -23,10 +23,11 @@ function settingsPath(home: E2EHome): string {
 }
 
 afterEach(async () => {
+  const ownedHomes = homes.splice(0);
   const stopped = await Promise.allSettled(servers.splice(0).map(server => server.stop(true)));
-  for (const home of homes.splice(0)) rmSync(home.root, { recursive: true, force: true });
   const errors = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
   if (errors.length) throw new AggregateError(errors, 'E2E listener test cleanup failed');
+  for (const home of ownedHomes) rmSync(home.root, { recursive: true, force: true });
 });
 
 test('owned daemon listener ignores an occupied home probe and routes canonical discovery to its bound port', async () => {

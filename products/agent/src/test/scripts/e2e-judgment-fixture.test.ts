@@ -49,7 +49,7 @@ test('the loopback service rejects unknown judgments instead of manufacturing su
       expect(changed.status).toBe(422);
     }
     expect(server.unexpected).toHaveLength(4);
-  } finally { server.stop(); }
+  } finally { await server.stop(); }
 });
 
 test('native readings match only captured semantic requests with intact host-identity relationships', async () => {

@@ -178,6 +178,7 @@ for (const loseStartReply of [false, true]) test(`compiled owner conversation pr
     } catch {}
     failures.push(new Error(`Native owner PTY failed at ${stage}: ${String(error)}\nMethods: ${calls.map(call => call.method).join(', ')}\nJournal state: ${JSON.stringify(journalState)}\nKnown notices: ${JSON.stringify(['The durable intake journal could not be confirmed.', 'Native intake outcome is unknown or unavailable.'].filter(notice => output.includes(notice)))}\nNative outcomes: ${JSON.stringify(outcomes.filter(outcome => outcome.method.startsWith('workLedger.intake.')))}\nJev question batches: ${JSON.stringify(fake.requests.map(request => Object.keys(request.questions)))}`, { cause: error }));
   } finally {
+    const previousFailures = failures.length;
     releaseHeld();
     if (child) {
       try { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); await child.exited; }
@@ -185,8 +186,12 @@ for (const loseStartReply of [false, true]) test(`compiled owner conversation pr
       finally { try { child.terminal?.close(); } catch (error) { failures.push(error); } }
     }
     try { await daemon.stop(); } catch (error) { failures.push(error); }
-    for (const cleanup of [() => read.mockRestore(), () => transport.mockRestore(), () => localModel.stop(), () => remoteModel.stop(), () => home.judgments.stop(), () => removeHome(home)]) {
+    for (const cleanup of [() => read.mockRestore(), () => transport.mockRestore(), () => localModel.stop(), () => remoteModel.stop(), () => home.judgments.stop()]) {
       try { await cleanup(); } catch (error) { failures.push(error); }
+    }
+    // Preserve the original root when any owner could not establish its drain.
+    if (failures.length === previousFailures) {
+      try { await removeHome(home); } catch (error) { failures.push(error); }
     }
   }
   if (failures.length === 1) throw failures[0];

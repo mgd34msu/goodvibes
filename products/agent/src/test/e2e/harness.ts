@@ -15,6 +15,7 @@
 import { AgentConfigManager } from '../../config/host-settings.ts';
 import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { startE2EJudgments } from './judgment-fixture.ts';
+import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { TerminalFrame } from './terminal-frame.ts';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -422,11 +423,21 @@ export function screenText(screen: string): string {
 }
 
 /** Remove a home made by makeHome. */
-export function removeHome(e2eHome: E2EHome | null): void {
+export async function removeHome(e2eHome: E2EHome | null): Promise<void> {
   if (!e2eHome) return;
-  e2eHome.judgments.stop();
+  await e2eHome.judgments.stop();
   const violations = existsSync(e2eHome.networkViolations) ? readFileSync(e2eHome.networkViolations, 'utf8') : '';
   rmSync(e2eHome.root, { recursive: true, force: true });
   e2eHome.judgments.assertNoUnexpected();
   if (violations.trim()) throw new Error(`E2E attempted unexpected external requests:\n${violations}`);
+}
+
+/** Drain original fixture owners in dependency order before removing their home.
+ * Every stop is attempted; failed/unknown drains preserve the home for diagnosis. */
+export async function closeE2EFixture(home: E2EHome | null, ...stops: readonly (() => void | Promise<void>)[]): Promise<void> {
+  const scope = createAsyncDisposalScope('Agent E2E fixture');
+  scope.registry.add('decision server', () => home?.judgments.stop());
+  for (let index = stops.length - 1; index >= 0; index--) scope.registry.add(`owner ${index + 1}`, stops[index]!);
+  await scope.close();
+  await removeHome(home);
 }

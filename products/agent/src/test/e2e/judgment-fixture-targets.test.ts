@@ -20,5 +20,5 @@ test('Agent E2E endpoint accepts the actual native text target adapter without o
     expect((await ask(fake.requests[0])).status).toBe(200);
     expect((await ask(recorded)).status).toBe(422);
     expect(recorded.questions.false_blocker.instructions.nativeTargets.proposedAnswer).toHaveProperty('digest');
-  } finally { server.stop(); }
+  } finally { await server.stop(); }
 });

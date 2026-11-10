@@ -1,6 +1,6 @@
 /** The generic harness owns an actual compiled-binary PTY, not a transcript stub. */
 import { expect, test } from 'bun:test';
-import { answerWorkspaceQuestion, inputAreaVisible, launchAgent, makeHome, removeHome, startStubModel } from './harness.ts';
+import { answerWorkspaceQuestion, inputAreaVisible, launchAgent, makeHome, closeE2EFixture, startStubModel } from './harness.ts';
 
 test('the owned compiled terminal resizes, keeps current screen separate from history, and awaits shutdown', async () => {
   const model = startStubModel(() => ({ text: 'UNEXPECTED MODEL REQUEST' }));
@@ -35,8 +35,6 @@ test('the owned compiled terminal resizes, keeps current screen separate from hi
     await agent.stop();
     expect(agent.alive()).toBe(false);
   } finally {
-    await agent.stop();
-    model.stop();
-    removeHome(home);
+    await closeE2EFixture(home, () => agent.stop(), () => model.stop());
   }
 }, 60_000);

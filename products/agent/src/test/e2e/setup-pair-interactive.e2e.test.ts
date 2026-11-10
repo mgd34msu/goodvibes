@@ -8,7 +8,7 @@ import { BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/provider
 import { startDaemonFixture } from '@goodvibes-jev/daemon/testing';
 import { agentHostPairingStorePath, readAgentHostPairing } from '../../runtime/connected-host-pairing-store.ts';
 import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
-import { isolatedEnv, makeHome, removeHome, resolveBinary, startStubModel, waitFor, WORKSPACE_QUESTION } from './harness.ts';
+import { isolatedEnv, makeHome, closeE2EFixture, resolveBinary, startStubModel, waitFor, WORKSPACE_QUESTION } from './harness.ts';
 
 const AUTH = '/api/control-plane/auth';
 const MIGRATE = '/api/control-plane/methods/pairing.tokens.migrate/invoke';
@@ -38,7 +38,11 @@ function deferred() {
 
 async function fixture(environmentOverride = false) {
   const model = startStubModel(() => ({ text: 'Unexpected pairing model request' }));
-  const home = await makeHome(model).catch(error => { model.stop(); throw error; });
+  const home = await makeHome(model).catch(async error => {
+    try { await closeE2EFixture(null, () => model.stop()); }
+    catch (cleanup) { throw new AggregateError([error, cleanup], 'Pairing fixture setup and cleanup failed'); }
+    throw error;
+  });
   mkdirSync(join(home.root, 'tmp'), { recursive: true });
   const daemonRoot = join(home.root, 'pairing-host');
   const daemon = await startDaemonFixture({ root: daemonRoot, token: 'synthetic-interactive-pairing-bootstrap', hostSessions: false,
@@ -51,7 +55,11 @@ async function fixture(environmentOverride = false) {
       writeFileSync(cache, JSON.stringify({ version: 1, fetchedAt: Date.now(), ttlMs: 86_400_000, entries: [] }));
     },
     inboxFactory: (context, _routing, options) => registerInboxSurface(context, { ...options, adapters: new Map() }),
-  }).catch(error => { model.stop(); removeHome(home); throw error; });
+  }).catch(async error => {
+    try { await closeE2EFixture(home, () => model.stop()); }
+    catch (cleanup) { throw new AggregateError([error, cleanup], 'Pairing host setup and cleanup failed'); }
+    throw error;
+  });
   let stopProxy: (() => Promise<void>) | undefined;
   try {
     const legacyPath = join(home.daemonHome, 'operator-tokens.json');
@@ -222,21 +230,31 @@ async function fixture(environmentOverride = false) {
       completedAuth: () => completedAuth,
       authTokens,
       async stop() {
-        try {
-          const stopped = await Promise.allSettled(sessions.map(session => session.stop()));
-          gate.release(); requests.abort();
-          const servers = await Promise.allSettled([proxy.stop(true), daemon.stop()]);
-          const failed = [...stopped, ...servers].filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-          if (failed.length) throw new AggregateError(failed.map(result => result.reason), 'Owned pairing fixture cleanup failed');
-          for (const session of sessions) session.assertOutput();
-          for (const file of sharedFiles) expect(readFileSync(file.path)).toEqual(file.bytes);
-          expect(unexpectedMutations).toEqual([]);
-          expect(model.requests).toEqual([]);
-        } finally { model.stop(); removeHome(home); }
+        await closeE2EFixture(home,
+          async () => {
+            const stopped = await Promise.allSettled(sessions.map(session => session.stop()));
+            const failed = stopped.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+            if (failed.length) throw new AggregateError(failed.map(result => result.reason), 'Owned pairing sessions could not drain');
+          },
+          () => { gate.release(); requests.abort(); },
+          async () => {
+            const servers = await Promise.allSettled([(async () => proxy.stop(true))(), (async () => daemon.stop())()]);
+            const failed = servers.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+            if (failed.length) throw new AggregateError(failed.map(result => result.reason), 'Owned pairing servers could not drain');
+          },
+          () => model.stop(),
+          () => {
+            for (const session of sessions) session.assertOutput();
+            for (const file of sharedFiles) expect(readFileSync(file.path)).toEqual(file.bytes);
+            expect(unexpectedMutations).toEqual([]);
+            expect(model.requests).toEqual([]);
+          },
+        );
       },
     };
   } catch (error) {
-    try { await stopProxy?.(); } finally { try { await daemon.stop(); } finally { model.stop(); removeHome(home); } }
+    try { await closeE2EFixture(home, () => stopProxy?.(), () => daemon.stop(), () => model.stop()); }
+    catch (cleanup) { throw new AggregateError([error, cleanup], 'Pairing fixture and cleanup failed'); }
     throw error;
   }
 }

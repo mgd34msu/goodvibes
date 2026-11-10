@@ -7,7 +7,7 @@ import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { createShellPathService } from '../../runtime/index.ts';
 import { registerAgentOperatorBriefingTool } from '../../tools/agent-operator-briefing-tool.ts';
 import { mockFetch } from '../helpers/typed-fetch-mock.ts';
-import { makeHome, removeHome, startStubModel } from './harness.ts';
+import { makeHome, closeE2EFixture, startStubModel } from './harness.ts';
 import { startE2ENativeHost } from './native-host-fixture.ts';
 
 /** Actual public Agent tool, platform, authenticated routes and daemon-owned ledger.
@@ -72,6 +72,6 @@ test('registered operator briefing reads native daemon work without mutation or 
     expect(requests.some(request => request.path === '/api/work-ledger/snapshot')).toBe(false);
   } finally {
     globalThis.fetch = originalFetch;
-    try { await host?.stop(); } finally { model.stop(); removeHome(home); }
+    await closeE2EFixture(home, () => host?.stop(), () => model.stop());
   }
 }, 30000);

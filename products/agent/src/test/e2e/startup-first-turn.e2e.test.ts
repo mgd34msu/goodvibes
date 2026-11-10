@@ -21,7 +21,7 @@ import {
   lastUserText,
   launchAgent,
   makeHome,
-  removeHome,
+  closeE2EFixture,
   screenText,
   startStubModel,
   type AgentSession,
@@ -38,8 +38,8 @@ let agent: AgentSession | null = null;
 let home: E2EHome | null = null;
 let host: Awaited<ReturnType<typeof startE2ENativeHost>> | null = null;
 afterEach(async () => {
-  await agent?.stop(); agent = null;
-  try { await host?.stop(); } finally { host = null; removeHome(home); home = null; }
+  try { await closeE2EFixture(home, () => agent?.stop(), () => host?.stop()); }
+  finally { agent = null; host = null; home = null; }
 });
 afterAll(() => model.stop());
 

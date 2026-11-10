@@ -30,7 +30,7 @@ import {
   inputAreaVisible,
   launchAgent,
   makeHome,
-  removeHome,
+  closeE2EFixture,
   startStubModel,
   waitFor,
   type AgentSession,
@@ -49,11 +49,7 @@ let daemon: BootedDaemon | null = null;
 let door: DaemonDoor | null = null;
 let home: E2EHome | null = null;
 afterAll(async () => {
-  await agent?.stop();
-  await door?.stop();
-  await daemon?.stop();
-  model.stop();
-  removeHome(home);
+  await closeE2EFixture(home, () => agent?.stop(), () => door?.stop(), () => daemon?.stop(), () => model.stop());
 });
 
 function count(calls: readonly string[], call: string): number {

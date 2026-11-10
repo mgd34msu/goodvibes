@@ -69,7 +69,7 @@ test('standalone previous-session severity retains the exact complete notice and
       expect((await ask({ ...body, model: 'another-model' })).status).toBe(422);
       expect((await ask({ ...body, questions: { severity: { ...noticeSeverity.items.severity.question, instructions: 'Changed question' } } })).status).toBe(422);
     }
-  } finally { server.stop(); }
+  } finally { await server.stop(); }
 });
 
 test('startup gate fixture requires the exact owned workspace, operation and questions', async () => {
@@ -85,7 +85,7 @@ test('startup gate fixture requires the exact owned workspace, operation and que
     expect((await ask({ ...original, state: { ...original.state, arguments: { mode: 'send' } } })).status).toBe(422);
     expect((await ask({ ...original, questions: { ...original.questions, extra: { type: 'noul' } } })).status).toBe(422);
     expect((await ask(ambientDraftGate)).status).toBe(422);
-  } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+  } finally { await server.stop(); rmSync(root, { recursive: true, force: true }); }
 });
 
 test('headless applicability retains the real question and rejects changed instructions or requirements', async () => {
@@ -107,7 +107,7 @@ test('headless applicability retains the real question and rejects changed instr
       else body.questions.completion_required.instructions.question = 'A different routing decision';
       expect((await ask(body)).status).toBe(422);
     }
-  } finally { server.stop(); }
+  } finally { await server.stop(); }
 });
 
 for (const product of ['agent', 'tui'] as const) test(`${product} scripted completion accepts only its complete recorded request and authored reply`, async () => {
@@ -160,7 +160,7 @@ for (const product of ['agent', 'tui'] as const) test(`${product} scripted compl
     const changedNotice = structuredClone(native);
     changedNotice.state.transcript[0]!.content = 'A different dispatch claim';
     expect((await ask(changedNotice)).status).toBe(422);
-  } finally { server.stop(); }
+  } finally { await server.stop(); }
 });
 
 
@@ -260,7 +260,7 @@ test('exact CI and native diagnostics retain canonical questions and original an
       }
     }
     expect({ tokenLines, memoryLines, setupLines, scalarSetupLines }).toEqual({ tokenLines: 2, memoryLines: 1, setupLines: 3, scalarSetupLines: 3 });
-  } finally { server.stop(); rmSync(ownedRoot, { recursive: true, force: true }); }
+  } finally { await server.stop(); rmSync(ownedRoot, { recursive: true, force: true }); }
 });
 
 test('unknown diagnostic models, complete schemas, subjects and path owners remain 422 failures', async () => {
@@ -304,7 +304,7 @@ test('unknown diagnostic models, complete schemas, subjects and path owners rema
     expect(server.accepted).toHaveLength(0);
     expect(server.acceptedDiagnostics).toHaveLength(0);
     expect(() => server.assertNoUnexpected()).toThrow('unknown judgment request');
-  } finally { server.stop(); rmSync(ownedRoot, { recursive: true, force: true }); }
+  } finally { await server.stop(); rmSync(ownedRoot, { recursive: true, force: true }); }
 });
 
 describe('recorded cancellation diagnostic fixtures', () => {
@@ -345,7 +345,7 @@ describe('recorded cancellation diagnostic fixtures', () => {
       expect((await send({ ...timings[0], model: 'unrecognized-model' })).status).toBe(422);
       expect(server.unexpected).toHaveLength(1);
       expect(() => server.assertNoUnexpected()).toThrow('unknown judgment request');
-    } finally { server.stop(); }
+    } finally { await server.stop(); }
   });
 
 });
@@ -389,7 +389,7 @@ test('recorded synthetic privacy failures remain unavailable and unknown project
     expect(server.unavailablePrivacy).toHaveLength(recordedCount);
     expect(server.unexpected).toHaveLength(unknown.length);
     expect(() => server.assertNoUnexpected()).toThrow('unknown judgment request');
-  } finally { server.stop(); rmSync(ownedRoot, { recursive: true, force: true }); }
+  } finally { await server.stop(); rmSync(ownedRoot, { recursive: true, force: true }); }
 });
 
 

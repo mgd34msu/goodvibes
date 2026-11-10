@@ -23,7 +23,7 @@ import {
   lastUserText,
   launchAgent,
   makeHome,
-  removeHome,
+  closeE2EFixture,
   screenText,
   startStubModel,
   type AgentSession,
@@ -39,7 +39,7 @@ const model = startStubModel((request) => (
 let agent: AgentSession | null = null;
 let home: E2EHome | null = null;
 let host: Awaited<ReturnType<typeof startE2ENativeHost>> | null = null;
-afterAll(async () => { await agent?.stop(); try { await host?.stop(); } finally { model.stop(); removeHome(home); } });
+afterAll(() => closeE2EFixture(home, () => agent?.stop(), () => host?.stop(), () => model.stop()));
 
 describe('first start in a new workspace', () => {
   test('the workspace question is drawn, and the first typed prompt reaches the conversation whole', async () => {

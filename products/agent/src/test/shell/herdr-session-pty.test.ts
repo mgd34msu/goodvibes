@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { isolatedEnv, makeHome, removeHome, startStubModel, waitFor } from '../e2e/harness.ts';
+import { isolatedEnv, makeHome, closeE2EFixture, startStubModel, waitFor } from '../e2e/harness.ts';
 import { createSessionSurface } from '@/runtime/index.ts';
 import { TerminalFrame } from '../e2e/terminal-frame.ts';
 
@@ -58,8 +58,12 @@ if (argv[1] === 'release-agent' && argv[argv.indexOf('--source') + 1] === 'goodv
     expect(calls().at(-1)?.[1]).toBe('release-agent');
   } finally {
     writeFileSync(releaseGate, 'release');
-    if (child.exitCode === null) child.kill('SIGKILL');
-    await child.exited; child.terminal?.close();
-    model.stop(); removeHome(home);
+    await closeE2EFixture(home,
+      async () => {
+        try { if (child.exitCode === null) child.kill('SIGKILL'); await child.exited; }
+        finally { child.terminal?.close(); }
+      },
+      () => model.stop(),
+    );
   }
 }, 60_000);

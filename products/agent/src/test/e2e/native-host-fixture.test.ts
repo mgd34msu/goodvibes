@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createNativeConversationIntakeBinding } from '../../runtime/native-conversation-intake-host.ts';
 import { readNativeConversationTurnPermit, revalidateNativeConversationTurnPermit } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
-import { makeHome, removeHome, startStubModel } from './harness.ts';
+import { makeHome, closeE2EFixture, startStubModel } from './harness.ts';
 import { startE2ENativeHost } from './native-host-fixture.ts';
 
 test('startup fixture uses genuine paired capture/admission and revocable turn authority', async () => {
@@ -29,5 +29,5 @@ test('startup fixture uses genuine paired capture/admission and revocable turn a
       expect(host.daemon.services.pairingTokens.revoke(principal.tokenId)).toBe(true);
       await expect(revalidateNativeConversationTurnPermit(permit)).rejects.toThrow();
     } finally { binding.dispose(); }
-  } finally { try { await host?.stop(); } finally { model.stop(); removeHome(home); } }
+  } finally { await closeE2EFixture(home, () => host?.stop(), () => model.stop()); }
 }, 30000);

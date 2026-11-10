@@ -68,6 +68,11 @@ for (const scenario of ['complete', 'cancel', 'changed', 'native-refusal'] as co
       } else {
         expect(contract.status).not.toBe('passed'); expect(unitSource).toBeUndefined();
       }
-    } finally { lifetime.abort(); automation.stop(); broker.stop(); h.dispose(); }
+    } finally {
+      lifetime.abort(); automation.stop();
+      // The broker owns a queued final persistence write. The harness may
+      // remove its root as soon as the runner joins, so retain it until stop.
+      try { await broker.stop(); } finally { h.dispose(); }
+    }
   });
 }

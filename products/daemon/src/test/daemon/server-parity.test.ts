@@ -20,6 +20,7 @@ import { DaemonServer, HttpListener } from '@goodvibes-jev/engine/platform/platf
 import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { ProviderRegistry, BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
 import { RuntimeEventBus, createFeatureFlagManager, deriveFeatureStates, type TransportEvent } from '../../runtime/index.js';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.js';
@@ -168,7 +169,15 @@ describe('daemon server source parity: restored source assertions', () => {
   const servers: DaemonServer[] = [];
   const rootSignals: AbortSignal[] = [];
   const graphs: RuntimeServices[] = [];
+  const graphRestores: (() => void | Promise<void>)[] = [];
   const restores: (() => void)[] = [];
+  async function closeOwnedGraphs(): Promise<void> {
+    const scope = createAsyncDisposalScope('Server parity owned graphs');
+    for (const restore of graphRestores.splice(0)) scope.registry.add('graph fixture dependency', restore);
+    for (const graph of graphs.splice(0)) scope.registry.add('runtime graph', () => graph.close());
+    for (const server of servers.splice(0)) scope.registry.add('daemon server', () => server.stop());
+    await scope.close();
+  }
   const capturingServe = ((options) => {
     const server = Bun.serve(options);
     if (server.port !== undefined) boundPort = server.port;
@@ -194,6 +203,9 @@ describe('daemon server source parity: restored source assertions', () => {
     readonly userAuth?: UserAuthManager; readonly serveFactory?: typeof Bun.serve;
     readonly runtimeBus?: RuntimeEventBus; readonly port?: number; readonly host?: string;
   } = {}): Promise<DaemonServer> {
+    // This helper replaces the test's daemon. A second independent graph at
+    // the same paths would race the first original task-graph owner on close.
+    if (options.runtimeServices === undefined && graphs.length > 0) await closeOwnedGraphs();
     const config = options.configManager ?? makeConfig();
     let inboxFactory = createProductionDaemonInboxFactory();
     if (config.get('surfaces.slack.enabled') === true) {
@@ -203,7 +215,7 @@ describe('daemon server source parity: restored source assertions', () => {
         if (path === '/api/conversations.list') return Response.json({ ok: true, channels: [] });
         throw new Error(`Unscripted Slack fixture request: ${path}`);
       } });
-      restores.push(() => provider.stop(true));
+      graphRestores.push(() => provider.stop(true));
       inboxFactory = createProductionDaemonInboxFactory({ slack: {
         account: { workspaceId: 'workspace-1', userId: 'U123' },
         screening: {
@@ -244,9 +256,9 @@ describe('daemon server source parity: restored source assertions', () => {
       }
       return parityReadings.port.ask(request);
     } };
-    const previous = installJudgmentPort(withDecisionLog(scripted, services.judgment.decisionLog)); restores.push(() => { installJudgmentPort(previous); });
+    const previous = installJudgmentPort(withDecisionLog(scripted, services.judgment.decisionLog)); graphRestores.push(() => { installJudgmentPort(previous); });
     const judgmentSpy = spyOn(services.judgment.port, 'ask').mockImplementation(request => scripted.ask(request));
-    restores.push(() => judgmentSpy.mockRestore());
+    graphRestores.push(() => judgmentSpy.mockRestore());
     return server;
   }
   beforeEach(async () => {
@@ -261,11 +273,8 @@ describe('daemon server source parity: restored source assertions', () => {
     daemon = await createTestDaemon();
   });
   afterEach(async () => {
-    try { for (const server of servers.splice(0).reverse()) await server.stop(); }
-    finally {
-      try { for (const graph of graphs.splice(0).reverse()) await graph.close(); }
-      finally { for (const restore of restores.splice(0).reverse()) restore(); }
-    }
+    try { await closeOwnedGraphs(); }
+    finally { for (const restore of restores.splice(0).reverse()) restore(); }
   });
 
 async function proveAutonomousRead(): Promise<void> {

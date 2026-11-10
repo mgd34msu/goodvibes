@@ -10,7 +10,7 @@
  * in their own beforeEach, bun:test runs all registered beforeEach hooks.
  */
 import { seedProviderMetadataCacheFixture } from './provider-metadata-cache-fixture.ts';
-import { afterAll, beforeEach } from 'bun:test';
+import { afterAll, afterEach, beforeEach } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -71,6 +71,11 @@ let runtimeServices: RuntimeServices | null = null;
 let runtimePreparation: Promise<RuntimeServices> | null = null;
 let runtimeGeneration = 0;
 const pendingRuntimePreparations = new Set<Promise<RuntimeServices>>();
+const ownedRuntimes = new Set<RuntimeServices>();
+const pendingRuntimeClosures = new Set<Promise<void>>();
+class RetiredRuntimePreparationError extends Error {
+  constructor() { super('Test runtime preparation was reset'); }
+}
 let runtimeCounter = 0;
 let toolLLM: ToolLLM | null = null;
 let toolLLMRuntimeServices: RuntimeServices | null = null;
@@ -175,6 +180,34 @@ export function resetTestRuntimeServices(): void {
   toolLLM = null;
   toolLLMRuntimeServices = null;
   autoHealer = null;
+  for (const services of ownedRuntimes) {
+    ownedRuntimes.delete(services);
+    let closing: Promise<void>;
+    // Invoke now: native close fences new work synchronously, before its drain.
+    try { closing = services.close(); } catch (error) { closing = Promise.reject(error); }
+    pendingRuntimeClosures.add(closing);
+    // Keep the original promise for the awaited boundary and failure report.
+    void closing.catch(() => {});
+  }
+}
+
+/** Retain roots until every original preparation and owned graph has drained.
+ * A failed cleanup remains a test failure rather than an ignored rejection. */
+export async function drainTestRuntimeServices(): Promise<void> {
+  resetTestRuntimeServices();
+  const failures: unknown[] = [];
+  while (pendingRuntimePreparations.size || pendingRuntimeClosures.size || ownedRuntimes.size) {
+    const preparations = [...pendingRuntimePreparations];
+    const prepared = await Promise.allSettled(preparations);
+    for (const preparation of preparations) pendingRuntimePreparations.delete(preparation);
+    for (const outcome of prepared) if (outcome.status === 'rejected' && !(outcome.reason instanceof RetiredRuntimePreparationError)) failures.push(outcome.reason);
+    resetTestRuntimeServices();
+    const closures = [...pendingRuntimeClosures];
+    for (const closing of closures) pendingRuntimeClosures.delete(closing);
+    const closed = await Promise.allSettled(closures);
+    for (const outcome of closed) if (outcome.status === 'rejected') failures.push(outcome.reason);
+  }
+  if (failures.length) throw new AggregateError(failures, 'Owned Agent test runtimes did not drain.');
 }
 
 export async function getTestRuntimeServices(): Promise<RuntimeServices> {
@@ -186,7 +219,7 @@ export async function getTestRuntimeServices(): Promise<RuntimeServices> {
   seedProviderMetadataCacheFixture({ configManager, workingDirectory: workingDir, homeDirectory: workingDir });
   const preparation = (async () => {
     await prepareConfiguredProjectContext(configManager, workingDir, 'knowledge-agent.sqlite', { activate: true });
-    if (generation !== runtimeGeneration) throw new Error('Test runtime preparation was reset');
+    if (generation !== runtimeGeneration) throw new RetiredRuntimePreparationError();
     // The real constructor remains synchronous; nothing can publish a retired
     // preparation while the original activation is in flight.
     const services = createRuntimeServices({
@@ -194,6 +227,7 @@ export async function getTestRuntimeServices(): Promise<RuntimeServices> {
       runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
       workingDir, homeDirectory: workingDir, getConversationTitle: () => 'test-runtime',
     });
+    ownedRuntimes.add(services);
     seedRuntimeProviderTestModels(services);
     applyExecutorIfPresent(services);
     runtimeServices = services;
@@ -515,16 +549,15 @@ export function resetAllTestServiceState(): void {
 // Auto-register a beforeEach reset so every test file that imports this helper
 // starts with clean singleton state, without needing explicit reset calls.
 // Files can still register additional beforeEach hooks, all registered hooks run.
-beforeEach(() => {
+beforeEach(async () => {
   resetAllTestServiceState();
+  await drainTestRuntimeServices();
 });
 
 // Reset fences publication, while this set retains already-started native IO
 // until the actual test lifetime drains before the preload removes its roots.
-afterAll(async () => {
-  resetTestRuntimeServices();
-  await Promise.allSettled([...pendingRuntimePreparations]);
-});
+afterEach(drainTestRuntimeServices);
+afterAll(drainTestRuntimeServices);
 
 export function applyTestAgentExecutor(executor: AgentExecutor | null): void {
   agentExecutorForTests = executor;

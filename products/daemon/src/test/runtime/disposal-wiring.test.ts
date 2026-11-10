@@ -15,7 +15,7 @@ function owners(calls: string[], close: () => Promise<void>): DaemonRuntimePolle
     stopWakeHousekeeping: stop('wake'), devicePosture: { stopHousekeeping: stop('devices') }, daemonHandlers: { close },
   };
 }
-const expected = ['handlers', 'wake', 'devices', 'durability', 'agents', 'triggers', 'orchestrator', 'memory', 'processes', 'contract', 'home-graph', 'agent-knowledge', 'knowledge', 'sessions', 'reindex', 'consolidation', 'retention', 'snapshots', 'watchers', 'config'];
+const expected = ['handlers', 'wake', 'devices', 'durability', 'agents', 'processes', 'triggers', 'orchestrator', 'memory', 'contract', 'home-graph', 'agent-knowledge', 'knowledge', 'sessions', 'reindex', 'consolidation', 'retention', 'snapshots', 'watchers', 'config'];
 
 test('all declared owners are registered and handler drain precedes the rest of the graph', async () => {
   const calls: string[] = []; const scope = createDisposalScope('fixture');
@@ -45,4 +45,22 @@ test('the constructed base graph can be released when no handler surface was acq
   registerDaemonRuntimeBasePollers(scope.registry, base, { stopConfigWatch: () => { calls.push('config'); } });
   await scope.close();
   expect(calls).toEqual(expected.slice(1));
+});
+
+test('the fleet reader stops before the trigger owner drains and older dependencies remain available', async () => {
+  const calls: string[] = [], scope = createDisposalScope('fixture');
+  let entered!: () => void, release!: () => void;
+  const joined = new Promise<void>(resolve => { entered = resolve; });
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  registerDaemonRuntimePollers(scope.registry, {
+    ...owners(calls, async () => { calls.push('handlers'); }),
+    triggerManager: { shutdown() { calls.push('triggers'); }, async join() {
+      calls.push('trigger-join'); entered(); await pending; calls.push('trigger-drained');
+    } },
+  }, { stopConfigWatch: () => { calls.push('config'); } });
+  const closed = scope.close();
+  await joined;
+  try { expect(calls).toEqual([...expected.slice(0, 7), 'trigger-join']); }
+  finally { release(); await closed; }
+  expect(calls).toEqual([...expected.slice(0, 7), 'trigger-join', 'trigger-drained', ...expected.slice(7)]);
 });

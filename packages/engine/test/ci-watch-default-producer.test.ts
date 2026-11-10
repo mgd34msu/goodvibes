@@ -132,6 +132,12 @@ test('default conversational goal-only source survives a returned push and compl
     expect(h.events.some(event => event.type === 'CONTRACT_PLAN_CHECKED' && event.check === 'criterion-trace')).toBe(true);
     expect(h.events.some(event => event.type === 'CONTRACT_PLAN_CHECKED' && event.check === 'plan-coverage')).toBe(true);
   } finally {
-    process.env.PATH = path; orchestrator.dispose(); lifetime.abort(); automation.stop(); broker.stop(); permissionSpy.mockRestore(); services.dispose(); h.dispose(); forgetGateReadings();
+    process.env.PATH = path; orchestrator.dispose(); lifetime.abort(); automation.stop();
+    try { await broker.stop(); }
+    finally {
+      permissionSpy.mockRestore();
+      try { await services.close(); }
+      finally { h.dispose(); forgetGateReadings(); }
+    }
   }
 });

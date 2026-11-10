@@ -8,7 +8,7 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { selectedPlanningTarget } from '../../input/commands/planning-action-target.ts';
 import { registerPlanningRuntimeCommands } from '../../input/commands/planning-runtime.ts';
-import { ordinaryPlanningRevision } from '../../../../../packages/engine/test/_helpers/planning-revision.ts';
+import { judgmentInputCardProblem } from '@goodvibes-jev/engine/platform/platform/gate';
 
 const roots: string[] = [];
 let previous: ReturnType<typeof installJudgmentPort>;
@@ -47,6 +47,22 @@ async function reopened(path: string) {
   return { sources: store.listSources(1000).sort((a, b) => a.id.localeCompare(b.id)), state: await new ProjectPlanningService(store).getState({ projectId: 'fixture' }) };
 }
 
+/** Real persisted comparison tokens for ordinary stale-source fixture cases. */
+async function ordinaryPlanningRevision(store: KnowledgeStore, service: ProjectPlanningService) {
+  let selected = await service.getState({ projectId: 'fixture' });
+  for (let attempt = 0; attempt < 32; attempt++) {
+    if (!selected.source || !selected.revision) throw new Error('Expected an actual persisted planning revision');
+    if (judgmentInputCardProblem(selected.revision.generation) === undefined) return selected;
+    // Change setup metadata through the real writer; never fabricate a revision
+    // or relax the privacy floor for an unmatched selected comparison token.
+    await store.upsertSource({ ...selected.source,
+      metadata: { ...selected.source.metadata, ordinaryFixtureRevision: `fixture-${attempt}` },
+    });
+    selected = await service.getState({ projectId: 'fixture' });
+  }
+  throw new Error('Could not select an ordinary persisted planning revision');
+}
+
 for (const action of ['approve', 'answer']) {
   test(`explicit historical ${action} rejects a replaced revision without changing saved bytes`, async () => {
     const clock = spyOn(Date, 'now').mockReturnValue(70_000);
@@ -55,7 +71,7 @@ for (const action of ['approve', 'answer']) {
       // This case exercises stale-source refusal, not protected-token admission.
       // Select a genuine ordinary persisted revision; dedicated platform cases
       // retain explicit PAN-shaped and caller-forged generation coverage.
-      const selected = await ordinaryPlanningRevision(f.store, f.service, 'fixture');
+      const selected = await ordinaryPlanningRevision(f.store, f.service);
       await f.service.upsertState({ projectId: 'fixture', state: { ...f.authored, goal: 'A replacement goal', executionApproved: true,
         metadata: { ...f.authored.metadata, approvedAt: 42, approvedFrom: 'previous-owner' } } });
       const before = await reopened(f.path); const bytes = readFileSync(f.path);

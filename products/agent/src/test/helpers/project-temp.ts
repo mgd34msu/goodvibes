@@ -18,7 +18,16 @@ let projectTmpRoot: {
 // sweepCreatedProjectTempDirs below). Directories created via
 // makeLongLivedProjectTempDir are deliberately NEVER pushed here, they go to
 // the shared temp registry instead, which is swept once at end of run.
-const _createdDirs: string[] = [];
+interface CreatedProjectDir {
+  readonly path: string;
+  readonly dev: number;
+  readonly ino: number;
+  readonly birthtimeMs: number;
+  readonly uid: number;
+  drain?: () => void | Promise<void>;
+  closing?: Promise<void>;
+}
+const _createdDirs: CreatedProjectDir[] = [];
 
 /** One checkout-contained root for this process, shared by creation and final cleanup. */
 export function projectTestTmpRoot(): string {
@@ -74,18 +83,56 @@ export function assertProjectTestTmpCurrent(): boolean {
 }
 
 /** The native parent removes its issued root only after complete child drainage. */
-export function sweepProjectTestTmpRoot(): void {
+export async function sweepProjectTestTmpRoot(): Promise<void> {
+  await sweepCreatedProjectTempDirs();
   if (assertProjectTestTmpCurrent() && projectTmpRoot && !projectTmpRoot.parentOwned) rmSync(projectTmpRoot.path, { recursive: true, force: true });
 }
 
-function removeAll(dirs: readonly string[]): void {
-  for (const dir of dirs) {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      // A directory already removed by its own test is not an error.
-    }
+function assertCreatedDirCurrent(entry: CreatedProjectDir): void {
+  if (!assertProjectTestTmpCurrent()) throw new Error('The owned Agent project test root no longer exists');
+  const current = lstatSync(entry.path);
+  if (!current.isDirectory() || current.isSymbolicLink() || realpathSync(entry.path) !== entry.path
+    || current.dev !== entry.dev || current.ino !== entry.ino || current.birthtimeMs !== entry.birthtimeMs || current.uid !== entry.uid) {
+    throw new Error('Refusing cleanup of a replaced Agent fixture root');
   }
+}
+
+function closeCreatedDir(entry: CreatedProjectDir): Promise<void> {
+  if (entry.closing) return entry.closing;
+  let resolveClose!: () => void, rejectClose!: (error: unknown) => void;
+  const closing = new Promise<void>((resolve, reject) => { resolveClose = resolve; rejectClose = reject; });
+  entry.closing = closing;
+  // Older fixture callers do not await cleanup. The preload still awaits this
+  // exact promise and reports any failure instead of deleting failed evidence.
+  void closing.catch(() => {});
+  try {
+    let originalGuardFailure: unknown;
+    try { assertCreatedDirCurrent(entry); } catch (error) { originalGuardFailure = error; }
+    // Retired physical custody forbids removal, but does not excuse leaving the
+    // original process/admission owner running. Its own cleanup guards remain.
+    const drained = entry.drain?.();
+    if (drained === closing) throw new Error('An Agent fixture drain cannot await its own cleanup');
+    void Promise.resolve(drained).then(() => {
+      if (originalGuardFailure) throw originalGuardFailure;
+      assertCreatedDirCurrent(entry);
+      rmSync(entry.path, { recursive: true, force: true });
+      const index = _createdDirs.indexOf(entry);
+      if (index !== -1) _createdDirs.splice(index, 1);
+    }).then(resolveClose, rejectClose);
+  } catch (error) { rejectClose(error); }
+  return closing;
+}
+
+/** Bind cleanup to an actual newly created root, without registering test hooks.
+ * The callback must stop admission synchronously and join its original work.
+ * Repeated explicit cleanup and the global sweep share one original promise.
+ */
+export function registerProjectTempDrain(path: string, drain: () => void | Promise<void>): () => Promise<void> {
+  const entry = _createdDirs.find(candidate => candidate.path === path);
+  if (!entry || entry.drain || entry.closing) throw new Error('Agent fixture root is not available for drain registration');
+  assertCreatedDirCurrent(entry);
+  entry.drain = drain;
+  return () => closeCreatedDir(entry);
 }
 
 /**
@@ -110,7 +157,8 @@ function removeAll(dirs: readonly string[]): void {
  */
 export function makeProjectTempDir(prefix: string): string {
   const dir = mkdtempSync(join(projectTestTmpRoot(), `${prefix}-`));
-  _createdDirs.push(dir);
+  const owner = lstatSync(dir);
+  _createdDirs.push({ path: dir, dev: owner.dev, ino: owner.ino, birthtimeMs: owner.birthtimeMs, uid: owner.uid });
   return dir;
 }
 
@@ -155,7 +203,20 @@ export function makeLongLivedProjectTempDir(prefix: string): string {
  * Exporting one sweep function and calling it from exactly one place (the
  * preload's afterEach) avoids that whole class of bug.
  */
-export function sweepCreatedProjectTempDirs(): void {
-  if (assertProjectTestTmpCurrent()) removeAll(_createdDirs.splice(0));
-  else _createdDirs.length = 0;
+export async function sweepCreatedProjectTempDirs(): Promise<void> {
+  const failures: unknown[] = [];
+  const results = await Promise.allSettled([..._createdDirs].map(async entry => {
+    if (entry.drain || entry.closing) return closeCreatedDir(entry);
+    // Existing simple roots have no accepted async owner. Keep their original
+    // best-effort cleanup while registered roots require proven complete drain.
+    try { assertCreatedDirCurrent(entry); rmSync(entry.path, { recursive: true, force: true }); }
+    catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+    }
+    const index = _createdDirs.indexOf(entry);
+    if (index !== -1) _createdDirs.splice(index, 1);
+    return Promise.resolve();
+  }));
+  for (const result of results) if (result.status === 'rejected') failures.push(result.reason);
+  if (failures.length) throw new AggregateError(failures, 'Agent fixture cleanup did not complete; original roots were preserved');
 }

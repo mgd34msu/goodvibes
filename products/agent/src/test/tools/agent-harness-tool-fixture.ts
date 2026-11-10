@@ -32,7 +32,7 @@ import { createAgentHarnessTool, registerAgentHarnessTool } from '../../tools/ag
 import { registerAgentTerminalProcessTools } from '../../tools/agent-terminal-process-tools.ts';
 import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
 import type { AgentExecutionRecord } from '../../runtime/execution-ledger.ts';
-import { makeProjectTempDir } from '../helpers/project-temp.ts';
+import { makeProjectTempDir, registerProjectTempDrain } from '../helpers/project-temp.ts';
 
 
 export type ShellPaths = ReturnType<typeof createShellPathService>;
@@ -57,7 +57,7 @@ export interface HarnessFixture {
   readonly openedSurfaces: Array<{ readonly id: string; readonly detail?: string; readonly result?: boolean }>;
   readonly openedSelections: Array<{ readonly title: string; readonly itemIds: readonly string[]; readonly preSelectId?: string }>;
   readonly executionRecords: AgentExecutionRecord[];
-  readonly cleanup: () => void;
+  readonly cleanup: () => Promise<void>;
 }
 
 export function makeShellPaths(): { readonly root: string; readonly paths: ShellPaths; readonly cleanup: () => void } {
@@ -119,6 +119,15 @@ export function createHarnessArtifactStore(clock: () => number = () => Date.now(
   return { records, store };
 }
 
+interface HarnessMemoryOwner {
+  readonly config: ConfigManager;
+  readonly stores: Set<MemoryStore>;
+  readonly signal: AbortSignal;
+  track<T>(work: () => Promise<T>): Promise<T>;
+}
+// Only the actual fixture's original paths object can join its store lifetime.
+const harnessMemoryOwners = new WeakMap<ShellPaths, HarnessMemoryOwner>();
+
 export function makeFixture(options: {
   readonly secrets?: boolean;
   readonly dismissAgentWorkspace?: boolean;
@@ -128,7 +137,7 @@ export function makeFixture(options: {
   readonly controlPlanePort?: number;
   readonly artifactStore?: Pick<ArtifactStore, 'create' | 'get' | 'list' | 'readContent'>;
 } = {}): HarnessFixture {
-  const { root, paths, cleanup } = makeShellPaths();
+  const { root, paths } = makeShellPaths();
   const commandRegistry = new CommandRegistry();
   const configManager = makeConfig(paths);
   // Keep this native credential owner inside its fixture. Ancestor discovery
@@ -157,6 +166,43 @@ export function makeFixture(options: {
   const toolRegistry = new ToolRegistry(manager);
   bindAgentResearchSourceOwner(toolRegistry, ordinaryResearchOwner());
   const processManager = new ProcessManager();
+  const abort = new AbortController();
+  const pending = new Set<Promise<unknown>>();
+  const stores = new Set<MemoryStore>();
+  let closing = false;
+  const track = <T>(work: () => Promise<T>): Promise<T> => {
+    if (closing) {
+      const refused = Promise.reject<T>(abort.signal.reason);
+      void refused.catch(() => {});
+      return refused;
+    }
+    const original = Promise.resolve().then(() => {
+      abort.signal.throwIfAborted();
+      if (closing) throw new Error('Agent harness fixture is closing');
+      return work();
+    });
+    pending.add(original);
+    // Observe the original rejection without replacing the caller's promise.
+    void original.then(() => { pending.delete(original); }, () => { pending.delete(original); });
+    return original;
+  };
+  const cleanup = registerProjectTempDrain(root, async () => {
+    closing = true;
+    abort.abort(new DOMException('Agent harness fixture is closing', 'AbortError'));
+    const failures: unknown[] = [];
+    // Stop real process owners immediately, then join both process termination
+    // and every accepted admission/execution/store initialization before stores.
+    let processDrain: Promise<void>;
+    try { processDrain = processManager.close().catch((error: unknown) => { failures.push(error); }); }
+    catch (error) { failures.push(error); processDrain = Promise.resolve(); }
+    while (pending.size) await Promise.allSettled([...pending]);
+    await processDrain;
+    for (const store of stores) {
+      try { store.close(); } catch (error) { failures.push(error); }
+    }
+    if (failures.length) throw new AggregateError(failures, 'Agent harness fixture owners did not close');
+  });
+  harnessMemoryOwners.set(paths, { config: configManager, stores, signal: abort.signal, track });
   const fixtureModel = { ...buildTestModelDefinition('openai', 'gpt-4.1'), contextWindow: 128_000 };
   const tierReading = { tier: 'standard', frontier: 0.01, small: 0.01 } satisfies TierRecord;
   const modelTiers = {
@@ -421,17 +467,26 @@ export function makeFixture(options: {
   const tool = createAgentHarnessTool({ commandRegistry, commandContext: context, toolRegistry });
   registerAgentTerminalProcessTools(toolRegistry, context);
   let invocation = 0;
-  const executeAdmittedCall: HarnessFixture['executeAdmittedCall'] = async (id, name, args, options) => {
-    options?.signal?.throwIfAborted(); options?.assertCurrent?.();
-    configManager.flushConfigFileChanges();
-    const call = await toolRegistry.prepareCall(id, name, args, { signal: options?.signal });
-    const admission = await manager.admitAutonomous(id, name, call.args, {
+  const executeAdmittedCall: HarnessFixture['executeAdmittedCall'] = (id, name, args, options) => {
+    // Capture caller restrictions once; this same object follows the original
+    // prepare/admit/execute chain and retains any invocation projection context.
+    const ownedOptions = {
+      ...options,
+      signal: AbortSignal.any([abort.signal, ...(options?.signal ? [options.signal] : [])]),
       sourceOf: () => ({ goal: 'Verify the exact Agent harness operation requested by this isolated test',
         criteria: ['Only modify temporary fixture files, stubbed service owners, and explicitly configured loopback hosts'] }),
-      signal: options?.signal, schemaRevision: call.schemaRevision, preparedCall: { registry: toolRegistry, call },
+    };
+    return track(async () => {
+      ownedOptions.signal.throwIfAborted(); ownedOptions.assertCurrent?.();
+      configManager.flushConfigFileChanges();
+      const call = await toolRegistry.prepareCall(id, name, args, ownedOptions);
+      const admissionOptions = Object.assign(ownedOptions, {
+        schemaRevision: call.schemaRevision, preparedCall: { registry: toolRegistry, call },
+      });
+      const admission = await manager.admitAutonomous(id, name, call.args, admissionOptions);
+      expect(admission.result.approved).toBe(true);
+      return toolRegistry.executePrepared(call, admission, ownedOptions);
     });
-    expect(admission.result.approved).toBe(true);
-    return toolRegistry.executePrepared(call, admission, options);
   };
   const admittedTool: Tool = { ...tool, execute(args, options) {
     return executeAdmittedCall(`harness-effect-fixture-${++invocation}`, tool.definition.name, args, options);
@@ -455,18 +510,23 @@ export function makeFixture(options: {
     openedSurfaces,
     openedSelections,
     executionRecords,
-    cleanup: () => {
-      for (const entry of processManager.list()) processManager.stop(entry.id);
-      cleanup();
-    },
+    cleanup,
   };
 }
 
-export async function createMemoryRegistry(paths: ShellPaths, configManager: ConfigManager): Promise<MemoryRegistry> {
-  const embeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager });
-  const store = new MemoryStore(paths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'memory.sqlite'), { embeddingRegistry });
-  await store.init();
-  return new MemoryRegistry(store);
+export function createMemoryRegistry(paths: ShellPaths, configManager: ConfigManager): Promise<MemoryRegistry> {
+  const owner = harnessMemoryOwners.get(paths);
+  const open = async () => {
+    if (owner && owner.config !== configManager) throw new Error('Agent harness memory owner changed');
+    owner?.signal.throwIfAborted();
+    const embeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager });
+    const store = new MemoryStore(paths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'memory.sqlite'), { embeddingRegistry });
+    owner?.stores.add(store);
+    await store.init();
+    owner?.signal.throwIfAborted();
+    return new MemoryRegistry(store);
+  };
+  return owner ? owner.track(open) : open();
 }
 
 export async function refusePreparedHarnessSetting(fixture: HarnessFixture, id: string, args: Record<string, unknown>,

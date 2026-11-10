@@ -33,8 +33,8 @@ if (typeof globalThis.fetch === 'undefined') {
 // file, and to fire AFTER a test file's own local afterEach hooks
 // (inner-to-outer, then this one last), which is what makes it safe to run
 // the actual directory removal here.
-afterEach(() => {
-  sweepCreatedProjectTempDirs();
+afterEach(async () => {
+  await sweepCreatedProjectTempDirs();
 });
 
 /**
@@ -109,7 +109,7 @@ function assertRedirect(): void {
 beforeAll(assertRedirect);
 beforeEach(assertRedirect);
 
-afterAll(() => {
+afterAll(async () => {
   // Fail the run loudly if the redirect did not hold to the end. Without this,
   // a suite that lost TMPDIR partway through would still report a clean temp
   // directory, because the measurement only ever looks at the redirect target,
@@ -123,8 +123,9 @@ afterAll(() => {
   }
   // Directories deliberately created OUTSIDE the sandbox (under
   // <repo>/.test-tmp, so a test workspace sits inside this git checkout).
+  await sweepCreatedProjectTempDirs();
   const swept = assertProjectTestTmpCurrent() ? sweepTrackedTempDirs() : 0;
-  sweepProjectTestTmpRoot();
+  await sweepProjectTestTmpRoot();
   if (process.env['GOODVIBES_TEST_KEEP_TMP_SANDBOX'] === '1') {
     // Diagnostic mode: leave the sandbox in place so the per-run residual can
     // be counted (how much the suite creates and never removes itself). The

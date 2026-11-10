@@ -1,3 +1,4 @@
+import { sweepCreatedProjectTempDirs } from '../helpers/project-temp.ts';
 import { cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import { afterAll, afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -22,7 +23,12 @@ beforeEach(() => {
     fixtureLog = new SqliteDecisionLog(':memory:');
     previousPort = installJudgmentPort(withDecisionLog(createHarnessFixtureReadings(), fixtureLog));
   });
-afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previousPort); fixtureLog[Symbol.dispose](); });
+afterEach(async () => {
+  // Bun can time out the test before its accepted tool promise settles. Keep
+  // the original model/log owner alive until cancellation and actual drainage.
+  await sweepCreatedProjectTempDirs();
+  resetAgentMcpCallRouteForTests(); installJudgmentPort(previousPort); fixtureLog[Symbol.dispose]();
+});
 
 
   // Complete native libraries, protected-source HTTP and every canonical grade

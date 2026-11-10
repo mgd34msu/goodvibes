@@ -416,6 +416,37 @@ test('ordinary successful screening and projection create no refusal commitment'
   } finally { hashes.mockRestore(); commitments.mockRestore(); }
 });
 
+test.each(['release-then-close', 'close-then-release', 'authority-abort-then-release'] as const)(
+  'retired owner %s releases the actual uncertain source without creating an unconsumed comparison pin', async order => {
+    const f = fixture({ judge: body => reading(body, 0.5, 1) });
+    const handle = f.owner.capture(['The actual uncertain original.']);
+    expect(await f.owner.screen(handle)).toEqual({ status: 'held', reason: 'unsettled' });
+    const commitments = spyOn(Bun.CryptoHasher, 'hash'), remove = spyOn(Map.prototype, 'delete');
+    try {
+      let releasing: Promise<void>, closing: Promise<void>;
+      if (order === 'release-then-close') {
+        // release queues its raw-owner cleanup; close retires the consumer
+        // synchronously before that cleanup callback can calculate a pin.
+        releasing = f.owner.release(handle); closing = f.owner.close();
+      } else if (order === 'close-then-release') {
+        closing = f.owner.close(); releasing = f.owner.release(handle);
+      } else {
+        f.lifetime.abort(); releasing = f.owner.release(handle);
+        await releasing; closing = f.owner.close();
+      }
+      await Promise.all([releasing, closing]);
+      expect(commitments).not.toHaveBeenCalled();
+      const deletion = remove.mock.calls.findIndex(([key]) => key === handle);
+      expect(deletion).toBeGreaterThanOrEqual(0);
+      const nativeSourceTable: unknown = remove.mock.contexts[deletion];
+      if (!(nativeSourceTable instanceof Map)) throw new Error('Actual source release must remove its native map entry');
+      expect(nativeSourceTable.size).toBe(0);
+      expect(await f.owner.screen(handle)).toEqual({ status: 'held', reason: 'stale' });
+      expect(() => f.owner.capture(['No future consumer.'])).toThrow();
+    } finally { commitments.mockRestore(); remove.mockRestore(); }
+  },
+);
+
 test('same-length pending sources compare exact original parts without hashing or sampling duplicates', async () => {
   const gate = deferred<void>(), started = deferred<void>(); let count = 0;
   const f = fixture({ propose: async source => {

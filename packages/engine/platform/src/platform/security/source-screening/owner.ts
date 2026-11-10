@@ -304,7 +304,10 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
       const source = sources.get(handle); if (!source) return Promise.resolve();
       source.released = true; source.lifetime.abort();
       return own(Promise.resolve(source.pending).then(() => {
-        if (unsettled.delete(source)) {
+        // Retirement synchronously removes every future consumer, even when
+        // this release was queued first. Always forget the raw original below,
+        // but do not generate a compact expectation for a dead owner lifetime.
+        if (unsettled.delete(source) && !closing && !signal.aborted) {
           const bucket = pendingSourceBucket(source), pin = refusalComparison(source);
           const originals = releasedUnsettled.get(bucket) ?? new Set<string>();
           if (!originals.has(pin)) { originals.add(pin); releasedUnsettledCount++; }

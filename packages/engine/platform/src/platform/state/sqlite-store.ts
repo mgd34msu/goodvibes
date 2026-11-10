@@ -1205,6 +1205,10 @@ const nativeReadFrameIdentities = new WeakMap<object, {
   readonly identity: object;
   readonly persistence: SQLiteStorePersistence | null;
   readonly assertCurrent: (verifyNative?: boolean) => void;
+  /** Deterministic complete-row equality only, never an authority outcome.
+   * Private to this exact synchronous native image; public frame memos are
+   * deliberately excluded and all currentness checks still run on every use. */
+  readonly expectedMatches: WeakMap<ExpectedKnowledgeRecordReadset, boolean>;
   readonly observation?: NativeReadFrameObservation;
   readonly bytes?: Buffer;
 }>();
@@ -1742,10 +1746,14 @@ export class SQLiteStore {
             values.push(true);
           } else {
             frame?.assertCurrent();
-            const current = readActualRecordValues(frame?.db ?? this.getDb(), input.selectors);
+            const equality = closed && frame ? assertReadFrameOrigin(this, frame).expectedMatches : undefined;
+            const previous = equality ? privateMapGet(equality, input.expected) : undefined;
+            const current = previous === undefined ? readActualRecordValues(frame?.db ?? this.getDb(), input.selectors) : undefined;
             currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
             frame?.assertCurrent();
-            values.push(sameActualRecordValues(current, retained.records));
+            const matches = previous ?? sameActualRecordValues(current!, retained.records);
+            if (equality && previous === undefined) privateMapSet(equality, input.expected, matches);
+            values.push(matches);
           }
         }
         currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
@@ -1897,7 +1905,8 @@ export class SQLiteStore {
       },
     };
     const assertCurrent = frame.assertCurrent;
-    privateMapSet(nativeReadFrameIdentities, frame, nativeFreeze({ store: this, identity: nativeFreeze({}), persistence: this.persistence, assertCurrent }));
+    privateMapSet(nativeReadFrameIdentities, frame, nativeFreeze({ store: this, identity: nativeFreeze({}), persistence: this.persistence, assertCurrent,
+      expectedMatches: new WeakMap<ExpectedKnowledgeRecordReadset, boolean>() }));
     this.persistedReadFrame = frame;
     try {
       invoke();

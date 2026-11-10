@@ -1435,6 +1435,73 @@ test('compiled expected readsets return equality only and still open a fresh phy
   } finally { rows.restore(); physical.restore(); }
 });
 
+test.each([false, true])('one original synchronous frame compares a compiled full row once with changed content = %s', async changed => {
+  const { store, source, extraction, sqlite } = await fixture();
+  const selectors = [{ kind: 'source' as const, id: source.id }, { kind: 'extraction' as const, id: extraction.id }];
+  const compiled = store.captureExpectedRecordReadset(selectors);
+  // A real acknowledged unrelated write retires the original persisted-image
+  // shortcut. This path must compare the actual full native row, not a clock.
+  await store.upsertSource({ id: 'unrelated-frame-source', connectorId: 'fixture', sourceType: 'document',
+    title: 'Independent document', status: 'indexed' });
+  if (changed) await store.upsertSource({ ...source, summary: 'Genuine changed source meaning.' });
+  const freeze = Object.freeze, tuples = new Map<string, number>();
+  const observing = spyOn(Object, 'freeze').mockImplementation((value: unknown) => {
+    if (Array.isArray(value) && value[0] === 'id' && (value[1] === source.id || value[1] === extraction.id)) {
+      tuples.set(value[1], (tuples.get(value[1]) ?? 0) + 1);
+    }
+    return freeze(value);
+  });
+  const bytes = readFileSync(store.storagePath), input = [{ expected: compiled.expected, selectors }];
+  let callbacks = 0;
+  try {
+    store.assertRecordSnapshotFrame(() => {
+      for (let index = 0; index < 8; index++) {
+        // Every caller assertion still runs. Only its deterministic full-row
+        // comparison shares this native frame; authority is never memoized.
+        callbacks++;
+        expect(store.matchesExpectedRecordReadsets(input)).toEqual([!changed]);
+      }
+    });
+    expect(callbacks).toBe(8); expect(tuples.get(source.id)).toBe(1); expect(tuples.get(extraction.id)).toBe(1);
+    store.assertRecordSnapshotFrame(() => { expect(store.matchesExpectedRecordReadsets(input)).toEqual([!changed]); });
+    expect(tuples.get(source.id)).toBe(2); expect(tuples.get(extraction.id)).toBe(2);
+    expect(readFileSync(store.storagePath)).toEqual(bytes);
+    expect(Reflect.get(sqlite, 'expectedMatches')).toBeUndefined();
+  } finally { observing.mockRestore(); }
+});
+
+test.each(['native callback mutation', 'identical file replacement', 'native alias restore'] as const)(
+  'frame-local full-row equality retains the original %s fence before reuse', async mutation => {
+    const { store, source, sqlite } = await fixture();
+    const selectors = [{ kind: 'source' as const, id: source.id }], compiled = store.captureExpectedRecordReadset(selectors);
+    await store.upsertSource({ id: 'unrelated-frame-source', connectorId: 'fixture', sourceType: 'document', title: 'Independent document', status: 'indexed' });
+    let writer: SqlDatabase | undefined;
+    await sqlite.transactPersisted(db => { writer = db; return { changed: true, value: undefined }; }, () => {});
+    if (!writer) throw new Error('No original native writer');
+    const SQL = await loadSqlJsEngine(), alias = new SQL.Database();
+    const main = writer.exec('PRAGMA database_list')[0]?.values.find(row => row[1] === 'main')?.[2];
+    if (typeof main !== 'string') throw new Error('No original native VFS filename');
+    alias.run('ATTACH DATABASE ? AS original', [main]);
+    const bytes = readFileSync(store.storagePath); let callback = false, consumed = false;
+    try {
+      expect(() => store.assertRecordSnapshotFrame(() => {
+        expect(store.matchesExpectedRecordReadsets([{ expected: compiled.expected, selectors }])).toEqual([true]);
+        callback = true;
+        if (mutation === 'native callback mutation') {
+          sqlite.run('UPDATE knowledge_sources SET summary = ? WHERE id = ?', ['Changed native evidence', source.id]);
+        } else if (mutation === 'identical file replacement') {
+          copyFileSync(store.storagePath, `${store.storagePath}.replacement`); renameSync(`${store.storagePath}.replacement`, store.storagePath);
+        } else {
+          alias.run('UPDATE original.knowledge_sources SET title = ? WHERE id = ?', ['Temporary native title', source.id]);
+          alias.run('UPDATE original.knowledge_sources SET title = ? WHERE id = ?', [source.title ?? null, source.id]);
+        }
+        store.matchesExpectedRecordReadsets([{ expected: compiled.expected, selectors }]); consumed = true;
+      })).toThrow();
+      expect(callback).toBe(true); expect(consumed).toBe(false); expect(readFileSync(store.storagePath)).toEqual(bytes);
+    } finally { alias.close(); }
+  },
+);
+
 test('compiled expected readsets allow unrelated persistence and reject changed complete raw content', async () => {
   const { store, source, extraction, sqlite } = await fixture();
   const selectors = [{ kind: 'source' as const, id: source.id }, { kind: 'extraction' as const, id: extraction.id }];

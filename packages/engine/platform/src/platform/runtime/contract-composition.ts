@@ -221,7 +221,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
     throw new Error('Native composition requires both authenticated owners and the original read authorization');
   }
   const writer = options.nativeDataWriter;
-  const declare = (format: import('./native-reader-compatibility.js').NativeDataFormat, refusal: string): void => {
+  const publishFormat = (format: import('./native-reader-compatibility.js').NativeDataFormat, refusal: string): void => {
     let result: unknown;
     try { result = writer?.declare(format); }
     catch (error) { drainOwned(error); throw error; }
@@ -230,7 +230,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
   const store = new ContractStore({ projectRoot: options.projectRoot,
     beforeCreate: id => {
       if (isOpaqueContractId(id)) {
-        declare('contract-opaque-identities-v1', 'Contract identity publication requires a synchronous native owner');
+        publishFormat('contract-opaque-identities-v1', 'Contract identity publication requires a synchronous native owner');
       }
     },
     beforeWrite: contract => {
@@ -269,7 +269,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
       if (isOpaqueContractId(contract?.id)) formats.push('contract-opaque-identities-v1');
       if (contract?.nativeSource?.continuation?.version === 2) formats.push('native-conversation-captures-v2');
       for (const format of formats) {
-        declare(format, 'Contract data format publication requires a synchronous native owner');
+        publishFormat(format, 'Contract data format publication requires a synchronous native owner');
       }
     } });
   const { priceUsage, priceProvenance } = buildPricingSeams(options.providerRegistry);

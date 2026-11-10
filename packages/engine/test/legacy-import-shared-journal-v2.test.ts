@@ -70,7 +70,7 @@ test('actual native owner declares manifest3 before publishing the first saved c
     const options = retainLegacyImportJournalOwner(f.selected, config, f.stateDirectory, () => ({ config, stateDirectory: f.stateDirectory }));
     const journal = new LegacyImportJournal(f.path, undefined, options);
     try {
-      expect(() => journal.reserve(f.binding, () => f.command)).toThrow();
+      expect(() => journal.reserve(f.binding, () => f.command)).toThrow(nonvoid ? 'synchronous native owner' : 'Preparation reader unavailable');
       expect(formats).toContain('native-historical-import-revisions-v3');
       expect(journal.read(f.binding)).toBeNull();
       permitted = true;

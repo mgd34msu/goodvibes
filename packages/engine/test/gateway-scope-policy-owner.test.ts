@@ -211,9 +211,10 @@ test('rejected asynchronous scope preconditions are drained without changing the
 
 test('actual saved catalog-policy expectations verify unchanged and refuse changed registration, while fresh revisions do not hash', () => {
   const f = fixture(); f.capture();
-  // Independent published-v1 serializer over this declared catalog fixture.
+  // Independent published-v1 serializer over the registered catalog fixture.
+  // register() normalizes omitted invokable to true before serialization.
   const expected = createHash('sha256').update(JSON.stringify({ methods: [['synthetic.write', 'plugin', 'synthetic-plugin', 'admin',
-    ['http'], ['write:synthetic'], ['POST', '/synthetic'], null, false, true]], events: [] })).digest('hex');
+    ['http'], ['write:synthetic'], ['POST', '/synthetic'], true, false, true]], events: [] })).digest('hex');
   const hash = spyOn(crypto, 'createHash');
   try {
     f.owner.current(); expect(hash).not.toHaveBeenCalled();

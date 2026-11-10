@@ -87,14 +87,15 @@ nativeTest('changed attempts/artifact identity, payload corruption and cancellat
 
 nativeTest('archive admission refuses missing, duplicate, extra, symlink and executable receipt entries before extraction', async () => {
   for (const mutation of ['missing', 'duplicate', 'extra', 'symlink', 'mode'] as const) {
-    const f = await fixture(); const names = [...DAEMON_CI_PAYLOADS, 'ci-artifact.json'].map(path => `products/daemon/native/${path}`);
+    const f = await fixture(); const archive = f.archive;
+    const names = [...DAEMON_CI_PAYLOADS, 'ci-artifact.json'].map(path => `products/daemon/native/${path}`);
     if (mutation === 'missing') names.pop();
     if (mutation === 'duplicate') names.push(names[0]!);
     if (mutation === 'extra') { writeFileSync(join(f.root, 'extra'), 'outside'); names.push('extra'); }
     if (mutation === 'symlink') { rmSync(join(f.root, names[0]!)); symlinkSync('/etc/passwd', join(f.root, names[0]!)); }
     if (mutation === 'mode') chmodSync(join(f.source, 'native/ci-artifact.json'), 0o755);
-    execFileSync('tar', ['-czf', f.archive, ...names], { cwd: f.root });
-    const staged = join(f.root, 'stage'); expect(() => stageDaemonCiArchive(readFileSync(f.archive), staged)).toThrow(); expect(existsSync(staged)).toBe(false);
+    execFileSync('tar', ['-czf', archive, ...names], { cwd: f.root });
+    const staged = join(f.root, 'stage'); expect(() => stageDaemonCiArchive(readFileSync(archive), staged)).toThrow(); expect(existsSync(staged)).toBe(false);
   }
 });
 

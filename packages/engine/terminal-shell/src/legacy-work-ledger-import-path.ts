@@ -85,5 +85,5 @@ export function retainLegacyImportJournalOwner(location: ReturnType<typeof resol
   };
   assertCurrent();
   return { layout: location.layout, beforeWrite: () => nativeWriter?.declare('terminal-import-journals-v2'),
-    beforeManifestWrite: version => { if (version === 3) nativeWriter?.declare('native-historical-import-revisions-v3'); }, assertCurrent };
+    beforeManifestWrite: version => version === 3 ? nativeWriter?.declare('native-historical-import-revisions-v3') : undefined, assertCurrent };
 }

@@ -13,8 +13,12 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'exact-policy-revisions-')); roots.push(root);
   const options = { configDir: root, surfaceRoot: 'daemon' };
   const config = new ConfigManager(options);
-  const snapshot = config.getConfigPath() + '.policy-configuration-v3.json';
-  return { root, options, config, snapshot };
+  // This fixture supplies only the config root and native settings-sync root.
+  // The owner deliberately stores one snapshot beside their sorted first root.
+  const snapshotRoot = [config.getConfigPath(), join(root, 'settings-sync.json')].sort()[0];
+  if (!snapshotRoot) throw new Error('Actual policy source root is missing');
+  const snapshot = snapshotRoot + '.policy-configuration-v3.json';
+  return { root, options, config, snapshot, snapshotRoot };
 }
 
 test('actual source-backed private settings recover unchanged without hashes or private sidecar copies', () => {
@@ -104,7 +108,7 @@ test('a native catalog larger than the revision field recovers via exact public 
   try {
     f.config.captureDurableConfigurationIncarnation();
     const issued = owner.current(); expect(issued.revision).toBe(unissued.revision);
-    const path = f.config.getConfigPath() + '.policy-gateway-v3.json';
+    const path = f.snapshotRoot + '.policy-gateway-v3.json';
     const source = readFileSync(path, 'utf8'); expect(source.length).toBeGreaterThan(4096);
     const nextConfig = new ConfigManager(f.options), nextCatalog = new GatewayMethodCatalog();
     const nextOwner = nextCatalog.attachScopePolicyOwner(() => nextConfig.invalidateExternalPolicy(), data => nextConfig.getDurableGatewayPolicyRevision(data));

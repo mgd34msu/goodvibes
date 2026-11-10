@@ -35,7 +35,6 @@
 // single-owner; it does not claim cross-process mutation safety.
 // ---------------------------------------------------------------------------
 
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { HandlerSqliteStore, type HandlerSqliteTransaction } from '../state/daemon-handler-sqlite-store.js';
 import type { ImapUidCheckpoint, ImapUidCheckpointAdvance, InboundChannelItem } from './provider-adapter.js';
 import { captureTriageReceiptScope, type CapturedTriageInput } from './triage/evidence.js';
@@ -190,7 +189,6 @@ export class InboxCursorStore {
   private readonly onSweep: ((summary: InboxSweepSummary) => void) | undefined;
   private readonly onSweepError: ((message: string) => void) | undefined;
   private readonly now: () => number;
-  private readonly beforeSourceRevisionWrite: (() => void) | undefined;
   private readonly setIntervalImpl: typeof setInterval;
   private readonly clearIntervalImpl: typeof clearInterval;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -219,7 +217,6 @@ export class InboxCursorStore {
       schema: SCHEMA,
       beforeWrite: options.beforeSourceRevisionWrite,
     });
-    this.beforeSourceRevisionWrite = options.beforeSourceRevisionWrite;
     this.itemTtlMs = policy.itemTtlMs;
     this.itemCap = policy.itemCap;
     this.sweepIntervalMs = options.sweepIntervalMs ?? INBOX_SWEEP_INTERVAL_MS;
@@ -250,10 +247,10 @@ export class InboxCursorStore {
       if (this.closed) return;
       const sourcePolicy = this.store.get<{ version: number }>('SELECT version FROM inbox_source_revision_policy WHERE singleton = 1');
       if (sourcePolicy && sourcePolicy.version !== 1) throw new Error('Inbox source revisions are unsupported');
-      let declared: unknown;
-      try { declared = this.beforeSourceRevisionWrite?.(); }
-      catch (error) { drainOwned(error); throw error; }
-      if (declared !== undefined) { drainOwned(declared); throw new Error('Inbox source format declaration must be synchronous'); }
+      // This schema setup is private memory until a real mirror mutation is
+      // published. HandlerSqliteStore.beforeWrite declares the source-revision
+      // reader floor before every actual image write and final rename. Empty,
+      // unconfigured inboxes must not retire an installed reader at startup.
       const columns = this.store.all<{ name: string }>('PRAGMA table_info(items)');
       if (!columns.some(column => column.name === 'triage_revision')) {
         if (sourcePolicy) throw new Error('Inbox source revision schema is unsupported');

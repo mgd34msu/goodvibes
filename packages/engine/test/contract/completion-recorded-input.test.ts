@@ -1,7 +1,7 @@
 /** Actual runner regression source; UNRUN during the coding-first pass. */
 import { expect, test } from 'bun:test';
 import { JudgmentContextLimitError, JudgmentError, SqliteDecisionLog, observeJudgmentModel, recordedJudgmentInputHash, reuseObservedJudgmentResult, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { captureJudgmentPort, installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -68,11 +68,13 @@ for (const changed of [false, true]) test(`native content refusal survives a lat
   const source = { sourceId: 'original-native-work', sourceRevision: '1', inputRevision: 'input-1', criteriaId: 'original-native-criteria', criteriaRevision: '1',
     goal: plan.goal, criteria: plan.criteria.map(criterion => criterion.text) };
   let contentCalls = 0, fulfillmentCalls = 0, localizationCalls = 0;
-  const h = makeHarness({ decisionLog: log, recordNative: true, contract: { maxFixRounds: 0 },
+  const h = makeHarness({ decisionLog: log, recordNative: true,
     plan: { ...plan, criteria: source.criteria.map((text, index) => ({ id: `c${index + 1}`, text, quote: text })) },
     scripts: { u1: finishes('The retained parser answer.') }, port: context => {
       if (context.name === 'unfinished') { contentCalls++; return noulAnswer(contentCalls === 1 ? .98 : .03); }
       if (context.name === 'goal' && context.state['goal'] === source.goal) fulfillmentCalls++;
+      const action = (context.state['binding'] as { actionId?: string } | undefined)?.actionId;
+      if (context.name === 'disposition' && action?.includes(':stall:')) return choiceAnswer(context.question, 'reject', .99);
       return undefined;
     } });
   const original = judgmentPort('test.native-negative-then-localization-failure');

@@ -39,14 +39,18 @@ export async function refreshHomeGraphQualityReport(
   const originals = new Map(originalState.nodes.map(node => [node.id,node]));
   const state = structuredClone(originalState);
   // Capture the full read-set, including hidden/terminal issues, BEFORE readings.
-  const allIssues = structuredClone(store.listIssuesInSpace(spaceId));
+  const originalIssues = store.listIssuesInSpace(spaceId);
+  const allIssues = structuredClone(originalIssues);
   const version = JSON.stringify({ state, issues: allIssues });
   for (const issue of allIssues) if (issue.metadata.namespace === homeGraphQualityNamespace(spaceId)
     && (issue.metadata.homeGraphQualityIdentityVersion !== undefined && issue.metadata.homeGraphQualityIdentityVersion !== 1
       || issue.metadata.qualityFingerprintVersion !== undefined && ![1,2].includes(issue.metadata.qualityFingerprintVersion as number)
       || issue.metadata.homeGraphQualityRevisionVersion !== undefined && issue.metadata.homeGraphQualityRevisionVersion !== 1)) throw new HomeGraphQualityHeldError('malformed');
   const identities = createHomeGraphQualityIssueIdentities(store, spaceId, homeGraphQualityNamespace(spaceId));
-  const legacy = allIssues.filter((issue) => isLegacyHomeGraphQualityIssue(issue, spaceId));
+  // The old published ID recipe belongs to the actual saved row. Detached
+  // read-set snapshots must not repeat that independent compatibility check.
+  const legacyIds = new Set(originalIssues.filter(issue => isLegacyHomeGraphQualityIssue(issue, spaceId)).map(issue => issue.id));
+  const legacy = allIssues.filter(issue => legacyIds.has(issue.id));
   const tuples = new Set<string>();
   const previousBySubject = new Map<string, KnowledgeIssueRecord>();
   for (const issue of [...allIssues.filter(issue => issue.metadata.namespace === homeGraphQualityNamespace(spaceId)), ...legacy]) {
@@ -124,7 +128,7 @@ export async function refreshHomeGraphQualityReport(
   }
   const previous = new Map(allIssues.map((issue) => [issue.id, issue]));
   const retainedLegacyIssues = allIssues.filter((issue) => (issue.metadata.namespace === homeGraphQualityNamespace(spaceId)
-    || isLegacyHomeGraphQualityIssue(issue, spaceId)) && preserveLegacyQualityAuthority(issue)).length;
+    || legacyIds.has(issue.id)) && preserveLegacyQualityAuthority(issue)).length;
   let written: readonly KnowledgeIssueRecord[];
   try { written = await store.replaceIssuesGuarded(issues.filter((issue) => !preserveLegacyQualityAuthority(previous.get(issue.id!))
       && !isSuppressedGeneratedIssue(previous.get(issue.id!) ?? null, issue)),

@@ -369,7 +369,7 @@ test.each(['declared','semantic'] as const)('normalized %s facts and unordered a
 test('an existing version-two digest review remains exact without historical hashing after real source changes', async () => {
   const { store, node, run } = await fixture();
   const input = legacyIssue(spaceId,installationId,'homegraph.device.missing_manual','Earlier reviewed issue',{ nodeId: node.id });
-  const issue = await store.upsertIssue({ ...input, metadata: { ...input.metadata, generated: true, qualityFingerprintVersion: 2, subjectFingerprint: 'abcd'.repeat(6) } });
+  const issue = await store.upsertIssue({ ...input, metadata: { ...input.metadata, namespace: homeGraphQualityNamespace(spaceId), generated: true, qualityFingerprintVersion: 2, subjectFingerprint: 'abcd'.repeat(6) } });
   await reviewHomeGraphFact(store,spaceId,installationId,{ issueId: issue.id, action: 'accept', reviewer: 'owner' });
   const before = JSON.stringify(store.getIssue(issue.id)), hashes = spyOn(crypto,'createHash');
   try {
@@ -378,6 +378,24 @@ test('an existing version-two digest review remains exact without historical has
     await seedHomeAssistantObservation(store,{ ...node, summary: 'A different actual physical description.' });
     await run(); expect(JSON.stringify(store.getIssue(issue.id))).toBe(before);
     expect(hashes).not.toHaveBeenCalled();
+  } finally { hashes.mockRestore(); }
+});
+
+test('a real plain-space legacy issue verifies its published identity once on the original row without snapshot rehashes', async () => {
+  const { store, node, run } = await fixture();
+  const input = legacyIssue(spaceId,installationId,'homegraph.device.missing_manual','Earlier plain-space reviewed issue',{ nodeId: node.id });
+  const issue = await store.upsertIssue({ ...input, metadata: { ...input.metadata, generated: true, qualityFingerprintVersion: 2, subjectFingerprint: 'abcd'.repeat(6) } });
+  await reviewHomeGraphFact(store,spaceId,installationId,{ issueId: issue.id, action: 'accept', reviewer: 'owner' });
+  const before = JSON.stringify(store.getIssue(issue.id)), hashes = spyOn(crypto,'createHash');
+  try {
+    const fake = readings(); await run();
+    expect(hashes).toHaveBeenCalledTimes(1); // Actual published hg-issue ID recipe, not a subject/content lifecycle hash.
+    expect(hashes).toHaveBeenCalledWith('sha256');
+    expect(fake.requests.every(request => !Object.keys(request.questions).some(name => name.endsWith('manualApplicable')))).toBe(true);
+    await seedHomeAssistantObservation(store,{ ...node, summary: 'A different actual physical description.' });
+    await run(); await run();
+    expect(JSON.stringify(store.getIssue(issue.id))).toBe(before);
+    expect(hashes).toHaveBeenCalledTimes(1);
   } finally { hashes.mockRestore(); }
 });
 

@@ -23,9 +23,9 @@ function runSettingsHost(body: string) {
       const daemonPath = join(root, 'daemon', 'settings.json');
       mkdirSync(configDir, { recursive: true });
       mkdirSync(join(root, 'daemon'), { recursive: true });
-      writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ provider: { model: 'openai:original' } }));
+      writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ provider: { model: 'openai:original' }, permissions: { tools: { exec: 'deny' } } }));
       writeFileSync(daemonPath, JSON.stringify({ permissions: { tools: { exec: 'deny' } } }));
-      const managerOptions = { homeDir: root, configDir, daemonTierPath: daemonPath };
+      const managerOptions = { homeDir: root, configDir, surfaceRoot: 'goodvibes', daemonTierPath: daemonPath };
       const visible = [];
       const router = new TerminalSystemMessageRouter({
         addSystemMessage: message => { visible.push(message); },
@@ -65,8 +65,8 @@ describe('settings diagnostics under the real fullscreen stream guard', () => {
       } finally { stopWatch(); stopNotices(); stopOther(); guard.dispose(); }
       process.stdout.write(JSON.stringify(result));
     `);
-    expect(run.error).toBeUndefined();
-    expect(run.status).toBe(0);
+    expect(run.error, run.stderr).toBeUndefined();
+    expect(run.status, run.stderr).toBe(0);
     expect(run.stderr).toBe('');
     const result = JSON.parse(run.stdout);
     expect(result.visible).toHaveLength(1);
@@ -74,6 +74,7 @@ describe('settings diagnostics under the real fullscreen stream guard', () => {
     expect(result.visible[0]).toContain('expects one of allow, prompt, deny');
     expect(result.visible[0]).not.toContain('refused to start');
     expect(result.otherNotices).toBe(0);
+    expect(result.originalMode).toBe('deny');
     expect(result.mode).toBe(result.originalMode);
     expect(result.model).toBe('openai:original');
     expect(result.bytes).toBe(result.invalid);
@@ -96,8 +97,8 @@ describe('settings diagnostics under the real fullscreen stream guard', () => {
       } finally { stopWatch(); guard.dispose(); }
       process.stdout.write(JSON.stringify(result));
     `);
-    expect(run.error).toBeUndefined();
-    expect(run.status).toBe(0);
+    expect(run.error, run.stderr).toBeUndefined();
+    expect(run.status, run.stderr).toBe(0);
     expect(run.stderr).toBe('');
     const result = JSON.parse(run.stdout);
     expect(result.visible).toEqual([]);
@@ -116,8 +117,8 @@ describe('settings diagnostics under the real fullscreen stream guard', () => {
         catch (error) { reportFatalBootFailure(error); process.exitCode = 1; }
       } finally { guard.dispose(); }
     `);
-    expect(run.error).toBeUndefined();
-    expect(run.status).toBe(1);
+    expect(run.error, run.stderr).toBeUndefined();
+    expect(run.status, run.stderr).toBe(1);
     expect(run.stderr).toContain('goodvibes daemon host failed:');
     expect(run.stdout).toBe('');
   });

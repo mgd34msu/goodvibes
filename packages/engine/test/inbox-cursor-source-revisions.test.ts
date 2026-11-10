@@ -1,7 +1,7 @@
 /** Original mirror schema migration and the actual native async image publisher. */
 import { expect, spyOn, test } from 'bun:test';
 import * as promises from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { InboxCursorStore, captureInboxTriageSource } from '../platform/src/platform/intake/cursor-store.js';
 import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handler-sqlite-store.js';
 import { loadSqlJsEngine } from '../platform/src/platform/state/sqlite-store.js';
@@ -23,11 +23,31 @@ async function legacyMirror() {
   } finally { original.close(); }
 }
 
+test('empty in-memory startup and close publish no mirror or native reader floor; first actual source write is fenced', async () => {
+  const directory = makeProjectTempDir('inbox-empty-source-floor-'); let declarations = 0;
+  const current = new InboxCursorStore(directory, 'mirror.sqlite', { sweepIntervalMs: 0, triageScope: scope,
+    beforeSourceRevisionWrite() { declarations++; throw new Error('Original native installation cannot publish source revisions'); } });
+  await current.init();
+  expect(declarations).toBe(0); expect(existsSync(current.dbPath)).toBe(false);
+  await current.flush(); expect(declarations).toBe(0);
+  await current.close(); expect(declarations).toBe(0); expect(existsSync(current.dbPath)).toBe(false);
+  const writer = new InboxCursorStore(directory, 'mirror.sqlite', { sweepIntervalMs: 0, triageScope: scope,
+    beforeSourceRevisionWrite() { declarations++; throw new Error('Original native installation cannot publish source revisions'); } });
+  await writer.init(); writer.upsertItems([row]);
+  await expect(writer.flush()).rejects.toThrow('cannot publish source revisions');
+  expect(declarations).toBeGreaterThan(0); expect(existsSync(writer.dbPath)).toBe(false);
+  await expect(writer.close()).rejects.toThrow('cannot publish source revisions');
+  expect(existsSync(writer.dbPath)).toBe(false);
+});
+
 test('a refused source floor leaves the genuine old mirror bytes untouched; an acknowledged migration retains original rows', async () => {
   const old = await legacyMirror();
   const refused = new InboxCursorStore(old.directory, 'mirror.sqlite', { sweepIntervalMs: 0, triageScope: scope,
     beforeSourceRevisionWrite() { throw new Error('Native reader cannot retain source revisions'); } });
-  await expect(refused.init()).rejects.toThrow('cannot retain source revisions'); await refused.close();
+  await refused.init();
+  expect(readFileSync(old.path)).toEqual(old.bytes);
+  await expect(refused.flush()).rejects.toThrow('cannot retain source revisions');
+  await expect(refused.close()).rejects.toThrow('cannot retain source revisions');
   expect(readFileSync(old.path)).toEqual(old.bytes);
   let declarations = 0;
   const current = new InboxCursorStore(old.directory, 'mirror.sqlite', { sweepIntervalMs: 0, triageScope: scope, beforeSourceRevisionWrite() { declarations++; } });
@@ -82,7 +102,10 @@ for (const mode of ['returned', 'thrown'] as const) test(`a ${mode} rejected nat
   const old = await legacyMirror();
   const current = new InboxCursorStore(old.directory, 'mirror.sqlite', { sweepIntervalMs: 0, triageScope: scope,
     beforeSourceRevisionWrite() { const failed = Promise.reject(new Error('Synthetic async format refusal')); if (mode === 'thrown') throw failed; return failed as never; } });
-  await expect(current.init()).rejects.toBeDefined(); await current.close(); await Promise.resolve();
+  await current.init();
+  expect(readFileSync(old.path)).toEqual(old.bytes);
+  await expect(current.flush()).rejects.toBeDefined();
+  await expect(current.close()).rejects.toBeDefined(); await Promise.resolve();
   expect(readFileSync(old.path)).toEqual(old.bytes);
 });
 

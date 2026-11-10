@@ -882,8 +882,8 @@ test('actual first-pass group and deliverable success omits unused refusal commi
     for (const check of [...result.checks, ...result.groups.flatMap(group => group.checks)]) {
       expect(check.result).toBe('pass'); expect(check).not.toHaveProperty('evidenceDigest');
     }
-    // The final content-review commitment has a real saved receipt and remains.
-    expect(hash.mock.calls.some(([evaluation]) => evaluation !== null && typeof evaluation === 'object' && 'state' in evaluation)).toBe(true);
-    expect(hash.mock.calls.filter(([evaluation]) => evaluation !== null && typeof evaluation === 'object' && 'criteria' in evaluation)).toHaveLength(0);
+    // Positive receipts have no independent whole-evidence cache consumer;
+    // only actual native negative holds need this persisted expectation.
+    expect(hash.mock.calls).toHaveLength(0);
   } finally { hash.mockRestore(); }
 });

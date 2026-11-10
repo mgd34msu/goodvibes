@@ -18,14 +18,15 @@ function context(detail: string[], editing?: string) {
   });
 }
 
-test('shared scalar context owns the canonical description once and retains appended product warnings', () => {
+test('shared scalar context owns the canonical description once and preserves product warning priority', () => {
   const entry = { setting: setting('display.collapseThreshold'), currentValue: 24 };
   const warning = 'Locked: This original setting is controlled by the host.';
   const lines = context([warning]).buildSettingContext(modal, entry);
   expect(entry.setting.description).toBe('Line count threshold for collapsing tool output');
   expect(lines.filter(line => line === entry.setting.description)).toHaveLength(1);
   expect(lines.indexOf(entry.setting.description)).toBeGreaterThan(lines.indexOf('Source: default'));
-  expect(lines.indexOf(warning)).toBeGreaterThan(lines.indexOf(entry.setting.description));
+  expect(lines.indexOf(warning)).toBeGreaterThan(lines.indexOf('Source: default'));
+  expect(lines.indexOf(entry.setting.description)).toBeGreaterThan(lines.indexOf(warning));
   expect(lines).toContain('Editing: Enter opens inline edit, then type the value and press Enter to save. Arrow keys only navigate.');
 });
 

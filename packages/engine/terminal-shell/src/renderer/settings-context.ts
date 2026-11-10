@@ -49,8 +49,8 @@ export function createSettingContext<Modal extends SettingContextModal, Entry ex
       `Default: ${formatDefaultValue(entry.setting.default)}`,
       `Type: ${entry.setting.type}${entry.setting.enumValues ? ` with ${entry.setting.enumValues.length} possible value(s)` : ''}`,
       `Source: ${policy.source(entry)}${entry.sourceLabel ? ` from ${entry.sourceLabel}` : ''}`,
-      ...(entry.setting.description ? ['', entry.setting.description] : []),
       ...policy.detail(entry),
+      ...(entry.setting.description ? ['', entry.setting.description] : []),
     ];
     if (policy.routingKeys.includes(entry.setting.key))
       lines.push(`Routing meaning: ${policy.describeUiRouting(String(entry.currentValue))}.`);

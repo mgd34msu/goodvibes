@@ -19,16 +19,16 @@ test('fresh native line bookkeeping and repeated projection never hash returned 
   } finally { hash.mockRestore(); }
 });
 
-test('the saved earlier checksum format verifies its actual body and refuses changed bytes', () => {
+test('old co-serialized checksum metadata grants no authenticity and needs no hashing', () => {
   const content = '    1 | saved source';
   const readObservation = { startLine: 1, completeLines: 1, numbered: true, truncated: false,
-    contentSha256: crypto.createHash('sha256').update(content).digest('hex') };
+    contentSha256: 'a'.repeat(64) };
   const hash = spyOn(crypto, 'createHash');
   try {
     expect(returnedReadRows({ content, readObservation })).toEqual([content]);
-    expect(hash).toHaveBeenCalledTimes(1);
-    expect(returnedReadRows({ content: content.replace('saved', 'other'), readObservation })).toEqual([]);
-    expect(hash).toHaveBeenCalledTimes(2);
+    expect(hash).not.toHaveBeenCalled();
+    expect(returnedReadRows({ content: content.replace('saved', 'other'), readObservation })).toEqual([content.replace('saved', 'other')]);
+    expect(hash).not.toHaveBeenCalled();
   } finally { hash.mockRestore(); }
 });
 

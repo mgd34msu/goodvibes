@@ -1,6 +1,6 @@
 import * as crypto from 'node:crypto';
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { STAKES_BANDS, yesNo, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -60,6 +60,8 @@ test('JSON Lines appends actual metering and refuses an existing foreign log wit
   const path = join(root, 'calls.jsonl'), foreign = join(root, 'foreign.sqlite');
   writeFileSync(foreign, 'SQLite format 3\0original bytes'); const before = readFileSync(foreign);
   expect(() => openStaticCallLog(foreign)).toThrow('JSON Lines'); expect(readFileSync(foreign)).toEqual(before);
+  const alias = join(root, 'alias.jsonl'); symlinkSync(foreign, alias);
+  expect(() => openStaticCallLog(alias)).toThrow(); expect(readFileSync(foreign)).toEqual(before);
   {
     using log = openStaticCallLog(path);
     const captured = createStaticCallRecorder(fakePort(() => noulAnswer(0.01)).port, log.write);

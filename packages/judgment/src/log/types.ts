@@ -24,8 +24,9 @@ export interface CallRecord {
   readonly at: IsoTime;
   readonly context: DecisionContext;
   readonly requestedModel: string;
-  /** The state itself is not stored. */
-  readonly stateHash: StateHash;
+  /** Optional answered-call commitment requested for an independent saved
+   * proof. The state itself is not stored; audit-only and failed calls omit it. */
+  readonly stateHash?: StateHash;
   readonly questions: JsonValue;
   readonly latencyMs: number;
   readonly requestId: string | undefined;

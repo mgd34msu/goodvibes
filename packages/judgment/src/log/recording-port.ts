@@ -1,4 +1,5 @@
 import { retainNativeModelObservation, recordImmutableJudgmentResult } from '../port/model-observation.ts';
+import { drainOwned } from '../drain-owned.ts';
 import { assertSynchronousJudgmentGuard } from '../port/attempt-guard.ts';
 import { opaqueUuid } from '../port/opaque-uuid.ts';
 import { captureJudgmentInput } from '../port/input-snapshot.ts';
@@ -18,8 +19,8 @@ interface RecordedInput {
   readonly stateHash: string;
   readonly decisionId: string;
 }
-// Reuse the actual recorder's immutable input and existing commitment, never
-// another copy or a text-keyed global cache. Original result GC releases it.
+// Only explicitly committed answers retain their immutable input here. Ordinary
+// audit results retain no private state. Original result GC releases the binding.
 const recordedInputResults = new WeakMap<object, RecordedInput>();
 const applyRecordedInput = Reflect.apply, getRecordedInput = WeakMap.prototype.get, setRecordedInput = WeakMap.prototype.set;
 
@@ -180,11 +181,11 @@ function assertLogCurrent(check: (() => void) | undefined): void {
 }
 
 /** Object-spread semantics, but the admitted assertion accessor is read only once. */
-function captureRequest<Q extends Questions>(request: JudgmentRequest<Q>, check: (() => void) | undefined): JudgmentRequest<Q> {
+function captureRequest<Q extends Questions>(request: JudgmentRequest<Q>, check: (() => void) | undefined, inputBinding: JudgmentRequest<Q>['inputBinding']): JudgmentRequest<Q> {
   const entries: [PropertyKey, unknown][] = [];
   for (const key of Reflect.ownKeys(request)) {
     if (Object.prototype.propertyIsEnumerable.call(request, key)) {
-      entries.push([key, key === 'assertLogCurrent' ? check : Reflect.get(request, key)]);
+      entries.push([key, key === 'assertLogCurrent' ? check : key === 'inputBinding' ? inputBinding : Reflect.get(request, key)]);
     }
   }
   return Object.fromEntries(entries) as unknown as JudgmentRequest<Q>;
@@ -240,8 +241,12 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
       let requestedModel: string | undefined;
       let logAssertion: (() => void) | undefined;
       let resultCapture: JudgmentRequest<Q>['captureResult'];
-      try { logAssertion = request.assertLogCurrent; resultCapture = request.captureResult; }
-      catch { throw new JudgmentError('rejected', FAILURE_MESSAGES.rejected); }
+      let inputBinding: JudgmentRequest<Q>['inputBinding'];
+      try { logAssertion = request.assertLogCurrent; resultCapture = request.captureResult; inputBinding = request.inputBinding; }
+      catch (error) { drainOwned(error); throw new JudgmentError('rejected', FAILURE_MESSAGES.rejected); }
+      // Observe malformed owned work immediately, even if a later retention
+      // guard refuses before enum validation. Never assimilate borrowed thenables.
+      if (inputBinding !== undefined && inputBinding !== 'state') drainOwned(inputBinding);
       assertLogCurrent(logAssertion);
       // Admit one immutable payload before settings/key acquisition can await.
       // Keep a separate question snapshot so a borrowed port cannot alter validation.
@@ -259,17 +264,17 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
       const call = {
         at,
         context,
-        stateHash: hashState(input.state),
         questions,
       };
       let originalResult: JudgmentResult<Q> | undefined;
       let result: JudgmentResult<Q>;
       let resultToReturn: JudgmentResult<Q>;
       try {
+        if (inputBinding !== undefined && inputBinding !== 'state') throw new JudgmentError('invalid-request', FAILURE_MESSAGES['invalid-request']);
         requestedModel = identifier(request.model ?? inner.model, true);
         if (requestedModel === undefined) throw new JudgmentError('invalid-request', FAILURE_MESSAGES['invalid-request']);
         checkCancellation(signal);
-        const original = await inner.ask(Object.freeze({ ...captureRequest(request, logAssertion), ...input, context: call.context, model: requestedModel }));
+        const original = await inner.ask(Object.freeze({ ...captureRequest(request, logAssertion, inputBinding), ...input, context: call.context, model: requestedModel }));
         originalResult = original;
         checkCancellation(signal);
         // An owned strict scope must see every original field before the
@@ -307,8 +312,10 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
         recorded(() => log.record(entry));
         throw failure;
       }
+      assertLogCurrent(logAssertion);
       const entry: NewDecisionEntry = recorded(() => ({
         ...call,
+        ...(inputBinding === 'state' ? { stateHash: hashState(input.state) } : {}),
         status: 'answered',
         requestedModel: result.requestedModel,
         model: result.model,
@@ -321,7 +328,7 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
       assertLogCurrent(logAssertion);
       const decisionId = recorded(() => log.record(entry));
       const returned = recordImmutableJudgmentResult(retainNativeModelObservation(originalResult, { ...resultToReturn, decisionId }));
-      applyRecordedInput(setRecordedInput, recordedInputResults, [returned, { state: input.state, questions: input.questions, context: call.context, stateHash: call.stateHash, decisionId }]);
+      if (entry.stateHash !== undefined) applyRecordedInput(setRecordedInput, recordedInputResults, [returned, { state: input.state, questions: input.questions, context: call.context, stateHash: entry.stateHash, decisionId }]);
       return returned;
     },
   };

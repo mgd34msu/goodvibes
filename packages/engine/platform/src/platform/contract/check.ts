@@ -249,13 +249,24 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
   const judged = unit.criteria.filter((criterion) => criterion.disposition === 'judged');
   const signal = input.signal === undefined ? {} : { signal: input.signal };
   const state = judgeState(unit, evidence);
+  const nativeBinding = input.native !== undefined && input.native.contract.nativeSource !== undefined;
+  const checkedPort = (site: string): JudgmentPort => {
+    const original = input.checkPort ?? judgmentPort(site);
+    // Native execution later verifies these recorded inputs. Ordinary checks
+    // have no persisted cryptographic-input consumer and do not request one.
+    const proof: JudgmentPort = !nativeBinding ? original : { ...original, async ask(request) {
+      return original.ask({ ...request, inputBinding: 'state' });
+    } };
+    return meteredPort(input.checkPort !== undefined || input.native === undefined ? proof
+      : nativeContractPort(input.native.contract, input.native.services, proof, input.signal), usage);
+  };
   const [judgment, quality] = await Promise.all([
     UNIT_JUDGES[settings.acceptanceStakes].judge(
-      meteredPort(input.checkPort ?? (input.native === undefined ? judgmentPort(CHECK_SITES.judge) : nativeContractPort(input.native.contract, input.native.services, judgmentPort(CHECK_SITES.judge), input.signal)), usage),
+      checkedPort(CHECK_SITES.judge),
       { goal: unit.goal, criteria: judged.map((criterion) => criterion.text), output: state['output']!, evidence: state['evidence']! },
       { ...signal, site: CHECK_SITES.judge },
     ),
-    unitQuality.run(meteredPort(input.checkPort ?? (input.native === undefined ? judgmentPort(CHECK_SITES.quality) : nativeContractPort(input.native.contract, input.native.services, judgmentPort(CHECK_SITES.quality), input.signal)), usage), qualityState(unit, evidence), { ...signal, site: CHECK_SITES.quality }),
+    unitQuality.run(checkedPort(CHECK_SITES.quality), qualityState(unit, evidence), { ...signal, site: CHECK_SITES.quality }),
   ]);
   if (input.signal?.aborted === true || unit.status === 'cancelled') {
     judgment.recordAction('discarded: unit cancelled');
@@ -290,6 +301,13 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
   const findings: Findings = { verdicts, goalVerdict, qualityVerdicts, qualityProblems, qualityUnshown, regressions, claimsFailed: claimsDidFail, kinds };
 
   const chosen = chooseResult(input, findings, qualityReadings);
+  // Only actual native uncertainty has a persisted unchanged-refusal consumer.
+  // Its original private evidence is released at shutdown; the saved check has
+  // no raw image to compare on recovery. Keep that compact binding, while
+  // ordinary/non-unshown failures and live same-owner comparisons need none.
+  // This established recipe excludes nativeContractPort's originalSource and
+  // must not be confused with the separate execution log's wire-input hash.
+  const needsSavedHold = nativeBinding && chosen.result !== 'pass' && kinds.includes('unshown');
   const decisionIds = [judgment.decisionId, quality.result.decisionId].filter((id): id is string => id !== undefined);
   const assignedFiles = new Set(input.contract.reviewInventory ? assignedReviewPaths(input.contract.reviewInventory, unit.files) : []);
   const inspectedFiles = new Set((evidence.sourceReads ?? []).filter(read => read.returnedLines > 0)
@@ -315,7 +333,7 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
     problems: kinds,
     qualityProblems,
     decisionIds,
-    ...(chosen.result === 'pass' ? {} : { evidenceDigest: hashState(judgeState(unit, evidence)) }),
+    ...(needsSavedHold ? { evidenceDigest: hashState(judgeState(unit, evidence)) } : {}),
   };
 
   let result = chosen.result;

@@ -1,12 +1,14 @@
+import { isDeepStrictEqual as sameUnitCheckEvidence } from 'node:util';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { selectBaselineExecutionRoot } from './tree-baseline.js';
 import { nativeContractActionSource, nativeContractPort } from './native-decisions.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, judgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { selectSourceCitationEvidence } from './source-citation-selection.js';
 import { getContractActionSource } from '../tools/agent/contract-binding.js';
 import { assertOwnedContractSource } from './owned-source.js';
 import { hashState, JudgmentError } from '@goodvibes-jev/judgment';
 import { judgeState } from './evidence.js';
+import { captureUnitCheckEvidence, createUnitCheckEvidenceCache, type UnitCheckEvidence } from './unit-check-evidence.js';
 import { nativeRecordedCheck } from './check.js';
 import { gateEventSummary } from './gates.js';
 import type { AutonomousToolSource } from '../permissions/autonomous.js';
@@ -142,6 +144,7 @@ export interface UnitCheckLoop {
 const WORKING: ReadonlySet<ContractUnit['status']> = new Set(['running', 'nudged']);
 
 export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
+  const refusalEvidence = createUnitCheckEvidenceCache();
   function locate(record: AgentRecord): { readonly run: ContractRun; readonly unit: ContractUnit; readonly runtime: UnitRuntime } | null {
     if (record.contractId === undefined || record.contractUnitId === undefined) return null;
     const run = deps.findRun(record.contractId);
@@ -238,6 +241,10 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
     runtime.check = check;
     if (unit.status !== 'held') run.moveUnit(unit, 'checking');
     const signal = AbortSignal.any([runtime.abort.signal, check.abort.signal, run.abort.signal]);
+    const evidenceOwner = { run, unit, runtime, runSignal: run.abort.signal, unitSignal: runtime.abort.signal,
+      active: () => !run.terminal && !isTerminalUnitStatus(unit.status) && run.runtime(unit) === runtime };
+    let comparedEvidence: UnitCheckEvidence | undefined;
+    let evidenceAuthority: JudgmentPortCapture | undefined;
     let outcome: UnitCheckOutcome;
     let reusedNativeEvidence = false;
     let output: string;
@@ -271,14 +278,38 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       if (check.superseded || signal.aborted) return;
       addJudgmentUsage(run.contract.judgmentUsage, selection.usage);
       evidence = selection.evidence;
+      const settings = checkSettings(config);
+      if (run.contract.nativeSource !== undefined) {
+        comparedEvidence = captureUnitCheckEvidence({ contract: run.contract, unit, trigger, evidence, settings });
+        evidenceAuthority = captureJudgmentPort('contract.check.unit-judge', { signal: run.abort.signal });
+      }
       const prior = unit.checks.at(-1);
       if (run.contract.nativeSource !== undefined && prior !== undefined && prior.result !== 'pass'
         && (prior.problems?.includes('unshown') || prior.goal.verdict === 'unshown' || unit.criteria.some(criterion => criterion.status === 'unshown'))
-        && typeof prior.evidenceDigest === 'string' && prior.evidenceDigest === hashState(judgeState(unit, evidence))) {
-        // Dispatch the unchanged recorded uncertainty to native correction. Do not ask until probability crosses a threshold.
+        && comparedEvidence !== undefined && evidenceAuthority !== undefined
+        && (refusalEvidence.matches(evidenceOwner, prior, comparedEvidence, evidenceAuthority)
+          // After the original process releases its private evidence, an actual
+          // saved native refusal has only its recorded one-way binding. Verify
+          // that specific candidate once; do not resample an unchanged refusal.
+          || !refusalEvidence.hasOriginal(evidenceOwner, prior) && typeof prior.evidenceDigest === 'string' && /^[a-f0-9]{64}$/.test(prior.evidenceDigest)
+            && refusalEvidence.matchesSaved(evidenceOwner, prior, comparedEvidence, evidenceAuthority,
+              () => prior.evidenceDigest === hashState(judgeState(unit, evidence))))) {
+        // Only the exact active owner's recorded uncertainty can be reused.
+        // A saved unchanged hold stays a hold; it never grants execution.
         outcome = nativeRecordedCheck(unit, { ...prior, result: 'native-decision' }); reusedNativeEvidence = true;
       } else {
-      outcome = await runUnitCheck({ native: { contract: run.contract, services: run.env.native }, contract: run.contract, unit, trigger, evidence, settings: checkSettings(config), now: run.env.now(), signal });
+        outcome = await runUnitCheck({ native: { contract: run.contract, services: run.env.native }, contract: run.contract, unit, trigger, evidence, settings, now: run.env.now(), signal });
+        if (comparedEvidence !== undefined && evidenceAuthority !== undefined) {
+          try {
+            evidenceAuthority.assertCurrent();
+            const current = captureUnitCheckEvidence({ contract: run.contract, unit, trigger, evidence, settings });
+            if (!sameUnitCheckEvidence(comparedEvidence, current)) comparedEvidence = undefined;
+          } catch {
+            // Cache retirement cannot change the completed native check. A
+            // later check must obtain a new current model observation.
+            comparedEvidence = undefined;
+          }
+        }
       }
     } catch (error) {
       if (runtime.check === check) runtime.check = null;
@@ -308,6 +339,10 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       return;
     }
     if (!reusedNativeEvidence) record(run, unit, outcome);
+    if (comparedEvidence !== undefined && evidenceAuthority !== undefined && outcome.check.result !== 'pass'
+      && (outcome.check.problems?.includes('unshown') || outcome.check.goal.verdict === 'unshown' || unit.criteria.some(criterion => criterion.status === 'unshown'))) {
+      refusalEvidence.remember(evidenceOwner, reusedNativeEvidence ? unit.checks.at(-1)! : outcome.check, comparedEvidence, evidenceAuthority);
+    } else if (!reusedNativeEvidence) refusalEvidence.forget(runtime);
     await act(run, unit, runtime, outcome, output);
     if (runtime.recheckPending && runtime.check === null && WORKING.has(unit.status)) {
       runtime.recheckPending = false;

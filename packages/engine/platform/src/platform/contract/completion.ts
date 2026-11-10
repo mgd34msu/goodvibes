@@ -366,8 +366,14 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         const recheckEvidence = review === undefined ? undefined : finalContentEvidence(fulfillmentEvidence);
         const recheckHost = recheckEvidence?.['orchestration'];
         const execution = review === undefined ? undefined : judgmentExecutionEvidence(contract, context.judgmentLog, review.decisionIds);
+        const raw = judgmentPort(site);
+        // Native execution independently verifies these saved judge batches.
+        // Ordinary non-native assessments need no persisted input commitment.
+        const fulfillmentPort: typeof raw = contract.nativeSource === undefined ? raw : { ...raw, async ask(request) {
+          return raw.ask({ ...request, inputBinding: 'state' });
+        } };
         return await fulfillmentJudge.judge(
-          meteredPort(nativeContractPort(contract, context.native, judgmentPort(site), run.abort.signal), usage),
+          meteredPort(nativeContractPort(contract, context.native, fulfillmentPort, run.abort.signal), usage),
           { goal: input.goal, criteria: judgedCriteria.map(criterion => criterion.text), output: evidence.output,
             evidence: review === undefined ? fulfillmentEvidence : { ...recheckEvidence,
               ...(execution === undefined ? {} : { nativeJudgmentExecutions: execution }),
@@ -402,7 +408,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         meaning: 'Actual just-completed native original-requirements assessment of this exact output and primary evidence. These readings establish only the requirements and work they assessed. They are not permission to publish, approval of this separate final-content review, proof of unshown execution, or acceptance of a later rewritten answer. Every requirement reading, every gate and the final-content review must all pass before owner publication.' };
       const state = { goal: input.goal, criteria: judged(input.criteria).map(criterion => criterion.text), output: evidence.output,
         evidence: { ...finalContentEvidence(fulfillmentEvidence), fulfillmentAssessment }, ...(contract.nativeSource === undefined ? {} : { nativeSource: nativeContractSourceData(contract.nativeSource) }) };
-      const evidenceDigest = completionEvidenceCommitment({ state, policy: { name: reviewBattery.name, version: reviewBattery.version, stakes: config().acceptanceStakes } }, rawEvidence);
+      let retainedReviewDigest: string | undefined;
+      const reviewEvidenceDigest = (): string => retainedReviewDigest ??= completionEvidenceCommitment({ state,
+        policy: { name: reviewBattery.name, version: reviewBattery.version, stakes: config().acceptanceStakes } }, rawEvidence);
       const outputDigest = outputDigestForCurrentAnswer();
       const targetId = `${contract.id}.final-answer-review`;
       // A later verifier request failure does not invalidate an unchanged
@@ -411,12 +419,14 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         if (decision.action !== 'checked' || decision.targetId !== targetId) continue;
         try {
           const receipt = JSON.parse(decision.reason) as FinalAnswerReviewReceipt;
-          if (receipt.schemaVersion === 2 && JSON.stringify(receipt.policy) === JSON.stringify(reviewPolicy) && typeof receipt.stateHash === 'string' && Array.isArray(receipt.fulfillmentDecisionIds) && receipt.evidenceDigest === evidenceDigest && receipt.outputDigest === outputDigest && typeof receipt.passed === 'boolean'
+          if (receipt.schemaVersion === 2 && JSON.stringify(receipt.policy) === JSON.stringify(reviewPolicy) && typeof receipt.stateHash === 'string' && Array.isArray(receipt.fulfillmentDecisionIds) && isDeepStrictEqual(receipt.fulfillmentDecisionIds, fulfillmentAssessment.decisionIds)
+            && receipt.outputDigest === outputDigest && typeof receipt.passed === 'boolean'
             && ['unfinished', 'unsupported'].every(key => {
               const probability = receipt.readings[key as 'unfinished' | 'unsupported']?.probability;
               return typeof probability === 'number' && Number.isFinite(probability) && probability >= 0 && probability <= 1;
             }) && receipt.passed === ['unfinished', 'unsupported'].every(key => receipt.readings[key as 'unfinished' | 'unsupported'].probability <= 0.5)
-            && JSON.stringify(receipt.decisionIds) === JSON.stringify(decision.decisionIds)) { answerReview = receipt; break; }
+            && JSON.stringify(receipt.decisionIds) === JSON.stringify(decision.decisionIds)
+            && receipt.evidenceDigest === reviewEvidenceDigest()) { answerReview = receipt; break; }
         } catch { /* An invalid receipt cannot approve a candidate. */ }
       }
       if (answerReview === undefined) {
@@ -430,7 +440,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
             const captured = captureOwnedJson(request.state) as typeof state;
             if (reviewInput !== undefined && !isDeepStrictEqual(reviewInput.state, captured)) throw new Error('Final-answer evidence changed between content batches');
             reviewInput ??= { state: captured };
-            const forwarded: typeof request = { ...request, state: reviewInput.state };
+            const forwarded: typeof request = { ...request, state: reviewInput.state, inputBinding: 'state' };
             const result = await rawReviewPort.ask(forwarded);
             const recorded = recordedJudgmentInputHash(result, forwarded);
             if (recorded === undefined) throw new JudgmentError('unrecorded', 'Final-answer review requires its actual recorded input.');
@@ -465,7 +475,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
               let stateHash: string | undefined;
               const raw = judgmentPort(site);
               const bound: typeof raw = { ...raw, async ask(request) {
-                const forwarded: typeof request = { ...request, questions: { ...request.questions,
+                const forwarded: typeof request = { ...request, inputBinding: 'state', questions: { ...request.questions,
                   unsupported: scopedClaimQuestion(reviewBattery.items.unsupported.question, scope, outputDigest) } };
                 const result = await raw.ask(forwarded);
                 stateHash = recordedJudgmentInputHash(result, forwarded);
@@ -566,7 +576,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
           assertOwnedContractSource(contract);
           if (run.terminal) return null;
           if (reviewStateHash === undefined) throw new Error('Final-answer review has no recorded input binding');
-          answerReview = { schemaVersion: 2, policy: reviewPolicy, stateHash: reviewStateHash, fulfillmentDecisionIds: fulfillmentAssessment.decisionIds, evidenceDigest, outputDigest,
+          answerReview = { schemaVersion: 2, policy: reviewPolicy, stateHash: reviewStateHash, fulfillmentDecisionIds: fulfillmentAssessment.decisionIds, evidenceDigest: reviewEvidenceDigest(), outputDigest,
             passed, ...(findings.length ? { findings } : {}),
             readings: Object.fromEntries(Object.entries(readings).map(([key, { probability, verdict, outcome }]) => [key, { probability, verdict, outcome }])) as FinalAnswerReviewReceipt['readings'],
             ...(claimReviews ? { overviewUnsupported: { probability: overviewUnsupported.probability, verdict: overviewUnsupported.verdict, outcome: overviewUnsupported.outcome }, claimReviews } : {}),
@@ -600,7 +610,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       try {
         const raw = judgmentPort(site);
         const bound: typeof raw = { ...raw, async ask(request) {
-          const forwarded: typeof request = { ...request, questions: { ...request.questions, omitted: goalObligationQuestion(battery.items.omitted.question, literalSourceDigest) } };
+          const forwarded: typeof request = { ...request, inputBinding: 'state', questions: { ...request.questions, omitted: goalObligationQuestion(battery.items.omitted.question, literalSourceDigest) } };
           const result = await raw.ask(forwarded);
           stateHash = recordedJudgmentInputHash(result, forwarded);
           if (stateHash === undefined) throw new JudgmentError('unrecorded', 'Goal-obligation review requires its actual recorded input.');
@@ -655,8 +665,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         const port = judgmentPort(site);
         let stateHash: string | undefined;
         const boundPort: typeof port = { ...port, async ask(request) {
-          const result = await port.ask(request);
-          stateHash = recordedJudgmentInputHash(result, request);
+          const forwarded: typeof request = { ...request, inputBinding: 'state' };
+          const result = await port.ask(forwarded);
+          stateHash = recordedJudgmentInputHash(result, forwarded);
           if (stateHash === undefined) throw new JudgmentError('unrecorded', 'Original-obligation review requires its actual recorded input.');
           return result;
         } };
@@ -932,8 +943,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
           try {
             let stateHash: string | undefined;
             const observed: typeof owner.port = { ...owner.port, async ask(request) {
-              const result = await owner.port.ask(request);
-              stateHash = recordedJudgmentInputHash(result, request);
+              const forwarded: typeof request = { ...request, inputBinding: 'state' };
+              const result = await owner.port.ask(forwarded);
+              stateHash = recordedJudgmentInputHash(result, forwarded);
               if (stateHash === undefined) throw new JudgmentError('unrecorded', 'Publication assessment requires its actual recorded input.');
               return result;
             } };

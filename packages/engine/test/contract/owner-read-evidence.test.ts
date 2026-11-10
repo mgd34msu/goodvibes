@@ -66,6 +66,19 @@ test('new line metadata cannot qualify same-length substituted owner source text
   expect(f.read(f.contract, 'source.ts:1-2')).toMatchObject({ sourceReads: [] });
 });
 
+test('old co-serialized checksum metadata cannot qualify substituted rows against immutable input', () => {
+  const f = fixture();
+  const readObservation = { startLine: 1, completeLines: 2, numbered: false, truncated: false, contentSha256: 'a'.repeat(64) };
+  f.messages[2]!.content = JSON.stringify({ success: true, files: [{ path: 'source.ts', extract: 'lines',
+    content: 'FIRST\nSECOND', readObservation }] });
+  writeFileSync(f.saved, f.messages.map(message => JSON.stringify(message)).join('\n') + '\n');
+  expect(f.read(f.contract, 'source.ts:1-2')).toMatchObject({ sourceReads: [] });
+  f.messages[2]!.content = JSON.stringify({ success: true, files: [{ path: 'source.ts', extract: 'lines',
+    content: 'first\nsecond', readObservation }] });
+  writeFileSync(f.saved, f.messages.map(message => JSON.stringify(message)).join('\n') + '\n');
+  expect(f.read(f.contract, 'source.ts:1-2')).toMatchObject({ sourceReads: [{ path: 'source.ts', returnedRanges: ['1-2'], returnedLines: 2 }] });
+});
+
 test('a live recovery snapshot contributes real reads without inventing operations from assertions', () => {
   const f = fixture();
   writeFileSync(join(f.surface, 'recovery/recovery-user-original.jsonl'), [

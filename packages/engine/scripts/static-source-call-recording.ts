@@ -2,7 +2,7 @@ import { checkAnswers, drainOwned, JudgmentError, type DecisionContext, type Jud
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { captureStrictJudgmentJson } from '../platform/src/platform/gate/judgment-result.js';
 import type { StaticCallCapture, StaticCallEvidence } from './static-source-reading-types.ts';
-import { appendFileSync, closeSync, fstatSync, openSync, readSync } from 'node:fs';
+import { appendFileSync, closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { types as nodeTypes } from 'node:util';
 
 export interface StaticSourceCallRecord {
@@ -15,11 +15,17 @@ export interface StaticSourceCallRecord {
 /** Append actual wire observations without replacing another log format. */
 export function openStaticCallLog(path: string) {
   const header = Buffer.from('{"format":"static-source-calls","version":1}\n');
-  const fd = openSync(path, 'a+', 0o600);
+  const flags = constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+  let fd: number, created = false;
+  try { fd = openSync(path, flags | constants.O_CREAT | constants.O_EXCL, 0o600); created = true; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    fd = openSync(path, flags);
+  }
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile()) throw new Error('Static source call output must be a regular file');
-    if (stat.size === 0) appendFileSync(fd, header);
+    if (!stat.isFile() || stat.nlink !== 1) throw new Error('Static source call output must be a single-link regular file');
+    if (created) appendFileSync(fd, header);
     else {
       const observed = Buffer.alloc(header.length);
       if (readSync(fd, observed, 0, observed.length, 0) !== header.length || !observed.equals(header)) {

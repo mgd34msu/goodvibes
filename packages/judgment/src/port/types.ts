@@ -50,6 +50,13 @@ export interface JudgmentRequest<Q extends Questions> {
   readonly state: EntryType;
   /** Nonempty questions keyed by the names that identify their answers. */
   readonly questions: Q;
+  /**
+   * Request a private-state commitment on a successfully recorded answer.
+   * Use only when an independent saved-proof consumer must later match this
+   * input after its original state is released. Ordinary audit and failed
+   * calls do not retain a state digest.
+   */
+  readonly inputBinding?: 'state';
   /** Model override; omitted follows the configured port model (jev-latest by default). */
   readonly model?: string;
   /** Cancels the call and any pending retries. Required by the real transport unless its config supplies an owning signal. */
@@ -59,8 +66,8 @@ export interface JudgmentRequest<Q extends Questions> {
   /** Optional asynchronous admission before every wire attempt; the synchronous guard runs afterward. */
   readonly beforeAsyncAttempt?: () => void | Promise<void>;
   /**
-   * Synchronous permission to hash and retain this call. The recording port
-   * checks before capture/hash and every answered or failed entry. A throw or
+   * Synchronous permission to retain this call and any requested commitment.
+   * The recording port checks before capture and every answered or failed entry. A throw or
    * non-undefined return refuses retention without writing a failure entry.
    * Omitted preserves normal recording, including cancelled-call failures.
    */

@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 interface ReadLineObservation {
   startLine: number;
   completeLines: number;
@@ -49,11 +47,11 @@ export function validatedReadContent(file: { content: string; readObservation?: 
   if (observed.schemaVersion === 2) {
     if (observed.contentCharacters !== file.content.length || Object.hasOwn(observed, 'contentSha256')) return undefined;
   } else if (observed.schemaVersion === undefined && Object.hasOwn(observed, 'contentSha256')) {
-    // Only an actual earlier saved observation carries this text commitment.
-    // Preserve its original check; never compute it for new results or merely
-    // to probe for an older representation.
-    if (typeof observed.contentSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(observed.contentSha256)
-      || observed.contentSha256 !== createHash('sha256').update(file.content).digest('hex')) return undefined;
+    // This checksum rode alongside the same serialized text; it was never an
+    // independent expected original. Keep its saved shape as line metadata,
+    // without hashing. The native owner still qualifies each returned row
+    // against the immutable input before crediting it as source evidence.
+    if (typeof observed.contentSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(observed.contentSha256)) return undefined;
   } else return undefined;
   const rows = file.content.split('\n');
   let complete: string[] = [];

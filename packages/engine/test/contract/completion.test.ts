@@ -382,6 +382,8 @@ test.each(['group', 'final-answer', 'fulfillment'])('a %s verifier request failu
 
 test('stopping a contract cancels its owned verifier retry without a verdict', async () => {
   let failures = 0;
+  const commitment = spyOn(completionBinding, 'completionEvidenceCommitment');
+  try {
   const h = use(makeHarness({ plan: oneUnitPlan(1), scripts: { u1: finishes('A retained parser answer.') },
     port: context => { if (context.name === 'unfinished') { failures++; throw new JudgmentError('unavailable', 'fixture outage'); } return undefined; },
   }));
@@ -392,6 +394,10 @@ test('stopping a contract cancels its owned verifier retry without a verdict', a
   expect(contractOf(h, contract.id).status).toBe('cancelled');
   expect(contractOf(h, contract.id).checks).toEqual([]);
   expect(failures).toBe(1);
+  // A failed provider read produced no saved content receipt. Its input never
+  // needs the independent persisted-evidence commitment.
+  expect(commitment.mock.calls.filter(([evaluation]) => evaluation !== null && typeof evaluation === 'object' && 'state' in evaluation)).toHaveLength(0);
+  } finally { commitment.mockRestore(); }
 });
 
 test('a fulfillment request failure retries before content review and a later content rejection still blocks publication', async () => {

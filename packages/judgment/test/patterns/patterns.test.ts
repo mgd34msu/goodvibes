@@ -140,7 +140,7 @@ describe('judge', () => {
     expect(result.decisionIds).toHaveLength(3);
     expect(attempted.every(request => JSON.stringify(request.state) === JSON.stringify({ goal: 'g', output: 'o', evidence: { complete: 'Original source and execution evidence.' } }))).toBe(true);
     const entries = result.decisionIds.map(id => log.get(id)!);
-    expect(new Set(entries.map(entry => entry.stateHash)).size).toBe(1);
+    expect(entries.every(entry => !Object.hasOwn(entry, 'stateHash'))).toBe(true);
     expect(entries.flatMap(entry => Object.keys(entry.questions as object)).sort()).toEqual(['criterion_0', 'criterion_1', 'criterion_2', 'criterion_3', 'goal']);
     expect(log.get(result.decisionId!)!.questions).toHaveProperty('goal');
     for (const [index, id] of result.criteriaDecisionIds.entries()) expect(log.get(id!)!.questions).toHaveProperty(`criterion_${index}`);

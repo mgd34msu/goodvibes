@@ -66,6 +66,8 @@ Each check is read for what it actually decides: a check whose answer is its own
 
 The decision log keeps every call with what the decision concluded (a `readings` note), what code did with it (an `action` note) and, once known, what was right (a `truth` note). Calibration records each fixture's expectations as truth on that fixture's call; an owner correction or an observed outcome is attached the same way. The engine's observe subsystem reads accuracy against confidence, threshold sweeps, drift and historical questions stuck in `confirm` or `escalate` from the log alone. Those log values do not prescribe human approval in the autonomous contract.
 
+The log omits the original state. Ordinary audit calls and failed calls also omit its digest. An internal proof consumer can request `inputBinding: 'state'` when it must later match an independently saved answer to its original private input; only an admitted, answered call records that commitment. Existing entries with state digests remain readable alongside unbound entries. A call without a commitment cannot establish a native saved-input proof.
+
 SQLite schema 4 appends notes in recording order. `readingsOf`, `actionOf` and
 `truthOf` return the latest note of their kind; `entry.notes` retains the whole
 sequence. Outcome queries match historical readings too. Existing schema 2/3

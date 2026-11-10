@@ -440,14 +440,14 @@ describe('check outcomes, in table order (4.6)', () => {
 });
 
 describe('the check record and applying it', () => {
-  test('records readings, verdicts, goal, quality, decision ids and an evidence digest', async () => {
+  test('records readings, verdicts, goal, quality and decision ids without a cache digest', async () => {
     const outcome = await check({ criteria: [MET, UNMET] });
     expect(outcome.check.id).toBe('u1.k1');
     expect(outcome.check.trigger).toBe('completion');
     expect(outcome.check.goal).toEqual({ probabilityUnmet: MET, verdict: 'met', outcome: 'act' });
     expect(outcome.check.quality.placeholder).toEqual({ verdict: 'no', outcome: 'act' });
     expect(outcome.check.claims?.kind).toBe('files_verified');
-    expect(outcome.check.evidenceDigest).toMatch(/^[0-9a-f]{64}$/);
+    expect(outcome.check).not.toHaveProperty('evidenceDigest');
     expect(outcome.readings.get('u1.c2')).toEqual({ checkId: 'u1.k1', at: 2_000, probabilityUnmet: UNMET, verdict: 'unmet', outcome: 'act', decisionId: undefined });
     expect(outcome.usage).toEqual({ calls: 2, inputTokens: 2, outputTokens: 2 });
   });
@@ -560,20 +560,53 @@ test('fresh actual passing unit checks do not compute an unused refusal digest',
   } finally { hashing.mockRestore(); }
 });
 
-test('genuine nonpass checks keep their exact refusal commitment through checkpoint restart and recorded replay', async () => {
+test('fresh nonpass checks omit cache digests while historical fields remain readable through checkpoint restart', async () => {
   const unit = twoCriterionUnit(), current = evidence({ gates: undefined });
   const outcome = await check({ criteria: [MET, UNMET] }, { unit, evidence: current });
-  expect(outcome.check.result).not.toBe('pass'); expect(outcome.check.evidenceDigest).toMatch(/^[a-f0-9]{64}$/);
+  expect(outcome.check.result).not.toBe('pass'); expect(outcome.check).not.toHaveProperty('evidenceDigest');
   applyUnitCheck(unit, outcome);
-  const historicalPass = { ...outcome.check, id: 'historical-pass', result: 'pass' as const };
+  const historicalPass = { ...outcome.check, id: 'historical-pass', result: 'pass' as const, evidenceDigest: 'a'.repeat(64) };
   const persisted = serializeContract(makeContract({ units: [unit], checks: [historicalPass] }), 10);
   if (persisted === null) throw new Error('Actual contract checkpoint serialization failed');
   const restored = deserializeContract(persisted);
   if (!restored) throw new Error('Actual contract checkpoint restoration failed');
   const restoredUnit = restored.units[0]!, prior = restoredUnit.checks.at(-1)!;
-  expect(prior.evidenceDigest).toBe(outcome.check.evidenceDigest);
-  expect(prior.evidenceDigest).toBe(hashState(judgeState(restoredUnit, current)));
+  expect(prior).not.toHaveProperty('evidenceDigest');
   expect(restored.checks[0]!.evidenceDigest).toBe(historicalPass.evidenceDigest);
   const replayed = nativeRecordedCheck(restoredUnit, { ...prior, result: 'native-decision' });
   expect(replayed.check.result).toBe('native-decision'); expect(replayed.verdicts).toEqual(outcome.verdicts);
+});
+
+test('only native unshown holds retain a restart commitment; both native proof requests opt in to recorded input binding', async () => {
+  const unit = twoCriterionUnit(), current = evidence({ gates: [{ gate: 'tests', passed: false, required: true,
+    outcome: 'unverified', skipped: false, output: 'No supported assertion result', durationMs: 1 }] });
+  const native = makeContract({ nativeSource: { sourceId: 'source', sourceRevision: '1', inputRevision: 'input', criteriaId: 'criteria',
+    criteriaRevision: '1', goal: 'Preserve original work', criteria: ['Show the actual checks'] } });
+  const port = checkPort({ criteria: [MET, MET] }), serialized = canonicalJson(judgeState(unit, current));
+  const hashing = spyOn(Bun.CryptoHasher, 'hash');
+  try {
+    const ordinary = await runUnitCheck({ contract: native, unit, trigger: 'completion', evidence: current, settings: SETTINGS,
+      now: 1, checkPort: port.port });
+    if (ordinary.discarded) throw new Error('Synthetic live check unexpectedly discarded');
+    expect(ordinary.check.problems).toContain('unshown'); expect(ordinary.check).not.toHaveProperty('evidenceDigest');
+    expect(port.requests.every(request => request.inputBinding === undefined)).toBe(true);
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    port.requests.length = 0;
+    const actual = await runUnitCheck({ native: { contract: native, services: undefined }, contract: native, unit,
+      trigger: 'completion', evidence: current, settings: SETTINGS, now: 2, checkPort: port.port });
+    if (actual.discarded) throw new Error('Synthetic native check unexpectedly discarded');
+    expect(actual.check.problems).toContain('unshown'); expect(actual.check.evidenceDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(hashing.mock.calls.filter(([algorithm, value]) => algorithm === 'sha256' && value === serialized)).toHaveLength(1);
+    expect(port.requests).toHaveLength(2); expect(port.requests.every(request => request.inputBinding === 'state')).toBe(true);
+    const text = serializeContract(makeContract({ units: [{ ...unit, checks: [actual.check] }] }), 1);
+    if (!text) throw new Error('Actual refusal checkpoint serialization failed');
+    const restored = deserializeContract(text);
+    if (!restored) throw new Error('Actual refusal checkpoint restoration failed');
+    expect(restored.units[0]!.checks[0]!.evidenceDigest).toBe(actual.check.evidenceDigest);
+    // This real cold verification preserves the saved refusal; it does not ask
+    // the model again or convert the persisted uncertainty into approval.
+    expect(hashState(judgeState(restored.units[0]!, current))).toBe(actual.check.evidenceDigest);
+    expect(nativeRecordedCheck(restored.units[0]!, restored.units[0]!.checks[0]!).check.result).not.toBe('pass');
+    expect(port.requests).toHaveLength(2);
+  } finally { hashing.mockRestore(); }
 });

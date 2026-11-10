@@ -99,6 +99,7 @@ export class HomeGraphService {
   private pendingSyncSelfImprove = new Set<string>();
   private syncSelfImproveControllers = new Map<string, AbortController>();
   private syncSelfImproveRuns = new Map<string, Promise<void>>();
+  private readonly snapshotSyncRuns = new Set<Promise<HomeGraphSyncResult>>();
   private foregroundOperations = new Map<string, number>();
   private resumeSyncSelfImprove = new Set<string>();
   private pendingAnswerEnrichment = new Map<string, Set<string>>();
@@ -140,6 +141,9 @@ export class HomeGraphService {
     this.cancelSyncSelfImprovement();
     this.cancelAnswerEnrichment();
     this.pendingIngestEnrichment.clear(); this.scheduledIngestEnrichment.clear();
+    // A foreground snapshot also owns this store until its cancelled work has
+    // drained. Its caller retains the outcome; disposal only waits for release.
+    await Promise.all([...this.snapshotSyncRuns].map(run => run.then(() => undefined, () => undefined)));
     await Promise.all([...this.syncSelfImproveRuns.values(), ...[...this.answerEnrichmentRuns.values()].map(tail => tail.run),
       ...[...this.ingestEnrichmentRuns.values()].map(tail => tail.run)]);
   }
@@ -149,17 +153,23 @@ export class HomeGraphService {
   }
 
   async syncSnapshot(input: HomeGraphSnapshotInput): Promise<HomeGraphSyncResult> {
-    return withConfiguredDecisionModelPolicy(async () => {
+    const run = withConfiguredDecisionModelPolicy(async () => {
+      this.autoLinkController.signal.throwIfAborted();
       await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
       const result = await runHomeGraphSnapshotSync({
         store: this.store,
         artifactStore: this.artifactStore,
         snapshot: input,
         signal: this.autoLinkController.signal,
       });
+      this.autoLinkController.signal.throwIfAborted();
       this.scheduleSyncSelfImprovement(result.spaceId, result.installationId);
       return result;
     });
+    this.snapshotSyncRuns.add(run);
+    try { return await run; }
+    finally { this.snapshotSyncRuns.delete(run); }
   }
 
   async ingestUrl(input: HomeGraphIngestUrlInput, ownership: KnowledgeIngestOwnership = {}): Promise<HomeGraphIngestResult> {

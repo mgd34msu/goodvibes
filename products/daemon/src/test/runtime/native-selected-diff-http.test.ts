@@ -227,10 +227,12 @@ test('selected native diff stays exact host evidence through capture, changed wo
     expect(queuedDeliverySource.result.continuation?.messages).toEqual(queued.result.continuation?.messages);
     expect(queuedDeliverySource.result.continuation?.selectedDiff).toEqual(queued.result.continuation?.selectedDiff);
     for (const original of [queued.result, queuedDeliverySource.result]) {
-      expect(original.continuation?.version).toBe(2);
-      expect(original.continuation?.sessionId).toBe(sessionId);
+      const continuation = original.continuation;
+      if (!continuation) throw new Error('Original selected-diff continuation is missing');
+      expect(continuation.version).toBe(2);
+      expect(continuation.sessionId).toBe(sessionId);
       expect(original.sourceRef.continuation).toEqual({ version: 2, sessionId,
-        revision: original.continuation?.revision, selectedDiff: sessionSelector });
+        revision: continuation.revision, selectedDiff: sessionSelector });
     }
     const queuedDeliveryAbsent = await wire('workLedger.turn.status', queuedDeliverySource.identity); expect(body(queuedDeliveryAbsent)).toEqual({ kind: 'not-found' });
     const queuedAbsent = await wire('workLedger.turn.status', queued.identity); expect(body(queuedAbsent)).toEqual({ kind: 'not-found' });

@@ -115,7 +115,7 @@ export type ModelReply =
 export interface StubModel {
   readonly baseURL: string;
   readonly requests: ModelRequest[];
-  stop(): void;
+  stop(): void | Promise<void>;
 }
 
 /** Text of a message's content, whether a string or content parts. */
@@ -188,7 +188,7 @@ export function startStubModel(answer: (request: ModelRequest, index: number) =>
   return {
     baseURL: `http://127.0.0.1:${server.port}/v1`,
     requests,
-    stop: () => { void server.stop(true); },
+    stop: () => server.stop(true),
   };
 }
 

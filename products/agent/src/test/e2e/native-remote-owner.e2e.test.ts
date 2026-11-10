@@ -59,17 +59,27 @@ for (const loseStartReply of [false, true]) test(`compiled owner conversation pr
   const read = spyOn(daemon.services.judgment.port, 'ask').mockImplementation(request => recorded.ask(request));
   let child: ReturnType<typeof Bun.spawn> | undefined;
   const calls: { method: string; body: unknown }[] = [];
+  const outcomes: { method: string; outcome: string }[] = [];
   const originalInvoke = daemon.services.gatewayMethods.invoke.bind(daemon.services.gatewayMethods);
   let lost = false;
   const transport = spyOn(daemon.services.gatewayMethods, 'invoke').mockImplementation(async (method, invocation) => {
     calls.push({ method, body: invocation.body });
-    const result = await originalInvoke(method, invocation);
+    let result: unknown;
+    try {
+      result = await originalInvoke(method, invocation);
+      outcomes.push({ method, outcome: typeof result === 'object' && result !== null && 'kind' in result && typeof result.kind === 'string' ? result.kind : 'returned' });
+    } catch (error) {
+      outcomes.push({ method, outcome: error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'thrown' });
+      throw error;
+    }
     // The real owner has already durably dispatched. Only its HTTP response is
     // lost; explicit status must recover it without a second start.
     if (loseStartReply && !lost && method === 'workLedger.turn.startAgent') { lost = true; throw new Error('Owned native response-loss fixture'); }
     return result;
   });
   let stage = 'configure';
+  let output = '';
+  const failures: unknown[] = [];
   try {
     const modelUrl = new URL(remoteModel.baseURL);
     daemon.services.providerRegistry.registerDiscoveredProviders([{ name: 'native-owner-wire', host: '127.0.0.1', port: Number(modelUrl.port), baseURL: remoteModel.baseURL, models: ['stub-model'], serverType: 'vllm' }]);
@@ -88,7 +98,7 @@ for (const loseStartReply of [false, true]) test(`compiled owner conversation pr
       expect((await beginAgentHostPairing(home.home, daemon.baseUrl, { attemptId, name: minted.name, startedAt: Date.now() })).status).toBe('begun');
       expect((await completeAgentHostPairing(home.home, daemon.baseUrl, attemptId, { token: paired, tokenId: minted.id, name: minted.name, createdAt: minted.createdAt })).status).toBe('paired');
     }
-    const frame = new TerminalFrame(180, 50), decoder = new TextDecoder(); let output = '';
+    const frame = new TerminalFrame(180, 50), decoder = new TextDecoder();
     stage = 'spawn';
     child = Bun.spawn([resolveBinary(), '--working-dir', home.workspace, '--runtime-url', daemon.baseUrl], {
       cwd: home.workspace, env: isolatedEnv(home, { GOODVIBES_AGENT_RUNTIME_URL: daemon.baseUrl, ...(loseStartReply ? { GOODVIBES_CONNECTED_HOST_TOKEN: paired } : {}) }),
@@ -114,6 +124,7 @@ for (const loseStartReply of [false, true]) test(`compiled owner conversation pr
     expect(firstRecord.command.continuation).toBeUndefined(); expect(firstRecord.dispatch).toBeUndefined();
     expect(remoteModel.requests.some(request => request.messages.some(message => message.role === 'user' && message.content === FIRST))).toBe(true);
     expect(localModel.requests).toHaveLength(0);
+    stage = 'continuation-source';
     child.terminal!.write(`${SECOND}\r`);
     await find('hosted continuation answer', text => text.includes(FOLLOWUP));
     const secondRecord = record();
@@ -158,9 +169,26 @@ for (const loseStartReply of [false, true]) test(`compiled owner conversation pr
     }
     expect(output).not.toContain(paired); expect(output).not.toContain(daemon.token); expect(output).not.toContain('UNEXPECTED LOCAL FALLBACK');
     expect(daemon.services.contractRunner.list({ includeTerminal: true })).toHaveLength(0); expect(daemon.services.agentManager.list()).toHaveLength(0);
-  } catch (error) { throw new Error(`Native owner PTY failed at ${stage}: ${String(error)}\nMethods: ${calls.map(call => call.method).join(', ')}\nJev question batches: ${JSON.stringify(fake.requests.map(request => Object.keys(request.questions)))}`); } finally {
+  } catch (error) {
+    const journalPath = join(home.home, '.goodvibes/agent/native-work-submission.json.intake');
+    let journalState: unknown = 'unavailable';
+    try {
+      const current = (JSON.parse(readFileSync(journalPath, 'utf8')) as { records: NativeIntakeJournalRecord[] }).records[0]!;
+      journalState = { hasContinuation: Boolean(current.command.continuation), hasHostedSource: Boolean(current.hostedSource), delivery: current.delivery, execution: Boolean(current.execution) };
+    } catch {}
+    failures.push(new Error(`Native owner PTY failed at ${stage}: ${String(error)}\nMethods: ${calls.map(call => call.method).join(', ')}\nJournal state: ${JSON.stringify(journalState)}\nKnown notices: ${JSON.stringify(['The durable intake journal could not be confirmed.', 'Native intake outcome is unknown or unavailable.'].filter(notice => output.includes(notice)))}\nNative outcomes: ${JSON.stringify(outcomes.filter(outcome => outcome.method.startsWith('workLedger.intake.')))}\nJev question batches: ${JSON.stringify(fake.requests.map(request => Object.keys(request.questions)))}`, { cause: error }));
+  } finally {
     releaseHeld();
-    if (child) { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); await child.exited; child.terminal?.close(); }
-    try { await daemon.stop(); } finally { read.mockRestore(); transport.mockRestore(); localModel.stop(); remoteModel.stop(); removeHome(home); }
+    if (child) {
+      try { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); await child.exited; }
+      catch (error) { failures.push(error); }
+      finally { try { child.terminal?.close(); } catch (error) { failures.push(error); } }
+    }
+    try { await daemon.stop(); } catch (error) { failures.push(error); }
+    for (const cleanup of [() => read.mockRestore(), () => transport.mockRestore(), () => localModel.stop(), () => remoteModel.stop(), () => home.judgments.stop(), () => removeHome(home)]) {
+      try { await cleanup(); } catch (error) { failures.push(error); }
+    }
   }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, 'Native owner PTY and owned cleanup failures');
 }, 90_000);

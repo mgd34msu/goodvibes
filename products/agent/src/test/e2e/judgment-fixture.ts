@@ -6,6 +6,9 @@ import modelIdentity from '../fixtures/e2e-judgments/model-identity.json' with {
 import modelTier from '../fixtures/e2e-judgments/model-tier.json' with { type: "json" };
 import turnQuestions from '../fixtures/e2e-judgments/turn-questions.json' with { type: "json" };
 import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { judgmentInputCardProblem } from '@goodvibes-jev/engine/platform/platform/gate';
+import { nativeConversationIntakeCaptureRequestSchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import unavailableModelRoutes from '../fixtures/e2e-judgments/unavailable-model-routes.json' with { type: "json" };
 import cancelledTurnTimings from '../fixtures/e2e-judgments/cancelled-turn-timings.json' with { type: "json" };
 import cancelledTurnPending from '../fixtures/e2e-judgments/cancelled-turn-pending.json' with { type: "json" };
@@ -35,7 +38,79 @@ const nativeDispatchNotices = [
   { role: 'system', content: 'Native converse decision recorded; original turn dispatch claimed.' },
   { role: 'system', content: 'requestId 00000000-0000-4000-8000-000000000001 · inputId 00000000-0000-4000-8000-000000000002' },
 ];
-function completionShape(value: unknown): string {
+/** The fixture may explain a projected host notice only from its own actual
+ * saved input. A supplied wire marker never establishes the hidden ID. */
+function savedNativeNotice(value: unknown, ownedRoot: string | undefined): string | undefined {
+  if (!ownedRoot || !value || typeof value !== 'object' || !('state' in value) || !value.state
+    || typeof value.state !== 'object' || !('request' in value.state)) return undefined;
+  try {
+    const file: unknown = JSON.parse(readFileSync(join(ownedRoot, 'home/.goodvibes/agent/native-work-submission.json.intake'), 'utf8'));
+    if (!file || typeof file !== 'object' || !('records' in file) || !Array.isArray(file.records)) return undefined;
+    for (const record of file.records) {
+      if (!record || typeof record !== 'object' || !('command' in record)) continue;
+      const command = nativeConversationIntakeCaptureRequestSchema.safeParse(record.command);
+      if (command.success && command.data.text === value.state.request)
+        return `requestId ${command.data.requestId} · inputId ${command.data.inputId}`;
+    }
+  } catch { /* No saved original means no projected-notice compatibility. */ }
+  return undefined;
+}
+
+function restoreProjectedNativeNotice(value: unknown, original: string | undefined): unknown {
+  if (!original || !value || typeof value !== 'object' || !('state' in value) || !value.state || typeof value.state !== 'object') return value;
+  const state = value.state;
+  if (!('evidenceProjection' in state) || !state.evidenceProjection || typeof state.evidenceProjection !== 'object'
+    || !('withheld' in state.evidenceProjection) || !Array.isArray(state.evidenceProjection.withheld) || !state.evidenceProjection.withheld.length) return value;
+  const references = new Map<string, string>();
+  const marker = /\[WITHHELD:card-shaped-number:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[1-9][0-9]*\]/g;
+  const restore = (content: string): string | undefined => {
+    const matches = [...content.matchAll(marker)];
+    if (!matches.length) return content;
+    let sourceAt = 0, wireAt = 0;
+    for (let index = 0; index < matches.length; index++) {
+      const match = matches[index]!;
+      const literal = content.slice(wireAt, match.index);
+      if (!original.startsWith(literal, sourceAt)) return undefined;
+      sourceAt += literal.length;
+      const next = content.slice(match.index + match[0].length, matches[index + 1]?.index);
+      const ends: number[] = [];
+      for (let end = sourceAt + 1; end <= original.length; end++) {
+        if (!original.startsWith(next, end) || (index === matches.length - 1 && end + next.length !== original.length)) continue;
+        const hidden = original.slice(sourceAt, end);
+        if (/^[0-9 -]+$/.test(hidden) && judgmentInputCardProblem(hidden) === 'card-material'
+          && (!references.has(match[0]) || references.get(match[0]) === hidden)) ends.push(end);
+      }
+      if (ends.length !== 1) return undefined;
+      const end = ends[0]!;
+      const hidden = original.slice(sourceAt, end);
+      // One projection reuses the same reference for equal hidden values.
+      if ([...references].some(([reference, value]) => value === hidden && reference !== match[0]
+        || reference.slice(0, reference.lastIndexOf(':')) !== match[0].slice(0, match[0].lastIndexOf(':')))) return undefined;
+      references.set(match[0], hidden);
+      sourceAt = end; wireAt = match.index + match[0].length;
+    }
+    return original.slice(sourceAt) === content.slice(wireAt) ? original : undefined;
+  };
+  const copy = structuredClone(value);
+  const copiedState = (copy as { state: Record<string, unknown> }).state;
+  const initial = copiedState.initial;
+  for (const messages of [copiedState.transcript, initial && typeof initial === 'object' && 'transcript' in initial ? initial.transcript : undefined]) {
+    if (!Array.isArray(messages)) continue;
+    for (const message of messages) {
+      if (!message || typeof message !== 'object' || message.role !== 'system' || typeof message.content !== 'string' || !message.content.startsWith('requestId ')) continue;
+      const restored = restore(message.content);
+      if (restored === undefined) return value;
+      message.content = restored;
+    }
+  }
+  const withheld = state.evidenceProjection.withheld;
+  if (!references.size || withheld.length !== references.size || withheld.some(reference => typeof reference !== 'string' || !references.has(reference))
+    || new Set(withheld).size !== withheld.length) return value;
+  copiedState.evidenceProjection = { ...state.evidenceProjection, withheld: [] };
+  return copy;
+}
+function completionShape(value: unknown, originalNotice?: string): string {
+  value = restoreProjectedNativeNotice(value, originalNotice);
   const identities = new Map<string, string>();
   const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
   return previousSessionShape(stable(value), true).replace(new RegExp(`"requestId ${uuid} · inputId ${uuid}"`, 'g'), text => text.replace(new RegExp(uuid, 'g'), id => {
@@ -226,7 +301,7 @@ export function startE2EJudgments(options: { readonly ownedRoot?: string } = {})
     }
     const reading = expectedApplicability.has(stable(body))
       ? { kind: 'headless-applicability', answers: { completion_required: { type: 'noul', noul: 0.99 } } }
-      : expectedCompletions.has(completionShape(body))
+      : expectedCompletions.has(completionShape(body, savedNativeNotice(body, options.ownedRoot)))
       ? { kind: 'headless-completion', answers: completionAnswers }
       : e2eJudgmentAnswers(body, options.ownedRoot);
     if (!reading) {
@@ -281,6 +356,6 @@ export function startE2EJudgments(options: { readonly ownedRoot?: string } = {})
     },
     rejectRecordedCancellationTimings() { rejectCancellationTimings = true; },
     assertNoUnexpected: () => { if (unexpected.length) throw new Error(`E2E encountered ${unexpected.length} unknown judgment request(s): ${JSON.stringify(unexpected)}`); },
-    stop: () => { void server.stop(true); },
+    stop: () => server.stop(true),
   };
 }

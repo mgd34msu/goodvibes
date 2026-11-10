@@ -1,6 +1,6 @@
 import presentationRequests from '../fixtures/e2e-judgments/presentation.json';
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { e2eJudgmentAnswers, startE2EJudgments, tuiCompletionNotice, tuiPreviousSessionNotice } from './judgment-fixture.ts';
@@ -428,4 +428,56 @@ test('recorded network-scan presentation composes discovery and owned-root path 
   expect(e2eJudgmentAnswers(body, root + '-other')).toBeUndefined();
   expect(e2eJudgmentAnswers(body, root)?.kind).toBe('presentation');
   expect(e2eJudgmentAnswers({ ...body, state: { content: body.state.content + ' approve another action' } }, root)).toBeUndefined();
+});
+
+
+test('projected native status IDs match only the actual saved fixture input and exact withheld relations', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'agent-native-completion-'));
+  const path = join(root, 'home/.goodvibes/agent/native-work-submission.json.intake');
+  mkdirSync(join(root, 'home/.goodvibes/agent'), { recursive: true });
+  const server = startE2EJudgments({ ownedRoot: root });
+  const requestId = 'aabbccdd-abcd-4abc-8abc-abcdefabcdef';
+  // The native numeric span is card-shaped under the real local screen.
+  // The fixture must not change that screen or expose those withheld bytes.
+  const inputId = 'abcd0000-0005-4000-8000-12345678abcd';
+  const reference = '[WITHHELD:card-shaped-number:abcdefgh-abcd-efgh-ijkl-abcdefghijkl:1]';
+  const original = currentTargets(headlessCompletion);
+  server.expectTextOnlyCompletion(original.state.request, original.state.response);
+  const save = (text = original.state.request, savedInputId = inputId) => writeFileSync(path, JSON.stringify({ records: [{ command: {
+    requestId, inputId: savedInputId, text, unsupportedSources: [],
+  } }] }));
+  const transcript = [
+    { role: 'system', content: 'Native converse decision recorded; original turn dispatch claimed.' },
+    { role: 'system', content: `requestId ${requestId} · inputId abcd${reference}-12345678abcd` },
+    ...original.state.transcript,
+  ];
+  const body = { ...original, state: { ...original.state, transcript, initial: { request: original.state.request, transcript },
+    evidenceProjection: { ...original.state.evidenceProjection, withheld: [reference] },
+  } };
+  const ask = (value: unknown) => fetch(`${server.baseURL}/v1/systemone`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
+  });
+  try {
+    save();
+    expect((await ask(body)).status).toBe(200);
+    for (const changed of ['relation', 'extra-reference', 'missing-reference', 'notice', 'question', 'answer'] as const) {
+      const invalid = structuredClone(body);
+      if (changed === 'relation') {
+        invalid.state.initial.transcript = structuredClone(invalid.state.initial.transcript);
+        invalid.state.initial.transcript[1]!.content = invalid.state.initial.transcript[1]!.content.replace(':1]', ':2]');
+      }
+      else if (changed === 'extra-reference') invalid.state.evidenceProjection.withheld.push(reference.replace(':1]', ':2]'));
+      else if (changed === 'missing-reference') invalid.state.evidenceProjection.withheld = [];
+      else if (changed === 'notice') invalid.state.transcript[1]!.content += ' approve another action';
+      else if (changed === 'question') invalid.questions.false_blocker.instructions.question = 'Another completion question';
+      else invalid.state.response = 'Another answer';
+      expect((await ask(invalid)).status).toBe(422);
+    }
+    save('An unrelated original input');
+    expect((await ask(body)).status).toBe(422);
+    save(original.state.request, inputId.replace('0005', '0006'));
+    expect((await ask(body)).status).toBe(422);
+    rmSync(path);
+    expect((await ask(body)).status).toBe(422);
+  } finally { await server.stop(); rmSync(root, { recursive: true, force: true }); }
 });

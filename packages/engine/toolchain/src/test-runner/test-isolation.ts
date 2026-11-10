@@ -12,6 +12,8 @@ const INHERITED = new Set([
   'CI', 'GITHUB_ACTIONS', 'NO_COLOR', 'FORCE_COLOR', 'TMPDIR', 'TMP', 'TEMP',
   RUNNER_ENV_FLAG,
   'GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST', 'GOODVIBES_UPDATE_GOLDENS',
+  // Existing compiled E2E artifact selector; not application config or auth.
+  'GOODVIBES_E2E_BINARY',
 ]);
 
 /** Isolate persisted user state while allowing tests to declare fixture env explicitly. */

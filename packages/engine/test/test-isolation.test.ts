@@ -25,7 +25,7 @@ test('child env isolates persisted state and inherited credentials while retaini
   const directory = root();
   const env = isolatedTestEnvironment({
     PATH: '/bin', CI: 'true', GOODVIBES_TEST_TIMEOUT_MS: '123', GOODVIBES_UPDATE_GOLDENS: '1', [RUNNER_ENV_FLAG]: '1', GOODVIBES_PLATFORM_PRIVATE_CONFIG: '/real/private',
-    GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST: '1',
+    GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST: '1', GOODVIBES_E2E_BINARY: join(directory, 'selected native binary'), GOODVIBES_E2E_TOKEN: 'private-token',
     OPENAI_API_KEY: 'private-key', ABACUS_API_KEY: 'private-key', TYPESAFE_API_KEY: 'private-key',
     HTTP_PROXY: 'https://private-proxy', NODE_OPTIONS: '--require=private', GIT_CEILING_DIRECTORIES: '/inherited-git-ceiling',
     HOME: '/real/home', XDG_CONFIG_HOME: '/real/config', GOODVIBES_DAEMON_HOME: '/real/daemon',
@@ -35,6 +35,8 @@ test('child env isolates persisted state and inherited credentials while retaini
   expect(env.GOODVIBES_UPDATE_GOLDENS).toBe('1');
   expect(env[RUNNER_ENV_FLAG]).toBe('1');
   expect(env.GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST).toBe('1');
+  expect(env.GOODVIBES_E2E_BINARY).toBe(join(directory, 'selected native binary'));
+  expect(env.GOODVIBES_E2E_TOKEN).toBeUndefined();
   expect(env.GOODVIBES_PLATFORM_PRIVATE_CONFIG).toBeUndefined();
   expect(env.TYPESAFE_API_KEY).toBe('declared-fixture');
   expect(env.FIXTURE_MARKER).toBe('keep');
@@ -112,6 +114,9 @@ test('the owned runner ignores dotenv, isolates home, preserves fixture env, and
     import { test, expect } from 'bun:test'; import { writeFileSync } from 'node:fs';
     test('isolated environment', () => {
       expect(process.env.OPENAI_API_KEY).toBeUndefined();
+      expect(process.env.GOODVIBES_E2E_TOKEN).toBeUndefined();
+      expect(process.env.GOODVIBES_PLATFORM_PRIVATE_CONFIG).toBeUndefined();
+      expect(process.env.GOODVIBES_E2E_BINARY).toBe(${JSON.stringify(join(directory, 'selected native binary'))});
       expect(process.env.DOTENV_MARKER).toBeUndefined();
       expect(process.env.FIXTURE_MARKER).toBe('declared');
       expect(process.env.GIT_CEILING_DIRECTORIES?.split(${JSON.stringify(delimiter)}).sort()).toEqual([
@@ -123,7 +128,7 @@ test('the owned runner ignores dotenv, isolates home, preserves fixture env, and
       writeFileSync(${JSON.stringify(marker)}, process.env.HOME!);
     });
   `);
-  const result = await runOwnedTestChild({ argv: [fixture], cwd: directory, env: { ...process.env, GIT_CEILING_DIRECTORIES: '/inherited-git-ceiling', OPENAI_API_KEY: 'inherited-secret', [RUNNER_ENV_FLAG]: '1', GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST: '1' }, fixtureEnv: { FIXTURE_MARKER: 'declared', GIT_CEILING_DIRECTORIES: join(directory, 'fixture-ceiling') } });
+  const result = await runOwnedTestChild({ argv: [fixture], cwd: directory, env: { ...process.env, GIT_CEILING_DIRECTORIES: '/inherited-git-ceiling', OPENAI_API_KEY: 'inherited-secret', GOODVIBES_E2E_BINARY: join(directory, 'selected native binary'), GOODVIBES_E2E_TOKEN: 'private-token', GOODVIBES_PLATFORM_PRIVATE_CONFIG: '/real/private', [RUNNER_ENV_FLAG]: '1', GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST: '1' }, fixtureEnv: { FIXTURE_MARKER: 'declared', GIT_CEILING_DIRECTORIES: join(directory, 'fixture-ceiling') } });
   expect(result.exitCode).toBe(0);
   const childHome = await Bun.file(marker).text();
   expect(childHome).not.toBe(process.env.HOME);

@@ -8,6 +8,15 @@
   Completion and approval notifications work in TUI and Agent while direct
   diagnostic text and cursor controls remain captured above the footer.
 
+- Drain accepted Home Graph reads and updates, knowledge startup and owned
+  enrichment before closing their stores. Shutdown cancels active map readings
+  and discards late results. Embedded daemon facades clean up supplemental
+  knowledge resources without stopping borrowed host services.
+
+- Reduce repeated database revision reads during Home Graph scope checks.
+  Reuse checks only within the same synchronous read; changes and replacements
+  still invalidate retained evidence after a write or asynchronous wait.
+
 - Preserve contract and workstream restart checkpoints when the runner shuts
   down. Retiring its source signal no longer records an owner cancellation or
   kills saved work before recovery. Clean worktrees awaiting verification also
@@ -659,11 +668,15 @@
 - Keep selected-item descriptions above continuous option lists in the shared
   terminal UI used by TUI and Agent, including settings, generic pickers,
   slash-command completion, profiles, agent choices and reasoning effort.
+  Include each selected setting's description once in both terminal products.
 - Keep option positions and mouse targets stable as selection changes. Preserve
   long-help paging, inline editing, category-rail focus and confirmation prompts.
 
 - Wire decision provider/model, policy, permission, fallback and router controls
   into both terminals, with provider/model and structured fallback editors in WebUI.
+- Keep terminal settings pickers usable after cancellation. Nested provider,
+  model, endpoint and credential choices retain their callbacks and save the
+  selected configuration instead of leaving later pickers waiting indefinitely.
 - Preserve schema-2 catalog reasoning capabilities, including GPT-6.1 Sol xhigh
   and max, and retain stored effort preferences across model switches.
 - Route configuration diagnostics, including refused live reloads, through the

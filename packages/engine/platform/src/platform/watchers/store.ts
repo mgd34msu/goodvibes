@@ -6,6 +6,7 @@ import {
 } from '../utils/atomic-json-store.js';
 import type { AtomicWriteOutcome } from '../utils/atomic-json-store.js';
 import type { WatcherRecord } from '../runtime/store/domains/watchers.js';
+import { logger } from '../utils/logger.js';
 
 export interface WatcherStoreSnapshot {
   readonly version: 1;
@@ -49,7 +50,7 @@ export function loadWatcherSnapshot(storePath: string): WatcherStoreSnapshot | n
  * snapshot degrades to an empty one instead of crash-looping the reader.
  */
 export function loadWatcherSnapshotFromPath(storePath: string): WatcherStoreSnapshot | null {
-  return readJsonFileOrQuarantine<WatcherStoreSnapshot>(storePath, {
+  try { return readJsonFileOrQuarantine<WatcherStoreSnapshot>(storePath, {
     label: 'watchers/store',
     recovery: WATCHER_STORE_RECOVERY,
     validate: (parsed) => {
@@ -63,7 +64,16 @@ export function loadWatcherSnapshotFromPath(storePath: string): WatcherStoreSnap
       }
       return { version: 1, watchers };
     },
-  });
+  }); } catch (error) {
+    // This snapshot is a rebuildable cache, never the authority for a fresh
+    // registration. An unreadable path must not crash its background host or
+    // turn unverified stored bytes into restored watcher records.
+    const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+    logger.error('[watchers/store] Snapshot unavailable; rebuilding from live registrations', {
+      filePath: storePath, code, error: 'Watcher snapshot could not be loaded.',
+    });
+    return null;
+  }
 }
 
 export function saveWatcherSnapshot(watchers: readonly WatcherRecord[], storePath: string): void {

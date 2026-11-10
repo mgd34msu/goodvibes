@@ -94,7 +94,7 @@ test('historical native plan-owner wait is inspected and freshly refused without
   expect(done.escalations).toEqual(contract.escalations); expect(h.events.some(event => event.type === 'CONTRACT_OWNER_REPLIED' || event.type === 'CONTRACT_ESCALATED')).toBe(false);
 }, 20_000);
 
-test('historical native unshown wait rechecks evidence without an owner approval', async () => {
+test('historical native unshown wait retains unchanged evidence without an owner approval', async () => {
   const directory = root(); using log = new SqliteDecisionLog(':memory:');
   const first = add(makeHarness({ root: directory, recordNative: true, decisionLog: log, plan: plan(),
     scripts: { u1: finishes('parser complete') } }));
@@ -109,10 +109,15 @@ test('historical native unshown wait rechecks evidence without an owner approval
   for (const unit of saved.units) unit.checks = unit.checks.map(({ reviewedFiles: _newPhysicalDescriptors, ...check }) => check);
   writeSnapshot(path, { ...saved, schemaVersion: 3 }, 3);
   expect(readContractSnapshot(readFileSync(path, 'utf8'))).toHaveProperty('snapshot');
-  const h = add(makeHarness({ root: directory, recordNative: true, decisionLog: log, contract: { maxFixRounds: 0 }, scripts: {}, port: context => context.name === 'disposition' ? choiceAnswer(context.question, 'reject', 0.99) : context.name.startsWith('criterion_') ? noulAnswer(0.99) : undefined }));
+  let criterionReads = 0;
+  const h = add(makeHarness({ root: directory, recordNative: true, decisionLog: log, contract: { maxFixRounds: 0 }, scripts: {}, port: context => {
+    if (context.name.startsWith('criterion_')) { criterionReads++; return noulAnswer(0.99); }
+    return context.name === 'disposition' ? choiceAnswer(context.question, 'reject', 0.99) : undefined;
+  } }));
   await h.runner.resumeAll(); await waitFor(() => terminal(h, id), 'fresh refusal of unchanged evidence'); await h.runner.join(id);
-  const done = h.store.get(id)!; expect(done.status).toBe('failed'); expect(done.units[0]!.criteria[0]!.status).toBe('unmet'); expect(h.agentsOf('u1')).toHaveLength(0);
-  expect(done.units[0]!.checks.length).toBeGreaterThan(saved.units[0]!.checks.length);
+  const done = h.store.get(id)!; expect(done.status).toBe('failed'); expect(done.units[0]!.criteria[0]!.status).toBe('unshown'); expect(h.agentsOf('u1')).toHaveLength(0);
+  expect(done.units[0]!.checks).toEqual(saved.units[0]!.checks);
+  expect(criterionReads).toBe(0);
   expect(done.nativeDecisions?.history ?? []).toHaveLength(0); expect(done.escalations[0]!.reply).toBeUndefined();
   expect(h.events.some(event => event.type === 'CONTRACT_OWNER_REPLIED' || event.type === 'CONTRACT_ESCALATED')).toBe(false);
 }, 20_000);

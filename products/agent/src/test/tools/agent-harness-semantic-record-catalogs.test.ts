@@ -92,9 +92,10 @@ function nativeMembershipRequest(raw: unknown) {
 }
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => {
-  watcherRuntime?.dispose(); watcherRuntime = undefined;
-  resetTestRuntimeServices(); installJudgmentPort(previous);
+afterEach(async () => {
+  const original = watcherRuntime; watcherRuntime = undefined;
+  try { await original?.close(); }
+  finally { resetTestRuntimeServices(); installJudgmentPort(previous); }
 });
 afterAll(cleanupResearchScreeningFixtures);
 

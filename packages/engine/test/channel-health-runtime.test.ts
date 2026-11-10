@@ -118,9 +118,9 @@ async function statusFor(
 
 const LIVE_TELEGRAM = {
   enabled: true,
-  botToken: 'a-real-looking-token',
+  botToken: '123:synthetic-channel-health',
   botUsername: 'gv_bot',
-  discoveredBotTokenId: 'a-real-looking-token',
+  discoveredBotTokenId: '123',
 } as const;
 
 const tempDirs: string[] = [];
@@ -153,19 +153,23 @@ describe('channel health reflects the runtime, not the configuration', () => {
 
   test('a configured Telegram bot with live ingress reports healthy', async () => {
     const realFetch = globalThis.fetch;
+    const registrations: unknown[] = [];
+    let runtime: BuiltinChannelRuntime | undefined;
     // Built to satisfy `typeof fetch` rather than cast to it: the global also
     // carries `preconnect`, so a bare arrow is genuinely not a fetch and the
     // cast was hiding that rather than resolving it.
     globalThis.fetch = Object.assign(
-      async (): Promise<Response> => new Response(
-        JSON.stringify({ ok: true, result: true }),
-        { headers: { 'content-type': 'application/json' } },
-      ),
+      async (...[input, init]: Parameters<typeof fetch>): Promise<Response> => {
+        if (typeof input !== 'string' || input !== 'https://api.telegram.org/bot123%3Asynthetic-channel-health/setWebhook')
+          throw new Error('Unexpected Telegram health fixture request');
+        registrations.push(JSON.parse(String(init?.body)));
+        return Response.json({ ok: true, result: true });
+      },
       { preconnect: (): void => undefined },
     );
     try {
       const registry = new ChannelPluginRegistry();
-      const runtime = new BuiltinChannelRuntime(createDeps(registry, {
+      runtime = new BuiltinChannelRuntime(createDeps(registry, {
         surfaces: { telegram: { ...LIVE_TELEGRAM, mode: 'webhook', webhookSecret: 'shhh' } },
         config: { 'web.publicBaseUrl': 'https://example.invalid' },
         deliveryEnabled: (surface) => surface === 'telegram',
@@ -175,12 +179,13 @@ describe('channel health reflects the runtime, not the configuration', () => {
       await runtime.startIngress();
 
       const snapshot = (await registry.listStatus()).find((entry) => entry.surface === 'telegram');
+      expect(registrations).toEqual([{ url: 'https://example.invalid/webhook/telegram', secret_token: 'shhh', allowed_updates: ['message', 'edited_message', 'channel_post', 'edited_channel_post'] }]);
       expect(runtime.telegramIngressStatus()?.mode).toBe('webhook');
       expect(snapshot?.state).toBe('healthy');
       expect(snapshot?.runtime?.observable).toBe(true);
-      await runtime.stopIngress();
     } finally {
-      globalThis.fetch = realFetch;
+      try { await runtime?.stopIngress(); }
+      finally { globalThis.fetch = realFetch; }
     }
   });
 

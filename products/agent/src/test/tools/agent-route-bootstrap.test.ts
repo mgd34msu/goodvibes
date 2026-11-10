@@ -83,9 +83,9 @@ test.each(['route', 'agent_harness'] as const)('actual Agent bootstrap registers
     expect(fake.requests.filter(request => (request.state as { context?: { kind?: string } }).context?.kind === 'model provider')).toHaveLength(1);
     expect(fake.requests.filter(request => (request.state as { context?: { kind?: string } }).context?.kind === 'messaging channel or notification target')).toHaveLength(1);
   } finally {
-    services.dispose();
-    await cleanupResearchScreeningFixtures();
-    await Promise.resolve();
-    await Promise.resolve();
+    const failures: unknown[] = [];
+    try { await services.close(); } catch (error) { failures.push(error); }
+    try { await cleanupResearchScreeningFixtures(); } catch (error) { failures.push(error); }
+    if (failures.length) throw new AggregateError(failures, 'Bootstrap fixture owners did not drain.');
   }
 }, 120_000);

@@ -18,9 +18,10 @@
  * bounded by an age TTL and a keep-newest count, reaped on the next init.
  */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { existsSync, mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { logger } from '../platform/src/platform/utils/logger.ts';
+import { quarantineCorruptFile } from '../platform/src/platform/utils/atomic-json-store.ts';
 import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handler-sqlite-store.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
@@ -52,7 +53,7 @@ function seedRawStoreFile(contents: Buffer | string): void {
 
 function quarantineFiles(): string[] {
   try {
-    return readdirSync(storeDir()).filter((name) => name.startsWith(`${FILE_NAME}.corrupt-`));
+    return readdirSync(storeDir()).filter((name) => name.startsWith(`${FILE_NAME}.corrupt-`) && !name.endsWith('.why'));
   } catch {
     return [];
   }
@@ -164,22 +165,17 @@ describe('a crash-damaged database is rejected rather than served', () => {
 });
 
 describe('the quarantine directory is bounded and the reap is disclosed', () => {
-  /**
-   * Drop `count` quarantine files roughly `ageDays` old, each one MINUTE newer
-   * than the last. Distinct mtimes matter: the keep-newest cap sorts on them,
-   * and identical stamps would make the assertion below depend on readdir order
-   * rather than on the rule under test.
-   */
+  /** Real factory receipts are the retention proof; a matching name is not. */
   function seedQuarantines(count: number, ageDays: number): string[] {
     mkdirSync(storeDir(), { recursive: true });
     const made: string[] = [];
     const base = Date.now() - ageDays * 24 * 60 * 60 * 1000;
     for (let index = 0; index < count; index += 1) {
-      const path = join(storeDir(), `${FILE_NAME}.corrupt-${1_000_000 + index}`);
-      writeFileSync(path, `old-${index}`);
-      const when = new Date(base + index * 60_000);
-      utimesSync(path, when, when);
-      made.push(path);
+      seedRawStoreFile(`old-${index}`);
+      made.push(quarantineCorruptFile(storePath(), {
+        label: 'recovery fixture', reason: 'invalid SQLite image', recovery: 'Preserved for the retention test.',
+        now: base + index * 60_000, maxFiles: 64,
+      }).quarantinePath);
     }
     return made;
   }
@@ -198,16 +194,43 @@ describe('the quarantine directory is bounded and the reap is disclosed', () => 
   });
 
   test('recent quarantines survive the TTL but are still capped by count, newest kept', async () => {
-    seedQuarantines(6, 1); // one day old: inside the TTL, over the keep-newest cap
+    const seeded = seedQuarantines(6, 1); // one day old: inside the TTL, over the keep-newest cap
     const store = makeStore();
     await store.init();
     store.close();
 
     const remaining = quarantineFiles();
     expect(remaining).toHaveLength(3);
-    // The newest survive, the seeds are numbered ascending and written in order.
-    expect(remaining.some((name) => name.endsWith('1000005'))).toBe(true);
-    expect(remaining.some((name) => name.endsWith('1000000'))).toBe(false);
+    expect(seeded.slice(0, 3).every((path) => !existsSync(path) && !existsSync(`${path}.why`))).toBe(true);
+    expect(seeded.slice(3).every((path) => existsSync(path) && existsSync(`${path}.why`))).toBe(true);
+  });
+
+  test.each(['expired', 'over-cap'] as const)('another supported healthy store survives %s retention despite its quarantine-like filename', async (policy) => {
+    const secondary = new HandlerSqliteStore({ workingDirectory: tmpDir, fileName: `${FILE_NAME}.corrupt-secondary.sqlite`, schema: SCHEMA });
+    await secondary.init();
+    secondary.run('INSERT INTO probe VALUES (?, ?)', ['owned', 'healthy secondary']);
+    await secondary.save(); secondary.close();
+    const original = readFileSync(secondary.dbPath);
+    const aged = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    if (policy === 'expired') utimesSync(secondary.dbPath, aged, aged);
+    const quarantines = seedQuarantines(policy === 'expired' ? 2 : 6, policy === 'expired' ? 30 : 1);
+    const primary = makeStore(); await primary.init(); primary.close();
+    expect(readFileSync(secondary.dbPath)).toEqual(original);
+    expect(quarantines.filter(existsSync)).toHaveLength(policy === 'expired' ? 0 : 3);
+    const reopened = new HandlerSqliteStore({ workingDirectory: tmpDir, fileName: `${FILE_NAME}.corrupt-secondary.sqlite`, schema: SCHEMA });
+    await reopened.init();
+    expect(reopened.get('SELECT value FROM probe WHERE id = ?', ['owned'])).toEqual({ value: 'healthy secondary' });
+    reopened.close();
+  });
+
+  test('unattributed historical recovery files are preserved even when expired and over cap', async () => {
+    mkdirSync(storeDir(), { recursive: true });
+    const names = Array.from({ length: 5 }, (_, index) => `${FILE_NAME}.corrupt-${1_000_000 + index}`);
+    const aged = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    for (const name of names) { const path = join(storeDir(), name); writeFileSync(path, 'old salvage'); utimesSync(path, aged, aged); }
+    const primary = makeStore(); await primary.init(); primary.close();
+    expect(quarantineFiles().sort()).toEqual(names.sort());
+    for (const name of names) expect(readFileSync(join(storeDir(), name), 'utf8')).toBe('old salvage');
   });
 
   test('a reap with nothing to reclaim says nothing', async () => {
@@ -231,7 +254,7 @@ describe('the quarantine directory is bounded and the reap is disclosed', () => 
     expect(infos.some((entry) => entry.message.includes('reclaimed quarantined copies'))).toBe(false);
   });
 
-  test('a quarantine file removed by another process mid-reap is not an error', async () => {
+  test('a missing archive leaves its unmatched receipt intact without blocking other owned retention', async () => {
     const seeded = seedQuarantines(3, 30);
     // Simulate the race: the file is gone before this process gets to unlink it.
     rmSync(seeded[1]!, { force: true });
@@ -240,6 +263,7 @@ describe('the quarantine directory is bounded and the reap is disclosed', () => 
     await store.init(); // must not throw
     store.close();
     expect(quarantineFiles()).toEqual([]);
+    expect(existsSync(`${seeded[1]}.why`)).toBe(true);
   });
 });
 

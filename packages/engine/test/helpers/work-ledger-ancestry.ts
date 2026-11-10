@@ -9,6 +9,7 @@ export interface WorkLedgerAncestryInput {
 const input = JSON.parse(process.argv[2]!) as WorkLedgerAncestryInput;
 const native = { ...fs };
 const paths = new Map<number, string>();
+const failedSyncDescriptors = new Set<number>();
 let failures = 2;
 const events: { operation: string; path: string | undefined }[] = [];
 mock.module('node:fs', () => ({
@@ -18,12 +19,15 @@ mock.module('node:fs', () => ({
   },
   fsyncSync(fd: number) {
     const path = paths.get(fd); events.push({ operation: 'fsync', path });
-    if (path === input.failDirectory && failures > 0) { failures--; throw new Error('Injected ancestor durability failure'); }
+    if (path === input.failDirectory && failures > 0) {
+      failures--; if (input.lateCloseFailure) failedSyncDescriptors.add(fd);
+      throw new Error('Injected ancestor durability failure');
+    }
     native.fsyncSync(fd);
   },
   closeSync(fd: number) {
-    const path = paths.get(fd); native.closeSync(fd); paths.delete(fd);
-    if (input.lateCloseFailure && path === input.failDirectory) throw new Error('Injected post-sync directory close failure');
+    native.closeSync(fd); paths.delete(fd);
+    if (failedSyncDescriptors.delete(fd)) throw new Error('Injected post-sync directory close failure');
   },
 }));
 

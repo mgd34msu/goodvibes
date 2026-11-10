@@ -460,10 +460,11 @@ test('owner revocation during original-source read cannot return retained text',
   const held = spyOn(DelegatedInboundReviewReceiver.prototype, 'read').mockImplementationOnce(async function (this: DelegatedInboundReviewReceiver, ref) {
     const value = await originalRead.call(this, ref); entered(); await gate; return value;
   });
+  const reading = f.host.status(pending.ref, f.authority, true);
   try {
-    const reading = f.host.status(pending.ref, f.authority, true); await waiting;
-    f.revokeOwner(); const refused = expect(reading).rejects.toThrow(); release(); await refused;
-  } finally { release(); held.mockRestore(); }
+    await Promise.race([waiting, reading.then(() => { throw new Error('Source status settled before the original read barrier'); })]);
+    f.revokeOwner(); release(); await expect(reading).rejects.toThrow('Owner or lifecycle changed');
+  } finally { release(); held.mockRestore(); await reading.then(() => {}, () => {}); }
 });
 
 test('owner scope changes during metadata listing cannot return a stale-owner result', async () => {
@@ -475,10 +476,11 @@ test('owner scope changes during metadata listing cannot return a stale-owner re
   const held = spyOn(DelegatedInboundReviewReceiver.prototype, 'list').mockImplementationOnce(async function (this: DelegatedInboundReviewReceiver) {
     const records = await originalList.call(this); entered(); await gate; return records;
   });
+  const listing = f.host.list(f.authority);
   try {
-    const listing = f.host.list(f.authority); await waiting;
-    f.mutateOwnerScopes(); const refused = expect(listing).rejects.toThrow(); release(); await refused;
-  } finally { release(); held.mockRestore(); }
+    await Promise.race([waiting, listing.then(() => { throw new Error('Review listing settled before the original list barrier'); })]);
+    f.mutateOwnerScopes(); release(); await expect(listing).rejects.toThrow('Owner or lifecycle changed');
+  } finally { release(); held.mockRestore(); await listing.then(() => {}, () => {}); }
 });
 
 test('saved digest-only review receipts retain metadata access without restoring source authority', async () => {
@@ -510,13 +512,14 @@ test('review cancellation while a source read settles cannot return the already-
   const held = spyOn(DelegatedInboundReviewReceiver.prototype, 'read').mockImplementationOnce(async function (this: DelegatedInboundReviewReceiver, ref) {
     const value = await originalRead.call(this, ref); entered(); await gate; return value;
   });
+  const reading = f.host.status(pending.ref, f.authority, true);
   try {
-    const reading = f.host.status(pending.ref, f.authority, true); await waiting;
+    await Promise.race([waiting, reading.then(() => { throw new Error('Source status settled before the original read barrier'); })]);
     await f.host.cancel(pending.ref, f.authority); release();
     const result = await reading;
     expect(result).not.toHaveProperty('original');
     expect(result.source).toBe('expired-or-lost');
-  } finally { release(); held.mockRestore(); }
+  } finally { release(); held.mockRestore(); await reading.then(() => {}, () => {}); }
 });
 
 

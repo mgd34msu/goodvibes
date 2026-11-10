@@ -1,12 +1,12 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createSqlJsDatabase, SqlJsDatabaseAllocationError } from './sqljs-database.js';
 import { open } from 'node:fs/promises';
-import { fstatSync, lstatSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, type BigIntStats } from 'node:fs';
-import { randomUUID } from 'node:crypto';
-import { basename, dirname, join } from 'node:path';
+import { fstatSync, lstatSync, renameSync, unlinkSync, type BigIntStats } from 'node:fs';
+import { join } from 'node:path';
 import type { MutationPublication } from '../utils/file-mutation.js';
 import { logger } from '../utils/logger.js';
 import { fileObservationIdentity } from '../utils/file-observation.js';
+import { captureQuarantineSource, quarantineCorruptFile, reapOwnedQuarantines, type QuarantineSource, type QuarantineOutcome } from '../utils/atomic-json-store.js';
 import { capturePrivateSqliteDirectory, readPrivateSqliteImage } from './private-sqlite-path.js';
 import { loadSqlJsEngine, type SqlDatabase } from './sqlite-store.js';
 
@@ -35,7 +35,7 @@ export interface HandlerSqliteStoreOptions {
 const SQLITE_HEADER = Buffer.from('SQLite format 3\0', 'latin1');
 
 /**
- * How long a quarantined `.corrupt-<timestamp>` database is kept before it is
+ * How long a physically owned database quarantine is kept before it is
  * reclaimed. These files exist so an operator can try to salvage a damaged
  * store by hand; 14 days is long enough for someone to notice a broken daemon
  * and come looking, and short enough that a store that goes bad repeatedly
@@ -101,70 +101,31 @@ export class HandlerSqliteStore {
    * Move a database file that cannot be opened aside instead of deleting it, so
    * an operator still has something to salvage, and return the quarantine path.
    * Returns null when the move itself failed, in which case the caller starts
-   * fresh in memory and the bad file is left exactly where it was rather than
-   * being overwritten on the next save.
+   * fresh in memory with persistence blocked. Any surviving source or archive
+   * remains available for recovery instead of being overwritten on save.
    */
-  private quarantineUnreadable(expected: string | undefined): string | null {
-    if (!expected) return null;
-    const target = `${this.resolvedPath}.corrupt-${Date.now()}-${randomUUID()}`;
+  private quarantineUnreadable(source: QuarantineSource | null, reason: string): QuarantineOutcome | null {
+    if (!source) return null;
     try {
-      this.assertActiveStorage(); if (fileObservationIdentity(this.resolvedPath) !== expected) return null;
-      renameSync(this.resolvedPath, target);
-      return target;
+      return quarantineCorruptFile(this.resolvedPath, {
+        source, label: 'daemon SQLite', reason,
+        recovery: 'The daemon starts an empty store. Inspect the preserved database before attempting manual recovery.',
+        assertCurrent: () => this.assertActiveStorage(),
+        maxFiles: MAX_CORRUPT_QUARANTINES, maximumAgeMs: CORRUPT_QUARANTINE_TTL_MS,
+      });
     } catch {
+      // A failed or uncertain quarantine never permits overwriting a survivor.
       return null;
     }
   }
 
-  /**
-   * Bound the quarantine directory: drop `.corrupt-*` copies of THIS store that
-   * are past the TTL or beyond the keep-newest count. Best-effort and
-   * idempotent, a file another process already removed is success, not an
-   * error, so two daemons opening the same store at once cannot fight.
-   * Returns how many were reclaimed.
-   */
+  /** Only exact native archive/receipt pairs belong to this retention policy.
+   * Matching historical filenames and other configured stores remain intact. */
   private reapCorruptQuarantines(nowMs: number): number {
-    const dir = dirname(this.resolvedPath);
-    const prefix = `${basename(this.resolvedPath)}.corrupt-`;
-    let candidates: Array<{ path: string; mtimeMs: number }>;
-    try {
-      candidates = readdirSync(dir)
-        .filter((name) => name.startsWith(prefix))
-        .map((name) => join(dir, name))
-        .flatMap((path) => {
-          try {
-            const stat = statSync(path);
-            if (!stat.isFile()) return [];
-            // New names record quarantine time. Source mtime may be years old;
-            // it must not cause the only salvage copy to be reaped immediately.
-            // Historical timestamp-only names retain their mtime convention.
-            const stamp = basename(path).slice(prefix.length).match(/^(\d+)-[a-f0-9-]{36}$/);
-            const mtimeMs = stamp ? Number(stamp[1]) : stat.mtimeMs;
-            return [{ path, mtimeMs }];
-          } catch {
-            return [];
-          }
-        });
-    } catch {
-      return 0;
-    }
-    if (candidates.length === 0) return 0;
-    // Newest first: the newest MAX_CORRUPT_QUARANTINES survive the count cap,
-    // and everything past the TTL goes regardless of rank.
-    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
-    let reclaimed = 0;
-    for (const [index, candidate] of candidates.entries()) {
-      const tooOld = nowMs - candidate.mtimeMs > CORRUPT_QUARANTINE_TTL_MS;
-      const overCap = index >= MAX_CORRUPT_QUARANTINES;
-      if (!tooOld && !overCap) continue;
-      try {
-        rmSync(candidate.path, { force: true });
-        reclaimed += 1;
-      } catch {
-        // Another process may have taken it first; that is the outcome we wanted.
-      }
-    }
-    return reclaimed;
+    return reapOwnedQuarantines(this.resolvedPath, {
+      maxFiles: MAX_CORRUPT_QUARANTINES, maximumAgeMs: CORRUPT_QUARANTINE_TTL_MS,
+      now: nowMs, assertCurrent: () => this.assertActiveStorage(),
+    }).reaped;
   }
 
   async init(): Promise<void> {
@@ -195,79 +156,94 @@ export class HandlerSqliteStore {
     // database. Handing those bytes to `new SQL.Database(...)` throws out of
     // init and takes the whole daemon store down with no way back.
     let existing: Buffer | undefined;
-    let quarantined: string | null = null;
+    let quarantined: QuarantineOutcome | null = null;
     let quarantineReason = '';
     // Reject aliases/hardlinks and tighten the actual selected descriptor
     // before reading a private database. Unsafe ownership is never quarantined
     // or replaced by an apparently fresh store.
     const original = readPrivateSqliteImage(this.resolvedPath, () => this.assertActiveStorage());
-    if (original !== undefined) {
-      const raw = original.bytes;
-      if (raw.length === 0) {
-        quarantineReason = 'zero-byte file (interrupted write)';
-        quarantined = this.quarantineUnreadable(original?.physical);
-      } else if (raw.length < SQLITE_HEADER.length || !raw.subarray(0, SQLITE_HEADER.length).equals(SQLITE_HEADER)) {
-        quarantineReason = 'missing the SQLite file header (not a database)';
-        quarantined = this.quarantineUnreadable(original?.physical);
-      } else {
-        existing = raw;
-      }
-    }
-
-    let candidate: SqlDatabase | null = null;
-    if (existing) {
-      // The constructor is NOT where a damaged image surfaces: sql.js accepts
-      // the bytes and only reports "database disk image is malformed" when the
-      // first statement touches a bad page. Validate the image independently
-      // of the caller's schema: a schema typo must never quarantine good data.
-      try {
-        candidate = createSqlJsDatabase(SQL.Database, existing);
-        const check = candidate.exec('PRAGMA quick_check');
-        if (check.length !== 1 || check[0]?.values.length !== 1 || check[0].values[0]?.[0] !== 'ok') {
-          throw new Error('SQLite quick_check rejected the database image');
-        }
-      } catch (error) {
-        if (error instanceof SqlJsDatabaseAllocationError) throw error;
-        // Header present but the body does not hold up: a truncated or damaged
-        // database. Same treatment, set aside, disclose, start clean.
-        quarantineReason = `database would not open: ${error instanceof Error ? error.message : String(error)}`;
-        candidate?.close();
-        candidate = null;
-        quarantined = this.quarantineUnreadable(original?.physical);
-      }
-    }
-
-    // A failed move is not permission to overwrite the operator's only copy.
-    this.persistenceBlocked = Boolean(quarantineReason && !quarantined);
-    candidate ??= createSqlJsDatabase(SQL.Database);
+    const source = original ? captureQuarantineSource(this.resolvedPath) : null;
     try {
-      for (const statement of this.options.schema) candidate.run(statement);
-      this.db = candidate;
-    } catch (error) {
-      candidate.close();
-      throw error;
-    }
+      // Bind the recovery descriptor to the exact private image already read,
+      // before any SQL validation. Never adopt a catch-time replacement.
+      if (original) {
+        if (!source || fileObservationIdentity(this.resolvedPath) !== original.physical) throw new Error('SQLite source changed before validation');
+        source.assertCurrent();
+      }
+      if (original !== undefined) {
+        const raw = original.bytes;
+        if (raw.length === 0) {
+          quarantineReason = 'zero-byte file (interrupted write)';
+          quarantined = this.quarantineUnreadable(source, quarantineReason);
+        } else if (raw.length < SQLITE_HEADER.length || !raw.subarray(0, SQLITE_HEADER.length).equals(SQLITE_HEADER)) {
+          quarantineReason = 'missing the SQLite file header (not a database)';
+          quarantined = this.quarantineUnreadable(source, quarantineReason);
+        } else {
+          existing = raw;
+        }
+      }
 
-    // Disclosure: starting a store from scratch is data loss from the user's
-    // point of view, so it is never allowed to happen quietly.
-    if (quarantineReason) {
-      logger.warn('daemon store could not be opened; starting a fresh one', {
-        store: this.options.fileName,
-        path: this.resolvedPath,
-        reason: quarantineReason,
-        quarantinedTo: quarantined ?? '(could not be moved aside; left in place)',
-      });
-    }
+      let candidate: SqlDatabase | null = null;
+      if (existing) {
+        // The constructor is NOT where a damaged image surfaces: sql.js accepts
+        // the bytes and only reports "database disk image is malformed" when the
+        // first statement touches a bad page. Validate the image independently
+        // of the caller's schema: a schema typo must never quarantine good data.
+        try {
+          candidate = createSqlJsDatabase(SQL.Database, existing);
+          const check = candidate.exec('PRAGMA quick_check');
+          if (check.length !== 1 || check[0]?.values.length !== 1 || check[0].values[0]?.[0] !== 'ok') {
+            throw new Error('SQLite quick_check rejected the database image');
+          }
+        } catch (error) {
+          if (error instanceof SqlJsDatabaseAllocationError) throw error;
+          // Header present but the body does not hold up: a truncated or damaged
+          // database. Same treatment, set aside, disclose, start clean.
+          quarantineReason = `database would not open: ${error instanceof Error ? error.message : String(error)}`;
+          candidate?.close();
+          candidate = null;
+          quarantined = this.quarantineUnreadable(source, quarantineReason);
+        }
+      }
 
-    const reclaimed = this.reapCorruptQuarantines(Date.now());
-    if (reclaimed > 0) {
-      logger.info('daemon store reclaimed quarantined copies', {
-        store: this.options.fileName,
-        reclaimedFiles: reclaimed,
-        ttlDays: Math.round(CORRUPT_QUARANTINE_TTL_MS / (24 * 60 * 60 * 1000)),
-        keptNewest: MAX_CORRUPT_QUARANTINES,
-      });
-    }
+      if (!quarantineReason) {
+        try { source?.assertCurrent(); } catch (error) { candidate?.close(); throw error; }
+      }
+      let reclaimed: number;
+      try { reclaimed = (quarantined?.reaped ?? 0) + this.reapCorruptQuarantines(Date.now()); }
+      catch (error) { candidate?.close(); throw error; }
+
+      // A failed move is not permission to overwrite the operator's only copy.
+      this.persistenceBlocked = Boolean(quarantineReason && !quarantined);
+      candidate ??= createSqlJsDatabase(SQL.Database);
+      try {
+        for (const statement of this.options.schema) candidate.run(statement);
+        this.db = candidate;
+      } catch (error) {
+        candidate.close();
+        throw error;
+      }
+
+      // Disclosure: starting a store from scratch is data loss from the user's
+      // point of view, so it is never allowed to happen quietly.
+      if (quarantineReason) {
+        logger.warn('daemon store could not be opened; starting a fresh one', {
+          store: this.options.fileName,
+          path: this.resolvedPath,
+          reason: quarantineReason,
+          quarantinedTo: quarantined?.quarantinePath ?? '(recovery was not confirmed; existing files preserved)',
+        });
+      }
+
+      if (reclaimed > 0) {
+        logger.info('daemon store reclaimed quarantined copies', {
+          store: this.options.fileName,
+          reclaimedFiles: reclaimed,
+          ttlDays: Math.round(CORRUPT_QUARANTINE_TTL_MS / (24 * 60 * 60 * 1000)),
+          keptNewest: MAX_CORRUPT_QUARANTINES,
+        });
+      }
+    } finally { source?.close(); }
   }
 
   /** Execute a write (INSERT/UPDATE/DELETE/CREATE). */
@@ -293,8 +269,9 @@ export class HandlerSqliteStore {
 
   /** Retain the actual staged descriptor through every asynchronous write.
    * Creation collisions grant neither publication nor cleanup of another file. */
-  private async stageImage(path: string, bytes: Uint8Array): Promise<PreparedSqliteImage> {
-    this.assertActiveStorage();
+  private async stageImage(path: string, bytes: Uint8Array, assertCurrent: () => void = () => this.assertActiveStorage()): Promise<PreparedSqliteImage> {
+    const assertStorageCurrent = this.assertStorageCurrent;
+    assertCurrent();
     const handle = await open(path, 'wx', 0o600);
     let original: BigIntStats | undefined;
     let handleClosed = false;
@@ -303,24 +280,24 @@ export class HandlerSqliteStore {
     const cleanup = () => {
       // Physical cleanup remains allowed after close, but never follows a
       // replaced directory or removes a foreign file occupying the old name.
-      this.assertStorageCurrent(); const selected = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+      assertStorageCurrent(); const selected = lstatSync(path, { bigint: true, throwIfNoEntry: false });
       if (owns(selected)) unlinkSync(path);
     };
     try {
       original = fstatSync(handle.fd, { bigint: true });
-      this.assertActiveStorage();
+      assertCurrent();
       if (!owns(lstatSync(path, { bigint: true, throwIfNoEntry: false }))) throw new Error('SQLite staging source changed');
-      await handle.chmod(0o600); this.assertActiveStorage();
-      await handle.writeFile(bytes); this.assertActiveStorage();
+      await handle.chmod(0o600); assertCurrent();
+      await handle.writeFile(bytes); assertCurrent();
       const prepared = fstatSync(handle.fd, { bigint: true });
       if (!owns(prepared) || (prepared.mode & 0o777n) !== 0o600n) throw new Error('SQLite staging permissions are unavailable');
-      const assertCurrent = () => {
-        this.assertActiveStorage(); const selected = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+      const assertPreparedCurrent = () => {
+        assertCurrent(); const selected = lstatSync(path, { bigint: true, throwIfNoEntry: false });
         if (!owns(selected) || !selected || selected.mode !== prepared.mode || selected.size !== prepared.size
           || selected.mtimeNs !== prepared.mtimeNs || selected.ctimeNs !== prepared.ctimeNs) throw new Error('SQLite staging source changed');
       };
-      assertCurrent(); await handle.close(); handleClosed = true; assertCurrent();
-      return { assertCurrent, cleanup };
+      assertPreparedCurrent(); await handle.close(); handleClosed = true; assertPreparedCurrent();
+      return { assertCurrent: assertPreparedCurrent, cleanup };
     } catch (error) {
       try { if (!handleClosed) await handle.close(); } finally { cleanup(); }
       throw error;
@@ -349,13 +326,16 @@ export class HandlerSqliteStore {
     // A save admitted behind a staged transaction must capture AFTER it; an
     // earlier snapshot would overwrite the newly committed checkpoint.
     const data = this.stagedTransactions > 0 ? undefined : db.export();
+    // SQL resource teardown cannot revoke these already captured bytes. Retain
+    // the original physical storage owner through every later publication step.
+    const assertStorageCurrent = this.assertStorageCurrent;
     HandlerSqliteStore.saveSequence += 1;
     const tmpPath = `${this.resolvedPath}.${process.pid}.${Date.now()}.${HandlerSqliteStore.saveSequence}.tmp`;
     const previous = HandlerSqliteStore.saveTails.get(this.resolvedPath) ?? Promise.resolve();
     const saving = previous.then(async () => {
       let prepared: PreparedSqliteImage | undefined;
       try {
-        prepared = await this.stageImage(tmpPath, data ?? this.requireDb().export());
+        prepared = await this.stageImage(tmpPath, data ?? this.requireDb().export(), assertStorageCurrent);
         prepared.assertCurrent(); renameSync(tmpPath, this.resolvedPath);
       } finally { prepared?.cleanup(); }
     });

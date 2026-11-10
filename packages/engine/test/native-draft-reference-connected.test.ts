@@ -78,10 +78,22 @@ async function fixture(message = ORIGINAL_BODY, webhook?: string, preField = fal
     await drafts.close();
     const old = new HandlerSqliteStore({ workingDirectory: directory, fileName: 'drafts.sqlite', schema: [] });
     await old.init();
-    old.run('DROP INDEX idx_drafts_wireReference');
-    old.run('ALTER TABLE drafts DROP COLUMN wireReference');
-    old.run('ALTER TABLE drafts DROP COLUMN legacyWireReference');
-    await old.close();
+    try {
+      old.run('DROP INDEX idx_drafts_wireReference');
+      old.run('ALTER TABLE drafts DROP COLUMN wireReference');
+      old.run('ALTER TABLE drafts DROP COLUMN legacyWireReference');
+      // HandlerSqliteStore close only releases its image. The bridge requires
+      // actual persisted pre-field bytes, not unsaved ALTER statements.
+      await old.save();
+    } finally { old.close(); }
+    const persistedOld = new HandlerSqliteStore({ workingDirectory: directory, fileName: 'drafts.sqlite', schema: [] });
+    try {
+      await persistedOld.init();
+      const columns = persistedOld.all<{ name: string }>('PRAGMA table_info(drafts)').map(column => column.name);
+      expect(columns).not.toContain('wireReference');
+      expect(columns).not.toContain('legacyWireReference');
+      expect(Boolean(persistedOld.get('SELECT id FROM drafts WHERE id = ?', [LEGACY_ID]))).toBe(true);
+    } finally { persistedOld.close(); }
     drafts = new DraftSyncStore({ workingDirectory: directory, cipher }); await drafts.init();
   }
   const surface = registerDraftMethods({ catalog, workingDirectory: directory, credentials, nativeMutationHost,
@@ -154,6 +166,10 @@ test('real connected native legacy draft save/get/list/delete keeps private IDs 
 
 for (const preField of [false, true]) test(`actual registered Agent admission publishes its owned draft through paired peer (${preField ? 'old row bridge' : 'stored label'})`, async () => {
   const f = await fixture(ORIGINAL_BODY, undefined, preField);
+  const offeredReference = preField ? historicalChannelDraftWireReference(LEGACY_ID) : f.reference;
+  // Only genuine saved old rows can resolve their historical one-time bridge.
+  expect(f.drafts.resolveReferenceId(offeredReference) === LEGACY_ID).toBe(true);
+  if (preField) expect(offeredReference === f.reference).toBe(false);
   const clientRoot = mkdtempSync(join(tmpdir(), 'gv-agent-reference-peer-'));
   cleanup.push(() => rmSync(clientRoot, { recursive: true, force: true }));
   const inputPath = join(clientRoot, 'native-client-input.json');
@@ -171,16 +187,16 @@ for (const preField of [false, true]) test(`actual registered Agent admission pu
   expect(stderr).not.toContain(LEGACY_ID); expect(stderr).not.toContain(f.paired.token);
   expect({ exitCode, stderr, stdout }).toMatchObject({ exitCode: 0 });
   const receipt: unknown = JSON.parse(stdout);
-  expect(receipt).toMatchObject({ result: { success: true, output: expect.stringContaining(preField ? historicalChannelDraftWireReference(LEGACY_ID) : f.reference) },
+  expect(receipt).toMatchObject({ result: { success: true, output: expect.stringContaining(offeredReference) },
     localWireReference: f.reference,
     localStatus: 'sent', delivery: [ORIGINAL_BODY], autonomousReadings: expect.any(Number) });
   expect(f.drafts.get(LEGACY_ID)?.status).toBe('queued'); expect(f.drafts.get(f.reference)).toBeNull();
   expect(f.responses).toEqual([{ method: 'POST', status: 200, nativeStatus: 'queued' }]);
   const persisted = new DraftSyncStore({ workingDirectory: f.directory, cipher: f.cipher });
   try {
-    await persisted.init(); expect(persisted.get(LEGACY_ID)?.status).toBe('queued'); expect(persisted.get(f.reference)).toBeNull();
+    await persisted.init(); expect(persisted.get(LEGACY_ID)?.status).toBe('queued'); expect(persisted.get(LEGACY_ID)?.wireReference).toBe(f.reference); expect(persisted.get(f.reference)).toBeNull();
   } finally { await persisted.close(); }
-  expect(f.wire).toHaveLength(1); expect(JSON.parse(f.wire[0]!)).toMatchObject({ id: f.reference, admission: 'autonomous', message: ORIGINAL_BODY, status: 'queued' });
+  expect(f.wire).toHaveLength(1); expect(JSON.parse(f.wire[0]!)).toMatchObject({ id: offeredReference, admission: 'autonomous', message: ORIGINAL_BODY, status: 'queued' });
   expect(f.wire.join('')).not.toContain(LEGACY_ID); expect(JSON.stringify(requests)).not.toContain(LEGACY_ID);
   expect(stdout).not.toContain(LEGACY_ID); expect(stdout).not.toContain(f.paired.token);
   expect(JSON.stringify(requests)).not.toContain(f.paired.token);

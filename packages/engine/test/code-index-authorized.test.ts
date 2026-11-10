@@ -115,7 +115,8 @@ describe('receipt-authorized code index', () => {
     const other = setup();
     await other.store.prepareAuthorizedSnapshots(other.input);
     other.store.close();
-    await expect(other.store.searchAuthorized('captured')).rejects.toThrow('lifecycle changed');
+    await expect(other.store.searchAuthorized('captured')).rejects.toThrow('Authorized code index');
+    expect(other.calls).toHaveLength(1);
   });
   test('cancels a non-cooperating pending provider and discards its late result', async () => {
     const { store, registry, input, controller } = setup();

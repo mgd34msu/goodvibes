@@ -204,11 +204,12 @@ test.each(['unchanged', 'changed', 'unreadable'] as const)('remote readback repo
 function stoppingFacade() {
   const events: string[] = [];
   const promotionAbort = new AbortController();
+  let observeStopping = () => {};
   const lifecycle = Object.assign(Object.create(DaemonLifecycleRuntime.prototype) as object, {
     promotionAbort, rollbackAbort: new AbortController(),
     promotionTask: null as Promise<void> | null,
     rollbackHandover: null,
-    autoUpdater: null as { stop(handover?: boolean): void; drainHandover(handover?: boolean): Promise<void> } | null,
+    autoUpdater: { stop() { observeStopping(); }, async drainHandover() {} } as { stop(handover?: boolean): void; drainHandover(handover?: boolean): Promise<void> } | null,
     appliedUpdater: null,
     async onStopping(_restarting: boolean, handover: boolean) { events.push(`onStopping:${handover}`); },
   });
@@ -236,6 +237,7 @@ function stoppingFacade() {
     stopRuntime(this: object, handover: boolean): Promise<void>;
   }).stopRuntime;
   return { state, events, promotionAbort,
+    observeStopping(callback: () => void) { observeStopping = callback; },
     stop(handover: boolean) { return handover ? stopRuntime.call(state, true) : daemon.stop(); },
     enable(token = 'fixture-shared') { return daemon.enable({ daemon: true }, token); },
   };
@@ -246,20 +248,21 @@ for (const handover of [false, true]) test(`actual facade stop handover=${handov
   const before = f.manager.get('controlPlane.port');
   const prepared = await captureRemoteSettingsPrecondition(f.endpoint,
     { operation: 'set', key: 'controlPlane.port', value: 4567 }, { fetchImpl: f.fetchImpl });
-  let lifetimeAtAbort: object | null | undefined;
-  d.promotionAbort.signal.addEventListener('abort', () => { lifetimeAtAbort = d.state.settingsLifetime; });
+  let lifetimeAtStop: object | null | undefined;
+  d.observeStopping(() => { lifetimeAtStop = d.state.settingsLifetime; });
   await d.stop(handover);
   const result = await applyRemoteSettingsPrecondition(prepared);
-  expect(lifetimeAtAbort).toBeNull();
+  expect(lifetimeAtStop).toBeNull();
+  expect(d.promotionAbort.signal.aborted).toBe(!handover);
   expect(result.status).toBe('unknown'); expect(f.manager.get('controlPlane.port')).toBe(before);
-  expect(d.events).toEqual(['watcher', `onStopping:${handover}`, 'socket']);
+  expect(d.events).toEqual(['watcher', 'socket', `onStopping:${handover}`]);
 });
 
-for (const handover of [false, true]) test(`actual synchronous lifecycle abort cannot remint SETTINGS during handover=${handover}`, async () => {
+for (const handover of [false, true]) test(`actual synchronous lifecycle stop callback cannot remint SETTINGS during handover=${handover}`, async () => {
   const d = stoppingFacade(); const f = fixture('shared', () => d.state.settingsLifetime);
   let lifetimeAfterEnable: object | null | undefined;
   let captureStatus = 0;
-  d.promotionAbort.signal.addEventListener('abort', () => {
+  d.observeStopping(() => {
     d.enable();
     lifetimeAfterEnable = d.state.settingsLifetime;
     const request = new Request('http://synthetic.invalid/config', {
@@ -277,14 +280,22 @@ for (const handover of [false, true]) test(`actual synchronous lifecycle abort c
 
 for (const handover of [false, true]) test(`repeated actual stop handover=${handover} retires lifetime and still joins its handover`, async () => {
   const d = stoppingFacade(); d.state.tornDown = true;
-  let release!: () => void;
-  d.state.lifecycle.promotionTask = new Promise<void>(resolve => { release = resolve; });
+  let release!: () => void; let entered!: () => void;
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const drains: (boolean | undefined)[] = [];
+  d.state.lifecycle.autoUpdater = {
+    stop() {},
+    drainHandover(actual) { drains.push(actual); entered(); return gate; },
+  };
   let settled = false;
   const stopping = d.stop(handover).then(() => { settled = true; });
   try {
-    await Promise.resolve();
+    await Promise.race([waiting, stopping.then(() => { throw new Error('Stop settled without entering its owned handover drain'); })]);
     expect(settled).toBe(false);
-    expect(d.promotionAbort.signal.aborted).toBe(true);
+    // An update's own stop must not cancel or join its own promotion task.
+    expect(d.promotionAbort.signal.aborted).toBe(!handover);
+    expect(drains).toEqual([handover]);
     expect(d.state.settingsLifetime).toBeNull();
     expect(d.events).toEqual([]);
   } finally { release(); await stopping; }
@@ -313,7 +324,7 @@ for (const handover of [false, true]) test(`failed actual updater stop handover=
   await d.stop(handover);
   expect(tornDownAfterFailure).toBe(false);
   expect(lifetimeAfterEnable).toBeNull(); expect(captureStatus).toBe(409);
-  expect(d.events).toEqual(['watcher', `onStopping:${handover}`, 'socket']);
+  expect(d.events).toEqual(['watcher', 'socket', `onStopping:${handover}`]);
   expect(d.state.settingsLifetime).toBeNull();
   expect(stops).toBe(2);
 });

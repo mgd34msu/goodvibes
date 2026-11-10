@@ -42,12 +42,15 @@ describe('daemon handler store preservation', () => {
     try { await store.init(); } finally { nowSpy.mockRestore(); }
     expect(fs.readFileSync(oldCopy, 'utf8')).toBe('previous salvage');
     const files = fs.readdirSync(dirname(store.dbPath));
-    expect(files).toHaveLength(2);
-    expect(files.map((file) => fs.readFileSync(join(dirname(store.dbPath), file), 'utf8')).sort())
+    expect(files).toHaveLength(3);
+    const archived = files.filter((file) => !file.endsWith('.why'));
+    expect(archived.map((file) => fs.readFileSync(join(dirname(store.dbPath), file), 'utf8')).sort())
       .toEqual(['new salvage', 'previous salvage']);
+    const receipt = files.find((file) => file.endsWith('.why'))!;
+    expect(JSON.parse(fs.readFileSync(join(dirname(store.dbPath), receipt), 'utf8'))).toMatchObject({ schema: 1, role: 'goodvibes-owned-quarantine', source: 'probe.sqlite' });
     const reopened = makeStore();
     await reopened.init();
-    expect(fs.readdirSync(dirname(store.dbPath))).toHaveLength(2);
+    expect(fs.readdirSync(dirname(store.dbPath))).toHaveLength(3);
   });
 
   test('a failed quarantine refuses save and leaves the original bytes untouched', async () => {
@@ -55,8 +58,8 @@ describe('daemon handler store preservation', () => {
     fs.mkdirSync(dirname(store.dbPath), { recursive: true });
     const original = Buffer.from('operator may salvage these bytes');
     fs.writeFileSync(store.dbPath, original);
-    const renameSpy = spyOn(fs, 'renameSync').mockImplementation(() => { throw new Error('fixture move denied'); });
-    try { await store.init(); } finally { renameSpy.mockRestore(); }
+    const linkSpy = spyOn(fs, 'linkSync').mockImplementation(() => { throw new Error('fixture archive publication denied'); });
+    try { await store.init(); } finally { linkSpy.mockRestore(); }
     store.run('INSERT INTO probe VALUES (?, ?)', ['new', 'in memory']);
     await expect(store.save()).rejects.toThrow('quarantine');
     expect(fs.readFileSync(store.dbPath)).toEqual(original);
@@ -80,12 +83,18 @@ describe('daemon handler store preservation', () => {
     expect(reopened.get<{ value: string }>('SELECT value FROM probe')).toEqual({ value: 'preserved' });
   });
 
-  test('a fresh schema failure leaves init retryable and no half-ready database', async () => {
-    const schema = ['THIS IS NOT VALID SQL'];
-    const store = makeStore(schema);
-    await expect(store.init()).rejects.toThrow();
+  test('a transient schema failure leaves init retryable and no half-ready database', async () => {
+    const SQL = await loadSqlJsEngine();
+    const store = makeStore();
+    const nativeRun = SQL.Database.prototype.run;
+    const runSpy = spyOn(SQL.Database.prototype, 'run').mockImplementationOnce((statement) => {
+      expect(statement).toBe(SCHEMA[0]);
+      throw new Error('fixture transient schema failure');
+    });
+    try { await expect(store.init()).rejects.toThrow('fixture transient schema failure'); }
+    finally { runSpy.mockRestore(); }
+    expect(SQL.Database.prototype.run).toBe(nativeRun);
     expect(() => store.run('CREATE TABLE accidental (id TEXT)')).toThrow('not initialized');
-    schema.splice(0, 1, ...SCHEMA);
     await store.init();
     store.run('INSERT INTO probe VALUES (?, ?)', ['retry', 'ready']);
     expect(store.get<{ value: string }>('SELECT value FROM probe')).toEqual({ value: 'ready' });
@@ -101,12 +110,13 @@ describe('daemon handler store persistence order', () => {
     first.run('INSERT INTO probe VALUES (?, ?)', ['version', 'old']);
     const entered = deferred();
     const release = deferred();
-    const nativeRename = fsPromises.rename;
-    let renames = 0;
-    const renameSpy = spyOn(fsPromises, 'rename').mockImplementation(async (...args) => {
-      renames += 1;
-      if (renames === 1) { entered.resolve(); await release.promise; }
-      return nativeRename(...args);
+    const nativeOpen = fsPromises.open;
+    let opens = 0;
+    const openSpy = spyOn(fsPromises, 'open').mockImplementation(async (...args) => {
+      const handle = await nativeOpen(...args);
+      opens += 1;
+      if (opens === 1) { entered.resolve(); await release.promise; }
+      return handle;
     });
     let oldSave: Promise<void> | undefined;
     let newSave: Promise<void> | undefined;
@@ -116,11 +126,10 @@ describe('daemon handler store persistence order', () => {
       second.run('INSERT OR REPLACE INTO probe VALUES (?, ?)', ['version', 'new']);
       newSave = second.save();
       await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(renames).toBe(1);
+      expect(opens).toBe(1);
     } finally {
       release.resolve();
-      await Promise.all([oldSave, newSave]);
-      renameSpy.mockRestore();
+      try { await Promise.all([oldSave, newSave]); } finally { openSpy.mockRestore(); }
     }
     const reopened = makeStore();
     await reopened.init();
@@ -134,7 +143,7 @@ describe('daemon handler store persistence order', () => {
     await store.save();
     const original = fs.readFileSync(store.dbPath);
     store.run('UPDATE probe SET value = ?', ['new']);
-    const renameSpy = spyOn(fsPromises, 'rename').mockRejectedValueOnce(new Error('fixture rename failure'));
+    const renameSpy = spyOn(fs, 'renameSync').mockImplementationOnce(() => { throw new Error('fixture rename failure'); });
     try { await expect(store.save()).rejects.toThrow('fixture rename failure'); } finally { renameSpy.mockRestore(); }
     expect(fs.readFileSync(store.dbPath)).toEqual(original);
     expect(fs.readdirSync(dirname(store.dbPath))).toEqual(['probe.sqlite']);
@@ -142,6 +151,21 @@ describe('daemon handler store persistence order', () => {
     const reopened = makeStore();
     await reopened.init();
     expect(reopened.get<{ value: string }>('SELECT value FROM probe')).toEqual({ value: 'new' });
+  });
+
+  test('closing SQL resources does not bypass original storage revocation for an admitted save', async () => {
+    const store = makeStore(); await store.init();
+    store.run('INSERT INTO probe VALUES (?, ?)', ['original', 'saved']); await store.save();
+    const original = fs.readFileSync(store.dbPath);
+    store.run('UPDATE probe SET value = ?', ['pending']);
+    const saving = store.save(); store.close();
+    const parent = dirname(store.dbPath), retired = `${parent}-original`;
+    fs.renameSync(parent, retired); fs.mkdirSync(parent);
+    fs.writeFileSync(join(parent, 'foreign-marker'), 'foreign');
+    await expect(saving).rejects.toThrow('Private SQLite storage path is unavailable');
+    expect(fs.readdirSync(parent)).toEqual(['foreign-marker']);
+    expect(fs.readFileSync(join(retired, 'probe.sqlite'))).toEqual(original);
+    expect(fs.readdirSync(retired)).toEqual(['probe.sqlite']);
   });
 
   test('save owns its snapshot before close or a subsequent in-memory change', async () => {

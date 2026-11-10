@@ -101,7 +101,8 @@ describe('agent memory-spine wiring', () => {
     agentServices.configManager.set('controlPlane.port', unusedPort);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await agentServices?.close();
     rmSync(agentRoot, { recursive: true, force: true });
   });
 
@@ -160,7 +161,11 @@ describe('agent memory-spine wiring', () => {
     });
 
     afterEach(async () => {
-      await daemon?.stop();
+      const failures: unknown[] = [];
+      try { await daemon?.stop(); } catch (error) { failures.push(error); }
+      // The facade borrows this graph; the fixture owns its pollers/stores.
+      try { await daemonServices?.close(); } catch (error) { failures.push(error); }
+      if (failures.length) throw new AggregateError(failures, 'Memory-spine fixture owners did not drain.');
       rmSync(daemonRoot, { recursive: true, force: true });
     });
 

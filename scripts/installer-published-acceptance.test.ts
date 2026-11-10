@@ -3,7 +3,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, type AcceptanceSteps } from './accept-published-suite.mjs';
+import { assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, runHistoricalUpgradeSteps, assertHistoricalRollbackRefusal, type HistoricalUpgradeSteps, type AcceptanceSteps } from './accept-published-suite.mjs';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -110,4 +110,81 @@ test('both actual publication workflows await one shared four-native-target acce
     .toEqual({ ref: '${{ inputs.tooling-sha }}' });
   expect(steps.map(object).find(step => step.name === 'Download, install, serve and uninstall the published suite')?.run)
     .toBe('node scripts/accept-published-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET"');
+});
+
+
+function historicalSteps(events: string[]): HistoricalUpgradeSteps {
+  const record = (name: string) => async () => { events.push(name); };
+  return { admit: record('admit'), installPrevious: record('install-old-service-off'), verifyPrevious: record('original-old-versions-defaults'),
+    seedPreviousData: record('original-data'), startPreviousService: record('start-old-service'), awaitAutomaticUpgrade: record('actual-auto-transition'),
+    verifyUpgradedData: record('upgraded-data'), verifyRollbackRefusal: record('real-api-refusal'), uninstall: record('cleanup'), verifyPreserved: record('preserved') };
+}
+
+test('historical Linux delivery waits for actual old automatic transition before rollback and cleanup', async () => {
+  const events: string[] = [], host = historicalSteps(events), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  host.awaitAutomaticUpgrade = async () => { events.push('observing-old-owner'); entered.resolve(); await release.promise; events.push('current-suite-observed'); };
+  const running = runHistoricalUpgradeSteps(host);
+  try {
+    await entered.promise;
+    expect(events).toEqual(['admit', 'install-old-service-off', 'original-old-versions-defaults', 'original-data', 'start-old-service', 'observing-old-owner']);
+    release.resolve(); await running;
+    expect(events.slice(-5)).toEqual(['current-suite-observed', 'upgraded-data', 'real-api-refusal', 'cleanup', 'preserved']);
+  } finally { release.resolve(); await Promise.allSettled([running]); }
+});
+
+test('historical automatic-upgrade failure cannot be repaired by a current install and drains cleanup', async () => {
+  const events: string[] = [], host = historicalSteps(events), original = new Error('Old automatic updater did not deliver'), cleanup = new Error('Original service did not drain');
+  host.awaitAutomaticUpgrade = async () => { events.push('failed-auto-transition'); throw original; };
+  host.uninstall = async () => { events.push('failed-cleanup'); throw cleanup; };
+  await expect(runHistoricalUpgradeSteps(host)).rejects.toMatchObject({ name: 'AggregateError', errors: [original, cleanup] });
+  expect(events).toEqual(['admit', 'install-old-service-off', 'original-old-versions-defaults', 'original-data', 'start-old-service', 'failed-auto-transition', 'failed-cleanup']);
+});
+
+test('historical rollback accepts only the actual admission refusal and checks original file/tree observations', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-rollback-refusal-')); roots.push(root);
+  const events: string[] = [];
+  class Refusal extends Error {
+    readonly receipt = { operation: 'rollback', phase: 'admission', committed: false, recoveryRequired: false };
+    constructor() { super('Native cohort refused', { cause: new Error('Previous native cohort is incomplete; refusing partial rollback') }); }
+  }
+  const plan = { files: [{ path: join(root, 'program') }], directories: [{ path: join(root, 'webui') }], assertCurrent() { events.push('plan-current'); } };
+  const verifier = {
+    resolveSuiteUpdatePlan: () => plan,
+    captureUpdateFileIo: (io: object) => io, realUpdateFileIo: {},
+    retainNativeUpdateSources: (_paths: readonly string[], _io: object) => () => { events.push('files-current'); },
+    retainNativeUpdateTree: (_path: string) => ({ assertCurrent() { events.push('tree-current'); } }),
+    rollbackSuiteUpdate(_options: { assertCurrent(): void; beforeCommit(): void }) { events.push('actual-rollback'); throw new Refusal(); },
+    UpdateTransactionError: Refusal,
+  };
+  const input = { bin: root, version: '3.1.2', webuiDirectory: join(root, 'webui') };
+  await assertHistoricalRollbackRefusal(input, verifier);
+  expect(events.indexOf('actual-rollback')).toBeGreaterThan(events.indexOf('files-current'));
+  expect(events.slice(-4)).toEqual(['files-current', 'tree-current', 'tree-current', 'files-current']);
+  for (const wrong of [new Error('Verifier dependency missing'), new Error('Invalid invocation'), Object.assign(new Refusal(), { receipt: { operation: 'rollback', phase: 'admission', committed: false, recoveryRequired: true } })]) {
+    verifier.rollbackSuiteUpdate = () => { throw wrong; };
+    await expect(assertHistoricalRollbackRefusal(input, verifier)).rejects.toThrow();
+  }
+  verifier.rollbackSuiteUpdate = options => { options.beforeCommit(); throw new Refusal(); };
+  await expect(assertHistoricalRollbackRefusal(input, verifier)).rejects.toThrow('must refuse before admission');
+  verifier.rollbackSuiteUpdate = () => { throw new Refusal(); };
+  verifier.retainNativeUpdateSources = () => {
+    let checks = 0;
+    return () => { if (++checks > 1) throw new Error('Original installed file changed'); };
+  };
+  await expect(assertHistoricalRollbackRefusal(input, verifier)).rejects.toThrow('Original installed file changed');
+});
+
+test('historical upgrade uses separate Linux-only hosted accounts and a verifier build without native payload copying', () => {
+  const value = Bun.YAML.parse(readFileSync(resolve(import.meta.dir, '../.github/workflows/reusable-published-install-acceptance.yml'), 'utf8')) as {
+    jobs: Record<string, { if: string; strategy: { matrix: { include: Array<{ target: string; runner: string }> } }; steps: Array<{ name?: string; run?: string; uses?: string; with?: Record<string, unknown> }> }>;
+  };
+  const job = value.jobs['historical-linux-upgrade']!;
+  expect(job.if).toBe("inputs.tag == 'v3.1.2'");
+  expect(job.strategy.matrix.include).toEqual([{ target: 'linux-x64', runner: 'ubuntu-24.04' }, { target: 'linux-arm64', runner: 'ubuntu-22.04-arm' }]);
+  expect(job.steps.find(step => String(step.uses).startsWith('actions/checkout@'))?.with).toEqual({ ref: '${{ inputs.source }}' });
+  expect(job.steps.find(step => step.name === 'Verify the original released payload source')?.run).toBe('test "$(git rev-parse HEAD)" = "$PAYLOAD_SOURCE"');
+  expect(job.steps.find(step => step.name === 'Build only the source-bound rollback verifier')?.run)
+    .toBe('bun install --frozen-lockfile\nbun packages/engine/scripts/build.ts\n');
+  expect(job.steps.find(step => step.name === 'Observe actual old unattended upgrade and unsupported rollback refusal')?.run)
+    .toBe('node scripts/accept-published-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET" upgrade-v3.1.1');
 });

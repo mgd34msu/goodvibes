@@ -17,7 +17,8 @@ import type { CommandContext, CommandRegistry } from '../../input/command-regist
  * Recorded judgment I/O is synthetic; Agent composition, registry, manager,
  * persistence and the owned loopback HTTP router are real production paths.
  * No external service, provider, credential or non-fixture setting is used.
- * The original parked combined acceptance remains unchanged beside this file.
+ * Related original-source and native-effect acceptance is exercised by the
+ * discovered agent-settings-admission.test.ts suite; no parked duplicate is required.
  */
 import { afterAll, afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';

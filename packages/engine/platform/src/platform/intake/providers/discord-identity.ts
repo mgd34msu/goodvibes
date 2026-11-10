@@ -8,7 +8,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod/v4';
 import type { ProtectedSourceOwnerOptions } from '../../security/source-screening/types.js';
 import { updateInboxIdentityRegistry, captureRegistryOwner, synchronous, type InboxIdentityRegistryFormat } from './identity-registry.js';
-import { findSavedDiscordScope, findSavedDiscordTriage, publishedDiscordElectionScope } from './discord-saved-scope.js';
+import { findSavedDiscordScope, publishedDiscordElectionScope } from './discord-saved-scope.js';
 
 const snowflake = z.string().regex(/^[1-9]\d{0,19}$/).refine(value => BigInt(value) < (1n << 64n));
 const metadata = z.string().min(1).max(4096);
@@ -79,8 +79,11 @@ const discordIdentityRegistry: InboxIdentityRegistryFormat<Registry> = {
     // registry recovery must hold, rather than silently opening an empty mirror.
     const knownMirrors = new Set(registry.scopes.map(entry => `inbox-discord-${entry.id}.sqlite`));
     const knownTriage = new Set(registry.scopes.map(entry => entry.triageFileName));
-    for (const name of readdirSync(directory)) {
+    const stored = new Set(readdirSync(directory));
+    for (const name of stored) {
       const base = name.replace(/-(?:wal|shm)$/, '');
+      if (name !== base && /^inbox-(?:discord-(?:[0-9a-f-]{36}|[0-9a-f]{64})|triage-(?:discord-[0-9a-f-]{36}|[0-9a-f]{64}))\.sqlite$/.test(base)
+        && !stored.has(base)) throw unavailable();
       if ((/^inbox-discord-[0-9a-f-]{36}\.sqlite$/.test(base) && !knownMirrors.has(base))
         || (/^inbox-triage-discord-[0-9a-f-]{36}\.sqlite$/.test(base) && !knownTriage.has(base))) throw unavailable();
     }
@@ -118,11 +121,11 @@ export async function acquireDiscordInboxIdentity(owner: DiscordInboxIdentityOwn
       }
     }
     current();
-    const historical = findSavedDiscordScope(binding, configuredRegistry, mirrors);
+    const historical = findSavedDiscordScope(binding, configuredRegistry, mirrors, triage);
     const saved = historical?.found ? historical.candidate : undefined;
     discoveredElectionScope = historical?.candidate;
     const id = saved ?? randomUUID();
-    const triageFileName = saved ? findSavedDiscordTriage(saved, triage) ?? `inbox-triage-discord-${randomUUID()}.sqlite` : `inbox-triage-discord-${randomUUID()}.sqlite`;
+    const triageFileName = historical?.triageFileName ?? `inbox-triage-discord-${randomUUID()}.sqlite`;
     const entry = { binding, id, triageFileName }; registry.scopes.push(entry); return { value: entry, changed: true };
   });
   synchronous(owner.assertCurrent);

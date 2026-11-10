@@ -89,6 +89,58 @@ test.each([false, true])('actual saved hashed mirror and triage rows remain reac
   expect(resolveDiscordInboxIdentity(await acquireDiscordInboxIdentity(f.owner, selected, { configuredRegistry: configured }), selected)).toEqual(current);
 });
 
+test.each([false, true])('an actual saved Discord receipt store remains reachable without its optional old mirror (configured registry %s)', async configured => {
+  const f = fixture(), source = input(), old = historicalScope(source, configured);
+  const triageFileName = `inbox-triage-${oldDigest(['owned-inbox-triage-v1', 'discord', old])}.sqlite`;
+  const historical = new SqliteTriageStore(f.root, triageFileName);
+  await historical.commit([{ id: 'discord:receipt-only', inputHash: 'a'.repeat(64), battery: inboxTriage.name,
+    batteryVersion: inboxTriage.version, model: TRIAGE_MODEL, status: 'unavailable' }]);
+  await historical.close();
+  const savedBytes = readFileSync(join(f.directory, triageFileName));
+  const selected = configured ? { ...source, channels: { ...source.channels,
+    revision: await acquireDiscordInboxRegistryRevision(f.owner, source.account, source.channels.channelIds) } } : source;
+  const identity = await acquireDiscordInboxIdentity(f.owner, selected, { configuredRegistry: configured });
+  const selectors = resolveDiscordInboxIdentity(identity, selected);
+  expect(selectors).toEqual({ scopeId: old, triageFileName });
+  expect(existsSync(join(f.directory, `inbox-discord-${old}.sqlite`))).toBe(false);
+  expect(readFileSync(join(f.directory, triageFileName))).toEqual(savedBytes);
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    expect(resolveDiscordInboxIdentity(await acquireDiscordInboxIdentity({ ...f.owner }, selected, { configuredRegistry: configured }), selected)).toEqual(selectors);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+  } finally { hash.mockRestore(); }
+  const receipts = new SqliteTriageStore(f.root, selectors.triageFileName); cleanups.push(() => receipts.close());
+  expect((await receipts.readBatch(['discord:receipt-only'])).get('discord:receipt-only')?.latest.status).toBe('unavailable');
+});
+
+test.each(['wal', 'shm'] as const)('historical Discord %s without its main database is preserved and cannot mint a fresh binding', async suffix => {
+  for (const kind of ['mirror', 'triage'] as const) {
+    const f = fixture(), source = input(), scope = historicalScope(source, false);
+    const name = kind === 'mirror' ? `inbox-discord-${scope}.sqlite`
+      : `inbox-triage-${oldDigest(['owned-inbox-triage-v1', 'discord', scope])}.sqlite`;
+    mkdirSync(f.directory, { recursive: true, mode: 0o700 });
+    const orphan = join(f.directory, `${name}-${suffix}`), bytes = Buffer.from('retained orphan SQLite companion');
+    writeFileSync(orphan, bytes, { mode: 0o600 });
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      await expect(acquireDiscordInboxIdentity(f.owner, source)).rejects.toThrow('unavailable');
+      expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    } finally { hash.mockRestore(); }
+    expect(readFileSync(orphan)).toEqual(bytes); expect(existsSync(join(f.directory, name))).toBe(false);
+    expect(existsSync(f.path)).toBe(false);
+  }
+});
+
+test('an existing Discord mapping cannot hide a missing main database behind a retained WAL', async () => {
+  const f = fixture(), source = input();
+  const selected = resolveDiscordInboxIdentity(await acquireDiscordInboxIdentity(f.owner, source), source);
+  const registry = readFileSync(f.path), path = join(f.directory, `${selected.triageFileName}-wal`);
+  writeFileSync(path, 'retained selected-account WAL', { mode: 0o600 });
+  await expect(acquireDiscordInboxIdentity(f.owner, source)).rejects.toThrow('unavailable');
+  expect(readFileSync(f.path)).toEqual(registry); expect(readFileSync(path, 'utf8')).toBe('retained selected-account WAL');
+  expect(existsSync(join(f.directory, selected.triageFileName))).toBe(false);
+});
+
 test('missing identity registry with existing opaque mirrors holds without creating an empty replacement', async () => {
   const f = fixture(); mkdirSync(f.directory, { recursive: true, mode: 0o700 });
   const orphan = join(f.directory, `inbox-discord-${randomUUID()}.sqlite`); writeFileSync(orphan, 'Original opaque mirror', { mode: 0o600 });

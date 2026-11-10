@@ -1,5 +1,5 @@
 /** Published v3.1.1 Discord account codecs. File discovery runs only after
- * actual old mirrors exist; genuine clustered owners also use the deployed
+ * actual old mirrors or receipts exist; genuine clustered owners also use the deployed
  * wire codec once. Fresh local selectors remain opaque UUIDs. */
 import { createHash } from 'node:crypto';
 import type { DiscordInboxBinding } from './discord-identity.js';
@@ -13,10 +13,15 @@ export function publishedDiscordElectionScope(binding: DiscordInboxBinding, conf
       'abacus-route-llm+typesafe-jev-latest', 'provider-managed-zero-retention-unverified']
     : ['discord-inbox', 1, binding.userId, binding.channelIds, revision, binding.screening.ownerId, binding.screening.revision]);
 }
-export function findSavedDiscordScope(binding: DiscordInboxBinding, configuredRegistry: boolean, mirrors: ReadonlySet<string>): { readonly candidate: string; readonly found: boolean } | undefined {
-  if (!mirrors.size) return undefined;
+export function findSavedDiscordScope(binding: DiscordInboxBinding, configuredRegistry: boolean, mirrors: ReadonlySet<string>, triageFiles: ReadonlySet<string>): { readonly candidate: string; readonly found: boolean; readonly triageFileName?: string } | undefined {
+  if (!mirrors.size && !triageFiles.size) return undefined;
   const candidate = publishedDiscordElectionScope(binding, configuredRegistry);
-  return { candidate, found: mirrors.has(candidate) };
+  // A saved receipt remains the same account's history when its optional
+  // mirror has been removed. Match the original filename; never manufacture
+  // receipt contents or treat an unrelated store as the selected account.
+  const triageFileName = findSavedDiscordTriage(candidate, triageFiles);
+  return { candidate, found: mirrors.has(candidate) || triageFileName !== undefined,
+    ...(triageFileName === undefined ? {} : { triageFileName }) };
 }
 export function findSavedDiscordTriage(scopeId: string, files: ReadonlySet<string>): string | undefined {
   if (!files.size) return undefined;

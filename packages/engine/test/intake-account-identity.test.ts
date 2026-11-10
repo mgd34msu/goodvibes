@@ -114,6 +114,42 @@ test.each([slack, email])('an actual $provider historical receipt store remains 
   expect(selected.scopeId).toBe(scope); expect(selected.triageFileName).toBe(triageFileName);
 });
 
+test.each(['wal', 'shm'] as const)('historical account %s without its main database cannot reset saved account history', async suffix => {
+  for (const input of [slack, email]) for (const kind of ['mirror', 'triage'] as const) {
+    const f = fixture(), scope = oldScope(input);
+    const name = kind === 'mirror' ? `inbox-${input.provider}-${scope}.sqlite`
+      : `inbox-triage-${historicalDigest(['owned-inbox-triage-v1', input.provider, scope])}.sqlite`;
+    mkdirSync(f.directory, { recursive: true, mode: 0o700 });
+    const path = join(f.directory, `${name}-${suffix}`), bytes = Buffer.from('retained historical SQLite companion');
+    writeFileSync(path, bytes, { mode: 0o600 });
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      await expect(acquireAccountInboxIdentity(f.owner, input)).rejects.toThrow('unavailable');
+      expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    } finally { hash.mockRestore(); }
+    expect(readFileSync(path)).toEqual(bytes); expect(existsSync(join(f.directory, name))).toBe(false);
+    expect(existsSync(f.path)).toBe(false);
+  }
+});
+
+test('owned triage cannot replace orphaned historical SQLite companions with an empty namespace', async () => {
+  const f = fixture(), scope = historicalDigest(['owned-inbox-triage-v1', 'fixture', 'original-account']);
+  mkdirSync(f.directory, { recursive: true, mode: 0o700 });
+  const path = join(f.directory, `inbox-owned-${scope}.sqlite-wal`);
+  writeFileSync(path, 'original owned-triage WAL', { mode: 0o600 });
+  await expect(acquireOwnedTriageIdentity(f.owner, 'fixture', 'original-account')).rejects.toThrow('unavailable');
+  expect(readFileSync(path, 'utf8')).toBe('original owned-triage WAL'); expect(existsSync(f.path)).toBe(false);
+});
+
+test.each([slack, email])('an existing $provider mapping refuses selected orphaned SQLite companions before returning its selector', async input => {
+  const f = fixture(), selected = resolveAccountInboxIdentity(await acquireAccountInboxIdentity(f.owner, input), input);
+  const registry = readFileSync(f.path), path = join(f.directory, `${selected.mirrorFileName}-shm`);
+  writeFileSync(path, 'original selected-account SHM', { mode: 0o600 });
+  await expect(acquireAccountInboxIdentity(f.owner, input)).rejects.toThrow('unavailable');
+  expect(readFileSync(f.path)).toEqual(registry); expect(readFileSync(path, 'utf8')).toBe('original selected-account SHM');
+  expect(existsSync(join(f.directory, selected.mirrorFileName))).toBe(false);
+});
+
 test('generic triage default preserves actual old mirror/receipt filenames and uses opaque selectors for a fresh account', async () => {
   const f = fixture(), scope = historicalDigest(['owned-inbox-triage-v1', 'fixture', 'old-account']);
   const mirror = new InboxCursorStore(f.root, `inbox-owned-${scope}.sqlite`, { sweepIntervalMs: 0 });

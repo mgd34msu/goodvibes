@@ -52,8 +52,11 @@ const format: InboxIdentityRegistryFormat<Registry> = {
   },
   assertStored(registry, directory) {
     const known = new Set(registry.scopes.flatMap(entry => [entry.mirrorFileName, entry.triageFileName]));
-    for (const name of readdirSync(directory)) {
+    const stored = new Set(readdirSync(directory));
+    for (const name of stored) {
       const base = name.replace(/-(?:wal|shm)$/, '');
+      if (name !== base && /^inbox-(?:(?:slack|email|owned)-(?:[0-9a-f-]{36}|[0-9a-f]{64})|triage-(?:(?:slack|email|owned)-[0-9a-f-]{36}|[0-9a-f]{64}))\.sqlite$/.test(base)
+        && !stored.has(base)) throw unavailable();
       if (/^inbox-(?:(?:slack|email|owned)|triage-(?:slack|email|owned))-[0-9a-f-]{36}\.sqlite$/.test(base) && !known.has(base)) throw unavailable();
     }
   },

@@ -17,12 +17,13 @@ export function sha256First(input: string, hexChars: number): string {
   return digest.slice(0, Math.max(0, hexChars));
 }
 
-/** Existing stable sender commitment in persisted inbox rows and route rules.
- * The mapper releases raw provider IDs/addresses after projection. A durable
- * UUID registry would retain those originals; a reversible encoding would put
- * them in the inbox. Keep this bounded commitment for sender matching without
- * retaining that additional private data. It neither authorizes a sender nor
- * prevents guessing a low-entropy address: it is not anonymization.
+/** Stable private sender label in persisted inbox rows and the wire `from`.
+ * Preserve same-sender display across polls/restarts and existing saved rows
+ * without retaining or disclosing the raw provider ID/address. A per-message
+ * UUID loses that correlation; a durable sender-to-UUID registry would retain
+ * the originals, and reversible encoding would disclose them. The built-in
+ * inbox route resolver does not use this value. It neither authorizes a sender
+ * nor prevents guessing a low-entropy address: it is not anonymization.
  */
 export function digestSender(senderExternalId: string): string {
   return sha256First(senderExternalId, 16);

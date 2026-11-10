@@ -46,7 +46,10 @@ describe('renderMcpWorkspace (modal surface kit, list and detail)', () => {
     expect(text).toContain('actions');
     expect(text).toContain('No configured servers');
     expect(text).toContain('Add server');
-    expect(text).toContain('Write a server through the platform config manager');
+    const details = layer.lines.map(line => line
+      .filter(cell => cell.bg === activeTokens().backgroundElement)
+      .map(cell => cell.char).join('')).join(' ').replace(/\s+/g, ' ');
+    expect(details).toContain('Write a server through the platform config manager');
     expect(text).not.toMatch(/[┌┐└┘│]/);
     const insetCells = layer.lines.flat().filter((cell) => cell.bg === activeTokens().backgroundElement);
     expect(insetCells.length).toBeGreaterThan(0);

@@ -137,7 +137,12 @@ describe('a multi-line body in the history', () => {
     await publishNotice(feed, "[Contract] contract-4e27484 passed\nall checks passed\nyour repository's commit hooks refused the contract's commit", { now: () => Date.now() });
     const layer = renderNotificationsModal({ entries: feed.list(), selectedIndex: 0, unread: 1, isUnread: () => true, status: null, now: Date.now() }, 160, 40);
     const shown = flat(text(layer.lines));
-    expect(shown).toContain('all checks passed \u00b7 your repository');
+    expect(shown).toContain('all checks passed');
+    expect(shown).toContain("your repository's commit hooks refused the contract's commit");
+    const rows = text(layer.lines).split('\n');
+    expect(rows.findIndex(row => row.includes('all checks passed'))).toBeLessThan(
+      rows.findIndex(row => row.includes("your repository's commit hooks")),
+    );
     expect(shown).not.toContain('passedyour');
   });
 });

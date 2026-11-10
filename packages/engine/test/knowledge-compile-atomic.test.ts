@@ -225,10 +225,15 @@ describe('atomic knowledge compilation', () => {
     expect(state(ctx.store)).toEqual(before); expect(await reopen()).toEqual(before);
   });
 
-  test('an operational artifact read failure still rejects without replacing the source or extraction', async () => {
+  test('an operational artifact read failure returns a value-free hold without replacing the source or extraction', async () => {
     const { ctx, run, reopen } = await fixture('recompile');
     const before = state(ctx.store), read = spyOn(ctx.artifactStore, 'readContent').mockRejectedValue(new Error('fixture artifact read failure'));
-    try { await expect(run()).rejects.toThrow('fixture artifact read failure'); }
+    try {
+      const error = await run().then(() => undefined, (failure: unknown) => failure);
+      expect(error).toBeInstanceOf(KnowledgeExtractionJudgmentHoldError);
+      expect(String(error)).not.toContain('fixture artifact read failure');
+      expect(read).toHaveBeenCalledTimes(1);
+    }
     finally { read.mockRestore(); }
     expect(state(ctx.store)).toEqual(before); expect(await reopen()).toEqual(before);
   });

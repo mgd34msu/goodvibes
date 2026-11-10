@@ -190,7 +190,7 @@ describe('restartOntoUpdatedBinary', () => {
     expect(spawned[0]!.env['PATH']).toBe('/usr/bin');
   });
 
-  test('a null child status maps to exit code 0', () => {
+  test('a child without an exit status cannot report a successful restart', () => {
     const code = restartOntoUpdatedBinary({
       execPath: '/opt/goodvibes/goodvibes-agent',
       argv: [],
@@ -198,7 +198,7 @@ describe('restartOntoUpdatedBinary', () => {
       fromVersion: '1.0.0',
       spawn: () => null,
     });
-    expect(code).toBe(0);
+    expect(code).toBe(1);
   });
 });
 

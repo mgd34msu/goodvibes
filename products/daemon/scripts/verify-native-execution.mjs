@@ -138,7 +138,11 @@ try {
     writeFileSync(full, file.bytes, { flag: 'wx', mode: file.mode }); chmodSync(full, file.mode);
   }
   original.retained.assertCurrent();
-  const relocated = retainNativeExecutionFiles(artifacts, [...original.members, { path: 'native-execution-artifact.json', mode: 0o644 }]);
+  // The running admitted daemon publishes reader requirements and their lock
+  // beside its executable. Those owned sibling writes change directory clocks;
+  // retain physical parents and every original member, not an immutable directory
+  // revision. The downloaded original cohort above remains strictly immutable.
+  const relocated = retainNativeExecutionFiles(artifacts, [...original.members, { path: 'native-execution-artifact.json', mode: 0o644 }], { directoryRevisions: false });
   assert.deepEqual(relocated.files.map(({ path, sha256, mode, size }) => ({ path, sha256, mode, size })),
     original.retained.files.map(({ path, sha256, mode, size }) => ({ path, sha256, mode, size })), 'Relocation changed the retained execution cohort');
   const binary = join(artifacts, original.members[0].path), version = original.artifact.version;

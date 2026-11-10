@@ -542,6 +542,11 @@ describe('parseCliFlags', () => {
     );
     const secretPaths = new Set(['surfaces.slack.signingSecret', 'surfaces.slack.botToken']);
     const ordinaryPaths = new Set([
+      'judgment.volumeMonitor.enabled',
+      'judgment.volumeMonitor.intervalMs',
+      'judgment.volumeMonitor.windowMs',
+      'judgment.volumeMonitor.limit',
+      'judgment.volumeMonitor.budgets',
       'provider.decisionRouter.initialContextChars',
       'provider.decisionRouter.expandedContextChars',
       'provider.decisionRouter.categories',

@@ -217,7 +217,12 @@ describe('a multi-line body in the history', () => {
     publishNotice(feed, "[Delegated task] 2 running\n  aaaa1111 reading src/retry.ts\n  bbbb2222 running tests", { now: () => Date.now() });
     const layer = renderNotificationsModal({ entries: feed.list(), selectedIndex: 0, unread: 1, isUnread: () => true, status: null, now: Date.now() }, 160, 40);
     const shown = flat(text(layer.lines));
-    expect(shown).toContain('aaaa1111 reading src/retry.ts \u00b7 bbbb2222 running tests');
+    expect(shown).toContain('aaaa1111 reading src/retry.ts');
+    expect(shown).toContain('bbbb2222 running tests');
+    const rows = text(layer.lines).split('\n');
+    expect(rows.findIndex(row => row.includes('aaaa1111 reading src/retry.ts'))).toBeLessThan(
+      rows.findIndex(row => row.includes('bbbb2222 running tests')),
+    );
   });
 });
 

@@ -43,7 +43,7 @@ function makeHarness(options: {
   const sessionId = 'cleanup-session';
   const recoveryFile = surface.recoveryFile(sessionId);
   mkdirSync(dirname(recoveryFile), { recursive: true });
-  writeFileSync(recoveryFile, 'recovery must survive an unconfirmed save');
+  writeFileSync(recoveryFile, `${JSON.stringify({ type: 'meta', sessionId, title: 'Recovery fixture', timestamp: 1 })}\n${JSON.stringify({ type: 'message', id: 'recovery-message', role: 'user', content: 'recovery must survive an unconfirmed save', timestamp: 1 })}\n`);
   writeLivenessMarker(surface, sessionId, process.pid);
   const markerFile = livenessMarkerPathFor(surface, sessionId);
   const interval = setInterval(() => {}, 60_000);

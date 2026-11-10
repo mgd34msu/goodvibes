@@ -3,6 +3,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { assertNativeArtifactFilesCurrent, nativeArtifactPins, readNativeArtifactFile, retainNativeArtifactFiles, type RetainedNativeArtifactFiles } from '@goodvibes-jev/engine/toolchain';
+import { createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { makeProjectTempDir } from '../_helpers/project-temp.ts';
 
 function fixture() {
@@ -118,3 +119,49 @@ test('a continuously appending source is refused after its original size and one
     expect(sourceReads).toBe(2);
   } finally { tap.mockRestore(); }
 });
+
+
+test('a relocated runtime keeps original files and physical parents through actual native reader-floor sibling publications', () => {
+  const f = fixture();
+  // This regression tests currentness, not a new portable checksum consumer.
+  const members = f.members.map(member => ({ ...member, pin: false }));
+  const immutable = retainNativeArtifactFiles(f.root, members);
+  const runtime = retainNativeArtifactFiles(f.root, members, { directoryRevisions: false });
+  const writer = createNativeDataWriteOwner({ execPath: join(f.root, 'program'), version: '3.1.2',
+    assertCurrent: () => assertNativeArtifactFilesCurrent(runtime) });
+  const hashing = spyOn(crypto, 'createHash');
+  try {
+    writer.declare('configuration-policy-epochs-v2');
+    writer.declare('knowledge-schema-v17');
+    const requirements: unknown = JSON.parse(fs.readFileSync(join(f.root, NATIVE_READER_REQUIREMENT_FILE), 'utf8'));
+    expect(requirements).toEqual({ schema: 1, minimumReader: '3.1.2', formats: ['configuration-policy-epochs-v2', 'knowledge-schema-v17'] });
+    expect(fs.existsSync(join(f.root, `${NATIVE_READER_REQUIREMENT_FILE}.lock`))).toBe(false);
+    assertNativeArtifactFilesCurrent(runtime);
+    expect(readNativeArtifactFile(runtime, 'program').toString()).toBe('alpha');
+    expect(Object.hasOwn(runtime.files[0]!, 'sha256')).toBe(false);
+    expect(hashing).not.toHaveBeenCalled();
+    // Strict archives still reject namespace mutation. Only the selected live
+    // runtime has declared that its native data-floor writer owns sibling work.
+    expect(() => immutable.assertCurrent()).toThrow('parent changed');
+  } finally { hashing.mockRestore(); }
+});
+
+for (const mutation of ['same-byte-replacement', 'parent-replacement', 'alias-replacement'] as const) {
+  test(`runtime sibling publication mode still refuses actual ${mutation}`, () => {
+    const f = fixture(), container = makeProjectTempDir('native-runtime-alias-'), alias = join(container, 'selected');
+    fs.symlinkSync(f.root, alias, 'dir');
+    const runtime = retainNativeArtifactFiles(alias, f.members.map(member => ({ ...member, pin: false })), { directoryRevisions: false });
+    if (mutation === 'same-byte-replacement') {
+      fs.renameSync(join(f.root, 'program'), join(f.root, 'program.original'));
+      fs.writeFileSync(join(f.root, 'program'), 'alpha', { mode: 0o755 });
+    } else if (mutation === 'parent-replacement') {
+      fs.renameSync(f.root, f.root + '.original'); fs.mkdirSync(f.root);
+      fs.writeFileSync(join(f.root, 'program'), 'alpha', { mode: 0o755 });
+      fs.writeFileSync(join(f.root, 'metadata.json'), '{"actual":"metadata"}', { mode: 0o644 });
+    } else {
+      fs.unlinkSync(alias); fs.symlinkSync(f.root, alias, 'dir');
+    }
+    expect(() => assertNativeArtifactFilesCurrent(runtime)).toThrow();
+    expect(() => readNativeArtifactFile(runtime, 'program')).toThrow();
+  });
+}

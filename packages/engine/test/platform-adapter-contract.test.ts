@@ -140,9 +140,10 @@ describe('verifySha256HmacSignature', () => {
     return `${prefix}${createHmac('sha256', s).update(b).digest('hex')}`;
   }
 
-  test('returns true for a valid signature', () => {
+  test('accepts a valid signature only with its nonempty secret', () => {
     const sig = sign(body, secret);
     expect(verifySha256HmacSignature(body, secret, sig)).toBe(true);
+    expect(verifySha256HmacSignature(body, '', sig)).toBe(false);
   });
 
   test('returns false when body is tampered', () => {
@@ -159,19 +160,10 @@ describe('verifySha256HmacSignature', () => {
     expect(verifySha256HmacSignature(body, secret, '')).toBe(false);
   });
 
-  test('returns false when secret is empty string', () => {
-    const sig = sign(body, secret);
-    expect(verifySha256HmacSignature(body, '', sig)).toBe(false);
-  });
-
-  test('returns false when prefix does not match', () => {
+  test('accepts a custom prefix and refuses the same signature under the default prefix', () => {
     const sig = sign(body, secret, 'v0=');
     // Default prefix is 'sha256=', so 'v0=...' will fail the startsWith check
     expect(verifySha256HmacSignature(body, secret, sig)).toBe(false);
-  });
-
-  test('accepts a custom prefix', () => {
-    const sig = sign(body, secret, 'v0=');
     expect(verifySha256HmacSignature(body, secret, sig, 'v0=')).toBe(true);
   });
 

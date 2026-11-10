@@ -5,7 +5,7 @@ import { createSystemOnePort, DECISION_MODEL_PROFILES, observeJudgmentModel, reu
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { captureTriageJudgment } from '../platform/src/platform/intake/triage/model-result.js';
 import { scoreInboxTriage } from '../platform/src/platform/intake/triage/scorer.js';
-import { captureTriageInputs, checkTriageReceipt, triageBinding } from '../platform/src/platform/intake/triage/evidence.js';
+import { checkTriageReceipt } from '../platform/src/platform/intake/triage/evidence.js';
 import { prepareJudgmentResult } from '../platform/src/platform/gate/judgment-result.js';
 import { readCustomTagMeaning } from '../platform/src/platform/intake/triage/tagger/meaning.js';
 
@@ -92,7 +92,7 @@ test('unavailable receipts do not invent a requested or answered model; historic
   expect(Object.hasOwn(unavailable, 'inputHash')).toBe(false);
   expect(unavailable?.model).toBeUndefined(); expect(unavailable?.actualModel).toBeUndefined();
   expect(checkTriageReceipt(unavailable)).toEqual(unavailable);
-  const historical: Record<string, unknown> = { ...triageBinding(captureTriageInputs([item])[0]!), status: 'unavailable', model: 'jev-latest' };
+  const historical: Record<string, unknown> = { ...unavailable, inputHash: 'a'.repeat(64), status: 'unavailable', model: 'jev-latest' };
   delete historical.receiptVersion; expect<unknown>(checkTriageReceipt(historical)).toEqual(historical);
 });
 

@@ -77,6 +77,11 @@ export function encryptPushPayload(
   if (p256dhProblem) throw new Error(p256dhProblem);
   const authProblem = describeAuthSecretProblem(keys.auth);
   if (authProblem) throw new Error(authProblem);
+  // The fixed record cannot carry this payload, regardless of its encryption
+  // keys. Refuse before generating an ephemeral key or deriving unused keys.
+  if (plaintext.length + 17 > RECORD_SIZE) {
+    throw new Error(`Push payload too large for a single aes128gcm record (max ${RECORD_SIZE - 17} bytes)`);
+  }
   const receiverPublic = base64UrlToBuffer(keys.p256dh);
   const authSecret = base64UrlToBuffer(keys.auth);
 
@@ -98,9 +103,6 @@ export function encryptPushPayload(
 
   // One record: plaintext followed by the 0x02 last-record delimiter.
   const record = Buffer.concat([plaintext, Buffer.from([0x02])]);
-  if (record.length + 16 > RECORD_SIZE) {
-    throw new Error(`Push payload too large for a single aes128gcm record (max ${RECORD_SIZE - 17} bytes)`);
-  }
 
   const cipher = createCipheriv('aes-128-gcm', contentEncryptionKey, nonce);
   const ciphertext = Buffer.concat([cipher.update(record), cipher.final(), cipher.getAuthTag()]);

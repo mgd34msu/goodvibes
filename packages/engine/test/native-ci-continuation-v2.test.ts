@@ -16,12 +16,15 @@ const roots: string[] = [], stores: KnowledgeStore[] = [];
 afterEach(async () => { for (const store of stores.splice(0)) await store.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const oldDigest = (value: unknown): string => crypto.createHash('sha256').update(JSON.stringify(value, (_key, item: unknown) => item !== null && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)).digest('hex');
-function issued() {
+function originalIssue() {
   const key = { workId: 'original-work', criteriaId: 'criteria-v2:original-work', criteriaRevision: '1', attemptId: 'original-attempt' };
-  const issue = captureNativeCiIssue(2, { projectId: 'project', originalKey: key, originalPayloadRevision: 'a'.repeat(64), principalId: 'paired-fixture', authorityRevision: 'paired-incarnation',
+  return captureNativeCiIssue(2, { projectId: 'project', originalKey: key, originalPayloadRevision: 'a'.repeat(64), principalId: 'paired-fixture', authorityRevision: 'paired-incarnation',
     authorityScopes: ['read:work-ledger', 'write:work-ledger', 'write:fleet'], scopeId: 'owned-workspace', scopeRevision: 'scope-incarnation',
     ledgerSource: { version: 3, sourceId: opaqueUuid(), sourceRevision: 'b'.repeat(64), inputId: 'input', sessionId: 'session' },
     policyRevision: JSON.stringify(['configuration-incarnation', 'scope-incarnation']), successorAttemptId: 'attempt-ci-' + opaqueUuid(), successorSourceBinding: 'c'.repeat(64) });
+}
+function issued() {
+  const issue = originalIssue();
   const grant = { id: opaqueUuid(), binding: nativeCiIssueCommitment(issue) };
   return parseNativeCiContinuation({ version: 2, id: grant.id, issue, grant, watch: null, state: 'issued', failureRevision: null, successor: null });
 }
@@ -88,7 +91,7 @@ test('impossible saved associations and states hash nothing; a viable cold grant
 });
 
 test('old CI issue, successor and grant-consumption recipes remain readable without rehashing every live guard', () => {
-  const owner = issued().issue, issue = captureNativeCiIssue(1, { projectId: owner.projectId, originalKey: owner.originalKey, originalPayloadRevision: owner.originalPayloadRevision,
+  const owner = originalIssue(), issue = captureNativeCiIssue(1, { projectId: owner.projectId, originalKey: owner.originalKey, originalPayloadRevision: owner.originalPayloadRevision,
     principalId: owner.principalId, authorityRevision: owner.authorityRevision, authorityScopes: owner.authorityScopes, scopeId: owner.scopeId, scopeRevision: owner.scopeRevision,
     ledgerSourceRevision: 'b'.repeat(64), policyRevision: 'c'.repeat(64), seedRevision: 'd'.repeat(64) });
   const grant = { id: 'historical-grant', binding: oldDigest(issue) }, expected = `attempt-ci-${oldDigest(grant).slice(0, 40)}`;

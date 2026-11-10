@@ -1,9 +1,13 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 
 import { join } from 'node:path';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as crypto from 'node:crypto';
 import {
   CHECKSUM_MANIFEST_NAME,
   parseChecksumFile,
+  requireChecksum,
   resolveArtifactNames,
   sha256,
   verifyChecksum,
@@ -108,6 +112,7 @@ describe('postinstall.js wiring', () => {
     // Guards against postinstall.js drifting back to its own copy of this
     // logic instead of the shared src/runtime/release-artifacts.ts module.
     expect(postinstall.verifyChecksum).toBe(verifyChecksum);
+    expect(postinstall.requireChecksum).toBe(requireChecksum);
     expect(postinstall.parseChecksumFile).toBe(parseChecksumFile);
     expect(postinstall.sha256).toBe(sha256);
     expect(postinstall.resolveArtifactNames).toBe(resolveArtifactNames);
@@ -115,19 +120,36 @@ describe('postinstall.js wiring', () => {
   });
 });
 
-describe('end-to-end: the download-verify loop shape from installPlatformBinaries', () => {
-  test('a missing manifest entry hard-fails instead of installing unverified', () => {
-    const manifestText = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  goodvibes-linux-x64';
-    const checksums = parseChecksumFile(manifestText);
+describe('the actual postinstall download-verify operation', () => {
+  test('a missing manifest entry refuses before download, hashing or destination changes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'tui-postinstall-pin-'));
+    const destination = join(root, 'goodvibes-linux-x64');
+    const fetch = spyOn(globalThis, 'fetch');
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      await expect(postinstall.installVerifiedReleaseBinary('goodvibes-linux-x64', new Map(), 'https://unused.test', destination))
+        .rejects.toThrow(/no checksum entry for goodvibes-linux-x64/);
+      expect(fetch).not.toHaveBeenCalled(); expect(hash).not.toHaveBeenCalled();
+      expect(existsSync(destination)).toBe(false); expect(existsSync(destination + '.download')).toBe(false);
+    } finally { fetch.mockRestore(); hash.mockRestore(); rmSync(root, { recursive: true, force: true }); }
+  });
 
-    const downloadedBuffer = Buffer.from('fake daemon binary bytes');
-    const actual = sha256(downloadedBuffer);
-    // goodvibes-daemon-linux-x64 has no entry in the manifest above.
-    const expected = checksums.get('goodvibes-daemon-linux-x64');
-
-    expect(() => verifyChecksum('goodvibes-daemon-linux-x64', actual, expected)).toThrow(
-      /no checksum entry for goodvibes-daemon-linux-x64/,
-    );
+  test('a real downloaded payload is hashed and installed only for its matching manifest pin', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'tui-postinstall-bytes-'));
+    const destination = join(root, 'goodvibes-linux-x64');
+    const bytes = Buffer.from('actual owned synthetic binary bytes');
+    const pin = sha256(bytes);
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(Uint8Array.from(bytes)));
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      await postinstall.installVerifiedReleaseBinary('goodvibes-linux-x64', new Map([['goodvibes-linux-x64', pin]]), 'https://owned.test', destination);
+      expect(fetch).toHaveBeenCalledTimes(1); expect(hash).toHaveBeenCalledTimes(1);
+      expect(readFileSync(destination)).toEqual(bytes);
+      await expect(postinstall.installVerifiedReleaseBinary('goodvibes-linux-x64', new Map([['goodvibes-linux-x64', 'f'.repeat(64)]]), 'https://owned.test', destination))
+        .rejects.toThrow(/checksum mismatch/);
+      expect(hash).toHaveBeenCalledTimes(2); expect(readFileSync(destination)).toEqual(bytes);
+      expect(existsSync(destination + '.download')).toBe(false);
+    } finally { fetch.mockRestore(); hash.mockRestore(); rmSync(root, { recursive: true, force: true }); }
   });
 });
 

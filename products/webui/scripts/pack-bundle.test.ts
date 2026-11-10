@@ -13,8 +13,9 @@
  *   3. A `dist/` with no index.html is refused here rather than published as a
  *      bundle nobody can serve.
  */
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import * as crypto from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUNDLE_ROOT_DIR, bundleAssetName, packBundle } from './pack-bundle';
@@ -128,10 +129,14 @@ test('existing private staging and existing archive/checksum outputs are preserv
   first.assertCurrent();
 });
 
-test('an existing checksum refuses publication and rolls back only the new archive', () => {
+test('an existing checksum refuses before archive or digest work', () => {
   const root = scratch('pack-existing-sums'), dist = buildDist(root), out = join(root, 'release');
   mkdirSync(out); writeFileSync(join(out, 'SHA256SUMS.txt'), 'foreign manifest');
-  expect(() => packBundle({ distDir: dist, outDir: out, version: '3.1.2' })).toThrow();
+  const hash = spyOn(crypto, 'createHash'), produce = spyOn(Bun, 'spawnSync');
+  try {
+    expect(() => packBundle({ distDir: dist, outDir: out, version: '3.1.2' })).toThrow('already exists');
+    expect(hash).not.toHaveBeenCalled(); expect(produce).not.toHaveBeenCalled();
+  } finally { hash.mockRestore(); produce.mockRestore(); }
   expect(readFileSync(join(out, 'SHA256SUMS.txt'), 'utf8')).toBe('foreign manifest');
   expect(existsSync(join(out, bundleAssetName('3.1.2')))).toBe(false);
   expect(readdirSync(out)).toEqual(['SHA256SUMS.txt']);

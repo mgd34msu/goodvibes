@@ -270,20 +270,14 @@ describe('provisioning succeeds and is resumable', () => {
     // Uses pins over content the test can actually produce, so the happy path
     // is exercised end to end rather than only its failure branches.
     const classifierBody = new Uint8Array(2048).fill(3);
-    const noticeBody = new TextEncoder().encode('NOTICE: attribution required.\n');
-    const embeddingBody = new Uint8Array(4096).fill(9);
     const specs = {
       classifier: fakePin(classifierBody, 'https://example.invalid/classifier.onnx'),
-      notice: fakePin(noticeBody, 'https://example.invalid/NOTICE.txt'),
-      embedding: fakePin(embeddingBody, 'https://example.invalid/embedding.onnx'),
     };
     const { downloadVerifiedFile } = await import(
       '../platform/src/platform/voice/provisioning/download-verified.js'
     );
     const bodies = {
       [specs.classifier.url]: classifierBody,
-      [specs.notice.url]: noticeBody,
-      [specs.embedding.url]: embeddingBody,
     };
     const { impl, requests } = servingFetch(bodies);
     const dest = join(root, 'artifact.onnx');
@@ -296,8 +290,6 @@ describe('provisioning succeeds and is resumable', () => {
     if (second.ok) expect(second.skipped).toBe(true);
     // Exactly one network request across both runs, that is what resumable means.
     expect(requests.filter((u) => u === specs.classifier.url).length).toBe(1);
-    expect(specs.notice.bytes).toBe(noticeBody.length);
-    expect(specs.embedding.bytes).toBe(embeddingBody.length);
   });
 });
 

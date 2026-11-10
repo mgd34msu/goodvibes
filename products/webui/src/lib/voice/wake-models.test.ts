@@ -128,9 +128,10 @@ describe('a multi-chunk download reassembles byte-exactly', () => {
     // the whole set, not just the two a tab fetches: the tflite twin and the
     // notices exist and must not fail for being unrecognised here.
     const components: WakeModelComponent[] = ['classifier', 'embedding', 'notice', 'vad'];
+    const bytes = fakeModelBytes(2048);
+    const pin = await webCryptoDigest(bytes);
     for (const component of components) {
-      const bytes = fakeModelBytes(2048);
-      const server = chunkServer(bytes, await webCryptoDigest(bytes));
+      const server = chunkServer(bytes, pin);
       const loaded = await loadWakeModel(component, { readChunk: server.readChunk });
       expect(loaded.bytes.length).toBe(2048);
       expect(server.calls.every((call) => call.component === component)).toBe(true);
@@ -177,7 +178,9 @@ describe('verification refuses bytes that are not the pinned model', () => {
 
   test('a chunk stream that skips an offset is truncated-download, not silently patched', async () => {
     const bytes = fakeModelBytes(CHUNK * 2);
-    const sha256 = await webCryptoDigest(bytes);
+    const sha256 = 'a'.repeat(64);
+    let digests = 0;
+    const digest = async () => { digests++; throw new Error('truncated input must not be hashed'); };
     let call = 0;
     const readChunk = ({ component, offset }: { component: WakeModelComponent; offset: number }) => {
       call += 1;
@@ -195,14 +198,18 @@ describe('verification refuses bytes that are not the pinned model', () => {
         complete: realOffset + slice.length >= bytes.length,
       });
     };
-    const error = await loadWakeModel('embedding', { readChunk }).catch((e: unknown) => e);
+    const error = await loadWakeModel('embedding', { readChunk, digest }).catch((e: unknown) => e);
     expect((error as WakeModelError).failure).toBe('truncated-download');
+    expect(digests).toBe(0);
   });
 
   test('a total that disagrees with what assembled is truncated-download', async () => {
     const bytes = fakeModelBytes(1024);
-    const sha256 = await webCryptoDigest(bytes);
+    const sha256 = 'a'.repeat(64);
+    let digests = 0;
+    const digest = async () => { digests++; throw new Error('truncated input must not be hashed'); };
     const error = await loadWakeModel('classifier', {
+      digest,
       readChunk: ({ component }) => Promise.resolve({
         component,
         offset: 0,
@@ -214,6 +221,7 @@ describe('verification refuses bytes that are not the pinned model', () => {
       }),
     }).catch((e: unknown) => e);
     expect((error as WakeModelError).failure).toBe('truncated-download');
+    expect(digests).toBe(0);
   });
 
   test('a chunk of zero bytes that does not complete is truncated-download, not an endless loop', async () => {

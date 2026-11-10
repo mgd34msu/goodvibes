@@ -264,9 +264,12 @@ describe('relay step-up WebAuthn ceremony', () => {
 });
 
 
-test('malformed DER assertion structure spends no SHA while viable signatures retain actual ceremony verification', async () => {
+test('malformed DER or missing mandatory flags spend no SHA while viable signatures retain actual ceremony verification', async () => {
   const credential = await makeCredential(), challenge = toBase64Url(u8(8, 7, 6, 5));
   const envelope = await signAssertion({ credential, challenge, signCount: 1 });
+  // These are genuinely signed assertions, not crypto-invalid placeholders.
+  const missingPresence = await signAssertion({ credential, challenge, flags: 0x04 });
+  const missingVerification = await signAssertion({ credential, challenge, flags: 0x01 });
   const stored: StoredStepUpCredential = { credentialId: credential.credentialId, publicKeyCose: credential.publicKeyCose, signCount: 0, createdAt: 1 };
   const params = { envelope, credential: stored, expectedChallenge: challenge, rpId: RP_ID, allowedOrigins: [ORIGIN], requireUserVerification: true };
   const digests = spyOn(crypto.subtle, 'digest'), verification = spyOn(crypto.subtle, 'verify');
@@ -278,6 +281,10 @@ test('malformed DER assertion structure spends no SHA while viable signatures re
     // The structural failure deliberately precedes later RP/policy failures.
     expect(await verifyStepUpAssertion({ ...params, rpId: 'wrong.example', envelope: { ...envelope, signature: toBase64Url(u8(0)) } }))
       .toEqual({ ok: false, reason: 'bad-signature' });
+    expect(await verifyStepUpAssertion({ ...params, envelope: missingPresence }))
+      .toEqual({ ok: false, reason: 'user-presence-missing' });
+    expect(await verifyStepUpAssertion({ ...params, envelope: missingVerification }))
+      .toEqual({ ok: false, reason: 'user-verification-missing' });
     expect(digests).not.toHaveBeenCalled(); expect(verification).not.toHaveBeenCalled();
     expect(await verifyStepUpAssertion(params)).toEqual({ ok: true, signCount: 1 });
     expect(digests).toHaveBeenCalledTimes(2); expect(verification).toHaveBeenCalledTimes(1);

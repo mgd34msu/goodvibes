@@ -50,8 +50,9 @@ function selectedDiff(): NativeSelectedDiffContext {
   return { kind: 'session', revision: numericProtocolDigest, fileIndex: 2, hunkIndex: 3, unifiedDiff: diff,
     provenance: { kind: 'session', sessionId: 'hosted-owned', baselineCheckpointId: 'checkpoint-before', latestCheckpointId: 'checkpoint-after' } };
 }
+function conversationMessages() { return [{ role: 'assistant' as const, content: 'Previous discussion.' }]; }
 function continuation(selected = selectedDiff()): NativeConversationContinuation {
-  const sessionId = 'hosted-owned'; const messages = [{ role: 'assistant' as const, content: 'Previous discussion.' }];
+  const sessionId = 'hosted-owned'; const messages = conversationMessages();
   return { sessionId, messages, selectedDiff: selected, revision: createHash('sha256').update(canonicalNativeConversationContinuation(sessionId, messages, selected)).digest('hex') };
 }
 function source(context = continuation()) {
@@ -77,12 +78,12 @@ test('native source binds every selected diff byte and provenance field while pr
     { ...selectedDiff(), fileIndex: 7 },
     { ...selectedDiff(), revision: 'b'.repeat(64) },
     { ...selectedDiff(), provenance: { kind: 'session', sessionId: 'hosted-owned', baselineCheckpointId: 'other-baseline', latestCheckpointId: 'checkpoint-after' } },
-  ]) expect(() => captureNativeContractSource({ ...source(), continuation: { ...continuation(), selectedDiff: changed } })).toThrow('Invalid native continuation revision');
+  ]) expect(() => captureNativeContractSource(source({ ...captured.continuation!, selectedDiff: changed }))).toThrow('Invalid native continuation revision');
 });
 
 test('admission projection retains complete frozen evidence and tool-source capture rejects malformed or executable context', () => {
   const view = contract(); const admission = nativeContractSourceForAdmission(view);
-  expect(admission).toEqual({ goal: text, criteria: [text], conversationContext: continuation().messages, selectedDiffContext: selectedDiff() });
+  expect(admission).toEqual({ goal: text, criteria: [text], conversationContext: conversationMessages(), selectedDiffContext: selectedDiff() });
   expect(Object.isFrozen(admission.selectedDiffContext)).toBe(true);
   const borrowed = structuredClone({ ...admission, selectedDiffContext: { ...admission.selectedDiffContext! } }); const captured = captureAutonomousSource(borrowed);
   borrowed.selectedDiffContext!.unifiedDiff = diff.replace(privateLine, 'later mutation');
@@ -132,7 +133,7 @@ test('recorded route, fidelity, coverage and final admission retain the exact se
   const result = await decideNativeIntake({ ...read, routeEvidence, requirements, allowAct: true, continuations: [], conditions: [] });
   expect(result.route).toBe('work'); expect(result.requirements!.criteria).toEqual([text]); expect(result.autonomous.decision.outcome).toBe('act');
   expect(fake.requests).toHaveLength(4);
-  for (const request of fake.requests) expect(request.state).toMatchObject({ originalSource: { text, selectedDiffContext: { kind: 'session', unifiedDiff: diff }, conversationContext: continuation().messages } });
+  for (const request of fake.requests) expect(request.state).toMatchObject({ originalSource: { text, selectedDiffContext: { kind: 'session', unifiedDiff: diff }, conversationContext: conversationMessages() } });
   for (const id of result.decisionIds) expect(log.get(id)?.status).toBe('answered');
   await expect(decideNativeIntake({ ...read, continuation: continuation({ ...selectedDiff(), fileIndex: 8 }), routeEvidence, requirements, allowAct: true, continuations: [], conditions: [] })).rejects.toMatchObject({ kind: 'invalid-request' });
   expect(fake.requests).toHaveLength(4);
@@ -236,7 +237,7 @@ test('native turn scope exposes only its owned exact comment and frozen separate
     await withNativeConversationTurn(f.permit, async () => {
       await Promise.resolve();
       const owned = readNativeConversationTurnActionSource()!;
-      expect(owned).toEqual({ goal: text, criteria: [], conversationContext: continuation().messages, selectedDiffContext: selectedDiff() });
+      expect(owned).toEqual({ goal: text, criteria: [], conversationContext: conversationMessages(), selectedDiffContext: selectedDiff() });
       expect(Object.isFrozen(owned)).toBe(true); expect(Object.isFrozen(owned.selectedDiffContext!.provenance)).toBe(true);
       expect(readNativeConversationTurnSelectedDiffContext()).toEqual(selectedDiff());
       expect(captureAutonomousSource(owned).criteria).toEqual([]);
@@ -274,7 +275,7 @@ test('real hosted native turn provider and tool admission retain private selecte
       expect(request.systemPrompt).toContain(JSON.stringify(selectedDiff()));
       expect(JSON.stringify(request.messages)).not.toContain(privateLine);
     }
-    expect(sources[0]).toEqual({ goal: text, criteria: [], conversationContext: continuation().messages, selectedDiffContext: selectedDiff() });
+    expect(sources[0]).toEqual({ goal: text, criteria: [], conversationContext: conversationMessages(), selectedDiffContext: selectedDiff() });
     expect(conversation.getMessagesForLLM().filter(message => message.role === 'user').map(message => message.content)).toEqual([text]);
     expect(JSON.stringify(conversation.getMessagesForLLM())).not.toContain(privateLine);
   } finally { instance.dispose(); f.client.dispose(); }

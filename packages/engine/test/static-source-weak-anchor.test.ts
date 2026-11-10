@@ -128,7 +128,7 @@ test('a settled weak negative sibling cannot clear another unresolved exact sour
 test('original plan-2 raw answers revalidate under plan 3 without a new question or provider call', async () => {
   const captured = input();
   const fixture = await selected(.5, 'none', .2, .01);
-  const manifest = staticDecisionSourceManifest().map(([path, hash]) => [path, path === 'static-source-readings.ts' ? sha256('authored original plan-2 source') : hash]);
+  const manifest = staticDecisionSourceManifest().map(([path, hash]) => [path, path === 'static-source-readings.ts' ? 'authored-original-plan-2-source' : hash]);
   const captureHash = sha256(JSON.stringify(manifest));
   const original = { ...fixture.receipt, readingPlanVersion: 2 as const, decisionSourceHash: captureHash,
     presence: { ...fixture.receipt.presence, captureDecisionSourceHash: captureHash },
@@ -271,7 +271,7 @@ test('v1 weak answers remain raw history while only new v2 questions are measure
   const run = await legacy.select(withDecisionLog(fixture.port, log), staticSelectionContext(captured), staticSelectionCandidates(captured), { site: `${STATIC_SITE}.${captured.kind}` });
   const entry = log.query({ status: 'answered' }).find(value => value.id === run.decisionId);
   if (!entry || entry.status !== 'answered') throw new Error('Missing authored v1 call');
-  const manifest = staticDecisionSourceManifest().map(([path, hash]) => [path, path === 'batteries/static-weak-anchor.ts' ? sha256('authored synthetic archived v1 definition') : hash]);
+  const manifest = staticDecisionSourceManifest().map(([path, hash]) => [path, path === 'batteries/static-weak-anchor.ts' ? 'authored-synthetic-archived-v1-definition' : hash]);
   const oldHash = sha256(JSON.stringify(manifest));
   const rawSelection = { id: entry.id, at: entry.at, battery: staticWeakAnchor.name, version: 1, site: `${STATIC_SITE}.${captured.kind}`,
     stateHash: entry.stateHash, questionsHash: sha256(canonicalJson(entry.questions)), requestedModel: entry.requestedModel,

@@ -31,15 +31,16 @@ function fixture(install = true) {
   const base = 'https://emitted-owner-fixture.invalid/releases/download/v2.0.24';
   const assets = new Map(targets.map((target, index) => [target.assetName,
     index === targets.length - 1 ? Buffer.from(JSON.stringify(input.next.artifact)) : next[index]]));
-  const checksums = [...assets].map(([name, bytes]) => `${sha256(bytes)}  ${name}`).join('\n');
+  let checksums;
+  const manifest = () => checksums ??= [...assets].map(([name, bytes]) => `${sha256(bytes)}  ${name}`).join('\n');
   const fetchImpl = async url => {
-    const bytes = url === base + '/SHA256SUMS.txt' ? Buffer.from(checksums) : assets.get(url.slice(base.length + 1));
+    const bytes = url === base + '/SHA256SUMS.txt' ? Buffer.from(manifest()) : assets.get(url.slice(base.length + 1));
     return new Response(bytes ? new Uint8Array(bytes) : null, { status: bytes ? 200 : 404 });
   };
   const apply = (fetch = fetchImpl, options = {}) => applyVerifiedUpdate({ fetchImpl: fetch, downloadBaseUrl: base, targets,
     platform: 'linux', daemonNative: { execPath, platform: 'linux', arch, version: '2.0.24' }, ...options });
   const state = () => targets.map(target => ({ bytes: readFileSync(target.path).toString('hex'), mode: lstatSync(target.path).mode & 0o777 }));
-  return { root, execPath, targets, old, next, assets, base, fetchImpl, apply, state };
+  return { root, execPath, targets, old, next, assets, base, fetchImpl, manifest, apply, state };
 }
 function assertNoTransient(targets) {
   for (const target of targets) for (const suffix of ['.update-download', '.update-previous', '.update-transaction', '.rollback-exchange']) {
@@ -90,7 +91,7 @@ test('ordinary Node emitted legacy adoption probes its actual old executable and
   writeFileSync(f.execPath, '#!/bin/sh\nprintf "goodvibes-daemon 1.28.25\\n"\n'); chmodSync(f.execPath, 0o755);
   const home = homedir(); assert.equal(home, process.env.HOME); const beforeHome = readFileSync(join(home, 'sentinel'), 'utf8');
   const requests = [];
-  const checksums = [...f.assets].map(([name, bytes]) => `${sha256(bytes)}  ${name}`).join('\n');
+  const checksums = f.manifest();
   const server = createServer((request, response) => {
     requests.push({ method: request.method, path: request.url });
     if (request.url === '/native/releases/latest') { response.writeHead(302, { location: '/native/releases/tag/v2.0.24' }); response.end(); return; }

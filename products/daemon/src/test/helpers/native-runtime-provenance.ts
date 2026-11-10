@@ -54,8 +54,15 @@ export function writeNativeInstallationFixture(prefix: string, version: string, 
   return { execPath, targets, buffers, receipt, assets,
     options: { bundled: true, execPath, version, platform: 'linux', arch,
       runningExecutableIdentity: () => { const stat = lstatSync(execPath, { bigint: true }); return `${stat.dev}:${stat.ino}`; } },
-    checksumManifest: Object.entries(assets).map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join(''),
   };
+}
+
+/** Release-download fixture: capture the manifest once from the original assets.
+ * Local installation fixtures do not publish or verify a release manifest. */
+export function writeNativeInstallationReleaseFixture(prefix: string, version: string, arch: 'x64' | 'arm64' = 'x64') {
+  const original = writeNativeInstallationFixture(prefix, version, arch);
+  const checksumManifest = Object.entries(original.assets).map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join('');
+  return { ...original, checksumManifest };
 }
 
 /** Explicit current-reader variant. These are still inert original fixtures,

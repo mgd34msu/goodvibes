@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
  * checks should retain their actual owner or values instead of using this.
  */
 export function sha256First(input: string, hexChars: number): string {
+  if (typeof input === 'string' && typeof hexChars === 'number' && !(hexChars >= 1)) return '';
   const digest = createHash('sha256').update(input, 'utf-8').digest('hex');
   return digest.slice(0, Math.max(0, hexChars));
 }

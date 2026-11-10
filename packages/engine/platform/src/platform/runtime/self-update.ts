@@ -237,6 +237,18 @@ export function parseChecksumFile(contents: string): Map<string, string> {
   return checksums;
 }
 
+/** Require a manifest pin before fetching or hashing an artifact. */
+export function requireChecksum(
+  artifactName: string,
+  expected: string | undefined,
+  manifestName: string = CHECKSUM_MANIFEST_NAME,
+): string {
+  if (expected === undefined) {
+    throw new Error(`no checksum entry for ${artifactName} in ${manifestName}, refusing to install an unverified binary`);
+  }
+  return expected;
+}
+
 /**
  * Verify a downloaded artifact's checksum against the parsed manifest.
  * An artifact with no entry in the manifest is a hard failure, identical
@@ -249,9 +261,7 @@ export function verifyChecksum(
   expected: string | undefined,
   manifestName: string = CHECKSUM_MANIFEST_NAME,
 ): void {
-  if (expected === undefined) {
-    throw new Error(`no checksum entry for ${artifactName} in ${manifestName}, refusing to install an unverified binary`);
-  }
+  requireChecksum(artifactName, expected, manifestName);
   if (expected !== actual) {
     throw new Error(`checksum mismatch for ${artifactName}: expected ${expected}, got ${actual}`);
   }
@@ -612,8 +622,13 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     const checksumText = await manifestResponse.text();
     const checksums = parseChecksumFile(checksumText);
     signal.throwIfAborted();
+    // A missing later member makes the whole cohort unverifiable. Require all
+    // pins before downloading or hashing even its otherwise valid first member.
+    const pinnedTargets = options.targets.map(target => ({
+      target, expected: requireChecksum(target.assetName, checksums.get(target.assetName)),
+    }));
     const verified: StagedUpdate[] = [];
-    for (const target of options.targets) {
+    for (const { target, expected } of pinnedTargets) {
       const url = `${options.downloadBaseUrl}/${target.assetName}`;
       const response = await options.fetchImpl(url, { signal });
       signal.throwIfAborted();
@@ -621,7 +636,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       const buffer = Buffer.from(new Uint8Array(await response.arrayBuffer()));
       signal.throwIfAborted();
       const pin = sha256(buffer);
-      verifyChecksum(target.assetName, pin, checksums.get(target.assetName));
+      verifyChecksum(target.assetName, pin, expected);
       verifiedMembers.set(target.path, { path: target.path, assetName: target.assetName, sha256: pin, size: buffer.length, mode: target.executable ? 0o755 : 0o644 });
       verified.push({ target, buffer });
     }

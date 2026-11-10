@@ -259,12 +259,12 @@ function servingFetch(byUrl: Record<string, Uint8Array>): typeof fetch {
     return { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) };
   }) as unknown as typeof fetch;
 }
-function fixtureManifests(binaryContent: string, engineVersion: string) {
+function fixtureManifests(binaryContent: string, engineVersion: string, originalVoice?: { id: string; onnx: ReturnType<typeof pinned>; json: ReturnType<typeof pinned> }) {
   const archiveBytes = tarballFixture(binaryContent);
   const onnxBytes = (() => { const b = new Uint8Array(8192); b[0] = 0x08; return b; })();
   const jsonBytes = enc.encode('{"sample_rate":22050}'.padEnd(4885, ' '));
   const engine = { version: engineVersion, archive: pinned(archiveBytes, `https://e.test/piper-${engineVersion}.tar.gz`), binaryRelPath: 'piper/piper' };
-  const voice = { id: 'fixture-voice', onnx: pinned(onnxBytes, 'https://v.test/voice.onnx'), json: pinned(jsonBytes, 'https://v.test/voice.onnx.json') };
+  const voice = originalVoice ?? { id: 'fixture-voice', onnx: pinned(onnxBytes, 'https://v.test/voice.onnx'), json: pinned(jsonBytes, 'https://v.test/voice.onnx.json') };
   const fetchImpl = servingFetch({
     [engine.archive.url]: archiveBytes,
     [voice.onnx.url]: onnxBytes,
@@ -292,7 +292,7 @@ describe('provisioning failure handling', () => {
     // Bump the pinned engine to v2 (the exact case the incident needed, a newer
     // piper to fix the onnxruntime IR incompatibility): the OLD binary exists,
     // but the install must download AND extract the new one, replacing it.
-    const v2 = fixtureManifests('binary-v2', 'v2');
+    const v2 = fixtureManifests('binary-v2', 'v2', v1.voice);
     const bumped = await provision({ managedRoot: dir, platform: 'linux-x64', engineOverride: v2.engine, voiceOverride: v1.voice, fetchImpl: v2.fetchImpl, extractArchive: fakeExtractor() });
     expect(bumped.tts.state).toBe('provisioned');
     expect(readFileSync(paths.piperBinary, 'utf-8')).toBe('binary-v2'); // REPLACED
@@ -486,14 +486,19 @@ describe('breaker classification + reset (reviewer scenario)', () => {
 });
 
 describe('managed STT (goodvibes-built whisper.cpp)', () => {
-  function whisperFixture(binaryContent: string, version = 'w1') {
-    const archiveBytes = tarballFixture(binaryContent); // reuses the {binary} payload shape
+  function whisperModelFixture() {
     const modelBytes = (() => { const b = new Uint8Array(16384); b.fill(7); return b; })();
+    return { model: { id: 'fixture-model', bin: pinned(modelBytes, 'https://w.test/model.bin') }, modelBytes };
+  }
+  function whisperBundleFixture(binaryContent: string, version = 'w1') {
+    const archiveBytes = tarballFixture(binaryContent); // reuses the {binary} payload shape
     return {
       whisper: { version, bundle: { url: `https://w.test/whisper-${version}.tar.gz` as string | null, bytes: archiveBytes.length, sha256: createHash('sha256').update(archiveBytes).digest('hex') }, binaryRelPath: 'whisper/whisper-cli' },
-      model: { id: 'fixture-model', bin: pinned(modelBytes, 'https://w.test/model.bin') },
-      archiveBytes, modelBytes,
+      archiveBytes,
     };
+  }
+  function whisperFixture(binaryContent: string, version = 'w1') {
+    return { ...whisperBundleFixture(binaryContent, version), ...whisperModelFixture() };
   }
   const whisperExtractor = async (archivePath: string, destDir: string): Promise<void> => {
     const payload = JSON.parse(new TextDecoder().decode(readFileSync(archivePath)).trim()) as { binary: string };
@@ -545,12 +550,14 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
     const dir = scratch();
     const { provisionLocalVoiceRuntime: provision } = await import('../platform/src/platform/voice/provisioning/index.ts');
     const v1 = fixtureManifests('binary-v1', 'v1');
-    const w = whisperFixture('whisper-binary-1');
-    const unhosted = { ...w.whisper, bundle: { ...w.whisper.bundle, url: null } };
+    const { WHISPER_ENGINES } = await import('../platform/src/platform/voice/provisioning/manifest.ts');
+    const whisper = WHISPER_ENGINES['linux-x64'];
+    if (!whisper) throw new Error('The supported fixture platform requires a published whisper manifest');
+    const unhosted = { ...whisper, bundle: { ...whisper.bundle, url: null } };
     const result = await provision({
       managedRoot: dir, platform: 'linux-x64',
       engineOverride: v1.engine, voiceOverride: v1.voice,
-      whisperOverride: unhosted, whisperModelOverride: w.model,
+      whisperOverride: unhosted,
       fetchImpl: v1.fetchImpl, extractArchive: bothExtractor,
     });
     expect(result.tts.state).toBe('provisioned'); // STT failure never blocks TTS
@@ -686,7 +693,7 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
     expect(readVoiceInstallStamp(dir)?.sttEngineVersion).toBe('w1');
     // The on-disk archive is still the w1 bytes (no NEW bundle was sideloaded);
     // the manifest bumps to w2 (url null) so the stale archive fails the w2 pin.
-    const w2 = whisperFixture('whisper-binary-2', 'w2');
+    const w2 = whisperBundleFixture('whisper-binary-2', 'w2');
     const w2Unhosted = { ...w2.whisper, bundle: { ...w2.whisper.bundle, url: null } };
     const bumped = await provision({
       managedRoot: dir, platform: 'linux-x64',
@@ -738,14 +745,14 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
     // 3) The manifest bumps to w2; the user sideloads the NEW bundle correctly and
     //    the model is available again, the update now APPLIES precisely because
     //    the preserved w1 stamp makes the version change detectable.
-    const w2 = whisperFixture('whisper-binary-2', 'w2');
+    const w2 = whisperBundleFixture('whisper-binary-2', 'w2');
     const w2Unhosted = { ...w2.whisper, bundle: { ...w2.whisper.bundle, url: null } };
     writeFileSync(paths.whisperArchive, w2.archiveBytes);
     const updated = await provision({
       managedRoot: dir, platform: 'linux-x64',
       engineOverride: v1.engine, voiceOverride: v1.voice,
-      whisperOverride: w2Unhosted, whisperModelOverride: w2.model,
-      fetchImpl: fullServe(v1, 'binary-v1', { [w2.model.bin.url]: w2.modelBytes }),
+      whisperOverride: w2Unhosted, whisperModelOverride: w1.model,
+      fetchImpl: fullServe(v1, 'binary-v1', { [w1.model.bin.url]: w1.modelBytes }),
       extractArchive: bothExtractor,
     });
     expect(updated.stt.state).toBe('provisioned');

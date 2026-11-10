@@ -20,11 +20,11 @@ function fixture(product = 'goodvibes') {
   return { root, execPath, owner, requirement: join(root, NATIVE_READER_REQUIREMENT_FILE) };
 }
 function formats(path: string): string[] { return JSON.parse(readFileSync(path, 'utf8')).formats; }
-function artifact(packageName: ClientReaderPackage, bytes: Buffer, supported = true): ClientReaderArtifact {
+function artifact(packageName: ClientReaderPackage, bytes: Buffer): ClientReaderArtifact {
   const target = 'darwin-x64', asset = clientReaderAsset(packageName, target);
   return { schema: 1, packageName, version: '3.1.2', target, sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40),
     files: [{ path: asset, sha256: sha256(bytes), mode: 0o755, size: bytes.length }],
-    readers: supported ? nativeReaderCapabilities('3.1.2') : { schema: 1, version: '3.1.2', formats: [] } };
+    readers: nativeReaderCapabilities('3.1.2') };
 }
 
 test.each(['file:///workspace/main.ts', 'file:///workspace/$bunfs-demo/src/main.ts', 'file:///workspace/$bunfs/root/main.ts'])('source module %s does not acquire installation ownership from an executable-looking path', moduleUrl => {
@@ -83,9 +83,10 @@ test.each(['@goodvibes-jev/tui', '@goodvibes-jev/agent'] as const)('saved floors
     () => assertStagedClientReaderCompatible(f.execPath, f.execPath + '.previous', realUpdateFileIo), { native: true })).toThrow();
   expect(readFileSync(f.execPath)).toEqual(before); expect(readFileSync(f.execPath + '.previous')).toEqual(previous);
   expect(existsSync(join(f.root, 'was-executed'))).toBe(false);
-  writeFileSync(f.execPath + '.readers.json.previous', JSON.stringify(artifact(packageName, previous, false)), { mode: 0o644 });
+  const releaseArtifact = artifact(packageName, previous);
+  writeFileSync(f.execPath + '.readers.json.previous', JSON.stringify({ ...releaseArtifact, readers: { schema: 1, version: '3.1.2', formats: [] } }), { mode: 0o644 });
   expect(() => assertStagedClientReaderCompatible(f.execPath, f.execPath + '.previous', realUpdateFileIo)).toThrow();
-  writeFileSync(f.execPath + '.readers.json.previous', JSON.stringify(artifact(packageName, previous)), { mode: 0o644 });
+  writeFileSync(f.execPath + '.readers.json.previous', JSON.stringify(releaseArtifact), { mode: 0o644 });
   expect(() => assertStagedClientReaderCompatible(f.execPath, f.execPath + '.previous', realUpdateFileIo)).not.toThrow();
   expect(existsSync(join(f.root, 'was-executed'))).toBe(false);
   writeFileSync(f.execPath + '.previous', 'Changed after release metadata'); chmodSync(f.execPath + '.previous', 0o755);

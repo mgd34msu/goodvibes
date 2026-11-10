@@ -14,9 +14,10 @@ function releasedSalt(id: string) {
 }
 test('newly minted group IDs retain the released pre-JOIN salt and verifier bytes', async () => {
   const id = generateGroupId(); expect(id).toMatch(/^g[0-9A-HJKMNP-TV-Z]{16}$/);
-  expect(deriveJoinSalt(id)).toBe(releasedSalt(id));
+  const currentSalt = deriveJoinSalt(id), oldSalt = releasedSalt(id);
+  expect(currentSalt).toBe(oldSalt);
   const key = 'fixture owner-selected join phrase';
-  expect(await deriveJoinVerifier(key, deriveJoinSalt(id))).toBe(await deriveJoinVerifier(key, releasedSalt(id)));
+  expect(await deriveJoinVerifier(key, currentSalt)).toBe(await deriveJoinVerifier(key, oldSalt));
 });
 test('a released-style first JOIN authenticates to a newly created group, and rotation preserves bootstrap material', async () => {
   const world = createGroupWorld();
@@ -24,7 +25,7 @@ test('a released-style first JOIN authenticates to a newly created group, and ro
     const owner = await addGroupNode(world, 'current-owner', { version: '3.1.2' });
     const created = await createGroup(owner.context, {}); if (!created.ok) throw Error(created.error);
     const id = created.data.groupId, key = created.data.joinKey, peerKeys = generateNodeKeyMaterial();
-    const oldVerifier = await deriveJoinVerifier(key, releasedSalt(id));
+    const oldSalt = releasedSalt(id), oldVerifier = await deriveJoinVerifier(key, oldSalt);
     const peer = world.bus.createTransport('released-peer'), replies: string[] = [];
     await peer.start(raw => { const value: unknown = JSON.parse(raw); if (typeof value === 'object' && value !== null && 'type' in value && value.type === GROUP_MESSAGE_TYPES.joinAccept) replies.push(raw); });
     await peer.send(encodeJoinClassMessage({ type: GROUP_MESSAGE_TYPES.join, nodeId: 'released-peer', nodeVersion: '3.1.1', seq: 1, ts: world.clock.now(),
@@ -32,9 +33,9 @@ test('a released-style first JOIN authenticates to a newly created group, and ro
     await settle(); expect(replies).toHaveLength(1);
     const response = JSON.parse(replies[0]!) as { body: { sealed: unknown } };
     const accepted = openGrant(peerKeys, response.body.sealed, 'join'); expect(accepted?.state.groupId).toBe(id);
-    expect(accepted?.joinSalt).toBe(releasedSalt(id)); expect(accepted?.joinVerifier).toBe(oldVerifier);
+    expect(accepted?.joinSalt).toBe(oldSalt); expect(accepted?.joinVerifier).toBe(oldVerifier);
     const rotated = await rotateGroupKey(owner.context); expect(rotated.ok).toBe(true);
-    expect(owner.runtime.keyMaterial?.joinSalt).toBe(releasedSalt(id)); expect(owner.runtime.keyMaterial?.joinVerifier).toBe(oldVerifier);
+    expect(owner.runtime.keyMaterial?.joinSalt).toBe(oldSalt); expect(owner.runtime.keyMaterial?.joinVerifier).toBe(oldVerifier);
     await peer.stop();
   } finally { await stopGroupWorld(world); destroyGroupWorld(world); }
 });

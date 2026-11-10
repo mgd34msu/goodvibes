@@ -801,12 +801,12 @@ describe('status', () => {
 test('runtime stop immediately cancels a reserved JOIN and drains every late preparation', async () => {
   const created = createGroupWorld(); world = created;
   const node = await addGroupNode(created, 'joining-during-stop');
-  const groupId = generateGroupId();
-  const pending = node.runtime.requestJoin({ groupId, joinKey: 'fixture phrase long enough', joinSalt: deriveJoinSalt(groupId), timeoutMs: 60_000 });
+  const groupId = generateGroupId(), joinSalt = deriveJoinSalt(groupId);
+  const pending = node.runtime.requestJoin({ groupId, joinKey: 'fixture phrase long enough', joinSalt, timeoutMs: 60_000 });
   await node.runtime.stop();
   expect(await pending).toMatchObject({ ok: false, failure: 'abandoned' });
   expect(created.wire.filter(entry => entry.from === 'joining-during-stop'
     && JSON.parse(entry.raw)['type'] === GROUP_MESSAGE_TYPES.join)).toEqual([]);
-  expect(await node.runtime.requestJoin({ groupId, joinKey: 'fixture phrase long enough', joinSalt: deriveJoinSalt(groupId), timeoutMs: 60_000 }))
+  expect(await node.runtime.requestJoin({ groupId, joinKey: 'fixture phrase long enough', joinSalt, timeoutMs: 60_000 }))
     .toMatchObject({ ok: false, failure: 'not-sent' });
 });

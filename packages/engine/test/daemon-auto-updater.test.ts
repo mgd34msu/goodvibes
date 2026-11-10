@@ -20,7 +20,6 @@ import {
   BOOT_SETTLE_CHECK_DELAY_MS,
   PREVIOUS_FILE_SUFFIX,
   PeriodicUpdateLoop,
-  sha256,
   nativeReaderCapabilities,
   type DaemonCurrentReader,
   type NativeReaderCapabilities,
@@ -87,17 +86,22 @@ const NEW_DAEMON = Buffer.from('daemon-v2');
 
 const EXEC_PATH = '/opt/gv/goodvibes-daemon';
 const currentCohort = (version = '1.0.0') => nativeCohortFixture({ version, daemonBytes: 'daemon-v1' });
-const originalFiles = () => currentCohort().installation(EXEC_PATH);
-const originalPaths = () => Object.keys(originalFiles()).sort();
 const memoryIo = nativeMemoryIo;
 
 function releaseFetch(overrides: { latestTag?: string; assetName?: string; readers?: NativeReaderCapabilities } = {}): { fetchImpl: UpdateFetchLike; requests: string[] } {
   const tag = overrides.latestTag ?? NEW_TAG;
   const assetName = overrides.assetName ?? DAEMON_ASSET;
   const base = defaultDownloadBaseUrl(LATEST_URL, tag);
-  const cohort = nativeCohortFixture({ version: tag.replace(/^v/, ''), daemonBytes: NEW_DAEMON.toString(), ...(overrides.readers ? { readers: overrides.readers } : {}) });
-  const assets = { ...cohort.assets, [assetName]: NEW_DAEMON };
-  const manifest = Object.entries(assets).map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join('');
+  let release: { assets: Record<string, Buffer>; manifest: string } | undefined;
+  const releaseAssets = () => {
+    if (release) return release;
+    const cohort = nativeCohortFixture({ version: tag.replace(/^v/, ''), daemonBytes: NEW_DAEMON.toString(), ...(overrides.readers ? { readers: overrides.readers } : {}) });
+    const daemonPin = cohort.artifact.files.find(file => file.path === DAEMON_ASSET)?.sha256;
+    if (!daemonPin || !cohort.assets[DAEMON_ASSET]?.equals(NEW_DAEMON)) throw new Error('Original daemon fixture bytes are required');
+    const assets = { ...cohort.assets, [assetName]: NEW_DAEMON };
+    const manifest = cohort.checksumManifest + (assetName === DAEMON_ASSET ? '' : `${daemonPin}  ${assetName}\n`);
+    return release = { assets, manifest };
+  };
   const requests: string[] = [];
   const fetchImpl: UpdateFetchLike = async (url) => {
     requests.push(url);
@@ -109,8 +113,8 @@ function releaseFetch(overrides: { latestTag?: string; assetName?: string; reade
       };
     }
     const body = url === `${base}/SHA256SUMS.txt`
-      ? Buffer.from(manifest)
-      : url.startsWith(`${base}/`) ? assets[url.slice(base.length + 1)] ?? null : null;
+      ? Buffer.from(releaseAssets().manifest)
+      : url.startsWith(`${base}/`) ? releaseAssets().assets[url.slice(base.length + 1)] ?? null : null;
     if (!body) {
       return { ok: false, status: 404, url, headers: { get: () => null }, text: async () => '', arrayBuffer: async () => new ArrayBuffer(0) };
     }
@@ -126,6 +130,7 @@ function releaseFetch(overrides: { latestTag?: string; assetName?: string; reade
 interface Harness {
   updater: DaemonAutoUpdater;
   files: Map<string, Buffer>;
+  originalFiles: Record<string, Buffer>;
   io: UpdateFileIo;
   mutations: string[];
   receipts: DaemonReceiptStore;
@@ -163,7 +168,8 @@ function makeHarness(options: {
   stopGracefully?: () => void | Promise<void>;
 } ): Harness {
   const scratch = mkdtempSync(join(tmpdir(), 'auto-updater-'));
-  const { files, io, mutations } = memoryIo(currentCohort(options.currentVersion ?? '1.0.0').installation(EXEC_PATH));
+  const originalFiles = currentCohort(options.currentVersion ?? '1.0.0').installation(EXEC_PATH);
+  const { files, io, mutations } = memoryIo(originalFiles);
   const { fetchImpl, requests } = releaseFetch({ assetName: options.platform === 'darwin' ? 'goodvibes-daemon-macos-x64' : DAEMON_ASSET,
     ...(options.latestTag ? { latestTag: options.latestTag } : {}), ...(options.releaseReaders ? { readers: options.releaseReaders } : {}) });
   const receipts = new DaemonReceiptStore(join(scratch, 'receipts.json'), { now: () => new Date(2026, 6, 12, 14, 30).getTime() });
@@ -217,7 +223,7 @@ function makeHarness(options: {
     },
     clearTimer: () => {},
   });
-  return { updater, files, io, mutations, receipts, actions, exits, timers, requests, sequence, scratch, alerts };
+  return { updater, files, originalFiles, io, mutations, receipts, actions, exits, timers, requests, sequence, scratch, alerts };
 }
 
 /** A fetch that always throws, a check that cannot complete at all. */
@@ -238,7 +244,7 @@ describe('DaemonAutoUpdater', () => {
       expect(h.updater.snapshot().appliedVersion).toBe('3.1.3');
       const receipt = JSON.parse(h.files.get('/opt/gv/daemon-installation.json')?.toString() ?? 'null');
       expect(receipt.previousReader).toEqual({ version: '3.1.2', artifact: {
-        ...currentCohort('3.1.2').artifact, schema: 2, readers: nativeReaderCapabilities('3.1.2'),
+        ...JSON.parse(h.originalFiles['/opt/gv/daemon-installation.json']!.toString()).artifact, schema: 2, readers: nativeReaderCapabilities('3.1.2'),
       } });
       expect(guardCalls).toBeGreaterThanOrEqual(2);
       const previous = JSON.parse(h.files.get('/opt/gv/daemon-installation.json.previous')?.toString() ?? 'null');
@@ -308,7 +314,7 @@ describe('DaemonAutoUpdater', () => {
       for (const [path, bytes] of Object.entries(installed)) {
         if (path.endsWith('daemon-installation.json')) expect(JSON.parse(h.files.get(path)?.toString() ?? 'null')).toEqual(JSON.parse(bytes.toString()));
         else expect(h.files.get(path)).toEqual(bytes);
-        expect(h.files.get(path + PREVIOUS_FILE_SUFFIX)).toEqual(originalFiles()[path]);
+        expect(h.files.get(path + PREVIOUS_FILE_SUFFIX)).toEqual(h.originalFiles[path]);
       }
       expect(h.requests).toHaveLength(8);
       expect(h.actions.restarted).toBe(1);
@@ -778,7 +784,7 @@ describe('post-swap service handover', () => {
       await tick;
       expect(requestSignal?.aborted).toBe(true);
       expect(release.requests).toEqual([]);
-      expect([...h.files.keys()].sort()).toEqual(originalPaths());
+      expect([...h.files.keys()].sort()).toEqual(Object.keys(h.originalFiles).sort());
       expect(h.sequence).toEqual([]);
       expect(h.receipts.list()).toHaveLength(0);
       expect(h.updater.snapshot().appliedVersion).toBeNull();
@@ -786,7 +792,7 @@ describe('post-swap service handover', () => {
       lookupFinished.resolve();
       await new Promise(resolve => setTimeout(resolve, 0));
       expect(release.requests).toEqual([LATEST_URL]);
-      expect([...h.files.keys()].sort()).toEqual(originalPaths());
+      expect([...h.files.keys()].sort()).toEqual(Object.keys(h.originalFiles).sort());
     } finally {
       lookupFinished.resolve();
       await tick;
@@ -826,7 +832,7 @@ describe('post-swap service handover', () => {
           await h.updater.drainHandover();
           await tick;
           expect(requestSignal?.aborted).toBe(true);
-          expect(h.files).toEqual(new Map(Object.entries(originalFiles())));
+          expect(h.files).toEqual(new Map(Object.entries(h.originalFiles)));
           expect(h.updater.snapshot().appliedVersion).toBeNull();
           expect(h.updater.snapshot().pendingVersion).toBeNull();
           expect(h.updater.failedCheckCount).toBe(0);
@@ -837,7 +843,7 @@ describe('post-swap service handover', () => {
           if (lateOutcome === 'reject') finish.reject(new Error('late synthetic download failure'));
           else finish.resolve();
           await new Promise(resolve => setTimeout(resolve, 0));
-          expect([...h.files.keys()].sort()).toEqual(originalPaths());
+          expect([...h.files.keys()].sort()).toEqual(Object.keys(h.originalFiles).sort());
           expect(h.sequence).toEqual([]);
           expect(h.alerts).toEqual([]);
           expect(h.timers).toHaveLength(0);
@@ -868,7 +874,7 @@ describe('post-swap service handover', () => {
       h.updater.stop(); h.updater.start();
       await h.updater.drainHandover(); await tick;
       finish.resolve(); await new Promise(resolve => setTimeout(resolve, 0));
-      expect([...h.files.keys()].sort()).toEqual(originalPaths());
+      expect([...h.files.keys()].sort()).toEqual(Object.keys(h.originalFiles).sort());
       expect(h.sequence).toEqual([]);
       hold = false;
       await h.updater.tick();
@@ -895,7 +901,7 @@ describe('post-swap service handover', () => {
     const tick = h.updater.tick();
     try {
       await started.promise; idle = false; finish.resolve(); await tick;
-      expect([...h.files.keys()].sort()).toEqual(originalPaths());
+      expect([...h.files.keys()].sort()).toEqual(Object.keys(h.originalFiles).sort());
       expect(h.files.get('/opt/gv/goodvibes-daemon')?.toString()).toBe('daemon-v1');
       expect(h.updater.snapshot().pendingVersion).toBe('2.0.0');
       expect(h.updater.snapshot().appliedVersion).toBeNull();
@@ -926,7 +932,7 @@ describe('post-swap service handover', () => {
     try {
       await h.updater.tick(); await h.updater.drainHandover();
       expect(renames).toBe(0);
-      expect([...h.files.keys()].sort()).toEqual(originalPaths());
+      expect([...h.files.keys()].sort()).toEqual(Object.keys(h.originalFiles).sort());
       expect(h.files.get('/opt/gv/goodvibes-daemon')?.toString()).toBe('daemon-v1');
       expect(h.sequence).toEqual([]);
       expect(h.receipts.list()).toHaveLength(0);
@@ -965,7 +971,7 @@ describe('post-swap service handover', () => {
     try {
       await h.updater.tick();
       expect(probes).toBe(2);
-      expect([...h.files.keys()].sort()).toEqual(originalPaths());
+      expect([...h.files.keys()].sort()).toEqual(Object.keys(h.originalFiles).sort());
       expect(h.sequence).toEqual([]);
       expect(h.alerts).toEqual([]);
     } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
@@ -993,12 +999,12 @@ describe('post-swap service handover', () => {
       try {
         await started.promise; await tick; await h.updater.drainHandover();
         expect(requestSignal?.aborted).toBe(true);
-        expect([...h.files.keys()].sort()).toEqual(originalPaths());
+        expect([...h.files.keys()].sort()).toEqual(Object.keys(h.originalFiles).sort());
         expect(h.updater.failedCheckCount).toBe(1);
         expect(fake.requests).toHaveLength(1);
         expect(h.alerts).toEqual([]);
         finish.resolve(); await new Promise(resolve => setTimeout(resolve, 0));
-        expect([...h.files.keys()].sort()).toEqual(originalPaths());
+        expect([...h.files.keys()].sort()).toEqual(Object.keys(h.originalFiles).sort());
         expect(h.sequence).toEqual([]);
         expect(h.timers.at(-1)?.ms).toBe(60 * 60 * 1_000);
       } finally { h.updater.stop(); finish.resolve(); await tick; rmSync(h.scratch, { recursive: true, force: true }); }
@@ -1043,7 +1049,7 @@ describe('post-swap service handover', () => {
     try {
       await h.updater.tick();
       expect(renames).toBe(0);
-      expect([...h.files.keys()].sort()).toEqual(originalPaths());
+      expect([...h.files.keys()].sort()).toEqual(Object.keys(h.originalFiles).sort());
       expect(h.sequence).toEqual([]);
       expect(h.updater.failedCheckCount).toBe(1);
       expect(failureReading.requests).toHaveLength(1);
@@ -1582,7 +1588,7 @@ for (const restartOnFailure of [false, true]) {
         expect(commands).toBe(0);
         expect(serviceExits).toEqual([]);
         expect(h.exits).toEqual([]);
-        expect(h.files).toEqual(new Map(Object.entries(originalFiles())));
+        expect(h.files).toEqual(new Map(Object.entries(h.originalFiles)));
         expect(h.files.has(`${EXEC_PATH}${PREVIOUS_FILE_SUFFIX}`)).toBe(false);
         expect(h.updater.snapshot().appliedVersion).toBeNull();
         expect(h.updater.snapshot().handover).toBeNull();
@@ -1616,7 +1622,7 @@ describe('updater-owned effect references', () => {
       h.io.rename('/fixture/replacement-runtime', `${EXEC_PATH}.bun`);
       h.mutations.length = 0;
       finish(); await tick;
-      expect(h.files).toEqual(new Map(Object.entries(originalFiles())));
+      expect(h.files).toEqual(new Map(Object.entries(h.originalFiles)));
       expect(h.mutations).toEqual([]);
       expect(h.sequence).toEqual([]);
       expect(h.updater.snapshot().appliedVersion).toBeNull();

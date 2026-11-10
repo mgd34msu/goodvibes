@@ -16,9 +16,13 @@ import type { OperatorRemoteClient } from '../operator-client/src/index.js';
 import { captureAutonomousSource } from '../platform/src/platform/permissions/autonomous.js';
 import { captureNativeContractSource } from '../platform/src/platform/contract/native-source.js';
 
-function context() {
-  const sessionId = 'hosted-owned'; const messages = [{ role: 'assistant' as const, content: '  Previous answer. 🌻\r\n' }];
-  return { sessionId, revision: createHash('sha256').update(canonicalNativeConversationContinuation(sessionId, messages)).digest('hex'), messages };
+const messages = () => [{ role: 'assistant' as const, content: '  Previous answer. 🌻\r\n' }];
+// These DTO consumers validate shape/equality, not the historical byte commitment.
+// Keep a valid-shaped marker rather than computing a digest they never verify.
+function context() { return { sessionId: 'hosted-owned', revision: 'a'.repeat(64), messages: messages() }; }
+function committedContext() {
+  const original = context();
+  return { ...original, revision: createHash('sha256').update(canonicalNativeConversationContinuation(original.sessionId, original.messages)).digest('hex') };
 }
 
 test('continuation is complete, exact, detached and deeply immutable without invoking accessors', () => {
@@ -66,7 +70,7 @@ test('turn result binding and process-local permit retain the same deeply frozen
 });
 
 test('native contract source preserves context as evidence without changing original roots', () => {
-  const continuation = context(); const original = { sourceId: 'source', sourceRevision: 'source-revision', inputRevision: 'input-revision', criteriaId: 'criteria', criteriaRevision: '1', goal: 'Do that.', criteria: ['Do that.'], continuation };
+  const continuation = committedContext(); const original = { sourceId: 'source', sourceRevision: 'source-revision', inputRevision: 'input-revision', criteriaId: 'criteria', criteriaRevision: '1', goal: 'Do that.', criteria: ['Do that.'], continuation };
   const captured = captureNativeContractSource(original);
   continuation.messages[0]!.content = 'later mutation';
   expect(captured.goal).toBe('Do that.'); expect(captured.criteria).toEqual(['Do that.']);
@@ -76,7 +80,7 @@ test('native contract source preserves context as evidence without changing orig
 
 
 test('real autonomous tool admission retains complete prior evidence and rejects extra source fields', () => {
-  const conversationContext = context().messages;
+  const conversationContext = messages();
   const original = { goal: 'Do that.', criteria: ['Do that.'], conversationContext };
   const captured = captureAutonomousSource(original);
   conversationContext[0]!.content = 'caller mutation';
@@ -89,7 +93,7 @@ test('real autonomous tool admission retains complete prior evidence and rejects
 
 
 test('persisted planner, unit and correction task prompts omit captured transcript evidence', () => {
-  const continuation = context();
+  const continuation = committedContext();
   const source = captureNativeContractSource({ sourceId: 'source', sourceRevision: 'source-revision', inputRevision: 'input-revision', criteriaId: 'criteria', criteriaRevision: '1', goal: 'Do that.', criteria: ['Do that.'], continuation });
   const contract = makeContract({ nativeSource: source, shape: shapeOf() });
   const prompts = [

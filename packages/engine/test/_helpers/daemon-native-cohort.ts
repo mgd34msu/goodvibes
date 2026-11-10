@@ -14,13 +14,14 @@ export function nativeCohortFixture(options: {
   if (!payloads) throw new Error('Native fixture requires a supported Linux target');
   const daemonAsset = `goodvibes-daemon-linux-${arch}`;
   const bun = Buffer.from(options.bunBytes ?? `bun-${options.version}`);
+  const bunPin = sha256(bun);
   const bodies = [
     Buffer.from(options.daemonBytes),
     bun,
     Buffer.from(`Bun license ${options.version}\n`),
     Buffer.from(JSON.stringify({
       version: '1.3.14', target: `linux-${arch}`, source: 'build-interpreter',
-      sha256: sha256(bun), upstreamSource: 'https://github.com/oven-sh/bun/tree/bun-v1.3.14',
+      sha256: bunPin, upstreamSource: 'https://github.com/oven-sh/bun/tree/bun-v1.3.14',
     })),
     Buffer.from(options.addonBytes ?? `addon-${options.version}`),
   ];
@@ -29,11 +30,12 @@ export function nativeCohortFixture(options: {
     if (!bytes) throw new Error('Native fixture payload count changed');
     return { ...payload, bytes, mode: payload.executable ? 0o755 : 0o644 };
   });
+  const memberPins = members.map(member => member.bytes === bun ? bunPin : sha256(member.bytes));
   const base = {
     schema: 1,
     sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40),
     target: `linux-${arch}`,
-    files: members.map(member => ({ path: member.relativePath, sha256: sha256(member.bytes), mode: member.mode, size: member.bytes.length })),
+    files: members.map((member, index) => ({ path: member.relativePath, sha256: memberPins[index]!, mode: member.mode, size: member.bytes.length })),
   } satisfies DaemonCiArtifact;
   const artifact: DaemonCiArtifact = options.readers === undefined ? base : { ...base, schema: 2, readers: options.readers };
   const receipt = Buffer.from(JSON.stringify({ schema: 1, packageName: '@goodvibes-jev/daemon', version: options.version, artifact }));
@@ -54,7 +56,9 @@ export function nativeCohortFixture(options: {
         [join(dirname(execPath), 'daemon-installation.json') + suffix, receipt],
       ]);
     },
-    checksumManifest: Object.entries(assets).map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join(''),
+    checksumManifest: members.map((member, index) => `${memberPins[index]}  ${member.assetName}\n`).join('')
+      + Object.entries(assets).filter(([name]) => !members.some(member => member.assetName === name))
+        .map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join(''),
   };
 }
 

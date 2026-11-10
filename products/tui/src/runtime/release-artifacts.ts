@@ -14,6 +14,7 @@
 export {
   CHECKSUM_MANIFEST_NAME,
   parseChecksumFile,
+  requireChecksum,
   resolveArtifactNames,
   resolveSqliteVecAsset,
   sha256,

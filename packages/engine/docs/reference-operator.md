@@ -33091,6 +33091,7 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                       "unavailable",
                       "aborted",
                       "invalid-response",
+                      "internal",
                       "unrecorded"
                     ]
                   },
@@ -40850,6 +40851,7 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                             "unavailable",
                             "aborted",
                             "invalid-response",
+                            "internal",
                             "unrecorded"
                           ]
                         },
@@ -48717,6 +48719,7 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                           "unavailable",
                           "aborted",
                           "invalid-response",
+                          "internal",
                           "unrecorded"
                         ]
                       },

@@ -40,12 +40,16 @@ async function view(root: string, snapshot: Awaited<ReturnType<typeof captureCon
 }
 
 /** Independent writer for the persisted version-one format; production creates
- * only version two. These extra digests exercise actual old receipt recovery.
+ * only version two. Original captured pins exercise actual old receipt recovery.
  */
-function versionOneReceipt(root: string, snapshot: Awaited<ReturnType<typeof captureContractInput>>) {
-  return { ...snapshot, version: 1 as const, files: snapshot.files.map(file => file.kind === 'missing' ? file : {
-    ...file, digest: crypto.createHash('sha256').update(file.kind === 'symlink'
-      ? readlinkSync(join(root, file.path), { encoding: 'buffer' }) : readFileSync(join(root, file.path))).digest('hex'),
+function versionOneReceipt(snapshot: Awaited<ReturnType<typeof captureContractInput>>) {
+  // This sole caller just captured a SHA1 repository. Its native snapshot has
+  // already committed these exact ordinary-file and symlink bytes once.
+  return { ...snapshot, version: 1 as const, files: snapshot.files.map(file => {
+    if (file.kind !== 'missing' && (typeof file.digest !== 'string' || !/^[a-f0-9]{64}$/.test(file.digest))) {
+      throw new Error('Historical fixture requires the actual captured byte commitment');
+    }
+    return { ...file };
   }) };
 }
 
@@ -79,7 +83,7 @@ describe('local frozen contract input', () => {
 
   test('version-one receipts resume their recorded bytes and reject a mismatched old digest', async () => {
     const root = repo(); symlinkSync('tracked.ts', join(root, 'link.ts'));
-    const current = await captureContractInput(root), old = versionOneReceipt(root, current);
+    const current = await captureContractInput(root), old = versionOneReceipt(current);
     const restored = JSON.parse(JSON.stringify(old)) as typeof old;
     expect(isContractInputSnapshot(restored)).toBe(true);
     const frozen = await view(root, restored);

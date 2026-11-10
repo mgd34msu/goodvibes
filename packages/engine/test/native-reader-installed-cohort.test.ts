@@ -19,7 +19,7 @@ function peer(root: string, packageName: ClientReaderPackage = '@goodvibes-jev/a
   const program = packageName === '@goodvibes-jev/tui' ? 'goodvibes' : packageName === '@goodvibes-jev/agent' ? 'goodvibes-agent' : 'goodvibes-daemon';
   const path = join(root, program), bytes = Buffer.from(`Published ${program} ${version}`), target = 'darwin-x64';
   writeFileSync(path, bytes, { mode: 0o755 });
-  const files: Array<ClientReaderArtifact['files'][number]> = [{ path: clientReaderAsset(packageName, target), sha256: sha256(bytes), mode: 0o755, size: bytes.length }];
+  const files: Array<ClientReaderArtifact['files'][number]> = [{ path: clientReaderAsset(packageName, target), sha256: historicalProgramOnly ? 'a'.repeat(64) : sha256(bytes), mode: 0o755, size: bytes.length }];
   const artifact: ClientReaderArtifact = { schema: 1, packageName, version, target, sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40),
     files, readers: { schema: 1, version, formats } };
   if (packageName === '@goodvibes-jev/daemon' && !historicalProgramOnly) for (const member of clientReaderPayloadPaths(packageName, target).slice(1)) {

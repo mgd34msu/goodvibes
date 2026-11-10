@@ -71,8 +71,8 @@ describe('goodvibes plugin bundles', () => {
 
   test('browse lists a governed marketplace index (name, capability summary, pin)', async () => {
     const manifest = scaffoldCapabilityBundleManifest('demo-bundle');
-    const bytes = JSON.stringify(manifest);
-    const pin = computeSha256(new TextEncoder().encode(bytes));
+    // Browse displays the publisher's declared pin; it does not read bundle bytes.
+    const pin = 'a'.repeat(64);
     const entry = buildMarketplaceIndexEntry(manifest, { kind: 'file', location: 'bundle.json', sha256: pin });
     const index: PinnedMarketplaceIndex = { version: 1, bundles: [entry] };
     const indexPath = join(root, 'index.json');

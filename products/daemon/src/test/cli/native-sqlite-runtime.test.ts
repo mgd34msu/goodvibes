@@ -10,7 +10,7 @@ import { daemonSqliteRuntime, initializeDaemonNativeSqlite, type DaemonSqliteOwn
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-function fixture(arch: 'x64' | 'arm64' = 'arm64') {
+function fixture(arch: 'x64' | 'arm64' = 'arm64', { pinBytes = true } = {}) {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'daemon-sqlite-owner-')); roots.push(root);
   const cohort = join(root, 'cohort'); mkdirSync(cohort);
   const execPath = join(cohort, 'goodvibes-daemon'); writeFileSync(execPath, 'inert test executable', { mode: 0o755 });
@@ -20,7 +20,7 @@ function fixture(arch: 'x64' | 'arm64' = 'arm64') {
   const bytes = Buffer.alloc(64); bytes.writeUInt32LE(0xfeedfacf, 0); bytes.writeUInt32LE(arch === 'arm64' ? 0x0100000c : 0x01000007, 4); bytes.writeUInt32LE(6, 12);
   const owner: DaemonSqliteOwner = Object.freeze({ schema: 1, packageName: '@goodvibes-jev/daemon', daemonVersion: '2.0.23', target: runtime.target,
     sqliteVersion: runtime.sqliteVersion, sourceUrl: runtime.sourceUrl, sourceSha3: runtime.sourceSha3,
-    sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length });
+    sha256: pinBytes ? createHash('sha256').update(bytes).digest('hex') : '0'.repeat(64), size: bytes.length });
   writeFileSync(library, bytes, { mode: 0o644 }); writeFileSync(provenance, JSON.stringify(owner), { mode: 0o644 });
   const options = { platform: 'darwin', arch, bundled: true, version: owner.daemonVersion, execPath, capturedOwner: owner };
   return { root, cohort, library, provenance, bytes, owner, options };
@@ -45,11 +45,15 @@ test('unbundled source and Linux do not select custom SQLite', () => {
   } finally { hash.mockRestore(); }
 });
 
-test('retired target or absent compiled owner refuses before selection', () => {
-  const f = fixture(); let calls = 0; const setCustomSQLite = () => { calls++; return true; };
-  expect(() => initializeDaemonNativeSqlite({ ...f.options, arch: 'riscv64', setCustomSQLite })).toThrow('Unsupported');
-  expect(() => initializeDaemonNativeSqlite({ ...f.options, capturedOwner: null, setCustomSQLite })).toThrow('compiled producer');
-  expect(calls).toBe(0);
+test('retired target or absent compiled owner refuses before selection or digest work', () => {
+  const options = { platform: 'darwin', arch: 'arm64', bundled: true, execPath: '/absent/daemon', capturedOwner: null };
+  let calls = 0; const setCustomSQLite = () => { calls++; return true; };
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    expect(() => initializeDaemonNativeSqlite({ ...options, arch: 'riscv64', setCustomSQLite })).toThrow('Unsupported');
+    expect(() => initializeDaemonNativeSqlite({ ...options, setCustomSQLite })).toThrow('compiled producer');
+    expect(calls).toBe(0); expect(hash).not.toHaveBeenCalled();
+  } finally { hash.mockRestore(); }
 });
 
 test('coherently replaced library and mutable sidecar cannot replace compiled byte authority', () => {
@@ -61,9 +65,13 @@ test('coherently replaced library and mutable sidecar cannot replace compiled by
 });
 
 test('supplier, daemon owner and architecture mismatches refuse before selection', () => {
-  const f = fixture(); let calls = 0; const setCustomSQLite = () => { calls++; return true; };
-  expect(() => initializeDaemonNativeSqlite({ ...f.options, capturedOwner: { ...f.owner, sourceSha3: '0'.repeat(64) }, setCustomSQLite })).toThrow('compiled producer');
-  expect(() => initializeDaemonNativeSqlite({ ...f.options, version: '2.0.24', setCustomSQLite })).toThrow('compiled producer');
+  const f = fixture('arm64', { pinBytes: false }); let calls = 0; const setCustomSQLite = () => { calls++; return true; };
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    expect(() => initializeDaemonNativeSqlite({ ...f.options, capturedOwner: { ...f.owner, sourceSha3: '0'.repeat(64) }, setCustomSQLite })).toThrow('compiled producer');
+    expect(() => initializeDaemonNativeSqlite({ ...f.options, version: '2.0.24', setCustomSQLite })).toThrow('compiled producer');
+    expect(hash).not.toHaveBeenCalled();
+  } finally { hash.mockRestore(); }
   const wrong = Buffer.from(f.bytes); wrong.writeUInt32LE(0x01000007, 4);
   const wrongOwner: DaemonSqliteOwner = { ...f.owner, sha256: createHash('sha256').update(wrong).digest('hex') };
   writeFileSync(f.library, wrong); writeFileSync(f.provenance, JSON.stringify(wrongOwner));
@@ -73,22 +81,29 @@ test('supplier, daemon owner and architecture mismatches refuse before selection
 
 test('missing member, mode, symlink and sidecar owner changes refuse before selection', () => {
   for (const kind of ['missing', 'mode', 'symlink', 'owner'] as const) {
-    const f = fixture(); let calls = 0;
-    if (kind === 'missing') rmSync(f.library);
-    if (kind === 'mode') chmodSync(f.library, 0o600);
-    if (kind === 'symlink') { const foreign = join(f.root, 'foreign'); writeFileSync(foreign, f.bytes); rmSync(f.library); symlinkSync(foreign, f.library); }
-    if (kind === 'owner') writeFileSync(f.provenance, JSON.stringify({ ...f.owner, daemonVersion: '2.0.24' }));
-    expect(() => initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => { calls++; return true; } })).toThrow();
-    expect(calls).toBe(0);
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      const f = fixture('arm64', { pinBytes: kind === 'owner' }); let calls = 0;
+      if (kind === 'missing') rmSync(f.library);
+      if (kind === 'mode') chmodSync(f.library, 0o600);
+      if (kind === 'symlink') { const foreign = join(f.root, 'foreign'); writeFileSync(foreign, f.bytes); rmSync(f.library); symlinkSync(foreign, f.library); }
+      if (kind === 'owner') writeFileSync(f.provenance, JSON.stringify({ ...f.owner, daemonVersion: '2.0.24' }));
+      expect(() => initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => { calls++; return true; } })).toThrow();
+      expect(calls).toBe(0);
+      if (kind !== 'owner') expect(hash).not.toHaveBeenCalled();
+    } finally { hash.mockRestore(); }
   }
 });
 
 test('oversized library and provenance refuse before reading or selecting', () => {
   for (const member of ['library', 'provenance'] as const) {
-    const f = fixture(); let calls = 0;
-    writeFileSync(f[member], Buffer.alloc(member === 'library' ? f.owner.size + 1 : 16_385));
-    expect(() => initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => { calls++; return true; } })).toThrow('size bound');
-    expect(calls).toBe(0);
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      const f = fixture('arm64', { pinBytes: false }); let calls = 0;
+      writeFileSync(f[member], Buffer.alloc(member === 'library' ? f.owner.size + 1 : 16_385));
+      expect(() => initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => { calls++; return true; } })).toThrow('size bound');
+      expect(calls).toBe(0); expect(hash).not.toHaveBeenCalled();
+    } finally { hash.mockRestore(); }
   }
 });
 
@@ -110,8 +125,11 @@ test('prior-constructor selection refusal and cancellation never admit startup',
   const f = fixture();
   expect(() => initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => false })).toThrow('Bun refused');
   const controller = new AbortController(); controller.abort(); let calls = 0;
-  expect(() => initializeDaemonNativeSqlite({ ...f.options, signal: controller.signal, setCustomSQLite: () => { calls++; return true; } })).toThrow();
-  expect(calls).toBe(0);
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    expect(() => initializeDaemonNativeSqlite({ ...f.options, signal: controller.signal, setCustomSQLite: () => { calls++; return true; } })).toThrow();
+    expect(calls).toBe(0); expect(hash).not.toHaveBeenCalled();
+  } finally { hash.mockRestore(); }
 });
 
 test('asynchronous current restriction refuses and consumes rejection before selection', async () => {

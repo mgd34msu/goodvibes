@@ -265,7 +265,7 @@ test('the exact recorded Jev content review is bound to the saved answer and an 
   expect(admitted.contentReview!.matchesSavedAnswer).toBe(true);
   expect(admitted.contentReview!.record).toEqual(review);
   expect(admitted.contentReview!.recordedDecisionId).toBe('work.d1');
-  const stale = contract({ decisions: [decision, { ...decision, id: 'work.d2', reason: JSON.stringify({ ...review, outputDigest: hashState('A different answer.') }) }] });
+  const stale = contract({ decisions: [decision, { ...decision, id: 'work.d2', reason: JSON.stringify({ ...review, outputDigest: (review.outputDigest[0] === '0' ? '1' : '0') + review.outputDigest.slice(1) }) }] });
   const held = completedContractEvidence({ list: () => [stale] }, 'session')[0]!;
   expect(held.contentReview!.matchesSavedAnswer).toBe(false);
   expect(held.contentReview!.recordedDecisionId).toBe('work.d2');

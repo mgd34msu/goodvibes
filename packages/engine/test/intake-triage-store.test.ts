@@ -9,8 +9,13 @@ import type { TriageEvidence, TriageReceipt } from '../platform/src/platform/int
 import { loadSqlJsEngine, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
-function binding(id: string, subject = 'Synthetic routine update') {
-  return { ...triageBinding(captureTriageInputs([{ id, surface: 'synthetic', subject }])[0]!), model: 'jev-latest', actualModel: 'jev-1.13.0', targetModel: 'jev-latest' }; // Resolved model from the authored response, not a request pin.
+function binding(id: string, subject?: string) {
+  // The store tests exercise saved shape/ownership, not message matching. Only
+  // the explicit two-input consistency control needs freshly derived bindings.
+  const stored = subject === undefined
+    ? { id, inputHash: 'a'.repeat(64), battery: inboxTriage.name, batteryVersion: inboxTriage.version, receiptVersion: 2 as const }
+    : triageBinding(captureTriageInputs([{ id, surface: 'synthetic', subject }])[0]!);
+  return { ...stored, model: 'jev-latest', actualModel: 'jev-1.13.0', targetModel: 'jev-latest' }; // Resolved model from the authored response, not a request pin.
 }
 
 function settled(id: string, subject?: string): TriageEvidence {
@@ -21,9 +26,9 @@ function settled(id: string, subject?: string): TriageEvidence {
   return value;
 }
 
-function attempt(id: string, status: 'held' | 'unavailable', subject = 'Synthetic changed input'): TriageReceipt {
-  if (status === 'unavailable') return { ...triageBinding(captureTriageInputs([{ id, surface: 'synthetic', subject }])[0]!), status };
-  return { ...binding(id, subject), status };
+function attempt(id: string, status: 'held' | 'unavailable'): TriageReceipt {
+  const receipt = { id, battery: inboxTriage.name, batteryVersion: inboxTriage.version, receiptVersion: 3, status } as const;
+  return status === 'unavailable' ? receipt : { ...receipt, model: 'jev-latest', actualModel: 'jev-1.13.0', targetModel: 'jev-latest' };
 }
 
 let dir: string;
@@ -90,7 +95,7 @@ describe('SqliteTriageStore', () => {
     const store = owner();
     const previous = settled('a');
     const held = attempt('a', 'held');
-    const unavailable = attempt('a', 'unavailable', 'Synthetic third input');
+    const unavailable = attempt('a', 'unavailable');
     await store.commit([previous]);
     await store.commit([held, attempt('new', 'held')]);
     expect((await store.readBatch(['a'])).get('a')).toEqual({ latest: held, settled: previous });
@@ -113,7 +118,7 @@ describe('SqliteTriageStore', () => {
 
   test('captures caller-owned receipts and ids before asynchronous admission', async () => {
     const store = owner();
-    const mutable = structuredClone(settled('original'));
+    const original = settled('original'), mutable = structuredClone(original);
     const write = store.commit([mutable]);
     Object.assign(mutable, { id: 'changed' });
     Object.assign(mutable.tags, { 0: 'unexpected' });
@@ -121,7 +126,7 @@ describe('SqliteTriageStore', () => {
     const read = store.readBatch(ids);
     ids[0] = 'changed';
     await write;
-    expect((await read).get('original')?.latest).toEqual(settled('original'));
+    expect((await read).get('original')?.latest).toEqual(original);
     expect((await store.readBatch(['changed'])).size).toBe(0);
   });
 
@@ -131,9 +136,9 @@ describe('SqliteTriageStore', () => {
     const ids = Array.from({ length: 20 }, (_, index) => `item-${index}`);
     await Promise.all(ids.map((id, index) => (index % 2 ? right : left).commit([settled(id)])));
     expect((await left.readBatch(ids)).size).toBe(ids.length);
-    const held = attempt('item-0', 'held');
-    await Promise.all([left.commit([settled('item-0')]), right.commit([held])]);
-    expect((await right.readBatch(['item-0'])).get('item-0')).toEqual({ latest: held, settled: settled('item-0') });
+    const held = attempt('item-0', 'held'), replacement = settled('item-0');
+    await Promise.all([left.commit([replacement]), right.commit([held])]);
+    expect((await right.readBatch(['item-0'])).get('item-0')).toEqual({ latest: held, settled: replacement });
   });
 
   test('symlink working-directory aliases share canonical identity before parent creation', async () => {
@@ -300,7 +305,7 @@ describe('SqliteTriageStore', () => {
     ['unexpected trigger', (db: SqlDatabase) => db.run('CREATE TRIGGER sqlitexhidden AFTER INSERT ON triage_receipts BEGIN DELETE FROM triage_receipts; END')],
   ] as const)('persisted %s corruption is rejected even outside the requested ids', async (_name, alter) => {
     const store = owner();
-    await store.commit([settled('a')]);
+    await store.commit([settled('a', _name === 'inconsistent settled' ? 'Synthetic routine update' : undefined)]);
     await alterDatabase(store.dbPath, alter);
     const bytes = fs.readFileSync(store.dbPath);
     await expect(store.readBatch(['unrelated'])).rejects.toThrow();

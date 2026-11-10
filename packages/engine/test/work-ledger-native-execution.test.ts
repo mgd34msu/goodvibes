@@ -18,7 +18,6 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
 import { createNativeWorkExecutionHost } from '../platform/src/platform/workflow/work-ledger/native-execution.js';
-import { criteriaSetIdForWork } from '../platform/src/platform/contract/durable-admission.js';
 import { getContractInputAuthority, authorizeContractInputPath } from '../platform/src/platform/contract/input-authority.js';
 import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.js';
 import { WorkspaceRegistrationStore } from '../platform/src/platform/workspace/registration/store.js';
@@ -103,7 +102,7 @@ async function fixture(options: { harness?: Partial<HarnessOptions>; decoratePor
   };
   const key = {
     workId: work.id,
-    criteriaId: criteriaSetIdForWork(work.id),
+    criteriaId: `criteria-v2:${work.id}`,
     criteriaRevision: String(work.criteriaRevision),
     attemptId: attempt.id,
   };

@@ -12,12 +12,13 @@ function fixture() {
   const root = makeProjectTempDir('verified-reader-pins'), execPath = join(root, 'goodvibes'), asset = clientReaderAsset('@goodvibes-jev/tui', 'darwin-x64');
   const binary = Buffer.from('Known downloaded terminal bytes');
   writeFileSync(execPath, 'Current image', { mode: 0o755 });
+  const binaryPin = sha256(binary);
   const artifact: ClientReaderArtifact = { schema: 1, packageName: '@goodvibes-jev/tui', version: '3.1.2', target: 'darwin-x64',
     sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40), readers: nativeReaderCapabilities('3.1.2'),
-    files: [{ path: asset, sha256: sha256(binary), mode: 0o755, size: binary.length }] };
+    files: [{ path: asset, sha256: binaryPin, mode: 0o755, size: binary.length }] };
   const metadata = Buffer.from(JSON.stringify(artifact)), readerAsset = asset + '.reader-ci-artifact.json';
   const assets = new Map([[asset, binary], [readerAsset, metadata]]);
-  const manifest = Buffer.from([...assets].map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join(''));
+  const manifest = Buffer.from([...assets].map(([name, bytes]) => `${name === asset ? binaryPin : sha256(bytes)}  ${name}\n`).join(''));
   const owner = createNativeDataWriteOwner({ execPath, version: '3.1.2', assertCurrent() {} }); owner.declare('knowledge-schema-v12');
   const fetchImpl = async (url: string) => new Response(url.endsWith('/SHA256SUMS.txt') ? manifest : assets.get(url.slice(url.lastIndexOf('/') + 1)), { status: 200 });
   return { root, execPath, asset, readerAsset, binary, fetchImpl, targets: [

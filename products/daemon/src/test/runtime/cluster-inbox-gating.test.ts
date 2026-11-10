@@ -105,8 +105,9 @@ test('coordinator construction and account registration are inert; account ident
   const unregister = coordinator.register(gate);
   expect(started).toBe(0); expect(coordinator.isMaster).toBe(false); expect(readdirSync(root)).toEqual([]);
   expect(gate.id).toBe(`inbox-poller:${account}`); expect(gate.surface).toEqual(inboxSurface(account));
-  expect(surfaceIdFor(gate.surface)).toMatch(/^[0-9a-f]{32}$/);
-  expect(surfaceIdFor(gate.surface)).not.toBe(surfaceIdFor(inboxSurface(other)));
+  const selectedSurfaceId = surfaceIdFor(gate.surface);
+  expect(selectedSurfaceId).toMatch(/^[0-9a-f]{32}$/);
+  expect(selectedSurfaceId).not.toBe(surfaceIdFor(inboxSurface(other)));
   unregister();
 });
 

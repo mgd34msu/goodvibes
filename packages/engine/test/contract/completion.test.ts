@@ -502,6 +502,7 @@ test.each([false, true])('a long finding uses complete shared evidence and retri
 test('a final-content receipt resolves its own pending requirement through a genuine original-requirements recheck', async () => {
   using log = new SqliteDecisionLog(':memory:');
   const order: string[] = [];
+  let expectedOutput: string | undefined, expectedOutputDigest: ReturnType<typeof hashState> | undefined;
   let workers = 0;
   const plan = oneUnitPlan(1);
   plan.criteria[0]!.text = 'Have native Jev validate the completed final answer before publishing it.';
@@ -516,7 +517,7 @@ test('a final-content receipt resolves its own pending requirement through a gen
           expect(evidence.finalAnswerReview.passed).toBe(true);
           const output = context.state['output'];
           if (typeof output !== 'string') throw new Error('Expected the exact final answer');
-          const expectedOutputDigest = hashState(output);
+          if (output !== expectedOutput) { expectedOutputDigest = hashState(output); expectedOutput = output; }
           expect(evidence.finalAnswerReview.outputDigest).toBe(expectedOutputDigest);
           expect(log.get(evidence.finalAnswerReview.decisionIds[0]!)?.context.site).toBe('contract.check.final-answer-review');
           expect(evidence).toMatchObject({ orchestration: { currentValidation: { stage: 'original-requirements-after-content-review',

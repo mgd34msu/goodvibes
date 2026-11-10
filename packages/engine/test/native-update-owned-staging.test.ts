@@ -11,9 +11,9 @@ afterEach(() => { for (const close of restore.splice(0).reverse()) close(); });
 function fixture() {
   const root = makeProjectTempDir('native-owned-update'), directory = join(root, 'selected'); fs.mkdirSync(directory);
   const execPath = join(directory, 'goodvibes'), bytes = Buffer.from('Verified replacement program'); fs.writeFileSync(execPath, 'Original program', { mode: 0o755 });
-  const asset = 'goodvibes-macos-x64', manifest = Buffer.from(`${sha256(bytes)}  ${asset}\n`);
-  return { root, directory, execPath, bytes, asset, manifest,
-    fetchImpl: async (url: string) => new Response(url.endsWith('/SHA256SUMS.txt') ? manifest : bytes),
+  const asset = 'goodvibes-macos-x64';
+  return { root, directory, execPath, bytes, asset,
+    fetchImpl: async (url: string) => new Response(url.endsWith('/SHA256SUMS.txt') ? `${sha256(bytes)}  ${asset}\n` : bytes),
     targets: [{ label: 'terminal', path: execPath, assetName: asset, executable: true }],
   };
 }

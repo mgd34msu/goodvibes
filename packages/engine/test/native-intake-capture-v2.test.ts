@@ -26,7 +26,10 @@ function facts() {
     owner: { authorityId: 'pairing:private-device', authorityRevision: 'private-token-incarnation', authorityScopes: ['read:work-ledger', 'write:work-ledger'], scopeId: 'workspace:private-id', scopeRevision: 'private-registry:1:1', projectRoot: '/private/project' },
     generation: 1, state: 'captured' as const, stage: null, route: null, reason: null, proposalsSpent: 0, proposal: null, decisions: [], association: null };
 }
-function fresh(continuation = createNativeContinuationSnapshotOwner().capture('hosted-session', [{ role: 'assistant', content: 'Exact prior answer. 🌻' }])) {
+function freshContinuation() {
+  return createNativeContinuationSnapshotOwner().capture('hosted-session', [{ role: 'assistant', content: 'Exact prior answer. 🌻' }]);
+}
+function fresh(continuation = freshContinuation()) {
   return createNativeConversationCapture({ ...facts(), continuation });
 }
 function file() { const root = mkdtempSync(join(tmpdir(), 'native-capture-v2-')); roots.push(root); return join(root, 'knowledge.sqlite'); }
@@ -224,5 +227,5 @@ test('historical v1 captures retain original hashed labels and reject a v2 conti
   const restored = parseNativeConversationCapture(structuredClone(old));
   expect(restored).toEqual(old); expect(restored.version).toBe(1); expect(nativeConversationDecisionBinding(restored, 'routing')).toEqual(nativeConversationDecisionBinding(old, 'routing'));
   expect(nativeIntakeDecisionSite(restored)).toMatch(/^work-ledger\.native-intake\.admission:[a-f0-9]{64}$/);
-  expect(() => parseNativeConversationCapture({ ...old, continuation: fresh().continuation })).toThrow();
+  expect(() => parseNativeConversationCapture({ ...old, continuation: freshContinuation() })).toThrow();
 });

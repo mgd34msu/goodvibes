@@ -1,11 +1,12 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { chmodSync, copyFileSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import * as crypto from 'node:crypto';
 import { resolveDaemonCliOwnership } from '../../cli/configuration.js';
 import { applyVerifiedUpdate, createNativeDataWriteOwner, inspectDaemonNativeInstallation, nativeReaderCapabilities, realUpdateFileIo, rollbackKeptPrevious, sha256 } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { rollbackDaemonNative } from '../../../scripts/install-native.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
-import { writeNativeInstallationFixture } from '../helpers/native-runtime-provenance.js';
+import { writeNativeInstallationFixture, writeNativeInstallationReleaseFixture } from '../helpers/native-runtime-provenance.js';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { resolveDaemonUpdateArtifact, resolveInstalledDaemonUpdateArtifact } from '../../daemon/lifecycle.js';
@@ -300,7 +301,21 @@ describe('verified native lifecycle admission', () => {
   });
 
   test('verified native update and rollback can be admitted by each freshly restarted artifact', async () => {
-    const f = installedFixture('9.9.8-test'); const next = installedFixture('9.9.9-test');
+    const { f, next } = (() => {
+      const hash = spyOn(crypto, 'createHash');
+      try {
+        const f = installedFixture('9.9.8-test');
+        const localHashCount = hash.mock.calls.length;
+        expect(f).not.toHaveProperty('checksumManifest');
+        const next = writeNativeInstallationReleaseFixture(makeOwnedTempDir('daemon-lifecycle-release'), '9.9.9-test');
+        expect(hash.mock.calls.length).toBe(localHashCount * 2 + Object.keys(next.assets).length);
+        const manifest = next.checksumManifest;
+        expect(next.checksumManifest).toBe(manifest);
+        expect(Object.getOwnPropertyDescriptor(next, 'checksumManifest')?.value).toBe(manifest);
+        expect(hash.mock.calls.length).toBe(localHashCount * 2 + Object.keys(next.assets).length);
+        return { f, next };
+      } finally { hash.mockRestore(); }
+    })();
     const old = resolveInstalledDaemonUpdateArtifact(defaultHome, f.options);
     const requests: string[] = []; const base = 'https://native-fixture.test/release';
     await applyVerifiedUpdate({ targets: f.targets, platform: 'linux', io: realUpdateFileIo,

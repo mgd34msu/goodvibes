@@ -65,23 +65,11 @@ describe('signBundle', () => {
     expect(bundle.bundleId).toBe('test-bundle-1');
     expect(typeof bundle.signature).toBe('string');
     expect(bundle.signature).toMatch(/^[0-9a-f]{64}$/);
-  });
-
-  it('includes payload and issuedAt in the bundle', () => {
-    const bundle = signBundle('b2', TEST_PAYLOAD, TEST_KEY);
+    // Inspect passthrough metadata on this actual signature-producing result,
+    // instead of generating unused MACs in separate metadata-only fixtures.
     expect(bundle.payload).toEqual(TEST_PAYLOAD);
     expect(typeof bundle.issuedAt).toBe('string');
-    // issuedAt should be a valid ISO 8601 string
-    expect(() => new Date(bundle.issuedAt)).not.toThrow();
-  });
-
-  it('includes issuer when provided', () => {
-    const bundle = signBundle('b3', TEST_PAYLOAD, TEST_KEY, 'test-issuer');
-    expect(bundle.issuer).toBe('test-issuer');
-  });
-
-  it('omits issuer when not provided', () => {
-    const bundle = signBundle('b4', TEST_PAYLOAD, TEST_KEY);
+    expect(new Date(bundle.issuedAt).toISOString()).toBe(bundle.issuedAt);
     expect(bundle.issuer).toBeUndefined();
   });
 
@@ -89,7 +77,8 @@ describe('signBundle', () => {
     // Since issuedAt is generated at sign time, two independent sign() calls
     // will have different issuedAt and thus different signatures. The correct
     // stability test is that the signed bundle verifies successfully.
-    const bundle = signBundle('b5', TEST_PAYLOAD, TEST_KEY);
+    const bundle = signBundle('b5', TEST_PAYLOAD, TEST_KEY, 'test-issuer');
+    expect(bundle.issuer).toBe('test-issuer');
     const { ok, status } = verifyBundle(bundle, TEST_KEY);
     expect(ok).toBe(true);
     expect(status).toBe('valid');

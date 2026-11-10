@@ -267,10 +267,12 @@ export async function verifyStepUpAssertion(params: StepUpVerifyParams): Promise
   // it before hashing RP/client data; viable signatures still take every check.
   const rawSignature = derToRawEcdsaSignature(signatureDer);
   if (!rawSignature) return { ok: false, reason: 'bad-signature' };
-  const expectedRpIdHash = await sha256(new TextEncoder().encode(params.rpId) as Uint8Array<ArrayBuffer>);
-  if (toBase64Url(parsedAuth.rpIdHash) !== toBase64Url(expectedRpIdHash)) return { ok: false, reason: 'rpid-mismatch' };
+  // Missing required authenticator flags already prevent authentication;
+  // checking their presence does not require a relying-party digest.
   if (!parsedAuth.userPresent) return { ok: false, reason: 'user-presence-missing' };
   if (params.requireUserVerification && !parsedAuth.userVerified) return { ok: false, reason: 'user-verification-missing' };
+  const expectedRpIdHash = await sha256(new TextEncoder().encode(params.rpId) as Uint8Array<ArrayBuffer>);
+  if (toBase64Url(parsedAuth.rpIdHash) !== toBase64Url(expectedRpIdHash)) return { ok: false, reason: 'rpid-mismatch' };
 
   const rawPoint = coseP256ToRawPoint(fromBase64Url(credential.publicKeyCose));
   if (!rawPoint) return { ok: false, reason: 'bad-public-key' };

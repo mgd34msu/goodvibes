@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,8 +51,9 @@ function response(url: string, body: Buffer): Awaited<ReturnType<UpdateFetchLike
     arrayBuffer: async () => Uint8Array.from(body).buffer };
 }
 const fetchRelease: UpdateFetchLike = async (url) => {
-  const manifest = Buffer.from(Object.entries(payloads).map(([name, bytes]) => `${sha256(bytes)}  ${name}`).join('\n'));
-  return response(url, url.endsWith('/SHA256SUMS.txt') ? manifest : url.endsWith('/daemon') ? payloads.daemon : payloads.addon);
+  if (url.endsWith('/SHA256SUMS.txt')) return response(url, Buffer.from(
+    Object.entries(payloads).map(([name, bytes]) => `${sha256(bytes)}  ${name}`).join('\n')));
+  return response(url, url.endsWith('/daemon') ? payloads.daemon : payloads.addon);
 };
 const apply = (io: UpdateFileIo, rest: Partial<Parameters<typeof applyVerifiedUpdate>[0]> = {}) =>
   applyVerifiedUpdate({ fetchImpl: fetchRelease, downloadBaseUrl: base, targets, io, platform: 'linux', ...rest });
@@ -296,10 +298,40 @@ describe('asynchronous preparation owns immutable intent', () => {
     await apply(state.io, { fetchImpl });
     expect(state.files.get('/fixture/daemon')?.toString()).toBe('new daemon');
   });
+  test('a missing later target pin refuses the complete cohort before any payload fetch or body hash', async () => {
+    const state = memory(), requests: string[] = [];
+    const manifestResponse = await fetchRelease(`${base}/SHA256SUMS.txt`);
+    const completeManifest = await manifestResponse.text();
+    const missingAddon = completeManifest.split('\n').filter(line => !line.endsWith('  addon')).join('\n');
+    let complete = false, admissions = 0;
+    const fetchImpl: UpdateFetchLike = async url => {
+      requests.push(url);
+      return response(url, url.endsWith('/SHA256SUMS.txt') ? Buffer.from(complete ? completeManifest : missingAddon)
+        : url.endsWith('/daemon') ? payloads.daemon : payloads.addon);
+    };
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      await expect(apply(state.io, { fetchImpl })).rejects.toThrow('no checksum entry for addon');
+      expect(requests).toEqual([`${base}/SHA256SUMS.txt`]);
+      expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+      expect(state.operations).toEqual([]); expect(state.contents()).toEqual(initial);
+      complete = true; requests.length = 0;
+      await apply(state.io, { fetchImpl, beforeCommit() {
+        admissions++;
+        expect(state.files.get('/fixture/daemon.update-download')).toEqual(payloads.daemon);
+        expect(state.files.get('/fixture/lib/addon.update-download')).toEqual(payloads.addon);
+      } });
+      expect(admissions).toBe(1);
+      expect(requests).toEqual([`${base}/SHA256SUMS.txt`, `${base}/daemon`, `${base}/addon`]);
+      expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(2);
+      expect(state.files.get('/fixture/daemon')).toEqual(payloads.daemon);
+      expect(state.files.get('/fixture/lib/addon')).toEqual(payloads.addon);
+    } finally { hash.mockRestore(); }
+  });
   test('conflicting checksum entries refuse the cohort before any write', async () => {
     const state = memory();
-    const originalPin = sha256(payloads.daemon);
-    const conflictingPin = (originalPin[0] === '0' ? '1' : '0') + originalPin.slice(1);
+    // Conflict is rejected while parsing the manifest, before payload integrity.
+    const originalPin = 'a'.repeat(64), conflictingPin = 'b'.repeat(64);
     const fetchImpl: UpdateFetchLike = async (url) => url.endsWith('/SHA256SUMS.txt')
       ? response(url, Buffer.from(`${originalPin}  daemon\n${conflictingPin}  daemon`))
       : fetchRelease(url);

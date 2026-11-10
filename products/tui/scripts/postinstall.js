@@ -5,7 +5,7 @@ import { isPrivateWorkspaceSource } from '../src/cli/workspace-source.ts';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CHECKSUM_MANIFEST_NAME, parseChecksumFile, resolveArtifactNames, sha256, verifyChecksum } from '../src/runtime/release-artifacts.ts';
+import { CHECKSUM_MANIFEST_NAME, parseChecksumFile, requireChecksum, resolveArtifactNames, sha256, verifyChecksum } from '../src/runtime/release-artifacts.ts';
 
 // Platform package names, mirrored from scripts/platform-packages.ts, keyed by
 // `${process.platform}-${node-arch}`.
@@ -155,13 +155,18 @@ async function installPlatformBinaries() {
   writeFileSync(join(vendorDir, 'SHA256SUMS.txt'), checksumText);
   const checksums = parseChecksumFile(checksumText);
 
-  const artifactName = artifacts.app;
-  const destination = join(vendorDir, artifactName);
+  await installVerifiedReleaseBinary(artifacts.app, checksums, releaseBaseUrl, join(vendorDir, artifacts.app));
+
+  console.log(`postinstall: installed the release binary for ${process.platform}-${process.arch}`);
+}
+
+/** Download and install one manifest-pinned release binary. */
+export async function installVerifiedReleaseBinary(artifactName, checksums, releaseBaseUrl, destination) {
+  const expected = requireChecksum(artifactName, checksums.get(artifactName));
   const tempDestination = `${destination}.download`;
   rmSync(tempDestination, { force: true });
   await downloadFile(`${releaseBaseUrl}/${artifactName}`, tempDestination);
   const actual = sha256(readFileSync(tempDestination));
-  const expected = checksums.get(artifactName);
   try {
     verifyChecksum(artifactName, actual, expected);
   } catch (error) {
@@ -172,8 +177,6 @@ async function installPlatformBinaries() {
   copyFileSync(tempDestination, destination);
   rmSync(tempDestination, { force: true });
   prepareBinary(destination);
-
-  console.log(`postinstall: installed the release binary for ${process.platform}-${process.arch}`);
 }
 
 function deployBundledFiles() {
@@ -299,4 +302,4 @@ if (import.meta.main) {
   await main();
 }
 
-export { verifyChecksum, parseChecksumFile, sha256, resolveArtifactNames, CHECKSUM_MANIFEST_NAME, installWakeWordModel };
+export { verifyChecksum, requireChecksum, parseChecksumFile, sha256, resolveArtifactNames, CHECKSUM_MANIFEST_NAME, installWakeWordModel };

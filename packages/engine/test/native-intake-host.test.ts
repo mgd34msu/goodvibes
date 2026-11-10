@@ -476,7 +476,7 @@ test('continuation prefix invalidation fences an in-flight Jev response before p
 test('continuation rejects malformed host revisions and ledger-only callers before history access', async () => {
   let captures = 0;
   const f = await fixture({ continuation: {
-    async capture() { captures++; return { ...continuationSnapshot([]), revision: '0'.repeat(64) }; }, assertCurrent() {},
+    async capture() { captures++; return { sessionId: 'hosted-owned', messages: [], revision: '0'.repeat(64) }; }, assertCurrent() {},
   } });
   const narrowAuthority = { current: () => ({ ...f.authority.current()!, scopes: ['read:work-ledger', 'write:work-ledger'] }), withCurrent: f.authority.withCurrent.bind(f.authority) };
   const command = { ...f.original, continuation: { sessionId: 'hosted-owned' } };

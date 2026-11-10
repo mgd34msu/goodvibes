@@ -145,7 +145,8 @@ describe('loadPolicyBundle (managed mode)', () => {
   });
 
   it('rejects when no key is provided in managed mode', () => {
-    const bundle = makeSignedBundle('m-5');
+    // No signing key means this branch never verifies the signature bytes.
+    const bundle = { ...createUnsignedBundle('m-5', EMPTY_PAYLOAD), signature: 'a'.repeat(64) };
     // Managed mode but no key, status=skipped → rejected
     const result = loadPolicyBundle(bundle, { managed: true });
     expect(result.ok).toBe(false);

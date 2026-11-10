@@ -92,7 +92,8 @@ test('a v1 wire peer and two current peers converge on one old total order after
   await startNode(world, first); await advance(world, 1100);
   const second = addNode(world, { id: 'mixed-current-c', version: '3.1.2', surfaces: [topic], settings: { secret } }); world.bus.partition(second.transport, 'second');
   await startNode(world, second); await advance(world, 1100);
-  const surface = idFor(topic), expected = [old, first, second].sort((a, b) => oldRank(a.id, surface).localeCompare(oldRank(b.id, surface)))[0];
+  const surface = idFor(topic), expected = [old, first, second].map(node => ({ node, rank: oldRank(node.id, surface) }))
+    .sort((a, b) => a.rank.localeCompare(b.rank))[0]?.node;
   world.bus.heal(); await advance(world, 5000);
   expect<unknown>(holders(world, topic)).toEqual([expected]);
   for (const node of [first, second]) {

@@ -61,10 +61,9 @@ describe('only one cluster node consumes a mailbox', () => {
     // A node watching the signup alias must not stand down for a node watching
     // the owner's personal mailbox, so the discriminator carries both the
     // account and the mailbox.
-    expect(surfaceIdFor(inboxSurface('email:primary:INBOX')))
-      .not.toBe(surfaceIdFor(inboxSurface('email:primary:Signups')));
-    expect(surfaceIdFor(inboxSurface('email:primary:INBOX')))
-      .not.toBe(surfaceIdFor(inboxSurface('email:secondary:INBOX')));
+    const primary = surfaceIdFor(inboxSurface('email:primary:INBOX'));
+    expect(primary).not.toBe(surfaceIdFor(inboxSurface('email:primary:Signups')));
+    expect(primary).not.toBe(surfaceIdFor(inboxSurface('email:secondary:INBOX')));
   });
 });
 

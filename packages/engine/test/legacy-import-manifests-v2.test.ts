@@ -1,6 +1,7 @@
 /** Actual preparation/foreign validation, no provider or product mock. Tests UNRUN. */
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
+import { canonicalJson, toJson } from '@goodvibes-jev/judgment';
 import {
   assertLegacyWorkLedgerSourcesCurrent, matchLegacyWorkLedgerManifest, prepareLegacyWorkLedgerMigration,
   replayLegacyWorkLedgerPreparation, validateLegacyWorkLedgerManifest, type LegacyMigrationInput, type LegacyMigrationManifest,
@@ -8,29 +9,50 @@ import {
 import { workLedgerCommandSchema } from '../platform/src/platform/workflow/work-ledger/types.js';
 import { createEmptyWorkLedgerState, createWorkLedger, readWorkLedgerState } from '../platform/src/platform/workflow/work-ledger/service.js';
 
-function input(): LegacyMigrationInput {
+function input() {
   const decision = { id: 'decision', title: 'Preserve the decision', text: 'Exact historical text', status: 'accepted' };
+  const stateSource = { id: 'source-state', connectorId: 'goodvibes-project-planning', metadata: {
+    projectPlanning: true, projectId: 'project', knowledgeSpaceId: 'space', planningArtifactKind: 'state', planningArtifactId: 'plan',
+    value: { id: 'plan', projectId: 'project', knowledgeSpaceId: 'space', openQuestions: [], answeredQuestions: [], decisions: [decision], dependencies: [],
+      tasks: [{ id: 'task', title: 'Exact historical task', status: 'completed' }] },
+  } };
+  const decisionSource = { id: 'source-decision', connectorId: 'goodvibes-project-planning', metadata: {
+    projectPlanning: true, projectId: 'project', knowledgeSpaceId: 'space', planningArtifactKind: 'decision', planningArtifactId: decision.id, value: decision,
+  } };
   return { hostId: 'host', projectId: 'project', expectedLedgerRevision: 0, pendingLocalChanges: false, occupiedWorkIds: [], sources: [
-    { generation: 'kr-' + 'a'.repeat(32), source: { id: 'source-state', connectorId: 'goodvibes-project-planning', metadata: {
-      projectPlanning: true, projectId: 'project', knowledgeSpaceId: 'space', planningArtifactKind: 'state', planningArtifactId: 'plan',
-      value: { id: 'plan', projectId: 'project', knowledgeSpaceId: 'space', openQuestions: [], answeredQuestions: [], decisions: [decision], dependencies: [],
-        tasks: [{ id: 'task', title: 'Exact historical task', status: 'completed' }] },
-    } } },
-    { generation: 'kr-' + 'b'.repeat(32), source: { id: 'source-decision', connectorId: 'goodvibes-project-planning', metadata: {
-      projectPlanning: true, projectId: 'project', knowledgeSpaceId: 'space', planningArtifactKind: 'decision', planningArtifactId: decision.id, value: decision,
-    } } },
-  ] };
+    { generation: 'kr-' + 'a'.repeat(32), source: stateSource },
+    { generation: 'kr-' + 'b'.repeat(32), source: decisionSource },
+  ] as const } satisfies LegacyMigrationInput;
 }
-function prepared(value = input()) {
+
+function prepared(value: LegacyMigrationInput = input()) {
   const result = prepareLegacyWorkLedgerMigration(value);
   if (result.kind !== 'prepared') throw new Error(result.reason);
   return result.manifest;
 }
-function oldManifest(value: LegacyMigrationManifest): LegacyMigrationManifest {
-  const { digest: _digest, ...original } = value;
-  const body = { ...original, version: 1 as const, sources: value.sources.map(entry => ({ source: entry.source, generation: entry.generation,
-    digest: crypto.createHash('sha256').update(JSON.stringify(entry.source)).digest('hex'),
-  })) };
+function oldManifest(): LegacyMigrationManifest {
+  // An independent writer of this fixed historical fixture. Do not call the
+  // modern preparer only to discard its complete v2 commitment immediately.
+  const original = input();
+  const canonical = <T>(value: T): T => JSON.parse(canonicalJson(toJson(value))) as T;
+  const stateSource = canonical(original.sources[0].source), decisionSource = canonical(original.sources[1].source);
+  const state = stateSource.metadata.value, decision = decisionSource.metadata.value;
+  const fragment = (sourceId: string, pointer: string, value: typeof decision | typeof state | typeof state.tasks[number]) =>
+    ({ sourceId, pointer, original: value });
+  const body = { version: 1 as const, hostId: original.hostId, projectId: original.projectId,
+    expectedLedgerRevision: original.expectedLedgerRevision,
+    sources: [
+      { source: decisionSource, generation: original.sources[1].generation },
+      { source: stateSource, generation: original.sources[0].generation },
+    ].map(entry => ({ ...entry, digest: crypto.createHash('sha256').update(JSON.stringify(entry.source)).digest('hex') })),
+    entities: [
+      { kind: 'artifact' as const, id: decisionSource.id, fragments: [fragment(decisionSource.id, '/metadata/value', decision)], verification: 'unverified' as const },
+      { kind: 'decision' as const, id: decision.id, fragments: [fragment(decisionSource.id, '/metadata/value', decision),
+        fragment(stateSource.id, '/metadata/value/decisions/0', state.decisions[0]!)], verification: 'unverified' as const },
+      { kind: 'artifact' as const, id: stateSource.id, fragments: [fragment(stateSource.id, '/metadata/value', state)], verification: 'unverified' as const },
+      { kind: 'work' as const, id: state.tasks[0]!.id, fragments: [fragment(stateSource.id, '/metadata/value/tasks/0', state.tasks[0]!)],
+        reportedState: 'complete' as const, verification: 'unverified' as const },
+    ], links: [], executionAuthority: 'none' as const, persistence: 'not-imported' as const };
   return { ...body, digest: crypto.createHash('sha256').update(JSON.stringify(body)).digest('hex') };
 }
 
@@ -80,7 +102,13 @@ test('source currentness checks complete exact bytes and generation independentl
 });
 
 test('actual historical format1 retains its exact per-source commitment and preparation replay recipe', () => {
-  const old = oldManifest(prepared()), admitted = validateLegacyWorkLedgerManifest(old);
+  const hashing = spyOn(crypto, 'createHash');
+  let old: LegacyMigrationManifest;
+  try {
+    old = oldManifest();
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(3); // Two old source pins and the complete old manifest.
+  } finally { hashing.mockRestore(); }
+  const admitted = validateLegacyWorkLedgerManifest(old);
   expect(admitted).toEqual(old); expect(admitted.version).toBe(1); expect(admitted.sources.every(entry => entry.digest?.length === 64)).toBe(true);
   expect(replayLegacyWorkLedgerPreparation(admitted, input())).toEqual({ kind: 'prepared', manifest: admitted });
   const malformed = structuredClone(admitted); delete (malformed.sources[0] as { digest?: string }).digest;
@@ -120,7 +148,7 @@ test('actual saved JSON event and receipt projections preserve canonical plain d
 });
 
 test('historical manifest1 insertion order survives saved signature validation and exact restart lookup/retry', async () => {
-  const manifest = validateLegacyWorkLedgerManifest(oldManifest(prepared())), byId = new Map(manifest.sources.map(entry => [String(entry.source.id), entry]));
+  const manifest = validateLegacyWorkLedgerManifest(oldManifest()), byId = new Map(manifest.sources.map(entry => [String(entry.source.id), entry]));
   let state = createEmptyWorkLedgerState('project');
   const ledger = createWorkLedger({ projectId: 'project', importHostId: 'host', clock: { now: () => 10, newId: () => { throw new Error('No execution identities'); } }, storage: {
     async read() { return state; }, async transaction(decide) { const decision = decide(state, { readSource: id => byId.get(id)! }); if (decision.next) state = decision.next; return decision.value; }, subscribe() { return () => {}; },

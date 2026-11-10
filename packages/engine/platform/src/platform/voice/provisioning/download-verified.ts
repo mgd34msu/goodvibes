@@ -43,12 +43,18 @@ function sha256Hex(bytes: Uint8Array): string {
   return hash.digest('hex');
 }
 
+function checksumPin(value: string): string | undefined {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value) ? value.toLowerCase() : undefined;
+}
+
 /** True when an existing file already matches the pinned size + checksum. */
 export function fileMatches(path: string, spec: VerifiedDownloadSpec): boolean {
   try {
+    const expected = checksumPin(spec.sha256);
+    if (expected === undefined) return false;
     if (!existsSync(path)) return false;
     if (statSync(path).size !== spec.bytes) return false;
-    return sha256Hex(readFileSync(path)) === spec.sha256.toLowerCase();
+    return sha256Hex(readFileSync(path)) === expected;
   } catch {
     return false;
   }
@@ -69,6 +75,9 @@ function verificationFileRevision(path: string): string {
  * provisioning decisions (download skip/replace) always use the full hash.
  */
 export function fileMatchesCached(path: string, spec: VerifiedDownloadSpec): boolean {
+  const expectedSha256 = checksumPin(spec.sha256);
+  if (expectedSha256 === undefined) return false;
+  const expectedBytes = spec.bytes;
   let revision: string;
   try {
     revision = verificationFileRevision(path);
@@ -76,14 +85,13 @@ export function fileMatchesCached(path: string, spec: VerifiedDownloadSpec): boo
     verificationCache.delete(path);
     return false;
   }
-  const expectedSha256 = spec.sha256.toLowerCase();
   const cached = verificationCache.get(path);
-  if (cached && cached.revision === revision && cached.expectedBytes === spec.bytes && cached.expectedSha256 === expectedSha256) return cached.matched;
-  const matched = fileMatches(path, spec);
+  if (cached && cached.revision === revision && cached.expectedBytes === expectedBytes && cached.expectedSha256 === expectedSha256) return cached.matched;
+  const matched = fileMatches(path, { url: spec.url, bytes: expectedBytes, sha256: expectedSha256 });
   try { if (verificationFileRevision(path) !== revision) { verificationCache.delete(path); return false; } }
   catch { verificationCache.delete(path); return false; }
   if (verificationCache.size >= 128) verificationCache.clear();
-  verificationCache.set(path, { revision, expectedBytes: spec.bytes, expectedSha256, matched });
+  verificationCache.set(path, { revision, expectedBytes, expectedSha256, matched });
   return matched;
 }
 
@@ -93,7 +101,10 @@ export function fileMatchesCached(path: string, spec: VerifiedDownloadSpec): boo
  * makes a re-run resumable. Never leaves a partial or unverified file in place.
  */
 export async function downloadVerifiedFile(options: VerifiedDownloadOptions): Promise<VerifiedDownloadResult> {
-  const { spec, destPath } = options;
+  const { spec: declared, destPath } = options;
+  const spec = { url: declared.url, bytes: declared.bytes, sha256: declared.sha256 };
+  const expected = checksumPin(spec.sha256);
+  if (expected === undefined) return { ok: false, reason: 'checksum-mismatch', error: 'missing or malformed SHA-256 pin' };
   if (fileMatches(destPath, spec)) {
     options.onProgress?.('skip', `${destPath} already present and verified`);
     return { ok: true, path: destPath, bytes: spec.bytes, skipped: true };
@@ -113,7 +124,7 @@ export async function downloadVerifiedFile(options: VerifiedDownloadOptions): Pr
     }
     options.onProgress?.('verify', 'verifying checksum');
     const actual = sha256Hex(bytes);
-    if (actual !== spec.sha256.toLowerCase()) {
+    if (actual !== expected) {
       // Checksum mismatch: refuse and keep NOTHING.
       return { ok: false, reason: 'checksum-mismatch', error: `sha256 mismatch: expected ${spec.sha256}, got ${actual}` };
     }

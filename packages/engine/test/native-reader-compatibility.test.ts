@@ -190,15 +190,19 @@ for (const profile of ['old-version', 'same-version-unknown', 'same-version-miss
       : profile === 'same-version-missing' ? { schema: 1 as const, version: candidateVersion, formats: [] } : nativeReaderCapabilities(candidateVersion);
     const candidate = nativeCohortFixture({ version: candidateVersion, daemonBytes: 'candidate-reader', ...(readers ? { readers } : {}) });
     if (profile === 'foreign-reader-profile') {
-      candidate.assets['goodvibes-daemon-linux-x64.reader-ci-artifact.json'] = Buffer.from(JSON.stringify({ ...candidate.artifact, sourceTree: 'f'.repeat(40) }));
-      candidate.checksumManifest = Object.entries(candidate.assets).map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join('');
+      const name = 'goodvibes-daemon-linux-x64.reader-ci-artifact.json';
+      const changed = Buffer.from(JSON.stringify({ ...candidate.artifact, sourceTree: 'f'.repeat(40) }));
+      candidate.assets[name] = changed;
+      const pin = sha256(changed);
+      candidate.checksumManifest = candidate.checksumManifest.split('\n').map(line => line.endsWith('  ' + name) ? `${pin}  ${name}` : line).join('\n');
     }
     if (profile === 'malformed-reader-pin' || profile === 'ambiguous-reader-pin') {
       const name = 'goodvibes-daemon-linux-x64.reader-ci-artifact.json';
-      const bytes = candidate.assets[name]; if (!bytes) throw new Error('Reader fixture asset was not produced');
+      const originalLine = candidate.checksumManifest.split('\n').find(line => line.endsWith('  ' + name));
+      if (!originalLine) throw new Error('Reader fixture asset pin was not produced');
       candidate.checksumManifest = profile === 'malformed-reader-pin'
         ? candidate.checksumManifest.split('\n').map(line => line.endsWith('  ' + name) ? 'not-a-digest  ' + name : line).join('\n')
-        : candidate.checksumManifest + sha256(bytes) + '  ' + name + '\n';
+        : candidate.checksumManifest + originalLine + '\n';
     }
     const floor = '/native-reader-fixture/' + NATIVE_READER_REQUIREMENT_FILE;
     const memory = nativeMemoryIo({ ...previous.installation(execPath), ...(hasRequirement ? { [floor]: Buffer.from(requirement()) } : {}) });

@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import {
   digestSender, normalizeWhitespace, sha256First, stripMarkup,
 } from '../platform/src/platform/intake/text-normalization.js';
@@ -51,10 +52,16 @@ describe('sender digest contract', () => {
     expect(sha256First('こんにちは', 64)).toBe('125aeadf27b0459b8760c13a3d80912dfa8a81a68261906f60d87f4a0268646c');
   });
   test('preserves upstream slice width coercion and bounds', () => {
-    for (const width of [0, -1, -Infinity, NaN]) expect(sha256First('hello', width)).toBe('');
-    expect(sha256First('hello', 3.9)).toBe('2cf');
-    expect(sha256First('hello', Infinity)).toHaveLength(64);
-    expect(sha256First('hello', 100)).toHaveLength(64);
+    const hashes = spyOn(crypto, 'createHash');
+    try {
+      for (const width of [0, -0, -1, -Infinity, NaN, 0.9]) expect(sha256First('hello', width)).toBe('');
+      expect(hashes).not.toHaveBeenCalled();
+      expect(sha256First('hello', 3.9)).toBe('2cf'); expect(hashes).toHaveBeenCalledTimes(1);
+      expect(sha256First('hello', Infinity)).toHaveLength(64);
+      expect(sha256First('hello', 100)).toHaveLength(64);
+      // Empty output cannot hide invalid untyped input; native update still rejects it.
+      expect(() => Reflect.apply(sha256First, undefined, [null, 0])).toThrow();
+    } finally { hashes.mockRestore(); }
   });
   test('does not normalize case, whitespace or Unicode in sender ids', () => {
     expect(digestSender('Alice')).not.toBe(digestSender('alice'));

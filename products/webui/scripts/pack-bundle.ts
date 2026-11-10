@@ -35,7 +35,7 @@
  *   bun run scripts/pack-bundle.ts                 # writes release/ from dist/
  *   bun run scripts/pack-bundle.ts --dist <dir> --out <dir> --version <x.y.z>
  */
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -98,6 +98,14 @@ export function packBundle(options: PackBundleOptions): PackedBundle {
   }
   if (!existsSync(join(dist, 'index.html'))) {
     throw new Error(`${distDir} holds no index.html; that is the file the daemon serves at / and falls back to for app routes, so this is not a bundle. Run the build first.`);
+  }
+  // A foreign manifest already makes this publication impossible. Refuse before
+  // creating an archive or its pin; the exclusive final link still handles races.
+  try {
+    lstatSync(join(planned, 'SHA256SUMS.txt'));
+    throw Object.assign(new Error('Release checksum manifest already exists.'), { code: 'EEXIST' });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   const staging = createReleaseStage(outDir, '.pack-staging-');
   let archive: PublishedReleaseFile | undefined, checksum: PublishedReleaseFile | undefined;

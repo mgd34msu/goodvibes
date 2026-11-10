@@ -329,7 +329,7 @@ test('SQLite settlement publishes one adjacent report/evidence pair and matching
   expect(current.record).toEqual(original.record); expect(current.intent).toEqual(original.intent);
   expect(current.ledger.history.slice(0, 2)).toEqual(original.ledger.history);
   expect(current.settlement).toEqual(receipt); expect(current.ledger.evidence[0]?.target).toEqual(receipt.targetAfterReport);
-  expect(receipt).toMatchObject({ target: f.target, receiptDigest: nativeSettlementDigest(f.record.receipt), payloadRevision: durablePayloadRevision(f.record.request), publicationDigest: nativeSettlementDigest(f.publication), attestation: f.publication.attestation });
+  expect(receipt).toMatchObject({ target: f.target, receiptDigest: f.publication.receiptDigest, payloadRevision: durablePayloadRevision(f.record.request), publicationDigest: nativeSettlementDigest(f.publication), attestation: f.publication.attestation });
   expect(receipt.targetAfterReport).toEqual({ ...f.target, workRevision: f.target.workRevision + 1, attemptRevision: f.target.attemptRevision + 1 });
   expect(Object.keys(current.record!).sort()).toEqual(['authorityScopes', 'decision', 'decisionContext', 'projectId', 'receipt', 'request', 'state', 'target', 'version']);
   expect(() => parseNativeWorkExecutionRecord({ ...current.record, settlement: receipt })).toThrow('invalid');
@@ -401,7 +401,11 @@ test('different storage owners concurrently settle one immutable publication and
   expect(results.filter(result => result.status === 'rejected')).toHaveLength(1);
   const rejected = results.find(result => result.status === 'rejected'); expect(rejected?.status === 'rejected' && rejected.reason).toMatchObject({ code: 'conflict' });
   const winner = g.storage.current(g.key).settlement!;
-  expect([nativeSettlementDigest(g.publication), nativeSettlementDigest(conflict)]).toContain(winner.publicationDigest);
+  const accepted = results.find(result => result.status === 'fulfilled');
+  if (accepted?.status !== 'fulfilled') throw new Error('Missing actual settlement winner');
+  expect(winner).toEqual(accepted.value);
+  const winningPublication = results[0]?.status === 'fulfilled' ? g.publication : conflict;
+  expect(winner.publicationDigest).toBe(nativeSettlementDigest(winningPublication));
   await assertImage(g.file, 4, 1);
 });
 

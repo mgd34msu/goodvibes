@@ -29,7 +29,7 @@ test('schema6 namespace keeps the original durable operation and cross-process e
   const root = makeRepo(); roots.add(root); const input = request(root), first = setup(root);
   const started = await first.runner.startDurable(input), id = started.admission.contractId;
   const admissions = new DurableContractAdmissions(root), directory = join(contractsDir(root), 'admissions');
-  const path = join(directory, durableKeyHash(input.key) + '.json'), lease = path + '.execution';
+  const digest = durableKeyHash(input.key), path = join(directory, digest + '.json'), lease = path + '.execution';
   expect(dirname(contractPath(root, id))).toBe(contractCheckpointsDir(root));
   expect(JSON.parse(readFileSync(contractPath(root, id), 'utf8')).schemaVersion).toBe(6);
   expect(existsSync(join(contractsDir(root), id + '.json'))).toBe(false); expect(existsSync(lease)).toBe(true);
@@ -44,7 +44,7 @@ test('schema6 namespace keeps the original durable operation and cross-process e
   const next = setup(root), resumed = await next.runner.resumeDurable(input.key);
   expect(resumed.admission).toEqual(started.admission); expect(resumed.admission.contractId).toBe(id);
   expect(admissions.read(input.key)).toEqual(original); expect(existsSync(lease)).toBe(true);
-  expect(readdirSync(directory).filter(name => name.endsWith('.json'))).toEqual([durableKeyHash(input.key) + '.json']);
+  expect(readdirSync(directory).filter(name => name.endsWith('.json'))).toEqual([digest + '.json']);
   expect(existsSync(join(contractsDir(root), id + '.json'))).toBe(false);
 });
 

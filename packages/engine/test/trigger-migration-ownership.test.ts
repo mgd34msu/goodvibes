@@ -50,18 +50,18 @@ test('a changed original v1 source invalidates execution and the next boot inste
   expect(() => manager(path, { previousStorePath: old }).start()).toThrow();
 });
 test('committed v2 loss never replays preserved runnable v1 effects', async () => {
-  const { path, old } = fixture(); writeFileSync(old, oldBytes([record()])); const owner = manager(path, { previousStorePath: old }); owner.start(); owner.migratePrevious({ olderInstancesClosed: true });
+  const { path, old } = fixture(), bytes = oldBytes([record()]); writeFileSync(old, bytes); const owner = manager(path, { previousStorePath: old }); owner.start(); owner.migratePrevious({ olderInstancesClosed: true });
   owner.shutdown(); await owner.join(); unlinkSync(path);
-  expect(() => manager(path, { previousStorePath: old }).start()).toThrow(); expect(readFileSync(old, 'utf8')).toBe(oldBytes([record()]));
+  expect(() => manager(path, { previousStorePath: old }).start()).toThrow(); expect(readFileSync(old, 'utf8')).toBe(bytes);
 });
 test('a prepared history-only cutover can finish after interruption, while future cutover records are preserved', () => {
-  const { path, old } = fixture(); writeFileSync(old, oldBytes());
-  const oldData = JSON.parse(oldBytes()) as { checksum: string; daemonBootId: string; savedAt: number };
+  const { path, old } = fixture(), bytes = oldBytes(); writeFileSync(old, bytes);
+  const oldData = JSON.parse(bytes) as { checksum: string; daemonBootId: string; savedAt: number };
   const previousSource = { version: 1, checksum: oldData.checksum, daemonBootId: oldData.daemonBootId, savedAt: oldData.savedAt };
   writeFileSync(`${path}.cutover.json`, JSON.stringify({ version: 1, phase: 'prepared', migration: 'terminal-history', previousSource }));
   const owner = manager(path, { previousStorePath: old }); owner.start(); expect(owner.executionOwnership).toBe('local');
-  const other = fixture(), bytes = '{"version":99,"future":"keep"}'; writeFileSync(`${other.path}.cutover.json`, bytes);
-  expect(() => manager(other.path).start()).toThrow(); expect(readFileSync(`${other.path}.cutover.json`, 'utf8')).toBe(bytes);
+  const other = fixture(), futureBytes = '{"version":99,"future":"keep"}'; writeFileSync(`${other.path}.cutover.json`, futureBytes);
+  expect(() => manager(other.path).start()).toThrow(); expect(readFileSync(`${other.path}.cutover.json`, 'utf8')).toBe(futureBytes);
 });
 test('another terminal boots and inspects read-only without sweeping, rewriting or firing', async () => {
   const { path } = fixture(), first = manager(path); await first.create(definition); const bytes = readFileSync(path, 'utf8');

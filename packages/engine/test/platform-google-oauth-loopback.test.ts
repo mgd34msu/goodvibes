@@ -29,10 +29,7 @@ describe('generatePkcePair', () => {
       .replace(/\//g, '_')
       .replace(/=+$/, '');
     expect(codeChallenge).toBe(expected);
-  });
-
-  test('produces a URL-safe verifier within the RFC 7636 length range', () => {
-    const { codeVerifier } = generatePkcePair();
+    // The same independently verified S256 pair supplies the verifier checks.
     expect(codeVerifier.length).toBeGreaterThanOrEqual(43);
     expect(codeVerifier.length).toBeLessThanOrEqual(128);
     expect(/^[A-Za-z0-9_-]+$/.test(codeVerifier)).toBe(true);

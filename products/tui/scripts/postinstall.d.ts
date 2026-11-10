@@ -13,6 +13,7 @@
 export {
   CHECKSUM_MANIFEST_NAME,
   parseChecksumFile,
+  requireChecksum,
   resolveArtifactNames,
   sha256,
   verifyChecksum,
@@ -28,3 +29,11 @@ export {
  * reason to fail an installation.
  */
 export function installWakeWordModel(): Promise<void>;
+
+/** Download only after the required manifest pin exists; publish matching bytes. */
+export function installVerifiedReleaseBinary(
+  artifactName: string,
+  checksums: ReadonlyMap<string, string>,
+  releaseBaseUrl: string,
+  destination: string,
+): Promise<void>;

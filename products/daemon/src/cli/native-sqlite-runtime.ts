@@ -99,6 +99,7 @@ export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}):
     setCustomSQLite = (path: string) => (createRequire(import.meta.url)('bun:sqlite') as typeof import('bun:sqlite')).Database.setCustomSQLite(path),
   } = options;
   if (!bundled || platform !== 'darwin') return;
+  signal?.throwIfAborted();
   const runtime = daemonSqliteRuntime(platform, arch);
   if (!runtime) throw new Error('Native SQLite runtime is undeclared');
   const expected = capturedOwner && Object.freeze({ ...capturedOwner });

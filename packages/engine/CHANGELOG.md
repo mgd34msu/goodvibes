@@ -207,10 +207,11 @@
   deferred decision. Ordinary decision history reuses its existing action
   incarnation; saved deferred comparisons and exact live claim guards remain.
 
-- Remove private-source screening fingerprints. Compare already-owned pending
-  inputs directly. Releasing an unsettled original retains an owner-wide hold
-  without its text or a fingerprint; further screening then requires a fresh
-  owner. Preserve prior refusals in Classic fallback.
+- Compare live private-source screening inputs directly without hashing for
+  in-flight deduplication. Only releasing an uncertain source retains a compact
+  commitment after discarding its raw text. Compare later potentially matching
+  inputs once per capture; changed input remains eligible and prior refusals
+  survive Classic fallback. Completed unchanged projections remain usable.
 
 - Set up native configuration after the installer releases its completed suite
   claims, install required vector companions on macOS as well as Linux, and

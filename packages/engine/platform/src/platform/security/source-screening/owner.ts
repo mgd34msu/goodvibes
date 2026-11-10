@@ -2,7 +2,7 @@ import { assertScreeningOperation, captureScreeningOperation as captureOperation
 import { createClassicProtectedSourceOwner, classicScreeningParts } from './classic-owner.js';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { DecisionModelsDisabledError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { createSystemOnePort, DEFAULT_MODEL, JudgmentError, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
+import { createSystemOnePort, DEFAULT_MODEL, hashState, JudgmentError, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
 import { types as nodeTypes } from 'node:util';
 import { JudgmentInputError } from '../../gate/judgment-input.js';
 import { captureScreeningSource, isMalformedScreeningProposal, proposeScreeningSpans, type ScreeningSource, type ScreeningSpan } from './proposal.js';
@@ -26,6 +26,7 @@ interface OwnedSource {
   pending?: Promise<Result>;
   pendingOperation?: ResearchReferenceOperation | undefined;
   result?: Result;
+  releasedRefusalComparison?: string;
 }
 interface OwnedProjection { readonly source: OwnedSource; readonly parts: readonly string[]; }
 /** Cheap pending-work bucket, retaining no source text beyond its live owner. */
@@ -104,19 +105,30 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
   const sources = new Map<Handle, OwnedSource>();
   const projections = new Map<Receipt, OwnedProjection>();
   const referenceReader = createResearchReferenceReader(credentialLiterals);
-  // Live original owners already retain their text. Once an unsettled original
-  // is released, retain only an owner-wide hold, never its text or fingerprint.
-  // A fresh owner is required before unrelated work can be screened again.
+  // Live uncertainty compares exact owned parts. Release must forget private
+  // source bodies while preserving the earlier refusal for that source only.
+  // There is no persisted native source revision here: source-N labels a new
+  // capture, not its bytes. A compact expected commitment is therefore retained
+  // only for an actual released uncertain original, never successful screening.
+  // They are original-byte comparisons, not anonymization or authority.
+  // These pins stay inside this exact authority/retention/route/model owner;
+  // changing policy cannot grant a lucky retry or a Classic downgrade.
   const unsettled = new Set<OwnedSource>();
-  let releasedUnsettled = false;
+  const releasedUnsettled = new Map<string, Set<string>>();
+  let releasedUnsettledCount = 0;
+  const refusalComparison = (source: OwnedSource): string => source.releasedRefusalComparison ??= hashState({
+    reference: source.reference !== undefined, parts: [...source.source.parts],
+  });
   // Only already-owned pending sources, removed when their original work ends.
   // Kind/part lengths avoid full-text comparisons across unrelated requests.
   const screening = new Map<string, Set<OwnedSource>>();
   let screeningCount = 0;
   const wasUnsettled = (source: OwnedSource): boolean => {
-    if (releasedUnsettled) return true;
     for (const original of unsettled) if (samePendingSource(original, source)) return true;
-    return false;
+    const originals = releasedUnsettled.get(pendingSourceBucket(source));
+    // Unrelated geometry needs no commitment. A matching candidate is compared
+    // once against the independent released original, then reuses its tiny pin.
+    return originals !== undefined && originals.has(refusalComparison(source));
   };
   const work = new Set<Promise<unknown>>();
   let closing: Promise<void> | undefined;
@@ -227,8 +239,9 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
     if (bucket) for (const pending of bucket) {
       if (samePendingSource(pending, source)) return Promise.resolve(held('busy'));
     }
-    // Bound live refusals and pending work before asynchronous admission.
-    if (unsettled.size + screeningCount >= LIMITS.unsettledRevisions) return Promise.resolve(held('capacity'));
+    // The existing bound covers live/released refusals and pending work before
+    // asynchronous admission. No old refusal is evicted to admit another sample.
+    if (unsettled.size + releasedUnsettledCount + screeningCount >= LIMITS.unsettledRevisions) return Promise.resolve(held('capacity'));
     const pendingSources = bucket ?? new Set<OwnedSource>();
     pendingSources.add(source); screening.set(bucketKey, pendingSources); screeningCount++;
     const pending = own(Promise.resolve().then(() => withConfiguredDecisionModelPolicy(() => run(source, operation))));
@@ -291,7 +304,12 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
       const source = sources.get(handle); if (!source) return Promise.resolve();
       source.released = true; source.lifetime.abort();
       return own(Promise.resolve(source.pending).then(() => {
-        if (unsettled.delete(source)) releasedUnsettled = true;
+        if (unsettled.delete(source)) {
+          const bucket = pendingSourceBucket(source), pin = refusalComparison(source);
+          const originals = releasedUnsettled.get(bucket) ?? new Set<string>();
+          if (!originals.has(pin)) { originals.add(pin); releasedUnsettledCount++; }
+          releasedUnsettled.set(bucket, originals);
+        }
         sources.delete(handle);
         for (const [receipt, entry] of projections) if (entry.source === source) projections.delete(receipt);
       }));
@@ -300,7 +318,7 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
       if (closing) return closing;
       const finish = Promise.withResolvers<void>(); closing = finish.promise;
       lifetime.abort();
-      void Promise.allSettled([...work]).then(() => { sources.clear(); projections.clear(); unsettled.clear(); screening.clear(); referenceReader.clear(); finish.resolve(); });
+      void Promise.allSettled([...work]).then(() => { sources.clear(); projections.clear(); unsettled.clear(); releasedUnsettled.clear(); releasedUnsettledCount = 0; screening.clear(); referenceReader.clear(); finish.resolve(); });
       return closing;
     },
   };

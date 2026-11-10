@@ -3,7 +3,7 @@ import * as crypto from 'node:crypto';
 import { join } from 'node:path';
 import { suiteReleaseFixture } from '@goodvibes-jev/engine/toolchain/testing/suite-release';
 
-test('complete original daemon and SQLite fixture pins are computed once before independent update verification', () => {
+test('complete original daemon and SQLite fixture pins are computed once through release manifest fetches', async () => {
   const create = crypto.createHash, reads: Array<() => readonly unknown[]> = [], restores: Array<() => void> = [];
   const hash = spyOn(crypto, 'createHash').mockImplementation((algorithm, options) => {
     const hasher = create(algorithm, options);
@@ -16,6 +16,7 @@ test('complete original daemon and SQLite fixture pins are computed once before 
   let fixture: ReturnType<typeof suiteReleaseFixture> | undefined;
   try {
     fixture = suiteReleaseFixture();
+    const firstManifest = await (await fixture.fetchImpl('https://fixture.invalid/SHA256SUMS.txt')).text();
     const inputs = reads.flatMap(read => read());
     for (const original of [
       fixture.original.get(join(fixture.root, 'goodvibes-daemon')),
@@ -26,6 +27,24 @@ test('complete original daemon and SQLite fixture pins are computed once before 
       expect(original).toBeDefined();
       expect(inputs.filter(input => input === original)).toHaveLength(1);
     }
+    const initialHashes = reads.length;
+    expect(await (await fixture.fetchImpl('https://fixture.invalid/SHA256SUMS.txt')).text()).toBe(firstManifest);
+    expect(reads).toHaveLength(initialHashes);
+    const deleted = 'sqlite-darwin-x64.dylib.json';
+    fixture.release.delete(deleted);
+    expect(await (await fixture.fetchImpl('https://fixture.invalid/SHA256SUMS.txt')).text()).not.toContain(`  ${deleted}\n`);
+    expect(reads).toHaveLength(initialHashes);
+    const name = 'goodvibes-daemon-macos-x64', bytes = fixture.release.get(name);
+    if (!bytes) throw new Error('Missing original daemon bytes');
+    const originalDaemonLine = firstManifest.split('\n').find(line => line.endsWith(`  ${name}`));
+    if (!originalDaemonLine) throw new Error('Missing original daemon manifest pin');
+    bytes[0] = bytes[0]! ^ 1;
+    const changedManifest = await (await fixture.fetchImpl('https://fixture.invalid/SHA256SUMS.txt')).text();
+    expect(changedManifest).not.toContain(originalDaemonLine);
+    expect(reads).toHaveLength(initialHashes + 1);
+    fixture.release.set(name, Buffer.from(bytes));
+    expect(await (await fixture.fetchImpl('https://fixture.invalid/SHA256SUMS.txt')).text()).toBe(changedManifest);
+    expect(reads).toHaveLength(initialHashes + 2);
   } finally {
     for (const restore of restores) restore(); hash.mockRestore(); fixture?.cleanup();
   }

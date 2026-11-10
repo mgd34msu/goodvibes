@@ -1,7 +1,6 @@
 import { expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { captureNativeSelectedDiffContext, nativeSelectedDiffSelectorSchema, selectNativeDiffHunk, NATIVE_SELECTED_DIFF_MAX_BYTES, NATIVE_SELECTED_DIFF_SOURCE_MAX_BYTES } from '../platform/src/platform/workflow/work-ledger/native-diff-context.js';
-import { canonicalNativeConversationContinuation, captureNativeConversationContinuation } from '../platform/src/platform/workflow/work-ledger/native-continuation-context.js';
+import { canonicalNativeConversationContinuation, captureNativeConversationContinuation, createNativeContinuationSnapshotOwner } from '../platform/src/platform/workflow/work-ledger/native-continuation-context.js';
 import { nativeConversationIntakeCaptureRequestSchema } from '../platform/src/platform/workflow/work-ledger/native-intake-wire.js';
 
 const headers = 'diff --git a/source.ts b/source.ts\nindex 1234567..abcdef0 100644\n--- a/source.ts\n+++ b/source.ts\n';
@@ -49,8 +48,7 @@ test('selected evidence is deeply frozen, strict, session-bound, and retains the
   expect(() => captureNativeSelectedDiffContext({ ...selected, get unifiedDiff() { accessed = true; return headers + hunk; } })).toThrow();
   expect(accessed).toBe(false);
   expect(() => captureNativeSelectedDiffContext({ ...selected, fabricatedAuthority: true })).toThrow();
-  const revision = createHash('sha256').update(canonicalNativeConversationContinuation('hosted', [], captured)).digest('hex');
-  const continuation = captureNativeConversationContinuation({ sessionId: 'hosted', revision, messages: [], selectedDiff: captured });
+  const continuation = createNativeContinuationSnapshotOwner().capture('hosted', [], captured);
   expect(continuation.selectedDiff).toEqual(captured);
   expect(() => captureNativeConversationContinuation({ ...continuation, sessionId: 'other' })).toThrow('session mismatch');
   expect(canonicalNativeConversationContinuation('hosted', [], captured)).not.toBe(canonicalNativeConversationContinuation('hosted', [], { ...captured, unifiedDiff: headers + another }));

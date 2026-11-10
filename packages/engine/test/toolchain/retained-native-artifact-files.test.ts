@@ -38,7 +38,7 @@ test('one cold portable pin, then native original guards without hashing or rere
 
 for (const mutation of ['changed-bytes', 'same-byte-replacement', 'parent-replacement', 'metadata-replacement'] as const) {
   test(`warm original proof refuses ${mutation}`, () => {
-    const f = fixture(), original = retainNativeArtifactFiles(f.root, f.members);
+    const f = fixture(), original = retainNativeArtifactFiles(f.root, f.members.map(member => ({ ...member, pin: false })));
     if (mutation === 'changed-bytes') fs.writeFileSync(join(f.root, 'program'), 'other');
     if (mutation === 'same-byte-replacement') {
       fs.renameSync(join(f.root, 'program'), join(f.root, 'program.old'));
@@ -78,7 +78,7 @@ test('copies, inherited handles, subclasses and overridden methods cannot manufa
 test('an original directory alias is supported, while retargeting it invalidates its actual owner', () => {
   const f = fixture(), container = makeProjectTempDir('native-alias-'), alias = join(container, 'original');
   fs.symlinkSync(f.root, alias, 'dir');
-  const original = retainNativeArtifactFiles(alias, f.members);
+  const original = retainNativeArtifactFiles(alias, f.members.map(member => ({ ...member, pin: false })));
   expect(original.files[0]!.bytes.toString()).toBe('alpha'); original.assertCurrent();
   fs.unlinkSync(alias); fs.symlinkSync(f.root, alias, 'dir');
   expect(() => original.assertCurrent()).toThrow();

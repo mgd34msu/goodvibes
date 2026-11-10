@@ -13,7 +13,10 @@ export function darwinInstallationFixture(root: string, arch: 'x64' | 'arm64' = 
   const paths = clientReaderPayloadPaths('@goodvibes-jev/daemon', runtime.target), values = [binary, vector, library, Buffer.from(JSON.stringify(owner))];
   const artifact: ClientReaderArtifact = { schema: 1, packageName: '@goodvibes-jev/daemon', version, target: runtime.target,
     sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'a'.repeat(40), readers: nativeReaderCapabilities(version),
-    files: paths.map((path, index) => ({ path, sha256: sha256(values[index]!), mode: index === 0 ? 0o755 : 0o644, size: values[index]!.length })) };
+    files: paths.map((path, index) => {
+      const bytes = values[index]!;
+      return { path, sha256: bytes === library ? owner.sha256 : sha256(bytes), mode: index === 0 ? 0o755 : 0o644, size: bytes.length };
+    }) };
   const installed = paths.map((path, index) => index === 0 ? execPath : join(root, path));
   installed.forEach((path, index) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, values[index]!); chmodSync(path, index === 0 ? 0o755 : 0o644); });
   writeFileSync(execPath + '.readers.json', JSON.stringify(artifact)); chmodSync(execPath + '.readers.json', 0o644);

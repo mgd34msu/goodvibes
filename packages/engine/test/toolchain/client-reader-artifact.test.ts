@@ -76,7 +76,7 @@ test('only genuine original pins skip repeated local hashing; a foreign or copie
       expect(() => inspectTerminalReaderArtifact({ ...f.input, retained: copy })).toThrow('original retained owner');
     }
     const other = fixture(false), otherOwner = retainNativeArtifactFiles(other.directory,
-      other.input.files.map(file => ({ path: file.path })), { directoryRevisions: false });
+      other.input.files.map(file => ({ path: file.path, pin: false })), { directoryRevisions: false });
     expect(() => inspectTerminalReaderArtifact({ ...f.input, retained: otherOwner })).toThrow('another selected root');
   } finally { hash.mockRestore(); }
 });

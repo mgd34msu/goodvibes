@@ -27,6 +27,14 @@ export function suiteReleaseFixture() {
     { name: 'goodvibes-daemon', packageName: '@goodvibes-jev/daemon' },
   ] as const;
   const release = new Map<string, Buffer>(), original = new Map<string, Buffer>();
+  const originalPins = new WeakMap<Buffer, { readonly bytes: Buffer; readonly pin: string }>();
+  const pinOriginal = (bytes: Buffer): string => {
+    const saved = originalPins.get(bytes);
+    if (saved && bytes.equals(saved.bytes)) return saved.pin;
+    const pin = sha256(bytes);
+    originalPins.set(bytes, { bytes: Buffer.from(bytes), pin });
+    return pin;
+  };
   const daemonIdentities: Array<{ readonly previous: boolean; readonly metadata: Omit<ClientReaderArtifact, 'files'> }> = [];
   const sqlitePins = new Map<boolean, { readonly bytes: Buffer; readonly pin: string }>();
   for (const program of programs) {
@@ -42,7 +50,7 @@ export function suiteReleaseFixture() {
       continue;
     }
     const descriptor = (version: string, bytes: Buffer): ClientReaderArtifact => ({ ...identity(version),
-      files: [{ path: asset, sha256: sha256(bytes), mode: 0o755, size: bytes.length }] });
+      files: [{ path: asset, sha256: pinOriginal(bytes), mode: 0o755, size: bytes.length }] });
     const beforeMetadata = Buffer.from(JSON.stringify(descriptor('3.1.2', before)));
     writeFileSync(path + '.readers.json', beforeMetadata, { mode: 0o644 }); original.set(path + '.readers.json', beforeMetadata);
     release.set(asset + '.reader-ci-artifact.json', Buffer.from(JSON.stringify(descriptor('3.1.3', after))));
@@ -62,7 +70,7 @@ export function suiteReleaseFixture() {
   for (const previous of [true, false]) {
     const version = previous ? '3.1.2' : '3.1.3', library = Buffer.alloc(64, previous ? 1 : 2);
     library.writeUInt32LE(0xfeedfacf, 0); library.writeUInt32LE(0x01000007, 4); library.writeUInt32LE(6, 12);
-    const pin = sha256(library); sqlitePins.set(previous, { bytes: library, pin });
+    const pin = pinOriginal(library); sqlitePins.set(previous, { bytes: library, pin });
     const owner = Buffer.from(JSON.stringify({ schema: 1, packageName: '@goodvibes-jev/daemon', daemonVersion: version,
       target: 'darwin-x64', sqliteVersion: '3.54.0', sourceUrl: 'https://www.sqlite.org/2026/sqlite-autoconf-3540000.tar.gz',
       sourceSha3: 'c'.repeat(64), sha256: pin, size: library.length }));
@@ -83,7 +91,7 @@ export function suiteReleaseFixture() {
         const sqlite = sqlitePins.get(previous);
         if (!sqlite || sqlite.bytes !== bytes) throw new Error('Original synthetic SQLite library changed');
         pin = sqlite.pin;
-      } else pin = sha256(bytes);
+      } else pin = pinOriginal(bytes);
       return { path, sha256: pin, size: bytes.length, mode: path === daemonAsset ? 0o755 : 0o644 };
     });
     const bytes = Buffer.from(JSON.stringify({ ...metadata, files }));
@@ -101,7 +109,7 @@ export function suiteReleaseFixture() {
   writeFileSync(join(root, '.goodvibes-reader-requirements.json'), JSON.stringify({ schema: 1, minimumReader: '3.1.2', formats: ['knowledge-schema-v12'] }), { mode: 0o600 });
   const fetchImpl = async (url: string) => {
     const name = url.slice(url.lastIndexOf('/') + 1);
-    if (name === 'SHA256SUMS.txt') return new Response([...release].map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join(''));
+    if (name === 'SHA256SUMS.txt') return new Response([...release].map(([name, bytes]) => `${pinOriginal(bytes)}  ${name}\n`).join(''));
     const bytes = release.get(name); return new Response(bytes ? Uint8Array.from(bytes) : 'missing', { status: bytes ? 200 : 404 });
   };
   return { cleanup() { rmSync(root, { recursive: true, force: true }); }, root, webui, driver, programs, release, original, fetchImpl, options: { execPath: join(root, 'goodvibes'), platform: 'darwin' as const, arch: 'x64', version: '3.1.3',

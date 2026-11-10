@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-import { canonicalNativeConversationContinuation } from '../platform/src/platform/workflow/work-ledger/native-continuation-context.js';
+import { createNativeContinuationSnapshotOwner } from '../platform/src/platform/workflow/work-ledger/native-continuation-context.js';
 import { describe, expect, spyOn, test } from 'bun:test';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import { registerWorkLedgerGatewayMethods } from '../platform/src/platform/control-plane/routes/work-ledger.js';
@@ -459,7 +458,7 @@ test('one observer cannot rewrite another observer snapshot', async () => {
 test('generic ledger snapshot and history omit hosted transcript without changing authoritative provenance', async () => {
   const host = fixture(1); const sessionId = 'private-hosted-session';
   const messages = [{ role: 'assistant' as const, content: 'Private prior hosted conversation evidence.' }];
-  const continuation = { sessionId, revision: createHash('sha256').update(canonicalNativeConversationContinuation(sessionId, messages)).digest('hex'), messages };
+  const continuation = createNativeContinuationSnapshotOwner().capture(sessionId, messages);
   const work = host.events[0]!.work;
   work.source = { version: 2, sourceId: 'native-source', sourceRevision: 'bound-source-revision', inputId: 'native-input', sessionId: 'native-project', continuation,
     extraction: { version: 1, offsetEncoding: 'utf16', spans: [{ partId: 'input', start: 0, end: 1 }], proposalRevision: 'proposal', admissionDecisionId: 'decision', judgmentDecisionIds: ['decision'] } };

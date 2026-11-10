@@ -1,14 +1,14 @@
-/** Source-only regressions; no provider calls or recorded-reading rewrites. */
+/** Authored unit observations and real file ownership; no live model/cache rewrites. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import * as atomic from '../platform/src/platform/utils/atomic-json-store.ts';
-import { canonicalJson, toJson, SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { captureStaticInputs, staticInputKey, readStaticInput, staticDecisionSourceHash, staticDecisionSourceManifest,
-  revalidateStaticInput, withStaticSourcePolicyPass } from '../scripts/static-source-readings.ts';
+import { captureStaticInputs, staticInputKey, staticInputStanding, readStaticInput, staticDecisionSourceManifest,
+  staticDecisionSourceObservation, revalidateStaticInput, withStaticSourcePolicyPass } from '../scripts/static-source-readings.ts';
+import { createStaticCallRecorder } from '../scripts/static-source-call-recording.ts';
 import { checkNoInternalIdentifiers } from '../scripts/internal-identifier-rule.ts';
 import { sourceMarkerAnchors, sourceMarkerFindings } from '../scripts/no-todo-marker-rules.ts';
 import { preparedStaticReadings } from './_helpers/static-source-evidence.ts';
@@ -16,48 +16,44 @@ import { preparedStaticReadings } from './_helpers/static-source-evidence.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 
-test('missing or empty static stores and non-object receipts do not hash an impossible policy candidate', () => {
-  const input = captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const value = 3;')[0]!;
-  const key = staticInputKey(input), hash = spyOn(crypto, 'createHash');
+test('missing or empty stores and malformed receipts never calculate a policy or input digest', () => {
+  const hashing = spyOn(crypto, 'createHash'), nativeHashing = spyOn(Bun.CryptoHasher, 'hash');
   try {
+    const input = captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const value = 3;')[0]!;
+    const key = staticInputKey(input);
+    expect(JSON.parse(key)).toEqual([input.kind, input.path, input.firstLine, input.lastLine, input.anchors.map(anchor => [anchor.id, anchor.line, anchor.col])]);
     expect(revalidateStaticInput(input, null)).toBeNull();
-    expect(revalidateStaticInput(input, { format: 1, decisionSourceHash: 'missing', readings: {} })).toBeNull();
-    expect(hash).not.toHaveBeenCalled();
-    expect(revalidateStaticInput(input, { format: 1, decisionSourceHash: 'missing', readings: { [key]: 17 } })).toBeNull();
-    // The actual nonempty lookup needs one input key, never a sixteen-file
-    // policy commitment for a value that cannot contain receipt evidence.
-    expect(hash).toHaveBeenCalledTimes(1);
-  } finally { hash.mockRestore(); }
+    expect(revalidateStaticInput(input, { format: 2, readings: {} })).toBeNull();
+    expect(revalidateStaticInput(input, { format: 2, readings: { [key]: 17 } })).toBeNull();
+    expect(hashing).not.toHaveBeenCalled(); expect(nativeHashing).not.toHaveBeenCalled();
+  } finally { hashing.mockRestore(); nativeHashing.mockRestore(); }
 });
 
-for (const withProgress of [false, true]) for (const failed of [false, true]) test(`a static read without saved candidates hashes only published receipts (progress=${withProgress}, failed=${failed})`, async () => {
-  const input = captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const value = 3;')[0]!;
-  const expectedInput = canonicalJson(toJson(input));
-  const native = crypto.createHash; let inputKeys = 0;
-  const hash = spyOn(crypto, 'createHash').mockImplementation((...args: Parameters<typeof native>) => {
-    const current = native(...args), update = current.update.bind(current);
-    spyOn(current, 'update').mockImplementation((data: crypto.BinaryLike, inputEncoding?: crypto.Encoding) => {
-      if (data === expectedInput) inputKeys += 1;
-      return typeof data === 'string' && inputEncoding !== undefined ? update(data, inputEncoding) : update(data);
-    });
-    return current;
-  });
-  using log = new SqliteDecisionLog(':memory:');
-  const model = fakePort(() => { if (failed) throw new Error('Original unavailable fixture'); return noulAnswer(0.01); });
+for (const withProgress of [false, true]) for (const failed of [false, true]) test(`raw static capture does no hashing (progress=${withProgress}, failed=${failed})`, async () => {
+  const hashing = spyOn(crypto, 'createHash'), nativeHashing = spyOn(Bun.CryptoHasher, 'hash');
+  const model = fakePort(() => { if (failed) throw new Error('Unavailable unit fixture'); return noulAnswer(0.01); });
+  const recorded = createStaticCallRecorder(model.port);
   try {
-    const reading = readStaticInput(withDecisionLog(model.port, log), log, input, undefined, withProgress ? {
-      previous: { format: 1, decisionSourceHash: 'no-saved-candidates', readings: {} }, onReceipt() {},
+    const input = captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const value = 3;')[0]!;
+    const reading = readStaticInput(recorded.port, recorded.capture, input, undefined, withProgress ? {
+      previous: { format: 2, readings: {} }, onReceipt() {},
     } : undefined);
     if (failed) await expect(reading).rejects.toThrow();
-    else expect((await reading).inputHash).toEqual(expect.any(String));
-    expect(inputKeys).toBe(failed ? 0 : withProgress ? 2 : 1);
-  } finally { hash.mockRestore(); }
+    else {
+      const receipt = await reading;
+      expect(receipt.input).toEqual(input);
+      expect(receipt.presence.state).toHaveProperty('source', input.source);
+      expect(recorded.calls).toHaveLength(1);
+    }
+    expect(hashing).not.toHaveBeenCalled(); expect(nativeHashing).not.toHaveBeenCalled();
+  } finally { hashing.mockRestore(); nativeHashing.mockRestore(); }
 });
+
 const scripts = resolve(import.meta.dir, '../scripts'), packages = resolve(scripts, '../..');
 function fixture() {
   const root = fs.mkdtempSync(join(tmpdir(), 'static-policy-original-')); roots.push(root);
-  // Only the policy's existing16 named source files, real original bytes.
-  for (const [file] of staticDecisionSourceManifest()) {
+  const policy = staticDecisionSourceManifest();
+  for (const [file] of policy) {
     const original = resolve(scripts, file), path = join(root, relative(packages, original));
     fs.mkdirSync(dirname(path), { recursive: true }); fs.copyFileSync(original, path);
   }
@@ -70,72 +66,80 @@ function fixture() {
   const original = fs.readFileSync(source), stamp = fs.statSync(source);
   const changed = Buffer.from(original); changed[0] = changed[0] === 47 ? 42 : 47;
   const edit = (bytes: Buffer) => { fs.writeFileSync(source, bytes); fs.utimesSync(source, stamp.atime, stamp.mtime); };
-  return { source, original, changed, edit, close: () => { directories.mockRestore(); } };
+  return { source, original, changed, edit, fileCount: policy.length, close: () => { directories.mockRestore(); } };
 }
 const descriptorReads = (read: { readonly mock: { readonly calls: readonly (readonly unknown[])[] } }) =>
   read.mock.calls.filter(([path]) => typeof path === 'number').length;
 
-test('actual multi-candidate identifier gate and deferred-source reader hash policy bodies once per pass', () => {
-  const f = fixture(), readings = { format: 1 as const, decisionSourceHash: staticDecisionSourceHash(), readings: {} }, read = spyOn(fs, 'readFileSync');
+test('actual multi-candidate gates capture raw policy originals once per pass without hashing', () => {
+  const f = fixture(), readings = { format: 2 as const, readings: {} }, read = spyOn(fs, 'readFileSync');
+  const hashing = spyOn(crypto, 'createHash');
   try {
     const candidates = Array.from({ length: 12 }, (_, index) => ({ relPath: `platform/src/example-${index}.ts`, text: 'const value = 3;' }));
     const held: string[] = [];
     expect(checkNoInternalIdentifiers(candidates, readings, finding => { held.push(finding); })).toEqual([]);
-    expect(held.length).toBeGreaterThan(1); expect(descriptorReads(read)).toBe(16);
+    expect(held.length).toBeGreaterThan(1); expect(descriptorReads(read)).toBe(f.fileCount);
     read.mockClear();
     const markers = Array.from({ length: 181 }, (_, index) => `// Finish persistence for reader ${index}.`).join('\n\n');
     expect(sourceMarkerFindings('platform/src/example.ts', markers, readings).length).toBeGreaterThan(1);
-    expect(descriptorReads(read)).toBe(16);
-    // A completed pass cannot make a later invocation silently reuse its owner.
+    expect(descriptorReads(read)).toBe(f.fileCount);
     read.mockClear(); checkNoInternalIdentifiers(candidates, readings);
-    expect(descriptorReads(read)).toBe(16);
+    expect(descriptorReads(read)).toBe(f.fileCount);
     read.mockClear(); checkNoInternalIdentifiers(candidates, null);
     expect(descriptorReads(read)).toBe(0);
-  } finally { read.mockRestore(); f.close(); }
+    expect(hashing).not.toHaveBeenCalled();
+  } finally { hashing.mockRestore(); read.mockRestore(); f.close(); }
 });
 
-test('same-size edits, restored bytes/mtime, and identical-byte leaf replacements recompute originals', () => {
+test('same-size edits, byte restoration and equal-byte replacement cannot revive a retired policy owner', () => {
   const f = fixture(), read = spyOn(fs, 'readFileSync');
+  let originalManifest: ReturnType<typeof staticDecisionSourceManifest> = [];
   try {
-    withStaticSourcePolicyPass(() => {
-      const first = staticDecisionSourceHash(); expect(descriptorReads(read)).toBe(16);
-      const manifest = staticDecisionSourceManifest();
-      expect(Object.isFrozen(manifest)).toBe(true); expect(Object.isFrozen(manifest[0])).toBe(true);
-      expect(staticDecisionSourceHash()).toBe(first); expect(descriptorReads(read)).toBe(16);
-      f.edit(f.changed); expect(staticDecisionSourceHash()).not.toBe(first); expect(descriptorReads(read)).toBe(32);
-      f.edit(f.original); expect(staticDecisionSourceHash()).toBe(first); expect(descriptorReads(read)).toBe(48);
+    expect(() => withStaticSourcePolicyPass(() => {
+      originalManifest = staticDecisionSourceManifest();
+      expect(descriptorReads(read)).toBe(f.fileCount);
+      expect(Object.isFrozen(originalManifest)).toBe(true); expect(Object.isFrozen(originalManifest[0])).toBe(true);
+      expect(staticDecisionSourceManifest()).toBe(originalManifest); expect(descriptorReads(read)).toBe(f.fileCount);
+      f.edit(f.changed); expect(() => staticDecisionSourceObservation()).toThrow('Static policy source changed');
+      f.edit(f.original); expect(() => staticDecisionSourceObservation()).toThrow('Static policy source changed');
+      expect(descriptorReads(read)).toBe(f.fileCount);
+    })).toThrow('Static policy source changed');
+    expect(() => withStaticSourcePolicyPass(() => {
+      expect(staticDecisionSourceManifest()).toEqual(originalManifest); expect(descriptorReads(read)).toBe(f.fileCount * 2);
       fs.writeFileSync(`${f.source}.replacement`, f.original); fs.renameSync(`${f.source}.replacement`, f.source);
-      expect(staticDecisionSourceHash()).toBe(first); expect(descriptorReads(read)).toBe(64);
-      fs.unlinkSync(f.source); expect(() => staticDecisionSourceHash()).toThrow();
-    });
+      expect(() => staticDecisionSourceObservation()).toThrow('Static policy source changed');
+    })).toThrow('Static policy source changed');
+    withStaticSourcePolicyPass(() => { expect(staticDecisionSourceManifest()).toEqual(originalManifest); });
+    expect(descriptorReads(read)).toBe(f.fileCount * 3);
+    fs.unlinkSync(f.source);
+    expect(() => withStaticSourcePolicyPass(() => staticDecisionSourceObservation())).toThrow();
   } finally { read.mockRestore(); f.close(); }
 });
 
-test('actual gate held callbacks cannot make later candidates approve under a stale policy owner', async () => {
+test('actual gate held callbacks retire policy before later candidates can return a result', async () => {
   const f = fixture(), candidates = [
     { relPath: 'platform/src/uncaptured.ts', text: 'const missing = 3;' },
     { relPath: 'platform/src/current.ts', text: 'const value = 3;' },
   ];
   try {
-    const inputs = captureStaticInputs('internal-identifier', candidates[1]!.relPath, candidates[1]!.text);
-    const readings = await preparedStaticReadings(inputs);
+    const readings = await preparedStaticReadings(captureStaticInputs('internal-identifier', candidates[1]!.relPath, candidates[1]!.text));
     const held: string[] = [];
-    expect(checkNoInternalIdentifiers(candidates, readings, finding => {
-      held.push(finding); if (held.length === 1) f.edit(f.changed);
-    })).toEqual([]);
-    expect(held).toHaveLength(2); expect(held[1]).toContain('stale decision source');
+    expect(() => checkNoInternalIdentifiers(candidates, readings, finding => {
+      held.push(finding); f.edit(f.changed);
+    })).toThrow('Static policy source changed');
+    expect(held).toHaveLength(1);
   } finally { f.close(); }
 });
 
-test('the final actual gate callback cannot release a result using an invalidated original policy', () => {
-  const f = fixture(), readings = { format: 1 as const, decisionSourceHash: staticDecisionSourceHash(), readings: {} };
+test('the final actual callback cannot release a result using invalidated original policy', () => {
+  const f = fixture(), readings = { format: 2 as const, readings: {} };
   try {
     expect(() => checkNoInternalIdentifiers([{ relPath: 'platform/src/example.ts', text: 'const value = 3;' }], readings,
       () => { f.edit(f.changed); })).toThrow('Static policy source changed');
   } finally { f.close(); }
 });
 
-test('incoherent original capture is rejected instead of caching a mixed16-file manifest', () => {
+test('incoherent original capture refuses a mixed complete raw policy observation', () => {
   const f = fixture(), originalRead = fs.readFileSync; let reads = 0, edited = false;
   const read = spyOn(fs, 'readFileSync').mockImplementation(((...args: Parameters<typeof fs.readFileSync>) => {
     const value = Reflect.apply(originalRead, fs, args);
@@ -144,55 +148,56 @@ test('incoherent original capture is rejected instead of caching a mixed16-file 
   }) as typeof fs.readFileSync);
   try {
     withStaticSourcePolicyPass(() => {
-      expect(() => staticDecisionSourceHash()).toThrow('Static policy source changed');
+      expect(() => staticDecisionSourceObservation()).toThrow('Static policy source changed');
       expect(edited).toBe(true);
-      // No successful prior snapshot exists to fall back to after capture fails.
-      fs.unlinkSync(f.source); expect(() => staticDecisionSourceHash()).toThrow();
+      fs.unlinkSync(f.source); expect(() => staticDecisionSourceObservation()).toThrow();
     });
   } finally { read.mockRestore(); f.close(); }
 });
 
-test('actual static reader rechecks the owned policy after its provider await and rejects changed source', async () => {
+test('the actual static reader refuses policy retirement after its provider await before recording', async () => {
   const f = fixture(); let release!: () => void, entered!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; }), admitted = new Promise<void>(resolve => { entered = resolve; });
   const fake = fakePort(() => noulAnswer(0.01));
-  using log = new SqliteDecisionLog(':memory:');
-  const port = withDecisionLog({ ...fake.port, async ask(request) { entered(); await held; return fake.port.ask(request); } }, log);
+  const recorded = createStaticCallRecorder({ ...fake.port, async ask(request) { entered(); await held; return fake.port.ask(request); } });
+  const input = captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const value = 3;')[0]!;
+  const reading = readStaticInput(recorded.port, recorded.capture, input);
   try {
-    const input = captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const value = 3;')[0]!;
-    const reading = readStaticInput(port, log, input);
-    await admitted; f.edit(f.changed); release();
-    await expect(reading).rejects.toThrow('Static decision source changed during reading');
-    expect(fake.requests).toHaveLength(1);
-    expect(log.query({ status: 'answered' })).toHaveLength(1);
-  } finally { release(); f.close(); }
+    await Promise.race([admitted, reading.then(() => { throw new Error('Read settled before provider admission'); })]);
+    f.edit(f.changed); release();
+    await expect(reading).rejects.toThrow('Static policy source changed');
+    expect(fake.requests).toHaveLength(1); expect(recorded.calls).toHaveLength(0);
+  } finally { release(); await reading.catch(() => undefined); f.close(); }
 });
 
-
-test('actual missing-store gates keep identical structural held scopes without any SHA producer', () => {
+test('actual missing-store gates retain identical structural held scopes and no hashing', () => {
   const internalText = Array.from({ length: 240 }, (_, index) => `Paragraph ${index} is complete.`).join('\n\n');
   const deferredText = Array.from({ length: 240 }, (_, index) => `// Persistence reader ${index} is documented.`).join('\n\n');
   const internal = captureStaticInputs('internal-identifier', 'docs/example.md', internalText);
   const deferred = captureStaticInputs('deferred-work', 'platform/src/example.ts', deferredText, sourceMarkerAnchors('platform/src/example.ts', deferredText));
   expect(internal.length).toBeGreaterThan(1); expect(deferred.length).toBeGreaterThan(1);
-  const hash = spyOn(crypto, 'createHash'), nativeHash = spyOn(Bun.CryptoHasher, 'hash');
+  const hashing = spyOn(crypto, 'createHash'), nativeHashing = spyOn(Bun.CryptoHasher, 'hash');
   try {
     const held: string[] = [];
     expect(checkNoInternalIdentifiers([{ relPath: 'docs/example.md', text: internalText }], null, value => { held.push(value); })).toEqual([]);
     expect(held).toEqual(internal.map(input => `docs/example.md:${input.firstLine}: internal-identifier evidence held (missing or stale decision source); review source or run static-source:read [internal-identifier]`));
     expect(sourceMarkerFindings('platform/src/example.ts', deferredText, null)).toEqual(deferred.map(input => ({ line: input.firstLine, col: 1,
       marker: 'evidence-held', text: 'missing or stale decision source; run static-source:read' })));
-    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
-    expect(nativeHash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
-  } finally { hash.mockRestore(); nativeHash.mockRestore(); }
+    expect(hashing).not.toHaveBeenCalled(); expect(nativeHashing).not.toHaveBeenCalled();
+  } finally { hashing.mockRestore(); nativeHashing.mockRestore(); }
 });
 
-test('default explicit preparation still binds the complete source beyond its offered window', () => {
+test('an edit outside the transmitted window reuses identical exact input and questions', async () => {
   const first = '// Visible original source.', text = [first, ...Array.from({ length: 80 }, () => ''), '// Remote original source.'].join('\n');
   const anchors = [{ id: 'original', line: 1, col: 1, text: first }];
   const before = captureStaticInputs('deferred-work', 'platform/src/example.ts', text, anchors)[0]!;
   const after = captureStaticInputs('deferred-work', 'platform/src/example.ts', text.replace('Remote original', 'Remote modified'), anchors)[0]!;
-  expect(before).toHaveProperty('sourceHash'); expect(before.sourceHash).toMatch(/^[a-f0-9]{64}$/);
-  expect(before.source).toBe(after.source); expect(before.anchors).toEqual(after.anchors);
-  expect(before.sourceHash).not.toBe(after.sourceHash); expect(staticInputKey(before)).not.toBe(staticInputKey(after));
+  expect(before).not.toHaveProperty('sourceHash'); expect(before).toEqual(after);
+  expect(staticInputKey(before)).toBe(staticInputKey(after));
+  const readings = await preparedStaticReadings([before]);
+  expect(staticInputStanding(after, readings)).toEqual({ kind: 'clear' });
+  const forbidden = fakePort(() => { throw new Error('Identical wire must not be reread'); });
+  const recorded = createStaticCallRecorder(forbidden.port);
+  await readStaticInput(recorded.port, recorded.capture, after, undefined, { previous: readings, onReceipt() {} });
+  expect(forbidden.requests).toHaveLength(0); expect(recorded.calls).toHaveLength(0);
 });

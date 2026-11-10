@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
+import { preparedStaticReadings } from './_helpers/static-source-evidence.ts';
 import { internalSourceAnchors, markdownSourceContext } from '../scripts/static-source-anchors.ts';
-import { captureStaticInputs, staticInputKey } from '../scripts/static-source-readings.ts';
+import { captureStaticInputs, staticInputKey, staticInputStanding } from '../scripts/static-source-readings.ts';
 
 const table = (intro: string, rows = 360) => ['# Source table', '', intro, '', '## Entries', '', '| Id | Meaning |', '|---|---|',
   ...Array.from({ length: rows }, (_, index) => `| T${index + 1} | public-${index + 1}.test.ts |`)].join('\n');
@@ -35,14 +36,18 @@ test('private and injected declarations remain verbatim untrusted source, never 
   }
 });
 
-test('actual header replacement changes later input identity and ordinary source identity stays unchanged', () => {
+test('actual header replacement holds prior answers despite unchanged source positions', async () => {
   const ordinary = captureStaticInputs('internal-identifier', 'docs/plain.md', 'Ordinary prose.');
   expect(ordinary[0]?.source).toBe('1| Ordinary prose.');
   const first = captureStaticInputs('internal-identifier', 'docs/table.md', table('Generated public navigation ids.')).at(-1);
   const changed = captureStaticInputs('internal-identifier', 'docs/table.md', table('Private developer checklist ids.')).at(-1);
   if (!first || !changed) throw new Error('Expected later source windows');
   expect(first.anchors).toEqual(changed.anchors);
-  expect(staticInputKey(first)).not.toBe(staticInputKey(changed));
+  expect(staticInputKey(first)).toBe(staticInputKey(changed));
+  expect(first).not.toEqual(changed);
+  const readings = await preparedStaticReadings([first]);
+  expect(staticInputStanding(first, readings)).toEqual({ kind: 'clear' });
+  expect(staticInputStanding(changed, readings).kind).toBe('held');
   expect(changed.source).toContain('3| Private developer checklist ids.');
   expect(changed.source).not.toContain('Generated public navigation ids.');
 });

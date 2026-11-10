@@ -6,8 +6,8 @@
 //
 // Whether a package README documents the package, and whether it describes a
 // published package in stale internal or umbrella terms, is read through Jev
-// (`engine.gates.package-readme`) and stored by the content hash of the
-// README, package name and description in etc/package-readme-readings.json.
+// (`engine.gates.package-readme`) and stored with the exact original state and
+// questions in etc/package-readme-readings.json.
 // Reporting is offline and advisory: a favorable reading needs a stored,
 // settled yes to `documents` and, for a public package, a settled no to `stale`.
 // Missing, stale or adverse evidence never blocks deterministic correctness CI.
@@ -18,7 +18,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { packageReadme, type PackageReadmeState } from './package-readme.ts';
-import { decisionId, describeAnswer, isSettled, readingModel, stateHash, type StoredEntry, type StoredReadings } from './stored-readings.ts';
+import { decisionId, describeAnswer, isSettled, readingModel, recordedYesNoReadings, storedAnswer, type StoredAnswer, type StoredEntry, type StoredReadings } from './stored-readings.ts';
+
+export const README_SITE = 'engine.gates.package-readme.release';
 
 export const READINGS_PATH = process.env['PACKAGE_README_READINGS']
   ?? resolve(import.meta.dir, '..', '..', 'etc', 'package-readme-readings.json');
@@ -39,17 +41,22 @@ export function readmeQuestions(isPublic: boolean): ('documents' | 'stale')[] {
 }
 
 /** Evaluate one current input once; diagnostics and displayed answers must
- * come from the same real saved content commitment, never a supplied key. */
+ * come from the same original saved request, never a supplied content fingerprint. */
 export function evaluateReadmeReadings(
   dir: string,
   state: PackageReadmeState,
   isPublic: boolean,
   readings: Readonly<Record<string, StoredEntry>>,
-): { readonly entry: StoredEntry | undefined; readonly problems: string[] } {
-  const entry = Object.keys(readings).length === 0 ? undefined : readings[stateHash(state)];
+): { readonly entry: StoredEntry | undefined; readonly answers: Readonly<Record<string, StoredAnswer>> | undefined; readonly problems: string[] } {
+  const subject = `${dir}/README.md`;
+  const candidate = Object.hasOwn(readings, subject) ? readings[subject] : undefined;
+  const original = candidate?.subject === subject
+    ? recordedYesNoReadings(candidate.record, packageReadme, state, readmeQuestions(isPublic), README_SITE, readingModel(packageReadme)) : undefined;
+  const entry = original ? candidate : undefined;
+  const answers = original ? Object.fromEntries(Object.entries(original).map(([name, answer]) => [name, storedAnswer(answer)])) : undefined;
   const problems: string[] = [];
   for (const question of readmeQuestions(isPublic)) {
-    const answer = entry?.answers[question];
+    const answer = answers?.[question];
     if (answer === undefined) {
       problems.push(`${dir}/README.md has no stored ${packageReadme.name} reading for its current text (missing or stale content evidence); run \`bun run package-readmes:read\` and commit packages/engine/etc/package-readme-readings.json`);
       break;
@@ -65,7 +72,7 @@ export function evaluateReadmeReadings(
         : `${dir}/README.md is not settled as free of stale internal or umbrella wording (${describeAnswer(answer)}); describe it as the published package`);
     }
   }
-  return { entry, problems };
+  return { entry, answers, problems };
 }
 
 /** Editorial findings from current readings; empty only when all requested answers are favorable and settled. */
@@ -88,5 +95,5 @@ export function readmeAdvisories(
   if (stored !== null && (stored.decision !== decisionId(packageReadme) || stored.model !== readingModel(packageReadme))) {
     return [`${dir}/README.md has stale editorial evidence (decision ${stored.decision}, model ${stored.model}; expected ${decisionId(packageReadme)}, model ${readingModel(packageReadme)}); run \`bun run package-readmes:read\` to refresh it`];
   }
-  return readmeProblems(dir, state, isPublic, stored?.readings ?? {});
+  return readmeProblems(dir, state, isPublic, stored?.format === 2 ? stored.readings : {});
 }

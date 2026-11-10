@@ -8,7 +8,7 @@
  * slipped past.
  *
  * Read by `bun run package-readmes:read` for every package directory the
- * release publishes; the readings are stored by content hash in
+ * release publishes; the readings are stored with their actual state and questions in
  * etc/package-readme-readings.json. Offline editorial reporting recognizes a
  * favorable reading only on a stored, settled yes to `documents` and, for a
  * public package, a settled no to `stale`. Findings are advisory and do not

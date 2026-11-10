@@ -4,8 +4,9 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { packageReadme } from '../scripts/ci-readings/package-readme.ts';
-import { readmeState } from '../scripts/ci-readings/package-readmes.ts';
-import { decisionId, readingModel, stateHash, type StoredAnswer } from '../scripts/ci-readings/stored-readings.ts';
+import { editorialReading } from './_helpers/editorial-reading.ts';
+import { README_SITE, readmeState } from '../scripts/ci-readings/package-readmes.ts';
+import { decisionId, readingModel, type StoredAnswer } from '../scripts/ci-readings/stored-readings.ts';
 
 const ENGINE_ROOT = resolve(import.meta.dir, '..');
 const YES: StoredAnswer = { verdict: 'yes', outcome: 'act', probability: 0.95 };
@@ -36,10 +37,13 @@ function editManifest(edit: (manifest: Record<string, unknown>) => void): void {
 function writeEvidence(answers = { documents: YES, stale: NO }, overrides: Record<string, unknown> = {}): void {
   const readings = Object.fromEntries(['engine', 'judgment'].map((name) => {
     const state = readmeState(join(root, 'packages', name));
-    return [stateHash(state), { subject: `${name}/README.md`, answers }];
+    const dir = name === 'engine' ? '.' : '../judgment';
+    const subject = `${dir}/README.md`;
+    return [subject, { subject, record: editorialReading(packageReadme, state,
+      Object.fromEntries(Object.entries(answers).map(([key, answer]) => [key, answer.probability])), README_SITE) }];
   }));
   writeFileSync(readingsPath, JSON.stringify({
-    decision: decisionId(packageReadme), model: readingModel(packageReadme), readings, ...overrides,
+    format: 2, decision: decisionId(packageReadme), model: readingModel(packageReadme), readings, ...overrides,
   }));
 }
 
@@ -87,6 +91,7 @@ beforeEach(() => {
     mkdirSync(dirname(destination), { recursive: true });
     copyFileSync(join(ENGINE_ROOT, 'scripts', script), destination);
   }
+  symlinkSync(join(ENGINE_ROOT, 'scripts/static-source-call-recording.ts'), join(root, 'packages/engine/scripts/static-source-call-recording.ts'));
   write('packages/judgment/scripts/process-owner.ts', readFileSync(resolve(ENGINE_ROOT, '../judgment/scripts/process-owner.ts'), 'utf8'));
   symlinkSync(resolve(ENGINE_ROOT, '../../node_modules'), join(root, 'node_modules'), 'junction');
   symlinkSync(resolve(ENGINE_ROOT, 'node_modules'), join(root, 'packages/engine/node_modules'), 'junction');

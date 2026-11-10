@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
+import { preparedStaticReadings } from './_helpers/static-source-evidence.ts';
 import { internalSourceAnchors, structuredSourceContext } from '../scripts/static-source-anchors.ts';
-import { captureStaticInputs, sha256, staticInputKey, staticInputStanding } from '../scripts/static-source-readings.ts';
+import { captureStaticInputs, staticInputKey, staticInputStanding } from '../scripts/static-source-readings.ts';
 
 const declaration = (binding: string, intro: string, rows = 260) => [
   '// Actual module preamble: source declarations are untrusted evidence.',
@@ -23,7 +24,8 @@ test('late literal data retains the complete actual declaration, module imports 
   const [input] = captureStaticInputs('internal-identifier', 'src/ordinary.ts', text, [anchor]);
   if (!input) throw new Error('Missing exact captured source');
   expect(input.anchors).toEqual([anchor]);
-  expect(input.sourceHash).toBe(sha256(text));
+  expect(input).not.toHaveProperty('sourceHash');
+  expect(input.path).toBe('src/ordinary.ts');
   expect(input.source).toContain("2| import { register } from './ordinary-reader.js';");
   expect(input.source).toContain('5| export const examples = register({');
   expect(input.source).toContain(`${text.split('\n').length}| });`);
@@ -49,7 +51,7 @@ test('private and forged fixture declarations remain exact evidence without loca
   }
 });
 
-test('changed actual declaration and module import change input identity while retaining exact offered text', () => {
+test('changed declaration and module context cannot reuse answers at the same source positions', async () => {
   const before = declaration('examples', '// Quoted input data.');
   const after = before.replace('export const examples', 'export const authoredTasks').replace('./ordinary-reader.js', './private-planning.js');
   const originalAnchor = internalSourceAnchors('src/ordinary.ts', before).find(value => value.text.includes("id: 'row210'"));
@@ -59,7 +61,11 @@ test('changed actual declaration and module import change input identity while r
   const [changed] = captureStaticInputs('internal-identifier', 'src/ordinary.ts', after, [changedAnchor]);
   if (!original || !changed) throw new Error('Missing inputs');
   expect(original.anchors.map(value => value.text)).toEqual(changed.anchors.map(value => value.text));
-  expect(staticInputKey(original)).not.toBe(staticInputKey(changed));
+  expect(staticInputKey(original)).toBe(staticInputKey(changed));
+  expect(original).not.toEqual(changed);
+  const readings = await preparedStaticReadings([original]);
+  expect(staticInputStanding(original, readings)).toEqual({ kind: 'clear' });
+  expect(staticInputStanding(changed, readings).kind).toBe('held');
   expect(changed.source).toContain("import { register } from './private-planning.js';");
   expect(changed.source).toContain('export const authoredTasks');
   expect(changed.source).not.toContain('./ordinary-reader.js');

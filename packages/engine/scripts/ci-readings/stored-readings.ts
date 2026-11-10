@@ -1,17 +1,10 @@
 import { judgmentProcessSignal } from '../../../judgment/scripts/process-owner.ts';
-// stored-readings.ts
-//
-// The committed store of Jev readings the offline gates check against, shared
-// by each gate's live reader and the gate itself, the same pattern as
-// etc/credential-key-readings.json. A reading is stored under the content
-// hash of the exact state it was read from, so a changed input has no stored
-// reading and must be read again; the gates never call Jev.
-//
-// A stored file names the decision (`name@version`) and the model it was read
-// on. When either changes, every stored reading is stale: the gate reports the
-// inputs as unread and the reader reads them all again.
+// Offline editorial readings retain the actual request and response. File
+// subjects locate records; equality of the saved state and questions determines
+// whether those answers apply to the current input. No digest is needed.
 
-import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import type { StaticSourceCallRecord } from '../static-source-call-recording.ts';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import {
   createSystemOnePort,
@@ -21,6 +14,8 @@ import {
   type BatteryItems,
   type JudgmentPort,
   type YesNoReading,
+  type EntryType,
+  readItem,
 } from '@goodvibes-jev/judgment';
 
 /** One yes/no answer as stored: the verdict and outcome the battery's band gave, and the probability. */
@@ -30,34 +25,53 @@ export interface StoredAnswer {
   readonly probability: number;
 }
 
-/** The answers read about one state, by question name, and an optional label naming what was read. */
+/** The actual recorded call about one ordinary file subject. */
 export interface StoredEntry {
-  /** The alias requested and actual response version for this historical reading. */
-  readonly requestedModel?: string;
-  readonly model?: string;
-  readonly subject?: string;
-  readonly answers: Readonly<Record<string, StoredAnswer>>;
+  readonly subject: string;
+  readonly record: StaticSourceCallRecord;
 }
 
 export interface StoredReadings {
+  readonly format: 2;
   readonly decision: string;
   readonly model: string;
   readonly readings: Readonly<Record<string, StoredEntry>>;
 }
 
-/** Serializes a JSON value with object keys sorted, so equal states hash equally whatever their key order. */
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (value !== null && typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
-    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`).join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
+const object = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
 
-/** The content hash a state's reading is stored under: the first 16 hex digits of its canonical SHA-256. */
-export function stateHash(state: unknown): string {
-  return createHash('sha256').update(canonical(state)).digest('hex').slice(0, 16);
+/** Recover readings only from the actual original wire input, current battery
+ * questions and requested model. Reapply the battery's real bands rather than
+ * trusting saved, potentially stale derived verdicts. */
+export function recordedYesNoReadings(
+  record: StaticSourceCallRecord | undefined,
+  battery: Battery<BatteryItems>,
+  state: EntryType,
+  asked: readonly string[],
+  site: string,
+  model: string,
+): Readonly<Record<string, YesNoReading>> | undefined {
+  if (!object(record) || record.format !== 1 || !object(record.call)) return undefined;
+  const call = record.call;
+  if (typeof call.id !== 'string' || !call.id || typeof call.at !== 'string' || !Number.isFinite(Date.parse(call.at))
+    || call.battery !== battery.name || call.version !== battery.version || call.site !== site
+    || call.requestedModel !== model || typeof call.observedModel !== 'string' || !call.observedModel
+    || (call.requestId !== null && (typeof call.requestId !== 'string' || !call.requestId))
+    || !object(call.answers) || Object.keys(call.answers).length !== asked.length) return undefined;
+  const questions = Object.fromEntries(asked.map(name => [name, battery.items[name]?.question]));
+  if (!isDeepStrictEqual(call.state, state) || !isDeepStrictEqual(call.questions, questions)) return undefined;
+  const readings: Record<string, YesNoReading> = {};
+  try {
+    for (const name of asked) {
+      const item = battery.items[name];
+      if (!item || item.kind !== 'yes-no' || !Object.hasOwn(call.answers, name)) return undefined;
+      const reading = readItem(item, call.answers[name]);
+      if (reading.kind !== 'yes-no') return undefined;
+      readings[name] = reading;
+    }
+  } catch { return undefined; }
+  return readings;
 }
 
 /** `name@version`, the decision a stored file was read with. */
@@ -72,7 +86,9 @@ export function readingModel(battery: Battery<BatteryItems>): string {
 
 export function loadStoredReadings(path: string): StoredReadings | null {
   if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, 'utf-8')) as StoredReadings;
+  const value: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+  if (!object(value) || value.format !== 2 || typeof value.decision !== 'string' || typeof value.model !== 'string' || !object(value.readings)) return null;
+  return value as unknown as StoredReadings;
 }
 
 /**
@@ -85,13 +101,13 @@ export function currentReadings(path: string, battery: Battery<BatteryItems>): R
   return stored.readings;
 }
 
-/** Writes the store with one reading per line, sorted by hash, so a diff shows exactly the readings that changed. */
+/** Writes the store with one reading per line, sorted by file subject, so a diff shows exactly the readings that changed. */
 export function saveStoredReadings(path: string, readings: StoredReadings): void {
   const lines = Object.entries(readings.readings)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([hash, entry]) => `    ${JSON.stringify(hash)}: ${JSON.stringify(entry)}`);
+    .map(([subject, entry]) => `    ${JSON.stringify(subject)}: ${JSON.stringify(entry)}`);
   const body = lines.length === 0 ? '{}' : `{\n${lines.join(',\n')}\n  }`;
-  writeFileSync(path, `{\n  "decision": ${JSON.stringify(readings.decision)},\n  "model": ${JSON.stringify(readings.model)},\n  "readings": ${body}\n}\n`, 'utf-8');
+  writeFileSync(path, `{\n  "format": 2,\n  "decision": ${JSON.stringify(readings.decision)},\n  "model": ${JSON.stringify(readings.model)},\n  "readings": ${body}\n}\n`, 'utf-8');
 }
 
 /** A yes/no reading as it is stored. */

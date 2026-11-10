@@ -2,25 +2,32 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { unpackStaticSourceStorage } from '../scripts/static-source-storage.ts';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { canonicalJson, hashState, noul, SqliteDecisionLog, toJson, validateContextBudget, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { JudgmentError, noul, toJson, validateContextBudget, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { captureStaticInputs, CheckpointValueReader, loadStaticSourceCheckpoint, loadStaticSourceJournal, loadStaticSourceReadings, openStaticSourceJournal, parseStaticSourceReadings, readStaticInput, revalidateStaticInput, saveStaticSourceReadings, sha256, STATIC_CHECKPOINT_MAX_SCALAR_CHARS, staticDecisionSourceHash, staticDecisionSourceManifest, staticInputCaptureComplete, staticInputKey, staticInputStanding, staticSelectionCandidates, staticSelectionContext, type StaticSourceReadings } from '../scripts/static-source-readings.ts';
+import { captureStaticInputs, CheckpointValueReader, loadStaticSourceCheckpoint, loadStaticSourceJournal, loadStaticSourceReadings, openStaticSourceJournal, parseStaticSourceReadings, readStaticInput, revalidateStaticInput, saveStaticSourceReadings, STATIC_CHECKPOINT_MAX_SCALAR_CHARS, staticInputCaptureComplete, staticInputKey, staticInputStanding, staticSelectionCandidates, staticSelectionContext, type StaticSourceReadings, type StaticSourceInput, type StaticSourceProgress } from '../scripts/static-source-readings.ts';
 import { INTERNAL_IDENTIFIER_INSTRUCTIONS, internalIdentifier, staticOffendingAnchor } from '../scripts/batteries/static-source.ts';
+import { createStaticCallRecorder } from '../scripts/static-source-call-recording.ts';
 import { preparedStaticReadings } from './_helpers/static-source-evidence.ts';
 
 const input = () => captureStaticInputs('internal-identifier', 'platform/src/example.ts', '// Exact public source\nconst value = 3;')[0]!;
+const object = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+function readCapturedInput(port: JudgmentPort, input: StaticSourceInput, signal?: AbortSignal, progress?: StaticSourceProgress) {
+  const recorded = createStaticCallRecorder(port);
+  return readStaticInput(recorded.port, recorded.capture, input, signal, progress);
+}
 
 test('a durable interrupted subset tree resumes only its missing call', async () => {
   const root = mkdtempSync(join(tmpdir(), 'static-partial-subsets-'));
   try {
     const captured = input();
     const journalPath = join(root, 'checkpoint.journal');
-    const logPath = join(root, 'calls.sqlite');
+    let answeredBeforeRestart = 0;
     const readings: Record<string, unknown> = {};
-    const current: StaticSourceReadings = { format: 1, decisionSourceHash: staticDecisionSourceHash(), readings };
+    const current: StaticSourceReadings = { format: 2, readings };
     {
-      using log = new SqliteDecisionLog(logPath);
+
       using journal = openStaticSourceJournal(journalPath);
       journal.append(current);
       const fixture = fakePort((_name, _question, state) => {
@@ -29,17 +36,18 @@ test('a durable interrupted subset tree resumes only its missing call', async ()
       });
       let calls = 0;
       const interrupted: JudgmentPort = { model: fixture.port.model, ask(request) {
-        if (++calls === 3) throw new Error('Simulated interruption after the first answered subset');
+        if (++calls === 3) throw new JudgmentError('internal', 'The decision client failed internally. The operation has stopped.');
         return fixture.port.ask(request);
       } };
-      await expect(readStaticInput(withDecisionLog(interrupted, log), log, captured, undefined, {
+      await expect(readCapturedInput(interrupted, captured, undefined, {
         previous: current, onReceipt(source, receipt) {
           readings[staticInputKey(source)] = receipt;
           journal.append({ ...current, readings: { [staticInputKey(source)]: receipt } }, source);
         },
       })).rejects.toMatchObject({ kind: 'internal', message: 'The decision client failed internally. The operation has stopped.' });
-      expect(log.query({ status: 'answered' })).toHaveLength(2);
-      expect(log.query({ status: 'failed' })).toHaveLength(1);
+      expect(fixture.requests).toHaveLength(2);
+      answeredBeforeRestart = fixture.requests.length;
+      expect(calls).toBe(3);
     }
     const retained = loadStaticSourceJournal(journalPath, null);
     if (!retained) throw new Error('Missing durable partial receipts');
@@ -50,10 +58,10 @@ test('a durable interrupted subset tree resumes only its missing call', async ()
     const rootPresence = retained.readings[staticInputKey(captured)];
     const mutable = { ...retained.readings };
     const resumed = { ...retained, readings: mutable };
-    using log = new SqliteDecisionLog(logPath);
+
     using journal = openStaticSourceJournal(journalPath);
     const fixture = fakePort(() => noulAnswer(0.01));
-    const receipt = await readStaticInput(withDecisionLog(fixture.port, log), log, captured, undefined, {
+    const receipt = await readCapturedInput(fixture.port, captured, undefined, {
       previous: resumed, onReceipt(source, value) {
         mutable[staticInputKey(source)] = value;
         journal.append({ ...resumed, readings: { [staticInputKey(source)]: value } }, source);
@@ -63,8 +71,7 @@ test('a durable interrupted subset tree resumes only its missing call', async ()
     expect(fixture.requests[0]?.state).toMatchObject({ source: captured.source, anchors: [captured.anchors[1]] });
     if (typeof rootPresence !== 'object' || rootPresence === null || !('presence' in rootPresence)) throw new Error('Missing original presence');
     expect(rootPresence.presence).toEqual(receipt.presence);
-    expect(log.query({ status: 'answered' })).toHaveLength(3);
-    expect(log.query({ status: 'failed' })).toHaveLength(1);
+    expect(answeredBeforeRestart + fixture.requests.length).toBe(3);
     expect(staticInputCaptureComplete(captured, resumed)).toBe(true);
     expect(staticInputStanding(captured, resumed)).toEqual({ kind: 'clear' });
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -73,23 +80,23 @@ test('a durable interrupted subset tree resumes only its missing call', async ()
 test('an interrupted exact selector resumes without repeating its admitted presence', async () => {
   const captured = input();
   const readings: Record<string, unknown> = {};
-  const current: StaticSourceReadings = { format: 1, decisionSourceHash: staticDecisionSourceHash(), readings };
-  using log = new SqliteDecisionLog(':memory:');
+  const current: StaticSourceReadings = { format: 2, readings };
+
   const fixture = fakePort(() => noulAnswer(0.99));
   let calls = 0;
   const interrupted: JudgmentPort = { model: fixture.port.model, ask(request) {
-    if (++calls === 2) throw new Error('Selector interrupted');
+    if (++calls === 2) throw new JudgmentError('internal', 'The decision client failed internally. The operation has stopped.');
     return fixture.port.ask(request);
   } };
   const progress = { previous: current, onReceipt(source: Parameters<typeof staticInputKey>[0], receipt: Awaited<ReturnType<typeof readStaticInput>>) {
     readings[staticInputKey(source)] = receipt;
   } };
-  await expect(readStaticInput(withDecisionLog(interrupted, log), log, captured, undefined, progress)).rejects.toMatchObject({ kind: 'internal', message: 'The decision client failed internally. The operation has stopped.' });
+  await expect(readCapturedInput(interrupted, captured, undefined, progress)).rejects.toMatchObject({ kind: 'internal', message: 'The decision client failed internally. The operation has stopped.' });
   expect(staticInputCaptureComplete(captured, current)).toBe(false);
   expect(staticInputStanding(captured, current).kind).toBe('held');
   const original = readings[staticInputKey(captured)];
   const resumed = fakePort((name, question) => question.type === 'choice' ? choiceAnswer(question, 'none', 0.99) : noulAnswer(name === 'violation' ? 0.01 : 0.99));
-  const receipt = await readStaticInput(withDecisionLog(resumed.port, log), log, captured, undefined, progress);
+  const receipt = await readCapturedInput(resumed.port, captured, undefined, progress);
   expect(resumed.requests).toHaveLength(1);
   expect(resumed.requests[0]?.state).toHaveProperty('candidates');
   if (typeof original !== 'object' || original === null || !('presence' in original)) throw new Error('Missing original presence');
@@ -97,7 +104,7 @@ test('an interrupted exact selector resumes without repeating its admitted prese
   expect(staticInputCaptureComplete(captured, current)).toBe(true);
   expect(staticInputStanding(captured, current).kind).toBe('held');
   const noRepeat = fakePort(() => { throw new Error('An answered held selector must not be asked again'); });
-  await readStaticInput(withDecisionLog(noRepeat.port, log), log, captured, undefined, progress);
+  await readCapturedInput(noRepeat.port, captured, undefined, progress);
   expect(noRepeat.requests).toHaveLength(0);
   expect(staticInputStanding(captured, current).kind).toBe('held');
 });
@@ -108,9 +115,9 @@ test('journal recovery rejects torn or malformed records without altering origin
     const captured = input();
     const current = await preparedStaticReadings([captured]);
     const path = join(root, 'checkpoint.journal');
-    const original = `${JSON.stringify(current)}\n{\"format\":1,\"decisionSourceHash\":\"unfinished`;
+    const original = `${JSON.stringify(current)}\n{\"format\":2,\"readings\":{\"unfinished\":\"`;
     writeFileSync(path, original);
-    expect(loadStaticSourceJournal(path, null)).toEqual({ ...current, captureSources: {}, captureBatterySources: {} });
+    expect(loadStaticSourceJournal(path, null)).toEqual(current);
     {
       using journal = openStaticSourceJournal(path);
       journal.append({ ...current, readings: { malformed: { presence: 'invalid' } } });
@@ -118,7 +125,7 @@ test('journal recovery rejects torn or malformed records without altering origin
     expect(readFileSync(path, 'utf8').startsWith(original)).toBe(true);
     const recovered = loadStaticSourceJournal(path, null);
     expect(staticInputStanding(captured, recovered)).toEqual({ kind: 'clear' });
-    expect(staticInputStanding({ ...captured, sourceHash: 'other-source' }, recovered).kind).toBe('held');
+    expect(staticInputStanding({ ...captured, source: captured.source + 'changed' }, recovered).kind).toBe('held');
     expect(recovered?.readings.malformed).toEqual({ presence: 'invalid' });
     const prototypePath = join(root, 'prototype.journal');
     writeFileSync(prototypePath, `${JSON.stringify({ ...current, readings: { ['__proto__']: { [staticInputKey(captured)]: current.readings[staticInputKey(captured)] } } })}\n`);
@@ -135,37 +142,29 @@ test('chunked journal replay preserves original complete-line order, UTF-8 and o
   const root = mkdtempSync(join(tmpdir(), 'static-chunked-journal-'));
   try {
     const path = join(root, 'checkpoint.journal');
-    const prefix = '{"format":1,"decisionSourceHash":"first","readingPlanVersion":2,"readings":{"unicode":{"text":"';
+    const prefix = '{"format":2,"readingPlanVersion":2,"readings":{"unicode":{"text":"';
     const text = `${'x'.repeat(64 * 1024 - Buffer.byteLength(prefix) - 1)}😀é`;
     const first = Buffer.from(`${prefix}${text}"},"replaced":"first"}}\n`);
     expect(first.subarray(64 * 1024 - 1, 64 * 1024 + 3)).toEqual(Buffer.from('😀'));
-    const next = { format: 1, decisionSourceHash: 'last', readingPlanVersion: 3,
-      readings: { replaced: 'last', ['__proto__']: { retained: true }, large: 'y'.repeat(128 * 1024) },
-      captureSources: { first: [['source.ts', 'hash']], ['__proto__']: { retained: true } },
-      captureBatterySources: { battery: 'complete source' } };
-    const torn = Buffer.concat([Buffer.from('{"format":1,"decisionSourceHash":"torn","readings":{"text":"'), Buffer.from([0xf0, 0x9f])]);
-    const bytes = Buffer.concat([first,
-      Buffer.from('{"format":1,"decisionSourceHash":"ignored","readingPlanVersion":4,"readings":{}}\n'),
+    const next = { format: 2, readingPlanVersion: 3,
+      readings: { replaced: 'last', ['__proto__']: { retained: true }, large: 'y'.repeat(128 * 1024) } };
+    const torn = Buffer.concat([Buffer.from('{"format":2,"readings":{"text":"'), Buffer.from([0xf0, 0x9f])]);
+    const bytes = Buffer.concat([first, Buffer.from('{"format":2,"readingPlanVersion":4,"readings":{}}\n'),
       Buffer.from([0xc3, 10]), Buffer.from('null\n'), Buffer.from(`${JSON.stringify(next)}\n`), torn]);
     writeFileSync(path, bytes);
-    let decisionSourceHash: string | undefined;
     let readingPlanVersion: StaticSourceReadings['readingPlanVersion'];
+    let complete = false;
     const readings: Record<string, unknown> = {};
-    const captureSources: Record<string, unknown> = {};
-    const captureBatterySources: Record<string, unknown> = {};
-    // The previous whole-string algorithm is the exact replay compatibility oracle.
+    // Native whole-string parsing is independent of the streaming implementation.
     for (const line of bytes.toString('utf8').split('\n').slice(0, -1)) {
       let record: StaticSourceReadings | null;
       try { record = parseStaticSourceReadings(JSON.parse(line)); } catch { continue; }
       if (!record) continue;
-      decisionSourceHash = record.decisionSourceHash;
-      readingPlanVersion = record.readingPlanVersion;
+      complete = true; readingPlanVersion = record.readingPlanVersion;
       Object.defineProperties(readings, Object.getOwnPropertyDescriptors(record.readings));
-      Object.defineProperties(captureSources, Object.getOwnPropertyDescriptors(record.captureSources ?? {}));
-      Object.defineProperties(captureBatterySources, Object.getOwnPropertyDescriptors(record.captureBatterySources ?? {}));
     }
-    if (decisionSourceHash === undefined) throw new Error('Missing complete compatibility record');
-    const expected: StaticSourceReadings = { format: 1, decisionSourceHash, readings, captureSources, captureBatterySources,
+    expect(complete).toBe(true);
+    const expected: StaticSourceReadings = { format: 2, readings,
       ...(readingPlanVersion === undefined ? {} : { readingPlanVersion }) };
     const replayed = loadStaticSourceJournal(path, null);
     expect(replayed).toEqual(expected);
@@ -173,24 +172,22 @@ test('chunked journal replay preserves original complete-line order, UTF-8 and o
     expect(replayed?.readings.replaced).toBe('last');
     expect(Object.hasOwn(replayed!.readings, '__proto__')).toBe(true);
     expect(Object.getPrototypeOf(replayed!.readings)).toBe(Object.prototype);
-    expect(Object.hasOwn(replayed!.captureSources!, '__proto__')).toBe(true);
     expect(readFileSync(path)).toEqual(bytes);
     {
       using journal = openStaticSourceJournal(path);
-      journal.append({ format: 1, decisionSourceHash: 'appended', readings: { after: true } });
+      journal.append({ format: 2, readings: { after: true } });
     }
     const after = readFileSync(path);
     expect(after.subarray(0, bytes.length)).toEqual(bytes);
     expect(after.subarray(bytes.length).toString('utf8').startsWith('\tINCOMPLETE_RECORD\n')).toBe(true);
-    expect(loadStaticSourceJournal(path, null)).toEqual({ format: 1, decisionSourceHash: 'appended',
-      readings: { ...readings, after: true }, captureSources, captureBatterySources });
+    expect(loadStaticSourceJournal(path, null)).toEqual({ format: 2, readings: { ...readings, after: true } });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('the single-byte journal tail check preserves absent, empty and complete file behavior', () => {
   const root = mkdtempSync(join(tmpdir(), 'static-journal-tail-'));
   try {
-    const record: StaticSourceReadings = { format: 1, decisionSourceHash: 'current', readings: {} };
+    const record: StaticSourceReadings = { format: 2, readings: {} };
     for (const [name, original] of [['absent', undefined], ['empty', ''], ['complete', `${JSON.stringify(record)}\n`]] as const) {
       const path = join(root, `${name}.journal`);
       if (original !== undefined) writeFileSync(path, original);
@@ -199,29 +196,26 @@ test('the single-byte journal tail check preserves absent, empty and complete fi
         journal.append(record);
       }
       expect(readFileSync(path, 'utf8')).toBe(`${original ?? ''}${original === '' ? '\tINCOMPLETE_RECORD\n' : ''}${JSON.stringify(record)}\n`);
-      expect(loadStaticSourceJournal(path, null)).toEqual({ ...record, captureSources: {}, captureBatterySources: {} });
+      expect(loadStaticSourceJournal(path, null)).toEqual(record);
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a stale partial policy cannot affect new source capture or revive its old answer', async () => {
+test('stale raw question evidence cannot affect a new source capture or revive its old answer', async () => {
   const captured = input();
   const original = await preparedStaticReadings([captured], 0.2);
   const prior = original.readings[staticInputKey(captured)];
-  if (typeof prior !== 'object' || prior === null) throw new Error('Missing prior fixture');
-  const manifest = staticDecisionSourceManifest().map(([path, hash]) => [path, path.endsWith('/bands.ts') ? 'stale-policy' : hash]);
-  const oldHash = sha256(JSON.stringify(manifest));
-  const readings: Record<string, unknown> = { [staticInputKey(captured)]: { ...prior, decisionSourceHash: oldHash } };
-  const staleCapture = readings[staticInputKey(captured)];
-  const previous = { ...original, readings, captureSources: { [oldHash]: manifest } };
+  if (!object(prior) || !object(prior.presence)) throw new Error('Missing prior unit fixture');
+  const staleCapture = { ...prior, presence: { ...prior.presence, questions: { violation: noul('A different original question.') } } };
+  const readings: Record<string, unknown> = { [staticInputKey(captured)]: staleCapture };
+  const previous = { ...original, readings };
   const fixture = fakePort(() => noulAnswer(0.01));
-  using log = new SqliteDecisionLog(':memory:');
-  const receipt = await readStaticInput(withDecisionLog(fixture.port, log), log, captured, undefined, {
+  const receipt = await readCapturedInput(fixture.port, captured, undefined, {
     previous, onReceipt(source, value) { readings[staticInputKey(source)] = value; },
   });
   expect(fixture.requests).toHaveLength(1);
   expect(receipt.presence.answers).toEqual({ violation: noulAnswer(0.01) });
-  expect(receipt.decisionSourceHash).toBe(staticDecisionSourceHash());
+  expect(receipt.input).toEqual(captured);
   expect(receipt.previousCaptures?.[0]).toEqual(staleCapture);
   expect(staticInputStanding(captured, previous)).toEqual({ kind: 'clear' });
 });
@@ -231,13 +225,13 @@ test('replacing an invalid inherited subset preserves its original raw capture',
   const original = await preparedStaticReadings([captured], 0.5);
   const root = original.readings[staticInputKey(captured)];
   if (typeof root !== 'object' || root === null || !('parts' in root) || !Array.isArray(root.parts)
-    || typeof root.parts[0] !== 'object' || root.parts[0] === null) throw new Error('Missing authored subset tree');
-  const stalePart = { ...root.parts[0], sourceHash: 'stale-source' };
+    || !object(root.parts[0]) || !object(root.parts[0].input)) throw new Error('Missing authored subset tree');
+  const stalePart = { ...root.parts[0], input: { ...root.parts[0].input, source: 'stale original source' } };
   const readings: Record<string, unknown> = { [staticInputKey(captured)]: { ...root, parts: [stalePart, root.parts[1]] } };
   const previous = { ...original, readings };
   const fixture = fakePort(() => noulAnswer(0.01));
-  using log = new SqliteDecisionLog(':memory:');
-  const receipt = await readStaticInput(withDecisionLog(fixture.port, log), log, captured, undefined, {
+
+  const receipt = await readCapturedInput(fixture.port, captured, undefined, {
     previous, onReceipt(source, value) { readings[staticInputKey(source)] = value; },
   });
   expect(fixture.requests).toHaveLength(1);
@@ -253,20 +247,20 @@ test('gzip receipts preserve exact answers and provenance with deterministic epo
   try {
     const captured = input();
     const readings = await preparedStaticReadings([captured], 0.12345678901234567);
-    const value = { ...readings, captureSources: { original: [['policy', 'original-hash']] }, captureBatterySources: { original: 'exact original source bytes' },
+    const value = { ...readings,
       readings: { ...readings.readings, archived: { previousCaptures: [{ answers: { violation: { type: 'noul', noul: 0.9876543210987654 } }, at: '2026-10-01T00:00:00Z' }] } } };
     const path = join(root, 'receipt.json.gz');
     saveStaticSourceReadings(value, path);
     const bytes = readFileSync(path);
     expect(bytes.readUInt32LE(4)).toBe(0);
-    expect(JSON.parse(gunzipSync(bytes).toString('utf8'))).toEqual(value);
+    expect(unpackStaticSourceStorage(JSON.parse(gunzipSync(bytes).toString('utf8')))).toEqual(value);
     expect(loadStaticSourceReadings(path)).toEqual(value);
     saveStaticSourceReadings(value, path);
     expect(readFileSync(path)).toEqual(bytes);
     const plain = join(root, 'custom.json');
     saveStaticSourceReadings(value, plain);
     expect(loadStaticSourceReadings(plain)).toEqual(value);
-    expect(JSON.parse(readFileSync(plain, 'utf8'))).toEqual(value);
+    expect(unpackStaticSourceStorage(JSON.parse(readFileSync(plain, 'utf8')))).toEqual(value);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -274,7 +268,7 @@ test('malformed gzip and compressed schemas hold the same complete evidence gate
   const root = mkdtempSync(join(tmpdir(), 'static-receipt-invalid-codec-'));
   try {
     const path = join(root, 'receipt.json.gz');
-    for (const bytes of [Buffer.from('not gzip'), gzipSync('{'), gzipSync(JSON.stringify({ format: 1, decisionSourceHash: 'x', readings: [] }))]) {
+    for (const bytes of [Buffer.from('not gzip'), gzipSync('{'), gzipSync(JSON.stringify({ format: 2, readings: [] }))]) {
       writeFileSync(path, bytes);
       expect(loadStaticSourceReadings(path)).toBeNull();
       expect(staticInputStanding(input(), loadStaticSourceReadings(path)).kind).toBe('held');
@@ -294,7 +288,7 @@ test('only settled current no observations clear an offline source input', async
   const readings = await preparedStaticReadings([captured]);
   expect(staticInputStanding(captured, readings)).toEqual({ kind: 'clear' });
   expect(staticInputStanding(captured, null).kind).toBe('held');
-  expect(staticInputStanding(captured, { ...readings, decisionSourceHash: 'stale' }).kind).toBe('held');
+  expect(parseStaticSourceReadings({ format: 1, readings: readings.readings })).toBeNull();
   const changed = captureStaticInputs('internal-identifier', captured.path, '// Changed source\nconst value = 3;')[0]!;
   expect(staticInputStanding(changed, readings).kind).toBe('held');
   expect(staticInputStanding({ ...captured, path: 'platform/src/another.ts' }, readings).kind).toBe('held');
@@ -322,13 +316,13 @@ test('mismatched model, site, state or question evidence cannot clear a source i
   const readings = await preparedStaticReadings([captured]);
   const receipt: unknown = readings.readings[staticInputKey(captured)];
   if (typeof receipt !== 'object' || receipt === null || !('presence' in receipt) || typeof receipt.presence !== 'object' || receipt.presence === null) throw new Error('Missing fixture presence');
-  for (const [key, value] of [['observedModel', 'other-model'], ['requestedModel', 'other-model'], ['site', 'another-site'], ['stateHash', 'other-state'], ['questionsHash', 'other-question'], ['version', 99], ['captureDecisionSourceHash', 'unproved-policy']]) {
+  for (const [key, value] of [['observedModel', 'other-model'], ['requestedModel', 'other-model'], ['site', 'another-site'], ['state', { source: 'other-state' }], ['questions', { violation: noul('Different question.') }], ['version', 99]]) {
     expect(staticInputStanding(captured, { ...readings, readings: { [staticInputKey(captured)]: { ...receipt, presence: { ...receipt.presence, [String(key)]: value } } } }).kind).toBe('held');
   }
 });
 
 test('a malformed artifact or non-probability answer stays held', async () => {
-  expect(parseStaticSourceReadings({ format: 1, decisionSourceHash: staticDecisionSourceHash(), readings: [] })).toBeNull();
+  expect(parseStaticSourceReadings({ format: 2, readings: [] })).toBeNull();
   const captured = input();
   const readings = await preparedStaticReadings([captured]);
   const receipt: unknown = readings.readings[staticInputKey(captured)];
@@ -364,100 +358,65 @@ test('source windows fit the actual canonical selector without clipping evidence
   expect(captured[0]!.source).toBe(`1| ${huge}`);
 });
 
-test('unchanged deferred policy revalidates through a shared-file internal-only revision', async () => {
+test('unchanged deferred raw state and question evidence revalidates without a policy certificate', async () => {
   const captured = captureStaticInputs('deferred-work', 'source.ts', '// Intentional read-only adapter.')[0]!;
   const current = await preparedStaticReadings([captured]);
-  const receipt: unknown = current.readings[staticInputKey(captured)];
-  if (typeof receipt !== 'object' || receipt === null || !('presence' in receipt)) throw new Error('Missing authored capture');
-  const source = readFileSync(new URL('../scripts/batteries/static-source.ts', import.meta.url), 'utf8');
-  const oldSource = source.replace("name: 'engine.gates.internal-identifier', version: 3", "name: 'engine.gates.internal-identifier', version: 2");
-  expect(oldSource).not.toBe(source);
-  const oldManifest = staticDecisionSourceManifest().map(([path, hash]) => [path, path === 'batteries/static-source.ts' ? sha256(oldSource) : hash]);
-  const oldHash = sha256(JSON.stringify(oldManifest));
-  const old = { ...current, decisionSourceHash: oldHash, captureSources: { [oldHash]: oldManifest }, captureBatterySources: { [oldHash]: oldSource },
-    readings: { [staticInputKey(captured)]: { ...receipt, decisionSourceHash: oldHash } } };
-  const retained = revalidateStaticInput(captured, old);
-  expect(retained).not.toBeNull();
-  expect(retained).toMatchObject({ decisionSourceHash: oldHash, presence: receipt.presence });
-  expect(staticInputStanding(captured, { ...old, decisionSourceHash: staticDecisionSourceHash(), readings: { [staticInputKey(captured)]: retained } })).toEqual({ kind: 'clear' });
-  expect(revalidateStaticInput(captured, { ...old, captureBatterySources: { [oldHash]: `${oldSource}\n// tampered bytes` } })).toBeNull();
-  const changedPolicy = oldSource.replace('yesNo(DEFERRED_WORK_INSTRUCTIONS, STAKES_BANDS.high.yesNo)', 'yesNo(DEFERRED_WORK_INSTRUCTIONS, STAKES_BANDS.medium.yesNo)');
-  const changedManifest = oldManifest.map(([path, hash]) => [path, path === 'batteries/static-source.ts' ? sha256(changedPolicy) : hash]);
-  const changedHash = sha256(JSON.stringify(changedManifest));
-  expect(revalidateStaticInput(captured, { ...old, captureSources: { [changedHash]: changedManifest }, captureBatterySources: { [changedHash]: changedPolicy },
-    readings: { [staticInputKey(captured)]: { ...receipt, decisionSourceHash: changedHash } } })).toBeNull();
+  const receipt = current.readings[staticInputKey(captured)];
+  if (!object(receipt) || !object(receipt.presence)) throw new Error('Missing authored unit capture');
+  const original = JSON.stringify(receipt);
+  const retained = revalidateStaticInput(captured, current);
+  expect(retained).toEqual(receipt);
+  expect(staticInputStanding(captured, current)).toEqual({ kind: 'clear' });
+  const changedQuestions = { ...current, readings: { [staticInputKey(captured)]: { ...receipt,
+    presence: { ...receipt.presence, questions: { violation: noul('Different deferred policy question.') } } } } };
+  expect(revalidateStaticInput(captured, changedQuestions)).toBeNull();
+  expect(staticInputStanding(captured, changedQuestions).kind).toBe('held');
+  expect(JSON.stringify(receipt)).toBe(original);
 });
 
-test('unchanged held deferred evidence survives an identifier revision without another call', async () => {
+test('unchanged complete held deferred evidence keeps exact raw answers without another call', async () => {
   const captured = captureStaticInputs('deferred-work', 'source.ts', '// Intentional read-only adapter.')[0]!;
   const current = await preparedStaticReadings([captured], 0.5);
-  const receipt: unknown = current.readings[staticInputKey(captured)];
-  if (typeof receipt !== 'object' || receipt === null || !('presence' in receipt) || !('selection' in receipt)) throw new Error('Missing authored held capture');
-  const source = readFileSync(new URL('../scripts/batteries/static-source.ts', import.meta.url), 'utf8');
-  const oldSource = source.replace("name: 'engine.gates.internal-identifier', version: 3", "name: 'engine.gates.internal-identifier', version: 2");
-  expect(oldSource).not.toBe(source);
-  const oldManifest = staticDecisionSourceManifest().map(([path, hash]) => [path, path === 'batteries/static-source.ts' ? sha256(oldSource) : hash]);
-  const oldHash = sha256(JSON.stringify(oldManifest));
-  const original = { ...receipt, decisionSourceHash: oldHash };
+  const original = current.readings[staticInputKey(captured)];
+  if (!object(original)) throw new Error('Missing authored held capture');
   const originalBytes = JSON.stringify(original);
-  const old: StaticSourceReadings = { ...current, decisionSourceHash: oldHash,
-    captureSources: { [oldHash]: oldManifest }, captureBatterySources: { [oldHash]: oldSource },
-    readings: { [staticInputKey(captured)]: original } };
-  const retained = revalidateStaticInput(captured, old);
+  const retained = revalidateStaticInput(captured, current);
   expect(retained).not.toBeNull();
-  const revalidated: StaticSourceReadings = { ...old, decisionSourceHash: staticDecisionSourceHash(),
-    readings: { [staticInputKey(captured)]: retained } };
+  const revalidated = { ...current, readings: { [staticInputKey(captured)]: retained } };
   expect(staticInputCaptureComplete(captured, revalidated)).toBe(true);
   expect(staticInputStanding(captured, revalidated).kind).toBe('held');
-  using log = new SqliteDecisionLog(':memory:');
-  const forbidden = fakePort(() => { throw new Error('Unchanged held deferred evidence cannot be resampled'); });
-  const result = await readStaticInput(withDecisionLog(forbidden.port, log), log, captured, undefined, {
-    previous: revalidated, original: old, onReceipt() {},
-  });
+  const forbidden = fakePort(() => { throw new Error('Unchanged held evidence cannot be resampled'); });
+  const result = await readCapturedInput(forbidden.port, captured, undefined, { previous: revalidated, onReceipt() {} });
   expect(forbidden.requests).toHaveLength(0);
-  expect(log.query()).toHaveLength(0);
   expect<unknown>(result.presence).toEqual(original.presence);
   expect<unknown>(result.selection).toEqual(original.selection);
   expect(JSON.stringify(original)).toBe(originalBytes);
-  expect(staticInputStanding(captured, revalidated).kind).toBe('held');
 });
 
-test('identifier scope revision retains old positive measurements and reads the new question only once', async () => {
+test('a changed identifier question retains old raw measurements and measures the new question only once', async () => {
   expect(internalIdentifier.version).toBe(3);
   const boundary = INTERNAL_IDENTIFIER_INSTRUCTIONS.indexOf(' Judge the offered authored use in this repository,');
   expect(boundary).toBeGreaterThan(0);
   const legacyQuestion = INTERNAL_IDENTIFIER_INSTRUCTIONS.slice(0, boundary);
-  const source = readFileSync(new URL('../scripts/batteries/static-source.ts', import.meta.url), 'utf8');
-  const legacySource = source.replace(INTERNAL_IDENTIFIER_INSTRUCTIONS.slice(boundary), '')
-    .replace("name: 'engine.gates.internal-identifier', version: 3", "name: 'engine.gates.internal-identifier', version: 2");
-  expect(legacySource).not.toBe(source);
-  const legacyManifest = staticDecisionSourceManifest().map(([path, hash]) => [path, path === 'batteries/static-source.ts' ? sha256(legacySource) : hash]);
-  const legacyHash = sha256(JSON.stringify(legacyManifest));
   for (const probability of [0.87, 0.86]) {
     const captured = input();
-    using log = new SqliteDecisionLog(':memory:');
     const fixture = fakePort((name, question) => question.type === 'choice'
       ? choiceAnswer(question, 'none', 0.45) : noulAnswer(name === 'violation' ? probability : 0.01));
-    const authored = await readStaticInput(withDecisionLog(fixture.port, log), log, captured);
+    const authored = await readCapturedInput(fixture.port, captured);
     if (!authored.selection) throw new Error('Missing authored selector measurement');
-    const original = { ...authored, decisionSourceHash: legacyHash,
-      presence: { ...authored.presence, version: 2, captureDecisionSourceHash: legacyHash,
-        questionsHash: sha256(canonicalJson(toJson({ violation: noul(legacyQuestion) }))) },
-      selection: { ...authored.selection, captureDecisionSourceHash: legacyHash,
-        stateHash: hashState({ context: { ...staticSelectionContext(captured), rule: legacyQuestion }, candidates: staticSelectionCandidates(captured) }) } };
+    const original = { ...authored,
+      presence: { ...authored.presence, version: 2, questions: { violation: noul(legacyQuestion) } },
+      selection: { ...authored.selection, state: toJson({ context: { ...staticSelectionContext(captured), rule: legacyQuestion },
+        candidates: staticSelectionCandidates(captured) }) } };
     const originalBytes = JSON.stringify(original);
-    const legacy: StaticSourceReadings = { format: 1, decisionSourceHash: legacyHash,
-      captureSources: { [legacyHash]: legacyManifest }, captureBatterySources: { [legacyHash]: legacySource },
-      readings: { [staticInputKey(captured)]: original } };
+    const legacy: StaticSourceReadings = { format: 2, readings: { [staticInputKey(captured)]: original } };
     expect(revalidateStaticInput(captured, legacy)).toBeNull();
     expect(staticInputCaptureComplete(captured, legacy)).toBe(false);
     expect(staticInputStanding(captured, legacy).kind).toBe('held');
-    const readings: Record<string, unknown> = { ...legacy.readings };
-    const current: StaticSourceReadings = { ...legacy, decisionSourceHash: staticDecisionSourceHash(), readings,
-      captureSources: { ...legacy.captureSources, [staticDecisionSourceHash()]: staticDecisionSourceManifest() } };
+    const readings: Record<string, unknown> = { ...legacy.readings }, current = { ...legacy, readings };
     const replacement = fakePort(() => noulAnswer(0.01));
-    const updated = await readStaticInput(withDecisionLog(replacement.port, log), log, captured, undefined, {
-      previous: current, original: legacy, onReceipt(value, receipt) { readings[staticInputKey(value)] = receipt; },
+    const updated = await readCapturedInput(replacement.port, captured, undefined, {
+      previous: current, onReceipt(value, receipt) { readings[staticInputKey(value)] = receipt; },
     });
     expect(replacement.requests).toHaveLength(1);
     expect(replacement.requests[0]?.questions).toHaveProperty('violation', internalIdentifier.items.violation.question);
@@ -466,25 +425,22 @@ test('identifier scope revision retains old positive measurements and reads the 
     expect(JSON.stringify(original)).toBe(originalBytes);
     expect(original.presence.answers).toEqual({ violation: { type: 'noul', noul: probability } });
     expect(staticInputStanding(captured, current)).toEqual({ kind: 'clear' });
-    const forbidden = fakePort(() => { throw new Error('Current answered scope question cannot be repeated'); });
-    await readStaticInput(withDecisionLog(forbidden.port, log), log, captured, undefined, {
-      previous: current, original: legacy, onReceipt() {},
-    });
+    const forbidden = fakePort(() => { throw new Error('Current answered question cannot repeat'); });
+    await readCapturedInput(forbidden.port, captured, undefined, { previous: current, onReceipt() {} });
     expect(forbidden.requests).toHaveLength(0);
-    expect(JSON.stringify(original)).toBe(originalBytes);
     expect(staticInputStanding(captured, legacy).kind).toBe('held');
   }
 });
 
 test('bounded semantic revision clears only when complete exact subsets each settle no', async () => {
   const captured = input();
-  using log = new SqliteDecisionLog(':memory:');
+
   const fixture = fakePort((_name, _question, state) => {
     if (typeof state !== 'object' || state === null || !('anchors' in state) || !Array.isArray(state.anchors)) throw new Error('Unexpected fixture state');
     return noulAnswer(state.anchors.length > 1 ? 0.5 : 0.01);
   });
-  const receipt = await readStaticInput(withDecisionLog(fixture.port, log), log, captured);
-  const readings = { format: 1, decisionSourceHash: staticDecisionSourceHash(), readings: { [staticInputKey(captured)]: receipt } } satisfies Parameters<typeof staticInputStanding>[1];
+  const receipt = await readCapturedInput(fixture.port, captured);
+  const readings = { format: 2, readings: { [staticInputKey(captured)]: receipt } } satisfies Parameters<typeof staticInputStanding>[1];
   expect(fixture.requests).toHaveLength(3);
   expect(fixture.requests.map(request => request.state)).toMatchObject([
     { source: captured.source, anchors: captured.anchors },
@@ -496,38 +452,30 @@ test('bounded semantic revision clears only when complete exact subsets each set
   expect(staticInputStanding(captured, { ...readings, readings: { [staticInputKey(captured)]: { ...receipt, parts: [receipt.parts[1], receipt.parts[0]] } } }).kind).toBe('held');
 });
 
-test('exact observation revalidation preserves old wire provenance and requires unchanged canonical policy', async () => {
-  const captured = input();
-  const current = await preparedStaticReadings([captured]);
-  const receipt: unknown = current.readings[staticInputKey(captured)];
-  if (typeof receipt !== 'object' || receipt === null || !('presence' in receipt)) throw new Error('Missing authored capture');
-  const oldManifest = staticDecisionSourceManifest().map(([path, hash]) => [path, path === 'no-todo-marker-rules.ts' ? 'old-extractor' : hash]);
-  const oldHash = sha256(JSON.stringify(oldManifest));
-  const old = { ...current, decisionSourceHash: oldHash, captureSources: { [oldHash]: oldManifest },
-    readings: { [staticInputKey(captured)]: { ...receipt, decisionSourceHash: oldHash } } };
-  expect(staticInputStanding(captured, old).kind).toBe('held');
-  const revalidated = revalidateStaticInput(captured, old);
-  expect(revalidated).toMatchObject({ decisionSourceHash: oldHash, validatedDecisionSourceHash: staticDecisionSourceHash(), presence: receipt.presence });
-  expect(staticInputStanding(captured, { ...old, decisionSourceHash: staticDecisionSourceHash(), readings: { [staticInputKey(captured)]: revalidated } })).toEqual({ kind: 'clear' });
-  expect(revalidateStaticInput({ ...captured, sourceHash: 'changed' }, old)).toBeNull();
-  expect(revalidateStaticInput(captured, { ...old, captureSources: {} })).toBeNull();
-  const changedPolicy = oldManifest.map(([path, hash]) => [path, path?.endsWith('/bands.ts') ? 'changed-bands' : hash]);
-  const changedHash = sha256(JSON.stringify(changedPolicy));
-  expect(revalidateStaticInput(captured, { ...old, decisionSourceHash: changedHash, captureSources: { [changedHash]: changedPolicy },
-    readings: { [staticInputKey(captured)]: { ...receipt, decisionSourceHash: changedHash } } })).toBeNull();
-  const changedBattery = oldManifest.map(([path, hash]) => [path, path === 'batteries/static-source.ts' ? 'changed-battery-band' : hash]);
-  const changedBatteryHash = sha256(JSON.stringify(changedBattery));
-  expect(revalidateStaticInput(captured, { ...old, captureSources: { [changedBatteryHash]: changedBattery },
-    readings: { [staticInputKey(captured)]: { ...receipt, decisionSourceHash: changedBatteryHash } } })).toBeNull();
-  const weak = await preparedStaticReadings([captured], 0.2);
-  const retainedWeak = revalidateStaticInput(captured, weak);
+test('exact raw observation revalidation rejects changed input, state and questions without changing evidence', async () => {
+  const captured = input(), current = await preparedStaticReadings([captured]);
+  const receipt = current.readings[staticInputKey(captured)];
+  if (!object(receipt) || !object(receipt.presence)) throw new Error('Missing raw capture');
+  const original = JSON.stringify(receipt);
+  expect(revalidateStaticInput(captured, current)).toEqual(receipt);
+  expect(revalidateStaticInput({ ...captured, source: captured.source + '\nchanged' }, current)).toBeNull();
+  for (const presence of [
+    { ...receipt.presence, state: { source: 'changed original body' } },
+    { ...receipt.presence, questions: { violation: noul('A different question.') } },
+  ]) {
+    const changed = { ...current, readings: { [staticInputKey(captured)]: { ...receipt, presence } } };
+    expect(revalidateStaticInput(captured, changed)).toBeNull();
+    expect(staticInputStanding(captured, changed).kind).toBe('held');
+  }
+  const weak = await preparedStaticReadings([captured], 0.2), retainedWeak = revalidateStaticInput(captured, weak);
   expect(retainedWeak).not.toBeNull();
   expect(staticInputStanding(captured, { ...weak, readings: { [staticInputKey(captured)]: retainedWeak } }).kind).toBe('held');
+  expect(JSON.stringify(receipt)).toBe(original);
 });
 
 test('streaming checkpoints match native complete JSON values and ordered histories', async () => {
   const root = mkdtempSync(join(tmpdir(), 'static-checkpoint-stream-equivalence-'));
-  const text = String.raw`{"format":1,"readingPlanVersion":3,"decisionSourceHash":"controlled","readings":{"replace":{"old":true},"__proto__":{"kept":true},"replace":{"history":[{"answers":{"violation":{"type":"noul","noul":0.9876543210987654}}},null]},"numbers":[0,-0,1e-3,1e400],"escaped":"quote\" slash\\ control\b\f\n\r\t unicode\ud800\ud83d\ude00"},"captureSources":{"__proto__":{"kept":true},"ordered":[["a","b"],["c","d"]]},"captureBatterySources":{"original":"exact complete source"},"ignored":{"also":"validated"}}`;
+  const text = String.raw`{"format":2,"readingPlanVersion":3,"readings":{"original":{"old":true},"__proto__":{"kept":true},"replace":{"history":[{"answers":{"violation":{"type":"noul","noul":0.9876543210987654}}},null]},"numbers":[0,-0,1e-3,1e400],"escaped":"quote\" slash\\ control\b\f\n\r\t unicode\ud800\ud83d\ude00"},"ignored":{"also":"validated"}}`;
   try {
     const expected = parseStaticSourceReadings(JSON.parse(text));
     for (const size of [1, 2, 7, 61, 64 * 1024]) {
@@ -549,13 +497,11 @@ test('streaming checkpoints match native complete JSON values and ordered histor
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('discarded metadata and overwritten wrong-type maps validate without scalar storage', () => {
+test('discarded metadata validates without scalar storage', () => {
   const large = 'x'.repeat(STATIC_CHECKPOINT_MAX_SCALAR_CHARS + 65536);
   const texts = [
-    `{"format":1,"decisionSourceHash":"controlled","readings":{},"ignored":${JSON.stringify(large)}}`,
-    `{"format":1,"decisionSourceHash":"controlled","readings":{},${JSON.stringify(large)}:{"nested":[${JSON.stringify(large)},123.5e-2,true,null]}}`,
-    `{"format":1,"decisionSourceHash":"controlled","readings":[${JSON.stringify(large)}],"readings":{},"captureSources":[${JSON.stringify(large)}],"captureSources":{}}`,
-    `{"format":1,"decisionSourceHash":"controlled","readings":{"removed":true},"readings":{"last":true}}`,
+    `{"format":2,"readings":{},"ignored":${JSON.stringify(large)}}`,
+    `{"format":2,"readings":{},${JSON.stringify(large)}:{"nested":[${JSON.stringify(large)},123.5e-2,true,null]}}`,
   ];
   for (const text of texts) {
     const reader = new CheckpointValueReader();
@@ -568,24 +514,26 @@ test('streaming checkpoints refuse every damaged complete-document boundary', as
   const root = mkdtempSync(join(tmpdir(), 'static-checkpoint-stream-refusal-'));
   try {
     const path = join(root, 'checkpoint.json');
-    const valid = '{"format":1,"decisionSourceHash":"controlled","readings":{"nested":[{"escaped":"a\\\"b","n":-0.125e+2},false]}}';
+    const valid = '{"format":2,"readings":{"nested":[{"escaped":"a\\\"b","n":-0.125e+2},false]}}';
     for (let at = 0; at < valid.length; at++) {
       writeFileSync(path, valid.slice(0, at));
       expect(await loadStaticSourceCheckpoint(path)).toBeNull();
     }
     for (const text of [
       valid + ' trailing', valid + valid,
-      '{"format":1,"decisionSourceHash":"controlled","readings":{},}',
-      '{"format":1,"decisionSourceHash":"controlled","readings":{},"ignored":[1,]}',
-      '{"format":1,"decisionSourceHash":"controlled","readings":{},"ignored":{"x":"\\q"}}',
-      '{"format":1,"decisionSourceHash":"controlled","readings":{},"ignored":{"x":"\\uQQQQ"}}',
-      '{"format":1,"decisionSourceHash":"controlled","readings":{},"ignored":01}',
-      '{"format":1,"decisionSourceHash":"controlled","readings":{},"ignored":1.}',
-      '{"format":1,"decisionSourceHash":"controlled","readings":{},"ignored":1e+}',
-      '{"format":1,"decisionSourceHash":"controlled","readings":{},"ignored":trux}',
-      '{"format":1,"decisionSourceHash":"controlled","readings":[true]}',
-      '{"format":1,"readingPlanVersion":4,"decisionSourceHash":"controlled","readings":{}}',
-      '{"format":1,"decisionSourceHash":"controlled","readings":{},"captureSources":null}',
+      '{"format":2,"readings":{},"readings":{"last":true}}',
+      '{"format":2,"readings":{"entry":0,"entry":1}}',
+      '{"format":2,"readings":{},}',
+      '{"format":2,"readings":{},"ignored":[1,]}',
+      '{"format":2,"readings":{},"ignored":{"x":"\\q"}}',
+      '{"format":2,"readings":{},"ignored":{"x":"\\uQQQQ"}}',
+      '{"format":2,"readings":{},"ignored":01}',
+      '{"format":2,"readings":{},"ignored":1.}',
+      '{"format":2,"readings":{},"ignored":1e+}',
+      '{"format":2,"readings":{},"ignored":trux}',
+      '{"format":2,"readings":[true]}',
+      '{"format":2,"readingPlanVersion":4,"readings":{}}',
+      '{"format":2,"readings":null}',
     ]) {
       writeFileSync(path, text);
       expect(await loadStaticSourceCheckpoint(path)).toEqual(loadStaticSourceReadings(path));
@@ -597,7 +545,7 @@ test('streaming checkpoints refuse every damaged complete-document boundary', as
 test('streaming plain and gzip checkpoints preserve split text and refuse compressed corruption', async () => {
   const root = mkdtempSync(join(tmpdir(), 'static-checkpoint-stream-text-'));
   try {
-    const prefix = '{"format":1,"decisionSourceHash":"controlled","readings":{"text":"';
+    const prefix = '{"format":2,"readings":{"text":"';
     const padding = 'a'.repeat(64 * 1024 - Buffer.byteLength(prefix) - 1);
     const bytes = Buffer.from(`${prefix}${padding}😀é"}}`);
     const malformed = Buffer.concat([Buffer.from(prefix), Buffer.from([0xc3, 0x28]), Buffer.from('"}}')]);
@@ -620,11 +568,11 @@ test('streaming retained-scalar capacity refuses the complete checkpoint without
   const root = mkdtempSync(join(tmpdir(), 'static-checkpoint-stream-capacity-'));
   try {
     const path = join(root, 'checkpoint.json');
-    const text = JSON.stringify({ format: 1, decisionSourceHash: 'controlled', readings: { oversized: 'x'.repeat(STATIC_CHECKPOINT_MAX_SCALAR_CHARS + 1) } });
+    const text = JSON.stringify({ format: 2, readings: { oversized: 'x'.repeat(STATIC_CHECKPOINT_MAX_SCALAR_CHARS + 1) } });
     writeFileSync(path, text);
     expect(await loadStaticSourceCheckpoint(path)).toBeNull();
     expect(readFileSync(path, 'utf8')).toBe(text);
-    const below = JSON.stringify({ format: 1, decisionSourceHash: 'controlled', readings: { exact: 'x'.repeat(STATIC_CHECKPOINT_MAX_SCALAR_CHARS) } });
+    const below = JSON.stringify({ format: 2, readings: { exact: 'x'.repeat(STATIC_CHECKPOINT_MAX_SCALAR_CHARS) } });
     writeFileSync(path, below);
     expect(await loadStaticSourceCheckpoint(path)).toEqual(loadStaticSourceReadings(path));
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -642,10 +590,54 @@ test('streaming checkpoint resumes original complete held evidence without anoth
     if (!restored) throw new Error('Missing complete checkpoint');
     expect(staticInputCaptureComplete(captured, restored)).toBe(true);
     expect(staticInputStanding(captured, restored).kind).toBe('held');
-    using log = new SqliteDecisionLog(join(root, 'resume.sqlite'));
+
     const forbidden = fakePort(() => { throw new Error('Complete unchanged held evidence must not be dispatched'); });
-    const receipt = await readStaticInput(forbidden.port, log, captured, undefined, { previous: restored, onReceipt() {} });
+    const receipt = await readCapturedInput(forbidden.port, captured, undefined, { previous: restored, onReceipt() {} });
     expect((Object.values(previous.readings)[0] as { presence: unknown }).presence).toEqual(receipt.presence);
     expect(forbidden.requests).toHaveLength(0);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('cancellation or original input retirement during a provider await cannot publish a raw cache receipt', async () => {
+  for (const retirement of ['cancel', 'source'] as const) {
+    const captured = { ...input() }, original = structuredClone(captured), controller = new AbortController();
+    let release!: () => void, entered!: () => void, publications = 0;
+    const held = new Promise<void>(resolve => { release = resolve; }), admitted = new Promise<void>(resolve => { entered = resolve; });
+    const fixture = fakePort(() => noulAnswer(0.01));
+    const recorded = createStaticCallRecorder({ ...fixture.port, async ask(request) {
+      entered(); await held; return fixture.port.ask(request);
+    } });
+    const reading = readStaticInput(recorded.port, recorded.capture, captured, controller.signal, {
+      previous: { format: 2, readings: {} }, onReceipt() { publications++; },
+    });
+    try {
+      await Promise.race([admitted, reading.then(() => { throw new Error('Read settled before its provider seam'); })]);
+      const reason = new Error('Original unit owner cancelled');
+      if (retirement === 'cancel') controller.abort(reason);
+      else captured.source += '\nChanged while awaiting the provider.';
+      release();
+      if (retirement === 'cancel') await expect(reading).rejects.toBe(reason);
+      else await expect(reading).rejects.toThrow('Static input changed during reading');
+      expect(fixture.requests).toHaveLength(1);
+      expect(fixture.requests[0]?.state).toHaveProperty('source', original.source);
+      expect(recorded.calls).toHaveLength(0); expect(publications).toBe(0);
+    } finally { release(); await reading.catch(() => undefined); }
+  }
+});
+
+test('a receipt callback cannot mutate a nested subset and continue to another model request', async () => {
+  const captured = input(), original = structuredClone(captured);
+  const fixture = fakePort((_name, _question, state) => {
+    if (!object(state) || !Array.isArray(state.anchors)) throw new Error('Missing original anchors');
+    return noulAnswer(state.anchors.length > 1 ? 0.5 : 0.01);
+  });
+  let callbacks = 0;
+  await expect(readCapturedInput(fixture.port, captured, undefined, {
+    previous: { format: 2, readings: {} }, onReceipt(source) {
+      callbacks++;
+      if (source.anchors.length === 1) Object.defineProperty(source, 'source', { value: 'Changed nested original context.' });
+    },
+  })).rejects.toThrow('Static subset changed during reading');
+  expect(callbacks).toBe(2); expect(fixture.requests).toHaveLength(2);
+  expect(captured).toEqual(original);
 });

@@ -1,14 +1,15 @@
 #!/usr/bin/env bun
 /** Explicit genuine source preparation; ordinary validation never contacts a provider. */
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { createSystemOnePort, judgmentConfigFromEnv, SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
+import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes-jev/judgment';
+import { createStaticCallRecorder, openStaticCallLog } from './static-source-call-recording.ts';
 import { collectInternalIdentifierCandidates, INTERNAL_ID_ROOT, scanTargetsFromEnvironment } from './check-internal-identifiers.ts';
 import { isInternalIdentifierExempt } from './internal-identifier-rule.ts';
 import { collectDeferredSourceCandidates, TODO_ROOT } from './no-todo-markers.ts';
 import { sourceMarkerAnchors } from './no-todo-marker-rules.ts';
-import { captureStaticInputs, withStaticSourcePolicyPass, loadStaticSourceCheckpoint, loadStaticSourceJournal, loadStaticSourceReadings, openStaticSourceJournal, projectCurrentStaticSourceReadings, readStaticInput, revalidateStaticInput, saveStaticSourceReadings, STATIC_READINGS_PATH, STATIC_SOURCE_READING_PLAN_VERSION, staticDecisionSourceHash, staticDecisionSourceManifest, staticInputCaptureComplete, staticInputKey, staticInputStanding, type StaticSourceInput, type StaticSourceReadings, type StaticSourceReceipt } from './static-source-readings.ts';
+import { captureStaticInputs, withStaticSourcePolicyPass, loadStaticSourceCheckpoint, loadStaticSourceJournal, loadStaticSourceReadings, openStaticSourceJournal, projectCurrentStaticSourceReadings, readStaticInput, revalidateStaticInput, saveStaticSourceReadings, STATIC_READINGS_PATH, STATIC_SOURCE_READING_PLAN_VERSION, staticDecisionSourceObservation, staticInputCaptureComplete, staticInputKey, staticInputStanding, type StaticSourceInput, type StaticSourceReadings, type StaticSourceReceipt } from './static-source-readings.ts';
 
 export function collectStaticInputs(): StaticSourceInput[] {
   const internal = collectInternalIdentifierCandidates(INTERNAL_ID_ROOT, scanTargetsFromEnvironment(process.env.INTERNAL_ID_DIRS_JSON))
@@ -58,28 +59,26 @@ async function main(): Promise<void> {
   const logPath = values.log ? resolve(values.log) : undefined;
   assertStaticCapturePathsDistinct({ output: path, outputStage: `${path}.next`, checkpoint: checkpointPath,
     checkpointStage: `${checkpointPath}.next`, journal: journalPath,
-    ...(logPath ? { log: logPath, logWal: `${logPath}-wal`, logShm: `${logPath}-shm` } : {}),
+    ...(logPath ? { log: logPath } : {}),
     ...(values.inputs ? { inputs: resolve(values.inputs) } : {}) });
   const inputs = collectStaticInputs();
-  const decisionSourceHash = staticDecisionSourceHash();
+  const policy = staticDecisionSourceObservation();
   const inputKeys = inputs.map(input => staticInputKey(input));
+  if (new Set(inputKeys).size !== inputKeys.length) throw new Error('Captured source windows must have distinct position keys');
   const counts = Object.fromEntries(['internal-identifier', 'deferred-work'].map(kind => [kind, inputs.filter(input => input.kind === kind).length]));
   console.log(`[static-source] ${inputs.length} complete inputs: ${JSON.stringify(counts)}`);
   if (values.inputs) {
     mkdirSync(dirname(resolve(values.inputs)), { recursive: true });
-    writeFileSync(resolve(values.inputs), `${JSON.stringify({ readingPlanVersion: STATIC_SOURCE_READING_PLAN_VERSION, decisionSourceHash, inputs }, null, 2)}\n`);
+    writeFileSync(resolve(values.inputs), `${JSON.stringify({ readingPlanVersion: STATIC_SOURCE_READING_PLAN_VERSION, inputs }, null, 2)}\n`);
   }
   if (values['inventory-only']) return;
   if (!values.log) throw new Error('--log is required to retain genuine provider evidence');
   mkdirSync(dirname(resolve(values.log)), { recursive: true });
   const previous = loadStaticSourceJournal(journalPath, await loadStaticSourceCheckpoint(checkpointPath) ?? loadStaticSourceReadings(path));
-  const captureSources = { ...previous?.captureSources, [decisionSourceHash]: staticDecisionSourceManifest() };
-  const captureBatterySources = { ...previous?.captureBatterySources,
-    [decisionSourceHash]: readFileSync(resolve(import.meta.dir, 'batteries/static-source.ts'), 'utf8') };
   // Changed input keys remain historical captures, never evidence for a current
   // input. Replaced captures under the same key retain their lineage below.
   const readings: Record<string, unknown> = { ...previous?.readings };
-  const current: StaticSourceReadings = { format: 1, readingPlanVersion: STATIC_SOURCE_READING_PLAN_VERSION, decisionSourceHash, readings, captureSources, captureBatterySources };
+  const current: StaticSourceReadings = { format: 2, readingPlanVersion: STATIC_SOURCE_READING_PLAN_VERSION, readings };
   const pending = inputs.filter(input => {
     const key = staticInputKey(input);
     const revalidated = values.all ? null : revalidateStaticInput(input, previous);
@@ -93,8 +92,8 @@ async function main(): Promise<void> {
   mkdirSync(dirname(checkpointPath), { recursive: true });
   using journal = openStaticSourceJournal(journalPath);
   journal.append({ ...current, readings: {} });
-  using log = new SqliteDecisionLog(resolve(values.log));
-  const port = withDecisionLog(createSystemOnePort(judgmentConfigFromEnv(process.env)), log);
+  using log = openStaticCallLog(resolve(values.log));
+  const { port, capture } = createStaticCallRecorder(createSystemOnePort(judgmentConfigFromEnv(process.env)), entry => log.write(entry));
   const abort = new AbortController();
   const cancel = () => abort.abort(new Error('Source preparation cancelled'));
   process.once('SIGINT', cancel); process.once('SIGTERM', cancel);
@@ -116,16 +115,15 @@ async function main(): Promise<void> {
     if (JSON.stringify(value) === JSON.stringify(prior)) return;
     readings[key] = value;
     const capturedInput = priorId !== receipt.presence.id || (receipt.selection && priorSelectionId !== receipt.selection.id) ? input : undefined;
-    journal.append({ format: 1, readingPlanVersion: STATIC_SOURCE_READING_PLAN_VERSION, decisionSourceHash, readings: { [key]: value } }, capturedInput);
+    journal.append({ format: 2, readingPlanVersion: STATIC_SOURCE_READING_PLAN_VERSION, readings: { [key]: value } }, capturedInput);
   };
   const worker = async (): Promise<void> => {
     while (next < pending.length) {
       abort.signal.throwIfAborted();
       const input = pending[next++]!;
-      await readStaticInput(port, log, input, abort.signal, {
+      await readStaticInput(port, capture, input, abort.signal, {
         previous: values.all ? { ...current, readings: {} } : current,
         ...(previous && !values.all ? { original: previous } : {}),
-        decisionSourceHash,
         onReceipt,
       });
       completed++;
@@ -140,16 +138,21 @@ async function main(): Promise<void> {
     persist();
     const after = collectStaticInputs();
     const afterKeys = after.map(input => staticInputKey(input));
-    if (staticDecisionSourceHash() !== decisionSourceHash || afterKeys.length !== inputKeys.length
+    policy.assertCurrent();
+    if (afterKeys.length !== inputKeys.length
       || afterKeys.some((key, index) => key !== inputKeys[index])) {
       throw new Error(`Source changed during preparation; reusable genuine observations retained in ${checkpointPath}, canonical artifact was not published`);
     }
     const result: StaticSourceReadings = projectCurrentStaticSourceReadings(inputs, current);
     saveStaticSourceReadings(result, path);
-    const held = inputs.filter(input => staticInputStanding(input, result).kind === 'held');
-    const violations = inputs.filter(input => staticInputStanding(input, result).kind === 'violation');
-    console.log(`[static-source] ${pending.length} read, ${inputs.length - pending.length} reused, ${held.length} inconclusive advisories, ${violations.length} violating inputs`);
-    if (violations.length) process.exitCode = 1;
+    let held = 0, violations = 0;
+    for (const input of inputs) {
+      const standing = staticInputStanding(input, result);
+      if (standing.kind === 'held') held++;
+      else if (standing.kind === 'violation') violations++;
+    }
+    console.log(`[static-source] ${pending.length} read, ${inputs.length - pending.length} reused, ${held} inconclusive advisories, ${violations} violating inputs`);
+    if (violations) process.exitCode = 1;
   } catch (error) {
     abort.abort(error);
     await Promise.allSettled(workers);

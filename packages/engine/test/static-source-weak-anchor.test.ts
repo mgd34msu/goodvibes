@@ -1,21 +1,26 @@
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
-import { canonicalJson, choice, defineSelector, noul, DEFAULT_MODEL, SqliteDecisionLog, STAKES_BANDS, toJson, withDecisionLog } from '@goodvibes-jev/judgment';
+import { JudgmentError, choice, defineSelector, noul, DEFAULT_MODEL, STAKES_BANDS, toJson, type EntryType, type Questions, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { captureStaticInputs, parseStaticSourceReadings, readStaticInput, revalidateStaticInput, sha256, STATIC_SITE, staticDecisionSourceHash, staticDecisionSourceManifest, staticInputCaptureComplete, staticInputKey, staticInputStanding, staticSelectionCandidates, staticSelectionContext, type StaticSourceReadings } from '../scripts/static-source-readings.ts';
+import { captureStaticInputs, parseStaticSourceReadings, readStaticInput, revalidateStaticInput, STATIC_SITE, staticInputCaptureComplete, staticInputKey, staticInputStanding, staticSelectionCandidates, staticSelectionContext, type StaticSourceReadings, type StaticSourceInput, type StaticSourceProgress } from '../scripts/static-source-readings.ts';
 import { STATIC_WEAK_ANCHOR_FIT_INSTRUCTIONS, STATIC_WEAK_ANCHOR_INSTRUCTIONS, staticWeakAnchor } from '../scripts/batteries/static-weak-anchor.ts';
 import { STATIC_ANCHOR_FIT_INSTRUCTIONS, STATIC_ANCHOR_INSTRUCTIONS } from '../scripts/batteries/static-source.ts';
+import { createStaticCallRecorder } from '../scripts/static-source-call-recording.ts';
 import { preparedStaticReadings } from './_helpers/static-source-evidence.ts';
 
 const input = () => captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const value = 3;', [{ id: 'candidate', line: 1, col: 7, text: 'value' }])[0]!;
 const object = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+function readCapturedInput(port: JudgmentPort, input: StaticSourceInput, signal?: AbortSignal, progress?: StaticSourceProgress) {
+  const recorded = createStaticCallRecorder(port);
+  return readStaticInput(recorded.port, recorded.capture, input, signal, progress);
+}
 
 async function selected(presence: number, pick: 'candidate' | 'none', confidence: number, fit: number) {
   const captured = input();
-  using log = new SqliteDecisionLog(':memory:');
+
   const fixture = fakePort((name, question) => question.type === 'choice' ? choiceAnswer(question, pick, confidence) : noulAnswer(name === 'violation' ? presence : fit));
-  const receipt = await readStaticInput(withDecisionLog(fixture.port, log), log, captured);
-  return { captured, receipt, readings: { format: 1, decisionSourceHash: staticDecisionSourceHash(), readings: { [staticInputKey(captured)]: receipt } } satisfies StaticSourceReadings };
+  const receipt = await readCapturedInput(fixture.port, captured);
+  return { captured, receipt, readings: { format: 2, readings: { [staticInputKey(captured)]: receipt } } satisfies StaticSourceReadings };
 }
 
 test('weak presence clears with every exact negative fit unless a settled candidate identity contradicts it', async () => {
@@ -50,37 +55,32 @@ test('new positive identity and fit must both settle and cannot clear a strong c
   expect(contradiction.receipt.selection?.battery).toBe('engine.gates.static-offending-anchor');
 });
 
-test('current and historical selector receipts keep their own exact state/question pairs', async () => {
+test('current and historical selector receipts keep their own exact raw state/question pairs', async () => {
   const { captured, receipt, readings } = await selected(0.5, 'none', 0.99, 0.01);
-  const selection = receipt.selection!;
-  const legacyState = { context: staticSelectionContext(captured), candidates: staticSelectionCandidates(captured) };
-  const legacyQuestions = { pick: choice(STATIC_WEAK_ANCHOR_INSTRUCTIONS, { candidate: null, none: 'None of the candidates does what is needed.' }),
+  const selection = receipt.selection;
+  if (!selection) throw new Error('Missing complete selector');
+  const state = toJson({ context: staticSelectionContext(captured), candidates: staticSelectionCandidates(captured) });
+  const questions = { pick: choice(STATIC_WEAK_ANCHOR_INSTRUCTIONS, { candidate: null, none: 'None of the candidates does what is needed.' }),
     fits_0: noul({ question: STATIC_WEAK_ANCHOR_FIT_INSTRUCTIONS, candidate: '`candidates[0]` (id "candidate")' }) };
-  const stateHash = sha256(canonicalJson(toJson(legacyState))), questionsHash = sha256(canonicalJson(toJson(legacyQuestions)));
-  const standing = (hashes: { stateHash: string; questionsHash: string }) => staticInputStanding(captured,
-    { ...readings, readings: { [staticInputKey(captured)]: { ...receipt, selection: { ...selection, ...hashes } } } });
+  const standing = (wire: { state: EntryType; questions: Questions }) => staticInputStanding(captured,
+    { ...readings, readings: { [staticInputKey(captured)]: { ...receipt, selection: { ...selection, ...wire } } } });
   expect(staticInputStanding(captured, readings)).toEqual({ kind: 'clear' });
-  expect(standing({ stateHash, questionsHash })).toEqual({ kind: 'clear' });
-  expect(standing({ stateHash, questionsHash: selection.questionsHash }).kind).toBe('held');
-  expect(standing({ stateHash: selection.stateHash, questionsHash }).kind).toBe('held');
+  expect(standing({ state, questions })).toEqual({ kind: 'clear' });
+  expect(standing({ state, questions: selection.questions }).kind).toBe('held');
+  expect(standing({ state: selection.state, questions }).kind).toBe('held');
 });
 
-test('a current selector receipt does not also hash the historical selector wire', async () => {
-  const { captured, receipt, readings } = await selected(0.5, 'none', 0.99, 0.01);
-  const legacyState = { context: staticSelectionContext(captured), candidates: staticSelectionCandidates(captured) };
-  const legacyQuestions = { pick: choice(STATIC_WEAK_ANCHOR_INSTRUCTIONS, { candidate: null, none: 'None of the candidates does what is needed.' }),
-    fits_0: noul({ question: STATIC_WEAK_ANCHOR_FIT_INSTRUCTIONS, candidate: '`candidates[0]` (id "candidate")' }) };
-  const legacy = { ...readings, readings: { [staticInputKey(captured)]: { ...receipt, selection: { ...receipt.selection!,
-    stateHash: sha256(canonicalJson(toJson(legacyState))), questionsHash: sha256(canonicalJson(toJson(legacyQuestions))) } } } };
+test('both exact selector wire variants compare raw snapshots without any hashing', async () => {
   const hashing = spyOn(crypto, 'createHash'), nativeHashing = spyOn(Bun.CryptoHasher, 'hash');
-  const count = () => hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length
-    + nativeHashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
   try {
+    const { captured, receipt, readings } = await selected(0.5, 'none', 0.99, 0.01);
+    const legacy = { ...readings, readings: { [staticInputKey(captured)]: { ...receipt, selection: { ...receipt.selection!,
+      state: toJson({ context: staticSelectionContext(captured), candidates: staticSelectionCandidates(captured) }),
+      questions: { pick: choice(STATIC_WEAK_ANCHOR_INSTRUCTIONS, { candidate: null, none: 'None of the candidates does what is needed.' }),
+        fits_0: noul({ question: STATIC_WEAK_ANCHOR_FIT_INSTRUCTIONS, candidate: '`candidates[0]` (id "candidate")' }) } } } } };
     expect(staticInputStanding(captured, readings)).toEqual({ kind: 'clear' });
-    const currentCount = count();
-    hashing.mockClear(); nativeHashing.mockClear();
     expect(staticInputStanding(captured, legacy)).toEqual({ kind: 'clear' });
-    expect(count()).toBeGreaterThan(currentCount);
+    expect(hashing).not.toHaveBeenCalled(); expect(nativeHashing).not.toHaveBeenCalled();
   } finally { hashing.mockRestore(); nativeHashing.mockRestore(); }
 });
 
@@ -109,15 +109,15 @@ test('weak exhaustive negative fits keep the original high band and every contra
 
 test('a settled weak negative sibling cannot clear another unresolved exact source subset', async () => {
   const captured = captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const first = 1;\nconst second = 2;')[0]!;
-  using log = new SqliteDecisionLog(':memory:');
+
   const fixture = fakePort((name, question, state) => {
     if (question.type === 'choice') return choiceAnswer(question, 'none', .2);
     if (name === 'violation') return noulAnswer(.5);
     if (!object(state) || !Array.isArray(state.candidates) || !object(state.candidates[0])) throw new Error('Missing exact candidate state');
     return noulAnswer(state.candidates[0].id === captured.anchors[0]?.id ? .01 : .5);
   });
-  const receipt = await readStaticInput(withDecisionLog(fixture.port, log), log, captured);
-  const readings = { format: 1 as const, decisionSourceHash: staticDecisionSourceHash(), readings: { [staticInputKey(captured)]: receipt } };
+  const receipt = await readCapturedInput(fixture.port, captured);
+  const readings = { format: 2 as const, readings: { [staticInputKey(captured)]: receipt } };
   expect(receipt.parts).toHaveLength(2);
   expect(staticInputCaptureComplete(captured, readings)).toBe(true);
   expect(staticInputStanding(captured, readings).kind).toBe('held');
@@ -125,67 +125,47 @@ test('a settled weak negative sibling cannot clear another unresolved exact sour
   expect(staticInputStanding(first, { ...readings, readings: { [staticInputKey(first)]: receipt.parts[0] } }).kind).toBe('clear');
 });
 
-test('original plan-2 raw answers revalidate under plan 3 without a new question or provider call', async () => {
-  const captured = input();
-  const fixture = await selected(.5, 'none', .2, .01);
-  const manifest = staticDecisionSourceManifest().map(([path, hash]) => [path, path === 'static-source-readings.ts' ? 'authored-original-plan-2-source' : hash]);
-  const captureHash = sha256(JSON.stringify(manifest));
-  const original = { ...fixture.receipt, readingPlanVersion: 2 as const, decisionSourceHash: captureHash,
-    presence: { ...fixture.receipt.presence, captureDecisionSourceHash: captureHash },
-    selection: fixture.receipt.selection ? { ...fixture.receipt.selection, captureDecisionSourceHash: captureHash } : null };
-  const old = { format: 1 as const, readingPlanVersion: 2 as const, decisionSourceHash: captureHash,
-    readings: { [staticInputKey(captured)]: original }, captureSources: { [captureHash]: manifest } };
-  const revalidated = revalidateStaticInput(captured, old);
-  expect(revalidated).toMatchObject({ readingPlanVersion: 2, validatedReadingPlanVersion: 3, presence: original.presence, selection: original.selection });
-  const current = { ...old, readingPlanVersion: 3 as const, decisionSourceHash: staticDecisionSourceHash(),
-    readings: { [staticInputKey(captured)]: revalidated } };
+test('original plan-2 raw answers revalidate without changing their state, questions or probabilities', async () => {
+  const captured = input(), fixture = await selected(.5, 'none', .2, .01);
+  const original = { ...fixture.receipt, readingPlanVersion: 2 as const };
+  const old = { format: 2 as const, readingPlanVersion: 2 as const, readings: { [staticInputKey(captured)]: original } };
+  const originalBytes = JSON.stringify(original), revalidated = revalidateStaticInput(captured, old);
+  expect(revalidated).toEqual(original);
+  const current = { ...old, readingPlanVersion: 3 as const, readings: { [staticInputKey(captured)]: revalidated } };
   expect(staticInputCaptureComplete(captured, current)).toBe(true);
   expect(staticInputStanding(captured, current).kind).toBe('clear');
-  using log = new SqliteDecisionLog(':memory:');
-  const forbidden = fakePort(() => { throw new Error('Original plan-2 evidence cannot be resampled'); });
-  const receipt = await readStaticInput(withDecisionLog(forbidden.port, log), log, captured, undefined, {
-    previous: current, original: old, onReceipt() {},
-  });
+  const forbidden = fakePort(() => { throw new Error('Unchanged exact evidence cannot be resampled'); });
+  const receipt = await readCapturedInput(forbidden.port, captured, undefined, { previous: current, onReceipt() {} });
   expect(forbidden.requests).toHaveLength(0);
   expect(receipt.presence).toEqual(original.presence);
   expect(receipt.selection).toEqual(original.selection);
-  expect(receipt.previousCaptures).toEqual([original]);
-  expect(log.query()).toHaveLength(0);
+  expect(JSON.stringify(original)).toBe(originalBytes);
 });
 
-test('legacy weak presence survives exactly and receives only the genuinely new selector once', async () => {
-  const captured = input();
-  const authored = await preparedStaticReadings([captured], 0.5);
+test('a retained exact weak presence receives only its missing selector once', async () => {
+  const captured = input(), authored = await preparedStaticReadings([captured], 0.5);
   const raw = authored.readings[staticInputKey(captured)];
-  if (!object(raw) || !object(raw.presence)) throw new Error('Missing authored evidence');
-  const manifest = staticDecisionSourceManifest().filter(([path]) => path !== 'batteries/static-weak-anchor.ts');
-  const oldHash = sha256(JSON.stringify(manifest));
-  const presence = { ...raw.presence, captureDecisionSourceHash: oldHash };
-  const original = { ...raw, readingPlanVersion: 1, decisionSourceHash: oldHash, presence, selection: null };
+  if (!object(raw) || !object(raw.presence)) throw new Error('Missing authored raw presence');
+  const original = { ...raw, readingPlanVersion: 1, selection: null };
   const readings: Record<string, unknown> = { [staticInputKey(captured)]: original };
-  const old = { ...authored, decisionSourceHash: oldHash, readings, captureSources: { [oldHash]: manifest } };
-  const current = { ...old, decisionSourceHash: staticDecisionSourceHash() };
-  expect(revalidateStaticInput(captured, old)).not.toBeNull();
+  const current = { ...authored, readings };
+  expect(revalidateStaticInput(captured, current)).not.toBeNull();
   expect(staticInputCaptureComplete(captured, current)).toBe(false);
   expect(staticInputStanding(captured, current).kind).toBe('held');
-  using log = new SqliteDecisionLog(':memory:');
   const fixture = fakePort((_name, question) => question.type === 'choice' ? choiceAnswer(question, 'none', 0.99) : noulAnswer(0.01));
-  const progress = { previous: current, original: old, onReceipt(source: typeof captured, value: Awaited<ReturnType<typeof readStaticInput>>) {
+  const progress = { previous: current, onReceipt(source: typeof captured, value: Awaited<ReturnType<typeof readStaticInput>>) {
     readings[staticInputKey(source)] = value;
   } };
-  const receipt = await readStaticInput(withDecisionLog(fixture.port, log), log, captured, undefined, progress);
+  const receipt = await readCapturedInput(fixture.port, captured, undefined, progress);
   expect(fixture.requests).toHaveLength(1);
   expect(fixture.requests[0]?.questions).toHaveProperty('pick');
   expect(fixture.requests[0]?.questions).not.toHaveProperty('violation');
-  expect<unknown>(receipt.presence).toEqual(presence);
-  expect(receipt.decisionSourceHash).toBe(oldHash);
-  expect(receipt.selection?.captureDecisionSourceHash).toBe(staticDecisionSourceHash());
+  expect<unknown>(receipt.presence).toEqual(raw.presence);
   expect(staticInputStanding(captured, current)).toEqual({ kind: 'clear' });
   expect(staticInputCaptureComplete(captured, current)).toBe(true);
-  const repeated = fakePort(() => { throw new Error('No answered identity may be resampled'); });
-  await readStaticInput(withDecisionLog(repeated.port, log), log, captured, undefined, progress);
+  const repeated = fakePort(() => { throw new Error('An answered identity must not be resampled'); });
+  await readCapturedInput(repeated.port, captured, undefined, progress);
   expect(repeated.requests).toHaveLength(0);
-  expect(log.query({ status: 'answered' })).toHaveLength(1);
 });
 
 test('interrupted new selector resumes once and preserves an answered weak selector forever', async () => {
@@ -196,43 +176,42 @@ test('interrupted new selector resumes once and preserves an answered weak selec
   const readings: Record<string, unknown> = { [staticInputKey(captured)]: { ...raw, readingPlanVersion: 1, selection: null } };
   const current = { ...authored, readings };
   const progress = { previous: current, onReceipt(source: typeof captured, value: Awaited<ReturnType<typeof readStaticInput>>) { readings[staticInputKey(source)] = value; } };
-  using log = new SqliteDecisionLog(':memory:');
-  const interruption = fakePort(() => { throw new Error('Interrupted before selector answer'); });
-  await expect(readStaticInput(withDecisionLog(interruption.port, log), log, captured, undefined, progress)).rejects.toMatchObject({ kind: 'internal', message: 'The decision client failed internally. The operation has stopped.' });
+
+  const interruption = fakePort(() => { throw new JudgmentError('internal', 'The decision client failed internally. The operation has stopped.'); });
+  await expect(readCapturedInput(interruption.port, captured, undefined, progress)).rejects.toMatchObject({ kind: 'internal', message: 'The decision client failed internally. The operation has stopped.' });
   expect(staticInputCaptureComplete(captured, current)).toBe(false);
   const resumed = fakePort((_name, question) => question.type === 'choice' ? choiceAnswer(question, 'none', 0.8) : noulAnswer(0.5));
-  const receipt = await readStaticInput(withDecisionLog(resumed.port, log), log, captured, undefined, progress);
+  const receipt = await readCapturedInput(resumed.port, captured, undefined, progress);
   expect(resumed.requests).toHaveLength(1);
   expect<unknown>(receipt.presence).toEqual(raw.presence);
   expect(staticInputCaptureComplete(captured, current)).toBe(true);
   expect(staticInputStanding(captured, current).kind).toBe('held');
   const forbidden = fakePort(() => { throw new Error('Answered uncertain selector cannot be repeated'); });
-  await readStaticInput(withDecisionLog(forbidden.port, log), log, captured, undefined, progress);
+  await readCapturedInput(forbidden.port, captured, undefined, progress);
   expect(forbidden.requests).toHaveLength(0);
-  expect(log.query({ status: 'answered' })).toHaveLength(1);
-  expect(log.query({ status: 'failed' })).toHaveLength(1);
+  expect(resumed.requests).toHaveLength(1);
+  expect(interruption.requests).toHaveLength(1);
 });
 
-test('weak selector plan, source, policy and full answer identity must remain exact', async () => {
+test('weak selector raw input, state, questions and full answer identity must remain exact', async () => {
   const { captured, receipt, readings } = await selected(0.5, 'none', 0.99, 0.01);
   const selector = receipt.selection;
-  if (!selector) throw new Error('Missing selector fixture');
-  for (const marker of [undefined, 1, 99]) {
-    const mutated = { ...readings, readings: { [staticInputKey(captured)]: { ...receipt, readingPlanVersion: marker } } };
-    expect(staticInputStanding(captured, mutated).kind).toBe('held');
-    expect(staticInputCaptureComplete(captured, mutated)).toBe(false);
+  if (!selector) throw new Error('Missing selector unit fixture');
+  for (const marker of [undefined, 1, 2, 3] as const) {
+    const sameWire = { ...readings, readings: { [staticInputKey(captured)]: { ...receipt, readingPlanVersion: marker } } };
+    expect(staticInputStanding(captured, sameWire)).toEqual({ kind: 'clear' });
   }
+  const invalidPlan = { ...readings, readings: { [staticInputKey(captured)]: { ...receipt, readingPlanVersion: 99 } } };
+  expect(staticInputStanding(captured, invalidPlan).kind).toBe('held');
+  expect(staticInputCaptureComplete(captured, invalidPlan)).toBe(false);
   expect(parseStaticSourceReadings({ ...readings, readingPlanVersion: 99 })).toBeNull();
-  for (const [field, value] of [['observedModel', 'other'], ['requestedModel', 'other-model'], ['questionsHash', 'changed'], ['site', 'wrong'], ['stateHash', 'changed'], ['version', 1]]) {
-    expect(staticInputStanding(captured, { ...readings, readings: { [staticInputKey(captured)]: { ...receipt, selection: { ...selector, [String(field)]: value } } } }).kind).toBe('held');
+  for (const [field, value] of [['observedModel', 'other'], ['requestedModel', 'other-model'], ['questions', { changed: true }],
+    ['site', 'wrong'], ['state', { changed: true }], ['version', 1]]) {
+    expect(staticInputStanding(captured, { ...readings, readings: { [staticInputKey(captured)]: { ...receipt,
+      selection: { ...selector, [String(field)]: value } } } }).kind).toBe('held');
   }
-  for (const manifest of [staticDecisionSourceManifest().filter(([path]) => path !== 'batteries/static-weak-anchor.ts'),
-    staticDecisionSourceManifest().map(([path, hash]) => [path, path === 'batteries/static-weak-anchor.ts' ? 'changed-policy' : hash])]) {
-    const oldHash = sha256(JSON.stringify(manifest));
-    const old = { ...readings, captureSources: { [oldHash]: manifest }, readings: { [staticInputKey(captured)]: { ...receipt, selection: { ...selector, captureDecisionSourceHash: oldHash } } } };
-    expect(staticInputStanding(captured, old).kind).toBe('held');
-    expect(staticInputCaptureComplete(captured, old)).toBe(false);
-  }
+  expect(staticInputStanding(captured, { ...readings, readings: { [staticInputKey(captured)]: {
+    ...receipt, input: { ...captured, source: 'Different transmitted source.' } } } }).kind).toBe('held');
   for (const answers of [{ pick: { type: 'choice', choice: 'none', confidence: 0.99, probabilities: { candidate: 0.01, none: 0.99 } } },
     { pick: { type: 'choice', choice: 'none', confidence: 0.99, probabilities: { candidate: 0, none: 0.989999 } }, fits_0: noulAnswer(0.01) },
     { pick: { type: 'choice', choice: 'none', confidence: 0.99, probabilities: { candidate: 0.01, none: 0.99, extra: 0 } }, fits_0: noulAnswer(0.01) }]) {
@@ -240,61 +219,55 @@ test('weak selector plan, source, policy and full answer identity must remain ex
     expect(staticInputStanding(captured, malformed).kind).toBe('held');
     expect(staticInputCaptureComplete(captured, malformed)).toBe(false);
   }
-  expect(staticInputStanding({ ...captured, sourceHash: 'changed' }, readings).kind).toBe('held');
 });
 
 test('weak v2 source-only questions leave original strong selector questions unchanged', async () => {
   for (const presence of [0.5, 0.99]) {
     const captured = input();
-    using log = new SqliteDecisionLog(':memory:');
+
     const fixture = fakePort((name, question) => question.type === 'choice' ? choiceAnswer(question, 'none', 0.99) : noulAnswer(name === 'violation' ? presence : 0.01));
-    const receipt = await readStaticInput(withDecisionLog(fixture.port, log), log, captured);
+    const receipt = await readCapturedInput(fixture.port, captured);
     const questions = fixture.requests[1]?.questions;
     if (!questions) throw new Error('Missing exact selector questions');
     expect(questions.pick).toEqual(choice(presence === 0.5 ? STATIC_WEAK_ANCHOR_INSTRUCTIONS : STATIC_ANCHOR_INSTRUCTIONS, { candidate: null, none: 'None of the candidates does what is needed.' }));
     expect(questions.fits_0).toEqual(noul({ question: 'Apply the complete selectionFitInstructions in state to this exact candidate.', candidate: '`candidates[0]` (id "candidate")' }));
     expect(fixture.requests[1]?.state).toHaveProperty('selectionFitInstructions', presence === 0.5 ? STATIC_WEAK_ANCHOR_FIT_INSTRUCTIONS : STATIC_ANCHOR_FIT_INSTRUCTIONS);
     expect(receipt.selection?.version).toBe(2);
-    expect(receipt.selection?.questionsHash).toBe(sha256(canonicalJson(toJson(questions))));
+    expect(receipt.selection?.questions).toEqual(questions);
+    expect(receipt.selection?.state).toEqual(fixture.requests[1]?.state);
   }
 });
 
-test('v1 weak answers remain raw history while only new v2 questions are measured once', async () => {
-  const captured = input();
-  const authored = await selected(0.5, 'none', 0.8, 0.5);
-  using log = new SqliteDecisionLog(':memory:');
+test('v1 selector raw answers remain history while only genuinely new v2 questions are measured once', async () => {
+  const captured = input(), authored = await selected(0.5, 'none', 0.8, 0.5);
   const legacy = defineSelector({ name: staticWeakAnchor.name, version: 1, model: DEFAULT_MODEL, accuracyFloor: 0.95,
-    description: 'Authored synthetic historical v1 fixture', instructions: STATIC_ANCHOR_INSTRUCTIONS,
+    description: 'Authored synthetic historical v1 unit fixture', instructions: STATIC_ANCHOR_INSTRUCTIONS,
     fitInstructions: STATIC_ANCHOR_FIT_INSTRUCTIONS, band: STAKES_BANDS.high.confidence, fitBand: STAKES_BANDS.high.yesNo,
     fixtures: [{ name: 'authored historical example', context: staticSelectionContext(captured), candidates: staticSelectionCandidates(captured), expect: 'none' }] });
   const fixture = fakePort((_name, question) => question.type === 'choice' ? choiceAnswer(question, 'none', 0.8) : noulAnswer(0.5));
-  const run = await legacy.select(withDecisionLog(fixture.port, log), staticSelectionContext(captured), staticSelectionCandidates(captured), { site: `${STATIC_SITE}.${captured.kind}` });
-  const entry = log.query({ status: 'answered' }).find(value => value.id === run.decisionId);
-  if (!entry || entry.status !== 'answered') throw new Error('Missing authored v1 call');
-  const manifest = staticDecisionSourceManifest().map(([path, hash]) => [path, path === 'batteries/static-weak-anchor.ts' ? 'authored-synthetic-archived-v1-definition' : hash]);
-  const oldHash = sha256(JSON.stringify(manifest));
-  const rawSelection = { id: entry.id, at: entry.at, battery: staticWeakAnchor.name, version: 1, site: `${STATIC_SITE}.${captured.kind}`,
-    stateHash: entry.stateHash, questionsHash: sha256(canonicalJson(entry.questions)), requestedModel: entry.requestedModel,
-    observedModel: entry.model, requestId: entry.requestId, answers: entry.answers, captureDecisionSourceHash: oldHash };
-  const presence = { ...authored.receipt.presence, captureDecisionSourceHash: oldHash };
-  const original = { ...authored.receipt, decisionSourceHash: oldHash, presence, selection: rawSelection };
+  const recorded = createStaticCallRecorder(fixture.port);
+  const run = await legacy.select(recorded.port, staticSelectionContext(captured), staticSelectionCandidates(captured), { site: `${STATIC_SITE}.${captured.kind}` });
+  const rawSelection = run.decisionId ? recorded.capture.get(run.decisionId) : undefined;
+  if (!rawSelection) throw new Error('Missing authored raw v1 call');
+  expect(rawSelection.state).toEqual(fixture.requests[0]?.state);
+  expect(rawSelection.questions).toEqual(fixture.requests[0]?.questions);
+  const original = { ...authored.receipt, selection: rawSelection }, originalBytes = JSON.stringify(original);
   const readings: Record<string, unknown> = { [staticInputKey(captured)]: original };
-  const old = { format: 1, decisionSourceHash: oldHash, readings, captureSources: { [oldHash]: manifest } } satisfies StaticSourceReadings;
-  const current = { ...old, decisionSourceHash: staticDecisionSourceHash() };
+  const current = { format: 2, readings } satisfies StaticSourceReadings;
   expect(staticInputStanding(captured, current).kind).toBe('held');
   expect(staticInputCaptureComplete(captured, current)).toBe(false);
-  const newFixture = fakePort((_name, question) => question.type === 'choice' ? choiceAnswer(question, 'none', 0.8) : noulAnswer(0.5));
-  const progress = { previous: current, original: old, onReceipt(source: typeof captured, receipt: Awaited<ReturnType<typeof readStaticInput>>) { readings[staticInputKey(source)] = receipt; } };
-  const updated = await readStaticInput(withDecisionLog(newFixture.port, log), log, captured, undefined, progress);
-  expect(newFixture.requests).toHaveLength(1);
-  expect(newFixture.requests[0]?.questions).not.toEqual(fixture.requests[0]?.questions);
+  const replacement = fakePort((_name, question) => question.type === 'choice' ? choiceAnswer(question, 'none', 0.8) : noulAnswer(0.5));
+  const progress = { previous: current, onReceipt(source: typeof captured, receipt: Awaited<ReturnType<typeof readStaticInput>>) { readings[staticInputKey(source)] = receipt; } };
+  const updated = await readCapturedInput(replacement.port, captured, undefined, progress);
+  expect(replacement.requests).toHaveLength(1);
+  expect(replacement.requests[0]?.questions).not.toEqual(fixture.requests[0]?.questions);
   expect(updated.selection?.version).toBe(2);
-  expect<unknown>(updated.presence).toEqual(presence);
+  expect<unknown>(updated.presence).toEqual(original.presence);
   expect(updated.previousCaptures).toEqual([original]);
   expect(staticInputStanding(captured, current).kind).toBe('held');
   expect(staticInputCaptureComplete(captured, current)).toBe(true);
-  const forbidden = fakePort(() => { throw new Error('Unchanged weak v2 answers cannot be resampled'); });
-  await readStaticInput(withDecisionLog(forbidden.port, log), log, captured, undefined, progress);
+  const forbidden = fakePort(() => { throw new Error('Unchanged weak answers cannot be resampled'); });
+  await readCapturedInput(forbidden.port, captured, undefined, progress);
   expect(forbidden.requests).toHaveLength(0);
-  expect(log.query({ status: 'answered' })).toHaveLength(2);
+  expect(JSON.stringify(original)).toBe(originalBytes);
 });

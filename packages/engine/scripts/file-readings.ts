@@ -2,17 +2,11 @@
 //
 // Used by the gates whose question is read through Jev once per file content
 // and stored for an offline check (the stale 'server' error-kind docs gate):
-// the content hash a stored reading is keyed by, the fixed windows a long
+// the fixed windows a long
 // file is read in, how the readings of a file's windows make the file's
 // reading, and the one rule the gate applies to a stored reading.
 
-import { createHash } from 'node:crypto';
 import type { Outcome, YesNoReading } from '@goodvibes-jev/judgment';
-
-/** The sha256 of a file's text, the key a stored reading is valid for. */
-export function sha256(text: string): string {
-  return createHash('sha256').update(text).digest('hex');
-}
 
 /** One window of a file: its one-based first and last line and those lines. */
 export interface TextWindow {

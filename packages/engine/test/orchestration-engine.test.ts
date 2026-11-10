@@ -494,7 +494,6 @@ describe('primitive reuse', () => {
   });
 
   test('a passing gate commits with the phase\'s scoped touched-paths', async () => {
-    writeFileSync(join(projectRoot, 'real-file.ts'), 'export const x = 1;\n');
     const engine = h.makeEngine({ skipClaimVerification: false });
     const ws = engine.createWorkstream({
       title: 'ws',
@@ -504,6 +503,9 @@ describe('primitive reuse', () => {
     engine.start(ws.id);
     await flushMicrotasks();
     const item = ws.items[0]!;
+    // This is the phase's output, not an untouched owner edit already present
+    // in the actual launch-dirty snapshot.
+    writeFileSync(join(projectRoot, 'real-file.ts'), 'export const x = 1;\n');
     h.completeAgent(item.agentId!, engineerReportOutput('did real work', { filesCreated: ['real-file.ts'] }));
     await flushMicrotasks();
 

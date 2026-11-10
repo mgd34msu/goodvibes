@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /**
  * browser-checkout-driver.ts, the page driver a real browser can answer.
  *
@@ -312,9 +313,9 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     const port: JudgmentPort = { ...base, async ask(request) {
       await current();
       const result = await base.ask({ ...request,
-        beforeAttempt: () => { assertActive(); request.beforeAttempt?.(); assertActive(); },
-        beforeAsyncAttempt: async () => { await current(); await request.beforeAsyncAttempt?.(); assertActive(); },
-        assertLogCurrent: () => { assertActive(); request.assertLogCurrent?.(); assertActive(); },
+        beforeAttempt: () => { assertActive(); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); assertActive(); },
+        beforeAsyncAttempt: async () => { await current(); const checked = await request.beforeAsyncAttempt?.(); assertActive(); return checked; },
+        assertLogCurrent: () => { assertActive(); assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); assertActive(); },
       });
       await current(); checkAnswers(request.questions, result.answers); return result;
     } };

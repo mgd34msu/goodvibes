@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '../port/attempt-guard.ts';
 import { checkEachFixture, decisionHeader, fixtureCheck, NONE, type FixtureCheck, type NamedDecision } from '../batteries/decision.ts';
 import { choice, type ChoiceQuestion, type JudgmentPort } from '../port/types.ts';
 import { assertBand, outcomeForConfidence, type ConfidenceBand, type Outcome } from '../readings/bands.ts';
@@ -224,7 +225,7 @@ export function defineDatePartsReader(spec: DatePartsSpec): DatePartsReader {
       const readParts = async (phase: string, selected: readonly PartName[]) => {
         const result = await askAs(port, spec, 'date-parts', document, Object.fromEntries(selected.map(name => [name, questions[name]])), options);
         options.signal?.throwIfAborted();
-        options.beforeAttempt?.();
+        assertSynchronousJudgmentGuard(() => options.beforeAttempt?.());
         for (const name of selected) {
           const answer = result.answers[name];
           if (answer === undefined || answer.type !== 'choice') throw new TypeError('Missing or invalid date part');

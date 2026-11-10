@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { captureStrictJudgmentJson, judgmentInputBoundary } from '@goodvibes-jev/engine/platform/platform/gate';
 import { CONTENT_DERIVATION_SITE } from '@goodvibes-jev/engine/platform/platform/security';
@@ -37,7 +38,7 @@ export function captureOperatorRequestPolicy() {
         get model() { return port.model; }, ...(port.recorder ? { recorder: port.recorder } : {}),
         async ask(reading) {
           check(); const prior = reading.beforeAttempt;
-          const result = await port.ask({ ...reading, beforeAttempt() { prior?.(); check(); } });
+          const result = await port.ask({ ...reading, beforeAttempt() { assertSynchronousJudgmentGuard(() => prior?.()); check(); } });
           check(); return result;
         },
       } } : {}) } });

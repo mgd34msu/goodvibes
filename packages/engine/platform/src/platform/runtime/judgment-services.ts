@@ -5,7 +5,7 @@ import { bindJudgmentPortAuthority, installJudgmentPort, restoreJudgmentPort } f
 import { createJudgmentSourceLifetime } from './judgment-source-lifetime.js';
 import {
   createSystemOnePort,
-  drainOwned,
+  assertSynchronousJudgmentGuard,
   endpointKind,
   JudgmentError,
   captureJudgmentBackendSettings,
@@ -176,11 +176,7 @@ export function createSettingsJudgmentPort(source: JudgmentSettingsSource): Judg
       try {
         return await current.port.ask({ ...request, signal, beforeAttempt() {
           signal.throwIfAborted(); assertDecisionModelsEnabled('configured decision transport');
-          const checked: unknown = beforeAttempt?.();
-          if (checked !== undefined) {
-            drainOwned(checked);
-            throw new JudgmentError('invalid-request', 'the judgment attempt guard must be synchronous and complete without a return value');
-          }
+          assertSynchronousJudgmentGuard(beforeAttempt);
           signal.throwIfAborted(); assertDecisionModelsEnabled('configured decision transport');
         } });
       }

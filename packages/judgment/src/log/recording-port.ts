@@ -1,5 +1,5 @@
 import { retainNativeModelObservation, recordImmutableJudgmentResult } from '../port/model-observation.ts';
-import { drainOwned } from '../drain-owned.ts';
+import { assertSynchronousJudgmentGuard } from '../port/attempt-guard.ts';
 import { opaqueUuid } from '../port/opaque-uuid.ts';
 import { captureJudgmentInput } from '../port/input-snapshot.ts';
 import { types as nodeTypes } from 'node:util';
@@ -174,15 +174,8 @@ function recorded<T>(write: () => T): T {
 
 /** A retention refusal never copies private assertion text or creates a log entry. */
 function assertLogCurrent(check: (() => void) | undefined): void {
-  if (check === undefined) return;
-  try {
-    const value: unknown = check();
-    if (value === undefined) return;
-    // A refused async assertion must not leave its rejection unhandled. A
-    // hostile then/constructor getter is also only a value-free refusal.
-    drainOwned(value);
-  } catch { /* Refuse the assertion below. */ }
-  throw new JudgmentError('rejected', FAILURE_MESSAGES.rejected);
+  try { assertSynchronousJudgmentGuard(check, 'retention'); }
+  catch { throw new JudgmentError('rejected', FAILURE_MESSAGES.rejected); }
 }
 
 /** Object-spread semantics, but the admitted assertion accessor is read only once. */

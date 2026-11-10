@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Typed Jev contact decision, separate content-only draft, then Jev fidelity verification. */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
@@ -27,7 +28,7 @@ export function createProviderBackedCheckinJudge(
 ): CheckinJudge {
   return {
     async decide(briefing: string, lifetime: CheckinJudgeOptions = {}): Promise<CheckinDecision> {
-      const active = () => { lifetime.signal?.throwIfAborted(); lifetime.beforeAttempt?.(); };
+      const active = () => { lifetime.signal?.throwIfAborted(); assertSynchronousJudgmentGuard(() => lifetime.beforeAttempt?.()); };
       active();
       requireDecisionFeature('automatic check-in contact and note verification');
       assertJudgmentInput({ briefing });

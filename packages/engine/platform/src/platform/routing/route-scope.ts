@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { defineBattery, mapLimit, STAKES_BANDS, yesNo, type CallOptions, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { ModelDefinition } from '../providers/registry-types.js';
@@ -41,14 +42,14 @@ export async function withinSelectedFamily(models: readonly ModelDefinition[], s
   remembered.set(port, cache);
   const allowed = await mapLimit(candidates, 8, async (candidate) => {
     options.signal?.throwIfAborted();
-    options.beforeAttempt?.();
+    assertSynchronousJudgmentGuard(() => options.beforeAttempt?.());
     if (candidate.id === selected.id) return true;
     const state = { selected: identity(selected), candidate: identity(candidate) };
     const key = `${version}:${JSON.stringify(state)}`;
     if (cache.has(key)) return cache.get(key)!;
     const run = await sameFamily.run(port, state, { ...options, site: 'routing.same-model-family' });
     options.signal?.throwIfAborted();
-    options.beforeAttempt?.();
+    assertSynchronousJudgmentGuard(() => options.beforeAttempt?.());
     if (judgmentPort('routing.same-model-family') !== port || port.model !== version) throw new Error('Model family judgment configuration changed.');
     // An uncertain alternative does not broaden the user's family boundary.
     // The selected model itself always remains available in the candidate set.

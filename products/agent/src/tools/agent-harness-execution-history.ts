@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { CommandContext } from '../input/command-registry.ts';
 import { captureJudgmentPort, JudgmentPortMissingError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
@@ -587,8 +588,8 @@ async function readVerificationObservations(all: readonly AgentExecutionRecord[]
           recordAction: (...args: Parameters<typeof recorder.recordAction>) => { assertOwnedCurrent(); recorder.recordAction(...args); assertOwnedCurrent(); },
         } } : {}),
         ask: async request => { assertOwnedCurrent(); const result = await capture.port.ask({ ...request,
-          beforeAttempt: () => { request.beforeAttempt?.(); assertOwnedCurrent(); },
-          assertLogCurrent: () => { request.assertLogCurrent?.(); assertOwnedCurrent(); },
+          beforeAttempt: () => { assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); assertOwnedCurrent(); },
+          assertLogCurrent: () => { assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); assertOwnedCurrent(); },
         }); assertOwnedCurrent(); return result; },
       };
       for (const [index, record] of all.entries()) {

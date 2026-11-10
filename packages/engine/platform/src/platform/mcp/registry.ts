@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { assertSecurityReadSource, captureSecurityReadBindings } from '../security/read-source.js';
 import { prepareExternalExecution, prepareExternalWorkspaceRevision } from '../permissions/external-execution.js';
 import { captureExternalRequestEvidence } from '../permissions/external-request-evidence.js';
@@ -457,7 +458,7 @@ export class McpRegistry {
         ...(installed.recorder ? { recorder: installed.recorder } : {}),
         ask(request) {
           assertCurrent(); const prior = request.beforeAttempt;
-          return awaitPermission(() => installed.ask({ ...request, signal, beforeAttempt() { assertCurrent(); prior?.(); } }), signal);
+          return awaitPermission(() => installed.ask({ ...request, signal, beforeAttempt() { assertCurrent(); assertSynchronousJudgmentGuard(() => prior?.()); } }), signal);
         },
       } : undefined;
       const permission = await this.permissions.evaluateToolCall(parsed.serverName, parsed.toolName, args, { port, signal, externalRequestEvidence });

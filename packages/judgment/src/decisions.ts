@@ -25,3 +25,5 @@ export { DECISION_MODEL_PROFILES, type JudgmentAdapterKind, type DecisionModelPr
 export { opaqueUuid } from './port/opaque-uuid.ts';
 
 export { observeJudgmentModel, reuseObservedJudgmentResult, type JudgmentModelObservation } from './port/model-observation.ts';
+
+export { assertSynchronousJudgmentGuard } from './port/attempt-guard.ts';

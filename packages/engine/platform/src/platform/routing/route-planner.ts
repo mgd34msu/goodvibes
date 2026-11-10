@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { JudgmentHeldError } from '../types/judgment-held.js';
 /**
@@ -228,7 +229,7 @@ export function createRoutePlanner(deps: RoutePlannerDeps): RoutePlanner {
         const candidates: Candidate[] = shortlist.map((member) => ({ id: member.registryKey, content: { ...modelFactsState(member), tier } }));
         assertJudgmentInput({ context: choiceContext(request, reading), candidates });
         const port = judgmentPort('routing.route-planner.choice'), modelVersion = port.model;
-        const current = () => { request.signal?.throwIfAborted(); request.beforeAttempt?.(); if (judgmentPort('routing.route-planner.choice') !== port || port.model !== modelVersion) throw new JudgmentHeldError(); };
+        const current = () => { request.signal?.throwIfAborted(); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); if (judgmentPort('routing.route-planner.choice') !== port || port.model !== modelVersion) throw new JudgmentHeldError(); };
         let poolCandidates = candidates;
         let pick: Selection | undefined;
         const fits: Record<string, import('@goodvibes-jev/judgment').YesNoReading> = {};

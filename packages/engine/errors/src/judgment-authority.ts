@@ -273,9 +273,9 @@ function capture(site: string, options: JudgmentReadingOptions): JudgmentPortCap
         check();
         ownedRequest = { ...input, questions: dispatchedQuestions, signal: active,
           beforeAttempt: () => { check(); synchronous(beforeAttempt); check(); },
-          beforeAsyncAttempt: async () => { check(); await beforeAsyncAttempt?.(); check(); },
+          beforeAsyncAttempt: async () => { check(); const checked = await beforeAsyncAttempt?.(); check(); return checked; },
           assertLogCurrent: () => { check(); synchronous(assertLogCurrent); check(); },
-          onRetry: (progress: Parameters<NonNullable<typeof onRetry>>[0]) => { check(); onRetry?.(progress); check(); },
+          onRetry: async (progress: Parameters<NonNullable<typeof onRetry>>[0]) => { check(); await onRetry?.(progress); check(); },
           ...(strictResultCapture ? { captureResult: <T extends JudgmentResult<Q>>(original: T): T => {
             check(); assertResult?.(original); check();
             const admitted = reuseObservedJudgmentResult(original, resultFrame ? resultFrame.capture(original) : captureResult ? captureResult(original) : original);

@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
@@ -541,7 +542,7 @@ export class PermissionManager {
       ask(request) {
         assertCurrent();
         const prior = request.beforeAttempt;
-        return awaitPermission(() => owner().ask({ ...request, beforeAttempt() { assertCurrent(); prior?.(); } }), signal);
+        return awaitPermission(() => owner().ask({ ...request, beforeAttempt() { assertCurrent(); assertSynchronousJudgmentGuard(() => prior?.()); } }), signal);
       },
     };
     return { port, assertCurrent };
@@ -882,7 +883,7 @@ export class PermissionManager {
         async ask(request) {
           input.assertCurrent();
           const prior = request.beforeAttempt;
-          const result = await awaitPermission(() => installed.ask({ ...request, beforeAttempt() { prior?.(); input.assertCurrent(); } }), input.signal);
+          const result = await awaitPermission(() => installed.ask({ ...request, beforeAttempt() { assertSynchronousJudgmentGuard(() => prior?.()); input.assertCurrent(); } }), input.signal);
           input.assertCurrent();
           if (input.mode === 'safe-jev' && !result.decisionId) throw new JudgmentError('unrecorded', 'execution safety requires recorded provenance');
           if (result.decisionId) supportingIds.push(result.decisionId);

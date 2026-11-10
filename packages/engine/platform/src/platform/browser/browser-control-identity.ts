@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Browser page-purpose and same-control readings are observations, never permission to act. */
 import { checkAnswers, defineBattery, STAKES_BANDS, yesNo, toJson, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -137,9 +138,9 @@ export class BrowserControlIdentityWork {
       async ask(request) {
         await currentPage(); current();
         const result = await base.ask({ ...request,
-          beforeAttempt: () => { current(); request.beforeAttempt?.(); current(); },
-          beforeAsyncAttempt: async () => { await currentPage(); await request.beforeAsyncAttempt?.(); current(); },
-          assertLogCurrent: () => { current(); request.assertLogCurrent?.(); current(); },
+          beforeAttempt: () => { current(); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); current(); },
+          beforeAsyncAttempt: async () => { await currentPage(); const checked = await request.beforeAsyncAttempt?.(); current(); return checked; },
+          assertLogCurrent: () => { current(); assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); current(); },
         });
         await currentPage(); current(); checkAnswers(request.questions, result.answers); return result;
       },
@@ -174,8 +175,8 @@ export class BrowserControlIdentityWork {
     const port: JudgmentPort = { ...owner.port, async ask(request) {
       current();
       const result = await owner.port.ask({ ...request,
-        beforeAttempt: () => { current(); request.beforeAttempt?.(); current(); },
-        assertLogCurrent: () => { current(); request.assertLogCurrent?.(); current(); },
+        beforeAttempt: () => { current(); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); current(); },
+        assertLogCurrent: () => { current(); assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); current(); },
       });
       current(); checkAnswers(request.questions, result.answers); return result;
     } };

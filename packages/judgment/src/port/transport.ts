@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from './attempt-guard.ts';
 import { APIError, APITimeoutError, type Questions } from '@typesafe-ai/sdk';
 import { checkAnswers, projectAnswers } from './answers.ts';
 import { toJudgmentError } from './client.ts';
@@ -116,13 +117,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
                 checkCancellation();
                 if (checked !== undefined) throw new JudgmentError('invalid-request', 'the asynchronous judgment attempt guard must complete without a return value');
               }
-              const checked: unknown = beforeAttempt?.();
-              if (checked !== undefined) {
-                if (checked !== null && (typeof checked === 'object' || typeof checked === 'function')) {
-                  try { void Promise.prototype.then.call(checked, undefined, () => {}); } catch { /* Only genuine promises need rejection draining. */ }
-                }
-                throw new JudgmentError('invalid-request', 'the judgment attempt guard must be synchronous and complete without a return value');
-              }
+              assertSynchronousJudgmentGuard(beforeAttempt);
             } catch (error) {
               checkCancellation();
               throw error instanceof JudgmentError ? error : new JudgmentError('rejected', 'the judgment attempt is no longer authorized');

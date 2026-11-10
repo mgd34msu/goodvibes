@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentHeldError } from '../types/judgment-held.js';
 /**
  * Adaptive Execution Planner.
@@ -215,7 +216,7 @@ export class AdaptivePlanner {
    */
   async select(inputs: PlannerInputs, options: CallOptions = {}): Promise<PlannerDecision> {
     return decisionOrClassic(() => this.selectDecision(inputs, options), () => {
-      options.signal?.throwIfAborted(); options.beforeAttempt?.();
+      options.signal?.throwIfAborted(); assertSynchronousJudgmentGuard(() => options.beforeAttempt?.());
       const captured = this._validateInputs(inputs);
       assertJudgmentInput({ task: captured.taskDescription ?? '' });
       const selected = this.overrideStrategy ?? (this.mode === 'auto' ? 'single' : this.mode);

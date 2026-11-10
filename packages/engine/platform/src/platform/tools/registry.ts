@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { currentExecutionMode, withInvocationExecutionMode } from '../gate/execution-context.js';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
@@ -716,7 +717,7 @@ export class ToolRegistry {
         registry.assertPreparationCurrent(record);
         requireDecisionFeature('semantic tool argument repair; supply exact schema parameters');
         const result = await port().ask({ ...request, beforeAttempt() {
-          prior?.(); registry.assertPreparationCurrent(record);
+          assertSynchronousJudgmentGuard(() => prior?.()); registry.assertPreparationCurrent(record);
           requireDecisionFeature('semantic tool argument repair; supply exact schema parameters');
         } });
         registry.assertPreparationCurrent(record);

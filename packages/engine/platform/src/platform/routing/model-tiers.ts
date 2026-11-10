@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 /**
  * Model capability tiers from published facts: the routing.model-tier
@@ -128,11 +129,12 @@ export class ModelTierStore {
     assertJudgmentInput(modelFactsState(facts));
     facts = structuredClone(facts);
     const port = this.#currentPort(), model = port.model;
-    const current = () => { options.signal?.throwIfAborted(); options.beforeAttempt?.(); if (this.#currentPort() !== port || port.model !== model) throw new Error('Model tier judgment configuration changed.'); };
+    const current = () => { options.signal?.throwIfAborted(); assertSynchronousJudgmentGuard(() => options.beforeAttempt?.()); if (this.#currentPort() !== port || port.model !== model) throw new Error('Model tier judgment configuration changed.'); };
     const known = this.known(facts);
     if (known) return Promise.resolve(known);
-    const key = `${facts.registryKey}\u0000${fingerprint(facts)}`;
-    const pending = options.signal === undefined && options.beforeAttempt === undefined && options.beforeAsyncAttempt === undefined ? this.#inFlight.get(key) : undefined;
+    const key = options.signal === undefined && options.beforeAttempt === undefined && options.beforeAsyncAttempt === undefined
+      ? `${facts.registryKey}\u0000${fingerprint(facts)}` : undefined;
+    const pending = key === undefined ? undefined : this.#inFlight.get(key);
     if (pending) return pending;
     const site = options.site ?? 'routing.model-tier';
     const reading = (async (): Promise<TierRecord> => {
@@ -154,7 +156,7 @@ export class ModelTierStore {
       this.#save();
       return record;
     })();
-    if (options.signal === undefined && options.beforeAttempt === undefined && options.beforeAsyncAttempt === undefined) {
+    if (key !== undefined && options.signal === undefined && options.beforeAttempt === undefined && options.beforeAsyncAttempt === undefined) {
       this.#inFlight.set(key, reading);
       void reading.finally(() => { if (this.#inFlight.get(key) === reading) this.#inFlight.delete(key); }).catch(() => undefined);
     }

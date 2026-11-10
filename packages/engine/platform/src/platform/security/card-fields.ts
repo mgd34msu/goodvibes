@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /**
  * card-fields.ts, recognising a payment field on any page.
  *
@@ -110,8 +111,8 @@ export async function isCardFieldDescriptor(control: FormControlDescriptor, read
     const port: JudgmentPort = { ...base, async ask(request) {
       current();
       const result = await base.ask({ ...request,
-        beforeAttempt: () => { current(); request.beforeAttempt?.(); current(); },
-        assertLogCurrent: () => { current(); request.assertLogCurrent?.(); current(); },
+        beforeAttempt: () => { current(); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); current(); },
+        assertLogCurrent: () => { current(); assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); current(); },
       });
       current(); checkAnswers(request.questions, result.answers); return result;
     } };

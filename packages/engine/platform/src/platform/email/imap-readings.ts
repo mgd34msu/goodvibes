@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Semantic IMAP readings. Protocol atoms and session authority stay with callers. */
@@ -112,8 +113,8 @@ function readingOwner(site: string, options: ImapReadingOptions) {
     async ask(request) {
     current();
     const result = await owner.port.ask({ ...request, signal,
-      beforeAttempt: () => { current(); request.beforeAttempt?.(); current(); },
-      assertLogCurrent: () => { current(); request.assertLogCurrent?.(); current(); },
+      beforeAttempt: () => { current(); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); current(); },
+      assertLogCurrent: () => { current(); assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); current(); },
     });
     current();
     checkAnswers(request.questions, result.answers);

@@ -23,3 +23,5 @@ export type { JudgmentRetryPolicy } from './retry.ts';
 export { matchesJudgmentModel } from './endpoint-validation.ts';
 
 export { observeJudgmentModel, reuseObservedJudgmentResult, type JudgmentModelObservation } from './model-observation.ts';
+
+export { assertSynchronousJudgmentGuard } from './attempt-guard.ts';

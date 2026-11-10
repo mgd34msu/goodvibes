@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Calendar error meaning belongs to one registered reading, never a prose regex. */
 import {
   askAs, checkEachFixture, choice, decisionHeader, estimateTokens, fixtureCheck,
@@ -240,7 +241,7 @@ export async function readMissingPermission(
   provider: CalendarProviderId, bodyText: string, authenticationChallenge: string, options: CallOptions = {},
 ): Promise<string | undefined> {
   return decisionOrClassic(() => readDecisionMissingPermission(provider, bodyText, authenticationChallenge, options), () => {
-    options.signal?.throwIfAborted(); options.beforeAttempt?.();
+    options.signal?.throwIfAborted(); assertSynchronousJudgmentGuard(() => options.beforeAttempt?.());
     return structuredPermission(authenticationChallenge);
   });
 }

@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { gateJudgmentRegistry, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
@@ -66,8 +67,8 @@ export async function withLongLivedProcessReading<T>(
     const guardedPort: typeof port = { model: portModel, ...(recorder ? { recorder } : {}), ...(port.health ? { health: port.health } : {}), ask: async (request) => {
       assertCurrent();
       const result = await port.ask({ ...request,
-        beforeAttempt: () => { request.beforeAttempt?.(); assertCurrent(); },
-        assertLogCurrent: () => { request.assertLogCurrent?.(); assertCurrent(); },
+        beforeAttempt: () => { assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); assertCurrent(); },
+        assertLogCurrent: () => { assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); assertCurrent(); },
       });
       assertCurrent(); return result;
     } };

@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Custom label meaning is a versioned recorded reading, never substring dispatch. */
 import { defineBattery, oneOf, STAKES_BANDS, type DecisionRecorder, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { awaitPermission } from '../../../permissions/cancellation.js';
@@ -73,8 +74,8 @@ export async function readCustomTagMeaning(tag: string, port: JudgmentPort | und
       // that ignores its signal. Retention also ends with the exact operation.
       const raw = await awaitPermission(() => port.ask({ ...request,
         captureResult: original => { current(guard); return captureTriageJudgment(original, request.questions, configured).result; },
-        beforeAttempt() { current(guard); request.beforeAttempt?.(); },
-        assertLogCurrent() { current(guard); request.assertLogCurrent?.(); },
+        beforeAttempt() { current(guard); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); },
+        assertLogCurrent() { current(guard); assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); },
       }), guard.signal);
       current(guard);
       return captureTriageJudgment(raw, request.questions, configured).result;

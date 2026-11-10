@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Purpose-grounded Google setup controls. Readings are observations, not action authorization. */
 
 import type { GoogleBrowserElement, GoogleBrowserPort } from './types.js';
@@ -35,9 +36,9 @@ function fencedPort(base: JudgmentPort, current: () => void, currentPage: () => 
     async ask(request) {
       await currentPage(); current();
       const result = await base.ask({ ...request,
-        beforeAttempt: () => { current(); request.beforeAttempt?.(); current(); },
-        beforeAsyncAttempt: async () => { await currentPage(); await request.beforeAsyncAttempt?.(); current(); },
-        assertLogCurrent: () => { current(); request.assertLogCurrent?.(); current(); },
+        beforeAttempt: () => { current(); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); current(); },
+        beforeAsyncAttempt: async () => { await currentPage(); const checked = await request.beforeAsyncAttempt?.(); current(); return checked; },
+        assertLogCurrent: () => { current(); assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); current(); },
       });
       await currentPage(); current(); return result;
     },

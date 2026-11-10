@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
 import { judgmentPort, captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateJudgmentRegistry, prepareJudgmentResult, snapshotJudgmentEvidence, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
@@ -598,8 +599,8 @@ async function consumeProtectedCatalog<T>(entries: readonly T[], ids: readonly s
   } } : {}), ask: async (request) => {
     options.assertCurrent();
     const result = await readingPort.ask({ ...request,
-      beforeAttempt: () => { request.beforeAttempt?.(); options.assertCurrent(); },
-      assertLogCurrent: () => { request.assertLogCurrent?.(); options.assertCurrent(); },
+      beforeAttempt: () => { assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); options.assertCurrent(); },
+      assertLogCurrent: () => { assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); options.assertCurrent(); },
     });
     options.assertCurrent(); return result;
   } };

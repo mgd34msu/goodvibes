@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { bindNativeCiSourceIssuer } from '../ci-watch/native-owner.js';
@@ -34,7 +35,7 @@ export interface NativeContractDecisionHost {
   authorityOf(contract: ContractView): NativeContractAuthority;
   /** External evidence/resource changes only. Never approval or Jev availability. */
   conditions?(contract: ContractView, stage: NativeContractStage, targetId: string): readonly NativeContractCondition[];
-  onRetry?(contractId: string, progress: JudgmentRetryProgress): void;
+  onRetry?(contractId: string, progress: JudgmentRetryProgress): void | Promise<void>;
   /** Typed semantic notification; observer failure cannot change the decision or execute work. */
   onDecision?(contractId: string, record: NativeContractDecisionRecord): void;
 }
@@ -83,7 +84,7 @@ function readLifetime(contract: Contract, owner: NativeContractServices, signal?
   const active = () => { checkAlive(contract, signal); if (JSON.stringify(authority(contract, owner)) !== JSON.stringify(expected)) { owner.cancel?.(contract, 'Native authority or scope changed'); throw new JudgmentError('aborted', 'Native authority or scope changed'); } };
   const publish = () => { const current = waiting.get(contract); contract.nativeWaiting = current?.size ? { schemaVersion: 1, requests: [...current.values()] } : undefined; owner.changed(contract); };
   return { beforeAttempt: active,
-    onRetry(progress: JudgmentRetryProgress) { if (isTerminalContractStatus(contract.status)) return; const current = waiting.get(contract) ?? new Map<string, JudgmentRetryProgress>(); waiting.set(contract, current); current.set(progress.logicalRequestId, progress); owned.add(progress.logicalRequestId); publish(); owner.host.onRetry?.(contract.id, progress); },
+    onRetry(progress: JudgmentRetryProgress) { if (isTerminalContractStatus(contract.status)) return; const current = waiting.get(contract) ?? new Map<string, JudgmentRetryProgress>(); waiting.set(contract, current); current.set(progress.logicalRequestId, progress); owned.add(progress.logicalRequestId); publish(); return owner.host.onRetry?.(contract.id, progress); },
     finish() { for (const id of owned) waiting.get(contract)?.delete(id); if (owned.size > 0) publish(); },
   };
 }
@@ -185,7 +186,7 @@ export function nativeContractPort(contract: Contract, services: NativeContractS
     ...port,
     async ask(request) {
       const lifetime = readLifetime(contract, owner, signal);
-      const active = () => { lifetime.beforeAttempt(); request.signal?.throwIfAborted(); request.beforeAttempt?.(); };
+      const active = () => { lifetime.beforeAttempt(); request.signal?.throwIfAborted(); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); };
       const combined = signal === undefined ? request.signal : request.signal === undefined ? signal : AbortSignal.any([signal, request.signal]);
       const originalSource = autonomousSourceEvidence(nativeContractSourceForAdmission(contract));
       const state = request.state !== null && typeof request.state === 'object' && !Array.isArray(request.state)
@@ -193,7 +194,16 @@ export function nativeContractPort(contract: Contract, services: NativeContractS
       try {
         active();
         const result = await port.ask({ ...request, state: state as unknown as EntryType, ...(combined === undefined ? {} : { signal: combined }), beforeAttempt: active,
-          onRetry(progress) { lifetime.onRetry(progress); request.onRetry?.(progress); },
+          async onRetry(progress) {
+            active();
+            const observed = await Promise.allSettled([
+              Promise.resolve().then(() => lifetime.onRetry(progress)),
+              Promise.resolve().then(() => request.onRetry?.(progress)),
+            ]);
+            active();
+            const failed = observed.find(result => result.status === 'rejected');
+            if (failed?.status === 'rejected') throw failed.reason;
+          },
         });
         active(); return result;
       } finally { lifetime.finish(); }

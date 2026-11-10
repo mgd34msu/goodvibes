@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { matchesJudgmentModel } from '@goodvibes-jev/judgment';
 import {
   askAs, checkEachFixture, checkReading, concludedAnswer, decisionHeader, fixtureCheck,
@@ -97,7 +98,7 @@ function plan(source: ScreeningSource, spans: readonly ScreeningSpan[]) {
 }
 
 function guard(options: CallOptions): void {
-  options.beforeAttempt?.(); options.signal?.throwIfAborted();
+  assertSynchronousJudgmentGuard(() => options.beforeAttempt?.()); options.signal?.throwIfAborted();
 }
 
 

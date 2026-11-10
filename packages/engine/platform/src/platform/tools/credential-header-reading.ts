@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { CallOptions } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -13,7 +14,7 @@ export async function readCredentialHeader(
   options: CallOptions = {},
 ): Promise<boolean | null> {
   return decisionOrClassic(() => readDecisionCredentialHeader(header, options), () => {
-    options.signal?.throwIfAborted(); options.beforeAttempt?.();
+    options.signal?.throwIfAborted(); assertSynchronousJudgmentGuard(() => options.beforeAttempt?.());
     // Unknown names receive credential handling. A missing semantic answer must
     // never clear a custom header's contents for unprotected transmission.
     return !CLASSIC_PUBLIC_HEADERS.has(header.toLowerCase());

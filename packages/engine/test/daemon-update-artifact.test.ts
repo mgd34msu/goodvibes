@@ -19,6 +19,7 @@ import { logger } from '../platform/src/platform/utils/logger.ts';
 import type { ServiceCommandRunner } from '../platform/src/platform/daemon/service-handover.ts';
 import { updateConfigDefaults } from '../platform/src/platform/config/schema-domain-update.js';
 import { VERSION } from '../platform/src/platform/version.ts';
+import { createAsyncDisposalScope } from '../platform/src/platform/runtime/async-disposal.js';
 
 const scratchDirs: string[] = [];
 
@@ -468,8 +469,10 @@ test('an already-torn-down facade still fences and drains a pending lifecycle ha
   // No server construction or listener: exercise only the actual duplicate-stop path.
   const workProposals = new WorkProposalStore();
   workProposals.dispose();
+  const supplemental = createAsyncDisposalScope('empty facade supplemental fixture');
   const facade = Object.assign(Object.create(DaemonServer.prototype) as object, {
     lifecycle: h.runtime, tornDown: true, workProposals,
+    closeSupplementalResources: () => supplemental.close(),
   }) as unknown as DaemonServer;
   await facade.stop();
   release({ status: 'accepted' });

@@ -15,6 +15,7 @@ import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.js
 import { createServingSettingsPrecondition } from '../platform/src/platform/daemon/http/settings-precondition.js';
 import { captureRemoteSettingsPrecondition, applyRemoteSettingsPrecondition, inspectRemoteSettingsPrecondition,
   resolvePreparedConfigWriteRoute, assertPreparedConfigWriteRoute } from '../platform/src/platform/config/settings-precondition-client.js';
+import { createAsyncDisposalScope } from '../platform/src/platform/runtime/async-disposal.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -203,6 +204,7 @@ test.each(['unchanged', 'changed', 'unreadable'] as const)('remote readback repo
 /** Actual stop/enable and lifecycle abort methods, without constructing a service graph. */
 function stoppingFacade() {
   const events: string[] = [];
+  const supplemental = createAsyncDisposalScope('empty settings facade supplemental fixture');
   const promotionAbort = new AbortController();
   let observeStopping = () => {};
   const lifecycle = Object.assign(Object.create(DaemonLifecycleRuntime.prototype) as object, {
@@ -215,6 +217,7 @@ function stoppingFacade() {
   });
   const state = Object.assign(Object.create(DaemonServer.prototype) as object, {
     settingsLifetime: {} as object | null, tornDown: false, lifecycle,
+    closeSupplementalResources: () => supplemental.close(),
     // The real stop path owns proposal disposal and drain even without a socket.
     workProposals: new WorkProposalStore(),
     server: { stop() { events.push('socket'); } },

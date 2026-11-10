@@ -625,6 +625,37 @@ test('cancellation or original input retirement during a provider await cannot p
   }
 });
 
+test('selector-await retirement preserves the genuine presence capture and refuses only the unowned selector publication', async () => {
+  for (const retirement of ['cancel', 'source'] as const) {
+    const captured = { ...input() }, original = structuredClone(captured), controller = new AbortController();
+    let release!: () => void, entered!: () => void, publications = 0;
+    const held = new Promise<void>(resolve => { release = resolve; }), admitted = new Promise<void>(resolve => { entered = resolve; });
+    const anchor = captured.anchors[0];
+    if (!anchor) throw new Error('Missing actual selector candidate');
+    const fixture = fakePort((_name, question) => question.type === 'choice' ? choiceAnswer(question, anchor.id, 0.99) : noulAnswer(0.99));
+    const recorded = createStaticCallRecorder({ ...fixture.port, async ask(request) {
+      if ('pick' in request.questions) { entered(); await held; }
+      return fixture.port.ask(request);
+    } });
+    const reading = readStaticInput(recorded.port, recorded.capture, captured, controller.signal, {
+      previous: { format: 2, readings: {} }, onReceipt() { publications++; },
+    });
+    try {
+      await Promise.race([admitted, reading.then(() => { throw new Error('Read settled before its selector seam'); })]);
+      expect(recorded.calls).toHaveLength(1); expect(publications).toBe(1);
+      const reason = new Error('Original selector owner cancelled');
+      if (retirement === 'cancel') controller.abort(reason);
+      else captured.source += '\nChanged while awaiting the selector.';
+      release();
+      if (retirement === 'cancel') await expect(reading).rejects.toBe(reason);
+      else await expect(reading).rejects.toThrow('Static input changed during reading');
+      expect(fixture.requests).toHaveLength(2);
+      expect(fixture.requests[1]?.state).toHaveProperty('context.source', original.source);
+      expect(recorded.calls).toHaveLength(1); expect(publications).toBe(1);
+    } finally { release(); await reading.catch(() => undefined); }
+  }
+});
+
 test('a receipt callback cannot mutate a nested subset and continue to another model request', async () => {
   const captured = input(), original = structuredClone(captured);
   const fixture = fakePort((_name, _question, state) => {

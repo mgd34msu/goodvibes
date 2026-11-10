@@ -2,6 +2,7 @@ import { consumeStaticSourceStorage, createStaticSourceStorageValueDecoder, pack
 import { isDeepStrictEqual } from 'node:util';
 import type { StaticRule, SourceAnchor, StaticSourceInput, StaticSourceReadings, StaticCallEvidence, StaticSourceReceipt, StaticSourceProgress, StaticInputStanding, StaticSourceWindow, StaticPolicyObservation, StaticCallCapture } from './static-source-reading-types.ts';
 export type { StaticRule, SourceAnchor, StaticSourceInput, StaticSourceReadings, StaticCallEvidence, StaticSourceReceipt, StaticSourceProgress, StaticInputStanding, StaticCallCapture, StaticPolicyObservation } from './static-source-reading-types.ts';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { currentStaticSourcePolicyPass, withStaticSourcePolicyPass as runStaticSourcePolicyPass } from './static-source-policy-lifetime.ts';
 import { fileObservationIdentity, readFileObservation } from '../platform/src/platform/utils/file-observation.ts';
 import { captureExistingDirectory } from '../platform/src/platform/utils/atomic-json-store.ts';
@@ -571,12 +572,28 @@ export async function readStaticInput(port: JudgmentPort, capture: StaticCallCap
         const key = staticInputKey(current);
         return ownValue(originalReadings, key) ?? ownValue(previousReadings, key) ?? inherited;
       })() : inherited;
+      // Retention occurs inside the raw recorder, before the pattern resolves.
+      // Carry the original input restriction to that actual publication edge.
+      const recorder = port.recorder, health = port.health;
+      const inputPort: JudgmentPort = {
+        get model() { return port.model; },
+        ...(recorder ? { recorder } : {}),
+        ...(health ? { health: () => health.call(port) } : {}),
+        ask(request) {
+          const originalCurrent = request.assertLogCurrent;
+          return port.ask({ ...request, assertLogCurrent() {
+            assertInputCurrent();
+            assertSynchronousJudgmentGuard(originalCurrent ? () => originalCurrent.call(request) : undefined, 'retention');
+            assertInputCurrent();
+          } });
+        },
+      };
       const options = { site: `${STATIC_SITE}.${current.kind}`, beforeAttempt: assertInputCurrent, ...(signal ? { signal } : {}) };
       let presence = prior && object(prior) ? receiptEvidence(current, prior, false) : null;
       const reusedPresence = presence !== null;
       let previousCaptures: readonly unknown[] | undefined = object(prior) && Array.isArray(prior.previousCaptures) ? prior.previousCaptures : undefined;
       if (!presence) {
-        const run = await batteryFor(current.kind).run(port, staticInputState(current), options);
+        const run = await batteryFor(current.kind).run(inputPort, staticInputState(current), options);
         assertInputCurrent();
         run.recordAction(`prepared static source observation:${run.readings.violation.verdict}`);
         presence = evidence(capture, run.result.decisionId, current, false);
@@ -597,7 +614,7 @@ export async function readStaticInput(port: JudgmentPort, capture: StaticCallCap
         if (!selection) {
           if (object(prior) && prior.selection !== null && prior.selection !== undefined) previousCaptures = [original ?? prior];
           const selector = reading.outcome === 'act' ? staticOffendingAnchor : staticWeakAnchor;
-          const selected = await selector.select(port, staticSelectionContext(current), staticSelectionCandidates(current), options);
+          const selected = await selector.select(inputPort, staticSelectionContext(current), staticSelectionCandidates(current), options);
           assertInputCurrent();
           selected.recordAction('prepared exact offending source anchor; offline gate preserves held outcomes');
           selection = evidence(capture, selected.decisionId, current, true, reading.outcome !== 'act');
@@ -703,10 +720,11 @@ export function staticInputCaptureComplete(input: StaticSourceInput, readings: S
       const reading = readYesNo({ type: 'noul', noul: answer.noul }, STAKES_BANDS.high.yesNo);
       if (reading.outcome === 'act') return reading.verdict === 'no' || receiptEvidence(current, value, true) !== null;
       if (current.anchors.length < 2) return receiptEvidence(current, value, true) !== null;
-      if (!Array.isArray(value.parts) || value.parts.length !== 2) return false;
+      const parts = value.parts;
+      if (!Array.isArray(parts) || parts.length !== 2) return false;
       const middle = Math.ceil(current.anchors.length / 2);
       return [current.anchors.slice(0, middle), current.anchors.slice(middle)]
-        .every((anchors, index) => complete({ ...current, anchors }, value.parts[index]));
+        .every((anchors, index) => complete({ ...current, anchors }, parts[index]));
     };
     return complete(input, receipt);
   });

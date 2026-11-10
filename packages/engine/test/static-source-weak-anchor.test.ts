@@ -60,6 +60,7 @@ test('current and historical selector receipts keep their own exact raw state/qu
   const selection = receipt.selection;
   if (!selection) throw new Error('Missing complete selector');
   const state = toJson({ context: staticSelectionContext(captured), candidates: staticSelectionCandidates(captured) });
+  if (state === null || typeof state !== 'object' || Array.isArray(state)) throw new Error('Missing exact selector state object');
   const questions = { pick: choice(STATIC_WEAK_ANCHOR_INSTRUCTIONS, { candidate: null, none: 'None of the candidates does what is needed.' }),
     fits_0: noul({ question: STATIC_WEAK_ANCHOR_FIT_INSTRUCTIONS, candidate: '`candidates[0]` (id "candidate")' }) };
   const standing = (wire: { state: EntryType; questions: Questions }) => staticInputStanding(captured,
@@ -249,8 +250,10 @@ test('v1 selector raw answers remain history while only genuinely new v2 questio
   const run = await legacy.select(recorded.port, staticSelectionContext(captured), staticSelectionCandidates(captured), { site: `${STATIC_SITE}.${captured.kind}` });
   const rawSelection = run.decisionId ? recorded.capture.get(run.decisionId) : undefined;
   if (!rawSelection) throw new Error('Missing authored raw v1 call');
-  expect(rawSelection.state).toEqual(fixture.requests[0]?.state);
-  expect(rawSelection.questions).toEqual(fixture.requests[0]?.questions);
+  const originalRequest = fixture.requests[0];
+  if (!originalRequest) throw new Error('Missing original historical selector request');
+  expect(rawSelection.state).toEqual(originalRequest.state);
+  expect(rawSelection.questions).toEqual(originalRequest.questions);
   const original = { ...authored.receipt, selection: rawSelection }, originalBytes = JSON.stringify(original);
   const readings: Record<string, unknown> = { [staticInputKey(captured)]: original };
   const current = { format: 2, readings } satisfies StaticSourceReadings;

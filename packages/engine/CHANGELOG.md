@@ -26,6 +26,9 @@
 - Include compiled reader metadata in Darwin native execution archives and
   validate its source and complete payload cohort after relocation.
 
+- Remove repeated filesystem traversal and redundant fresh-database migrations
+  from native daemon startup.
+
 - Report Decision Router readiness through the runtime metadata used by the
   model selector. A configured General route can be selected without assigning
   credentials to the virtual provider; answering providers keep their own

@@ -2,9 +2,9 @@ import type { DarwinDaemonSqliteOwner } from '@goodvibes-jev/engine/platform/pla
 import { isCompiledBunModuleUrl } from '@goodvibes-jev/engine/platform/platform/runtime/compiled-native-startup';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { COMPILED_VERSION } from '../version.js';
 
 export interface DaemonSqliteRuntime {
@@ -46,7 +46,10 @@ function retainedFile(path: string, cohortRoot: string, strictClocks = false): s
     const within = relative(cohortRoot, current);
     const selectedParent = within === '' || (!within.startsWith(`..${sep}`) && within !== '..' && !within.startsWith(sep));
     const revision = strictClocks && selectedParent ? `:${stat.ctimeNs}:${stat.mtimeNs}` : '';
-    parents.push(`${realpathSync(current)}:${stat.dev}:${stat.ino}:${stat.mode}:${stat.uid}:${stat.gid}:${stat.birthtimeNs}${revision}`);
+    // Keep the original ancestor walk and reject each named symlink before
+    // forming its absolute identity. A recursive realpath at every hop repeats
+    // traversal without adding another physical identity constraint.
+    parents.push(`${resolve(current)}:${stat.dev}:${stat.ino}:${stat.mode}:${stat.uid}:${stat.gid}:${stat.birthtimeNs}${revision}`);
     const parent = dirname(current); if (parent === current) break; current = parent;
   }
   const stat = lstatSync(path, { bigint: true });

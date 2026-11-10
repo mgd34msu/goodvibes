@@ -148,6 +148,47 @@ test('retained compiled SQLite admission tolerates sibling bookkeeping and still
   expect(() => admitted?.assertCurrent()).toThrow('Original native SQLite');
 });
 
+test('retained SQLite guards check each original physical ancestor once without recursive realpath or digest work', () => {
+  const f = fixture();
+  const admitted = initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => true });
+  if (!admitted) throw new Error('Expected original native SQLite admission');
+  let ancestors = 0;
+  for (let path = dirname(f.library);;) {
+    ancestors += 1;
+    const parent = dirname(path); if (parent === path) break; path = parent;
+  }
+  const realpath = spyOn(nativeFs, 'realpathSync'), stat = spyOn(nativeFs, 'lstatSync'), hash = spyOn(crypto, 'createHash');
+  try {
+    for (let check = 0; check < 8; check++) admitted.assertCurrent();
+    // Two selected files retain all physical ancestors plus their own inode.
+    expect(stat).toHaveBeenCalledTimes(8 * 2 * (ancestors + 1));
+    expect(realpath).not.toHaveBeenCalled(); expect(hash).not.toHaveBeenCalled();
+  } finally { realpath.mockRestore(); stat.mockRestore(); hash.mockRestore(); }
+});
+
+test('an ancestor symlink cannot admit a native SQLite image even when it reaches the exact original files', () => {
+  const f = fixture(), original = f.cohort + '.original';
+  renameSync(f.cohort, original); symlinkSync(original, f.cohort);
+  let selected = 0;
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    expect(() => initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => { selected++; return true; } })).toThrow('parent is not a regular directory');
+    expect(selected).toBe(0); expect(hash).not.toHaveBeenCalled();
+  } finally { hash.mockRestore(); }
+});
+
+test.each(['symlink', 'replacement'] as const)('an admitted SQLite owner refuses %s of an ancestor while original leaf files survive', change => {
+  const f = fixture();
+  const admitted = initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => true });
+  if (!admitted) throw new Error('Expected original native SQLite admission');
+  const original = f.cohort + '.original'; renameSync(f.cohort, original);
+  if (change === 'symlink') symlinkSync(original, f.cohort);
+  else {
+    mkdirSync(f.cohort); renameSync(join(original, 'lib'), join(f.cohort, 'lib'));
+  }
+  expect(() => admitted.assertCurrent()).toThrow();
+});
+
 
 test.each(['x64', 'arm64'] as const)('Darwin SQLite compiler keeps Apple --sdk selection for %s', arch => {
   const compile = spyOn(childProcess, 'execFileSync').mockReturnValue(Buffer.alloc(0));

@@ -1183,6 +1183,9 @@ function assertSqliteImage(data: Uint8Array): void {
 }
 
 export interface SqliteStoreInitOptions {
+  /** Opt in only when schema creates the complete target version. Applies to
+   * a physically absent, newly owned image; every existing file still migrates. */
+  readonly initializeFreshSchema?: boolean | undefined;
   /** Validate an already-current persisted schema before idempotent base-schema repair. */
   readonly validateCurrentSchema?: ((db: SqlDatabase) => void) | undefined;
   /** Authentic source-defined plan; arbitrary validation callbacks retain their clone boundary. */
@@ -2390,7 +2393,11 @@ export class SQLiteStore {
       // Schema versioning: PRAGMA user_version + ordered migrations, with an
       // automatic pre-migration snapshot, auto-restore on failure, and a
       // downgrade guard (an older binary refuses a newer schema honestly).
-      const result = openVersionedSchema({
+      const initializeFreshSchema = options.initializeFreshSchema === true && original === null && !existedOnDisk;
+      if (initializeFreshSchema && (!Number.isSafeInteger(this.schemaVersion) || this.schemaVersion < 0 || this.schemaVersion > 2_147_483_647)) {
+        throw new RangeError('SQLiteStore: fresh schema version is outside the native user_version range');
+      }
+      const result = initializeFreshSchema ? { applied: [] } : openVersionedSchema({
         storeName: options.storeName ?? 'sqlite store',
         dbPath: persistent ? dbPath! : ':memory:',
         handle: sqlJsVersionHandle(this.db),
@@ -2411,6 +2418,7 @@ export class SQLiteStore {
       // The base schema always runs (it is IF NOT EXISTS-idempotent) so a
       // store already at the target version still gets any session tables.
       schema(this.getDb());
+      if (initializeFreshSchema) sqlJsVersionHandle(this.getDb()).setUserVersion(this.schemaVersion);
       this.validateCurrentSchema?.(this.getDb());
       // Persist a freshly-stamped version so the next open skips migration,
       // but only for a store that already lived on disk: a brand-new store

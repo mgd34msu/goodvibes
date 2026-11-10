@@ -1784,6 +1784,7 @@ export class KnowledgeStore {
   private async initialize(): Promise<void> {
     await this.sqlite.init(createSchema, {
       storeName: 'knowledge store', schemaVersion: KNOWLEDGE_SCHEMA_VERSION,
+      initializeFreshSchema: true,
       validateCurrentSchema: validateCurrentKnowledgeSchema,
       nativeSchemaReadPlan: prepareNativeKnowledgeSchemaReadPlan(),
       migrations: [

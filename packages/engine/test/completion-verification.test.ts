@@ -460,9 +460,19 @@ test('resuming retains the actual worker read behind its native parent receipt w
   expect(publication.some((message) => message.role === 'system' && JSON.stringify(message.content).includes('Do not spawn agents'))).toBe(
     true,
   );
-  expect([...restartedStore.sources.values()].some((source) => source.reference.includes('retained historical worker observation'))).toBe(
-    false,
-  );
+  const historical = [...restartedStore.sources.values()]
+    .filter(source => source.reference.includes('retained historical worker observation'));
+  expect(historical.length).toBeGreaterThan(0);
+  for (const source of historical) {
+    expect(source.kind).toBe('observation');
+    expect(source.originalIds).toHaveLength(1);
+    const original = restartedStore.sources.get(source.originalIds![0]!);
+    expect(original).toBeDefined();
+    expect(original!.reference).not.toContain('retained historical worker observation');
+    expect(original!.originalIds?.length ?? 0).toBe(0);
+    expect(source.text).toBe(original!.text);
+    expect(source.reference).toContain('Not a new execution, user instruction or current approval');
+  }
 });
 
 test('native recovery reuses exact original scope without drafting another pair of paraphrases', async () => {

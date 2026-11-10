@@ -19,7 +19,7 @@ const unit = 'goodvibes.service', label = 'sh.goodvibes.daemon';
 // into installed services. Freeze before the installer's EXIT cleanup runs.
 const installerLineProbe = `if [ -n "\${BASH_VERSION:-}" ]; then
   set -T
-  trap 'case "\${FUNCNAME[0]-}:$BASH_COMMAND" in cleanup_release_install:*|*:cleanup_release_install) trap - DEBUG ;; *) if [ "$LINENO" -gt 0 ] && [ "$LINENO" -le "$GOODVIBES_ACCEPTANCE_LINE_LIMIT" ]; then printf "%s\\n" "$LINENO" 2>/dev/null >"$GOODVIBES_ACCEPTANCE_LINE_PATH" || :; fi ;; esac' DEBUG
+  trap 'case "\${FUNCNAME[0]-}:$BASH_COMMAND" in cleanup_release_install:*|*:cleanup_release_install) trap - DEBUG ;; *) if [ "\${BASH_SOURCE[0]-}" = "$GOODVIBES_ACCEPTANCE_SOURCE_PATH" ] && [ "$LINENO" -gt 0 ] && [ "$LINENO" -le "$GOODVIBES_ACCEPTANCE_LINE_LIMIT" ]; then printf "%s\\n" "$LINENO" 2>/dev/null >"$GOODVIBES_ACCEPTANCE_LINE_PATH" || :; fi ;; esac' DEBUG
 fi
 . "$0"`;
 
@@ -76,7 +76,7 @@ export function assertHostedContext(input) {
 /** Drain the exact admitted child before reporting timeout/cancellation. Output
  * stays bounded/private: installer/status output can contain local credentials. */
 export async function runOwnedCommand(command, args, options = {}) {
-  const { timeoutMs = 120_000, signal, installerSource, ...spawnOptions } = options;
+  const { timeoutMs = 120_000, signal, installerSource, installerSourcePath = args[0], ...spawnOptions } = options;
   signal?.throwIfAborted();
   const shell = command.split(sep).at(-1);
   const probe = installerSource !== undefined && ['sh', 'bash', 'dash'].includes(shell);
@@ -87,6 +87,7 @@ export async function runOwnedCommand(command, args, options = {}) {
     if (probePath) writeFileSync(probePath, '', { flag: 'wx', mode: 0o600 });
     child = spawn(command, probe ? [...(shell === 'bash' ? ['--posix'] : []), '-c', installerLineProbe, ...args] : args,
       { ...spawnOptions, ...(probePath ? { env: { ...(spawnOptions.env ?? process.env), GOODVIBES_ACCEPTANCE_LINE_PATH: probePath,
+        GOODVIBES_ACCEPTANCE_SOURCE_PATH: installerSourcePath,
         GOODVIBES_ACCEPTANCE_LINE_LIMIT: String(installerSource.split('\n').length) } } : {}), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (error) { if (probeRoot) rmSync(probeRoot, { recursive: true, force: true }); throw error; }
   let stdout = '', stderr = '', bytes = 0, failOutput;
@@ -292,10 +293,10 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   const env = { ...process.env, HOME: home };
   for (const name of Object.keys(env)) if (/^(?:GOODVIBES_|OPENAI_|ANTHROPIC_|GOOGLE_|GEMINI_|JEV_|CLEF_)/.test(name)
     || ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'DBUS_SESSION_BUS_ADDRESS', 'NODE_OPTIONS', 'BUN_OPTIONS'].includes(name)) delete env[name];
-  const invoke = async (command, args, extra = {}, cleanup = false, installerSource) => {
+  const invoke = async (command, args, extra = {}, cleanup = false, installerSource, installerSourcePath) => {
     assertHome(); evidence.command = command.split(sep).at(-1); evidence.exitCode = undefined; evidence.diagnostics = undefined;
     const result = await runOwnedCommand(command, args, { cwd: home, env: { ...env, ...extra }, timeoutMs: 300_000,
-      signal: cleanup ? undefined : signal, installerSource }); assertHome();
+      signal: cleanup ? undefined : signal, installerSource, installerSourcePath }); assertHome();
     evidence.exitCode = result.code; evidence.diagnostics = result.diagnostics;
     assert.equal(result.code, 0, `Acceptance command failed: ${command.split(sep).at(-1)}`); return result.stdout.trim();
   };
@@ -394,7 +395,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   };
   const host = {
     async admit() { assertHome(); },
-    async install() { await invoke('sh', [installer], installEnv, false, delivery?.installerSource ?? readFileSync(installer, 'utf8')); },
+    async install() { await invoke('sh', [installer], installEnv, false, delivery?.installerSource ?? readFileSync(installer, 'utf8'), delivery?.installerSourcePath); },
     async verifyInstalled() {
       for (const name of products) {
         assert.equal(await invoke(join(bin, name), ['--version']), `${name} ${version}`);
@@ -434,7 +435,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     },
     async restartAndVerifyOptOut() { await service('restart'); await host.verifyInstalled(); await verifyOptOut(); },
     verifyOptOut,
-    async uninstall() { await invoke('sh', [installer], { ...installEnv, GOODVIBES_UNINSTALL: '1' }, true, delivery?.installerSource ?? readFileSync(installer, 'utf8')); },
+    async uninstall() { await invoke('sh', [installer], { ...installEnv, GOODVIBES_UNINSTALL: '1' }, true, delivery?.installerSource ?? readFileSync(installer, 'utf8'), delivery?.installerSourcePath); },
     verifyPreserved,
   };
   const previousInstallEnv = { GOODVIBES_VERSION: 'v3.1.1', GOODVIBES_WAKE_MODEL: '0' };

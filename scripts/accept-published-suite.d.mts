@@ -27,10 +27,10 @@ export function assertHistoricalRollbackRefusal(input: { bin: string; version: s
 export function assertHostedContext(input: HostedContext): void;
 export function runAcceptanceSteps(host: AcceptanceSteps): Promise<void>;
 export function runOwnedCommand(command: string, args: readonly string[], options?: SpawnOptionsWithoutStdio & {
-  signal?: AbortSignal; timeoutMs?: number; installerSource?: string;
+  signal?: AbortSignal; timeoutMs?: number; installerSource?: string; installerSourcePath?: string;
 }): Promise<{ code: number; stdout: string; diagnostics?: string[] }>;
 export interface AcceptanceDelivery {
-  installerSource?: string; rollbackSourceRoot?: string;
+  installerSource?: string; installerSourcePath?: string; rollbackSourceRoot?: string;
   admit(input: { tag: string; source: string; target: string; root: string; signal?: AbortSignal }): Promise<{
     readers: Map<string, unknown>; installer: string; published: { url: string; bytes: Uint8Array };
   }>;

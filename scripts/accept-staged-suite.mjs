@@ -103,6 +103,7 @@ export async function acceptStagedSuite({ directory, ...input }) {
   const delivery = {
     rollbackSourceRoot: process.env.CANDIDATE_SOURCE_ROOT,
     installerSource: undefined,
+    installerSourcePath: undefined,
     async admit({ tag, source, target, root, signal }) {
       admitted = await admitStagedAssets(directory, signal);
       const readers = await readPublishedReaders({ tag, source, target, assets: new Set(admitted.entries.keys()) }, async name => {
@@ -114,6 +115,7 @@ export async function acceptStagedSuite({ directory, ...input }) {
       const bytes = execFileSync('git', ['show', `${source}:scripts/install.sh`], { maxBuffer: 1_048_576 });
       delivery.installerSource = bytes.toString('utf8');
       const immutable = join(root, 'immutable-install.sh'); writeFileSync(immutable, bytes, { flag: 'wx', mode: 0o600 });
+      delivery.installerSourcePath = immutable;
       const installer = join(root, 'install.sh');
       // The installer owns WORKDIR, verification, publication, service setup,
       // opt-out persistence and uninstall. Override only its existing fetch port.

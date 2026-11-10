@@ -117,7 +117,7 @@ test('installer diagnostics preserve the shared stdout/stderr output bound witho
 
 test('silent Bash set-e failure retains its actual function line before successful EXIT cleanup and hides credentials', async () => {
   const root = mkdtempSync(join(tmpdir(), 'published-acceptance-silent-diagnostics-')); roots.push(root);
-  const installer = join(root, 'install.sh'), cleanup = join(root, 'cleaned'), secret = 'acceptance-silent-secret-3d485f';
+  const installer = join(root, 'install.sh'), wrapper = join(root, 'adapter.sh'), cleanup = join(root, 'cleaned'), secret = 'acceptance-silent-secret-3d485f';
   const source = `#!/bin/sh
 set -eu
 [ "$0" = "$ACCEPTANCE_SCRIPT" ] && [ "$1" = original-argument ]
@@ -134,14 +134,18 @@ refuse() {
 refuse
 `;
   writeFileSync(installer, source, { mode: 0o600 });
-  const result = await runOwnedCommand('bash', [installer, 'original-argument'], {
-    env: { ...process.env, ACCEPTANCE_SCRIPT: installer, ACCEPTANCE_CLEANUP: cleanup, ACCEPTANCE_SECRET: secret }, installerSource: source,
-  });
+  writeFileSync(wrapper, '. "$ACCEPTANCE_SOURCE"\n', { mode: 0o600 });
   const failedLine = source.split('\n').findIndex(line => line === '  return 1') + 1;
-  expect(result.code).toBe(1); expect(readFileSync(cleanup, 'utf8')).toBe('cleaned\n');
-  expect(result.diagnostics).toContain(`Installer exited nonzero after source line ${failedLine}; line captured before EXIT cleanup.`);
-  expect(JSON.stringify(result)).not.toContain(secret);
-  expect(result).not.toHaveProperty('stderr');
+  for (const entry of [installer, wrapper]) {
+    const result = await runOwnedCommand('bash', [entry, 'original-argument'], {
+      env: { ...process.env, ACCEPTANCE_SCRIPT: entry, ACCEPTANCE_SOURCE: installer, ACCEPTANCE_CLEANUP: cleanup, ACCEPTANCE_SECRET: secret },
+      installerSource: source, ...(entry === wrapper ? { installerSourcePath: installer } : {}),
+    });
+    expect(result.code).toBe(1); expect(readFileSync(cleanup, 'utf8')).toBe('cleaned\n');
+    expect(result.diagnostics).toContain(`Installer exited nonzero after source line ${failedLine}; line captured before EXIT cleanup.`);
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(result).not.toHaveProperty('stderr');
+  }
 });
 
 (existsSync('/bin/dash') ? test : test.skip)('dash parses the Bash-only metadata branch without changing original arguments or ordinary output', async () => {

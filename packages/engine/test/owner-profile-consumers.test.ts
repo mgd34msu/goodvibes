@@ -492,7 +492,7 @@ describe('at-rest admission uses the installed profile read lifetime', () => {
       await readStarted.promise;
       expect(store.status()).toBe(loaded);
       // A new read while loading must refuse before reaching the provider.
-      await readAtRestCredentialSpans([JSON.stringify({ body: `another ${candidate}` })], 'test.profile-at-rest');
+      await expect(readAtRestCredentialSpans([JSON.stringify({ body: `another ${candidate}` })], 'test.profile-at-rest')).rejects.toThrow('unavailable');
       expect(fake.requests.filter((request) => request.context?.battery === 'engine.runtime.at-rest-credential')).toHaveLength(1);
       release.resolve();
       await expect(reading).rejects.toThrow('unavailable');
@@ -507,12 +507,16 @@ describe('at-rest admission uses the installed profile read lifetime', () => {
       finishRead.resolve();
       await loading;
       expect(redactAtRestLine(line)).not.toContain(candidate);
-      // A genuinely current lease permits a fresh reading and its reuse.
-      await readAtRestCredentialSpans([line], 'test.profile-at-rest');
+      // A current lease permits only this call's returned projection. Exact
+      // duplicates coalesce within the call; no later write inherits a reading.
+      const projected = await readAtRestCredentialSpans([line,line], 'test.profile-at-rest');
       expect(fake.requests.filter((request) => request.context?.battery === 'engine.runtime.at-rest-credential')).toHaveLength(2);
-      expect(redactAtRestLine(line)).toContain(candidate);
-      await readAtRestCredentialSpans([line], 'test.profile-at-rest');
-      expect(fake.requests.filter((request) => request.context?.battery === 'engine.runtime.at-rest-credential')).toHaveLength(2);
+      expect(projected).toHaveLength(2); expect(projected[0]).toBe(projected[1]); expect(projected[0]).toContain(candidate);
+      expect(redactAtRestLine(line)).not.toContain(candidate);
+      const later = await readAtRestCredentialSpans([line], 'test.profile-at-rest');
+      expect(later[0]).toContain(candidate);
+      expect(fake.requests.filter((request) => request.context?.battery === 'engine.runtime.at-rest-credential')).toHaveLength(3);
+      expect(redactAtRestLine(line)).not.toContain(candidate);
       writeFileSync(store.path, FIXTURE.replace('owner@example.com', 'changed@example.com'));
       store.loadSync();
       writeFileSync(store.path, FIXTURE);
@@ -571,7 +575,7 @@ describe('at-rest admission uses the installed profile read lifetime', () => {
         fieldId: 'contact.email', value: 'changed@example.com', date: '2026-10-10' });
       await writingStarted.promise;
       expect(store.status()).toBe(loaded);
-      await readAtRestCredentialSpans([JSON.stringify({ body: `another ${candidate}` })], 'test.profile-at-rest');
+      await expect(readAtRestCredentialSpans([JSON.stringify({ body: `another ${candidate}` })], 'test.profile-at-rest')).rejects.toThrow('unavailable');
       expect(fake.requests.filter((request) => request.context?.battery === 'engine.runtime.at-rest-credential')).toHaveLength(1);
       release.resolve();
       await expect(reading).rejects.toThrow('unavailable');
@@ -587,9 +591,10 @@ describe('at-rest admission uses the installed profile read lifetime', () => {
       writeFileSync(store.path, FIXTURE);
       store.loadSync();
       expect(redactAtRestLine(line)).not.toContain(candidate);
-      await readAtRestCredentialSpans([line], 'test.profile-at-rest');
+      const projected = await readAtRestCredentialSpans([line], 'test.profile-at-rest');
       expect(fake.requests.filter((request) => request.context?.battery === 'engine.runtime.at-rest-credential')).toHaveLength(2);
-      expect(redactAtRestLine(line)).toContain(candidate);
+      expect(projected[0]).toContain(candidate);
+      expect(redactAtRestLine(line)).not.toContain(candidate);
     } finally {
       release.resolve();
       finishWrite.resolve();

@@ -81,14 +81,15 @@ test('captured evidence is detached and a copied check, run, runtime or fabricat
 });
 
 for (const stopped of ['run-aborted', 'unit-aborted', 'terminal'] as const) test(`${stopped} releases the comparison and cannot revive it`, () => {
-  const f = fixture(), cache = createUnitCheckEvidenceCache(), original = f.capture();
-  cache.remember(f.owner, f.check, original, f.authority());
+  const f = fixture(), cache = createUnitCheckEvidenceCache(), original = f.capture(), authority = f.authority();
+  cache.remember(f.owner, f.check, original, authority);
   if (stopped === 'run-aborted') f.runLife.abort();
   else if (stopped === 'unit-aborted') f.unitLife.abort();
   else f.setActive(false);
-  expect(cache.matches(f.owner, f.check, original, f.authority())).toBe(false);
+  expect(cache.matches(f.owner, f.check, original, authority)).toBe(false);
+  expect(cache.hasOriginal(f.owner, f.check)).toBe(false);
   f.setActive(true);
-  expect(cache.matches(f.owner, f.check, original, f.authority())).toBe(false);
+  expect(cache.matches(f.owner, f.check, original, authority)).toBe(false);
 });
 
 test('same-model provider replacement and restoration cannot resurrect an old reading owner', () => {

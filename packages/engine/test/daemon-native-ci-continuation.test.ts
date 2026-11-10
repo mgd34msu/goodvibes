@@ -67,7 +67,8 @@ async function fixture(pairingOwner?: PairingTokenManager) {
     if (spawnSync('git', args, { cwd: workspace }).status !== 0) throw new Error('Fixture git failed');
   const configManager = new ConfigManager({ workingDir: workspace, homeDir: root, configDir: join(root, 'config'), surfaceRoot: 'daemon' });
   const gatewayMethods = new GatewayMethodCatalog();
-  const continuationScopeOwner = gatewayMethods.attachScopePolicyOwner(() => configManager.invalidateExternalPolicy());
+  const continuationScopeOwner = gatewayMethods.attachScopePolicyOwner(() => configManager.invalidateExternalPolicy(),
+    snapshot => configManager.getDurableGatewayPolicyRevision(snapshot));
   const runtimeBus = new RuntimeEventBus();
   let approvals = 0;
   const services = createClientRuntimeServices({ workspaceTrust: null, configManager, runtimeBus, runtimeStore: createRuntimeStore(),
@@ -380,7 +381,13 @@ for (const mode of ['direct', 'restart', 'concurrent', 'brief-mutation', 'brief-
       await waitFor(() => execution.status(original.admission.key, f.authority).settlement?.state === 'published', 'original native settlement').catch(error => { throw new Error(JSON.stringify({ error: String(error), state: execution.status(original.admission.key, f.authority), warnings })); });
       if (mode !== 'launched-restart') { f.continuationScopeOwner.close(); await f.activation.close(); }
       const configManager = new ConfigManager({ workingDir: f.workspace, homeDir: f.root, configDir: join(f.root, 'config'), surfaceRoot: 'daemon' });
-      const gateway = new GatewayMethodCatalog(); reopenedScope = gateway.attachScopePolicyOwner(() => configManager.invalidateExternalPolicy());
+      const gateway = new GatewayMethodCatalog();
+      reopenedScope = gateway.attachScopePolicyOwner(() => configManager.invalidateExternalPolicy(),
+        snapshot => configManager.getDurableGatewayPolicyRevision(snapshot));
+      if (['restart','partial-claim-restart','launched-restart'].includes(mode)) {
+        expect(JSON.stringify([configManager.getDurableConfigurationIncarnation(), reopenedScope.current().revision]))
+          .toBe(issuedContinuation.issue.policyRevision);
+      }
       reopenedKnowledge = new KnowledgeStore({ dbPath: join(f.root, 'knowledge.sqlite') });
       restarted = createDaemonNativeWorkExecutionActivation({ ...f.options, configManager, knowledgeStore: reopenedKnowledge,
         continuationGrants: new PairingTokenManager(join(f.root, 'pairing.json')), continuationScopeOwner: reopenedScope,

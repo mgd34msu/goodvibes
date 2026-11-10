@@ -1,6 +1,6 @@
 /** Real native admission, captured initialization, engine allocation and recovery. */
 import { expect, spyOn, test } from 'bun:test';
-import { hashState, SqliteDecisionLog } from '@goodvibes-jev/judgment';
+import { SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import { noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -62,7 +62,6 @@ test('actual native materialization failure cannot grant member authority after 
   let materializationFailure: unknown;
   const recoveryReason = 'worktree initialization did not complete; retained resource requires recovery';
   const recoveryProjection = { phase: 'source', parts: [{ kind: 'text', text: recoveryReason }], target: 'whole-line' };
-  const recoveryHash = hashState(recoveryProjection);
   const log = new SqliteDecisionLog(':memory:');
   let recoveryReadings = 0;
   // Fail the real raw-blob materializer after Git has registered its no-checkout
@@ -123,9 +122,19 @@ test('actual native materialization failure cannot grant member authority after 
         prepareInputAuthority: async resource => { grants++; return createContractInputAuthority(contract, resource.path, { mutable: true, branch: resource.branch }); } });
       restored.push(recovered); expect(recovered.importWorkstream(snapshot)).toBe(true);
       const beforeReading = recoveryReadings;
+      const beforeEntries = new Set(log.query({ site: 'engine.redaction.credential', status: 'answered' }).map(entry => entry.id));
       expect(await redactSensitiveDataAsync(recoveryReason)).toBe(recoveryReason);
       expect(recoveryReadings).toBe(beforeReading + 2);
-      expect(log.query({ site: 'engine.redaction.credential', status: 'answered' }).some(entry => entry.stateHash === recoveryHash)).toBe(true);
+      // The exact transmitted projection was matched by both scripted answers
+      // above. Ordinary redaction audit records retain that call's questions
+      // and answers, never an unnecessary private-state commitment.
+      const saved = log.query({ site: 'engine.redaction.credential', status: 'answered' }).filter(entry => !beforeEntries.has(entry.id));
+      expect(saved).toHaveLength(1);
+      const recorded = saved[0];
+      if (!recorded || recorded.status !== 'answered' || !recorded.questions || typeof recorded.questions !== 'object' || Array.isArray(recorded.questions)) throw new Error('Missing original redaction audit record');
+      expect(Object.keys(recorded.questions).sort()).toEqual(['lineHasCredential','spanIsCredential']);
+      expect(recorded.answers).toEqual({ lineHasCredential: noulAnswer(.01), spanIsCredential: noulAnswer(.01) });
+      expect(Object.hasOwn(recorded,'stateHash')).toBe(false);
       if (stage === 'failed') expect(recovered.retryItem('u1')).toBe(true); else recovered.start('g1');
       await waitFor(() => recovered.getWorkstream('g1')!.items[0]!.state === 'failed' || spawns > 0, 'readiness recovery guard');
       expect(grants).toBe(0); expect(spawns).toBe(0); await recovered.join();

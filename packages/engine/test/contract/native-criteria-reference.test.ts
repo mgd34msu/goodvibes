@@ -161,8 +161,8 @@ test('late WeakMap overrides cannot launder an unverified historical criteria re
   });
 });
 
-// Source regression: only the actual decision-log input commitment is needed
-// for an ordinary native act. No second whole-operation hash has a consumer.
+// Ordinary native acts join their actual recorded decision by ID and native
+// action incarnation. Neither a log-state digest nor an operation hash is needed.
 test('ordinary native decisions reuse their action incarnation without hashing a deferred-operation cache key', async () => {
   await recorded(async (_fake, log) => {
     const value = contract({ criteriaId: 'current-criteria' }, null), hash = spyOn(crypto, 'createHash');
@@ -173,7 +173,11 @@ test('ordinary native decisions reuse their action incarnation without hashing a
       const record = value.nativeDecisions!.history.at(-1)!;
       expect(record.operationRevision).toBe(record.decision.binding.actionRevision);
       expect(log.query()).toHaveLength(1);
-      expect(logHash.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(log.query().length);
+      const entry = log.query()[0];
+      if (!entry) throw new Error('Missing actual native decision record');
+      expect(record.decision.judgmentDecisionIds).toContain(entry.id);
+      expect(entry.stateHash).toBeUndefined();
+      expect(logHash.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(0);
       expect(hash.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(0);
       result.recordClaim();
       result.assertCurrent();

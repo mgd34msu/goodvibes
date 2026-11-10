@@ -8,6 +8,7 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { selectedPlanningTarget } from '../../input/commands/planning-action-target.ts';
 import { registerPlanningRuntimeCommands } from '../../input/commands/planning-runtime.ts';
+import { ordinaryPlanningRevision } from '../../../../../packages/engine/test/_helpers/planning-revision.ts';
 
 const roots: string[] = [];
 let previous: ReturnType<typeof installJudgmentPort>;
@@ -51,7 +52,10 @@ for (const action of ['approve', 'answer']) {
     const clock = spyOn(Date, 'now').mockReturnValue(70_000);
     try {
       const f = await fixture();
-      const selected = await f.service.getState({ projectId: 'fixture' });
+      // This case exercises stale-source refusal, not protected-token admission.
+      // Select a genuine ordinary persisted revision; dedicated platform cases
+      // retain explicit PAN-shaped and caller-forged generation coverage.
+      const selected = await ordinaryPlanningRevision(f.store, f.service, 'fixture');
       await f.service.upsertState({ projectId: 'fixture', state: { ...f.authored, goal: 'A replacement goal', executionApproved: true,
         metadata: { ...f.authored.metadata, approvedAt: 42, approvedFrom: 'previous-owner' } } });
       const before = await reopened(f.path); const bytes = readFileSync(f.path);

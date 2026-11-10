@@ -1,5 +1,7 @@
 import { cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { resetAgentMcpCallRouteForTests } from '../../tools/agent-mcp-call-route.ts';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -540,19 +542,25 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         const notesArtifactJson = JSON.parse(notesArtifact.output!) as {
           readonly status: string;
           readonly lookup: { readonly source: string; readonly input?: string; readonly resolvedBy: string };
-          readonly artifact: { readonly id: string; readonly path: string; readonly content?: string; readonly summary?: { readonly bullets?: number } };
+          readonly artifact: { readonly id: string; readonly path: string; readonly status: string; readonly content?: string; readonly summary?: { readonly title?: string; readonly bullets?: number } };
         };
         expect(notesArtifactJson.status).toBe('found');
         expect(notesArtifactJson.lookup.source).toBe('artifactId');
         expect(notesArtifactJson.lookup.resolvedBy).toBe('id');
         expect(notesArtifactJson.artifact.id).toBe('release-notes');
         expect(notesArtifactJson.artifact.path).toBe('release/release-notes.md');
-        // Assert the SHAPE of the notes, never their wording: the live
-        // release/release-notes.md is rewritten every release, so pinning a
-        // phrase from one release's copy makes this test fail on the next one.
-        expect(notesArtifactJson.artifact.content).toBeTruthy();
-        expect(notesArtifactJson.artifact.content!.trimStart().startsWith('- ')).toBe(true);
-        expect(notesArtifactJson.artifact.summary?.bullets).toBeGreaterThan(0);
+        expect(notesArtifactJson.artifact.status).toBe('available');
+        // Return the actual shipped artifact, including canonical suite links,
+        // rather than requiring release prose to use a particular list style.
+        const root = join(import.meta.dir, '..', '..', '..');
+        const notes = readFileSync(join(root, 'release', 'release-notes.md'), 'utf8');
+        const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string };
+        expect(notesArtifactJson.artifact.content).toBe(notes);
+        expect(notes.trim()).not.toBe('');
+        expect(notes.trimEnd()).toMatch(new RegExp(`GoodVibes Agent ${version.replaceAll('.', '\\.')} - \\d{4}-\\d{2}-\\d{2}$`));
+        const title = notes.split(/\r?\n/).find(line => line.startsWith('# '))?.slice(2).trim();
+        expect(notesArtifactJson.artifact.summary?.title).toBe(title);
+        expect(notesArtifactJson.artifact.summary?.bullets).toBe(notes.split(/\r?\n/).filter(line => /^-\s+/.test(line)).length);
         return;
       }
 

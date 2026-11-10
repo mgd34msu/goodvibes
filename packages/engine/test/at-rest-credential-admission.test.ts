@@ -9,7 +9,7 @@ import {
   redactAtRestLine,
 } from '../platform/src/platform/runtime/at-rest-persistence.ts';
 import { logger } from '../platform/src/platform/utils/logger.ts';
-import { captureRedactionSource, redactSensitiveData, registerAccountIdentityRedaction, registerProfileRedactionValues } from '../platform/src/platform/utils/redaction.ts';
+import { captureRedactionSource, redactSensitiveDataAsync, registerAccountIdentityRedaction, registerProfileRedactionValues } from '../platform/src/platform/utils/redaction.ts';
 
 const DOCUMENT = 'key-rotation-policy-for-tenants';
 // Synthetic sentinel values only. Nothing in this suite contacts a live service.
@@ -120,13 +120,18 @@ describe('complete at-rest source admission before any provider request', () => 
     installJudgmentPort(fake.port);
     const disposeA = registerProfileRedactionValues(() => ({ guarded: [], absolute: [] }));
     const disposeB = registerProfileRedactionValues(() => ({ guarded: [], absolute: [PRIVATE] }));
+    const replacement = captureRedactionSource();
     const line = JSON.stringify({ body: DOCUMENT });
     expect(await readProjectedLine(line)).toContain(DOCUMENT);
     disposeA();
-    expect(redactSensitiveData(PRIVATE)).not.toContain(PRIVATE);
+    expect(() => replacement.assertCurrent()).not.toThrow();
+    expect(await redactSensitiveDataAsync(PRIVATE)).not.toContain(PRIVATE);
     expect(await readProjectedLine(line)).toContain(DOCUMENT);
-    expect(fake.requests).toHaveLength(2);
+    expect(fake.requests.filter(request => request.context?.battery === 'engine.runtime.at-rest-credential')).toHaveLength(2);
+    expect(fake.requests.filter(request => request.context?.battery === 'engine.redaction.credential')).toHaveLength(1);
+    expect(fake.requests).toHaveLength(3);
     disposeB();
+    expect(() => replacement.assertCurrent()).toThrow();
     expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
     const afterDispose = captureRedactionSource();
     disposeB();
@@ -139,13 +144,18 @@ describe('complete at-rest source admission before any provider request', () => 
     const identity = { homeDirectory: '/home/synthetic-owner', userName: 'synthetic-owner' };
     const disposeA = registerAccountIdentityRedaction(() => identity);
     const disposeB = registerAccountIdentityRedaction(() => identity);
+    const replacement = captureRedactionSource();
     const line = JSON.stringify({ body: DOCUMENT });
     expect(await readProjectedLine(line)).toContain(DOCUMENT);
     disposeA();
-    expect(redactSensitiveData(identity.homeDirectory)).not.toContain(identity.userName);
+    expect(() => replacement.assertCurrent()).not.toThrow();
+    expect(await redactSensitiveDataAsync(identity.homeDirectory)).not.toContain(identity.userName);
     expect(await readProjectedLine(line)).toContain(DOCUMENT);
-    expect(fake.requests).toHaveLength(2);
+    expect(fake.requests.filter(request => request.context?.battery === 'engine.runtime.at-rest-credential')).toHaveLength(2);
+    expect(fake.requests.filter(request => request.context?.battery === 'engine.redaction.credential')).toHaveLength(1);
+    expect(fake.requests).toHaveLength(3);
     disposeB();
+    expect(() => replacement.assertCurrent()).toThrow();
     expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
     const afterDispose = captureRedactionSource();
     disposeB();

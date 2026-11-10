@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { assertStaticCapturePathsDistinct } from '../scripts/read-static-source.ts';
@@ -50,28 +50,34 @@ test('existing directory links, file links and hard links cannot alias publicati
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('atomic staging files and SQLite sidecars cannot overwrite another owned evidence path', () => {
+test('atomic staging and the actual JSON Lines log cannot overwrite another owned evidence path', () => {
   const root = mkdtempSync(join(tmpdir(), 'static-capture-stage-paths-'));
   try {
     const output = join(root, 'current.json');
     const checkpoint = join(root, 'private.json');
     const log = join(root, 'calls.sqlite');
+    const inputs = join(root, 'inputs.json');
     const marker = 'immutable prior raw capture history';
     for (const [outputPath, checkpointPath, logPath] of [
       [output, `${output}.next`, log],
       [`${checkpoint}.next`, checkpoint, log],
       [output, checkpoint, `${output}.next`],
-      [`${log}-wal`, checkpoint, log],
-      [`${log}-shm`, checkpoint, log],
+      [log, checkpoint, log],
+      [output, log, log],
+      [`${checkpoint}.journal`, checkpoint, log],
+      [inputs, checkpoint, log],
     ]) {
       if (!outputPath || !checkpointPath || !logPath) throw new Error('Missing exact owned path control');
       writeFileSync(checkpointPath, marker);
+      const snapshot = () => readdirSync(root).sort().map(name => [name, readFileSync(join(root, name), 'utf8')]);
+      const before = snapshot();
       const result = spawnSync(process.execPath, [resolve(import.meta.dir, '../scripts/read-static-source.ts'),
-        '--out', outputPath, '--checkpoint', checkpointPath, '--log', logPath],
+        '--out', outputPath, '--checkpoint', checkpointPath, '--log', logPath, '--inputs', inputs],
       { encoding: 'utf8', env: { ...process.env, TYPESAFE_API_KEY: '' } });
       expect(result.status).toBe(1);
       expect(result.stderr).toContain('must point to distinct files');
       expect(readFileSync(checkpointPath, 'utf8')).toBe(marker);
+      expect(snapshot()).toEqual(before);
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

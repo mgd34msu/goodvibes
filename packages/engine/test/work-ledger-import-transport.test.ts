@@ -78,8 +78,12 @@ test('import descriptors require exactly the fields accepted by authenticated re
       expect(readFileSync(host.file)).toEqual(bytes);
     }
   }
-  expect(await (await host.request('/api/work-ledger/legacy-import/prepare', preparation)).json())
-    .toMatchObject({ kind: 'prepared', manifest: command.manifest });
+  const preparedAgain = await host.prepared();
+  if (command.manifest.version !== 3 || preparedAgain.manifest.version !== 3) throw new Error('Expected current native import manifests');
+  expect(preparedAgain.manifest.revision).not.toBe(command.manifest.revision);
+  // Independent preparations issue distinct ordinary labels. Their full
+  // captured source/body must still agree exactly before the original imports.
+  expect({ ...preparedAgain.manifest, revision: command.manifest.revision }).toEqual(command.manifest);
   expect(readFileSync(host.file)).toEqual(bytes);
   expect(await (await host.request('/api/work-ledger/legacy-import', command)).json())
     .toMatchObject({ kind: 'accepted', replayed: false });

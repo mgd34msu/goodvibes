@@ -41,11 +41,12 @@ test('actual daemon submission atomically captures exact source and owner, with 
   expect(first.kind).toBe('submitted'); expect(first.replayed).toBe(false);
   expect(first.receipt).toMatchObject({ projectId: f.projectId, requestId: input.requestId, inputId: input.inputId,
     ledgerRevision: 1, expectedRevision: { work: 1, criteria: 1, attempt: 1 }, goal: input.goal, criteria: input.criteria });
-  expect(first.receipt.source).toMatchObject({ version: 3, sessionId: `native-work:${f.projectId}` });
-  expect(first.receipt.source.sourceId).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/); expect(first.receipt.source.sourceRevision).toMatch(/^[a-f0-9]{64}$/);
+  expect(first.receipt.source).toMatchObject({ version: 4, sessionId: `native-work:${f.projectId}` });
+  expect(first.receipt.source.sourceId).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/); expect(first.receipt.source.sourceRevision).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
   const snapshot = await f.reader.readSnapshot();
   expect(snapshot.revision).toBe(1); expect(snapshot.works).toHaveLength(1);
   expect(snapshot.works[0]?.work).toMatchObject({ id: first.receipt.workId, goal: input.goal, criteria: input.criteria, currentAttemptId: first.receipt.attemptId });
+  expect(snapshot.works[0]?.work.source).toEqual({ ...first.receipt.source, inputId: input.inputId });
   expect(snapshot.works[0]?.attempt).toMatchObject({ id: first.receipt.attemptId, state: 'active', ownerId: f.daemon.services.pairingTokens.authenticateNative(f.paired.token)!.principalId });
   expect(snapshot.works[0]?.verification.state).toBe('unverified');
   const replay = await f.client.submit(input); expect(replay.replayed).toBe(true); expect(replay.receipt).toEqual(first.receipt);

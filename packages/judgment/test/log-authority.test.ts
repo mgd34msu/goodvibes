@@ -121,16 +121,43 @@ describe('recording authority', () => {
     } finally { hash.mockRestore(); }
   });
 
-  test('captures the assertion accessor once and forwards the same hook', async () => {
-    using log = new SqliteDecisionLog(':memory:'); let reads = 0; let checks = 0;
-    const check = () => { checks++; };
+  test.each([undefined, 'state'] as const)('captures the assertion accessor once and forwards the same hook (binding=%s)', async (inputBinding) => {
+    using log = new SqliteDecisionLog(':memory:'); let reads = 0;
+    const phases: string[] = [];
+    const check = () => { phases.push('check'); };
     const inner: JudgmentPort = { model: 'jev-1.13.0', async ask(incoming) {
+      phases.push('provider');
       expect(incoming.assertLogCurrent).toBe(check); return result() as never;
     } };
-    const answer = await withDecisionLog(inner, log).ask({ ...request,
-      get assertLogCurrent() { reads++; return reads === 1 ? check : () => { throw new Error(PRIVATE); }; },
-    });
-    expect(reads).toBe(1); expect(checks).toBe(3); expect(log.get(answer.decisionId!)).toMatchObject({ status: 'answered' });
+    const write = log.record.bind(log);
+    const record = spyOn(log, 'record').mockImplementation(entry => { phases.push('write'); return write(entry); });
+    const hash = spyOn(Bun.CryptoHasher, 'hash');
+    try {
+      const answer = await withDecisionLog(inner, log).ask({ ...request,
+        ...(inputBinding === undefined ? {} : { inputBinding }),
+        get assertLogCurrent() { reads++; return reads === 1 ? check : () => { throw new Error(PRIVATE); }; },
+      });
+      expect(reads).toBe(1);
+      // Initial admission, captured source, admitted answer before an optional
+      // commitment, then final entry publication each use the one captured hook.
+      expect(phases).toEqual(['check', 'check', 'provider', 'check', 'check', 'write']);
+      const entry = log.get(answer.decisionId!);
+      expect(entry).toMatchObject({ status: 'answered' });
+      if (inputBinding === 'state') expect(entry?.stateHash).toMatch(/^[a-f0-9]{64}$/);
+      else expect(entry).not.toHaveProperty('stateHash');
+      expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(inputBinding === 'state' ? 1 : 0);
+    } finally { hash.mockRestore(); record.mockRestore(); }
+  });
+
+  test('the admitted-answer retention fence refuses an explicit commitment before hashing or recording it', async () => {
+    using log = new SqliteDecisionLog(':memory:'); let checks = 0;
+    const hash = spyOn(Bun.CryptoHasher, 'hash');
+    try {
+      denied(await withDecisionLog(borrowed(), log).ask({ ...request, inputBinding: 'state', assertLogCurrent() {
+        if (++checks === 3) throw new Error(PRIVATE);
+      } }).catch((error: unknown) => error));
+      expect(checks).toBe(3); expect(hash).not.toHaveBeenCalled(); expect(log.query()).toEqual([]);
+    } finally { hash.mockRestore(); }
   });
 
   test('a throwing assertion accessor fails value-free before source capture', async () => {
@@ -146,9 +173,9 @@ describe('recording authority', () => {
   test('a final assertion refusal never becomes a replacement failed entry', async () => {
     using log = new SqliteDecisionLog(':memory:'); let checks = 0;
     denied(await withDecisionLog(borrowed(), log).ask({ ...request, assertLogCurrent() {
-      if (++checks === 3) throw new Error(PRIVATE);
+      if (++checks === 4) throw new Error(PRIVATE);
     } }).catch((error: unknown) => error));
-    expect(checks).toBe(3); expect(log.query()).toEqual([]);
+    expect(checks).toBe(4); expect(log.query()).toEqual([]);
   });
 
   test('omitting the hook preserves cancelled-call failure recording', async () => {

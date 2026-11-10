@@ -20,7 +20,7 @@ import {
 import type { Contract } from '../platform/src/platform/contract/types.js';
 import { installJudgmentPort } from '../errors/src/index.js';
 import { fakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
-import { hashState, SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
+import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 
 function git(root: string, ...args: string[]): void {
   const result = spawnSync('git', ['-C', root, ...args]);
@@ -429,7 +429,11 @@ for (const viewKind of ['snapshot', 'member'] as const) {
             expect(failureRequests[0]!.context).toMatchObject({ batteryVersion: 2, site: 'engine.agent.run-failure' });
             const decisions = decisionLog.query({ battery: 'engine.failure-reading', site: 'engine.agent.run-failure', status: 'answered' });
             expect(decisions).toHaveLength(1);
-            expect(decisions[0]!.stateHash).toBe(hashState(failureState));
+            // Failure classification is audit-only, not a saved content proof.
+            // Its exact input was checked on the observed request above.
+            expect(decisions[0]!.stateHash).toBeUndefined();
+            expect(decisions[0]!.context).toEqual(failureRequests[0]!.context);
+            expect(decisions[0]!.questions).toEqual(failureRequests[0]!.questions);
             const failedId = access === 'concurrent' ? secondId! : id;
             const failed = runtime.agentManager.getStatus(failedId)!;
             expect(failed.status).toBe('failed');

@@ -20,7 +20,11 @@ const readingEvidence = (readings: Readonly<Record<string, { verdict: string; ou
 class VerificationDeferredError extends Error {}
 class VerificationScopeFallback extends Error {}
 const attemptOwner = Symbol('verification attempt owner');
-type AttemptAccess = VerificationAccess & { [attemptOwner]?: { pending: Set<Promise<unknown>> } };
+type AttemptAccess = VerificationAccess & { [attemptOwner]?: {
+  pending: Set<Promise<unknown>>;
+  fail(error: unknown): void;
+  failure?: { error: unknown };
+} };
 type InspectionCursor = {
   frontier: VerificationReceipt[];
   opened: { sources: readonly VerificationSource[]; earlier: readonly { id: string; summary: VerificationSummary }[] };
@@ -44,14 +48,35 @@ type VerificationTurnContext = {
   readonly requirements: readonly { readonly id: string; readonly text: string }[];
   readonly currentTurn: { readonly entryMessageCount: number | null; readonly observationIds: readonly string[]; readonly meaning: string };
 };
-async function ownedMapLimit<T, R>(access: VerificationAccess, values: readonly T[], limit: number, read: (value: T) => Promise<R>): Promise<R[]> {
-  return mapLimit(values, limit, value => {
-    const pending = (access as AttemptAccess)[attemptOwner]?.pending;
-    const work = Promise.resolve().then(() => { access.assertCurrent(); return read(value); });
-    pending?.add(work);
-    void work.finally(() => pending?.delete(work)).catch(() => {});
+async function ownedVerificationAttempt<T>(access: VerificationAccess, work: (local: VerificationAccess) => Promise<T>): Promise<T> {
+  const controller = new AbortController(), pending = new Set<Promise<unknown>>();
+  const owner: NonNullable<AttemptAccess[typeof attemptOwner]> = { pending, fail(error) {
+    owner.failure ??= { error };
+    controller.abort(owner.failure.error);
+  } };
+  const local: AttemptAccess = { ...access, [attemptOwner]: owner,
+    signal: access.signal ? AbortSignal.any([access.signal, controller.signal]) : controller.signal,
+    assertCurrent: () => { access.assertCurrent(); controller.signal.throwIfAborted(); } };
+  try { return await work(local); }
+  catch (error) { throw owner.failure ? owner.failure.error : error; }
+  finally {
+    controller.abort(new VerificationDeferredError());
+    while (pending.size) await Promise.allSettled([...pending]);
+  }
+}
+async function ownedMapLimit<T, R>(access: VerificationAccess, values: readonly T[], limit: number,
+  read: (value: T, local: VerificationAccess) => Promise<R>): Promise<R[]> {
+  // mapLimit drains admitted work before rejection. Abort this map's siblings
+  // at the first failure, before waiting for that drain; the outer attempt may
+  // still handle a context-limit error by reading smaller original pages.
+  return ownedVerificationAttempt(access, local => mapLimit(values, limit, value => {
+    const owner = (local as AttemptAccess)[attemptOwner]!;
+    const work = Promise.resolve().then(() => { local.assertCurrent(); return read(value, local); })
+      .catch(error => { owner.fail(error); throw error; });
+    owner.pending.add(work);
+    void work.finally(() => owner.pending.delete(work)).catch(() => {});
     return work;
-  });
+  }));
 }
 const parse = (text: string): Record<string, unknown> => {
   const value: unknown = JSON.parse(text);
@@ -160,17 +185,7 @@ export class CompletionVerification {
     scope.audits.set(requirement, current); return current.id;
   }
   private async ownedAttempt<T>(access: VerificationAccess, work: (local: VerificationAccess) => Promise<T>): Promise<T> {
-    const controller = new AbortController(), pending = new Set<Promise<unknown>>();
-    const local: AttemptAccess = { ...access, [attemptOwner]: { pending },
-      signal: access.signal ? AbortSignal.any([access.signal, controller.signal]) : controller.signal,
-      assertCurrent: () => { access.assertCurrent(); controller.signal.throwIfAborted(); } };
-    try { return await work(local); }
-    finally {
-      controller.abort(new VerificationDeferredError());
-      // A failed parallel reading must not leave old writers or readers alive
-      // while the held draft starts its next recovery attempt.
-      while (pending.size) await Promise.allSettled([...pending]);
-    }
+    return ownedVerificationAttempt(access, work);
   }
   private async proposal<T>(operation: Parameters<VerificationWriter>[0]['operation'], context: unknown, key: string,
     access: VerificationAccess, admit: (value: Record<string, unknown>) => T,
@@ -238,7 +253,7 @@ export class CompletionVerification {
     // is scoped to the live access identity; an AI overview grants no scope.
     const key = JSON.stringify(['scope-v2', instructions.map(entry => [entry.id, entry.kind, entry.messageRole, entry.completeMessage])]);
     try { return await this.proposal('requirements', context, key, access, value => requirements(value, new Set([...instructions.map(entry => entry.id), ...source.map(entry => entry.id)])), async proposed => {
-      const runs = await ownedMapLimit(access, pages, 3, async sources => {
+      const runs = await ownedMapLimit(access, pages, 3, async (sources, access) => {
         const run = await verificationScope.run(access.port, { sources: sources.map(verificationWireSource), instructionOverview: source, proposed, instruction: 'Check omissions against this original page; assess invented scope against the COMPLETE instruction overview. Other original pages may support other ledger items. Do not require one page to prove all work.' } as never,
           { ...this.options(access), site: verificationScope.name });
         run.recordAction(clean(run.readings) ? 'Qualify this scope page only; no completion authority.' : 'Repair the private requirement proposal against this original page.');
@@ -296,7 +311,7 @@ export class CompletionVerification {
             proposed: { facts: kind === 'facts' ? [fact] : [], concerns: kind === 'concerns' ? [fact] : [] },
             focus: 'Judge ONLY this single cited assertion against its cited original sources, including its expressed uncertainty. Native citations preserve original identity and boundaries.' } });
       }
-      const defects = await ownedMapLimit(access, jobs, 3, async job => {
+      const defects = await ownedMapLimit(access, jobs, 3, async (job, access) => {
         const key = JSON.stringify(['atomic-evidence-v2', proposalRevision, job.aspect, job.target]);
         const cache = this.cache(access);
         if (cache.has(key)) return null;
@@ -385,12 +400,12 @@ export class CompletionVerification {
   }
   private async evidenceTree(sources: readonly VerificationSource[], access: VerificationAccess): Promise<VerificationReceipt[]> {
     const pages = verificationFrames(sources, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length);
-    let nodes = (await ownedMapLimit(access, pages, 3, page => this.page(page, access))).flat();
+    let nodes = (await ownedMapLimit(access, pages, 3, (page, access) => this.page(page, access))).flat();
     while (!bounded(nodes.map(node => this.compactNode(node)), VERIFICATION_OVERVIEW_CHARACTERS)) {
       // Only bounded summaries go over the wire. Full child/source ID sets stay
       // local, avoiding a growing duplicate index in every parent request.
       const groups = verificationFrames(nodes.map(node => this.compactNode(node)), 18_000);
-      const next = (await ownedMapLimit(access, groups, 3, async group => {
+      const next = (await ownedMapLimit(access, groups, 3, async (group, access) => {
         const children = group.map(item => this.nodes.get(item.id)!);
         return this.merge(children, access);
       })).flat();
@@ -484,7 +499,7 @@ export class CompletionVerification {
     const { sources: _sources, earlier: _earlier, ...details } = evidence;
     const auditScope = this.auditScope(requirement.id, { turnContext, requirement, response, details, nativeQualification,
       sourceIds: evidence.sources?.map(source => source.id) ?? null, earlierIds: evidence.earlier?.map(node => node.id) ?? null }, access);
-    const checks = await ownedMapLimit(access, pages, 3, async page => {
+    const checks = await ownedMapLimit(access, pages, 3, async (page, access) => {
       // These sets belong to ONE exact source/requirement/answer/authority
       // cursor. Opening another immutable original does not undo a checked
       // page. A new source, changed scope, draft or owner starts another cursor.
@@ -514,7 +529,7 @@ export class CompletionVerification {
         // Settle the actual counterevidence question, one complete observation
         // at a time. Reasking whether the entire task is finished for every
         // historical page obscures which fact still needs reconciliation.
-        const resolved = await ownedMapLimit(access, page, 3, async observation => {
+        const resolved = await ownedMapLimit(access, page, 3, async (observation, access) => {
           if (accounted.has(observation.id)) return true;
           const originalTurn = this.originalTurn(observation.id);
           const instruction = observation.kind === 'instruction';
@@ -1109,7 +1124,7 @@ export class CompletionVerification {
     if (!cases) {
       let confirmedGap = false;
       const pending = new Set<AbortController>();
-      const checked = await ownedMapLimit(access, ledger, 3, async requirement => {
+      const checked = await ownedMapLimit(access, ledger, 3, async (requirement, access) => {
         if (indexed && confirmedGap) return null;
         const resultKey = JSON.stringify(['requirement-result', casesKey, requirement.id]);
         const retained = cache.get(resultKey) as Awaited<ReturnType<CompletionVerification['inspect']>> | undefined;
@@ -1134,7 +1149,7 @@ export class CompletionVerification {
       access.assertCurrent(); cache.set(casesKey, captureStrictJudgmentJson(cases));
     }
     const findings: CompletionFinding[] = [];
-    const caseFindings = await ownedMapLimit(access, cases.map((entry, index) => ({ entry, index })), 3, async ({ entry, index }) => {
+    const caseFindings = await ownedMapLimit(access, cases.map((entry, index) => ({ entry, index })), 3, async ({ entry, index }, access) => {
       const failed = Object.entries(entry.readings).filter(([name, reading]) => name !== 'observed_gap' && !entry.resolution?.aspects.includes(name)
         && (name !== 'needs_source' || entry.sourceExhausted) && (reading.verdict !== 'no' || reading.outcome !== 'act'));
       if (!failed.length && !entry.auditHeld) return [];

@@ -1739,20 +1739,28 @@ test('routing fallback still discovers and holds an actual unfinished original o
   ).toBe(true);
 });
 
-test('a failed parallel requirement cancels and drains its sibling before recovery can start', async () => {
+test.each([false, true])('a failed parallel requirement cancels and drains its sibling before recovery can start (different sibling failure: %s)', async differentSiblingFailure => {
   const started = Promise.withResolvers<void>();
+  const draining = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
   let active = false, cancelled = false;
+  const failure = new JudgmentError('invalid-response', 'Synthetic failed parallel requirement');
   const fake = good(), controller = new AbortController();
   const port: VerificationAccess['port'] = { ...fake.port, async ask(request) {
     if (request.context?.battery !== 'engine.verification.requirement') return fake.port.ask(request);
     const current = request.state as never as { requirement: { text: string } };
     if (current.requirement.text === 'Review all source.') {
       await started.promise;
-      throw new JudgmentError('invalid-response', 'Synthetic failed parallel requirement');
+      throw failure;
     }
     active = true; started.resolve();
     return new Promise((_, reject) => {
-      const abort = () => { active = false; cancelled = true; reject(request.signal!.reason); };
+      const abort = () => {
+        cancelled = true; draining.resolve();
+        void release.promise.then(() => {
+          active = false;
+          reject(differentSiblingFailure ? new JudgmentError('invalid-request', 'Synthetic secondary cancellation failure') : request.signal!.reason);
+        });
+      };
       request.signal!.addEventListener('abort', abort, { once: true });
       if (request.signal!.aborted) abort();
     });
@@ -1763,12 +1771,16 @@ test('a failed parallel requirement cancels and drains its sibling before recove
           })),
         })
     : verificationWriter(request);
+  const result = new CompletionVerification(writer).prepare(state('Retained diagnostic.\n'.repeat(16_000)), access(port, {}, controller.signal));
+  let settled = false;
+  const observed = result.then(() => { settled = true; }, () => { settled = true; });
   try {
-    await expect(new CompletionVerification(writer).prepare(state('Retained diagnostic.\n'.repeat(16_000)), access(port, {}, controller.signal)),
-    )
-      .rejects.toThrow('Synthetic failed parallel requirement');
+    await draining.promise;
+    expect(cancelled).toBeTrue(); expect(active).toBeTrue(); expect(settled).toBeFalse();
+    release.resolve();
+    await expect(result).rejects.toBe(failure); await observed;
     expect(cancelled).toBeTrue(); expect(active).toBeFalse();
-  } finally { controller.abort(); }
+  } finally { release.resolve(); controller.abort(); await observed; }
 });
 
 test('the verifier reads every original interval, including a hidden middle, and repairs only its own lossy proposal', async () => {

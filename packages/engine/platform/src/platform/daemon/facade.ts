@@ -60,6 +60,7 @@ import {
   type ResolvedInboundTlsContext,
 } from '../runtime/network/index.js';
 import { createRuntimeServices, type RuntimeServices } from '../runtime/services.js';
+import { createAsyncDisposalScope, type AsyncDisposalScope } from '../runtime/async-disposal.js';
 import type { McpServerConfig } from '../mcp/config.js';
 import { isSurfaceFeatureGateEnabled } from '../runtime/feature-flags/index.js';
 import { buildDaemonRelayReachability } from '../relay/daemon-wiring.js';
@@ -126,6 +127,7 @@ export class DaemonServer {
   private readonly runtimeServices: RuntimeServices;
   /** Whether this server constructed its runtime graph, and so may dispose it on stop(). */
   private readonly ownsRuntimeServices: boolean;
+  private readonly closeSupplementalResources: () => Promise<void>;
   private readonly nativeHandoverDrain: DaemonConfig['drainForNativeHandover'];
   private readonly deferNativeActivationUntilHostReady: boolean;
   private hostStartupCompleted = false;
@@ -209,16 +211,27 @@ export class DaemonServer {
   static async create(config: DaemonConfig = {}): Promise<DaemonServer> {
     const captured = { ...config };
     await prepareDaemonFacadeRuntime(captured);
-    return new DaemonServer(captured);
+    const supplementalOwnership = createAsyncDisposalScope('daemon supplemental knowledge');
+    try { return new DaemonServer(captured, supplementalOwnership); }
+    catch (error) {
+      try { await supplementalOwnership.close(); }
+      catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Daemon construction and supplemental cleanup failed'); }
+      throw error;
+    }
   }
 
-  constructor(private config: DaemonConfig = {}) {
+  constructor(
+    private config: DaemonConfig = {},
+    supplementalOwnership: AsyncDisposalScope = createAsyncDisposalScope('daemon supplemental knowledge'),
+  ) {
+    try {
     this.nativeHandoverDrain = config.drainForNativeHandover;
     this.deferNativeActivationUntilHostReady = config.deferNativeActivationUntilHostReady === true;
-    const resolved = resolveDaemonFacadeRuntime(config);
+    const resolved = resolveDaemonFacadeRuntime(config, supplementalOwnership);
     this.configManager = resolved.configManager;
     this.runtimeServices = resolved.runtimeServices;
     this.ownsRuntimeServices = resolved.ownsRuntimeServices;
+    this.closeSupplementalResources = resolved.closeSupplementalResources;
     this.integrationHelpers = resolved.integrationHelpers;
     this.port = resolved.port;
     this.host = resolved.host;
@@ -357,6 +370,10 @@ export class DaemonServer {
       },
     });
     completeGatewayScopePolicyBootstrap(this.gatewayMethods);
+    } catch (error) {
+      supplementalOwnership.dispose();
+      throw error;
+    }
   }
 
   listRecentControlPlaneEvents(limit = 100): readonly import('../control-plane/gateway.js').ControlPlaneRecentEvent[] {
@@ -875,6 +892,7 @@ export class DaemonServer {
       await this.listenerDrain;
       if (forHandover) await this.nativeHandoverDrain?.();
       await this.lifecycle?.drainHandovers(forHandover);
+      await this.closeSupplementalResources();
       return;
     }
 
@@ -928,6 +946,7 @@ export class DaemonServer {
       logger.warn('DaemonServer: power-manager stop failed', { error: summarizeError(error) });
       runtimeCloseFailures.push(error);
     }
+    await close(this.closeSupplementalResources);
     if (this.ownsRuntimeServices) {
       try { await this.runtimeServices.close(); }
       catch (error) { runtimeCloseFailures.push(error); }

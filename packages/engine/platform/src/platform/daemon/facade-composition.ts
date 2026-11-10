@@ -55,6 +55,7 @@ import { findModelDefinition, findModelDefinitionForProvider } from '../provider
 import { CATALOG_PROVIDER_NAME_ALIASES } from '../providers/builtin-registry.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { createRuntimeServices, type RuntimeServices } from '../runtime/services.js';
+import { createAsyncDisposalScope, type AsyncDisposalScope } from '../runtime/async-disposal.js';
 import type { DaemonConfig, PendingSurfaceReply } from './types.js';
 import { PlatformServiceManager } from './service-manager.js';
 import type { ResolvedInboundTlsContext } from '../runtime/network/index.js';
@@ -81,10 +82,10 @@ function hasKnowledgeService(value: unknown): value is KnowledgeService {
     && typeof candidate.searchScoped === 'function';
 }
 
-function ensureAgentKnowledgeService(runtimeServices: RuntimeServices): RuntimeServices {
-  const mutableRuntime = runtimeServices as RuntimeServices & { agentKnowledgeService?: KnowledgeService };
-  if (hasKnowledgeService(mutableRuntime.agentKnowledgeService)) {
-    return runtimeServices;
+function ensureAgentKnowledgeService(runtimeServices: RuntimeServices, ownership: AsyncDisposalScope): KnowledgeService {
+  const existing = runtimeServices.agentKnowledgeService;
+  if (hasKnowledgeService(existing)) {
+    return existing;
   }
 
   const store = new KnowledgeStore({
@@ -92,6 +93,7 @@ function ensureAgentKnowledgeService(runtimeServices: RuntimeServices): RuntimeS
     dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE,
     family: 'agent',
   });
+  ownership.registry.add('supplemental Agent knowledge store', () => store.close());
   const semanticLlm = createProviderBackedKnowledgeSemanticLlm(runtimeServices.providerRegistry, {
     timeoutMs: 20_000,
     maxConcurrent: 1,
@@ -104,24 +106,21 @@ function ensureAgentKnowledgeService(runtimeServices: RuntimeServices): RuntimeS
     isBackgroundPaused: () => runtimeServices.pauseController.isPaused('knowledge-self-improvement'),
     admitExpensiveWork,
   });
+  ownership.registry.add('supplemental Agent knowledge semantic service', () => semanticService.dispose());
   const service = new KnowledgeService(store, runtimeServices.artifactStore, undefined, {
     memoryRegistry: runtimeServices.memoryRegistry,
     runtimeBus: runtimeServices.runtimeBus,
     semanticService,
     admitExpensiveWork,
   });
+  ownership.registry.add('supplemental Agent knowledge service', () => service.dispose());
   semanticService.setGapRepairer(createWebKnowledgeGapRepairer({
     searchService: runtimeServices.webSearchService,
     ingestService: service,
   }));
   service.attachRuntimeBus(runtimeServices.runtimeBus);
-  Object.defineProperty(mutableRuntime, 'agentKnowledgeService', {
-    value: service,
-    enumerable: true,
-    configurable: true,
-    writable: true,
-  });
-  return mutableRuntime as RuntimeServices;
+  // This service belongs to the facade, not the embedding host's graph.
+  return service;
 }
 
 /**
@@ -306,11 +305,15 @@ export async function prepareDaemonFacadeRuntime(config: DaemonConfig): Promise<
   }
 }
 
-export function resolveDaemonFacadeRuntime(config: DaemonConfig): ResolvedDaemonFacadeRuntime {
+export function resolveDaemonFacadeRuntime(
+  config: DaemonConfig,
+  supplementalOwnership: AsyncDisposalScope = createAsyncDisposalScope('daemon supplemental knowledge'),
+): ResolvedDaemonFacadeRuntime {
+  try {
   const { configManager: resolvedConfigManager, workingDirectory: ownedWorkingDir, homeDirectory: ownedHomeDirectory } = daemonFacadeRuntimeInputs(config);
   configureRuntimeEventBusDefaults(runtimeEventBusOptionsFrom((key) => resolvedConfigManager.get(key)));
   const ownedRuntimeBus = config.runtimeServices?.runtimeBus ?? config.runtimeBus ?? new RuntimeEventBus();
-  const runtimeServices = ensureAgentKnowledgeService(config.runtimeServices ?? createRuntimeServices({
+  const runtimeServices = config.runtimeServices ?? createRuntimeServices({
     configManager: resolvedConfigManager,
     runtimeBus: ownedRuntimeBus,
     runtimeStore: createRuntimeStore(),
@@ -318,7 +321,8 @@ export function resolveDaemonFacadeRuntime(config: DaemonConfig): ResolvedDaemon
     getConversationTitle: () => 'goodvibes daemon',
     workingDir: ownedWorkingDir!,
     homeDirectory: ownedHomeDirectory!,
-  }));
+  });
+  const agentKnowledgeService = ensureAgentKnowledgeService(runtimeServices, supplementalOwnership);
   const runtimeBus = runtimeServices.runtimeBus;
   const runtimeStore = runtimeServices.runtimeStore;
   const controlPlaneGateway = new ControlPlaneGateway({
@@ -347,7 +351,7 @@ export function resolveDaemonFacadeRuntime(config: DaemonConfig): ResolvedDaemon
   });
 
   runtimeServices.knowledgeService.attachRuntimeBus(runtimeBus);
-  runtimeServices.agentKnowledgeService.attachRuntimeBus(runtimeBus);
+  agentKnowledgeService.attachRuntimeBus(runtimeBus);
   runtimeServices.sessionBroker.attachRuntimeBus(runtimeBus, (agentId) => {
     for (const s of runtimeServices.sessionBroker.listSessions(1000)) {
       if (s.activeAgentId === agentId) return s.id;
@@ -436,6 +440,7 @@ export function resolveDaemonFacadeRuntime(config: DaemonConfig): ResolvedDaemon
     configManager: resolvedConfigManager,
     runtimeServices,
     ownsRuntimeServices: config.runtimeServices === undefined, // see facade-types.ts
+    closeSupplementalResources: () => supplementalOwnership.close(),
     integrationHelpers: runtimeServices.integrationHelpers,
     port: config.port ?? resolvedControlPlaneBinding.port,
     host: config.host ?? resolvedControlPlaneBinding.host,
@@ -469,7 +474,7 @@ export function resolveDaemonFacadeRuntime(config: DaemonConfig): ResolvedDaemon
     voiceService: runtimeServices.voiceService,
     webSearchService: runtimeServices.webSearchService,
     knowledgeService: runtimeServices.knowledgeService,
-    agentKnowledgeService: runtimeServices.agentKnowledgeService,
+    agentKnowledgeService,
     homeGraphService: runtimeServices.homeGraphService,
     projectPlanningService: runtimeServices.projectPlanningService,
     knowledgeGraphqlService: new KnowledgeGraphqlService(runtimeServices.knowledgeService),
@@ -482,6 +487,12 @@ export function resolveDaemonFacadeRuntime(config: DaemonConfig): ResolvedDaemon
     companionChatManager,
     hostedSessions,
   };
+  } catch (error) {
+    // Synchronous composition cannot await, but starts the same original drain
+    // the asynchronous DaemonServer factory owns and observes before rejecting.
+    supplementalOwnership.dispose();
+    throw error;
+  }
 }
 
 /**

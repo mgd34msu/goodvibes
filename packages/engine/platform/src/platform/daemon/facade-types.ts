@@ -48,6 +48,9 @@ export interface ResolvedDaemonFacadeRuntime {
    * that graph's pollers running rather than disposing something it did not build.
    */
   readonly ownsRuntimeServices: boolean;
+  /** Only supplemental resources constructed by this facade, including when
+   * the embedding host retains ownership of its supplied runtime graph. */
+  readonly closeSupplementalResources: () => Promise<void>;
   readonly integrationHelpers: IntegrationHelperService;
   readonly port: number;
   readonly host: string;

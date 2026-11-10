@@ -17,9 +17,14 @@ def pin(value):
     return {'sha256': hashlib.sha256(value).hexdigest(), 'size': len(value)}
 
 
+def reader_payloads(binary=b'original'):
+    asset = 'goodvibes-linux-x64'
+    return {asset: binary, asset + '.bun': b'runtime', asset + '.bun.LICENSE.md': b'license', asset + '.bun.json': b'owner'}
+
+
 def reader(binary=b'original'):
     asset = 'goodvibes-linux-x64'
-    payloads = {asset: binary, asset + '.bun': b'runtime', asset + '.bun.LICENSE.md': b'license', asset + '.bun.json': b'owner'}
+    payloads = reader_payloads(binary)
     value = {'schema': 1, 'packageName': '@goodvibes-jev/tui', 'version': '3.1.2', 'target': 'linux-x64',
              'sourceCommit': SOURCE, 'sourceTree': 'b' * 40, 'headCommit': SOURCE,
              'readers': {'schema': 1, 'version': '3.1.2', 'formats': []},
@@ -30,12 +35,16 @@ def reader(binary=b'original'):
 
 class ReleasePinSelection(unittest.TestCase):
     def test_missing_program_evidence_refuses_publication(self):
-        payloads, _, _ = reader()
+        payloads = reader_payloads()
         with self.assertRaisesRegex(AssertionError, 'no reader evidence'):
-            validate_reader_assets({name: pin(data) for name, data in payloads.items()}, {}, 'v3.1.2', SOURCE)
+            # The actual precondition refuses a selected program lacking its
+            # reader before any member pin can be inspected. Only names are
+            # relevant here; no discarded descriptor or fixture digest.
+            validate_reader_assets({name: {} for name in payloads}, {}, 'v3.1.2', SOURCE)
 
     def test_ci_winning_bytes_cannot_receive_rebuilt_coordinator_metadata(self):
-        original, name, _ = reader()
+        original = reader_payloads()
+        name = 'goodvibes-linux-x64.reader-ci-artifact.json'
         _, _, incompatible = reader(b'different rebuild')
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -66,7 +75,11 @@ class ReleasePinSelection(unittest.TestCase):
 
     def test_existing_ci_metadata_and_complete_cohort_win_together(self):
         payloads, name, metadata = reader()
-        rebuilt, _, rebuilt_metadata = reader(b'not selected')
+        rebuilt = reader_payloads(b'not selected')
+        # The merge must preserve the entire admitted CI cohort, including
+        # its original metadata. An unselected coordinator descriptor need
+        # not be parsed or furnished with independently computed body pins.
+        rebuilt_metadata = b'unselected coordinator metadata'
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             old, incoming = root / 'ci', root / 'suite'

@@ -15,6 +15,7 @@ const root = process.cwd();
 // Reader evidence must come from the exact selected release source, not that
 // coordinator's former relative directory or a nearby installed engine.
 const { inspectTerminalReaderArtifact, retainTerminalReaderCohort } = await import(pathToFileURL(join(root, 'packages/engine/toolchain/src/lib/client-reader-artifact.ts')).href);
+const { retainNativeArtifactFiles, nativeArtifactPins, readNativeArtifactFile } = await import(pathToFileURL(join(root, 'packages/engine/toolchain/src/lib/retained-native-artifact-files.ts')).href);
 const { clientReaderPayloadPaths, clientReaderMemberAsset } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/client-reader-artifact.ts')).href);
 const { resolveDaemonNativePayloads, retainDaemonNativeFiles, parseDaemonCiArtifact, assertDaemonNativePayloadPins } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/daemon-native-cohort.ts')).href);
 const { realUpdateFileIo } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/update-file-io.ts')).href);
@@ -40,8 +41,12 @@ try {
     original.assertCurrent(); const bytes = readFileSync(original.path); original.assertCurrent();
     files[name] = { sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length };
   };
-  const put = (path, name = basename(path)) => {
-    const bytes = readFileSync(path);
+  const put = (path, name = basename(path), source) => {
+    // The original native owner supplies both this exact file's bytes and its
+    // existing portable pin. A copied descriptor cannot enter this path.
+    if (source) assert.equal(path, join(source.directory, source.member));
+    const pin = source && nativeArtifactPins(source.retained, source.directory, [source.member])[0];
+    const bytes = source ? readNativeArtifactFile(source.retained, source.member) : readFileSync(path);
     if (files[name]) {
       // Several products supply the same published addon. Compare this input
       // with the actual original output; its first pin is already the release
@@ -54,8 +59,8 @@ try {
       assert(bytes.equals(selected), 'Product addon bytes differ');
       return;
     }
-    const hash = createHash('sha256').update(bytes).digest('hex');
-    publishBytes(name, bytes, lstatSync(path).mode & 0o777);
+    const hash = pin?.sha256 ?? createHash('sha256').update(bytes).digest('hex');
+    publishBytes(name, bytes, pin?.mode ?? (lstatSync(path).mode & 0o777));
     files[name] = { sha256: hash, size: bytes.length };
   };
   const [platform, arch] = target.split('-');
@@ -72,14 +77,24 @@ try {
     readerCurrent?.();
     assert.equal(run(binary, ['--version']), `${command} ${tag.slice(1)}`);
     readerCurrent?.();
-    put(binary);
-    if (platform === 'linux') for (const ending of ['.bun', '.bun.json', '.bun.LICENSE.md']) put(binary + ending);
-    // Complete actual Darwin daemon companions precede inspection. Pins are
-    // computed once by put(), then mapped from flat assets to fixed runtime paths.
-    put(join(directory, `lib/sqlite-vec-${target}/vec0.${extension}`), `sqlite-vec-${target}.${extension}`);
+    const packageName = `@goodvibes-jev/${product}`;
+    const names = daemonPayloads ? [] : clientReaderPayloadPaths(packageName, target);
+    // Capture only after the cheap version refusal. Publication and compiled
+    // reader inspection share this genuine original owner, avoiding a second
+    // digest of every unchanged terminal member in the cold inspection path.
+    const retained = daemonPayloads ? undefined : retainNativeArtifactFiles(directory, names.map(path => ({ path })), { directoryRevisions: false });
+    const putMember = (path, name = basename(path)) => {
+      const member = path.slice(directory.length + 1);
+      put(path, name, retained && names.includes(member) ? { retained, directory, member } : undefined);
+    };
+    putMember(binary);
+    if (platform === 'linux') for (const ending of ['.bun', '.bun.json', '.bun.LICENSE.md']) putMember(binary + ending);
+    // Complete actual Darwin daemon companions precede inspection. Original
+    // member pins are mapped from flat assets to fixed runtime paths.
+    putMember(join(directory, `lib/sqlite-vec-${target}/vec0.${extension}`), `sqlite-vec-${target}.${extension}`);
     if (product === 'daemon' && platform === 'darwin') {
-      put(join(directory, `lib/sqlite-${target}/libsqlite3.dylib`), `sqlite-${target}.dylib`);
-      put(join(directory, `lib/sqlite-${target}/libsqlite3.dylib.json`), `sqlite-${target}.dylib.json`);
+      putMember(join(directory, `lib/sqlite-${target}/libsqlite3.dylib`), `sqlite-${target}.dylib`);
+      putMember(join(directory, `lib/sqlite-${target}/libsqlite3.dylib.json`), `sqlite-${target}.dylib.json`);
     }
     const emitReader = (name, artifact) => {
       const bytes = Buffer.from(JSON.stringify(artifact, null, 2) + '\n');
@@ -100,9 +115,8 @@ try {
       emitReader(`${basename(binary)}.ci-artifact.json`, { ...base, schema: 1 });
       emitReader(`${basename(binary)}.reader-ci-artifact.json`, descriptor);
     } else {
-      const packageName = `@goodvibes-jev/${product}`, names = clientReaderPayloadPaths(packageName, target);
       const artifact = inspectTerminalReaderArtifact({ directory, packageName, version: tag.slice(1),
-        target, sourceCommit: source, sourceTree, headCommit: source, assertCurrent: readerCurrent,
+        target, sourceCommit: source, sourceTree, headCommit: source, assertCurrent: readerCurrent, retained,
         files: names.map(path => ({ path, ...files[clientReaderMemberAsset({packageName,target}, path)], mode: path === basename(binary) || path.endsWith('.bun') ? 0o755 : 0o644 })) });
       readerCurrent(); emitReader(`${basename(binary)}.reader-ci-artifact.json`, artifact);
     }

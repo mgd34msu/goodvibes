@@ -10,35 +10,12 @@ import { summarizeMemoryItem, summarizeNoteItem, summarizePersonaItem, summarize
 import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { captureWorkPlanLocation } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath, captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
 import { discoverVibeFiles } from '../agent/vibe-file.ts';
 import type { LocalLearningCandidateDomain, LearningCandidate } from './agent-harness-learning-curator-types.ts';
-
-// The native path is mutable only through the store's original location
-// selection. Observe its backing data without invoking a caller getter.
-const workPlanPrototype = WorkPlanStore.prototype;
-const workPlanPathDescriptor = Object.getOwnPropertyDescriptor(workPlanPrototype, 'filePath');
-function captureWorkPlanLocation(work: object): () => void {
-  if (!(work instanceof WorkPlanStore)) return captureCatalogMethods(work, ['filePath']);
-  const fields = captureCatalogMethods(work, ['selectedPath']);
-  const assertCurrent = () => {
-    fields();
-    let owner: object | null = work;
-    while (owner && owner !== workPlanPrototype) {
-      if (Object.getOwnPropertyDescriptor(owner, 'filePath')) throw new ToolInputProjectionError('held');
-      owner = Object.getPrototypeOf(owner);
-    }
-    const current = Object.getOwnPropertyDescriptor(workPlanPrototype, 'filePath');
-    if (owner !== workPlanPrototype || !workPlanPathDescriptor?.get || workPlanPathDescriptor.set
-      || current?.get !== workPlanPathDescriptor.get || current?.set !== workPlanPathDescriptor.set
-      || current?.enumerable !== workPlanPathDescriptor.enumerable || current?.configurable !== workPlanPathDescriptor.configurable
-      || current && 'value' in current) throw new ToolInputProjectionError('held');
-  };
-  assertCurrent(); return assertCurrent;
-}
 
 export interface LearningRecord {
   readonly item: AgentWorkspaceLocalLibraryItem;

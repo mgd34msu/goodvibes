@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { WorkPlanStore, WORK_PLAN_TERMINAL_ITEM_TTL_MS } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { ConfigManager, type PermissionMode } from '@goodvibes-jev/engine/platform/platform/config';
 import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { CommandContext } from '../../input/command-registry.ts';
@@ -77,9 +77,21 @@ test.each(['cancel', 'revoke'] as const)('work-plan physical write holds %s trig
 });
 
 test('work-plan list/get preserve corrupt and expired files without read-side housekeeping effects', async () => {
-  const f = fixture(); mkdirSync(dirname(f.store.filePath), { recursive: true }); writeFileSync(f.store.filePath, '{torn');
-  const result = await createAgentWorkPlanTool(f.store).execute({ action: 'list' });
-  expect(result.success).toBe(true); expect(readFileSync(f.store.filePath, 'utf8')).toBe('{torn');
+  const f = fixture(); f.store.addItem('Original plan'); const plan = f.store.getActivePlan({ readOnly: true });
+  const options = { homeDirectory: f.home, surfaceRoot: 'agent', projectId: 'local', projectRoot: f.workspace };
+  writeFileSync(f.store.filePath, '{torn');
+  const reader = new WorkPlanStore(options);
+  const result = await createAgentWorkPlanTool(reader).execute({ action: 'list' });
+  expect(result.success).toBe(true); expect(readFileSync(reader.filePath, 'utf8')).toBe('{torn');
+  // Restore a supported saved plan with an expired terminal item before a new
+  // reader selects its original source. Inspection must not perform a sweep.
+  const expired = { ...plan, items: [{ id: 'expired-item', title: 'Keep during inspection', status: 'done',
+    createdAt: 1, updatedAt: 1, completedAt: Date.now() - WORK_PLAN_TERMINAL_ITEM_TTL_MS - 1 }] };
+  const bytes = JSON.stringify(expired); writeFileSync(f.store.filePath, bytes);
+  const expiredReader = new WorkPlanStore(options);
+  const inspected = await createAgentWorkPlanTool(expiredReader).execute({ action: 'get', id: 'expired-item' });
+  expect(inspected.success).toBe(true); expect(inspected.output).toContain('Keep during inspection');
+  expect(readFileSync(expiredReader.filePath, 'utf8')).toBe(bytes);
 });
 
 test.each(['store', 'parent', 'source'] as const)('pre-admission %s ABA changes revoke the physical binding', async kind => {

@@ -35,11 +35,17 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { types as nodeTypes } from 'node:util';
+import { ToolInputProjectionError } from '../tools/input-projection.js';
 import { atomicWriteFileSync, type AtomicWriteOptions } from '../config/atomic-write.js';
 import { requireSurfaceRoot } from '../runtime/surface-root.js';
 import { captureExistingDirectory, captureQuarantineSource, readCapturedQuarantineSource, quarantineCorruptFile, reapOwnedQuarantines, type QuarantineSource, QuarantineEncodingError } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity } from '../utils/file-observation.js';
 import { resolveWorkPlanLocation } from './work-plan-location.js';
+
+const nativeWorkPlanStores = new WeakSet<object>();
+const nativeApply = Reflect.apply, nativeStoreAdd = WeakSet.prototype.add, nativeStoreHas = WeakSet.prototype.has;
+const ownDescriptor = Object.getOwnPropertyDescriptor, prototypeOf = Object.getPrototypeOf;
 
 export type WorkPlanEffectOptions = Pick<AtomicWriteOptions, 'assertCurrent' | 'onEffect'>;
 function retainEffects(effects: WorkPlanEffectOptions | undefined): WorkPlanEffectOptions | undefined {
@@ -367,6 +373,7 @@ export class WorkPlanStore {
     this.selectedPath = assigned.path; this.registered = assigned.registered; this.locationCurrent = assigned.assertCurrent; this.locationParentsCurrent = assigned.assertParentsCurrent;
     this.newPlanId = assigned.planId;
     this.unassignedPlanPaths = Object.freeze([...assigned.unassignedPaths]);
+    nativeApply(nativeStoreAdd, nativeWorkPlanStores, [this]);
   }
 
   getActivePlan(options: WorkPlanReadOptions = {}): WorkPlan {
@@ -524,9 +531,17 @@ export class WorkPlanStore {
   private readPlan(effects?: WorkPlanEffectOptions, readOnly = false): WorkPlan {
     effects?.assertCurrent?.(); this.locationParentsCurrent(); if (this.registered) this.locationCurrent();
     const directory = join(this.options.homeDirectory, '.goodvibes', requireSurfaceRoot(this.options.surfaceRoot), 'work-plans');
-    const selected = resolveWorkPlanLocation(directory, this.options, { readOnly, assertCurrent: effects?.assertCurrent, onEffect: effects?.onEffect });
-    effects?.assertCurrent?.();
-    this.selectedPath = selected.path; this.newPlanId = selected.planId; this.registered = selected.registered; this.locationCurrent = selected.assertCurrent; this.locationParentsCurrent = selected.assertParentsCurrent; this.locationCurrent();
+    // The retained location owns native source facts, not the invocation that
+    // happened to select it. Keep that invocation restriction through adoption,
+    // then retire only this wrapper. The operation's read/write effects still
+    // check their original restriction separately at every actual effect.
+    let selectionEffects = effects;
+    let selected: ReturnType<typeof resolveWorkPlanLocation>;
+    try {
+      selected = resolveWorkPlanLocation(directory, this.options, { readOnly, assertCurrent: () => { selectionEffects?.assertCurrent?.(); }, onEffect: flag => { selectionEffects?.onEffect?.(flag); } });
+      effects?.assertCurrent?.(); selected.assertCurrent();
+      this.selectedPath = selected.path; this.newPlanId = selected.planId; this.registered = selected.registered; this.locationCurrent = selected.assertCurrent; this.locationParentsCurrent = selected.assertParentsCurrent; this.locationCurrent();
+    } finally { selectionEffects = undefined; }
     this.unassignedPlanPaths = Object.freeze([...selected.unassignedPaths]);
     const loaded = this.loadFromDisk(effects, readOnly);
     const unassigned = this.unassignedPlanPaths.filter(path => existsSync(path));
@@ -755,4 +770,45 @@ export class WorkPlanStore {
       ...(item.completedAt !== undefined ? { completedAt: item.completedAt } : {}),
     };
   }
+}
+
+const workPlanPrototype = WorkPlanStore.prototype;
+const nativePathDescriptor = ownDescriptor(workPlanPrototype, 'filePath');
+
+/** Retain the original path descriptor without invoking an unknown getter.
+ * This observes a location; it grants neither filesystem ownership nor writes.
+ * Only an actual constructed store may use the native filePath getter. Other
+ * implementations may omit a location or supply an ordinary string data property. */
+export function captureWorkPlanLocation(store: object): () => void {
+  const fail = (): never => { throw new ToolInputProjectionError('held'); };
+  const chain: object[] = [];
+  for (let owner: object | null = store; owner; owner = prototypeOf(owner)) {
+    if (nodeTypes.isProxy(owner) || chain.length >= 64) fail();
+    chain.push(owner);
+  }
+  const native = nativeApply(nativeStoreHas, nativeWorkPlanStores, [store]) as boolean;
+  const pathOwner = chain.find(owner => ownDescriptor(owner, 'filePath'));
+  const path = pathOwner && ownDescriptor(pathOwner, 'filePath');
+  const backing = native ? ownDescriptor(store, 'selectedPath') : path;
+  if ((native || path) && (!backing || !('value' in backing) || typeof backing.value !== 'string')) fail();
+  if (native && (pathOwner !== workPlanPrototype || !nativePathDescriptor?.get || nativePathDescriptor.set
+    || !sameDescriptor(path, nativePathDescriptor))) fail();
+  const assertCurrent = () => {
+    let owner: object | null = store;
+    for (const original of chain) {
+      if (owner !== original || nodeTypes.isProxy(owner)) fail();
+      owner = prototypeOf(owner);
+    }
+    if (owner !== null || chain.find(entry => ownDescriptor(entry, 'filePath')) !== pathOwner
+      || !sameDescriptor(pathOwner && ownDescriptor(pathOwner, 'filePath'), path)
+      || native && !sameDescriptor(ownDescriptor(store, 'selectedPath'), backing)) fail();
+  };
+  assertCurrent(); return assertCurrent;
+}
+
+function sameDescriptor(current: PropertyDescriptor | undefined, original: PropertyDescriptor | undefined): boolean {
+  if (!current || !original) return current === original;
+  return current.configurable === original.configurable && current.enumerable === original.enumerable
+    && ('value' in current) === ('value' in original) && current.value === original.value
+    && current.writable === original.writable && current.get === original.get && current.set === original.set;
 }

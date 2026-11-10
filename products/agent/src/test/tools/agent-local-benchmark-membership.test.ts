@@ -2,7 +2,7 @@ import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { withDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterAll, afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -186,7 +186,12 @@ test.each(['artifact', 'content', 'definition', 'store-method', 'port', 'authori
 test('complete native content mismatch refuses before hosted membership inference', async () => {
   const f = await fixture(); const artifact = await comparison(f.store, 'Evaluate the on-device endpoint.');
   const original = f.store.readContent;
-  f.store.readContent = async id => { const result = await original.call(f.store, id); result.buffer[0] = 0; return result; };
+  f.store.readContent = async id => {
+    const result = await original.call(f.store, id);
+    const changed = Buffer.from(result.buffer); changed[0] = 0;
+    await writeFile(result.record.contentPath, changed);
+    return result;
+  };
   const fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port);
   await expect(readLocalModelBenchmarkSnapshot(f.context, { sourceOwner: ordinaryResearchOwner() })).rejects.toThrow();
   expect(fake.requests).toHaveLength(0);
@@ -227,7 +232,10 @@ test('native links remain deterministic beyond the displayed history slice', asy
 
 test('hidden metadata accessor is refused without invoking it or acquiring the port', async () => {
   const f = await fixture(); const artifact = await comparison(f.store, 'Evaluate the local endpoint.'); let calls = 0;
-  Object.defineProperty(artifact.metadata, 'hiddenProvenance', { configurable: true, get() { calls++; return 'unsafe source'; } });
+  const list = f.store.list.bind(f.store);
+  const borrowed = { ...artifact, metadata: { ...artifact.metadata } };
+  Object.defineProperty(borrowed.metadata, 'hiddenProvenance', { configurable: true, get() { calls++; return 'unsafe source'; } });
+  f.store.list = limit => list(limit).map(item => item.id === artifact.id ? borrowed : item);
   const fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port);
   await expect(readLocalModelBenchmarkSnapshot(f.context, { sourceOwner: ordinaryResearchOwner() })).rejects.toThrow();
   expect(calls).toBe(0); expect(fake.requests).toHaveLength(0);

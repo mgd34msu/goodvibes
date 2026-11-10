@@ -1,5 +1,6 @@
 export * from './trigger-executor.js';
 export {
+  captureWorkPlanLocation,
   nextWorkPlanStatus,
   WORK_PLAN_QUARANTINE_CAP,
   WORK_PLAN_QUARANTINE_SWEEP_INTERVAL_MS,

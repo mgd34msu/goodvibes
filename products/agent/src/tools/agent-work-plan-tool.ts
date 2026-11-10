@@ -3,6 +3,7 @@ import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/en
 import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
 import {
+  captureWorkPlanLocation,
   WORK_PLAN_STATUSES,
   type WorkPlanItem,
   type WorkPlanItemStatus,
@@ -313,7 +314,9 @@ export function createAgentWorkPlanTool(store: WorkPlanStore, _options: AgentWor
 
 export function registerAgentWorkPlanTool(registry: ToolRegistry, store: WorkPlanStore): void {
   registry.register(createAgentWorkPlanTool(store), { inputProjection: createAgentLocalStateInputProjector(() => {
-    const assertDescriptors = captureCatalogMethods(store, ['filePath', 'homeDirectory', 'options', ...Object.getOwnPropertyNames(Object.getPrototypeOf(store))]);
+    const location = captureWorkPlanLocation(store);
+    const methods = captureCatalogMethods(store, ['homeDirectory', 'options', ...Object.getOwnPropertyNames(Object.getPrototypeOf(store)).filter(key => key !== 'filePath')]);
+    const assertDescriptors = () => { location(); methods(); };
     assertDescriptors();
     return { targets: [{ root: store.homeDirectory, path: store.filePath, access: 'write' }], assertDescriptors };
   }, args => args.action === 'list' || args.action === 'get') });

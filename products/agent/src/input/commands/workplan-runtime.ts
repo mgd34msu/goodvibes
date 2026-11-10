@@ -1,4 +1,4 @@
-import type { WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { captureWorkPlanLocation, type WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { createAgentWorkPlanTool } from '../../tools/agent-work-plan-tool.ts';
 import { captureCatalogMethods } from '../../tools/agent-harness-catalog-ranking.ts';
 import { captureAgentExportPath } from '../../tools/agent-artifact-effect.ts';
@@ -63,7 +63,9 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
       if (!isDirectOwnerCommandContext(ctx, 'workplan')) {
         ctx.print('Local work-plan edits require a fresh terminal owner command.'); return;
       }
-      const methods = captureCatalogMethods(store, ['homeDirectory', 'filePath', 'options', ...Object.getOwnPropertyNames(Object.getPrototypeOf(store))]);
+      const location = captureWorkPlanLocation(store);
+      const originalMethods = captureCatalogMethods(store, ['homeDirectory', 'options', ...Object.getOwnPropertyNames(Object.getPrototypeOf(store)).filter(key => key !== 'filePath')]);
+      const methods = () => { location(); originalMethods(); };
       methods();
       const root = captureAgentExportPath(store.homeDirectory, store.homeDirectory);
       let target = captureAgentExportPath(store.homeDirectory, store.filePath);

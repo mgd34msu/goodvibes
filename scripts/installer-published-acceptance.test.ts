@@ -95,6 +95,22 @@ test('actual shell failures retain their source line and OS cause without disclo
   expect(JSON.stringify(result)).not.toContain(secretPath);
 });
 
+test('owned child diagnostics normalize both Dash and Bash missing-file spellings without exposing paths', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-os-dialects-')); roots.push(root);
+  const installer = join(root, 'install.sh'), secretPath = join(root, 'acceptance-secret-dialect-path');
+  const source = '#!/bin/sh\nprintf "%s: 3: cannot open %s: %s\\n" "$0" "$ACCEPTANCE_SECRET" "$ACCEPTANCE_OS_REASON" >&2\nexit 1\n';
+  writeFileSync(installer, source, { mode: 0o600 });
+  for (const reason of ['No such file', 'No such file or directory']) {
+    const result = await runOwnedCommand('sh', [installer], {
+      env: { ...process.env, ACCEPTANCE_SECRET: secretPath, ACCEPTANCE_OS_REASON: reason }, installerSource: source,
+    });
+    expect(result.code).toBe(1);
+    expect(result.diagnostics).toContain('Shell/OS failure at installer line 3: no such file or directory');
+    expect(JSON.stringify(result)).not.toContain(secretPath);
+    expect(result).not.toHaveProperty('stderr');
+  }
+});
+
 test('unclassified installer output retains an owned source line while withholding credentials and arbitrary text', async () => {
   const root = mkdtempSync(join(tmpdir(), 'published-acceptance-unknown-diagnostics-')); roots.push(root);
   const installer = join(root, 'install.sh'), secret = 'acceptance-unrecognized-secret-812adb';

@@ -51,8 +51,10 @@ function installerFailureDiagnostics(source, stdout, stderr) {
     // Shells print different prefixes; preserve only an in-range source line.
     const number = /:\s*(?:line\s+)?(\d+):/.exec(line)?.[1];
     const location = number && Number(number) > 0 && Number(number) <= sourceLines ? ` at installer line ${Number(number)}` : '';
-    const reason = /(?:^|: )(Bad file descriptor|Bad fd number|Is a directory|Not a directory|Permission denied|Operation not permitted|No such file or directory|not found|command not found|parameter not set|unbound variable|Illegal instruction|Segmentation fault|Exec format error|Argument list too long|Syntax error|Bad substitution|Read-only file system|Too many open files|No space left on device|unexpected operator)(?:$|[ .(:])/i.exec(line)?.[1];
-    if (reason) diagnostics.add(`Shell/OS failure${location}: ${reason.toLowerCase()}`);
+    const reason = /(?:^|: )(Bad file descriptor|Bad fd number|Is a directory|Not a directory|Permission denied|Operation not permitted|No such file(?: or directory)?|not found|command not found|parameter not set|unbound variable|Illegal instruction|Segmentation fault|Exec format error|Argument list too long|Syntax error|Bad substitution|Read-only file system|Too many open files|No space left on device|unexpected operator)(?:$|[ .(:])/i.exec(line)?.[1];
+    // Dash abbreviates missing read-redirection targets to "No such file".
+    const canonicalReason = /^no such file(?: or directory)?$/i.test(reason ?? '') ? 'no such file or directory' : reason?.toLowerCase();
+    if (canonicalReason) diagnostics.add(`Shell/OS failure${location}: ${canonicalReason}`);
     else if (location && !template) diagnostics.add(`Unclassified shell failure${location}; dynamic output withheld.`);
     const curl = /^curl: \((\d{1,3})\)/.exec(line);
     if (curl) diagnostics.add(`curl failed with error ${Number(curl[1])}; dynamic output withheld.`);

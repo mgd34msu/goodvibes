@@ -112,11 +112,12 @@ for (const missing of ['onnxruntime-web/ort-wasm-simd-threaded.mjs', 'onnxruntim
   });
 }
 
-test('suite release retains its helper before tag checkout and awaits preflight before its first TUI build', () => {
+test('suite release retains its helper before payload checkout and awaits preflight before its first TUI build', () => {
   const root = resolve(import.meta.dir, '../../../../..');
   const workflow = readFileSync(join(root, '.github/workflows/suite-release-assets.yml'), 'utf8');
   const retained = workflow.indexOf('cp products/daemon/scripts/build-native-ci.ts "$RUNNER_TEMP/build-native-ci.ts"');
-  expect(retained).toBeGreaterThan(0); expect(retained).toBeLessThan(workflow.indexOf('ref: ${{ inputs.tag }}'));
+  expect(retained).toBeGreaterThan(0);
+  expect(retained).toBeLessThan(workflow.indexOf('ref: ${{ inputs.candidate-source || inputs.tag }}'));
   const coordinator = readFileSync(join(root, '.github/scripts/package-suite-release.mjs'), 'utf8');
   const preflight = coordinator.indexOf('await prepareNativeBuildAssets(');
   expect(preflight).toBeGreaterThan(0); expect(preflight).toBeLessThan(coordinator.indexOf("[['tui', 'goodvibes', 'dist']"));

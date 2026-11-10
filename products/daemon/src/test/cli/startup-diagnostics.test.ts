@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { execFileSync } from 'node:child_process';
 import { get as httpsGet } from 'node:https';
 import * as fs from 'node:fs';
+import * as crypto from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyRuntimeConfigValue } from '@goodvibes-jev/engine/terminal-shell';
@@ -492,12 +493,22 @@ for (const kind of ['release', 'custom'] as const) test(`native startup serves t
 });
 
 for (const home of ['default', 'override'] as const) test(`configured CLI ${home} home forwards native lifecycle admission without activating real services`, async () => {
-  const native = writeNativeInstallationFixture(makeOwnedTempDir('cli-native-lifecycle'), getPackageVersion());
+  const root = makeOwnedTempDir('cli-native-lifecycle'), execPath = join(root, 'goodvibes-daemon');
+  if (home === 'override') writeFileSync(execPath, 'Inert policy-selected executable', { mode: 0o755 });
+  const native = home === 'default' ? writeNativeInstallationFixture(root, getPackageVersion()) : { execPath, options: {
+    bundled: true, execPath, version: getPackageVersion(), platform: 'linux', arch: 'x64',
+    runningExecutableIdentity() { throw new Error('Home policy must reject before executable inspection'); },
+  } };
   const resolveArtifact = nativeLifecycle.resolveInstalledDaemonUpdateArtifact;
   let admissions = 0; let server = 0;
   keep(spyOn(nativeLifecycle, 'resolveInstalledDaemonUpdateArtifact').mockImplementation((ownership, options) => {
     admissions++; expect(ownership.isOverridden).toBe(home === 'override');
-    return resolveArtifact(ownership, { ...options, ...native.options });
+    if (home === 'default') return resolveArtifact(ownership, { ...options, ...native.options });
+    const hash = spyOn(crypto, 'createHash'), read = spyOn(fs, 'readFileSync');
+    try {
+      const result = resolveArtifact(ownership, { ...options, ...native.options });
+      expect(hash).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled(); return result;
+    } finally { read.mockRestore(); hash.mockRestore(); }
   }));
   const f = await fixture(undefined, { createServer(config) {
     server++;
@@ -538,11 +549,19 @@ test('shutdown before native CLI admission cannot inspect or activate an install
 });
 
 test('reporting cannot turn an already resolved home override into native lifecycle admission', async () => {
-  const native = writeNativeInstallationFixture(makeOwnedTempDir('cli-native-home-retain'), getPackageVersion());
+  const execPath = join(makeOwnedTempDir('cli-native-home-retain'), 'goodvibes-daemon');
+  writeFileSync(execPath, 'Inert policy-selected executable', { mode: 0o755 });
+  const nativeOptions = { bundled: true, execPath, version: getPackageVersion(), platform: 'linux', arch: 'x64',
+    runningExecutableIdentity() { throw new Error('Resolved home policy must reject before executable inspection'); } };
   const resolveArtifact = nativeLifecycle.resolveInstalledDaemonUpdateArtifact; let admitted = 0;
   keep(spyOn(nativeLifecycle, 'resolveInstalledDaemonUpdateArtifact').mockImplementation((ownership, options) => {
-    expect(ownership.isOverridden).toBe(true); const result = resolveArtifact(ownership, { ...options, ...native.options });
-    if (result) admitted++; return result;
+    expect(ownership.isOverridden).toBe(true);
+    const hash = spyOn(crypto, 'createHash'), read = spyOn(fs, 'readFileSync');
+    try {
+      const result = resolveArtifact(ownership, { ...options, ...nativeOptions });
+      if (result) admitted++;
+      expect(hash).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled(); return result;
+    } finally { read.mockRestore(); hash.mockRestore(); }
   }));
   const f = await fixture(undefined, { createServer(config) {
     if (!config) throw new Error('Expected owned native server configuration');

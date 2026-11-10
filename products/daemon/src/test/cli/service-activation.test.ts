@@ -17,7 +17,8 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 type Call = { readonly command: string; readonly args: readonly string[] };
 function fixture() {
   const root = makeOwnedTempDir('daemon-service-activation'); roots.push(root);
-  const native = writeNativeInstallationFixture(join(root, 'native'), VERSION);
+  let native: ReturnType<typeof writeNativeInstallationFixture> | undefined;
+  const selectedNative = () => native ??= writeNativeInstallationFixture(join(root, 'native'), VERSION);
   const home = join(root, 'login-home'); const tree = join(root, 'tree');
   const daemon = join(root, 'daemon'); const workspace = join(root, 'workspace');
   const env = { HOME: home, GOODVIBES_HOME: tree };
@@ -46,16 +47,16 @@ function fixture() {
   };
   const options = {
     env, cwd: root, runtime: createProductionDaemonRuntime(),
-    resolveServiceExecutable: () => resolveShippedServiceExecutable(native.options),
+    resolveServiceExecutable: () => resolveShippedServiceExecutable(selectedNative().options),
     serviceActionRunner: runner, stdout: (line: string) => { lines.push(line); },
     stderr: (line: string) => { lines.push(line); },
   };
   const replaceRuntime = () => {
-    const member = native.targets[1];
+    const member = selectedNative().targets[1];
     if (!member) throw new Error('Missing synthetic runtime member');
     copyFileSync(member.path, member.path + '.replacement'); renameSync(member.path + '.replacement', member.path);
   };
-  return { root, native, home, tree, daemon, workspace, selected, unit, legacy, calls, lines, options, replaceRuntime,
+  return { root, get native() { return selectedNative(); }, home, tree, daemon, workspace, selected, unit, legacy, calls, lines, options, replaceRuntime,
     observe(listener: (call: Call) => void) { observe = listener; },
     invoke(command: string, extra: readonly string[] = []) { return runDaemonCli([command, ...selected, ...extra], options); },
   };
@@ -108,6 +109,7 @@ for (const command of ['install-service', 'migrate-service']) test(`${command} r
   expect(f.lines.slice(0, rejection.length)).toEqual([...rejection]);
   expect(f.calls).toEqual([]);
   expect(existsSync(f.unit)).toBe(false); expect(existsSync(f.legacy)).toBe(false);
+  expect(existsSync(join(f.root, 'native'))).toBe(false);
 });
 
 test('a different selected workspace cannot start the admitted executable under the old unit definition', async () => {
@@ -117,12 +119,14 @@ test('a different selected workspace cannot start the admitted executable under 
   expect(mutations(f.calls)).toEqual([]); expect(readFileSync(f.unit)).toEqual(bytes);
 });
 
-test('source execution cannot borrow a complete adjacent native installation', async () => {
+test('source execution is refused before any native installation inspection', async () => {
   const f = fixture();
+  const execPath = join(f.root, 'source-policy-executable'); writeFileSync(execPath, 'Inert source-selected executable', { mode: 0o755 });
   expect(await runDaemonCli(['install-service', ...f.selected], { ...f.options,
-    resolveServiceExecutable: () => resolveShippedServiceExecutable({ ...f.native.options, bundled: false }),
+    resolveServiceExecutable: () => resolveShippedServiceExecutable({ bundled: false, execPath, version: VERSION, platform: 'linux', arch: 'x64',
+      runningExecutableIdentity() { throw new Error('Source policy must reject before executable inspection'); } }),
   })).toBe(2);
-  expect(f.calls).toEqual([]); expect(existsSync(f.unit)).toBe(false);
+  expect(f.calls).toEqual([]); expect(existsSync(f.unit)).toBe(false); expect(existsSync(join(f.root, 'native'))).toBe(false);
 });
 
 test('a missing native cohort refuses before any service query or publication', async () => {

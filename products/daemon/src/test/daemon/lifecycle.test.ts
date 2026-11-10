@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { chmodSync, copyFileSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import * as fs from 'node:fs';
 import { join } from 'node:path';
 import * as crypto from 'node:crypto';
 import { resolveDaemonCliOwnership } from '../../cli/configuration.js';
@@ -131,9 +132,15 @@ describe('verified native lifecycle admission', () => {
     expect(Object.isFrozen(artifact)).toBe(true); expect(() => artifact?.assertCurrent?.()).not.toThrow();
   });
 
-  test('a source invocation cannot arm an adjacent valid native cohort', () => {
-    const f = installedFixture();
-    expect(resolveInstalledDaemonUpdateArtifact(defaultHome, { ...f.options, bundled: false })).toBeUndefined();
+  test('a source invocation refuses before inspecting native files', () => {
+    const execPath = join(makeOwnedTempDir('native-source-refusal'), 'goodvibes-daemon');
+    writeFileSync(execPath, 'Inert source-selected executable', { mode: 0o755 });
+    const hash = spyOn(crypto, 'createHash'), read = spyOn(fs, 'readFileSync');
+    try {
+      expect(resolveInstalledDaemonUpdateArtifact(defaultHome, { bundled: false, execPath, version: FIXTURE_VERSION, platform: 'linux', arch: 'x64',
+        runningExecutableIdentity() { throw new Error('Source policy must reject before executable inspection'); } })).toBeUndefined();
+      expect(hash).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled();
+    } finally { read.mockRestore(); hash.mockRestore(); }
   });
 
   test('an installed same-version replacement cannot borrow the original running image', () => {
@@ -183,20 +190,33 @@ describe('verified native lifecycle admission', () => {
     expect(() => resolveInstalledDaemonUpdateArtifact(defaultHome, f.options)?.assertCurrent?.()).not.toThrow();
   });
 
-  for (const override of ['tree', 'identity', 'flag'] as const) test(`${override} home override refuses a complete native cohort`, () => {
-    const f = installedFixture(); const root = makeOwnedTempDir('native-home-override');
+  for (const override of ['tree', 'identity', 'flag'] as const) test(`${override} home override refuses before inspecting native files`, () => {
+    const root = makeOwnedTempDir('native-home-override'), execPath = join(root, 'goodvibes-daemon');
+    writeFileSync(execPath, 'Inert policy-selected executable', { mode: 0o755 });
     const ownership = resolveDaemonCliOwnership({ daemonHome: override === 'flag' ? join(root, 'flag') : undefined, workingDir: undefined },
       { HOME: root, ...(override === 'tree' ? { GOODVIBES_HOME: join(root, 'tree') } : {}),
         ...(override === 'identity' ? { GOODVIBES_DAEMON_HOME: join(root, 'identity') } : {}) }, root);
     expect(ownership.isOverridden).toBe(true);
-    expect(resolveInstalledDaemonUpdateArtifact(ownership, f.options)).toBeUndefined();
+    const hash = spyOn(crypto, 'createHash'), read = spyOn(fs, 'readFileSync');
+    try {
+      expect(resolveInstalledDaemonUpdateArtifact(ownership, { bundled: true, execPath, version: FIXTURE_VERSION, platform: 'linux', arch: 'x64',
+        runningExecutableIdentity() { throw new Error('Home policy must reject before executable inspection'); } })).toBeUndefined();
+      expect(hash).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled();
+    } finally { read.mockRestore(); hash.mockRestore(); }
   });
 
-  test('package-managed native-looking files remain outside standalone lifecycle ownership', () => {
+  test('package-managed native paths remain outside standalone lifecycle ownership before inspection', () => {
     const root = makeOwnedTempDir('package-native-refusal');
-    const f = writeNativeInstallationFixture(join(root, 'node_modules', 'daemon'), '9.9.9-test');
-    expect(resolveInstalledDaemonUpdateArtifact(defaultHome, f.options)).toBeUndefined();
-    expect(resolveInstalledDaemonUpdateArtifact(defaultHome, { ...f.options, execPath: '/usr/bin/bun' })).toBeUndefined();
+    const directory = join(root, 'node_modules', 'daemon'); fs.mkdirSync(directory, { recursive: true });
+    const execPath = join(directory, 'goodvibes-daemon'); writeFileSync(execPath, 'Inert package-managed executable', { mode: 0o755 });
+    const options = { bundled: true, execPath, version: FIXTURE_VERSION, platform: 'linux', arch: 'x64',
+      runningExecutableIdentity() { throw new Error('Install-kind policy must reject before executable inspection'); } };
+    const hash = spyOn(crypto, 'createHash'), read = spyOn(fs, 'readFileSync');
+    try {
+      expect(resolveInstalledDaemonUpdateArtifact(defaultHome, options)).toBeUndefined();
+      expect(resolveInstalledDaemonUpdateArtifact(defaultHome, { ...options, execPath: '/usr/bin/bun' })).toBeUndefined();
+      expect(hash).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled();
+    } finally { read.mockRestore(); hash.mockRestore(); }
   });
 
   test('a foreign native target cannot be mixed into the installed cohort', () => {

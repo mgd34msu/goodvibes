@@ -230,6 +230,23 @@ describe('finite configured decision model failover', () => {
     expect(result.lineage?.attempts.map(attempt => [attempt.outcome, attempt.status])).toEqual([['rejected', status], ['answered', undefined]]);
   });
 
+  test.each([401, 403])('a singleton HTTP %i rejection retains its status and explains how to restore decision availability', async status => {
+    let calls = 0, effects = 0;
+    const controller = new AbortController();
+    const port = createSystemOnePort(config(async () => { calls++; return bad(status, 'auth-failed'); }, { fallbacks: [] }));
+    using log = new SqliteDecisionLog(':memory:');
+    const error = await failure(withDecisionLog(port, log).ask({ ...request, signal: controller.signal }).then(result => { effects++; return result; }));
+    expect(error.kind).toBe('rejected'); expect(error.status).toBe(status); expect(error.requestId).toBe('auth-failed');
+    expect(error.message).toContain(`HTTP ${status}`);
+    expect(error.message).toContain('No decision models are currently available. Check API keys, endpoint addresses, model names and local model services, then retry. The operation has stopped.');
+    expect(error.lineage?.attempts.map(attempt => [attempt.endpointIndex, attempt.outcome, attempt.status, attempt.requestId]))
+      .toEqual([[0, 'rejected', status, 'auth-failed']]);
+    expect(calls).toBe(1); expect(effects).toBe(0);
+    expect(log.query()).toHaveLength(1); expect(log.query()[0]).toMatchObject({ status: 'failed', error: { kind: 'rejected', message: error.message } });
+    expect(JSON.stringify(log.query()) + error.message).not.toContain(primary.apiKey);
+    expect(error.cause).toBeUndefined(); expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+  });
+
   test('invalid input never reaches any endpoint; malformed targets exhaust without an answer', async () => {
     let calls = 0;
     const port = createSystemOnePort(config(async () => { calls += 1; return Response.json({ nonsense: primary.apiKey }); }));

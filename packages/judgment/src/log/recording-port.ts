@@ -3,6 +3,7 @@ import { drainOwned } from '../drain-owned.ts';
 import { assertSynchronousJudgmentGuard } from '../port/attempt-guard.ts';
 import { opaqueUuid } from '../port/opaque-uuid.ts';
 import { captureJudgmentInput } from '../port/input-snapshot.ts';
+import { DECISION_MODELS_UNAVAILABLE_NOTICE } from '../port/availability-notice.ts';
 import { types as nodeTypes } from 'node:util';
 import { checkAnswers, projectAnswers } from '../port/answers.ts';
 import { JudgmentContextLimitError, JudgmentError, type JudgmentErrorKind } from '../port/errors.ts';
@@ -65,7 +66,7 @@ export function recordedJudgmentInputHash(value: unknown, request: unknown): str
 const FAILURE_MESSAGES: Readonly<Record<JudgmentErrorKind, string>> = {
   'invalid-request': 'the judgment request was invalid',
   rejected: 'the judgment request was rejected',
-  unavailable: 'No decision models are currently available. Check API keys, endpoint addresses, model names and local model services, then retry. The operation has stopped.',
+  unavailable: DECISION_MODELS_UNAVAILABLE_NOTICE,
   aborted: 'the judgment call was cancelled',
   'invalid-response': 'the judgment provider returned an invalid response',
   internal: 'The decision client failed internally. The operation has stopped.',
@@ -145,8 +146,10 @@ function asFailure(error: unknown, overrideKind?: JudgmentErrorKind): JudgmentEr
   // HTTP status is validated metadata, not private upstream exception text.
   // Preserve it in the displayed diagnostic as well as the structured error:
   // a billing refusal must not look like Jev rejected the task itself.
-  const message = status === undefined ? FAILURE_MESSAGES[kind]
+  const diagnostic = status === undefined ? FAILURE_MESSAGES[kind]
     : `${FAILURE_MESSAGES[kind]} (HTTP ${status}${status === 402 ? ': Payment Required' : ''})`;
+  const message = kind === 'rejected' && (status === 401 || status === 403)
+    ? `${diagnostic}. ${DECISION_MODELS_UNAVAILABLE_NOTICE}` : diagnostic;
   return new JudgmentError(kind, message, {
     ...(status === undefined ? {} : { status }),
     ...(requestId === undefined ? {} : { requestId }),

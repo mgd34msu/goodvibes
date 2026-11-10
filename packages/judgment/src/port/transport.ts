@@ -11,6 +11,7 @@ import { interruptible, retryDelay, retryPolicy } from './retry.ts';
 import { recordNativeModelObservation } from './model-observation.ts';
 import { opaqueUuid } from './opaque-uuid.ts';
 import { captureJudgmentInput } from './input-snapshot.ts';
+import { DECISION_MODELS_UNAVAILABLE_NOTICE } from './availability-notice.ts';
 import type { JudgmentAttempt, JudgmentEndpointHealth, JudgmentPort, JudgmentRequest, JudgmentResult } from './types.ts';
 
 function needsContextUpgrade(error: unknown): boolean {
@@ -227,8 +228,16 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         // Preserve a precise terminal protocol/configuration diagnostic when
         // there is only one target; context-limit callers can still partition
         // complete evidence. Availability failures always use the halt notice.
-        if (targets.length === 1 && lastFailure && lastFailure.kind !== 'unavailable') throw lastFailure;
-        throw new JudgmentError('unavailable', 'No decision models are currently available. Check API keys, endpoint addresses, model names and local model services, then retry. The operation has stopped.', {
+        if (targets.length === 1 && lastFailure && lastFailure.kind !== 'unavailable') {
+          if (lastFailure.kind === 'rejected' && (lastFailure.status === 401 || lastFailure.status === 403)) {
+            throw new JudgmentError('rejected', `${lastFailure.message}. ${DECISION_MODELS_UNAVAILABLE_NOTICE}`, {
+              status: lastFailure.status,
+              ...(lastFailure.requestId === undefined ? {} : { requestId: lastFailure.requestId }),
+            });
+          }
+          throw lastFailure;
+        }
+        throw new JudgmentError('unavailable', DECISION_MODELS_UNAVAILABLE_NOTICE, {
           ...(last?.status === undefined ? {} : { status: last.status }),
           ...(last?.requestId === undefined ? {} : { requestId: last.requestId }),
         });

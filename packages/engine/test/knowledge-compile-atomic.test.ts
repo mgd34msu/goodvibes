@@ -218,10 +218,24 @@ describe('atomic knowledge compilation', () => {
     const before = state(ctx.store), answer = settled().port, controller = new AbortController();
     let release = () => {}, started = () => {};
     const pending = new Promise<void>((resolve) => { release = resolve; }), reading = new Promise<void>((resolve) => { started = resolve; });
-    installJudgmentPort({ model: answer.model, async ask(request) { started(); await pending; return answer.ask(request); } });
-    const attempt = run(controller.signal); await reading; controller.abort();
-    await expect(attempt).rejects.toBeInstanceOf(KnowledgeEntityAliasHoldError);
-    release(); await Promise.resolve();
+    const drained = Promise.withResolvers<void>();
+    let receivedSignal: AbortSignal | undefined, calls = 0;
+    installJudgmentPort({ model: answer.model, async ask(request) {
+      calls += 1; receivedSignal = request.signal; started();
+      try { await pending; return await answer.ask(request); }
+      finally { drained.resolve(); }
+    } });
+    const attempt = run(controller.signal);
+    const outcome = attempt.catch((error: unknown) => error);
+    try {
+      await reading;
+      expect(receivedSignal).toBeDefined(); expect(receivedSignal?.aborted).toBe(false);
+      controller.abort();
+      expect(await outcome).toBeInstanceOf(KnowledgeEntityAliasHoldError);
+      expect(receivedSignal?.aborted).toBe(true); expect(calls).toBe(1);
+      expect(state(ctx.store)).toEqual(before);
+    } finally { release(); await drained.promise; await outcome; }
+    expect(calls).toBe(1);
     expect(state(ctx.store)).toEqual(before); expect(await reopen()).toEqual(before);
   });
 

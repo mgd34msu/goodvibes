@@ -58,6 +58,53 @@ describe('knowledge extraction refresh policy', () => {
     expect(await readKnowledgeSearchText({ text: 'A' })).toBe('A');
   });
 
+  for (const field of ['structure', 'metadata', 'excerpt', 'summary', 'section', 'search-text'] as const) {
+    test(`owner cancellation interrupts a held ${field} readability without admitting later work`, async () => {
+      const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>(), drained = Promise.withResolvers<void>();
+      const controller = new AbortController(), fake = fakePort(() => noulAnswer(0.99));
+      let receivedSignal: AbortSignal | undefined, calls = 0, laterWrites = 0;
+      installJudgmentPort({ ...fake.port, async ask(request) {
+        calls += 1; receivedSignal = request.signal; started.resolve();
+        try { await release.promise; return await fake.port.ask(request); }
+        finally { drained.resolve(); }
+      } });
+      const text = 'The display supports HDMI eARC.';
+      const record = extraction(field === 'structure' ? { structure: { searchText: text } }
+        : field === 'metadata' ? { metadata: { extractorVersion: KNOWLEDGE_EXTRACTOR_VERSION, text } }
+        : field === 'section' ? { sections: [text, 'Later section must not be read.'] }
+        : field === 'excerpt' ? { excerpt: text } : { summary: text });
+      const read = field === 'search-text'
+        ? readKnowledgeSearchText({ content: text }, controller.signal)
+        : knowledgeExtractionNeedsRefresh(record, undefined, controller.signal);
+      const outcome = read.then(() => { laterWrites += 1; return undefined; }, (error: unknown) => error);
+      try {
+        await started.promise;
+        expect(receivedSignal).toBeDefined();
+        expect(receivedSignal?.aborted).toBe(false);
+        controller.abort();
+        expect(await outcome).toBeInstanceOf(KnowledgeExtractionJudgmentHoldError);
+        expect(receivedSignal?.aborted).toBe(true);
+        expect(calls).toBe(1);
+        expect(laterWrites).toBe(0);
+      } finally {
+        release.resolve(); await drained.promise; await outcome;
+      }
+      expect(calls).toBe(1);
+      expect(laterWrites).toBe(0);
+    });
+  }
+
+  test('a current uncancelled owner retains normal results and a cancelled owner dispatches nothing', async () => {
+    const fake = answer(0.99), controller = new AbortController();
+    expect(await knowledgeExtractionNeedsRefresh(extraction({ summary: 'Readable text.' }), undefined, controller.signal)).toBe(false);
+    expect(await readKnowledgeSearchText({ text: 'Readable text.' }, controller.signal)).toBe('Readable text.');
+    expect(fake.requests).toHaveLength(2);
+    controller.abort();
+    await expect(knowledgeExtractionNeedsRefresh(null, undefined, controller.signal)).rejects.toBeInstanceOf(KnowledgeExtractionJudgmentHoldError);
+    await expect(readKnowledgeSearchText({ text: 'Readable text.' }, controller.signal)).rejects.toBeInstanceOf(KnowledgeExtractionJudgmentHoldError);
+    expect(fake.requests).toHaveLength(2);
+  });
+
   test('refreshes unreadable fields only on an actionable no', async () => {
     answer(0.01);
     expect(await knowledgeExtractionNeedsRefresh(extraction({ summary: 'Decoding noise', sections: ['Noise'] }))).toBe(true);

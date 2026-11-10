@@ -192,7 +192,7 @@ export async function recompileKnowledgeSource(context: KnowledgeIngestContext, 
   const assertCurrent = () => { sourceCurrent(); uris.assertCurrent(); };
   let refreshed: KnowledgeExtractionUpsertInput | undefined;
   let assertExtractionCurrent = () => {};
-  if (source.artifactId && await abortableCompileRead(knowledgeExtractionNeedsRefresh(extraction), signal)) {
+  if (source.artifactId && await abortableCompileRead(knowledgeExtractionNeedsRefresh(extraction, undefined, signal), signal)) {
     assertCurrent();
     uris.reserveSource(source.id);
     uris.attachArtifact(source.artifactId);

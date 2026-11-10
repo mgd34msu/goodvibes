@@ -44,24 +44,27 @@ const LIMITED_EXTRACTION_MARKERS = [
 export async function knowledgeExtractionNeedsRefresh(
   extraction: KnowledgeExtractionRecord | null,
   currentExtractorVersion: number = KNOWLEDGE_EXTRACTOR_VERSION,
+  signal?: AbortSignal,
 ): Promise<boolean> {
+  if (signal?.aborted) throw new KnowledgeExtractionJudgmentHoldError();
   if (!extraction) return true;
   if (readKnowledgeExtractorVersion(readDocumentFields(extraction, ['metadata']).metadata) < currentExtractorVersion) return true;
   // Inspect all candidate fields before a bounded sample of any field leaves.
   assertKnowledgeExtractionInput(extraction);
-  const searchText = await readKnowledgeSearchText(extraction.structure) ?? await readKnowledgeSearchText(extraction.metadata);
+  const searchText = await readKnowledgeSearchText(extraction.structure, signal) ?? await readKnowledgeSearchText(extraction.metadata, signal);
   if (searchText) return false;
   for (const text of [extraction.excerpt, extraction.summary, ...extraction.sections]) {
-    if (await hasUsefulKnowledgeExtractionText(text)) return false;
+    if (await readKnowledgeExtractionTextUsability(text, signal)) return false;
   }
   return true;
 }
 
-export async function readKnowledgeSearchText(record: Record<string, unknown>): Promise<string | undefined> {
+export async function readKnowledgeSearchText(record: Record<string, unknown>, signal?: AbortSignal): Promise<string | undefined> {
+  if (signal?.aborted) throw new KnowledgeExtractionJudgmentHoldError();
   const candidates = readDocumentFields(record, ['searchText', 'text', 'content']);
   assertJudgmentInput(candidates);
   const value = candidates.searchText ?? candidates.text ?? candidates.content;
-  return typeof value === 'string' && await hasUsefulKnowledgeExtractionText(value) ? value : undefined;
+  return typeof value === 'string' && await readKnowledgeExtractionTextUsability(value, signal) ? value : undefined;
 }
 
 export function hasUsefulKnowledgeExtractionText(value: string | undefined, owner?: KnowledgeExtractionOwner): Promise<boolean> {

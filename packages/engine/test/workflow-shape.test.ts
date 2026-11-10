@@ -1089,10 +1089,14 @@ describe('reusable workflows: workflow_call contracts', () => {
     const workspaceSteps = byIf('workspace');
     const registrySteps = byIf('registry');
 
-    // workspace mode self-hosts: checkout the verified commit, build the
-    // workspace toolchain, run the local dist bin, never bunx-from-registry.
+    // Workspace mode self-hosts the exact verified source with pinned Bun.
+    // Recompiling its project-reference graph cannot strengthen the CI verdict.
     expect(JSON.stringify(workspaceSteps)).toContain('actions/checkout');
-    expect(JSON.stringify(workspaceSteps)).toContain('toolchain/dist/bin/per-job-green.js');
+    const checkout = workspaceSteps.find(step => String(step.uses ?? '').includes('actions/checkout'));
+    expect(checkout?.with).toEqual(expect.objectContaining({ ref: '${{ inputs.sha }}' }));
+    expect(JSON.stringify(workspaceSteps)).toContain('bun packages/engine/toolchain/src/bin/per-job-green.ts');
+    expect(JSON.stringify(workspaceSteps)).not.toContain('tsc -b');
+    expect(JSON.stringify(workspaceSteps)).not.toContain('toolchain/dist/bin/per-job-green.js');
     expect(JSON.stringify(workspaceSteps)).not.toContain('bunx @goodvibes-jev/engine/toolchain');
 
     // registry mode bunx-es the published package and never assumes a checkout.

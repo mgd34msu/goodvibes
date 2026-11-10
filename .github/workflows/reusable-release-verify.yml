@@ -40,7 +40,7 @@ name: Reusable release verification
 #     @goodvibes-jev/engine from npm. Correct once the engine has published
 #     the package.
 #   - `workspace` (the engine repo itself): check out the verified commit, install,
-#     build the workspace toolchain, and invoke its local dist bin. The engine
+#     and execute its source CLI with the pinned Bun runtime. The engine
 #     cannot bunx-from-registry: its own release is what publishes the
 #     toolchain (first release: the package does not exist yet; later releases:
 #     bunx would verify with the PREVIOUS version, not the commit under
@@ -75,8 +75,8 @@ on:
         default: "1.3.14"
       toolchain-source:
         description: Where per-job-green comes from, `registry` (bunx the
-          published package; consumer repos) or `workspace` (build + run the
-          checked-out workspace toolchain; the engine repo itself).
+          published package; consumer repos) or `workspace` (execute the
+          checked-out workspace source with Bun; the engine repo itself).
         required: false
         type: string
         default: registry
@@ -135,9 +135,6 @@ jobs:
         uses: mgd34msu/goodvibes/.github/actions/setup@d8fa6304e093b42e318dfb24024d7bcaf82b08f9
         with:
           bun-version: ${{ inputs.bun-version }}
-      - name: Build workspace toolchain
-        if: inputs.toolchain-source == 'workspace'
-        run: bunx tsc -b packages/engine/toolchain
       - name: Verify push-CI run is per-job green (workspace toolchain)
         if: inputs.toolchain-source == 'workspace'
         id: pjg-workspace
@@ -151,7 +148,7 @@ jobs:
           # --deadline-ms 17m, sized under this job's 20m timeout-minutes cap so
           # an exhausted wait yields the tool's honest deadline-exceeded verdict
           # instead of a raw job kill.
-          bun packages/engine/toolchain/dist/bin/per-job-green.js \
+          bun packages/engine/toolchain/src/bin/per-job-green.ts \
             --repo "$TARGET_REPO" \
             --sha "$TARGET_SHA" \
             --workflow "$TARGET_WORKFLOW" \

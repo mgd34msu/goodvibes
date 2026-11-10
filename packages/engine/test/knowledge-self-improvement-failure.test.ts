@@ -1,7 +1,8 @@
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { selfImprovementFixtureReading, gapAssessmentFixture } from './_helpers/knowledge-self-improvement-readings.js';
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { GoodVibesError, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -202,14 +203,51 @@ describe('actual semantic service failure path', () => {
   test('an explicit short timeout is honored without a five-second minimum', async () => {
     const fake = fixture('other');
     const { store, service, gap, spaceId } = await serviceFixture(new Error('unused'));
-    service.setGapRepairer(() => new Promise(() => {}));
-    const started = Date.now();
-    const result = await service.selfImprove({ knowledgeSpaceId: spaceId, gapIds: [gap.id], force: true, maxRunMs: 1 });
-    expect(Date.now() - started).toBeLessThan(4_500);
-    const task = store.getRefinementTask(result.taskIds[0]!)!;
-    expect(task.state).toBe('blocked'); expect(task.trace.at(-1)?.data?.failureCause).toMatchObject({ cause: 'run_budget', basis: 'owned-timer' });
-    expect(fake.requests.filter(request => 'cause' in request.questions)).toHaveLength(0);
+    let repairCalls = 0, repairDeadlineAt: number | undefined, repairSignal: AbortSignal | undefined;
+    service.setGapRepairer(input => {
+      repairCalls++; repairDeadlineAt = input.deadlineAt; repairSignal = input.signal;
+      return new Promise(() => {});
+    });
+    // Select the issued-task branch deterministically. Real execution still
+    // uses its actual one-millisecond owned timer; CI scheduling cannot spend
+    // the logical run budget before this case reaches that timer.
+    const clock = spyOn(Date, 'now').mockReturnValue(70_000);
+    const started = performance.now();
+    try {
+      const result = await service.selfImprove({ knowledgeSpaceId: spaceId, gapIds: [gap.id], force: true, maxRunMs: 1 });
+      expect(performance.now() - started).toBeLessThan(4_500);
+      expect(result).toMatchObject({ budgetExhausted: true, truncated: true, blockedGaps: 1 });
+      expect(repairCalls).toBe(1); expect(repairDeadlineAt).toBe(70_001);
+      expect(repairSignal?.aborted).toBe(true); expect(repairSignal?.reason).toBeInstanceOf(KnowledgeRepairBudgetError);
+      expect(result.taskIds).toHaveLength(1);
+      const taskId = result.taskIds[0];
+      if (!taskId) throw new Error('The admitted repair timer must retain its actual task');
+      const task = store.getRefinementTask(taskId);
+      expect(task).not.toBeNull();
+      if (!task) throw new Error('The admitted repair task must be persisted');
+      expect(task.state).toBe('blocked'); expect(task.trace.at(-1)?.data?.failureCause).toMatchObject({ cause: 'run_budget', basis: 'owned-timer' });
+      expect(fake.requests.filter(request => 'cause' in request.questions)).toHaveLength(0);
+    } finally { clock.mockRestore(); }
   }, 10_000);
+
+  test('the same short run budget can expire before task issuance without starting repair or changing saved state', async () => {
+    const fake = fixture('other');
+    const { store, service, gap, spaceId } = await serviceFixture(new Error('unused'));
+    let repairCalls = 0;
+    service.setGapRepairer(() => { repairCalls++; return new Promise(() => {}); });
+    const beforeGap = structuredClone(store.getNode(gap.id)), bytes = readFileSync(store.storagePath);
+    // The first clock read after the plan's start exhausts its caller-selected
+    // one-millisecond budget. No wall-clock race or repeated sampling is needed.
+    let now = 70_000;
+    const clock = spyOn(Date, 'now').mockImplementation(() => now++);
+    try {
+      const result = await service.selfImprove({ knowledgeSpaceId: spaceId, gapIds: [gap.id], force: true, maxRunMs: 1 });
+      expect(result).toMatchObject({ budgetExhausted: true, truncated: true, processedGaps: 0, taskIds: [], blockedGaps: 0 });
+      expect(repairCalls).toBe(0); expect(store.listRefinementTasks()).toEqual([]);
+      expect(store.getNode(gap.id)).toEqual(beforeGap); expect(readFileSync(store.storagePath)).toEqual(bytes);
+      expect(fake.requests.filter(request => 'cause' in request.questions)).toHaveLength(0);
+    } finally { clock.mockRestore(); }
+  });
 
   test('request timeout retains truthful provenance and decision receipt', async () => {
     const fake = fakePort((_name, question, state) => {

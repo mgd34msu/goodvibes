@@ -193,7 +193,7 @@ test('both actual publication workflows await one shared four-native-target acce
   expect(String(fresh.if).split(/\s*&&\s*/)).toEqual([
     '!cancelled()', "needs.verify-tag-version.result == 'success'", "needs.github-release.result == 'success'",
   ]);
-  expect(existing.if).toBe("inputs.publish_existing && needs.collect.result == 'success'");
+  expect(existing.if).toBe("inputs.publish_existing && inputs.candidate-source == '' && needs.collect.result == 'success'");
   expect(object(existing.with).source).toBe('${{ needs.collect.outputs.source }}');
   expect(object(object(suite.collect).outputs).source).toBe('${{ steps.admit.outputs.source }}');
   for (const caller of [fresh, existing]) expect(object(caller.with)['tooling-sha']).toBe('${{ github.sha }}');

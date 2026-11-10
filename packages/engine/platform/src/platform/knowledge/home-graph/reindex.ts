@@ -26,6 +26,7 @@ import type {
 } from './types.js';
 
 export interface HomeGraphReindexContext {
+  readonly signal?: AbortSignal | undefined;
   readonly store: KnowledgeStore;
   readonly artifactStore: ArtifactStore;
   readonly semanticService?: KnowledgeSemanticService | undefined;
@@ -68,7 +69,9 @@ export async function runHomeGraphReindex(
   input: HomeGraphReindexInput = {},
 ): Promise<HomeGraphReindexResult> {
   requireDecisionFeature('semantic Home Graph reindexing');
+  context.signal?.throwIfAborted();
   await context.store.init();
+  context.signal?.throwIfAborted();
   const { spaceId, installationId } = resolveReadableHomeGraphSpace(context.store, input);
   const state = readHomeGraphSearchState(context.store, spaceId);
   const allSourceCount = readHomeGraphState(context.store, spaceId).sources.length;
@@ -84,13 +87,16 @@ export async function runHomeGraphReindex(
     maxRunMs: Math.min(maxRunMs, 30_000),
     limit: input.limit,
     extract: (source, artifact) => context.extract(source, artifact, spaceId, installationId),
+    signal: context.signal,
   });
   await yieldToEventLoop();
+  context.signal?.throwIfAborted();
   const relinkedSourceIds = reindex.sources.map((source) => source.id);
   const linked = relinkedSourceIds.length > 0 || input.force === true
     ? await context.autoLinkExistingSources(spaceId, installationId, input.force === true ? undefined : relinkedSourceIds)
     : [];
   await yieldToEventLoop();
+  context.signal?.throwIfAborted();
   const changedSourceIds = uniqueStrings([
     ...reindex.sources.map((source) => source.id),
     ...linked.map((item) => item.edge.fromKind === 'source' ? item.edge.fromId : undefined),
@@ -107,11 +113,14 @@ export async function runHomeGraphReindex(
         limit: semanticSourceIds.length,
         maxRunMs: Math.min(remainingMs, clampPositive(input.semanticMaxRunMs, 20_000, 5_000, 45_000)),
         force: input.force === true,
+        signal: context.signal,
       })
     : undefined;
   await yieldToEventLoop();
+  context.signal?.throwIfAborted();
   const qualityIssues = await context.refreshQualityIssues(spaceId, installationId);
   await yieldToEventLoop();
+  context.signal?.throwIfAborted();
   const currentState = readHomeGraphState(context.store, spaceId);
   const generated = input.refreshPages === false
     ? emptyGeneratedPagesSummary()
@@ -120,7 +129,9 @@ export async function runHomeGraphReindex(
         artifactStore: context.artifactStore,
         spaceId,
         installationId,
+        signal: context.signal,
       }, currentState.sources, changedSourceIds, clampPositive(input.generatedPageLimit, 256, 1, 512));
+  context.signal?.throwIfAborted();
   const refreshedGeneratedPageCount = generated.devicePassports + generated.roomPages;
   return {
     ...reindex,
@@ -137,6 +148,7 @@ export async function runHomeGraphReindex(
 }
 
 export async function reindexHomeGraphSources(input: {
+  readonly signal?: AbortSignal | undefined;
   readonly spaceId: string;
   readonly sources: readonly KnowledgeSourceRecord[];
   readonly extractionBySourceId: ReadonlyMap<string, KnowledgeExtractionRecord>;
@@ -158,6 +170,7 @@ export async function reindexHomeGraphSources(input: {
   let budgetExhausted = false;
   for (const [index, source] of candidates.entries()) {
     await yieldEvery(index);
+    input.signal?.throwIfAborted();
     if (Date.now() - startedAt >= maxRunMs) {
       truncated = true;
       budgetExhausted = true;
@@ -167,7 +180,9 @@ export async function reindexHomeGraphSources(input: {
     if (!artifactId) continue;
     scanned += 1;
     const current = input.extractionBySourceId.get(source.id);
-    if (!(await homeGraphExtractionNeedsRepair(current))) {
+    const needsRepair = await homeGraphExtractionNeedsRepair(current, input.signal);
+    input.signal?.throwIfAborted();
+    if (!needsRepair) {
       skipped += 1;
       continue;
     }
@@ -182,6 +197,7 @@ export async function reindexHomeGraphSources(input: {
       continue;
     }
     const extraction = await input.extract(source, artifact);
+    input.signal?.throwIfAborted();
     if (!extraction) {
       failed += 1;
       failures.push({ sourceId: source.id, error: 'Artifact extraction failed.' });
@@ -209,6 +225,7 @@ async function refreshHomeGraphPagesForSources(
   if (devices.length === 0) return summary;
   for (const [index, deviceId] of devices.entries()) {
     await yieldEvery(index, 2);
+    context.signal?.throwIfAborted();
     try {
       const page = await refreshHomeGraphDevicePassport({
         ...context,
@@ -222,6 +239,7 @@ async function refreshHomeGraphPagesForSources(
       if (page.artifactCreated) summary.artifacts += 1;
       if (page.source) summary.sources += 1;
     } catch (error) {
+      context.signal?.throwIfAborted();
       summary.errors.push({
         kind: 'device-passport',
         targetId: deviceId,

@@ -21,6 +21,7 @@ import type { HomeGraphAskInput, HomeGraphSearchResult } from './types.js';
  * candidate/excerpt windows and extraction repair are separate, retained policy.
  */
 export async function prepareHomeGraphAnswerScope(input: {
+  readonly signal?: AbortSignal | undefined;
   readonly store: KnowledgeStore;
   readonly spaceId: string;
   readonly query: HomeGraphAskInput;
@@ -92,7 +93,7 @@ export async function prepareHomeGraphAnswerScope(input: {
       // A settled rejection remains rejected. This scope pass changes membership,
       // not the existing retrieval score units or order; no reading is confidence.
       return { results: input.results.filter((_result, index) => selected.has(`candidate-${index + 1}`)), linkedObjects };
-    }, input.query.timeoutMs);
+    }, input.query.timeoutMs, input.signal);
   } catch (error) {
     if (error instanceof JudgmentInputError || error instanceof KnowledgeAnswerQualityHeldError) throw error;
     if (error instanceof KnowledgeAnswerObjectAlignmentHeldError) throw new KnowledgeAnswerQualityHeldError(

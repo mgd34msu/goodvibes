@@ -48,8 +48,9 @@ export function readHomeGraphSearchState(store: KnowledgeStore, spaceId: string)
 export async function selectHomeGraphExtractionRepairCandidates(
   query: string, sources: readonly KnowledgeSourceRecord[], nodes: readonly KnowledgeNodeRecord[],
   edges: readonly KnowledgeEdgeRecord[], extractionBySourceId: (sourceId: string) => KnowledgeExtractionRecord | null | undefined,
-  limit: number,
+  limit: number, signal?: AbortSignal,
 ): Promise<KnowledgeSourceRecord[]> {
+  signal?.throwIfAborted();
   assertExtractionInputs(sources, extractionBySourceId);
   const originalVersion = JSON.stringify({ query, sources, nodes, edges, extractions: sources.map((source) => extractionBySourceId(source.id)) });
   const links = buildSourceLinkIndex(edges, nodes);
@@ -67,19 +68,21 @@ export async function selectHomeGraphExtractionRepairCandidates(
   const decisionGuards: Array<() => void> = [];
   const results = await mapLimit(structuredClone(snapshots), 4, async (state, index) => {
     const source = eligible[index]!;
-    if (!source.artifactId || !(await homeGraphExtractionNeedsRepair(extractionBySourceId(source.id)))) return undefined;
-    const run = await readKnowledgeBattery(repairSourceRelevance, state);
+    signal?.throwIfAborted();
+    if (!source.artifactId || !(await homeGraphExtractionNeedsRepair(extractionBySourceId(source.id), signal))) return undefined;
+    const run = await readKnowledgeBattery(repairSourceRelevance, state, signal);
     decisionGuards.push(run.assertDecisionCurrent);
     return run.readings.relevant.verdict === 'yes' ? { source, score: run.readings.relevant.probability } : undefined;
   });
+  signal?.throwIfAborted();
   if (JSON.stringify({ query, sources, nodes, edges, extractions: sources.map((source) => extractionBySourceId(source.id)) }) !== originalVersion) throw new KnowledgeAnswerQualityHeldError('stale');
   for (const check of decisionGuards) check();
   return results.filter((entry): entry is NonNullable<typeof entry> => entry !== undefined)
     .sort((a, b) => b.score - a.score || a.source.id.localeCompare(b.source.id))
     .slice(0, Math.max(1, limit)).map((entry) => entry.source);
 }
-export async function homeGraphExtractionNeedsRepair(extraction: KnowledgeExtractionRecord | null | undefined): Promise<boolean> {
-  return knowledgeExtractionNeedsRefresh(extraction ?? null);
+export async function homeGraphExtractionNeedsRepair(extraction: KnowledgeExtractionRecord | null | undefined, signal?: AbortSignal): Promise<boolean> {
+  return knowledgeExtractionNeedsRefresh(extraction ?? null, undefined, signal);
 }
 function assertExtractionInputs(
   sources: readonly KnowledgeSourceRecord[],

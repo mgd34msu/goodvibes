@@ -557,6 +557,8 @@ export async function generateHomeGraphPacket(
     filename: `${safeHomeGraphFilename(title)}.md`,
     markdown,
     projectionKind: 'packet',
+    signal: context.signal,
+    assertCurrent: context.assertCurrent,
     identityKeys: [input.packetKind ?? 'home'],
     title,
     summary: `Generated ${title} packet for ${input.sharingProfile ?? 'default'} sharing.`,

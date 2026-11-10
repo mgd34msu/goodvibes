@@ -69,7 +69,7 @@ import {
   runHomeGraphRefinement,
 } from './refinement.js';
 import type { HomeGraphTriageOptions } from './triage.js';
-import { isUnusableHomeGraphExtractionText } from './extraction-quality.js';
+import { readKnowledgeExtractionTextUsability } from '../extraction-policy.js';
 import {
   readHomeGraphSearchState,
   selectHomeGraphExtractionRepairCandidates,
@@ -99,7 +99,7 @@ export class HomeGraphService {
   private pendingSyncSelfImprove = new Set<string>();
   private syncSelfImproveControllers = new Map<string, AbortController>();
   private syncSelfImproveRuns = new Map<string, Promise<void>>();
-  private readonly snapshotSyncRuns = new Set<Promise<HomeGraphSyncResult>>();
+  private readonly foregroundRuns = new Set<Promise<unknown>>();
   private foregroundOperations = new Map<string, number>();
   private resumeSyncSelfImprove = new Set<string>();
   private pendingAnswerEnrichment = new Map<string, Set<string>>();
@@ -141,19 +141,21 @@ export class HomeGraphService {
     this.cancelSyncSelfImprovement();
     this.cancelAnswerEnrichment();
     this.pendingIngestEnrichment.clear(); this.scheduledIngestEnrichment.clear();
-    // A foreground snapshot also owns this store until its cancelled work has
+    // Accepted foreground work owns this store until its cancelled work has
     // drained. Its caller retains the outcome; disposal only waits for release.
-    await Promise.all([...this.snapshotSyncRuns].map(run => run.then(() => undefined, () => undefined)));
+    await Promise.all([...this.foregroundRuns].map(run => run.then(() => undefined, () => undefined)));
     await Promise.all([...this.syncSelfImproveRuns.values(), ...[...this.answerEnrichmentRuns.values()].map(tail => tail.run),
       ...[...this.ingestEnrichmentRuns.values()].map(tail => tail.run)]);
   }
 
   async status(input: { readonly installationId?: string; readonly knowledgeSpaceId?: string } = {}): Promise<HomeGraphStatus> {
-    return getHomeGraphStatus(this.store, input);
+    return this.ownForegroundOperation(async () => {
+      return getHomeGraphStatus(this.store, input);
+    });
   }
 
   async syncSnapshot(input: HomeGraphSnapshotInput): Promise<HomeGraphSyncResult> {
-    const run = withConfiguredDecisionModelPolicy(async () => {
+    return this.ownForegroundOperation(() => withConfiguredDecisionModelPolicy(async () => {
       this.autoLinkController.signal.throwIfAborted();
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
@@ -166,173 +168,196 @@ export class HomeGraphService {
       this.autoLinkController.signal.throwIfAborted();
       this.scheduleSyncSelfImprovement(result.spaceId, result.installationId);
       return result;
-    });
-    this.snapshotSyncRuns.add(run);
-    try { return await run; }
-    finally { this.snapshotSyncRuns.delete(run); }
+    }));
   }
 
   async ingestUrl(input: HomeGraphIngestUrlInput, ownership: KnowledgeIngestOwnership = {}): Promise<HomeGraphIngestResult> {
-    return withConfiguredDecisionModelPolicy(async () => {
-      const { signal, assertCurrent, onCommitted, deferSemanticEnrichment } = ownership;
-      const owned = !!(signal || assertCurrent || onCommitted || deferSemanticEnrichment);
-      const current = () => {
-        if (ownership.signal !== signal || ownership.assertCurrent !== assertCurrent || ownership.onCommitted !== onCommitted
-          || ownership.deferSemanticEnrichment !== deferSemanticEnrichment) throw new KnowledgeWebGapRepairHeldError('stale');
-        signal?.throwIfAborted(); const result: unknown = assertCurrent?.(); if (result !== undefined) { drainOwned(result); throw new KnowledgeWebGapRepairHeldError('malformed'); }
-      };
-      current();
-      this.requireAdmission('home-graph url ingestion');
-      const { spaceId, installationId } = resolveHomeGraphSpace(input), url = input.url;
-      await this.store.init(); current();
-      const identity = createHomeGraphSourceIdentityPlanner(this.store).prepare({ spaceId, role: 'url', locator: 'uri', value: url });
-      const publication = await this.artifactStore.createForPublication({
-        uri: url,
-        allowPrivateHosts: input.allowPrivateHosts,
-        metadata: buildHomeGraphMetadata(spaceId, installationId, {
-          homeGraphSourceKind: 'url',
-          requestedAt: Date.now(),
-        }),
-      }, { signal, assertCurrent: current });
-      return this.withIngestArtifactPublication(publication, true, (artifact, assertArtifactCurrent) => this.ingestCreatedArtifact({
-        spaceId,
-        installationId,
-        artifact,
-        title: input.title,
-        sourceUri: url,
-        sourceType: inferHomeGraphSourceType(input.tags, 'url'),
-        tags: ['homeassistant', 'home-graph', ...(input.tags ?? [])],
-        target: input.target,
-        metadata: {
-          ...(input.metadata ?? {}),
-          homeGraphSourceKind: 'url',
-        },
-      }, owned ? { ...ownership, signal, assertCurrent: current } : ownership, identity, assertArtifactCurrent));
+    return this.ownForegroundOperation(async () => {
+      return withConfiguredDecisionModelPolicy(async () => {
+        const { signal: callerSignal, assertCurrent, onCommitted, deferSemanticEnrichment } = ownership;
+        const signal = callerSignal ? AbortSignal.any([this.autoLinkController.signal, callerSignal]) : this.autoLinkController.signal;
+        const owned = !!(callerSignal || assertCurrent || onCommitted || deferSemanticEnrichment);
+        const current = () => {
+          if (ownership.signal !== callerSignal || ownership.assertCurrent !== assertCurrent || ownership.onCommitted !== onCommitted
+            || ownership.deferSemanticEnrichment !== deferSemanticEnrichment) throw new KnowledgeWebGapRepairHeldError('stale');
+          signal?.throwIfAborted(); const result: unknown = assertCurrent?.(); if (result !== undefined) { drainOwned(result); throw new KnowledgeWebGapRepairHeldError('malformed'); }
+        };
+        current();
+        this.requireAdmission('home-graph url ingestion');
+        const { spaceId, installationId } = resolveHomeGraphSpace(input), url = input.url;
+        await this.store.init(); current();
+        const identity = createHomeGraphSourceIdentityPlanner(this.store).prepare({ spaceId, role: 'url', locator: 'uri', value: url });
+        const publication = await this.artifactStore.createForPublication({
+          uri: url,
+          allowPrivateHosts: input.allowPrivateHosts,
+          metadata: buildHomeGraphMetadata(spaceId, installationId, {
+            homeGraphSourceKind: 'url',
+            requestedAt: Date.now(),
+          }),
+        }, { signal, assertCurrent: current });
+        return this.withIngestArtifactPublication(publication, true, (artifact, assertArtifactCurrent) => this.ingestCreatedArtifact({
+          spaceId,
+          installationId,
+          artifact,
+          title: input.title,
+          sourceUri: url,
+          sourceType: inferHomeGraphSourceType(input.tags, 'url'),
+          tags: ['homeassistant', 'home-graph', ...(input.tags ?? [])],
+          target: input.target,
+          metadata: {
+            ...(input.metadata ?? {}),
+            homeGraphSourceKind: 'url',
+          },
+        }, owned ? { ...ownership, signal, assertCurrent: current } : ownership, identity, assertArtifactCurrent));
+      });
     });
   }
 
   async ingestNote(input: HomeGraphIngestNoteInput): Promise<HomeGraphIngestResult> {
-    return withConfiguredDecisionModelPolicy(async () => {
-      this.requireAdmission('home-graph note ingestion');
-      const { spaceId, installationId } = resolveHomeGraphSpace(input);
-      const title = input.title ?? `Home Assistant note ${new Date().toISOString()}`;
-      await this.store.init();
-      const publication = await this.artifactStore.createForPublication({
-        kind: 'document',
-        mimeType: 'text/markdown',
-        filename: `${safeHomeGraphFilename(title)}.md`,
-        text: input.body,
-        metadata: buildHomeGraphMetadata(spaceId, installationId, {
-          homeGraphSourceKind: 'note',
-          category: input.category ?? 'note',
-        }),
-      }, { signal: this.autoLinkController.signal });
-      return this.withIngestArtifactPublication(publication, true, (artifact, assertArtifactCurrent) => this.ingestCreatedArtifact({
-        spaceId,
-        installationId,
-        artifact,
-        title,
-        sourceType: 'document',
-        tags: uniqueStrings(['homeassistant', 'home-graph', 'note', input.category, ...(input.tags ?? [])]),
-        target: input.target,
-        metadata: {
-          ...(input.metadata ?? {}),
-          homeGraphSourceKind: 'note',
-          category: input.category ?? 'note',
-        },
-      }, {}, undefined, assertArtifactCurrent));
+    return this.ownForegroundOperation(async () => {
+      return withConfiguredDecisionModelPolicy(async () => {
+        this.requireAdmission('home-graph note ingestion');
+        const { spaceId, installationId } = resolveHomeGraphSpace(input);
+        const title = input.title ?? `Home Assistant note ${new Date().toISOString()}`;
+        await this.store.init();
+        this.autoLinkController.signal.throwIfAborted();
+        const publication = await this.artifactStore.createForPublication({
+          kind: 'document',
+          mimeType: 'text/markdown',
+          filename: `${safeHomeGraphFilename(title)}.md`,
+          text: input.body,
+          metadata: buildHomeGraphMetadata(spaceId, installationId, {
+            homeGraphSourceKind: 'note',
+            category: input.category ?? 'note',
+          }),
+        }, { signal: this.autoLinkController.signal });
+        return this.withIngestArtifactPublication(publication, true, (artifact, assertArtifactCurrent) => this.ingestCreatedArtifact({
+          spaceId,
+          installationId,
+          artifact,
+          title,
+          sourceType: 'document',
+          tags: uniqueStrings(['homeassistant', 'home-graph', 'note', input.category, ...(input.tags ?? [])]),
+          target: input.target,
+          metadata: {
+            ...(input.metadata ?? {}),
+            homeGraphSourceKind: 'note',
+            category: input.category ?? 'note',
+          },
+        }, {}, undefined, assertArtifactCurrent));
+      });
     });
   }
 
   async ingestArtifact(input: HomeGraphIngestArtifactInput): Promise<HomeGraphIngestResult> {
-    return withConfiguredDecisionModelPolicy(async () => {
-      this.requireAdmission('home-graph artifact ingestion');
-      const { spaceId, installationId } = resolveHomeGraphSpace(input);
-      const artifactId = input.artifactId, uri = input.uri, path = input.path;
-      await this.store.init();
-      const knownUri = uri ?? path;
-      const identity = knownUri ? createHomeGraphSourceIdentityPlanner(this.store).prepare({ spaceId, role: 'artifact', locator: 'uri', value: knownUri }) : undefined;
-      const publication = artifactId ? await (async () => {
-        const artifact = this.artifactStore.get(artifactId);
-        if (!artifact) throw new GoodVibesError('Unknown Home Graph artifact.', { category: 'not_found', source: 'runtime', recoverable: false });
-        const original = this.artifactStore.captureOriginal(artifactId), lease = await acquireArtifactPublication(original, this.autoLinkController.signal);
-        try { original.assertCurrent(); lease.assertCurrent(); return { artifact, original, lease }; }
-        catch (error) { try { lease.release(); } catch { logger.warn('Home Graph failed original artifact claim could not be released.'); } throw error; }
-      })() : await this.artifactStore.createForPublication({
-        path, uri, allowPrivateHosts: input.allowPrivateHosts,
-        metadata: buildHomeGraphMetadata(spaceId, installationId, { homeGraphSourceKind: 'artifact', requestedAt: Date.now() }),
-      }, { signal: this.autoLinkController.signal });
-      return this.withIngestArtifactPublication(publication, !artifactId, (artifact, assertArtifactCurrent) => this.ingestCreatedArtifact({
-        spaceId,
-        installationId,
-        artifact,
-        title: input.title,
-        sourceUri: knownUri ?? artifact.sourceUri,
-        sourceType: inferHomeGraphSourceType(input.tags, 'document'),
-        tags: ['homeassistant', 'home-graph', 'artifact', ...(input.tags ?? [])],
-        target: input.target,
-        metadata: {
-          ...(input.metadata ?? {}),
-          homeGraphSourceKind: 'artifact',
-        },
-      }, {}, identity, assertArtifactCurrent));
+    return this.ownForegroundOperation(async () => {
+      return withConfiguredDecisionModelPolicy(async () => {
+        this.requireAdmission('home-graph artifact ingestion');
+        const { spaceId, installationId } = resolveHomeGraphSpace(input);
+        const artifactId = input.artifactId, uri = input.uri, path = input.path;
+        await this.store.init();
+        this.autoLinkController.signal.throwIfAborted();
+        const knownUri = uri ?? path;
+        const identity = knownUri ? createHomeGraphSourceIdentityPlanner(this.store).prepare({ spaceId, role: 'artifact', locator: 'uri', value: knownUri }) : undefined;
+        const publication = artifactId ? await (async () => {
+          const artifact = this.artifactStore.get(artifactId);
+          if (!artifact) throw new GoodVibesError('Unknown Home Graph artifact.', { category: 'not_found', source: 'runtime', recoverable: false });
+          const original = this.artifactStore.captureOriginal(artifactId), lease = await acquireArtifactPublication(original, this.autoLinkController.signal);
+          try { original.assertCurrent(); lease.assertCurrent(); return { artifact, original, lease }; }
+          catch (error) { try { lease.release(); } catch { logger.warn('Home Graph failed original artifact claim could not be released.'); } throw error; }
+        })() : await this.artifactStore.createForPublication({
+          path, uri, allowPrivateHosts: input.allowPrivateHosts,
+          metadata: buildHomeGraphMetadata(spaceId, installationId, { homeGraphSourceKind: 'artifact', requestedAt: Date.now() }),
+        }, { signal: this.autoLinkController.signal });
+        return this.withIngestArtifactPublication(publication, !artifactId, (artifact, assertArtifactCurrent) => this.ingestCreatedArtifact({
+          spaceId,
+          installationId,
+          artifact,
+          title: input.title,
+          sourceUri: knownUri ?? artifact.sourceUri,
+          sourceType: inferHomeGraphSourceType(input.tags, 'document'),
+          tags: ['homeassistant', 'home-graph', 'artifact', ...(input.tags ?? [])],
+          target: input.target,
+          metadata: {
+            ...(input.metadata ?? {}),
+            homeGraphSourceKind: 'artifact',
+          },
+        }, {}, identity, assertArtifactCurrent));
+      });
     });
   }
 
   async linkKnowledge(input: HomeGraphLinkInput): Promise<HomeGraphLinkResult> {
-    await this.store.init();
-    const { spaceId, installationId } = resolveHomeGraphSpace(input);
-    return linkHomeGraphKnowledge(this.store, { ...input, spaceId, installationId });
+    return this.ownForegroundOperation(async () => {
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      return linkHomeGraphKnowledge(this.store, { ...input, spaceId, installationId });
+    });
   }
 
   async unlinkKnowledge(input: HomeGraphLinkInput): Promise<HomeGraphUnlinkResult> {
-    await this.store.init();
-    const { spaceId, installationId } = resolveHomeGraphSpace(input);
-    return unlinkHomeGraphKnowledge(this.store, { ...input, spaceId, installationId });
+    return this.ownForegroundOperation(async () => {
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      return unlinkHomeGraphKnowledge(this.store, { ...input, spaceId, installationId });
+    });
   }
 
   async ask(input: HomeGraphAskInput): Promise<HomeGraphAskResult> {
-    requireDecisionFeature('verified Home Graph answers; use browse or local knowledge search during Classic');
-    await this.store.init();
-    const { spaceId, installationId } = resolveReadableHomeGraphSpace(this.store, input);
-    return this.runForegroundOperation(spaceId, installationId, async () => {
-      const initialState = readHomeGraphSearchState(this.store, spaceId);
-      const repairedExtractions = await this.repairStaleExtractionsForAsk(spaceId, installationId, input.query, initialState);
-      const state = repairedExtractions > 0 ? readHomeGraphSearchState(this.store, spaceId) : initialState;
-      const selection = await readHomeGraphSearchSelection({ store: this.store, spaceId, query: input, state });
-      const answer = await answerHomeGraphQuery({ store: this.store, semanticService: this.options.semanticService,
-        spaceId, query: input, state, results: selection.results });
-      const pageRefresh = await refreshDevicePagesForHomeGraphAsk({
-        store: this.store,
-        artifactStore: this.artifactStore,
-        spaceId,
-        installationId,
-        answer,
+    return this.ownForegroundOperation(async () => {
+      requireDecisionFeature('verified Home Graph answers; use browse or local knowledge search during Classic');
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      const { spaceId, installationId } = resolveReadableHomeGraphSpace(this.store, input);
+      return this.runForegroundOperation(spaceId, installationId, async () => {
+        const initialState = readHomeGraphSearchState(this.store, spaceId);
+        const repairedExtractions = await this.repairStaleExtractionsForAsk(spaceId, installationId, input.query, initialState);
+        this.autoLinkController.signal.throwIfAborted();
+        const state = repairedExtractions > 0 ? readHomeGraphSearchState(this.store, spaceId) : initialState;
+        const selection = await readHomeGraphSearchSelection({ store: this.store, spaceId, query: input, state, signal: this.autoLinkController.signal });
+        this.autoLinkController.signal.throwIfAborted();
+        const answer = await answerHomeGraphQuery({ store: this.store, semanticService: this.options.semanticService,
+          spaceId, query: input, state, results: selection.results, signal: this.autoLinkController.signal });
+        this.autoLinkController.signal.throwIfAborted();
+        const pageRefresh = await refreshDevicePagesForHomeGraphAsk({
+          store: this.store,
+          artifactStore: this.artifactStore,
+          spaceId,
+          installationId,
+          answer,
+          signal: this.autoLinkController.signal,
+        });
+        this.queueAnswerEnrichment(spaceId, answer);
+        return withHomeGraphAskPageRefresh(answer, pageRefresh);
       });
-      this.queueAnswerEnrichment(spaceId, answer);
-      return withHomeGraphAskPageRefresh(answer, pageRefresh);
     });
   }
 
   async reindex(input: HomeGraphReindexInput = {}): Promise<HomeGraphReindexResult> {
-    requireDecisionFeature('semantic Home Graph reindexing');
-    await this.store.init();
-    if (this.activeReindex) return coalescedHomeGraphReindexResult(this.store, input);
-    const { spaceId, installationId } = resolveReadableHomeGraphSpace(this.store, input);
-    const run = this.runForegroundOperation(spaceId, installationId, () => runHomeGraphReindex({
-      store: this.store,
-      artifactStore: this.artifactStore,
-      semanticService: this.options.semanticService,
-      extract: (source, artifact, spaceId, installationId) => this.extractArtifact(source, artifact, spaceId, installationId),
-      autoLinkExistingSources: (spaceId, installationId, sourceIds) => this.autoLinkExistingSources(spaceId, installationId, sourceIds),
-      refreshQualityIssues: (spaceId, installationId) => this.refreshQualityIssues(spaceId, installationId),
-    }, input));
-    this.activeReindex = run;
-    try {
-      return await run;
-    } finally {
-      if (this.activeReindex === run) this.activeReindex = null;
-    }
+    return this.ownForegroundOperation(async () => {
+      requireDecisionFeature('semantic Home Graph reindexing');
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      if (this.activeReindex) return coalescedHomeGraphReindexResult(this.store, input);
+      const { spaceId, installationId } = resolveReadableHomeGraphSpace(this.store, input);
+      const run = this.runForegroundOperation(spaceId, installationId, () => runHomeGraphReindex({
+        store: this.store,
+        artifactStore: this.artifactStore,
+        semanticService: this.options.semanticService,
+        signal: this.autoLinkController.signal,
+        extract: (source, artifact, spaceId, installationId) => this.extractArtifact(source, artifact, spaceId, installationId),
+        autoLinkExistingSources: (spaceId, installationId, sourceIds) => this.autoLinkExistingSources(spaceId, installationId, sourceIds),
+        refreshQualityIssues: (spaceId, installationId) => this.refreshQualityIssues(spaceId, installationId),
+      }, input));
+      this.activeReindex = run;
+      try {
+        return await run;
+      } finally {
+        if (this.activeReindex === run) this.activeReindex = null;
+      }
+    });
   }
 
   private async repairStaleExtractionsForAsk(
@@ -348,21 +373,25 @@ export class HomeGraphService {
       state.edges,
       (sourceId) => state.extractionBySourceId.get(sourceId),
       2,
+      this.autoLinkController.signal,
     );
     let repaired = 0;
     for (const [index, source] of candidates.entries()) {
       await yieldEvery(index, 2);
+      this.autoLinkController.signal.throwIfAborted();
       const artifactId = typeof source.artifactId === 'string' ? source.artifactId : undefined;
       if (!artifactId) continue;
       const artifact = this.artifactStore.get(artifactId);
       if (!artifact) continue;
+      const owner = createKnowledgeExtractionOwner({ signal: this.autoLinkController.signal });
       const prepared = await prepareHomeGraphArtifactExtraction({
         store: this.store,
         artifactStore: this.artifactStore,
         reportBackgroundError: this.reportBackgroundError.bind(this),
-      }, source.id, artifact, spaceId);
-      const searchable = prepared ? await extractionHasSearchableText(prepared) : false;
-      const extraction = await storeHomeGraphArtifactExtraction(this.store, source, artifact, spaceId, installationId, prepared);
+      }, source.id, artifact, spaceId, owner);
+      const searchable = prepared ? await extractionHasSearchableText(prepared, this.autoLinkController.signal) : false;
+      owner.assertCurrent();
+      const extraction = await storeHomeGraphArtifactExtraction(this.store, source, artifact, spaceId, installationId, prepared, owner);
       if (extraction) {
         await autoLinkHomeGraphSource({
           signal: this.autoLinkController.signal,
@@ -381,49 +410,64 @@ export class HomeGraphService {
   }
 
   async refreshDevicePassport(input: HomeGraphProjectionInput): Promise<HomeGraphDevicePassportResult> {
-    requireDecisionFeature('verified Home Graph device passports');
-    await this.store.init();
-    const { spaceId, installationId } = resolveHomeGraphSpace(input);
-    return this.runForegroundOperation(spaceId, installationId, async () => {
-      await this.enrichSpaceSources(spaceId);
-      return refreshHomeGraphDevicePassport({
-        store: this.store,
-        artifactStore: this.artifactStore,
-        spaceId,
-        installationId,
-        input,
+    return this.ownForegroundOperation(async () => {
+      requireDecisionFeature('verified Home Graph device passports');
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      return this.runForegroundOperation(spaceId, installationId, async () => {
+        await this.enrichSpaceSources(spaceId);
+        this.autoLinkController.signal.throwIfAborted();
+        return refreshHomeGraphDevicePassport({
+          store: this.store,
+          artifactStore: this.artifactStore,
+          spaceId,
+          installationId,
+          input,
+          signal: this.autoLinkController.signal,
+        });
       });
     });
   }
 
   async generateRoomPage(input: HomeGraphProjectionInput): Promise<HomeGraphProjectionResult> {
-    requireDecisionFeature('verified Home Graph room pages');
-    await this.store.init();
-    const { spaceId, installationId } = resolveHomeGraphSpace(input);
-    return this.runForegroundOperation(spaceId, installationId, async () => {
-      await this.enrichSpaceSources(spaceId);
-      return generateHomeGraphRoomPage({
-        store: this.store,
-        artifactStore: this.artifactStore,
-        spaceId,
-        installationId,
-        input,
+    return this.ownForegroundOperation(async () => {
+      requireDecisionFeature('verified Home Graph room pages');
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      return this.runForegroundOperation(spaceId, installationId, async () => {
+        await this.enrichSpaceSources(spaceId);
+        this.autoLinkController.signal.throwIfAborted();
+        return generateHomeGraphRoomPage({
+          store: this.store,
+          artifactStore: this.artifactStore,
+          spaceId,
+          installationId,
+          input,
+          signal: this.autoLinkController.signal,
+        });
       });
     });
   }
 
   async generatePacket(input: HomeGraphProjectionInput): Promise<HomeGraphProjectionResult> {
-    requireDecisionFeature('verified Home Graph sharing packets');
-    await this.store.init();
-    const { spaceId, installationId } = resolveHomeGraphSpace(input);
-    return this.runForegroundOperation(spaceId, installationId, async () => {
-      await this.enrichSpaceSources(spaceId);
-      return generateHomeGraphPacket({
-        store: this.store,
-        artifactStore: this.artifactStore,
-        spaceId,
-        installationId,
-        input,
+    return this.ownForegroundOperation(async () => {
+      requireDecisionFeature('verified Home Graph sharing packets');
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      return this.runForegroundOperation(spaceId, installationId, async () => {
+        await this.enrichSpaceSources(spaceId);
+        this.autoLinkController.signal.throwIfAborted();
+        return generateHomeGraphPacket({
+          store: this.store,
+          artifactStore: this.artifactStore,
+          spaceId,
+          installationId,
+          input,
+          signal: this.autoLinkController.signal,
+        });
       });
     });
   }
@@ -434,21 +478,27 @@ export class HomeGraphService {
     readonly code?: string | undefined;
     readonly limit?: number | undefined;
   }): Promise<{ readonly ok: true; readonly spaceId: string; readonly issues: readonly KnowledgeIssueRecord[] }> {
-    await this.store.init();
-    const { spaceId } = resolveReadableHomeGraphSpace(this.store, input);
-    const limit = Math.max(1, input.limit ?? 100);
-    const issues = readHomeGraphState(this.store, spaceId).issues
-      .filter((issue) => !input.status || issue.status === input.status)
-      .filter((issue) => !input.severity || issue.severity === input.severity)
-      .filter((issue) => !input.code || issue.code === input.code)
-      .slice(0, limit);
-    return { ok: true, spaceId, issues };
+    return this.ownForegroundOperation(async () => {
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      const { spaceId } = resolveReadableHomeGraphSpace(this.store, input);
+      const limit = Math.max(1, input.limit ?? 100);
+      const issues = readHomeGraphState(this.store, spaceId).issues
+        .filter((issue) => !input.status || issue.status === input.status)
+        .filter((issue) => !input.severity || issue.severity === input.severity)
+        .filter((issue) => !input.code || issue.code === input.code)
+        .slice(0, limit);
+      return { ok: true, spaceId, issues };
+    });
   }
 
   async reviewFact(input: HomeGraphReviewInput): Promise<HomeGraphReviewResult> {
-    await this.store.init();
-    const { spaceId, installationId } = resolveHomeGraphSpace(input);
-    return reviewHomeGraphFact(this.store, spaceId, installationId, input);
+    return this.ownForegroundOperation(async () => {
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      return reviewHomeGraphFact(this.store, spaceId, installationId, input);
+    });
   }
 
   async listSources(input: HomeGraphSpaceInput & { readonly limit?: number } = {}): Promise<{
@@ -456,34 +506,41 @@ export class HomeGraphService {
     readonly spaceId: string;
     readonly sources: readonly KnowledgeSourceRecord[];
   }> {
-    return listHomeGraphSources({ ...input, store: this.store });
+    return this.ownForegroundOperation(async () => {
+      return listHomeGraphSources({ ...input, store: this.store });
+    });
   }
 
   async listPages(input: HomeGraphSpaceInput & { readonly limit?: number; readonly includeMarkdown?: boolean } = {}): Promise<HomeGraphPageListResult> {
-    await this.store.init();
-    const { spaceId } = resolveReadableHomeGraphSpace(this.store, input);
-    const state = readHomeGraphState(this.store, spaceId);
-    const observedSources = state.sources.filter(isGeneratedPageSource);
-    const observedNodes = state.nodes.filter(node => !node.metadata.semanticKind && !['fact', 'knowledge_gap', 'wiki_page'].includes(node.kind));
-    const ids = new Set([...observedSources, ...observedNodes].map(record => record.id));
-    const observedEdges = state.edges.filter(edge => ids.has(edge.fromId) && ids.has(edge.toId));
-    const original = JSON.stringify({ sources: observedSources, nodes: observedNodes, edges: observedEdges });
-    const assertCurrent = () => {
-      const edges = new Map(this.store.listEdges().map(edge => [edge.id, edge]));
-      const current = JSON.stringify({ sources: observedSources.map(source => this.store.getSource(source.id)),
-        nodes: observedNodes.map(node => this.store.getNode(node.id)), edges: observedEdges.map(edge => edges.get(edge.id)) });
-      if (current !== original) throw new HomeGraphPagePriorityHeldError('stale');
-    };
-    return listHomeGraphPages({
-      artifactStore: this.artifactStore,
-      store: this.store,
-      assertCurrent,
-      spaceId,
-      sources: state.sources,
-      nodes: state.nodes,
-      edges: state.edges,
-      limit: Math.max(1, input.limit ?? 100),
-      includeMarkdown: input.includeMarkdown !== false,
+    return this.ownForegroundOperation(async () => {
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      const { spaceId } = resolveReadableHomeGraphSpace(this.store, input);
+      const state = readHomeGraphState(this.store, spaceId);
+      const observedSources = state.sources.filter(isGeneratedPageSource);
+      const observedNodes = state.nodes.filter(node => !node.metadata.semanticKind && !['fact', 'knowledge_gap', 'wiki_page'].includes(node.kind));
+      const ids = new Set([...observedSources, ...observedNodes].map(record => record.id));
+      const observedEdges = state.edges.filter(edge => ids.has(edge.fromId) && ids.has(edge.toId));
+      const original = JSON.stringify({ sources: observedSources, nodes: observedNodes, edges: observedEdges });
+      const assertCurrent = () => {
+        this.autoLinkController.signal.throwIfAborted();
+        const edges = new Map(this.store.listEdges().map(edge => [edge.id, edge]));
+        const current = JSON.stringify({ sources: observedSources.map(source => this.store.getSource(source.id)),
+          nodes: observedNodes.map(node => this.store.getNode(node.id)), edges: observedEdges.map(edge => edges.get(edge.id)) });
+        if (current !== original) throw new HomeGraphPagePriorityHeldError('stale');
+      };
+      return listHomeGraphPages({
+        artifactStore: this.artifactStore,
+        store: this.store,
+        assertCurrent,
+        spaceId,
+        sources: state.sources,
+        nodes: state.nodes,
+        edges: state.edges,
+        limit: Math.max(1, input.limit ?? 100),
+        includeMarkdown: input.includeMarkdown !== false,
+        signal: this.autoLinkController.signal,
+      });
     });
   }
 
@@ -493,11 +550,15 @@ export class HomeGraphService {
     readonly subjectId?: string | undefined;
     readonly gapId?: string | undefined;
   } = {}) {
-    return listHomeGraphRefinementTasks({ ...input, store: this.store });
+    return this.ownForegroundOperation(async () => {
+      return listHomeGraphRefinementTasks({ ...input, store: this.store });
+    });
   }
 
   async getRefinementTask(input: HomeGraphSpaceInput & { readonly taskId: string }) {
-    return getHomeGraphRefinementTask({ ...input, store: this.store });
+    return this.ownForegroundOperation(async () => {
+      return getHomeGraphRefinementTask({ ...input, store: this.store });
+    });
   }
 
   async runRefinement(input: HomeGraphSpaceInput & {
@@ -509,11 +570,14 @@ export class HomeGraphService {
     readonly triage?: HomeGraphTriageOptions | boolean | undefined;
     readonly skipGapRefinement?: boolean | undefined;
   } = {}) {
-    return runHomeGraphRefinement({ ...input, store: this.store, semanticService: this.options.semanticService });
+    return this.ownForegroundOperation(() => runHomeGraphRefinement({ ...input, store: this.store,
+      semanticService: this.options.semanticService, signal: this.autoLinkController.signal }));
   }
 
   async cancelRefinementTask(input: HomeGraphSpaceInput & { readonly taskId: string }) {
-    return cancelHomeGraphRefinementTask({ ...input, store: this.store });
+    return this.ownForegroundOperation(async () => {
+      return cancelHomeGraphRefinementTask({ ...input, store: this.store });
+    });
   }
 
   async browse(input: HomeGraphSpaceInput & { readonly limit?: number } = {}): Promise<{
@@ -524,20 +588,27 @@ export class HomeGraphService {
     readonly sources: readonly KnowledgeSourceRecord[];
     readonly issues: readonly KnowledgeIssueRecord[];
   }> {
-    return browseHomeGraph({ ...input, store: this.store });
+    return this.ownForegroundOperation(async () => {
+      return browseHomeGraph({ ...input, store: this.store });
+    });
   }
 
   async map(input: HomeGraphMapInput = {}): Promise<HomeGraphMapResult> {
-    const request = snapshotNodeInput(input);
-    const assertCurrent = () => { if (!sameKnowledgeRecord(input, request)) throw new KnowledgeScopeSelectionHeldError('stale'); };
-    assertCurrent();
-    return mapHomeGraph({ ...request, store: this.store, assertCurrent });
+    return this.ownForegroundOperation(async () => {
+      const request = snapshotNodeInput(input);
+      const assertCurrent = () => { this.autoLinkController.signal.throwIfAborted(); if (!sameKnowledgeRecord(input, request)) throw new KnowledgeScopeSelectionHeldError('stale'); };
+      assertCurrent();
+      return mapHomeGraph({ ...request, store: this.store, assertCurrent, signal: this.autoLinkController.signal });
+    });
   }
 
   async exportSpace(input: HomeGraphSpaceInput = {}): Promise<HomeGraphExport> {
-    await this.store.init();
-    const { spaceId, installationId } = resolveReadableHomeGraphSpace(this.store, input);
-    return exportHomeGraphSpace(this.store, { spaceId, installationId });
+    return this.ownForegroundOperation(async () => {
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      const { spaceId, installationId } = resolveReadableHomeGraphSpace(this.store, input);
+      return exportHomeGraphSpace(this.store, { spaceId, installationId });
+    });
   }
 
   async importSpace(input: HomeGraphSpaceInput & { readonly data: HomeGraphExport }): Promise<{
@@ -545,25 +616,32 @@ export class HomeGraphService {
     readonly spaceId: string;
     readonly imported: { readonly sources: number; readonly nodes: number; readonly edges: number; readonly issues: number; readonly extractions: number };
   }> {
-    await this.store.init();
-    const { spaceId, installationId } = resolveHomeGraphSpace(input);
-    return importHomeGraphSpace(this.store, { spaceId, installationId, data: input.data });
+    return this.ownForegroundOperation(async () => {
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      return importHomeGraphSpace(this.store, { spaceId, installationId, data: input.data });
+    });
   }
 
   async resetSpace(input: HomeGraphResetInput): Promise<HomeGraphResetResult> {
-    await this.store.init();
-    const { spaceId } = resolveReadableHomeGraphSpace(this.store, input);
-    if (input.dryRun !== true) {
-      const sync = this.syncSelfImproveRuns.get(spaceId);
-      this.cancelSyncSelfImprovement(spaceId);
-      const tail = this.answerEnrichmentRuns.get(spaceId)?.run;
-      this.cancelAnswerEnrichment(spaceId);
-      const ingest = this.ingestEnrichmentRuns.get(spaceId);
-      this.pendingIngestEnrichment.delete(spaceId); this.scheduledIngestEnrichment.delete(spaceId);
-      ingest?.controller.abort();
-      await Promise.all([sync, tail, ingest?.run]);
-    }
-    return resetHomeGraphSpace(this.store, this.artifactStore, input);
+    return this.ownForegroundOperation(async () => {
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      const { spaceId } = resolveReadableHomeGraphSpace(this.store, input);
+      if (input.dryRun !== true) {
+        const sync = this.syncSelfImproveRuns.get(spaceId);
+        this.cancelSyncSelfImprovement(spaceId);
+        const tail = this.answerEnrichmentRuns.get(spaceId)?.run;
+        this.cancelAnswerEnrichment(spaceId);
+        const ingest = this.ingestEnrichmentRuns.get(spaceId);
+        this.pendingIngestEnrichment.delete(spaceId); this.scheduledIngestEnrichment.delete(spaceId);
+        ingest?.controller.abort();
+        await Promise.all([sync, tail, ingest?.run]);
+        this.autoLinkController.signal.throwIfAborted();
+      }
+      return resetHomeGraphSpace(this.store, this.artifactStore, input);
+    });
   }
 
   private async withIngestArtifactPublication<T>(publication: Awaited<ReturnType<ArtifactStore['createForPublication']>>, created: boolean,
@@ -726,7 +804,7 @@ export class HomeGraphService {
       store: this.store,
       artifactStore: this.artifactStore,
       reportBackgroundError: this.reportBackgroundError.bind(this),
-    }, source, artifact, spaceId, installationId);
+    }, source, artifact, spaceId, installationId, createKnowledgeExtractionOwner({ signal: this.autoLinkController.signal }));
   }
 
   private async autoLinkExistingSources(
@@ -738,10 +816,27 @@ export class HomeGraphService {
   }
 
   private async refreshQualityIssues(spaceId: string, installationId: string): Promise<readonly KnowledgeIssueRecord[]> {
-    return refreshHomeGraphQualityIssues(this.store, spaceId, installationId);
+    return refreshHomeGraphQualityIssues(this.store, spaceId, installationId, { signal: this.autoLinkController.signal });
+  }
+
+  private async ownForegroundOperation<T>(operation: () => Promise<T>): Promise<T> {
+    this.autoLinkController.signal.throwIfAborted();
+    // Publish ownership before invoking even the first borrowed dependency: an
+    // init hook may synchronously start shutdown while it still owns work.
+    const run = Promise.resolve().then(() => {
+      this.autoLinkController.signal.throwIfAborted();
+      return operation();
+    });
+    this.foregroundRuns.add(run);
+    try {
+      const result = await run;
+      this.autoLinkController.signal.throwIfAborted();
+      return result;
+    } finally { this.foregroundRuns.delete(run); }
   }
 
   private async runForegroundOperation<T>(spaceId: string, installationId: string, operation: () => Promise<T>): Promise<T> {
+    this.autoLinkController.signal.throwIfAborted();
     this.foregroundOperations.set(spaceId, (this.foregroundOperations.get(spaceId) ?? 0) + 1);
     if (this.syncSelfImproveControllers.has(spaceId)) this.resumeSyncSelfImprove.add(spaceId);
     const background = this.syncSelfImproveRuns.get(spaceId);
@@ -762,17 +857,23 @@ export class HomeGraphService {
       // Capture answer and page inputs only after the cancelled same-space
       // repair pump has finished its owned writes and cleanup.
       await background;
+      this.autoLinkController.signal.throwIfAborted();
       await tail?.run;
+      this.autoLinkController.signal.throwIfAborted();
       await ingest?.run;
+      this.autoLinkController.signal.throwIfAborted();
       return await operation();
     } finally {
       const remaining = (this.foregroundOperations.get(spaceId) ?? 1) - 1;
       if (remaining > 0) this.foregroundOperations.set(spaceId, remaining);
       else {
         this.foregroundOperations.delete(spaceId);
-        if (this.resumeSyncSelfImprove.delete(spaceId)) this.scheduleSyncSelfImprovement(spaceId, installationId);
-        this.scheduleAnswerEnrichment(spaceId);
-        this.scheduleIngestEnrichment(spaceId);
+        const resume = this.resumeSyncSelfImprove.delete(spaceId);
+        if (!this.autoLinkController.signal.aborted) {
+          if (resume) this.scheduleSyncSelfImprovement(spaceId, installationId);
+          this.scheduleAnswerEnrichment(spaceId);
+          this.scheduleIngestEnrichment(spaceId);
+        }
       }
     }
   }
@@ -883,7 +984,7 @@ export class HomeGraphService {
 
   private async enrichSpaceSources(spaceId: string): Promise<void> {
     if (!this.options.semanticService) return;
-    await enrichHomeGraphSpaceSources(this.requireSelfImprovementRuntime(), spaceId);
+    await enrichHomeGraphSpaceSources(this.requireSelfImprovementRuntime(), spaceId, this.autoLinkController.signal);
   }
 
   private queueIngestEnrichment(spaceId: string, sourceId: string): void {
@@ -973,7 +1074,7 @@ function withHomeGraphAskPageRefresh(
   };
 }
 
-async function extractionHasSearchableText(extraction: Pick<KnowledgeExtractionRecord, 'structure'>): Promise<boolean> {
+async function extractionHasSearchableText(extraction: Pick<KnowledgeExtractionRecord, 'structure'>, signal?: AbortSignal): Promise<boolean> {
   const structure = readRecord(extraction.structure);
-  return typeof structure.searchText === 'string' && !(await isUnusableHomeGraphExtractionText(structure.searchText));
+  return typeof structure.searchText === 'string' && await readKnowledgeExtractionTextUsability(structure.searchText, signal);
 }

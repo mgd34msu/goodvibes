@@ -59,7 +59,9 @@ export async function storeHomeGraphArtifactExtraction(
   spaceId: string,
   installationId: string,
   extracted: KnowledgeExtractionResult | undefined,
+  owner?: KnowledgeExtractionOwner,
 ): Promise<KnowledgeExtractionRecord | undefined> {
+  owner?.assertCurrent();
   if (!extracted) return undefined;
   const existing = store.getExtractionBySourceId(source.id);
   const generatedId = `hg-extract-${source.id.replace(/^hg-src-/, '')}`;
@@ -77,7 +79,8 @@ export async function storeHomeGraphArtifactExtraction(
     estimatedTokens: extracted.estimatedTokens,
     structure: extracted.structure,
     metadata: buildHomeGraphMetadata(spaceId, installationId, extracted.metadata),
-  });
+  }, owner?.assertCurrent.bind(owner));
+  owner?.assertCurrent();
   if (record.id === generatedId) registerGeneratedKnowledgeExtractionReferences(store, source, record, generatedId);
   return record;
 }
@@ -88,9 +91,10 @@ export async function extractHomeGraphArtifact(
   artifact: ArtifactDescriptor,
   spaceId: string,
   installationId: string,
+  owner: KnowledgeExtractionOwner = createKnowledgeExtractionOwner(),
 ): Promise<KnowledgeExtractionRecord | undefined> {
-  const extracted = await prepareHomeGraphArtifactExtraction(context, source.id, artifact, spaceId);
-  return storeHomeGraphArtifactExtraction(context.store, source, artifact, spaceId, installationId, extracted);
+  const extracted = await prepareHomeGraphArtifactExtraction(context, source.id, artifact, spaceId, owner);
+  return storeHomeGraphArtifactExtraction(context.store, source, artifact, spaceId, installationId, extracted, owner);
 }
 
 export function autoLinkExistingHomeGraphSources(

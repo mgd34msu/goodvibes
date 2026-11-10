@@ -13,6 +13,7 @@ import { KnowledgeAnswerQualityHeldError } from '../semantic/answer-verification
 import { prepareHomeGraphAnswerScope } from './answer-scope.js';
 
 export async function answerHomeGraphQuery(input: {
+  readonly signal?: AbortSignal | undefined;
   readonly store: KnowledgeStore;
   readonly semanticService?: KnowledgeSemanticService | undefined;
   readonly spaceId: string;
@@ -25,6 +26,7 @@ export async function answerHomeGraphQuery(input: {
 }
 
 async function answerHomeGraphQueryOnce(input: {
+  readonly signal?: AbortSignal | undefined;
   readonly store: KnowledgeStore;
   readonly semanticService?: KnowledgeSemanticService | undefined;
   readonly spaceId: string;
@@ -44,6 +46,7 @@ async function answerHomeGraphQueryOnce(input: {
     const semanticInputFor = (current: typeof selection): KnowledgeSemanticAnswerInput => {
       const currentResults = current?.results ?? results;
       const semanticInput: KnowledgeSemanticAnswerInput = {
+        signal: input.signal,
         query: input.query.query,
         knowledgeSpaceId: input.spaceId,
         mode: input.query.mode ?? 'standard',
@@ -67,7 +70,7 @@ async function answerHomeGraphQueryOnce(input: {
           // corpus; do not silently bless an old stale candidate window.
           selection!.assertRenewalAllowed();
           const state = readHomeGraphSearchState(input.store, input.spaceId);
-          const next = await readHomeGraphSearchSelection({ store: input.store, spaceId: input.spaceId, query: input.query, state });
+          const next = await readHomeGraphSearchSelection({ store: input.store, spaceId: input.spaceId, query: input.query, state, signal: input.signal });
           selection!.assertRenewalAllowed();
           const originalIds = new Set(selection!.linkedObjects.map((node) => node.id));
           if (next.linkedObjects.length !== originalIds.size || next.linkedObjects.some((node) => !originalIds.has(node.id))) {

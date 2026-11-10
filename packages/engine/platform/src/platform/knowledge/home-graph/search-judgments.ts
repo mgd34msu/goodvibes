@@ -66,6 +66,7 @@ export function preparedHomeGraphSearchSelection(input: {
  * candidates, never clipped document fragments, enter bounded shared readers.
  */
 export async function readHomeGraphSearchSelection(input: {
+  readonly signal?: AbortSignal | undefined;
   readonly store: KnowledgeStore;
   readonly spaceId: string;
   readonly query: HomeGraphAskInput;
@@ -76,10 +77,10 @@ export async function readHomeGraphSearchSelection(input: {
       if (input.state.spaceId !== input.spaceId) throw new Held('malformed');
       assertJudgmentInput({ query: input.query.query });
       // Do not retain the completed budget's aborted signal in a later handoff.
-      const baseGuard = createSemanticWriteGuard(input.store);
+      const baseGuard = createSemanticWriteGuard(input.store, input.signal);
       const originalQuestion = snapshotNodeInput(input.query);
       baseGuard.watch('home-graph-query', () => input.query, originalQuestion);
-      const renewalGuard = createSemanticWriteGuard(input.store);
+      const renewalGuard = createSemanticWriteGuard(input.store, input.signal);
       renewalGuard.watch('home-graph-original-question', () => input.query, originalQuestion);
       baseGuard.watch('home-graph-search-context', () => {
         const state = readHomeGraphSearchState(input.store, input.spaceId);
@@ -243,7 +244,7 @@ export async function readHomeGraphSearchSelection(input: {
         candidateSourceIds: Object.freeze(candidateSourceIds), assertCurrent, assertRenewalAllowed };
       selections.set(results, { selection, store: input.store, spaceId: input.spaceId, query: input.query, state: input.state });
       return selection;
-    }, input.query.timeoutMs);
+    }, input.query.timeoutMs, input.signal);
   } catch (error) {
     if (error instanceof JudgmentInputError || error instanceof Held) throw error;
     if (error instanceof KnowledgeAnswerExcerptHeldError || error instanceof KnowledgeEvidenceRelevanceHeldError

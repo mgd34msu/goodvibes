@@ -15,10 +15,11 @@
  * Cross-test observation is deliberate: a disposal that is supposed to happen
  * "after each test" can only be proven by a LATER test reading the flag.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { existsSync } from 'node:fs';
 
 import { trackDisposables } from './disposables.ts';
-import { getTestRuntimeServices, resetTestRuntimeServices, disposeTestRuntimeServicesAfterAll } from './runtime-services.ts';
+import { getTestRuntimeServices, resetTestRuntimeServices, drainTestRuntimeServices, disposeTestRuntimeServicesAfterAll } from './runtime-services.ts';
 
 // Stop the shared test runtime graph when this file ends. Called here, not
 // registered inside the helper, for the reason its doc comment gives.
@@ -154,28 +155,28 @@ function trackTimers() {
 
 describe('genuine async shared runtime preparation', () => {
   test('concurrent acquisition publishes one actual prepared graph', async () => {
-    resetTestRuntimeServices();
+    await drainTestRuntimeServices();
     const [first, second] = await Promise.all([getTestRuntimeServices(), getTestRuntimeServices()]);
     expect(first).toBe(second);
     expect(await getTestRuntimeServices()).toBe(first);
-    resetTestRuntimeServices();
+    await drainTestRuntimeServices();
   });
 
   test('a reset retires in-flight preparation without publishing over the replacement', async () => {
-    resetTestRuntimeServices();
+    await drainTestRuntimeServices();
     const retired = getTestRuntimeServices();
     resetTestRuntimeServices();
     const replacement = getTestRuntimeServices();
     await expect(retired).rejects.toThrow('Test runtime preparation was reset');
     const current = await replacement;
     expect(await getTestRuntimeServices()).toBe(current);
-    resetTestRuntimeServices();
+    await drainTestRuntimeServices();
   });
 });
 
 describe('resetTestRuntimeServices: stops the graph it drops', () => {
-  test('every poller the shared test graph started is cleared when it is reset', async () => {
-    resetTestRuntimeServices();
+  test('every poller the shared test graph started is cleared when its reset drains', async () => {
+    await drainTestRuntimeServices();
     const timers = trackTimers();
     try {
       const services = (await getTestRuntimeServices());
@@ -189,6 +190,7 @@ describe('resetTestRuntimeServices: stops the graph it drops', () => {
       expect(started).toBeGreaterThan(3);
 
       resetTestRuntimeServices();
+      await drainTestRuntimeServices();
       expect(timers.liveCount).toBe(0);
 
       // ...and the next request builds a fresh, running graph.
@@ -196,9 +198,88 @@ describe('resetTestRuntimeServices: stops the graph it drops', () => {
       expect(rebuilt).not.toBe(services);
       expect(timers.liveCount).toBeGreaterThan(3);
       resetTestRuntimeServices();
+      await drainTestRuntimeServices();
       expect(timers.liveCount).toBe(0);
     } finally {
-      timers.restore();
+      try { await drainTestRuntimeServices(); } finally { timers.restore(); }
+    }
+  });
+
+  test('reset retains both original graph drains while retiring the shared pointer immediately', async () => {
+    await drainTestRuntimeServices();
+    const first = await getTestRuntimeServices();
+    const firstClose = first.close.bind(first);
+    const a = Promise.withResolvers<void>();
+    const firstStop = spyOn(first, 'close').mockImplementation(() => {
+      const closing = firstClose();
+      return Promise.all([closing, a.promise]).then(() => {});
+    });
+    let restoreSecond = (): void => {};
+    let draining: Promise<void> | undefined;
+    const b = Promise.withResolvers<void>();
+    try {
+      resetTestRuntimeServices();
+      expect(firstStop).toHaveBeenCalledTimes(1);
+      const second = await getTestRuntimeServices();
+      expect(second).not.toBe(first);
+      expect(second.workingDirectory).not.toBe(first.workingDirectory);
+      const secondClose = second.close.bind(second);
+      const secondStop = spyOn(second, 'close').mockImplementation(() => {
+        const closing = secondClose();
+        return Promise.all([closing, b.promise]).then(() => {});
+      });
+      restoreSecond = () => { secondStop.mockRestore(); };
+      resetTestRuntimeServices();
+      let settled = false;
+      draining = drainTestRuntimeServices().then(() => { settled = true; });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(existsSync(first.workingDirectory)).toBe(true);
+      expect(existsSync(second.workingDirectory)).toBe(true);
+      a.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      b.resolve();
+      await draining;
+      expect(firstStop).toHaveBeenCalledTimes(1);
+      expect(secondStop).toHaveBeenCalledTimes(1);
+    } finally {
+      a.resolve(); b.resolve();
+      try { await draining; await drainTestRuntimeServices(); }
+      finally { firstStop.mockRestore(); restoreSecond(); }
+    }
+  });
+
+  test('a retired graph close failure is retained while every independent graph still drains', async () => {
+    await drainTestRuntimeServices();
+    const first = await getTestRuntimeServices();
+    const firstClose = first.close.bind(first);
+    const failure = new Error('original TUI test graph close failed');
+    const firstStop = spyOn(first, 'close').mockImplementation(async () => {
+      await firstClose();
+      throw failure;
+    });
+    let restoreSecond = (): void => {};
+    try {
+      resetTestRuntimeServices();
+      const second = await getTestRuntimeServices();
+      const secondClose = second.close.bind(second);
+      const secondStop = spyOn(second, 'close').mockImplementation(() => secondClose());
+      restoreSecond = () => { secondStop.mockRestore(); };
+      resetTestRuntimeServices();
+      const outcome = await Promise.allSettled([drainTestRuntimeServices()]);
+      expect(outcome[0]?.status).toBe('rejected');
+      const result = outcome[0];
+      if (!result || result.status !== 'rejected') throw new Error('Expected original cleanup failure');
+      expect(result.reason).toBeInstanceOf(AggregateError);
+      expect(result.reason.errors).toEqual([failure]);
+      expect(firstStop).toHaveBeenCalledTimes(1);
+      expect(secondStop).toHaveBeenCalledTimes(1);
+      expect(existsSync(first.workingDirectory)).toBe(true);
+      expect(existsSync(second.workingDirectory)).toBe(true);
+    } finally {
+      try { await drainTestRuntimeServices(); }
+      finally { firstStop.mockRestore(); restoreSecond(); }
     }
   });
 

@@ -105,7 +105,7 @@ function siteOf(stack: string): string {
 }
 
 let root: string;
-let services: RuntimeServices;
+let services: RuntimeServices | undefined;
 let liveBeforeDispose: string[] = [];
 let liveAfterDispose: string[] = [];
 
@@ -128,25 +128,18 @@ beforeAll(async () => {
       homeDirectory: root,
       getConversationTitle: () => 'disposal-test',
     });
-    // Not every poller is armed by the time the factory returns. The inbox
-    // surface starts its store bootstrap without awaiting it and arms the
-    // retention sweep two awaits later, so disposing the instant construction
-    // returns would measure a timer that does not exist yet and pass for
-    // entirely the wrong reason. Wait for it, bounded.
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline
-      && !describe().some((e) => e.includes('daemon/handlers/inbox/cursor-store'))) {
-      await new Promise((resolve) => realSetTimeout(resolve, 25));
-    }
+    // This graph owns no mailbox poller. Measure the real pollers it started,
+    // then await their dependency-ordered shutdown before checking survivors.
     liveBeforeDispose = describe();
-    services.dispose();
+    await services.close();
     liveAfterDispose = describe();
   } finally {
-    restore();
+    try { await services?.close(); } finally { restore(); }
   }
 }, 30_000);
 
-afterAll(() => {
+afterAll(async () => {
+  await services?.close();
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -166,7 +159,7 @@ test('this composition starts no mailbox poller at all', () => {
   expect(liveBeforeDispose.filter((e) => e.includes('daemon/handlers/inbox'))).toEqual([]);
 });
 
-test('dispose() stops every poller the graph started', () => {
+test('close() drains every poller the graph started', () => {
   const survivors = liveAfterDispose.filter((e) => POLLER_OWNERS.some((o) => e.includes(o)));
   expect(survivors).toEqual([]);
 });

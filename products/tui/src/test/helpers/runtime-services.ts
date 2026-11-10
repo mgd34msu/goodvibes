@@ -56,6 +56,11 @@ let runtimeServices: RuntimeServices | null = null;
 let runtimeOpening: Promise<RuntimeServices> | null = null;
 let runtimeGeneration = 0;
 const runtimePreparations = new Set<Promise<RuntimeServices>>();
+const ownedRuntimes = new Set<RuntimeServices>();
+const pendingRuntimeClosures = new Set<Promise<void>>();
+class RetiredRuntimePreparationError extends Error {
+  constructor() { super('Test runtime preparation was reset.'); }
+}
 let runtimeCounter = 0;
 let toolLLM: ToolLLM | null = null;
 let toolLLMRuntimeServices: RuntimeServices | null = null;
@@ -89,21 +94,9 @@ function getTestRoots(): IntelligenceTestRoots {
     }),
   };
 
-  // No cleanup wiring here on purpose, and two things clean this root up
-  // instead. A `process.on('exit', ...)` registered from inside this lazily-
-  // called function used to sit here, the same dead-code pattern documented
-  // on makeProjectTempDir in project-temp.ts: `bun test` never fires exit
-  // handlers, and afterAll doesn't reliably attach when called from inside an
-  // already-running test/beforeEach rather than at collection time. It was
-  // leaking one `gv-test-runtime` tree per test file that touched this shared
-  // graph. What replaces it: (1) disposeTestRuntimeServicesAfterAll's
-  // top-level afterAll removes this root per file, and (2) `root` came from
-  // makeProjectTempDir, so it is registered with helpers/temp-registry.ts and
-  // the preload's afterAll drains it, with re-checks, when the test process
-  // finishes. (2) is what closes the residual noted on
-  // disposeTestRuntimeServicesAfterAll below, where a late async write inside
-  // the platform recreates a few files microtasks after the per-file rmSync.
-
+  // The file's explicit afterAll drains original preparations and every retired
+  // graph before removing this shared root. The preload also owns the enclosing
+  // test-temp directory; no process-exit callback is needed here.
 
   return testRoots;
 }
@@ -157,14 +150,41 @@ function seedRuntimeProviderTestModels(services: RuntimeServices): void {
  * suite accumulates one whole graph's worth of timers per test or none.
  */
 export function resetTestRuntimeServices(): void {
-  const previous = runtimeServices;
   runtimeGeneration++;
   runtimeOpening = null;
   runtimeServices = null;
   toolLLM = null;
   toolLLMRuntimeServices = null;
   autoHealer = null;
-  previous?.dispose();
+  for (const services of ownedRuntimes) closeOwnedRuntime(services);
+}
+
+function closeOwnedRuntime(services: RuntimeServices): void {
+  if (!ownedRuntimes.delete(services)) return;
+  let closing: Promise<void>;
+  // Native close retires new work immediately; retain its original drain.
+  try { closing = services.close(); } catch (error) { closing = Promise.reject(error); }
+  pendingRuntimeClosures.add(closing);
+  void closing.catch(() => {});
+}
+
+/** Await all original preparations and graph closes, retaining cleanup failures. */
+export async function drainTestRuntimeServices(): Promise<void> {
+  resetTestRuntimeServices();
+  const failures: unknown[] = [];
+  while (runtimePreparations.size || pendingRuntimeClosures.size || ownedRuntimes.size) {
+    const preparations = [...runtimePreparations];
+    const prepared = await Promise.allSettled(preparations);
+    for (const preparation of preparations) runtimePreparations.delete(preparation);
+    for (const outcome of prepared)
+      if (outcome.status === 'rejected' && !(outcome.reason instanceof RetiredRuntimePreparationError)) failures.push(outcome.reason);
+    resetTestRuntimeServices();
+    const closures = [...pendingRuntimeClosures];
+    for (const closing of closures) pendingRuntimeClosures.delete(closing);
+    const closed = await Promise.allSettled(closures);
+    for (const outcome of closed) if (outcome.status === 'rejected') failures.push(outcome.reason);
+  }
+  if (failures.length) throw new AggregateError(failures, 'Owned TUI test runtimes did not drain.');
 }
 
 /**
@@ -190,31 +210,15 @@ export function resetTestRuntimeServices(): void {
  * per-file `afterAll` entry point, so folding the cleanup in here reaches
  * every file without a second thing to remember to call.
  *
- * Known residual: confirmed by direct instrumentation that this rmSync
- * genuinely succeeds at the moment it runs, but for some files a handful of
- * files reappear under the same path microtasks later, some subsystem
- * inside the created RuntimeServices graph (not identified further; it is
- * inside @goodvibes-jev/engine/platform, not this repo) performs an async write after
- * `previous?.dispose()` above has synchronously returned, without this
- * module awaiting it (resetTestRuntimeServices()'s signature is used
- * synchronously in dozens of afterEach hooks elsewhere, so it isn't safe to
- * make it async just for this). That residue is a small fraction of what
- * used to leak (a file or two under `runtime-N/config/...`, not the whole
- * populated `intelligence-workspace`/`intelligence-home` tree), and is still
- * bounded by the age-gated `.test-tmp` sweep like everything else here.
+ * Reset stays synchronous so existing callers immediately retire their graph.
+ * The original asynchronous closes are retained until this file's awaited
+ * drain; failure preserves the roots and remains a test failure.
  */
 export function disposeTestRuntimeServicesAfterAll(): void {
   afterAll(async () => {
-    const accepted = runtimeServices;
-    resetTestRuntimeServices();
-    await accepted?.close();
-    while (runtimePreparations.size) await Promise.allSettled([...runtimePreparations]);
+    await drainTestRuntimeServices();
     if (testRoots) {
-      try {
-        rmSync(testRoots.root, { recursive: true, force: true });
-      } catch {
-        // ignore cleanup failures
-      }
+      rmSync(testRoots.root, { recursive: true, force: true });
       testRoots = null;
     }
   });
@@ -228,16 +232,21 @@ export async function getTestRuntimeServices(): Promise<RuntimeServices> {
   const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir, workingDir, homeDir: workingDir });
   const opening = (async () => {
     await prepareConfiguredProjectContext(configManager, workingDir, 'knowledge-wiki.sqlite', { activate: true });
-    if (generation !== runtimeGeneration) throw new Error('Test runtime preparation was reset.');
+    if (generation !== runtimeGeneration) throw new RetiredRuntimePreparationError();
     const created = createRuntimeServices({ modelDiscovery: 'skip', configManager,
       runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), workingDir,
       homeDirectory: workingDir, getConversationTitle: () => 'test-runtime' });
+    ownedRuntimes.add(created);
     try {
       seedRuntimeProviderTestModels(created); applyExecutorIfPresent(created);
-      if (generation !== runtimeGeneration) throw new Error('Test runtime preparation was reset.');
+      if (generation !== runtimeGeneration) throw new RetiredRuntimePreparationError();
       runtimeServices = created;
       return created;
-    } catch (error) { await created.close(); throw error; }
+    } catch (error) {
+      // Keep this failed construction owned even when it was never published.
+      closeOwnedRuntime(created);
+      throw error;
+    }
   })();
   runtimeOpening = opening; runtimePreparations.add(opening);
   try { return await opening; }

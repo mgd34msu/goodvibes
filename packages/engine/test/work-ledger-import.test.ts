@@ -1,13 +1,12 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
 import { prepareLegacyWorkLedgerMigration } from '../platform/src/platform/workflow/work-ledger/legacy-import.js';
 import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
-import type { SQLitePublicationIO } from '../platform/src/platform/state/sqlite-store-persistence.js';
 import type { NativeDataWriteOwner } from '../platform/src/platform/runtime/native-reader-compatibility.js';
 const roots: string[] = []; const stores: KnowledgeStore[] = [];
 afterEach(async () => { await Promise.all(stores.splice(0).map(store => store.close())); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
@@ -137,10 +136,23 @@ test('lock-wait cancellation and live auth revocation leave no import; known rec
 });
 test('postrename durability ambiguity reconciles same request once, including aborted retry', async () => {
   const host = await fixture(); const request = await seed(host);
-  const persistence = (host.store as unknown as { sqlite: { persistence: { io: SQLitePublicationIO } } }).sqlite.persistence;
-  let fail = true;
-  persistence.io = { ...fs, fsyncSync(fd) { if (fs.fstatSync(fd).isDirectory() && fail) { fail = false; throw new Error('owned fault'); } fs.fsyncSync(fd); } };
-  expect(await host.service.execute(request, host.actor)).toMatchObject({ kind: 'indeterminate', requestId: request.requestId });
+  const parent = fs.statSync(dirname(host.file), { bigint: true });
+  const actualRename = fs.renameSync, actualSync = fs.fsyncSync;
+  let published = false, failed = false;
+  const rename = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+    actualRename(from, to);
+    if (String(to) === host.file && String(from).startsWith(`${host.file}.tmp-`)) published = true;
+  });
+  const sync = spyOn(fs, 'fsyncSync').mockImplementation(fd => {
+    const current = fs.fstatSync(fd, { bigint: true });
+    if (!failed && published && current.isDirectory() && current.dev === parent.dev && current.ino === parent.ino) {
+      failed = true; throw new Error('owned postrename acknowledgment fault');
+    }
+    actualSync(fd);
+  });
+  try { expect(await host.service.execute(request, host.actor)).toMatchObject({ kind: 'indeterminate', requestId: request.requestId }); }
+  finally { sync.mockRestore(); rename.mockRestore(); }
+  expect(published).toBe(true); expect(failed).toBe(true);
   const bytes = fs.readFileSync(host.file); const abort = new AbortController(); abort.abort();
   expect(await host.service.execute(request, host.actor, { signal: abort.signal })).toMatchObject({ kind: 'accepted', replayed: true });
   expect(fs.readFileSync(host.file)).toEqual(bytes); expect((await host.service.history(0, host.actor))).toHaveLength(1);

@@ -222,7 +222,16 @@ test('selected native diff stays exact host evidence through capture, changed wo
     expect(queued.result.continuation?.messages.some(message => message.content === ACTIVE)).toBe(false);
     const queuedDeliverySource = await captureAndAdmit(command('queued-delivery', QUEUED_DELIVERY, sessionSelector));
     if (queuedDeliverySource.result.kind !== 'turn') throw new Error(queuedDeliverySource.admit.body);
-    expect(queuedDeliverySource.result.continuation).toEqual(queued.result.continuation);
+    // Each v2 snapshot owns an opaque issuance revision. Equal captured
+    // evidence does not turn two independently issued snapshots into one ID.
+    expect(queuedDeliverySource.result.continuation?.messages).toEqual(queued.result.continuation?.messages);
+    expect(queuedDeliverySource.result.continuation?.selectedDiff).toEqual(queued.result.continuation?.selectedDiff);
+    for (const original of [queued.result, queuedDeliverySource.result]) {
+      expect(original.continuation?.version).toBe(2);
+      expect(original.continuation?.sessionId).toBe(sessionId);
+      expect(original.sourceRef.continuation).toEqual({ version: 2, sessionId,
+        revision: original.continuation?.revision, selectedDiff: sessionSelector });
+    }
     const queuedDeliveryAbsent = await wire('workLedger.turn.status', queuedDeliverySource.identity); expect(body(queuedDeliveryAbsent)).toEqual({ kind: 'not-found' });
     const queuedAbsent = await wire('workLedger.turn.status', queued.identity); expect(body(queuedAbsent)).toEqual({ kind: 'not-found' });
     const queuedStart = await wire('workLedger.turn.start', queued.identity); expect(turn(queuedStart).state).toBe('queued');

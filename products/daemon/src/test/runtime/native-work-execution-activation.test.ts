@@ -1,7 +1,7 @@
 import * as nativeFs from 'node:fs';
 import { expect, spyOn, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
@@ -38,6 +38,26 @@ async function waitFor(predicate: () => boolean, label: string) {
   }
 }
 const answer = (content: string): ChatResponse => ({ content, toolCalls: [], usage: { inputTokens: 10, outputTokens: 5 }, stopReason: 'completed' });
+
+/** Lose only the acknowledgement after this original database was renamed.
+ * Native publication remains real; private constructor-captured IO is untouched. */
+function failNativePublicationAcknowledgment(file: string, message: string) {
+  const parent = nativeFs.statSync(dirname(file), { bigint: true });
+  const actualRename = nativeFs.renameSync, actualSync = nativeFs.fsyncSync;
+  let published = false, failed = false;
+  const rename = spyOn(nativeFs, 'renameSync').mockImplementation((from, to) => {
+    actualRename(from, to);
+    if (String(to) === file && String(from).startsWith(`${file}.tmp-`)) published = true;
+  });
+  const sync = spyOn(nativeFs, 'fsyncSync').mockImplementation(fd => {
+    const current = nativeFs.fstatSync(fd, { bigint: true });
+    if (!failed && published && current.isDirectory() && current.dev === parent.dev && current.ino === parent.ino) {
+      failed = true; throw new Error(message);
+    }
+    actualSync(fd);
+  });
+  return { failed: () => failed, restore() { sync.mockRestore(); rename.mockRestore(); } };
+}
 
 async function fixture(pairingOwner?: PairingTokenManager) {
   const root = makeOwnedTempDir('native-activation'); const workspace = join(root, 'workspace');
@@ -268,15 +288,9 @@ for (const lostAcknowledgment of [false, true]) test(`authenticated cold daemon 
     expect({ starts, resumes }).toEqual({ starts: 0, resumes: 0 });
     const coldStore = recovered.store;
     if (lostAcknowledgment) {
-      const persistence = (coldStore as unknown as { sqlite: { persistence: { io: typeof nativeFs } } }).sqlite.persistence;
-      let fileSynced = false; let failed = false;
-      persistence.io = { ...nativeFs, fsyncSync(fd) {
-        const directory = nativeFs.fstatSync(fd).isDirectory(); if (!directory) fileSynced = true;
-        if (!failed && fileSynced && directory) { failed = true; throw new Error('Owned lost settlement acknowledgment'); }
-        nativeFs.fsyncSync(fd);
-      } };
-      try { await expect(client.resume(identity)).rejects.toMatchObject({ status: 503 }); expect(failed).toBe(true); }
-      finally { persistence.io = nativeFs; }
+      const fault = failNativePublicationAcknowledgment(coldStore.storagePath, 'Owned lost settlement acknowledgment');
+      try { await expect(client.resume(identity)).rejects.toMatchObject({ status: 503 }); expect(fault.failed()).toBe(true); }
+      finally { fault.restore(); }
       client.dispose(); recovered = await reopen(); client = recovered.client;
       expect(await client.status(identity)).toMatchObject({ settlement: { state: 'published' }, expectedRevision: identity.expectedRevision, stale: true, currentAttempt: false });
     }
@@ -654,6 +668,7 @@ test('review: ambiguous late-association cancellation still owns foreground clea
   let releaseCancel!: () => void; const cancelGate = new Promise<void>(resolve => { releaseCancel = resolve; });
   let releaseProvider!: () => void; const cleanup = new Promise<void>(resolve => { releaseProvider = resolve; });
   let entered = false; let aborted = false; let ended = false;
+  let restoreFault: (() => void) | undefined;
   let unsubscribe: (() => void) | undefined; let stopping: Promise<unknown> | undefined; let start: Promise<unknown> | undefined;
   f.hold(async request => { entered = true;
     await new Promise<void>(resolve => { if (request.signal?.aborted) resolve(); else request.signal?.addEventListener('abort', () => resolve(), { once: true }); });
@@ -674,21 +689,17 @@ test('review: ambiguous late-association cancellation still owns foreground clea
     stopping = execution.cancelTarget(f.target, f.authority, 'Owned delayed association cancellation').then(
       value => { ended = true; return value; }, error => { ended = true; return error; });
     releaseStart(); await start; await waitFor(() => entered, 'late foreground provider entered');
-    const persistence = (f.options.knowledgeStore as unknown as { sqlite: { persistence: { io: typeof nativeFs } } }).sqlite.persistence;
-    let failed = false;
-    persistence.io = { ...nativeFs, fsyncSync(fd) {
-      if (!failed && nativeFs.fstatSync(fd).isDirectory()) { failed = true; throw new Error('Owned after-publication cancellation fault'); }
-      nativeFs.fsyncSync(fd);
-    } };
+    const fault = failNativePublicationAcknowledgment(f.options.knowledgeStore.storagePath, 'Owned after-publication cancellation fault');
+    restoreFault = fault.restore;
     const originalAuthority = f.authority.withCurrent.bind(f.authority);
     f.authority.withCurrent = async (expected, callback) => {
       try { return await originalAuthority(expected, callback); }
-      finally { if (failed) tokens.revoke(f.paired.id); }
+      finally { if (fault.failed()) tokens.revoke(f.paired.id); }
     };
     releaseCancel(); await waitFor(() => ended || aborted, 'failed cancel or foreground abort observed');
-    persistence.io = nativeFs;
+    fault.restore(); restoreFault = undefined;
     await new Promise(resolve => setTimeout(resolve, 20));
-    expect(failed).toBe(true); expect({ ended, aborted }).toEqual({ ended: false, aborted: true });
+    expect(fault.failed()).toBe(true); expect({ ended, aborted }).toEqual({ ended: false, aborted: true });
     releaseProvider(); expect(await stopping).toMatchObject({ code: 'unavailable' }); expect(ended).toBe(true);
-  } finally { unsubscribe?.(); releaseStart(); releaseCancel(); releaseProvider(); await Promise.allSettled([start, stopping]); await f.close(); factory.mockRestore(); identities.mockRestore(); benchmarks.mockRestore(); }
+  } finally { restoreFault?.(); unsubscribe?.(); releaseStart(); releaseCancel(); releaseProvider(); await Promise.allSettled([start, stopping]); await f.close(); factory.mockRestore(); identities.mockRestore(); benchmarks.mockRestore(); }
 }, 20000);

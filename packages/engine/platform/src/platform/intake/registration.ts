@@ -13,6 +13,7 @@ import { InboxCursorStore } from './cursor-store.js';
 import { InboundPoller } from './poller.js';
 import { aggregateInbox, normalizeInboxQuery, type InboxListInput, type InboxListOutput, type ChannelInboxItem } from './aggregator.js';
 import type { ImapUidCheckpoint, InboundProviderAdapter } from './provider-adapter.js';
+import type { TriageReceiptScope } from './triage/types.js';
 import type { IntakeLogger } from './context.js';
 import { composeInboxReads, type InboxReadSource } from './composite.js';
 
@@ -43,8 +44,10 @@ export interface RegisterInboxSurfaceOptions {
   /** Required: the product supplies every configured or unavailable provider. */
   readonly adapters: ReadonlyMap<string, InboundProviderAdapter>;
   /** Trusted host-only overlay; runs inside all held account leases. */
-  readonly enrichTriage?: (items: readonly Readonly<ChannelInboxItem>[]) => Promise<ReadonlyMap<string, InboxTriageOverlay>>;
+  readonly enrichTriage?: (items: readonly Readonly<ChannelInboxItem>[], source?: object) => Promise<ReadonlyMap<string, InboxTriageOverlay>>;
   readonly storeFileName?: string;
+  readonly beforeSourceRevisionWrite?: (() => void) | undefined;
+  readonly triageScope?: TriageReceiptScope | undefined;
   readonly skipInitialPoll?: boolean;
   /** Default true. Cluster gates may heartbeat once the owned seed is admitted. */
   readonly awaitInitialPoll?: boolean;
@@ -113,6 +116,8 @@ export function createOwnedInboxSource(
   const store = new InboxCursorStore(ctx.workingDirectory, options.storeFileName, {
     onSweep: ({ expired, capped, remaining }) => report('info', 'inbox retention sweep reclaimed items', { expired, capped, remaining }),
     onSweepError: () => report('warn', 'inbox retention sweep failed'),
+    beforeSourceRevisionWrite: options.beforeSourceRevisionWrite,
+    triageScope: options.triageScope,
   });
   const poller = new InboundPoller({ adapters, store, logger: ctx.logger });
   let closed = false;
@@ -242,7 +247,7 @@ export function createOwnedInboxSource(
       };
       assertCurrent();
       return { providerIds, sources: { store, poller }, release: retire, assertCurrent,
-        ...(options.enrichTriage ? { enrichTriage: options.enrichTriage } : {}),
+        ...(options.enrichTriage ? { enrichTriage: (items: readonly Readonly<ChannelInboxItem>[]) => options.enrichTriage!(items, store) } : {}),
         async validate() {
           if (closed || released) throw stopped();
           await checkRead();

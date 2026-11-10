@@ -6,7 +6,8 @@ import { dirname } from 'node:path';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { checkTriageReceipt } from '../platform/src/platform/intake/triage/evidence.js';
-import { readTriageMetadataBatch } from '../platform/src/platform/intake/triage/pipeline.js';
+import { triageSource } from './_helpers/triage-source.ts';
+import { runInboxTriage, readTriageMetadataBatch } from '../platform/src/platform/intake/triage/pipeline.js';
 import { scoreInboxTriage } from '../platform/src/platform/intake/triage/scorer.js';
 import { SqliteTriageStore } from '../platform/src/platform/intake/triage/store.js';
 import type { TriageEvidence, TriageFailureReceipt, TriageReceipt } from '../platform/src/platform/intake/triage/types.js';
@@ -17,11 +18,14 @@ const answered = () => fakePort(name => noulAnswer(name.endsWith('urgency') ? .9
 const directories: string[] = [];
 const stores: SqliteTriageStore[] = [];
 function directory(): string { const value = makeProjectTempDir('triage-failed-bindings'); directories.push(value); return value; }
-function store(root: string, beforeWrite?: (version?: 3) => void): SqliteTriageStore {
+function store(root: string, beforeWrite?: (version?: 3 | 4) => void): SqliteTriageStore {
   const value = new SqliteTriageStore(root, undefined, beforeWrite); stores.push(value); return value;
 }
+let originalSource: Awaited<ReturnType<typeof triageSource>> | undefined;
 async function settled(): Promise<TriageEvidence> {
-  const receipt = (await scoreInboxTriage([item()], answered().port))[0];
+  originalSource ??= await triageSource([item()]);
+  const receipt = (await runInboxTriage([item()], { ...originalSource.options, port: answered().port,
+    store: { async readBatch() { return new Map(); }, async commit(_receipts, _signal, assertCurrent) { assertCurrent?.(); }, async close() {} } }))[0];
   if (receipt?.status !== 'settled') throw new Error('The actual answered fixture must settle.');
   return receipt;
 }
@@ -32,10 +36,11 @@ async function failed(): Promise<TriageFailureReceipt> {
 }
 afterEach(async () => {
   await Promise.all(stores.splice(0).map(value => value.close()));
+  originalSource = undefined;
   for (const root of directories.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-test('missing, cancelled, invalid, failed and held triage perform no input hashing; mixed settled items hash once', async () => {
+test('all triage outcomes perform no input hashing, including actual settled and mixed batches', async () => {
   const hash = spyOn(crypto, 'createHash');
   try {
     const unavailable = await scoreInboxTriage([item()]);
@@ -62,8 +67,8 @@ test('missing, cancelled, invalid, failed and held triage perform no input hashi
     const mixed = fakePort(name => noulAnswer(name.startsWith('item0__') ? .5 : name.endsWith('urgency') ? .99 : .01));
     const receipts = await scoreInboxTriage([item('held'), item('settled')], mixed.port);
     expect(receipts.map(value => value.status)).toEqual(['held', 'settled']);
-    expect(receipts.map(value => value.receiptVersion)).toEqual([3, 2]);
-    expect(hash).toHaveBeenCalledTimes(1);
+    expect(receipts.map(value => value.receiptVersion)).toEqual([3, 4]);
+    expect(hash).not.toHaveBeenCalled();
     expect(mixed.requests).toHaveLength(1);
   } finally { hash.mockRestore(); }
 });
@@ -82,49 +87,51 @@ test('strict v3 failures reject hashes, settled evidence and invented model/exec
 });
 
 test('v3 failure publication withdraws current labels, preserves settled history and declares only its actual format', async () => {
-  const root = directory(), versions: Array<3 | undefined> = [], owner = store(root, version => { versions.push(version); });
+  const root = directory(), versions: Array<3 | 4 | undefined> = [], owner = store(root, version => { versions.push(version); });
   const evidence = await settled(), failure = await failed();
   await owner.commit([evidence]);
-  expect(versions).toEqual([undefined]);
-  expect((await readTriageMetadataBatch([item()], owner)).get(item().id)?.label).toBe('priority');
+  expect(versions).toEqual([4]);
+  expect((await readTriageMetadataBatch([item()], owner, originalSource!.scope, originalSource!.mirror)).get(item().id)?.label).toBe('priority');
   await owner.commit([failure]);
-  expect(versions).toEqual([undefined, 3]);
+  expect(versions).toEqual([4, 3]);
   const bytes = readFileSync(owner.dbPath), reopened = store(root);
   expect((await reopened.readBatch([item().id])).get(item().id)).toEqual({ latest: failure, settled: evidence });
   const hash = spyOn(crypto, 'createHash');
-  try { expect((await readTriageMetadataBatch([item()], reopened)).size).toBe(0); expect(hash).not.toHaveBeenCalled(); }
+  try { expect((await readTriageMetadataBatch([item()], reopened, originalSource!.scope, originalSource!.mirror)).size).toBe(0); expect(hash).not.toHaveBeenCalled(); }
   finally { hash.mockRestore(); }
   expect(readFileSync(owner.dbPath)).toEqual(bytes);
 });
 
-test('actual saved v1/v2 failure bindings remain readable unchanged without a migration or format declaration', async () => {
+test('historical v1/v2 failure bindings remain readable unchanged and never supply current labels', async () => {
   const evidence = await settled();
-  const { id, inputHash, battery, batteryVersion, model, actualModel, targetModel } = evidence;
-  if (!model || !actualModel || !targetModel) throw new Error('The actual v2 settled fixture must carry all model attribution.');
+  const { id, battery, batteryVersion, model, actualModel, targetModel } = evidence;
+  // Historical shape fixture only: never adopted or cryptographically verified.
+  const inputHash = 'a'.repeat(64);
+  if (!model || !actualModel || !targetModel) throw new Error('The actual current settled fixture must carry all model attribution.');
   const oldV1 = { id, inputHash, battery, batteryVersion, model: 'jev-latest', status: 'unavailable' as const };
   const oldV2 = { id, inputHash, battery, batteryVersion, model, actualModel, targetModel, receiptVersion: 2 as const, status: 'held' as const };
-  const root = directory(), calls: Array<3 | undefined> = [], owner = store(root, version => { calls.push(version); });
+  const root = directory(), calls: Array<3 | 4 | undefined> = [], owner = store(root, version => { calls.push(version); });
   for (const original of [oldV1, oldV2]) {
     expect(checkTriageReceipt(original)).toEqual(original);
     await owner.commit([evidence, original]);
     const bytes = readFileSync(owner.dbPath);
     const opened = store(root, () => { throw new Error('A read must not publish a format.'); });
     expect((await opened.readBatch([id])).get(id)).toEqual({ latest: original, settled: evidence });
-    expect((await readTriageMetadataBatch([item()], opened)).size).toBe(0);
+    expect((await readTriageMetadataBatch([item()], opened, originalSource!.scope, originalSource!.mirror)).size).toBe(0);
     expect(readFileSync(owner.dbPath)).toEqual(bytes);
   }
-  expect(calls).toEqual([undefined, undefined]);
+  expect(calls).toEqual([4, 4]);
 });
 
 test('a refused v3 floor leaves the previous DB and current settled label intact', async () => {
   const root = directory(), existing = store(root), evidence = await settled(), failure = await failed();
   await existing.commit([evidence]);
-  const bytes = readFileSync(existing.dbPath), calls: Array<3 | undefined> = [];
+  const bytes = readFileSync(existing.dbPath), calls: Array<3 | 4 | undefined> = [];
   const refusing = store(root, version => { calls.push(version); throw new Error('Older native reader cannot read v3 failures'); });
   await expect(refusing.commit([failure])).rejects.toThrow('Older native reader');
   expect(calls).toEqual([3]);
   expect(readFileSync(existing.dbPath)).toEqual(bytes);
-  expect((await readTriageMetadataBatch([item()], existing)).get(item().id)?.label).toBe('priority');
+  expect((await readTriageMetadataBatch([item()], existing, originalSource!.scope, originalSource!.mirror)).get(item().id)?.label).toBe('priority');
   expect(readdirSync(dirname(existing.dbPath))).toEqual(['inbox-triage.sqlite']);
 });
 

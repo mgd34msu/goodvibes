@@ -143,7 +143,7 @@ export function createDiscordDaemonInboxSourceFactory(options: DiscordDaemonInbo
       });
       startupCurrent();
       surface = await createOwnedTriagedInboxSource({ ...context, workingDirectory }, {
-        beforeReceiptWrite: controls.beforeInboxTriageReceiptWrite, providerId: 'discord', accountScopeId: owner.scopeId, ...(authority ? { authority } : {}),
+        beforeSourceRevisionWrite: controls.beforeSourceRevisionWrite, beforeReceiptWrite: controls.beforeInboxTriageReceiptWrite, providerId: 'discord', accountScopeId: owner.scopeId, ...(authority ? { authority } : {}),
         adapters: new Map([['discord', owner.adapter]]), storeFileName, triageStoreFileName: owner.triageStoreFileName,
         ...(clustered ? { awaitInitialPoll: false } : {}), acquireReadLease: () => owner!.acquireReadLease(),
         gatePolling(_provider, control) {

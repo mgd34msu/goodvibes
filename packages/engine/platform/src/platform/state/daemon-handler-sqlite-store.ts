@@ -24,6 +24,8 @@ export interface HandlerSqliteStoreOptions {
   fileName: string;
   /** CREATE TABLE / INDEX statements run once on init (idempotent: IF NOT EXISTS). */
   schema: string[];
+  /** Native format declaration/restriction before each actual image publication. */
+  beforeWrite?: (() => void) | undefined;
 }
 
 /**
@@ -335,8 +337,10 @@ export class HandlerSqliteStore {
     const saving = previous.then(async () => {
       let prepared: PreparedSqliteImage | undefined;
       try {
-        prepared = await this.stageImage(tmpPath, data ?? this.requireDb().export(), assertStorageCurrent);
-        prepared.assertCurrent(); renameSync(tmpPath, this.resolvedPath);
+        const current = () => { assertStorageCurrent(); if (this.options.beforeWrite) synchronousFence(this.options.beforeWrite); assertStorageCurrent(); };
+        current();
+        prepared = await this.stageImage(tmpPath, data ?? this.requireDb().export(), current);
+        current(); prepared.assertCurrent(); renameSync(tmpPath, this.resolvedPath);
       } finally { prepared?.cleanup(); }
     });
     const tail = saving.catch(() => {});
@@ -388,7 +392,9 @@ export class HandlerSqliteStore {
             }
             candidate.run('COMMIT');
           } catch (error) { candidate.run('ROLLBACK'); throw error; }
-          prepared = await this.stageImage(tmpPath, candidate.export());
+          const current = () => { this.assertActiveStorage(); if (this.options.beforeWrite) synchronousFence(this.options.beforeWrite); this.assertActiveStorage(); };
+          current();
+          prepared = await this.stageImage(tmpPath, candidate.export(), current);
           const staged = prepared; staged.assertCurrent();
           // The trusted fence cannot yield. A synchronous rename closes the
           // otherwise unavoidable gap between checking and replacing the file.
@@ -396,7 +402,7 @@ export class HandlerSqliteStore {
           const publish = (publicationCurrent: () => void) => {
             if (!active || attempted) throw new Error('HandlerSqliteStore publication is not current');
             attempted = true;
-            synchronousFence(publicationCurrent); synchronousFence(assertCurrent); this.assertActiveStorage(); staged.assertCurrent();
+            synchronousFence(publicationCurrent); synchronousFence(assertCurrent); current(); staged.assertCurrent();
             if (this.db !== live) throw new Error('HandlerSqliteStore transaction lost its database');
             if (this.mutationRevision !== revision) { finished = true; return; }
             renameSync(tmpPath, this.resolvedPath);
@@ -459,11 +465,11 @@ function queryRows<T>(db: SqlDatabase, sql: string, params?: (string | number)[]
 }
 
 function synchronousFence(assertCurrent: () => void): void {
-  const result: unknown = assertCurrent();
+  let result: unknown;
+  try { result = assertCurrent(); }
+  catch (error) { drainOwned(error); throw error; }
   if (result !== undefined) {
-    if (result !== null && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
-      void Promise.resolve(result).catch(() => {});
-    }
+    drainOwned(result);
     throw new Error('HandlerSqliteStore currentness fence must be synchronous and return void');
   }
 }

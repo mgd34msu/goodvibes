@@ -38,7 +38,7 @@ for (const profile of DECISION_MODEL_PROFILES) {
     const [receipt] = await scoreInboxTriage([item], port);
     if (!receipt) throw new Error('Actual triage fixture returned no receipt');
     expect(requests).toEqual([profile.model]);
-    expect(receipt).toMatchObject({ receiptVersion: 2, status: 'settled', model: profile.model, actualModel: resolved, targetModel: profile.model });
+    expect(receipt).toMatchObject({ receiptVersion: 4, status: 'settled', model: profile.model, actualModel: resolved, targetModel: profile.model });
     expect(checkTriageReceipt(receipt)).toEqual(receipt);
   });
 }

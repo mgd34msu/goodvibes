@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { triageSource } from './_helpers/triage-source.ts';
 import { scoreInboxTriage } from '../platform/src/platform/intake/triage/scorer.js';
 import { captureTriageInputs, checkTriageReceipt } from '../platform/src/platform/intake/triage/evidence.js';
 import { inboxTriage, TRIAGE_MODEL } from '../platform/src/platform/intake/triage/battery.js';
@@ -12,7 +13,7 @@ const memory = (): TriageStore & { rows: Map<string, TriageStoredRecord>; calls:
   const rows = new Map<string, TriageStoredRecord>(), calls: string[] = [];
   return { rows, calls,
     async readBatch() { calls.push('read'); return rows; },
-    async commit(receipts) { calls.push('commit'); for (const receipt of receipts) rows.set(receipt.id, { latest: receipt, settled: receipt.status === 'settled' ? receipt : rows.get(receipt.id)?.settled ?? null }); },
+    async commit(receipts, _signal, assertCurrent) { assertCurrent?.(); calls.push('commit'); for (const receipt of receipts) rows.set(receipt.id, { latest: receipt, settled: receipt.status === 'settled' ? receipt : rows.get(receipt.id)?.settled ?? null }); },
     async close() { calls.push('close'); },
   };
 };
@@ -84,12 +85,12 @@ describe('typed inbox triage', () => {
     }
     for (const p of [.65,.5]) expect((await scoreInboxTriage([item()],answer(.01,p).port))[0]?.status).toBe('held');
   });
-  test('binding covers the whole semantic projection and ignores opaque targeting metadata', async () => {
+  test('generic conclusions carry no input hash or invented source and retain actual rounded decisions', async () => {
     const base = (await scoreInboxTriage([item()],answer().port))[0]!;
-    for (const change of [{surface:'other'},{subject:'different'},{snippet:'different'},{conversationKind:'direct' as const},{unread:false}]) {
-      expect((await scoreInboxTriage([{...item(),...change}],answer().port))[0]?.inputHash).not.toBe(base.inputHash);
-    }
-    expect((await scoreInboxTriage([{...item(),metadata:{providerTarget:'synthetic'}}],answer().port))[0]?.inputHash).toBe(base.inputHash);
+    expect(base).toMatchObject({ receiptVersion: 4, status: 'settled' });
+    expect(Object.hasOwn(base, 'inputHash')).toBe(false); expect(Object.hasOwn(base, 'source')).toBe(false);
+    const store = memory(); await runInboxTriage([item()], { port: answer().port, store });
+    expect((await readTriageMetadataBatch([item()], store)).size).toBe(0);
     const rounded = (await scoreInboxTriage([item()],answer(.015,.985).port))[0]!;
     expect(rounded.status === 'settled' && rounded.score).toBe(.99);
   });
@@ -118,7 +119,9 @@ describe('typed inbox triage', () => {
     const port: JudgmentPort = { model: TRIAGE_MODEL, async ask(request) { input.subject = 'changed'; return fake.port.ask(request); } };
     const receipts = await scoreInboxTriage([input], port);
     expect(fake.requests[0]!.state).toEqual({items: captureTriageInputs([item()]).map(item => ({...item}))});
-    expect(receipts[0]?.inputHash).not.toBe((await scoreInboxTriage([input], answer().port))[0]?.inputHash);
+    expect(receipts[0]).toMatchObject({ receiptVersion: 4, status: 'settled' });
+    expect(Object.hasOwn(receipts[0]!, 'inputHash')).toBe(false);
+    expect(Object.hasOwn(receipts[0]!, 'source')).toBe(false);
   });
   test('dry-run is wholly store-free and does not close an injected store', async () => {
     let touched = 0;
@@ -136,33 +139,33 @@ describe('typed inbox triage', () => {
     }
   });
   test('held/unavailable preserve history without projecting it, changed input invalidates projection', async () => {
-    const store = memory();
-    await runInboxTriage([item()], { store, port: answer(.01,.99).port });
+    const store = memory(), source = await triageSource([item()]);
+    await runInboxTriage([item()], { ...source.options, store, port: answer(.01,.99).port });
     const old = store.rows.get(item().id)!.settled;
-    expect((await readTriageMetadataBatch([item()],store)).get(item().id)?.label).toBe('priority');
-    expect((await readTriageMetadataBatch([item('fixture-a','changed')],store)).size).toBe(0);
+    expect((await readTriageMetadataBatch([item()],store,source.scope,source.mirror)).get(item().id)?.label).toBe('priority');
+    expect((await readTriageMetadataBatch([item('fixture-a','changed')],store,source.scope,source.mirror)).size).toBe(0);
     for (const port of [answer(.5).port, undefined]) {
-      await runInboxTriage([item()],{store,...(port ? {port} : {})});
+      await runInboxTriage([item()],{...source.options,store,...(port ? {port} : {})});
       expect(store.rows.get(item().id)!.settled).toEqual(old);
-      expect((await readTriageMetadataBatch([item()],store)).size).toBe(0);
+      expect((await readTriageMetadataBatch([item()],store,source.scope,source.mirror)).size).toBe(0);
     }
   });
   test('reordered stored evidence remains id-bound and stale incoming labels are stripped', async () => {
-    const store = memory();
-    await runInboxTriage([item('b')],{store,port:answer(.99).port});
-    await runInboxTriage([item('a')],{store,port:answer(.01,.99).port});
-    const results = await enrichItemsWithTriage([{...item('a'),triageLabel:'spam'} as TriageInput,item('b')],store);
+    const store = memory(), source = await triageSource([item('a'), item('b')]);
+    await runInboxTriage([item('b')],{...source.options,store,port:answer(.99).port});
+    await runInboxTriage([item('a')],{...source.options,store,port:answer(.01,.99).port});
+    const results = await enrichItemsWithTriage([{...item('a'),triageLabel:'spam'} as TriageInput,item('b')],store,source.scope,source.mirror);
     expect(results.map(row => row.triage?.label)).toEqual(['priority','spam']);
     expect('triageLabel' in results[0]!).toBe(false);
   });
   test('forged evidence and executable stored receipts never yield labels', async () => {
-    const store = memory(); await runInboxTriage([item()],{store,port:answer().port});
+    const store = memory(), source = await triageSource([item()]); await runInboxTriage([item()],{...source.options,store,port:answer().port});
     const row = store.rows.get(item().id)!;
     expect(() => checkTriageReceipt({...row.latest,label:'spam'})).toThrow();
     let calls=0; const bad = {...row}; Object.defineProperty(bad,'latest',{get(){calls++; return row.latest;}});
-    store.rows.set(item().id,bad); expect((await readTriageMetadataBatch([item()],store)).size).toBe(0); expect(calls).toBe(0);
+    store.rows.set(item().id,bad); expect((await readTriageMetadataBatch([item()],store,source.scope,source.mirror)).size).toBe(0); expect(calls).toBe(0);
     store.rows.set(item().id, {latest: {...row.latest,id:'wrong'},settled:row.settled} as TriageStoredRecord);
-    expect((await readTriageMetadataBatch([item()],store)).size).toBe(0);
+    expect((await readTriageMetadataBatch([item()],store,source.scope,source.mirror)).size).toBe(0);
   });
 });
 
@@ -212,28 +215,27 @@ test('late triage imports keep earlier native decision policies current while tr
 });
 
 
-test('account receipt domains distinguish saved evidence without changing generic bindings or exposing scope to the decision model', async () => {
+test('only native source/account bindings enrich and private scope stays out of the model request', async () => {
   const items = [item()], port = answer(.01, .99), genericStore = memory(), scopedStore = memory();
-  const scope = { providerId: 'private-provider-selector', accountScopeId: 'private-account-selector' };
+  const scope = { providerId: 'synthetic', accountScopeId: 'private-account-selector' }, source = await triageSource(items, scope);
   const generic = await runInboxTriage(items, { port: port.port, store: genericStore });
-  const scoped = await runInboxTriage(items, { port: port.port, store: scopedStore, receiptScope: scope });
-  expect(scoped[0]!.inputHash).not.toBe(generic[0]!.inputHash);
-  expect((await readTriageMetadataBatch(items, genericStore)).size).toBe(1);
-  expect((await readTriageMetadataBatch(items, genericStore, scope)).size).toBe(0);
-  expect((await readTriageMetadataBatch(items, scopedStore, scope)).size).toBe(1);
+  const scoped = await runInboxTriage(items, { port: port.port, store: scopedStore, ...source.options });
+  expect(Object.hasOwn(generic[0]!, 'source')).toBe(false);
+  expect(scoped[0]).toMatchObject({ receiptVersion: 4, source: { ...scope } });
+  expect((await readTriageMetadataBatch(items, genericStore)).size).toBe(0);
+  expect((await readTriageMetadataBatch(items, scopedStore, scope, source.mirror)).size).toBe(1);
   expect((await readTriageMetadataBatch(items, scopedStore)).size).toBe(0);
-  expect((await readTriageMetadataBatch(items, scopedStore, { ...scope, accountScopeId: 'another-private-account' })).size).toBe(0);
-  expect((await readTriageMetadataBatch(items, scopedStore, { ...scope, providerId: 'another-private-provider' })).size).toBe(0);
+  await expect(readTriageMetadataBatch(items, scopedStore, { ...scope, accountScopeId: 'another-account' }, source.mirror)).rejects.toThrow('original native mirror account');
+  await expect(readTriageMetadataBatch(items, scopedStore, { ...scope, providerId: 'another-provider' }, source.mirror)).rejects.toThrow('original native mirror account');
   expect(port.requests[1]!.state).toEqual(port.requests[0]!.state);
   expect(JSON.stringify(port.requests.map(request => request.state))).not.toContain('private-account-selector');
-  expect(JSON.stringify(scoped)).not.toContain('private-account-selector');
 });
 
 test('scope matching captures the original private domain before an awaited store read', async () => {
-  const items = [item()], source = memory(), scope = { providerId: 'synthetic', accountScopeId: 'account-original' };
-  await runInboxTriage(items, { port: answer(.01, .99).port, store: source, receiptScope: scope });
+  const items = [item()], source = memory(), scope = { providerId: 'synthetic', accountScopeId: 'account-original' }, native = await triageSource(items, scope);
+  await runInboxTriage(items, { port: answer(.01, .99).port, store: source, ...native.options });
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-  const reading = readTriageMetadataBatch(items, { ...source, async readBatch() { entered.resolve(); await release.promise; return source.rows; } }, scope);
+  const reading = readTriageMetadataBatch(items, { ...source, async readBatch() { entered.resolve(); await release.promise; return source.rows; } }, scope, native.mirror);
   await entered.promise; scope.accountScopeId = 'replacement'; release.resolve();
   expect((await reading).size).toBe(1);
 });

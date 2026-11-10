@@ -190,8 +190,9 @@ function publishImage(path: string, image: Uint8Array, signal?: AbortSignal, ass
 
 /**
  * Atomic latest-attempt and last-settled storage for the bounded triage pass.
- * Settled receipts retain only an exact-input commitment, not duplicated protected previews;
- * the commitment is dictionary-recoverable and grants no execution authority.
+ * Current settled receipts retain only an ordinary native mutation revision
+ * and account scope, not duplicated protected previews. Historical digest
+ * receipts remain readable history; neither form grants execution authority.
  * Construction, reads, and close are read-only. Every commit reloads the latest
  * disk image under the shared canonical-path process queue; separate instances
  * therefore cannot overwrite each other's admitted updates. The directory must
@@ -204,7 +205,7 @@ export class SqliteTriageStore implements TriageStore {
   private closing: Promise<void> | null = null;
   private readonly pending = new Set<Promise<unknown>>();
 
-  constructor(workingDirectory: string, fileName: string = STORE_FILE, private readonly beforeReceiptWrite?: ((receiptVersion?: 3) => void) | undefined) {
+  constructor(workingDirectory: string, fileName: string = STORE_FILE, private readonly beforeReceiptWrite?: ((receiptVersion?: 3 | 4) => void) | undefined) {
     if (!/^[a-zA-Z0-9_-]+\.sqlite$/.test(fileName)) throw new TypeError('Triage store requires a safe SQLite filename.');
     this.path = join(canonicalDirectory(workingDirectory), '.goodvibes', 'tui', 'operator', fileName);
   }
@@ -276,7 +277,7 @@ export class SqliteTriageStore implements TriageStore {
         abortIfRequested(signal);
         publishImage(this.path, db.export(), signal, () => {
           assertSynchronous(assertPublicationCurrent, 'Triage publication fence must be synchronous.');
-          assertSynchronous(() => this.beforeReceiptWrite?.(checked.some(receipt => receipt.receiptVersion === 3) ? 3 : undefined),
+          assertSynchronous(() => this.beforeReceiptWrite?.(checked.some(receipt => receipt.receiptVersion === 4) ? 4 : checked.some(receipt => receipt.receiptVersion === 3) ? 3 : undefined),
             'Triage receipt format declaration must be synchronous.');
           assertSynchronous(assertPublicationCurrent, 'Triage publication fence must be synchronous.');
         });

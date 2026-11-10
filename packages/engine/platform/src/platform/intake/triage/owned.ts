@@ -1,12 +1,13 @@
 /** Explicit account-owned scoring and lease-held enrichment; never a polling hook. */
 import { join } from 'node:path';
 import { types } from 'node:util';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { assertSynchronousJudgmentGuard, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { HandlerError } from '../../control-plane/host-handlers.js';
 import { acquireCrossProcessLock } from '../../state/durable-file-io.js';
 import { aggregateInbox, normalizeInboxQuery, type ChannelInboxItem, type InboxListInput } from '../aggregator.js';
 import { createOwnedInboxSource, registerCompositeInboxSurface, type InboxSurfaceContext,
   type OwnedInboxSource, type RegisterInboxSurfaceOptions, type InboxTriageOverlay } from '../registration.js';
+import { captureInboxTriageSource } from '../cursor-store.js';
 import { captureTriageInputs } from './evidence.js';
 import { readTriageMetadataBatch, runInboxTriage } from './pipeline.js';
 import { SqliteTriageStore } from './store.js';
@@ -36,7 +37,7 @@ export interface OwnedTriagedInboxOptions extends Omit<RegisterInboxSurfaceOptio
   readonly triageStoreFileName?: string;
   /** Native installation declaration before publishing default opaque selectors. */
   readonly beforeIdentityWrite?: (() => void) | undefined;
-  readonly beforeReceiptWrite?: ((receiptVersion?: 3) => void) | undefined;
+  readonly beforeReceiptWrite?: ((receiptVersion?: 3 | 4) => void) | undefined;
   readonly providerId: string;
   readonly accountScopeId: string;
   readonly acquireReadLease: NonNullable<RegisterInboxSurfaceOptions['acquireReadLease']>;
@@ -145,7 +146,7 @@ async function createTriagedSource(
   const getStore = (): SqliteTriageStore => store ??= new SqliteTriageStore(ctx.workingDirectory, fileName, options.beforeReceiptWrite);
   let source: OwnedInboxSource;
   try {
-    source = createOwnedInboxSource(ctx, { ...options, adapters: new Map(options.adapters), storeFileName: mirrorFileName,
+    source = createOwnedInboxSource(ctx, { ...options, adapters: new Map(options.adapters), storeFileName: mirrorFileName, triageScope: receiptScope,
       ...(gatePolling ? { gatePolling: (provider: string, control: Parameters<NonNullable<RegisterInboxSurfaceOptions['gatePolling']>>[1]) => {
         const retire = gatePolling(provider, control);
         if (typeof retire !== 'function') return;
@@ -157,7 +158,7 @@ async function createTriagedSource(
           return result;
         };
       } } : {}),
-      async enrichTriage(rows) {
+      async enrichTriage(rows, mirror) {
         const out = new Map<string, InboxTriageOverlay>();
         if (!optionalAuthority() || !rows.length) return out;
         for (let offset = 0; offset < rows.length; offset += 100) {
@@ -166,7 +167,7 @@ async function createTriagedSource(
           // Input/privacy rejection is not an optional database failure.
           captureTriageInputs(batch);
           try {
-            const evidence = await readTriageMetadataBatch(batch, getStore(), receiptScope);
+            const evidence = await readTriageMetadataBatch(batch, getStore(), receiptScope, mirror);
             for (const [id, row] of evidence) out.set(id, { triageScore: row.score, triageLabel: row.label, triageTags: row.tags });
           } catch {
             assertAuthority();
@@ -202,8 +203,9 @@ async function createTriagedSource(
         const batch = inputs(page.items);
         const captured = captureTriageInputs(batch);
         const expected = JSON.stringify(captured);
+        const originalSource = captureInboxTriageSource(read.sources.store, captured, receiptScope);
         const assertCurrent = (): void => {
-          signal.throwIfAborted(); assertAuthority(); read.assertCurrent();
+          signal.throwIfAborted(); assertAuthority(); read.assertCurrent(); originalSource.assertCurrent();
           const current = inputs(aggregateInbox(read.sources, selected).items);
           if (JSON.stringify(captureTriageInputs(current)) !== expected) {
             throw new HandlerError('Inbox triage selection changed', 'INBOX_TRIAGE_SELECTION_CHANGED', 409);
@@ -211,12 +213,12 @@ async function createTriagedSource(
         };
         assertCurrent();
         // Recheck at the actual outbound call, rather than only before fan-out.
-        const guardedPort: JudgmentPort = { get model() { return port!.model; }, async ask(request) { assertCurrent(); return port!.ask({ ...request, beforeAttempt: assertCurrent }); } };
-        const receipts = await runInboxTriage(batch, { port: guardedPort, signal, dryRun, receiptScope,
+        const guardedPort: JudgmentPort = { get model() { return port!.model; }, async ask(request) { assertCurrent(); return port!.ask({ ...request, beforeAttempt: () => { assertCurrent(); assertSynchronousJudgmentGuard(request.beforeAttempt); assertCurrent(); } }); } };
+        const receipts = await runInboxTriage(batch, { port: guardedPort, signal, dryRun, receiptScope, receiptSource: read.sources.store,
           // This seam is not caller-injectable. The canonical store enforces the
           // exact proof immediately before rename, with no intervening await.
           store: { readBatch: ids => getStore().readBatch(ids), close: async () => {},
-            commit: (rows, abort) => getStore().commit(rows, abort, assertCurrent) },
+            commit: (rows, abort, assertSource) => getStore().commit(rows, abort, () => { assertCurrent(); assertSource?.(); assertCurrent(); }) },
         });
         await read.validate(); assertCurrent();
         return { receipts, total: page.total, hasMore: page.hasMore, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };

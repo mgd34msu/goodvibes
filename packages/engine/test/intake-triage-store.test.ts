@@ -9,19 +9,18 @@ import type { TriageEvidence, TriageReceipt } from '../platform/src/platform/int
 import { loadSqlJsEngine, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
-function binding(id: string, subject?: string) {
-  // The store tests exercise saved shape/ownership, not message matching. Only
-  // the explicit two-input consistency control needs freshly derived bindings.
-  const stored = subject === undefined
-    ? { id, inputHash: 'a'.repeat(64), battery: inboxTriage.name, batteryVersion: inboxTriage.version, receiptVersion: 2 as const }
-    : triageBinding(captureTriageInputs([{ id, surface: 'synthetic', subject }])[0]!);
-  return { ...stored, model: 'jev-latest', actualModel: 'jev-1.13.0', targetModel: 'jev-latest' }; // Resolved model from the authored response, not a request pin.
+function binding(id: string) {
+  // Store-format tests use unbound current conclusions. Native message
+  // matching is exercised by the real mirror/source tests, never a fake pin.
+  return { ...triageBinding(captureTriageInputs([{ id, surface: 'synthetic' }])[0]!),
+    model: 'jev-latest', actualModel: 'jev-1.13.0', targetModel: 'jev-latest' };
 }
 
-function settled(id: string, subject?: string): TriageEvidence {
-  const value = settleTriage(binding(id, subject),
-    readYesNo({ type: 'noul', noul: 0.01 }, inboxTriage.items.spam.band),
-    readYesNo({ type: 'noul', noul: 0.01 }, inboxTriage.items.urgency.band));
+function settled(id: string, variant?: 'replacement' | 'different'): TriageEvidence {
+  const probability = variant === 'different' ? .03 : variant === 'replacement' ? .02 : .01;
+  const value = settleTriage(binding(id),
+    readYesNo({ type: 'noul', noul: probability }, inboxTriage.items.spam.band),
+    readYesNo({ type: 'noul', noul: probability }, inboxTriage.items.urgency.band));
   if (value.status !== 'settled') throw new Error('Synthetic fixture must settle.');
   return value;
 }
@@ -103,7 +102,7 @@ describe('SqliteTriageStore', () => {
     const records = await owner().readBatch(['a', 'new']);
     expect(records.get('a')).toEqual({ latest: unavailable, settled: previous });
     expect(records.get('new')?.settled).toBeNull();
-    const replacement = settled('a', 'Synthetic newer settled input');
+    const replacement = settled('a', 'replacement');
     await store.commit([replacement]);
     expect((await store.readBatch(['a'])).get('a')).toEqual({ latest: replacement, settled: replacement });
   });
@@ -298,14 +297,14 @@ describe('SqliteTriageStore', () => {
     ['settled status', (db: SqlDatabase) => db.run('UPDATE triage_receipts SET settled = ?', [JSON.stringify(attempt('a', 'held'))])],
     ['settled conclusion', (db: SqlDatabase) => db.run('UPDATE triage_receipts SET latest = ?', [JSON.stringify({ ...settled('a'), label: 'spam' })])],
     ['missing settled', (db: SqlDatabase) => db.run('UPDATE triage_receipts SET settled = NULL')],
-    ['inconsistent settled', (db: SqlDatabase) => db.run('UPDATE triage_receipts SET settled = ?', [JSON.stringify(settled('a', 'other input'))])],
+    ['inconsistent settled', (db: SqlDatabase) => db.run('UPDATE triage_receipts SET settled = ?', [JSON.stringify(settled('a', 'different'))])],
     ['malformed JSON', (db: SqlDatabase) => db.run('UPDATE triage_receipts SET latest = ?', ['{'])],
     ['future schema', (db: SqlDatabase) => db.run('PRAGMA user_version = 999')],
     ['unexpected schema', (db: SqlDatabase) => db.run('CREATE TABLE unrelated (id TEXT)')],
     ['unexpected trigger', (db: SqlDatabase) => db.run('CREATE TRIGGER sqlitexhidden AFTER INSERT ON triage_receipts BEGIN DELETE FROM triage_receipts; END')],
   ] as const)('persisted %s corruption is rejected even outside the requested ids', async (_name, alter) => {
     const store = owner();
-    await store.commit([settled('a', _name === 'inconsistent settled' ? 'Synthetic routine update' : undefined)]);
+    await store.commit([settled('a', _name === 'inconsistent settled' ? 'replacement' : undefined)]);
     await alterDatabase(store.dbPath, alter);
     const bytes = fs.readFileSync(store.dbPath);
     await expect(store.readBatch(['unrelated'])).rejects.toThrow();

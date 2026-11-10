@@ -29,7 +29,8 @@ export interface DaemonInboxControls extends Required<Pick<RegisterInboxSurfaceO
   readonly beforeDiscordIdentityWrite?: (() => void) | undefined;
   readonly beforeAccountIdentityWrite?: (() => void) | undefined;
   readonly beforeInboxTriageIdentityWrite?: (() => void) | undefined;
-  readonly beforeInboxTriageReceiptWrite?: ((receiptVersion?: 3) => void) | undefined;
+  readonly beforeSourceRevisionWrite?: (() => void) | undefined;
+  readonly beforeInboxTriageReceiptWrite?: ((receiptVersion?: 3 | 4) => void) | undefined;
   /** Root-owned capability; only explicit source options request it. */
   readonly createTriageTagging?: (request: DaemonTriageTaggingRequest) => OwnedInboxTagging;
   /** Explicit awaitable election withdrawal for account-verified clustered owners. */
@@ -99,10 +100,12 @@ export async function createDaemonHandlerComposition(
       beforeDiscordIdentityWrite: () => options.nativeDataWriter?.declare('discord-inbox-identities-v1'),
       beforeAccountIdentityWrite: () => options.nativeDataWriter?.declare('account-inbox-identities-v1'),
       beforeInboxTriageIdentityWrite: () => options.nativeDataWriter?.declare('inbox-triage-identities-v1'),
+      beforeSourceRevisionWrite: () => options.nativeDataWriter?.declare('inbox-triage-source-revisions-v1'),
       beforeInboxTriageReceiptWrite: receiptVersion => {
         options.nativeDataWriter?.declare('inbox-triage-model-receipts-v2');
         options.nativeDataWriter?.declare('inbox-triage-account-bindings-v1');
         if (receiptVersion === 3) options.nativeDataWriter?.declare('inbox-triage-failed-bindings-v3');
+        if (receiptVersion === 4) options.nativeDataWriter?.declare('inbox-triage-source-revisions-v1');
       },
       gatePollingOwned: (providerId, control) => options.clusterCoordinator.registerOwned(inboxPollerGate(providerId, control)),
     }, { configManager: options.configManager, secretsManager: options.secretsManager }, options.triagePermissionHost),

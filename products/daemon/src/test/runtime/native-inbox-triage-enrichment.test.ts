@@ -38,7 +38,7 @@ function triaged(source: OwnedInboxSource): OwnedTriagedInboxSource {
 }
 
 async function fixture(provider: Provider, options: { noAuthority?: boolean; scope?: string;
-  directory?: string; beforeReceiptWrite?: (() => void) | undefined; clustered?: boolean; failReady?: boolean; deferReady?: boolean;
+  directory?: string; beforeReceiptWrite?: ((receiptVersion?: 3 | 4) => void) | undefined; beforeSourceRevisionWrite?: (() => void) | undefined; clustered?: boolean; failReady?: boolean; deferReady?: boolean;
   throwAfterGate?: boolean; lifecycle?: { closed: boolean; metadataCalls: number };
   metadataHeld?: { entered: PromiseWithResolvers<void>; release: PromiseWithResolvers<void> };
   held?: { entered: PromiseWithResolvers<void>; release: PromiseWithResolvers<void> } } = {}) {
@@ -108,7 +108,7 @@ async function fixture(provider: Provider, options: { noAuthority?: boolean; sco
   const service = new EmailService({ getConfig: () => undefined, secretsManager: { get: async () => null },
     describeSenderClaim: describeSenderClaimNeutrally,
     transport: { connectImapTls: noTransport, connectSmtpTls: noTransport, connectSmtpStartTls: noTransport } });
-  const controls: DaemonInboxControls = { beforeInboxTriageReceiptWrite: options.beforeReceiptWrite, gatePolling(_id, value) { control = value; },
+  const controls: DaemonInboxControls = { beforeInboxTriageReceiptWrite: options.beforeReceiptWrite, beforeSourceRevisionWrite: options.beforeSourceRevisionWrite, gatePolling(_id, value) { control = value; },
     gatePollingOwned(_id, value) { enrollments++; control = value; return () => value.stop(); },
     onAccountInvalidation() { return () => {}; }, createEmailService: () => ({ service, close() {} }) };
   const semanticOptions = options.noAuthority ? {} : { triageAuthority: authority };
@@ -180,13 +180,15 @@ for (const provider of providers) {
     const directory = makeOwnedTempDir(`native-${provider}-triage-v2`);
     const writer = createNativeDataWriteOwner({ execPath: join(directory, 'goodvibes-daemon'), version: '3.1.2', assertCurrent() {} });
     let declarations = 0;
-    const f = await fixture(provider, { directory, beforeReceiptWrite() {
+    const f = await fixture(provider, { directory, beforeSourceRevisionWrite() { writer.declare('inbox-triage-source-revisions-v1'); }, beforeReceiptWrite(version) {
       declarations++; writer.declare('inbox-triage-model-receipts-v2');
+      if (version === 4) writer.declare('inbox-triage-source-revisions-v1');
     } });
     expect(declarations).toBe(0);
     await f.owned.runInboxTriage(); expect(declarations).toBe(1);
     const floor = JSON.parse(readFileSync(join(directory, NATIVE_READER_REQUIREMENT_FILE), 'utf8')) as { formats: string[] };
     expect(floor.formats).toContain('inbox-triage-model-receipts-v2');
+    expect(floor.formats).toContain('inbox-triage-source-revisions-v1');
   });
 
   test(`${provider} native factory enriches its existing mirror from persisted account-bound triage without automatic scoring`, async () => {

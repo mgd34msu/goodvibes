@@ -7,7 +7,8 @@ import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { DaemonServer, HttpListener, PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { persistProviders, loadPersistedProviders, type DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
 import { HostedSessionManager, HostedSessionStore, HostedWorkspaceFloors, HOSTED_SESSION_WIRE_EVENT, type HostedSessionRecord, type HostedSessionUpdatePayload, type HostedWorkspaceFloor } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
-import { inboxTriage, registerInboxSurface, runInboxTriage, SqliteTriageStore, type TriageReceipt } from '@goodvibes-jev/engine/platform/platform/intake';
+import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { inboxTriage, createOwnedTriagedInboxSource, registerInboxSurface, runInboxTriage, SqliteTriageStore, type TriageReceipt } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -1281,7 +1282,7 @@ for (const outcome of ['missing', 'rejected'] as const) test(`actual native hand
         receipts = await runInboxTriage([{ id: 'failed-preview', surface: 'email', snippet: 'Synthetic preview with no settled judgment.' }], {
           workingDirectory: context.workingDirectory, ...(port ? { port } : {}), beforeReceiptWrite: controls.beforeInboxTriageReceiptWrite,
         });
-        return registerInboxSurface(context, { ...controls, adapters: new Map() });
+        return registerInboxSurface(context, { ...controls, beforeSourceRevisionWrite: controls.beforeSourceRevisionWrite, adapters: new Map() });
       } });
       keep(spyOn(runtime.serviceRegistry, 'resolveSecret').mockResolvedValue(''));
       return runtime;
@@ -1305,6 +1306,51 @@ for (const outcome of ['missing', 'rejected'] as const) test(`actual native hand
   expect(() => assertNativeReaderCompatible(native.execPath, '3.1.2', realUpdateFileIo, {
     ...current, formats: current.formats.filter(format => format !== 'inbox-triage-failed-bindings-v3'),
   })).toThrow();
+  expect(() => assertNativeReaderCompatible(native.execPath, '3.1.2', realUpdateFileIo, current)).not.toThrow();
+  await fx.host.close();
+});
+
+test('actual native daemon mirror and settled receipt publication declare source-revision capability before an older reader can resume', async () => {
+  const native = writeNativeReaderInstallationFixture(makeOwnedTempDir('host-triage-native-source-floor'), '3.1.2', process.arch === 'arm64' ? 'arm64' : 'x64');
+  const artifact = resolveInstalledDaemonUpdateArtifact({ isOverridden: false }, native.options);
+  if (!artifact) throw new Error('Native fixture admission missing');
+  const decision = fakePort(name => { if (!name.endsWith('spam') && !name.endsWith('urgency')) throw new Error('Unexpected triage wire question'); return noulAnswer(name.endsWith('urgency') ? .99 : .01); });
+  let receipts: readonly (TriageReceipt | import('@goodvibes-jev/engine/platform/platform/intake').TriagePreview)[] = [];
+  const fx = fixture(undefined, {
+    async createRuntime(options) {
+      const runtime = await createRuntimeServices({ ...options, inboxFactory: async (context, _routing, controls) => {
+        const source = await createOwnedTriagedInboxSource(context, {
+          providerId: 'fixture', accountScopeId: 'original-account', storeFileName: 'native-source-mirror.sqlite', triageStoreFileName: 'native-source-receipts.sqlite',
+          beforeSourceRevisionWrite: controls.beforeSourceRevisionWrite, beforeReceiptWrite: controls.beforeInboxTriageReceiptWrite,
+          adapters: new Map([['fixture', { id: 'fixture', pollIntervalMs: 3_600_000, async poll() { return { items: [{
+            id: 'fixture:one', provider: 'fixture', kind: 'dm' as const, fromDigest: 'redacted-unit-sender', subjectPreview: 'Original protected subject',
+            bodyPreview: 'Original protected message', receivedAt: Date.now(), unread: true,
+          }], state: 'ready' as const, configured: true }; } }]]),
+          acquireReadLease: async () => Object.assign(async () => {}, { assertCurrent() {} }),
+          authority: { providerId: 'fixture', accountScopeId: 'original-account', destinationId: 'synthetic-only', retention: 'ephemeral-no-log',
+            port: decision.port, signal: new AbortController().signal, assertCurrent() {} },
+        });
+        try { await source.ready; receipts = (await source.runInboxTriage()).receipts; return source; }
+        catch (error) { await source.close(); throw error; }
+      } });
+      keep(spyOn(runtime.serviceRegistry, 'resolveSecret').mockResolvedValue('')); return runtime;
+    },
+    createServer() { return inertNativeHostServer(); },
+  }, { updateArtifact: artifact, hasOverriddenHome: false });
+  const floor = join(native.execPath, '..', NATIVE_READER_REQUIREMENT_FILE); expect(existsSync(floor)).toBe(false);
+  await fx.host.start();
+  expect(decision.requests).toHaveLength(1);
+  expect(receipts).toMatchObject([{ receiptVersion: 4, status: 'settled', source: { providerId: 'fixture', accountScopeId: 'original-account' } }]);
+  const disk = new SqliteTriageStore(fx.workingDir, 'native-source-receipts.sqlite');
+  try {
+    expect((await disk.readBatch(['fixture:one'])).get('fixture:one')?.latest).toEqual(receipts[0]);
+    const bytes = readFileSync(disk.dbPath); expect(bytes.includes(Buffer.from('inputHash'))).toBe(false);
+    expect(bytes.includes(Buffer.from('Original protected subject'))).toBe(false); expect(bytes.includes(Buffer.from('Original protected message'))).toBe(false);
+  } finally { await disk.close(); }
+  expect(JSON.parse(readFileSync(floor, 'utf8')).formats).toContain('inbox-triage-source-revisions-v1');
+  const current = nativeReaderCapabilities('3.1.2');
+  expect(() => assertNativeReaderCompatible(native.execPath, '3.1.2', realUpdateFileIo, { ...current,
+    formats: current.formats.filter(format => format !== 'inbox-triage-source-revisions-v1') })).toThrow();
   expect(() => assertNativeReaderCompatible(native.execPath, '3.1.2', realUpdateFileIo, current)).not.toThrow();
   await fx.host.close();
 });

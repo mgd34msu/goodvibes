@@ -70,7 +70,7 @@ function createSlackAccountFactory<T extends InboxSurfaceRegistration>(
   options: SlackDaemonInboxOptions,
   factories: Pick<SlackDaemonInboxFactories, 'createOwner' | 'eligibilityClock'>,
   register: (context: Parameters<DaemonInboxFactory>[0], options: Parameters<typeof registerInboxSurface>[1], owner: SlackInboxOwner,
-    beforeIdentityWrite: (() => void) | undefined, beforeReceiptWrite: ((receiptVersion?: 3) => void) | undefined) => T | Promise<T>,
+    beforeIdentityWrite: (() => void) | undefined, beforeReceiptWrite: ((receiptVersion?: 3 | 4) => void) | undefined) => T | Promise<T>,
   requireFinalProof: boolean,
 ): (...args: Parameters<DaemonInboxFactory>) => Promise<T> {
   const triageTagging = options.triageTagging ? Object.freeze({ onReady: options.triageTagging.onReady }) : undefined;
@@ -128,7 +128,7 @@ function createSlackAccountFactory<T extends InboxSurfaceRegistration>(
       });
       current();
       surface = await register({ ...context, workingDirectory }, {
-        adapters: new Map([['slack', owner.adapter]]), storeFileName, ...(clustered ? { awaitInitialPoll: false } : {}),
+        adapters: new Map([['slack', owner.adapter]]), beforeSourceRevisionWrite: controls.beforeSourceRevisionWrite, storeFileName, ...(clustered ? { awaitInitialPoll: false } : {}),
         ...(requireFinalProof
           ? { acquireReadLease: () => owner.acquireReadLease!() }
           : { assertReadCurrent: owner.assertReadCurrent }),

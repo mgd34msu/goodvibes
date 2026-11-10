@@ -35,8 +35,11 @@
 // single-owner; it does not claim cross-process mutation safety.
 // ---------------------------------------------------------------------------
 
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { HandlerSqliteStore, type HandlerSqliteTransaction } from '../state/daemon-handler-sqlite-store.js';
 import type { ImapUidCheckpoint, ImapUidCheckpointAdvance, InboundChannelItem } from './provider-adapter.js';
+import { captureTriageReceiptScope, type CapturedTriageInput } from './triage/evidence.js';
+import type { TriageReceiptScope, TriageSourceBinding } from './triage/types.js';
 import { existsSync } from 'node:fs';
 import { retainActiveInboxStore } from './active-stores.js';
 import { captureImapAdvance, captureImapCheckpoint, captureImapItems, sameImapCheckpoint } from './imap-checkpoint.js';
@@ -75,6 +78,10 @@ export interface InboxSweepSummary {
 }
 
 export interface InboxCursorStoreOptions {
+  /** Original native writer floor before publishing message source revisions. */
+  readonly beforeSourceRevisionWrite?: (() => void) | undefined;
+  /** Original constructor-owned account domain, never inferred from message fields. */
+  readonly triageScope?: TriageReceiptScope | undefined;
   /** Override the age TTL (tests / embedders). Defaults to INBOX_ITEM_TTL_MS. */
   readonly itemTtlMs?: number;
   /** Override the count cap (tests / embedders). Defaults to INBOX_ITEM_CAP. */
@@ -101,6 +108,9 @@ export function isInboxRetentionPolicy(value: unknown): value is InboxRetentionP
     && typeof row['itemCap'] === 'number' && Number.isSafeInteger(row['itemCap']) && row['itemCap'] >= 0;
 }
 const SCHEMA: string[] = [
+  `CREATE TABLE IF NOT EXISTS inbox_source_revision_policy (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1), version INTEGER NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS inbox_retention_policy (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1), version INTEGER NOT NULL, itemTtlMs INTEGER NOT NULL, itemCap INTEGER NOT NULL
   )`,
@@ -116,7 +126,8 @@ const SCHEMA: string[] = [
      bodyPreview TEXT NOT NULL,
      routeId TEXT,
      receivedAt INTEGER NOT NULL,
-     unread INTEGER NOT NULL
+     unread INTEGER NOT NULL,
+     triage_revision TEXT
    )`,
   `CREATE INDEX IF NOT EXISTS idx_items_provider_received
      ON items(provider, receivedAt)`,
@@ -161,11 +172,14 @@ export interface InboxQuery {
   limit: number;
 }
 
+const nativeTriageStores = new WeakMap<object, { readonly store: HandlerSqliteStore; readonly scope: TriageReceiptScope | undefined; ready: boolean; closed: boolean }>();
+
 export class InboxCursorStore {
   private readonly store: HandlerSqliteStore;
   private revision = 0;
   private persistedRevision = 0;
   private initialized = false;
+  private sourceRevisionsReady = false;
   private initializing: Promise<void> | null = null;
   private closing: Promise<void> | null = null;
   private readonly flushing = new Set<Promise<void>>();
@@ -176,6 +190,7 @@ export class InboxCursorStore {
   private readonly onSweep: ((summary: InboxSweepSummary) => void) | undefined;
   private readonly onSweepError: ((message: string) => void) | undefined;
   private readonly now: () => number;
+  private readonly beforeSourceRevisionWrite: (() => void) | undefined;
   private readonly setIntervalImpl: typeof setInterval;
   private readonly clearIntervalImpl: typeof clearInterval;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -195,13 +210,16 @@ export class InboxCursorStore {
     fileName: string = DEFAULT_STORE_FILE_NAME,
     options: InboxCursorStoreOptions = {},
   ) {
+    const triageScope = captureTriageReceiptScope(options.triageScope);
     const policy = { itemTtlMs: options.itemTtlMs ?? INBOX_ITEM_TTL_MS, itemCap: options.itemCap ?? INBOX_ITEM_CAP };
     if (!isInboxRetentionPolicy(policy)) throw new Error('Inbox retention requires nonnegative safe-integer TTL and item cap');
     this.store = new HandlerSqliteStore({
       workingDirectory,
       fileName: fileName || DEFAULT_STORE_FILE_NAME,
       schema: SCHEMA,
+      beforeWrite: options.beforeSourceRevisionWrite,
     });
+    this.beforeSourceRevisionWrite = options.beforeSourceRevisionWrite;
     this.itemTtlMs = policy.itemTtlMs;
     this.itemCap = policy.itemCap;
     this.sweepIntervalMs = options.sweepIntervalMs ?? INBOX_SWEEP_INTERVAL_MS;
@@ -211,6 +229,7 @@ export class InboxCursorStore {
     this.setIntervalImpl = options.setIntervalImpl ?? setInterval;
     this.clearIntervalImpl = options.clearIntervalImpl ?? clearInterval;
     this.releaseStorage = retainActiveInboxStore(this.store.dbPath);
+    nativeTriageStores.set(this, { store: this.store, scope: triageScope, ready: false, closed: false });
   }
 
   get dbPath(): string {
@@ -229,6 +248,29 @@ export class InboxCursorStore {
     const pending = (async () => {
       await this.store.init();
       if (this.closed) return;
+      const sourcePolicy = this.store.get<{ version: number }>('SELECT version FROM inbox_source_revision_policy WHERE singleton = 1');
+      if (sourcePolicy && sourcePolicy.version !== 1) throw new Error('Inbox source revisions are unsupported');
+      let declared: unknown;
+      try { declared = this.beforeSourceRevisionWrite?.(); }
+      catch (error) { drainOwned(error); throw error; }
+      if (declared !== undefined) { drainOwned(declared); throw new Error('Inbox source format declaration must be synchronous'); }
+      const columns = this.store.all<{ name: string }>('PRAGMA table_info(items)');
+      if (!columns.some(column => column.name === 'triage_revision')) {
+        if (sourcePolicy) throw new Error('Inbox source revision schema is unsupported');
+        this.store.run('ALTER TABLE items ADD COLUMN triage_revision TEXT');
+      }
+      if (!sourcePolicy) {
+        // An existing column alone does not prove that its writer updated it
+        // with semantic mutations. Reissue only derived revisions, never body data.
+        this.store.run('UPDATE items SET triage_revision = NULL');
+        this.store.run('INSERT INTO inbox_source_revision_policy (singleton, version) VALUES (1, 1)');
+        if (existsSync(this.store.dbPath)) this.revision += 1;
+      }
+      const unversioned = this.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM items WHERE triage_revision IS NULL');
+      if (unversioned && unversioned.count > 0) {
+        this.store.run("UPDATE items SET triage_revision = 'ir-' || lower(hex(randomblob(16))) WHERE triage_revision IS NULL");
+        this.revision += 1;
+      }
       const saved = this.store.get<{ version: number; itemTtlMs: number; itemCap: number }>('SELECT version, itemTtlMs, itemCap FROM inbox_retention_policy WHERE singleton = 1');
       if (saved && (saved.version !== 1 || !isInboxRetentionPolicy(saved))) throw new Error('Inbox retention policy is unsupported');
       if (!saved || saved.itemTtlMs !== this.itemTtlMs || saved.itemCap !== this.itemCap) {
@@ -237,9 +279,11 @@ export class InboxCursorStore {
         // mirrors must retain their actual policy after their owner closes.
         if (existsSync(this.store.dbPath)) this.revision += 1;
       }
+      this.sourceRevisionsReady = true;
       await this.runSweep();
       if (this.closed) return;
       this.initialized = true;
+      nativeTriageStores.get(this)!.ready = true;
       this.startSweepTimer();
     })();
     this.initializing = pending;
@@ -252,6 +296,7 @@ export class InboxCursorStore {
 
   private assertOpen(): void {
     if (this.closed) throw new Error('InboxCursorStore is closed.');
+    if (!this.sourceRevisionsReady) throw new Error('Inbox source revisions are unavailable');
   }
 
   /**
@@ -585,6 +630,7 @@ export class InboxCursorStore {
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.closed = true;
+    nativeTriageStores.get(this)!.closed = true;
     this.closing = Promise.resolve().then(async () => {
       let timerError: unknown;
       try { this.stopSweepTimer(); } catch (error) { timerError = error; }
@@ -656,12 +702,58 @@ function upsertRows(store: HandlerSqliteTransaction, items: readonly InboundChan
     store.run(`INSERT INTO items
       (id, provider, kind, fromDigest, subjectPreview, bodyPreview, routeId, receivedAt, unread)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET provider = excluded.provider, kind = excluded.kind,
+      ON CONFLICT(id) DO UPDATE SET
+      triage_revision = CASE WHEN items.provider IS excluded.provider
+        AND (CASE items.kind WHEN 'dm' THEN 'direct' WHEN 'thread' THEN 'thread' ELSE 'service' END)
+          IS (CASE excluded.kind WHEN 'dm' THEN 'direct' WHEN 'thread' THEN 'thread' ELSE 'service' END)
+        AND items.subjectPreview IS excluded.subjectPreview AND items.bodyPreview IS excluded.bodyPreview
+        AND items.unread IS excluded.unread THEN items.triage_revision ELSE NULL END,
+      provider = excluded.provider, kind = excluded.kind,
       fromDigest = excluded.fromDigest, subjectPreview = excluded.subjectPreview,
       bodyPreview = excluded.bodyPreview, routeId = COALESCE(excluded.routeId, items.routeId),
       receivedAt = excluded.receivedAt, unread = excluded.unread`,
     [item.id, item.provider, item.kind, item.fromDigest, item.subjectPreview, item.bodyPreview,
       item.routeId ?? null, item.receivedAt, item.unread ? 1 : 0]);
+    // SQLite issues only an actual new/changed message revision; identical
+    // polling never mints then discards a new identifier.
+    store.run("UPDATE items SET triage_revision = 'ir-' || lower(hex(randomblob(16))) WHERE id = ? AND triage_revision IS NULL", [item.id]);
   }
   return inserted;
+}
+
+
+export interface InboxTriageSourceObservation {
+  bindingFor(id: string): TriageSourceBinding | undefined;
+  assertCurrent(): void;
+}
+
+/** Only an original native mirror may supply a matching row revision. This is
+ * cache provenance, never a substitute for the account owner's read lease or
+ * permission to disclose a protected preview. No preview is copied/persisted. */
+export function captureInboxTriageSource(source: object, input: readonly CapturedTriageInput[], scope: TriageReceiptScope, requireAll = true): InboxTriageSourceObservation {
+  const owner = nativeTriageStores.get(source);
+  if (!owner || !owner.scope || owner.scope.providerId !== scope.providerId || owner.scope.accountScopeId !== scope.accountScopeId) throw new Error('Inbox triage requires its original native mirror account');
+  const originalCurrent = () => { if (!owner.ready || owner.closed) throw new Error('Inbox triage native source is unavailable'); };
+  originalCurrent();
+  const bindings = new Map<string, TriageSourceBinding>();
+  const currentRevision = (item: CapturedTriageInput): string | undefined => {
+    originalCurrent();
+    const row = owner.store.get<{ triage_revision: string }>(`SELECT triage_revision FROM items WHERE id = ? AND provider = ?
+      AND subjectPreview = ? AND bodyPreview = ? AND unread = ?
+      AND (CASE kind WHEN 'dm' THEN 'direct' WHEN 'thread' THEN 'thread' ELSE 'service' END) = ?`,
+    [item.id, item.surface, item.subject, item.snippet, item.unread ? 1 : 0, item.conversationKind]);
+    if (!row || typeof row.triage_revision !== 'string' || row.triage_revision.length !== 35 || !/^ir-[0-9a-f]{32}$/.test(row.triage_revision)) return undefined;
+    return row.triage_revision;
+  };
+  for (const item of input) {
+    const sourceRevision = currentRevision(item);
+    if (sourceRevision === undefined) { if (requireAll) throw new Error('Inbox triage native source changed'); continue; }
+    bindings.set(item.id, Object.freeze({ ...scope, sourceRevision }));
+  }
+  const assertCurrent = () => {
+    originalCurrent();
+    for (const item of input) if (bindings.has(item.id) && currentRevision(item) !== bindings.get(item.id)?.sourceRevision) throw new Error('Inbox triage native source changed');
+  };
+  assertCurrent();
+  return Object.freeze({ bindingFor: (id: string) => bindings.get(id), assertCurrent });
 }

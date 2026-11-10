@@ -2,6 +2,7 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { triageSource } from './_helpers/triage-source.ts';
 import { labelToTag } from '../platform/src/platform/intake/triage/evidence.js';
 import { scoreInboxTriage } from '../platform/src/platform/intake/triage/scorer.js';
 import { enrichItemsWithTriage, readTriageMetadataBatch, runInboxTriage } from '../platform/src/platform/intake/triage/pipeline.js';
@@ -15,8 +16,8 @@ function memory() {
   let writes = 0, closes = 0;
   const store: TriageStore = {
     async readBatch(ids) { reads.push([...ids]); return new Map(rows); },
-    async commit(receipts) {
-      writes++;
+    async commit(receipts, _signal, assertCurrent) {
+      assertCurrent?.(); writes++;
       for (const receipt of receipts) rows.set(receipt.id, { latest: receipt,
         settled: receipt.status === 'settled' ? receipt : rows.get(receipt.id)?.settled ?? null });
     },
@@ -57,12 +58,12 @@ describe('original triage code assertions with recorded readings', () => {
   });
 
   test('pipeline persists every item, re-scores by ID, and reads current tags in one batch', async () => {
-    const owner = memory(); const items = [item('a'), item('b')];
-    await runInboxTriage(items, { store: owner.store, port: recorded(.99, .01).port });
+    const owner = memory(); const items = [item('a'), item('b')], source = await triageSource(items);
+    await runInboxTriage(items, { ...source.options, store: owner.store, port: recorded(.99, .01).port });
     expect(owner.rows.size).toBe(2); expect(owner.writes()).toBe(1);
-    await runInboxTriage([items[0]!], { store: owner.store, port: recorded(.01, .99).port });
+    await runInboxTriage([items[0]!], { ...source.options, store: owner.store, port: recorded(.01, .99).port });
     expect(owner.rows.size).toBe(2); expect(owner.writes()).toBe(2);
-    const result = await readTriageMetadataBatch(items, owner.store);
+    const result = await readTriageMetadataBatch(items, owner.store, source.scope, source.mirror);
     expect(result.get('a')?.label).toBe('priority');
     expect(result.get('a')?.tags).toEqual(['GoodVibes/Priority']);
     expect(result.get('b')?.label).toBe('spam');
@@ -70,33 +71,33 @@ describe('original triage code assertions with recorded readings', () => {
   });
 
   test('enrichment overlays matching evidence and preserves an unscored semantic item', async () => {
-    const owner = memory(); const scored = item('scored'), unscored = item('unscored');
-    await runInboxTriage([scored], { store: owner.store, port: recorded(.01, .99).port });
-    const enriched = await enrichItemsWithTriage([scored, unscored], owner.store);
+    const owner = memory(); const scored = item('scored'), unscored = item('unscored'), source = await triageSource([scored, unscored]);
+    await runInboxTriage([scored], { ...source.options, store: owner.store, port: recorded(.01, .99).port });
+    const enriched = await enrichItemsWithTriage([scored, unscored], owner.store, source.scope, source.mirror);
     expect(enriched[0]?.triage?.label).toBe('priority');
     expect(enriched[1]).toEqual(unscored);
     expect(owner.reads).toEqual([['scored', 'unscored']]);
   });
 
-  // Regression source UNRUN: hashing is reserved for an actual saved match.
+  // Native source metadata matches without hashing or retaining message previews.
   test('inbox refresh skips input hashes for absent, held, unavailable and invalid receipts', async () => {
-    const owner = memory(), current = item('current');
-    await runInboxTriage([current], { store: owner.store, port: recorded(.01, .99).port });
-    await runInboxTriage([item('held')], { store: owner.store, port: recorded(.5, .5).port });
+    const owner = memory(), current = item('current'), source = await triageSource([current, item('held'), item('unavailable')]);
+    await runInboxTriage([current], { ...source.options, store: owner.store, port: recorded(.01, .99).port });
+    await runInboxTriage([item('held')], { ...source.options, store: owner.store, port: recorded(.5, .5).port });
     await runInboxTriage([item('unavailable')], { store: owner.store });
     const saved = owner.rows.get(current.id);
-    if (!saved || saved.latest.status !== 'settled' || saved.latest.receiptVersion !== 2) throw new Error('The current fixture must have actual settled v2 evidence.');
-    owner.rows.set('invalid', { latest: { ...saved.latest, id: 'invalid', inputHash: 'invalid' }, settled: saved.settled });
+    if (!saved || saved.latest.status !== 'settled' || saved.latest.receiptVersion !== 4) throw new Error('The current fixture must have actual settled v4 evidence.');
+    owner.rows.set('invalid', { latest: { ...saved.latest, id: 'invalid', source: undefined }, settled: saved.settled });
     const unscored = [...Array.from({ length: 20 }, (_, index) => item(`missing-${index}`)), item('held'), item('unavailable'), item('invalid')];
     const hashes = spyOn(crypto, 'createHash');
     const count = () => hashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
     try {
-      expect((await readTriageMetadataBatch(unscored, owner.store)).size).toBe(0);
+      expect((await readTriageMetadataBatch(unscored, owner.store, source.scope, source.mirror)).size).toBe(0);
       expect(count()).toBe(0);
-      expect((await readTriageMetadataBatch([current, ...unscored], owner.store)).get(current.id)?.label).toBe('priority');
-      expect(count()).toBe(1);
-      expect((await readTriageMetadataBatch([{ ...current, subject: 'Actually changed input' }], owner.store)).size).toBe(0);
-      expect(count()).toBe(2);
+      expect((await readTriageMetadataBatch([current, ...unscored], owner.store, source.scope, source.mirror)).get(current.id)?.label).toBe('priority');
+      expect(count()).toBe(0);
+      expect((await readTriageMetadataBatch([{ ...current, subject: 'Actually changed input' }], owner.store, source.scope, source.mirror)).size).toBe(0);
+      expect(count()).toBe(0);
     } finally { hashes.mockRestore(); }
     expect(owner.reads).toEqual([unscored.map(input => input.id), [current.id, ...unscored.map(input => input.id)], [current.id]]);
   });

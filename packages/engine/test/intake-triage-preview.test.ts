@@ -19,7 +19,8 @@ test('literal and dynamic dry-run previews contain the same decisions without is
   const fake = answer(), hashes = spyOn(crypto, 'createHash'); let storage = 0;
   try {
     const options: RunInboxTriageOptions = { dryRun: true, port: fake.port,
-      get store(): TriageStore { storage++; throw new Error('Preview must not inspect a store'); } };
+      get store(): TriageStore { storage++; throw new Error('Preview must not inspect a store'); },
+      get receiptSource(): object { storage++; throw new Error('Preview must not issue a native receipt binding'); } };
     const [dynamic] = await runInboxTriage([item], options);
     const [literal] = await runInboxTriage([item], { dryRun: true, port: fake.port });
     expect(dynamic).toEqual(literal);
@@ -38,7 +39,7 @@ test('preview shares actual settled math with persistent scoring without another
   const [receipt] = await runInboxTriage([item], { port: answer().port, store });
   if (!receipt) throw new Error('Actual settled receipt missing');
   const { inputHash, receiptVersion, ...decision } = receipt;
-  expect(inputHash).toHaveLength(64); expect(receiptVersion).toBe(2); expect(written).toBe(1);
+  expect(inputHash).toBeUndefined(); expect(Object.hasOwn(receipt, 'inputHash')).toBe(false); expect(receiptVersion).toBe(4); expect(written).toBe(1);
   const hashes = spyOn(crypto, 'createHash');
   try {
     const [preview] = await runInboxTriage([item], { dryRun: true, port: answer().port });

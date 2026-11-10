@@ -57,7 +57,7 @@ export function createEmailDaemonInboxFactory(options: EmailDaemonInboxOptions,
 function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: EmailDaemonInboxOptions,
   factories: Pick<EmailDaemonInboxFactories, 'createOwner' | 'eligibilityClock'>,
   register: (context: Parameters<DaemonInboxFactory>[0], options: Parameters<typeof registerInboxSurface>[1], owner: EmailInboxOwner,
-    beforeIdentityWrite: (() => void) | undefined, beforeReceiptWrite: ((receiptVersion?: 3) => void) | undefined) => T | Promise<T>,
+    beforeIdentityWrite: (() => void) | undefined, beforeReceiptWrite: ((receiptVersion?: 3 | 4) => void) | undefined) => T | Promise<T>,
 ): (...args: Parameters<DaemonInboxFactory>) => Promise<T> {
   const triageTagging = options.triageTagging ? Object.freeze({ onReady: options.triageTagging.onReady }) : undefined;
   if (triageTagging && typeof triageTagging.onReady !== 'function') throw new Error('Triage tagging requires an explicit owner callback');
@@ -107,7 +107,7 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
       current();
       const selectedOwner = owner;
       surface = await register({ ...context, workingDirectory }, {
-        adapters: new Map([['email', selectedOwner.adapter]]), storeFileName, ...(clustered ? { awaitInitialPoll: false } : {}),
+        adapters: new Map([['email', selectedOwner.adapter]]), beforeSourceRevisionWrite: controls.beforeSourceRevisionWrite, storeFileName, ...(clustered ? { awaitInitialPoll: false } : {}),
         acquireReadLease: () => selectedOwner.acquireReadLease(),
         gatePolling: (_provider, control) => {
           if (!clustered) return controls.gatePolling(`email:${electionScope}`, control);

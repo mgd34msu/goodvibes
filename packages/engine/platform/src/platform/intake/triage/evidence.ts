@@ -1,9 +1,8 @@
-import { createHash } from 'node:crypto';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { readYesNo, isPinnedJudgmentModel, matchesJudgmentModel, type YesNoReading } from '@goodvibes-jev/judgment';
 import { JudgmentInputError, snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import { inboxTriage, TRIAGE_MODEL } from './battery.js';
-import type { TriageBinding, TriageFailureReceipt, TriageEvidence, TriageInput, TriageLabel, TriageReceipt, TriageReceiptScope } from './types.js';
+import type { TriageBinding, TriageFailureReceipt, TriageEvidence, TriageInput, TriageLabel, TriageReceipt, TriageReceiptScope, TriageSourceBinding } from './types.js';
 
 /** Descriptor-only capture checks every property, including hidden data, without invoking user code. */
 export function captureTriageData(value: unknown): unknown {
@@ -41,7 +40,7 @@ export interface CapturedTriageInput {
   readonly conversationKind: string; readonly unread: boolean;
 }
 const invalid = (): never => { throw new JudgmentInputError('unsupported-input'); };
-/** Original input is fully captured and privacy-inspected before any projection or digest. */
+/** Original input is fully captured and privacy-inspected before any projection. */
 export function captureTriageInputs(items: readonly TriageInput[]): readonly CapturedTriageInput[] {
   const captured = captureTriageData(items);
   snapshotJudgmentInput(captured);
@@ -73,15 +72,11 @@ export function captureTriageReceiptScope(scope: TriageReceiptScope | undefined)
     || typeof value.accountScopeId !== 'string' || !value.accountScopeId || value.accountScopeId.length > 500) return invalid();
   return captured as TriageReceiptScope;
 }
-/**
- * Persisted exact-input commitment used only for receipt/enrichment matching.
- * It avoids duplicating protected message previews in the receipt DB. It is
- * dictionary-recoverable, not anonymization, secrecy, authority or a live fence.
- */
-export function triageBinding(input: CapturedTriageInput, scope?: TriageReceiptScope): TriageBinding {
-  return Object.freeze({ id: input.id, inputHash: createHash('sha256').update(JSON.stringify(scope === undefined ? input
-    : ['goodvibes/inbox-triage/account/v1', scope.providerId, scope.accountScopeId, input])).digest('hex'),
-    battery: inboxTriage.name, batteryVersion: inboxTriage.version, receiptVersion: 2 });
+/** A native mutation revision names the original mirror row. Generic input
+ * has no source binding; it can produce a displayed conclusion/history only. */
+export function triageBinding(input: CapturedTriageInput, source?: TriageSourceBinding): TriageBinding {
+  return Object.freeze({ id: input.id, battery: inboxTriage.name, batteryVersion: inboxTriage.version,
+    receiptVersion: 4, ...(source ? { source } : {}) });
 }
 const round = (p: number): number => Math.round(p * 100) / 100;
 export function labelToTag(label: TriageLabel): string {
@@ -98,7 +93,15 @@ export function triageConclusion(spam: YesNoReading, urgency: YesNoReading):
     label, score, tags: Object.freeze([labelToTag(label)]), signals: Object.freeze({ spam: round(spam.probability), urgency: round(urgency.probability) }) });
 }
 export function settleTriage(binding: TriageBinding, spam: YesNoReading, urgency: YesNoReading): TriageReceipt {
-  return Object.freeze({ ...binding, ...triageConclusion(spam, urgency) });
+  const conclusion = triageConclusion(spam, urgency);
+  if (conclusion.status === 'held') {
+    if (binding.receiptVersion === 4) {
+      const { source: _source, inputHash: _hash, receiptVersion: _version, ...attribution } = binding;
+      return Object.freeze({ ...attribution, receiptVersion: 3, status: 'held' });
+    }
+    return Object.freeze({ ...binding, status: 'held' });
+  }
+  return Object.freeze({ ...binding, ...conclusion });
 }
 /** Validate untrusted evidence as data, re-derive its conclusions, and return an immutable owned value. */
 export function checkTriageReceipt(value: unknown): TriageReceipt {
@@ -107,12 +110,12 @@ export function checkTriageReceipt(value: unknown): TriageReceipt {
   const row = safe as Record<string, unknown>;
   if (typeof row['id'] !== 'string' || !row['id'].trim() || row['id'].length > 500
     || row['battery'] !== inboxTriage.name || row['batteryVersion'] !== inboxTriage.version) return invalid();
-  const failedV3 = row['receiptVersion'] === 3;
-  if (failedV3 ? Object.hasOwn(row, 'inputHash') || (row['status'] !== 'held' && row['status'] !== 'unavailable')
+  const failedV3 = row['receiptVersion'] === 3, sourceV4 = row['receiptVersion'] === 4;
+  if (failedV3 || sourceV4 ? Object.hasOwn(row, 'inputHash') || (failedV3 ? row['status'] !== 'held' && row['status'] !== 'unavailable' : row['status'] !== 'settled')
     : typeof row['inputHash'] !== 'string' || !/^[a-f0-9]{64}$/.test(row['inputHash'])) return invalid();
   const model = row['model'], actualModel = row['actualModel'], targetModel = row['targetModel'];
   const identifier = (entry: unknown): entry is string => typeof entry === 'string' && /^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$/.test(entry);
-  const modern = row['receiptVersion'] === 2 || failedV3;
+  const modern = row['receiptVersion'] === 2 || failedV3 || sourceV4;
   if (row['receiptVersion'] !== undefined && !modern) return invalid();
   if (modern) {
     // Stored attribution describes the validated port response. It neither
@@ -135,10 +138,22 @@ export function checkTriageReceipt(value: unknown): TriageReceipt {
     if (!isDeepStrictEqual(safe, expected)) return invalid();
     return expected;
   }
-  const binding: TriageBinding = { id: row['id'], inputHash: row['inputHash'] as string, battery: inboxTriage.name, batteryVersion: inboxTriage.version,
-    ...(modern ? { receiptVersion: 2 as const } : {}), ...(model === undefined ? {} : { model: model as string }),
-    ...(actualModel === undefined ? {} : { actualModel: actualModel as string }), ...(targetModel === undefined ? {} : { targetModel: targetModel as string }) };
+  let source: TriageSourceBinding | undefined;
+  if (sourceV4 && row.source !== undefined) {
+    if (!row.source || typeof row.source !== 'object' || Array.isArray(row.source)) return invalid();
+    const value = row.source as Record<string, unknown>;
+    const scope = captureTriageReceiptScope({ providerId: value.providerId, accountScopeId: value.accountScopeId } as TriageReceiptScope);
+    if (!scope || typeof value.sourceRevision !== 'string' || value.sourceRevision.length !== 35 || !/^ir-[0-9a-f]{32}$/.test(value.sourceRevision)
+      || Object.keys(value).length !== 3) return invalid();
+    source = Object.freeze({ ...scope, sourceRevision: value.sourceRevision });
+  }
+  const attribution = { id: row['id'], battery: inboxTriage.name, batteryVersion: inboxTriage.version,
+    ...(model === undefined ? {} : { model: model as string }), ...(actualModel === undefined ? {} : { actualModel: actualModel as string }),
+    ...(targetModel === undefined ? {} : { targetModel: targetModel as string }) };
+  const binding: TriageBinding = sourceV4 ? { ...attribution, receiptVersion: 4, ...(source ? { source } : {}) }
+    : { ...attribution, inputHash: row['inputHash'] as string, ...(modern ? { receiptVersion: 2 as const } : {}) };
   if (row['status'] === 'held' || row['status'] === 'unavailable') {
+    if (binding.receiptVersion === 4) return invalid();
     const expected = Object.freeze({ ...binding, status: row['status'] });
     if (!isDeepStrictEqual(safe, expected)) return invalid();
     return expected;

@@ -641,13 +641,16 @@ describe('actual stateful catalog callers', () => {
     } finally { clock.mockRestore(); }
   });
 
-  test('setup retains complete original native smoke artifact records before the first restriction', async () => {
+  test('setup retains immutable original native smoke artifact records and refuses their deletion in the first restriction', async () => {
     const f = fixture(), store = new ArtifactStore({ rootDir: join(f.root, 'artifacts') });
     const descriptor = await store.create({ kind: 'document', mimeType: 'text/plain', filename: 'synthetic-smoke.txt',
       text: 'synthetic local smoke evidence', metadata: { purpose: 'agent-setup-smoke-evidence', result: 'blocked' } });
     f.platform.artifactStore = store; let restrictions = 0;
+    expect(Object.isFrozen(descriptor.metadata)).toBe(true);
+    expect(Reflect.set(descriptor.metadata, 'result', 'ready-for-user-run')).toBe(false);
+    expect(descriptor.metadata.result).toBe('blocked');
     await expect(setupPostureSummary(f.context, {}, { ...f.options, assertCurrent: () => {
-      if (restrictions++ === 0) descriptor.metadata.result = 'ready-for-user-run';
+      if (restrictions++ === 0) expect(store.delete(descriptor.id)).toBe(true);
     } })).rejects.toThrow(ToolInputProjectionError);
     expect(restrictions).toBe(1); expect(f.opened).toEqual([]);
   });

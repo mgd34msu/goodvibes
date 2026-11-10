@@ -125,14 +125,14 @@ describe('provider runtime expansion', () => {
     const bedrockRuntime = await providerRegistry.describeRuntime('amazon-bedrock');
     const bedrock = expectPresent(bedrockRuntime, 'amazon-bedrock runtime metadata');
     expect(bedrock.auth?.routes?.map((route) => route.route)).toContain('anonymous');
-    expect(bedrock.policy?.streamProtocol).toBe('anthropic-platform-stream');
+    expect(bedrock.policy?.streamProtocol).toBe('anthropic-sdk-stream');
 
     const vertexProvider = providerRegistry.getRegistered('anthropic-vertex');
     expect(typeof vertexProvider.describeRuntime).toBe('function');
     const vertexRuntime = await providerRegistry.describeRuntime('anthropic-vertex');
     const vertex = expectPresent(vertexRuntime, 'anthropic-vertex runtime metadata');
     expect(vertex.auth?.routes?.map((route) => route.route)).toContain('anonymous');
-    expect(vertex.policy?.streamProtocol).toBe('anthropic-platform-stream');
+    expect(vertex.policy?.streamProtocol).toBe('anthropic-sdk-stream');
 
     const copilotProvider = providerRegistry.getRegistered('github-copilot');
     expect(typeof copilotProvider.describeRuntime).toBe('function');

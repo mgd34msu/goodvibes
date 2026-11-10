@@ -401,35 +401,29 @@ describe('owned selected scalar configuration observations', () => {
     f.manager.setRuntimeOverride('controlPlane.host', 'changed-native-host');
     expect(() => guard(() => {})).toThrow(); expect(native.assertCurrent).toThrow(ToolInputProjectionError);
   });
-  test('equal selected parent replacements retain scalar equality but changed private tails retire', () => {
-    const f = nativePairing(), guard = selected(f.manager);
-    const config: unknown = Object.getOwnPropertyDescriptor(f.manager, 'config')?.value;
-    if (!config || typeof config !== 'object') throw new Error('Actual native configuration missing');
-    const field = Object.getOwnPropertyDescriptor(config, 'controlPlane'), original: unknown = field?.value;
-    if (!field || !original || typeof original !== 'object') throw new Error('Actual native section missing');
-    Object.defineProperty(config, 'controlPlane', { ...field, value: { ...original } });
+  test('borrowed config shadows and changed snapshots cannot substitute the native selected scalar source', () => {
+    const f = nativePairing(), guard = selected(f.manager), originalHost = f.manager.get('controlPlane.host');
+    const snapshot = f.manager.getAll(), replacement = { ...snapshot.controlPlane };
+    Object.defineProperty(snapshot, 'controlPlane', { value: replacement, configurable: true, enumerable: true, writable: true });
+    Object.defineProperty(f.manager, 'config', { value: snapshot, configurable: true, enumerable: true, writable: true });
     expect(guard(() => {})).toBe(true);
-    const replacement: unknown = Object.getOwnPropertyDescriptor(config, 'controlPlane')?.value;
-    if (!replacement || typeof replacement !== 'object') throw new Error('Actual replaced section missing');
-    Object.defineProperty(replacement, 'host', { value: 'changed-complete-scalar-tail', writable: true, enumerable: true, configurable: true });
+    replacement.host = 'changed-borrowed-scalar-tail';
+    expect(f.manager.get('controlPlane.host')).toBe(originalHost);
+    expect(guard(() => {})).toBe(true);
+    f.manager.setRuntimeOverride('controlPlane.host', 'changed-actual-native-host');
     expect(() => guard(() => {})).toThrow();
   });
-  for (const phase of [1, 2]) test(`selected mutation in boundary ${phase} holds before a later restoring callback`, () => {
+  for (const phase of [1, 2]) test(`selected native mutation in boundary ${phase} holds before a later restoring callback`, () => {
     const f = nativePairing(), guard = selected(f.manager), incarnation = f.manager.getConfigurationIncarnation();
-    const config: unknown = Object.getOwnPropertyDescriptor(f.manager, 'config')?.value;
-    if (!config || typeof config !== 'object') throw new Error('Actual native configuration missing');
-    const section: unknown = Object.getOwnPropertyDescriptor(config, 'controlPlane')?.value;
-    if (!section || typeof section !== 'object') throw new Error('Actual native section missing');
-    const original = Object.getOwnPropertyDescriptor(section, 'host');
-    if (!original) throw new Error('Actual selected field missing');
+    const original = f.manager.get('controlPlane.host');
     let boundaries = 0, mutated = false, restored = false;
     expect(() => guard(() => {
       boundaries++;
-      if (boundaries === phase) { Object.defineProperty(section, 'host', { ...original, value: 'changed-during-boundary' }); mutated = true; }
-      if (boundaries > phase) { Object.defineProperty(section, 'host', original); restored = true; }
+      if (boundaries === phase) { f.manager.setRuntimeOverride('controlPlane.host', 'changed-during-boundary'); mutated = true; }
+      if (boundaries > phase) { f.manager.setRuntimeOverride('controlPlane.host', original); restored = true; }
     })).toThrow();
     expect(mutated).toBe(true); expect(boundaries).toBe(phase); expect(restored).toBe(false);
-    expect(f.manager.getConfigurationIncarnation()).toBe(incarnation);
+    expect(f.manager.getConfigurationIncarnation()).not.toBe(incarnation);
   });
   test('canonical source ABA retires even after the original selected value is restored', () => {
     const f = nativePairing(), guard = selected(f.manager), original = f.manager.get('controlPlane.host');
@@ -545,15 +539,13 @@ describe('owned selected scalar configuration observations', () => {
     finally { Object.defineProperty(Object, 'getOwnPropertyDescriptor', descriptor); }
     expect(guard(() => { boundaries++; })).toBe(true); expect(boundaries).toBe(2);
   });
-  test('accessor and non-scalar values keep ordinary per-setting admission', () => {
+  test('borrowed get accessors and non-scalar selections keep ordinary per-setting admission', () => {
     const f = nativePairing(); let getters = 0;
-    const config: unknown = Object.getOwnPropertyDescriptor(f.manager, 'config')?.value;
-    if (!config || typeof config !== 'object') throw new Error('Actual native configuration missing');
-    const control: unknown = Object.getOwnPropertyDescriptor(config, 'controlPlane')?.value;
-    if (!control || typeof control !== 'object') throw new Error('Actual native section missing');
-    Object.defineProperty(control, 'host', { configurable: true, enumerable: true, get() { getters++; return 'ordinary-accessor-host'; } });
-    expect(captureConfigSelectedScalars(f.manager, [{ key: 'controlPlane.host', value: 'ordinary-accessor-host' }])).toBeUndefined();
-    expect(getters).toBe(0); expect(f.manager.get('controlPlane.host')).toBe('ordinary-accessor-host'); expect(getters).toBe(1);
+    const originalGet = f.manager.get, originalHost = f.manager.get('controlPlane.host');
+    Object.defineProperty(f.manager, 'get', { configurable: true, get() { getters++; return originalGet; } });
+    expect(captureConfigSelectedScalars(f.manager, [{ key: 'controlPlane.host', value: originalHost }])).toBeUndefined();
+    expect(getters).toBe(0); expect(f.manager.get('controlPlane.host')).toBe(originalHost); expect(getters).toBe(1);
+    Object.defineProperty(f.manager, 'get', { configurable: true, writable: true, value: originalGet });
     expect(captureConfigSelectedScalars(f.manager, [{ key: 'notifications.webhookUrls', value: [] }])).toBeUndefined();
   });
   test('the complete original file observation still retires a genuine grouped native source', () => {

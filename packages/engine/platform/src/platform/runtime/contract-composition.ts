@@ -248,13 +248,22 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
         if (baselines.some(baseline => baseline?.version === 2)) formats.push('contract-tree-baselines-v2');
         if (baselines.some(baseline => baseline?.version === 3)) formats.push('contract-tree-baselines-v3');
         let optionalDigest = [...contract.checks, ...contract.groups.flatMap(group => group.checks)]
-          .some(check => check.result === 'pass' && check.evidenceDigest === undefined);
+          .some(check => check.evidenceDigest === undefined);
         while (units.length && !optionalDigest) {
           const unit = units.pop()!;
-          optionalDigest = unit.checks.some(check => check.result === 'pass' && check.evidenceDigest === undefined);
+          optionalDigest = unit.checks.some(check => check.evidenceDigest === undefined);
           units.push(...(unit.attemptUnits ?? []));
         }
         if (optionalDigest) formats.push('contract-optional-check-digests-v1');
+        if (contract.decisions.some(decision => {
+          if (![`${contract.id}.final-answer-review`, `${contract.id}.goal-obligations`, `${contract.id}.original-obligations`].includes(decision.targetId)) return false;
+          try {
+            const receipt: unknown = JSON.parse(decision.reason);
+            return receipt !== null && typeof receipt === 'object' && !Array.isArray(receipt)
+              && (!Object.hasOwn(receipt, 'stateHash')
+                || decision.targetId === `${contract.id}.final-answer-review` && !Object.hasOwn(receipt, 'evidenceDigest'));
+          } catch { return false; }
+        })) formats.push('optional-review-binding-v1');
       }
       if (contract?.inputSnapshot?.indexFingerprint.startsWith('git-index-v2:')) formats.push('contract-input-index-observations-v1');
       if (isOpaqueContractId(contract?.id)) formats.push('contract-opaque-identities-v1');

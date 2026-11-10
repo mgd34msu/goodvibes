@@ -53,6 +53,39 @@ function approvedWork(projectRoot = '/project') {
   return completedContractEvidence({ list: () => [accepted] }, 'session', projectRoot);
 }
 
+test('ordinary saved reviews omit unused state bindings while source and answer matching still gate readiness', () => {
+  const prior = approvedWork()[0]!;
+  const content = { ...prior.contentReview!.record }, scope = { ...prior.goalCoverage!.record };
+  delete content['stateHash']; delete content['evidenceDigest']; delete scope['stateHash'];
+  const view = contract({ criteria: [{ id: 'c1', text: 'Review all source and deliver review.md.', disposition: 'judged', status: 'met', readings: [] }],
+    decisions: [
+      { id: 'work.d1', targetId: 'work.final-answer-review', reason: JSON.stringify(content), decisionIds: content.decisionIds },
+      { id: 'work.d2', targetId: 'work.goal-obligations', reason: JSON.stringify(scope), decisionIds: scope.decisionIds },
+    ] });
+  const work = completedContractEvidence({ list: () => [view] }, 'session', '/project')[0]!;
+  expect(work.contentReview).toMatchObject({ wellFormed: true, matchesSavedAnswer: true });
+  expect(work.goalCoverage).toMatchObject({ wellFormed: true, matchesSavedAnswer: true, matchesOriginalScope: true });
+  expect(work.contentReview!.record).not.toHaveProperty('stateHash');
+  expect(isNativeCompletedWorkReceipt(work, structuredClone(work))).toBe(true);
+  const stale = completedContractEvidence({ list: () => [{ ...view, answer: 'A different answer' }] }, 'session', '/project')[0]!;
+  expect(stale.contentReview!.matchesSavedAnswer).toBe(false);
+  expect(isNativeCompletedWorkReceipt(stale, stale)).toBe(false);
+  const changed = completedContractEvidence({ list: () => [{ ...view, ask: 'A different original request' }] }, 'session', '/project')[0]!;
+  expect(changed.goalCoverage!.matchesOriginalScope).toBe(false);
+  expect(isNativeCompletedWorkReceipt(changed, changed)).toBe(false);
+  const native = { ...view, nativeSource: { sourceId: 'native', sourceRevision: '1', inputRevision: '1', criteriaId: 'criteria', criteriaRevision: '1', goal: view.goal, criteria: ['Original native criterion'] } };
+  const unboundNative = completedContractEvidence({ list: () => [native] }, 'session', '/project')[0]!;
+  expect(unboundNative.contentReview!.wellFormed).toBe(false);
+  expect(unboundNative.goalCoverage!.wellFormed).toBe(false);
+  expect(isNativeCompletedWorkReceipt(unboundNative, unboundNative)).toBe(false);
+  const boundNativeContent = { ...prior.contentReview!.record };
+  delete boundNativeContent['evidenceDigest'];
+  const boundNative = { ...native, decisions: [{ id: 'actual-native-content', at: 100, action: 'checked' as const,
+    targetId: 'work.final-answer-review', reason: JSON.stringify(boundNativeContent), decisionIds: ['actual-content-review'] }] };
+  expect(completedContractEvidence({ list: () => [boundNative] }, 'session')[0]!.contentReview)
+    .toMatchObject({ wellFormed: true, matchesSavedAnswer: true });
+});
+
 test('native work receipts compare exact detached values without invoking supplied accessors or proxies', () => {
   const work = approvedWork()[0]!;
   expect(isNativeCompletedWorkReceipt(work, structuredClone(work))).toBe(true);

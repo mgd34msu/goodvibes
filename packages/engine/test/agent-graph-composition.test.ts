@@ -110,6 +110,38 @@ test('actual canonical composition publishes optional-check reader floor before 
   } finally { composed.dispose(); graph.agentOrchestrator.dispose(); rmSync(f.workingDirectory, { recursive: true, force: true }); }
 });
 
+test('ordinary review receipts declare optional state bindings before publication and retain older bound receipts', () => {
+  const f = fixture(), graph = createAgentExecutionGraph(f), declared: NativeDataFormat[] = [];
+  let target = '', refuse = false;
+  const nativeDataWriter = { declare(format: NativeDataFormat) {
+    declared.push(format);
+    if (format === 'optional-review-binding-v1') {
+      expect(existsSync(target)).toBe(false);
+      if (refuse) throw new Error('Original review-binding reader unavailable');
+    }
+  } };
+  const composed = composition.composeContractRunner({ ...f, projectRoot: f.workingDirectory, nativeDataWriter,
+    agentManager: graph.agentManager, agentMessageBus: graph.agentMessageBus,
+    fleetCapacity: composition.nativeAgentFleetCapacity(f.configManager, graph.agentManager) });
+  try {
+    for (const scope of ['final-answer-review', 'goal-obligations', 'original-obligations']) {
+      const current = makeContract({ projectRoot: f.workingDirectory });
+      current.decisions.push({ id: 'review', at: 10, action: 'checked', targetId: `${current.id}.${scope}`,
+        reason: JSON.stringify({ schemaVersion: 2, passed: true, decisionIds: ['actual-review'] }), decisionIds: ['actual-review'] });
+      target = contractPath(f.workingDirectory, current.id); composed.store.hold(current);
+      refuse = true; expect(composed.store.write(current.id)).toBe(false); expect(existsSync(target)).toBe(false);
+      refuse = false; declared.length = 0;
+      expect(composed.store.write(current.id)).toBe(true); expect(declared).toContain('optional-review-binding-v1');
+    }
+    const older = makeContract({ projectRoot: f.workingDirectory });
+    older.decisions.push({ id: 'old-review', at: 10, action: 'checked', targetId: `${older.id}.final-answer-review`,
+      reason: JSON.stringify({ stateHash: '1'.repeat(64), evidenceDigest: '2'.repeat(64) }), decisionIds: ['old-recorded-review'] });
+    declared.length = 0; target = contractPath(f.workingDirectory, older.id); composed.store.hold(older);
+    expect(composed.store.write(older.id)).toBe(true); expect(declared).not.toContain('optional-review-binding-v1');
+    expect(nativeReaderCapabilities('3.1.2').formats).toContain('optional-review-binding-v1');
+  } finally { composed.dispose(); graph.agentOrchestrator.dispose(); rmSync(f.workingDirectory, { recursive: true, force: true }); }
+});
+
 // Source-first regressions: authored without running during the audit pass.
 for (const boundary of ['identity', 'checkpoint'] as const) for (const mode of ['throw-promise', 'return-promise', 'throw-error', 'return-thenable'] as const) {
   test(`contract ${boundary} publication ${mode} preserves refusal and observes owned rejected work`, async () => {

@@ -8,7 +8,7 @@ interface HistoricalAnswerClaimScope extends ClaimRange { readonly version?: und
 interface CurrentAnswerClaimScope extends ClaimRange { readonly version: 2; readonly outputDigest: string }
 export type AnswerClaimScope = HistoricalAnswerClaimScope | CurrentAnswerClaimScope;
 interface ClaimReviewDetails {
-  readonly stateHash: string;
+  readonly stateHash?: string;
   readonly decisionId: string;
   readonly reading: Pick<YesNoReading, 'probability' | 'verdict' | 'outcome'>;
 }
@@ -55,7 +55,7 @@ function originalOutput(output: string, supplied?: AnswerClaimOutput): OutputOwn
 export function recordAnswerClaimReview(scope: AnswerClaimScope, details: ClaimReviewDetails): AnswerClaimReview {
   const output = scopeOwner(scope);
   if (output === undefined) throw new Error('Answer claim review requires its original host scope');
-  const review = freeze({ ...scope, stateHash: details.stateHash, decisionId: details.decisionId, reading: freeze({ ...details.reading }) });
+  const review = freeze({ ...scope, ...(details.stateHash === undefined ? {} : { stateHash: details.stateHash }), decisionId: details.decisionId, reading: freeze({ ...details.reading }) });
   apply(set, scopeOutputs, [review, output]); return review;
 }
 

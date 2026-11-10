@@ -2,6 +2,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import { contractInputPath } from '../../platform/src/platform/contract/input-snapshot.js';
 import { makeHarness, makeRepo, oneUnitPlan, startContract, waitFor, type Harness } from './runner-support.js';
 import { plannerOutput } from './plan-support.js';
@@ -17,7 +18,8 @@ for (const stale of [false, true]) {
     let indexAtApply: Buffer<ArrayBuffer>;
     let headAtApply = '';
     const plan = oneUnitPlan(1);
-    const h = harness = makeHarness({ plan, contract: { isolation: 'worktree' }, scripts: { u1: finishes('export const parse = 10;') }, planner: {
+    using log = new SqliteDecisionLog(':memory:');
+    const h = harness = makeHarness({ plan, decisionLog: log, contract: { isolation: 'worktree' }, scripts: { u1: finishes('export const parse = 10;') }, planner: {
       async run(request) {
         if (stale) writeFileSync(join(h.root, 'README.md'), 'owner edited after capture\n');
         ownerAtApply = readFileSync(join(h.root, 'README.md'), 'utf8'); indexAtApply = readFileSync(join(h.root, '.git/index')); headAtApply = git(h.root, 'rev-parse', 'HEAD');
@@ -32,7 +34,16 @@ for (const stale of [false, true]) {
     expect(done.status).toBe('passed');
     expect(done.commit?.status).toBe('applied');
     expect(done.commit?.note).toContain('uncommitted changes');
-    if (stale) expect(done.decisions.some(decision => decision.targetId === `${done.id}.publication-owner`)).toBe(true);
+    if (stale) {
+      const publication = done.decisions.find(decision => decision.targetId === `${done.id}.publication-owner`)!;
+      expect(publication).toBeDefined();
+      expect(JSON.parse(publication.reason)).not.toHaveProperty('stateHash');
+      expect(publication.decisionIds).not.toHaveLength(0);
+      for (const id of publication.decisionIds) {
+        expect(log.get(id)).toMatchObject({ status: 'answered', context: { site: 'contract.publication-owner' } });
+        expect(log.get(id)).not.toHaveProperty('stateHash');
+      }
+    }
     expect(done.commit?.hash).toBeUndefined();
     expect(done.statusLine).toContain('; applied');
     expect(h.manager.getStatus(done.ownerAgentId)?.progress).toBe(done.statusLine);

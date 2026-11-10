@@ -7,7 +7,7 @@ export interface GoalObligationProof {
   readonly policy: { readonly name: string; readonly version: number };
   readonly literalSourceDigest: string;
   readonly outputDigest: string;
-  readonly stateHash: string;
+  readonly stateHash?: string;
   readonly sourceJudgmentDecisionIds: readonly string[];
   readonly sourceGoal: Pick<YesNoReading, 'probability' | 'verdict' | 'outcome'>;
   readonly reading: Pick<YesNoReading, 'probability' | 'verdict' | 'outcome'>;

@@ -52,12 +52,16 @@ test.each(['covered', 'omitted', 'failed-criterion', 'confident-goal'])('an unce
     expect(current.status).toBe('passed'); expect(check.goal.probabilityUnmet).toBe(0.03);
     const proof = JSON.parse(current.decisions.findLast(decision => decision.targetId === `${contract.id}.goal-obligations`)!.reason);
     expect(proof.sourceGoal.probability).toBe(0.61); expect(proof.passed).toBe(true);
-    expect(log.get(proof.decisionIds[0])?.stateHash).toBe(proof.stateHash);
+    expect(proof).not.toHaveProperty('stateHash');
+    expect(log.get(proof.decisionIds[0])).not.toHaveProperty('stateHash');
     const original = log.get(proof.sourceJudgmentDecisionIds[0]);
     expect(original?.status).toBe('answered');
     if (original?.status === 'answered') expect(original.answers).toMatchObject({ goal: noulAnswer(0.61) });
     expect(check.decisionIds).toContain(proof.decisionIds[0]);
-  } else { expect(current.status).not.toBe('passed'); expect(current.commit).toBeUndefined(); expect(check.goal.verdict).toBe('unmet'); }
+  } else {
+    expect(current.status).not.toBe('passed'); expect(current.commit).toBeUndefined(); expect(check.goal.verdict).toBe('unmet');
+    expect(check).not.toHaveProperty('evidenceDigest');
+  }
 });
 
 test('an uncertain overall factual objection is resolved by exact complete answer coverage without another draft', async () => {
@@ -88,7 +92,8 @@ test('an uncertain overall factual objection is resolved by exact complete answe
   for (const claim of receipt.claimReviews) {
     expectedOutputDigest ??= hashState(current.answer!);
     const entry = log.get(claim.decisionId)!;
-    expect(entry.stateHash).toBe(claim.stateHash);
+    expect(claim).not.toHaveProperty('stateHash');
+    expect(entry).not.toHaveProperty('stateHash');
     expect(entry.questions).toMatchObject({ unsupported: { instructions: { claimScope: {
       version: 2, start: claim.start, end: claim.end, outputDigest: expectedOutputDigest } } } });
     expect(current.checks.at(-1)!.decisionIds).toContain(claim.decisionId);

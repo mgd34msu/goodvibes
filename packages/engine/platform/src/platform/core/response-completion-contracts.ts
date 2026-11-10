@@ -36,10 +36,14 @@ function recordedReview(contract: ContractView, target: 'final-answer-review' | 
     const reading = (value: unknown) => object(value) && typeof value.probability === 'number' && Number.isFinite(value.probability)
       && value.probability >= 0 && value.probability <= 1 && typeof value.verdict === 'string' && typeof value.outcome === 'string';
     const policy = object(record.policy) ? record.policy : null;
-    const wellFormed = typeof record.passed === 'boolean' && digest(record.outputDigest) && digest(record.stateHash)
+    // Native execution has an independent log-input verifier. Ordinary host
+    // reviews do not; their unused state commitment is absent on new receipts.
+    // Actual saved older bound receipts remain valid in either mode.
+    const inputBinding = Object.hasOwn(record, 'stateHash') ? digest(record.stateHash) : contract.nativeSource === undefined;
+    const wellFormed = typeof record.passed === 'boolean' && digest(record.outputDigest) && inputBinding
       && ids(record.decisionIds) && policy !== null
       && (target === 'final-answer-review'
-        ? record.schemaVersion === 2 && digest(record.evidenceDigest) && ids(record.fulfillmentDecisionIds)
+        ? record.schemaVersion === 2 && (!Object.hasOwn(record, 'evidenceDigest') || digest(record.evidenceDigest)) && ids(record.fulfillmentDecisionIds)
           && version(policy.fulfillment) && version(policy.content) && ['high', 'critical'].includes(String(policy.stakes))
           && object(record.readings) && reading(record.readings.unfinished) && reading(record.readings.unsupported)
         : target === 'original-obligations'

@@ -9,6 +9,8 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
 import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.js';
+import { HOME_GRAPH_KNOWLEDGE_DB_FILE } from '../platform/src/platform/knowledge/store-config.js';
 import { KnowledgeNodeActivationHeldError } from '../platform/src/platform/knowledge/activation/types.js';
 import { upsertObservedKnowledgeNode } from '../platform/src/platform/knowledge/store-node-observation.js';
 import { reviewKnowledgeNodeRecord } from '../platform/src/platform/knowledge/service-node-admin.js';
@@ -21,10 +23,11 @@ const spaceId = 'homeassistant:activation-propagation', installationId = 'activa
 const initialText = 'The laboratory recorded a sample from the reference device for later examination.';
 const capturedText = `${initialText}\n\nAC-7 resolution: 4K.`;
 const roots: string[] = [];
+const stores: KnowledgeStore[] = [];
 let previous: JudgmentPort | undefined;
 const extractionValues: Array<ExtractionValueFixtures[number]> = [];
 beforeEach(() => { extractionValues.length = 0; previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { for (const store of stores.splice(0)) await store.close(); installJudgmentPort(previous); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function metadata(extra: Record<string, unknown> = {}) { return buildHomeGraphMetadata(spaceId, installationId, extra); }
 function snapshot(store: KnowledgeStore) {
   return JSON.stringify({ nodes: store.listNodes(), edges: store.listEdges(), sources: store.listSources(),
@@ -33,9 +36,11 @@ function snapshot(store: KnowledgeStore) {
 }
 async function fixture(excerpt = initialText) {
   const root = mkdtempSync(join(tmpdir(), 'knowledge-activation-propagation-')); roots.push(root);
-  const dbPath = join(root, 'knowledge.sqlite'), store = new KnowledgeStore({ dbPath });
+  const dbPath = join(root, HOME_GRAPH_KNOWLEDGE_DB_FILE), store = new KnowledgeStore({ dbPath, family: 'home-graph' });
+  stores.push(store);
   await store.init();
   const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
+  configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: root, stores: [store] });
   const observed = { id: 'device', kind: 'ha_device' as const, slug: 'device', title: 'AC-7', status: 'active' as const,
     metadata: metadata({ model: 'AC-7', entityKind: 'device', homeAssistant: { objectId: 'device', objectKind: 'device' } }) };
   const device = await upsertObservedKnowledgeNode(store, observed, 'home-assistant-snapshot', observed, () => observed);
@@ -61,7 +66,7 @@ async function fixture(excerpt = initialText) {
     protectedFacts.push(store.getNode(node.id)!);
   }
   return { store, artifactStore, device, source, fact, protectedFacts,
-    async reload() { const reopened = new KnowledgeStore({ dbPath }); await reopened.init(); return reopened; } };
+    async reload() { const reopened = new KnowledgeStore({ dbPath, family: 'home-graph' }); stores.push(reopened); await reopened.init(); return reopened; } };
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 function ask(item: Fixture, includeFact = true) {
@@ -113,17 +118,22 @@ describe('required activation holds across knowledge refresh catches', () => {
   test.each([[0.01, 'no'], [0.5, 'uncertain']] as const)('Ask propagates actual profile activation %s/%s after only the accepted source link', async (probability, reason) => {
     const item = await fixture('AC-7 resolution: 4K.');
     const fake = fakePort((name, question, state) => {
+      name = name.split('__').at(-1)!;
       if (['factTrust', 'sourceSupport', 'subjectSupport'].includes(name)) return scoreAnswer(question, 4, 0.99);
       const input = state as { category?: { title: string } };
       if (name === 'authority') return choiceAnswer(question, 'official-vendor', 0.99);
       if (name === 'wanted') return noulAnswer(input.category?.title === 'Display and picture specifications' ? 0.99 : 0.01);
       if (name === 'serve') return noulAnswer(probability);
-      if (['useful', 'selected', 'profileSupported', 'supported', 'attached'].includes(name)) return noulAnswer(0.99);
+      if (['manufacturerPresent', 'modelPresent', 'batteryApplicable', 'batteryTypePresent'].includes(name)) return noulAnswer(0.01);
+      if (['useful', 'repairUseful', 'selected', 'profileSupported', 'supported', 'attached'].includes(name)) return noulAnswer(0.99);
       throw new Error(`Unscripted passport question: ${name}`);
     });
     installJudgmentPort(fake.port);
     await expect(ask(item, false)).rejects.toMatchObject({ name: 'KnowledgeNodeActivationHeldError', reason });
     expect(fake.requests.filter(request => 'serve' in request.questions).length).toBeGreaterThan(0);
+    const usefulness = fake.requests.findIndex(request => 'repairUseful' in request.questions);
+    const activation = fake.requests.findIndex(request => 'serve' in request.questions);
+    expect(usefulness).toBeGreaterThanOrEqual(0); expect(activation).toBeGreaterThan(usefulness);
     const reopened = await item.reload();
     expect(reopened.getNode(item.fact.id)).toEqual(item.fact);
     expectProtected(reopened, item);

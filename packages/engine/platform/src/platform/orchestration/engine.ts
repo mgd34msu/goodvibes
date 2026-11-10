@@ -217,6 +217,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   let disposed = false;
   const ownedWork = new OwnedWork();
   const activeItems = new Map<WorkItem, Promise<void>>();
+  const terminatedWorktreeCleanup = new WeakSet<WorkItem>();
 
   function dispatch(event: OrchestrationEvent): void {
     for (const listener of listeners) {
@@ -431,13 +432,17 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
         return;
       }
     }
+    // Capture the live failure's cleanup before publishing its terminal event:
+    // a contract listener can dispose the engine synchronously in response.
+    // Passive shutdown still preserves resumable worktrees.
+    if (!disposed && workstream.isolation === 'worktree') terminatedWorktreeCleanup.add(item);
     item.state = 'failed';
     item.completedAt = now();
     item.failureReason = reason;
     emit({ type: 'item-failed', workstreamId: workstream.id, itemId: item.id, reason });
     // Shutdown preserves the saved worktree for restart, including a clean
     // read-only candidate awaiting verification. Live fail/kill still reclaims.
-    if (!disposed && workstream.isolation === 'worktree' && !activeItems.has(item)) {
+    if (terminatedWorktreeCleanup.has(item) && !activeItems.has(item)) {
       void worktreeIsolation.cleanupTerminated(workstream, item).catch((error) => {
         logger.error('orchestration engine: worktree cleanup after item failure did not complete', {
           itemId: item.id, error: summarizeError(error),
@@ -698,12 +703,13 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
           try {
             // kill marks an item failed immediately, but its executor can still
             // be unwinding. Only reclaim its tree after the actual phase exits.
-            if (!disposed && workstream.isolation === 'worktree' && currentState(item) === 'failed') {
+            if ((!disposed || terminatedWorktreeCleanup.has(item)) && workstream.isolation === 'worktree' && currentState(item) === 'failed') {
               await worktreeIsolation.cleanupTerminated(workstream, item);
             }
           } finally {
             cancellation.release(item.id, signal);
             requeuedInFlight.delete(item);
+            terminatedWorktreeCleanup.delete(item);
             activeItems.delete(item);
             releasePhase();
             if (!disposed && !capacityRefused) {

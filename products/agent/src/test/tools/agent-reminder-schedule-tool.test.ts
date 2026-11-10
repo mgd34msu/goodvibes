@@ -2,7 +2,7 @@ import { scheduleEffectAdmission } from '../helpers/schedule-effect-admission.ts
 import { createScheduleInputProjector } from '../../tools/agent-schedule-effect.ts';
 import { registerAgentOperatorMethodTool } from '../../tools/agent-operator-method-tool.ts';
 import { mockFetch } from '../helpers/typed-fetch-mock.ts';
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -15,6 +15,12 @@ import {
   registerAgentReminderScheduleTool,
 } from '../../tools/agent-reminder-schedule-tool.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
+import { getSessionUntrustedContentLedger, resetSessionUntrustedContentLedgerForTests } from '../../trust/untrusted-content.ts';
+
+// Each fixture represents a separate synthetic owner session. Keep source
+// exposure within that session instead of inheriting an earlier test's turn.
+beforeEach(resetSessionUntrustedContentLedgerForTests);
+afterEach(resetSessionUntrustedContentLedgerForTests);
 
 type ShellPaths = ShellPathService;
 
@@ -223,6 +229,25 @@ describe('agent_reminder_schedule tool', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  test('current incomplete untrusted exposure still refuses the genuinely admitted reminder before HTTP dispatch', async () => {
+    const paths = shellPaths();
+    getSessionUntrustedContentLedger().record({ surface: 'web-page', origin: 'https://untrusted-fixture.example', at: new Date().toISOString() });
+    const tool = admittedTool(paths);
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = mockFetch(async () => { calls++; return scheduleResponse(); });
+    try {
+      const result = await tool.execute({
+        message: 'Review open approvals', scheduleKind: 'every', scheduleValue: '1d',
+        deliveryChannel: 'slack:ops:Ops',
+        explicitUserRequest: 'Remind me every day to review open approvals.',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('connected_host_unavailable');
+      expect(calls).toBe(0);
+    } finally { globalThis.fetch = originalFetch; }
   });
 
   test('is registered in the model tool registry', async () => {

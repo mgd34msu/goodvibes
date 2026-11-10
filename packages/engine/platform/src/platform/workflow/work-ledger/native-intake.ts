@@ -207,12 +207,29 @@ export function createNativeConversationIntakeHost(deps: {
       if (current.generation !== generation || current.state !== 'processing') throw new NativeConversationIntakeError('stale');
     };
     const watch = setInterval(() => { try { assertCurrent(); } catch (error) { controller.abort(error); } }, 50); watch.unref?.();
+    let terminalUpdate: NativeConversationCapture | undefined;
+    const prepareTerminalUpdate = (next: NativeConversationCapture): void => {
+      // Preparation is complete. Native publication retains its owner checks;
+      // the processing monitor must not cancel our exact terminal result while
+      // its acknowledgement is still pending.
+      terminalUpdate = next;
+      clearInterval(watch);
+    };
+    const currentTerminal = (): NativeConversationCapture => {
+      signal.throwIfAborted();
+      const current = load(key, authority, options, revision, record); assertContinuation(current);
+      if (!terminalUpdate || !isDeepStrictEqual(current, terminalUpdate)) throw new NativeConversationIntakeError('stale');
+      return current;
+    };
     async function update(change: Partial<NativeConversationCapture>) {
       record = await withOwners(record, authority, options, assertOwners => deps.storage.transaction(record, current => {
         assertOwners(); assertCurrent();
         if (!current || current.generation !== generation) throw new NativeConversationIntakeError('stale');
-        const next = parseNativeConversationCapture({ ...current, ...change }, record); return { next, value: next };
+        const next = parseNativeConversationCapture({ ...current, ...change }, record);
+        if (next.state !== 'processing') prepareTerminalUpdate(next);
+        return { next, value: next };
       }));
+      if (terminalUpdate) record = currentTerminal();
     }
     async function classicConversation(): Promise<NativeConversationIntakeResult> {
       assertCurrent();
@@ -282,24 +299,34 @@ export function createNativeConversationIntakeHost(deps: {
           await withOwners(record, authority, options, assertOwners => deps.storage.transaction(record, current => {
             assertOwners(); assertCurrent(); result.autonomous.recordClaim(); assertRecorded(result.autonomous);
             if (!current || current.generation !== generation) throw new NativeConversationIntakeError('stale');
-            const next = parseNativeConversationCapture({ ...current, state: 'turn', stage: null, decisions }, record); record = next; return { next, value: undefined };
+            const next = parseNativeConversationCapture({ ...current, state: 'turn', stage: null, decisions }, record);
+            prepareTerminalUpdate(next); record = next; return { next, value: undefined };
           }));
+          record = currentTerminal();
           return projection(record);
         }
         if (!requirements?.criteria.length || !record.proposal) throw new NativeConversationIntakeError('unavailable');
         await update({ stage: 'deciding', decisions });
-        await publish(record, result.autonomous, requirements.criteria, authority, options, signal, assertCurrent);
-        return projection(load(key, authority, options, revision, record));
+        await publish(record, result.autonomous, requirements.criteria, authority, options, signal, assertCurrent, prepareTerminalUpdate);
+        return projection(currentTerminal());
       }
     } catch (error) {
-      signal.throwIfAborted(); assertCurrent();
-      if (!record.association && !record.decisions.some(entry => entry.decision.outcome === 'reject') && activateClassicFallback(error))
+      signal.throwIfAborted();
+      if (terminalUpdate) {
+        const current = load(key, authority, options, revision, record); assertContinuation(current);
+        // A lost acknowledgement cannot turn our exact durable terminal record
+        // into a stale processing attempt or a new Classic conversation.
+        if (isDeepStrictEqual(current, terminalUpdate)) throw error;
+      }
+      assertCurrent();
+      if (!terminalUpdate && !record.association && !record.decisions.some(entry => entry.decision.outcome === 'reject') && activateClassicFallback(error))
         return await classicConversation();
       throw error;
     } finally { clearInterval(watch); }
   }
   async function publish(record: NativeConversationCapture, decision: AutonomousDecision, criteria: readonly string[], authority: NativePairedExecutionAuthority,
-    options: NativeConversationIntakeOptions, signal: AbortSignal, assertCurrent: () => void): Promise<void> {
+    options: NativeConversationIntakeOptions, signal: AbortSignal, assertCurrent: () => void,
+    prepareTerminalUpdate: (next: NativeConversationCapture) => void): Promise<void> {
     if (!record.proposal || decision.decision.outcome !== 'act') throw new NativeConversationIntakeError('invalid');
     const source = { version: 2 as const, sourceId: record.sourceId, sourceRevision: record.sourceRevision, inputId: record.inputId, sessionId: record.sessionId,
       ...(record.continuation ? { continuation: nativeConversationContinuationSchema.parse(record.continuation) } : {}),
@@ -310,8 +337,9 @@ export function createNativeConversationIntakeHost(deps: {
       if (current.generation !== record.generation || !isDeepStrictEqual(current.proposal, record.proposal)) throw new NativeConversationIntakeError('stale');
     }, (current, event) => {
       decision.recordClaim(); assertCurrent(); assertRecorded(decision);
-      return parseNativeConversationCapture({ ...current, state: 'associated', stage: null,
+      const next = parseNativeConversationCapture({ ...current, state: 'associated', stage: null,
         association: { workId: event.workId, attemptId: event.attemptId, ledgerRevision: event.sequence } }, record);
+      prepareTerminalUpdate(next); return next;
     });
     const ledger = createWorkLedger({ projectId: deps.projectId, storage, clock: { now: Date.now, newId: kind => `${kind}-${randomUUID()}` } });
     const actor = ledger.authority.issueActor({ actorId: record.principalId, projectId: deps.projectId, role: 'coordinator' });

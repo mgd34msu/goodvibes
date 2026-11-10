@@ -18,7 +18,7 @@ import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../pla
 import { createNativeConversationIntakeHost } from '../platform/src/platform/workflow/work-ledger/native-intake.js';
 import type { NativeRequirementProposer } from '../platform/src/platform/workflow/work-ledger/native-intake-proposer.js';
 import type { NativeConversationIntakeResult } from '../platform/src/platform/workflow/work-ledger/native-intake-wire.js';
-import type { NativeConversationStorage } from '../platform/src/platform/workflow/work-ledger/native-intake-types.js';
+import type { NativeConversationStorage, NativeConversationPublicationStorage } from '../platform/src/platform/workflow/work-ledger/native-intake-types.js';
 import { makeRepo } from './contract/runner-support.js';
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -191,6 +191,52 @@ test.each(['converse', 'answer'] as const)('settled %s still needs a recorded ac
   expect(f.fake.requests).toHaveLength(2); expect(await (await f.store.openWorkLedgerStorage('project')).read()).toMatchObject({ revision: 0 });
 });
 
+test.each(['converse', 'contract'] as const)('a durable %s publication can await acknowledgement without retiring its original decision owner', async route => {
+  let held = false;
+  const f = await fixture({ route, decorateStorage(storage) {
+    return { ...storage, async transaction(key, decide) {
+      let terminal = false;
+      const value = await storage.transaction(key, current => {
+        const mutation = decide(current); terminal = mutation.next?.state === 'turn'; return mutation;
+      });
+      if (terminal) { held = true; await new Promise(resolve => setTimeout(resolve, 75)); }
+      return value;
+    }, publicationStorage(...args) {
+      const original = storage.publicationStorage(...args);
+      const wrapped: NativeConversationPublicationStorage = { ...original, async transaction(decide) {
+        const value = await original.transaction(decide);
+        held = true; await new Promise(resolve => setTimeout(resolve, 75)); return value;
+      } };
+      return wrapped;
+    } };
+  } });
+  const captured = await f.capture(), target = f.target(captured);
+  const result = await f.host.admit(target, f.authority);
+  expect(held).toBe(true); expect(result.kind).toBe(route === 'contract' ? 'work' : 'turn');
+  expect(f.fake.requests.length).toBeGreaterThan(0);
+  expect(f.fake.requests.every(request => request.signal !== undefined && !request.signal.aborted)).toBe(true);
+  const reads = f.fake.requests.length;
+  expect(await f.host.resume(target, f.authority)).toEqual(result); expect(f.fake.requests).toHaveLength(reads);
+});
+
+test('terminal publication still rechecks caller authorization after its acknowledgement await', async () => {
+  let authorized = true;
+  const f = await fixture({ route: 'converse', decorateStorage(storage) {
+    return { ...storage, async transaction(key, decide) {
+      let terminal = false;
+      const value = await storage.transaction(key, current => {
+        const mutation = decide(current); terminal = mutation.next?.state === 'turn'; return mutation;
+      });
+      if (terminal) { authorized = false; await new Promise(resolve => setTimeout(resolve, 75)); }
+      return value;
+    } };
+  } });
+  const captured = await f.capture(), target = f.target(captured);
+  await expect(f.host.admit(target, f.authority, { isAuthorized: () => authorized })).rejects.toMatchObject({ code: 'forbidden' });
+  expect(authorized).toBe(false);
+  expect(f.storage.current({ principalId: f.principalId, inputId: target.inputId })?.state).toBe('turn');
+});
+
 test('unsupported original source selects registered source resolution and never falls back or fabricates roots', async () => {
   const f = await fixture({ route: 'converse', final: 'revise_0' });
   const captured = await f.host.capture({ ...f.original, unsupportedSources: [{ kind: 'image', label: 'Original referenced screenshot' }] }, f.authority);
@@ -219,12 +265,19 @@ test.each(['before', 'after'] as const)('recorded refusal survives %s capture pu
         if (terminal && fail && phase === 'before') { fail = false; throw new Error('Owned pre-publication source failure'); }
         return mutation;
       });
-      if (terminal && fail && phase === 'after') { fail = false; throw new Error('Owned lost capture acknowledgement'); }
+      if (terminal && fail && phase === 'after') {
+        fail = false;
+        // Let the original processing monitor run while the real publication
+        // is durable but its acknowledgement has not reached the intake host.
+        await new Promise(resolve => setTimeout(resolve, 75));
+        throw new Error('Owned lost capture acknowledgement');
+      }
       return result;
     } };
   } };
   const f = await fixture(options); const captured = await f.capture(); const target = f.target(captured);
-  await expect(f.host.admit(target, f.authority)).rejects.toThrow();
+  await expect(f.host.admit(target, f.authority)).rejects.toThrow(phase === 'before'
+    ? 'Owned pre-publication source failure' : 'Owned lost capture acknowledgement');
   const retained = f.storage.current({ principalId: f.principalId, inputId: target.inputId })!;
   expect(retained.state).toBe(phase === 'before' ? 'processing' : 'refused');
   if (phase === 'before') expect(retained.stage).toBe('deciding');
@@ -235,6 +288,33 @@ test.each(['before', 'after'] as const)('recorded refusal survives %s capture pu
     expect(f.fake.requests).toHaveLength(reads); expect(f.proposals()).toBe(1);
     expect(await (await f.store.openWorkLedgerStorage('project')).read()).toMatchObject({ revision: 0 });
   } finally { await replacement.close(); }
+});
+
+test.each(['before', 'after'] as const)('Preferred cannot downgrade a recorded refusal when its %s publication reports unavailability', async phase => {
+  const failure = new JudgmentError('unavailable', 'Synthetic terminal publication unavailable');
+  let fail = true;
+  const f = await fixture({ final: 'reject', decorateStorage(storage) {
+    return { ...storage, async transaction(key, decide) {
+      let refused = false;
+      const value = await storage.transaction(key, current => {
+        const mutation = decide(current); refused = mutation.next?.state === 'refused';
+        if (refused && fail && phase === 'before') { fail = false; throw failure; }
+        return mutation;
+      });
+      if (refused && fail && phase === 'after') { fail = false; await new Promise(resolve => setTimeout(resolve, 75)); throw failure; }
+      return value;
+    } };
+  } });
+  const captured = await f.capture(), target = f.target(captured);
+  await withDecisionModelPolicy(() => 'Preferred', async () => {
+    await expect(f.host.admit(target, f.authority)).rejects.toBe(failure);
+    const retained = f.storage.current({ principalId: f.principalId, inputId: target.inputId })!;
+    expect(retained.classic).toBeUndefined();
+    expect(retained.state).toBe(phase === 'before' ? 'processing' : 'refused');
+    const reads = f.fake.requests.length;
+    expect(await f.host.resume(target, f.authority)).toMatchObject({ kind: 'refused', reason: 'semantic' });
+    expect(f.fake.requests).toHaveLength(reads);
+  });
 });
 
 test('identical-span repair has a distinct final attempt and restores its later refusal after capture failure', async () => {

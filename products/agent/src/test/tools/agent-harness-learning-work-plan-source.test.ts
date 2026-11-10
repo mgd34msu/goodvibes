@@ -1,5 +1,6 @@
-import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as fs from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
@@ -49,4 +50,50 @@ test('a changed native path after an await is held even when the temporary gette
   Reflect.deleteProperty(f.work, 'filePath');
   expect(() => source.assertCurrent()).toThrow(ToolInputProjectionError);
   expect(touched).toBe(0);
+});
+
+test('a learning source reuses the actual native item read while retaining every caller check and original file', async () => {
+  const f = fixture(); f.work.addItem('Actual authored source', { status: 'done', notes: 'Keep the original complete notes.' });
+  const bytes = readFileSync(f.work.filePath), reading = spyOn(fs, 'readFileSync'), syncing = spyOn(fs, 'fsyncSync');
+  let callers = 0;
+  try {
+    // No registry stand-ins are needed to exercise this genuine native owner.
+    const source = acquireLearningCuratorSource({ workspace: { workPlanStore: f.work } }, { assertCurrent() { callers++; } });
+    const reads = reading.mock.calls.length;
+    expect(reads).toBeGreaterThan(0); expect(source.source.workItems).toHaveLength(1);
+    for (let index = 0; index < 8; index++) {
+      await Promise.resolve();
+      const before = callers; source.assertCurrent(); expect(callers).toBeGreaterThan(before);
+    }
+    expect(reading.mock.calls.length).toBe(reads); expect(syncing.mock.calls).toHaveLength(0);
+  } finally { reading.mockRestore(); syncing.mockRestore(); }
+  expect(readFileSync(f.work.filePath)).toEqual(bytes);
+});
+
+test.each(['contents', 'same-byte-file', 'same-byte-assignment', 'method'] as const)('a retained learning source refuses actual native %s changes before reusing work', async change => {
+  const f = fixture(); f.work.addItem('Original authored source');
+  const source = acquireLearningCuratorSource(f.context, {});
+  if (change === 'contents') f.work.addItem('Later independent source');
+  else if (change === 'method') Object.defineProperty(f.work, 'listItems', { value: () => [] });
+  else {
+    const path = change === 'same-byte-assignment'
+      ? join(f.home, '.goodvibes', 'agent', 'work-plans', '.project-owners', '0.json') : f.work.filePath;
+    const bytes = readFileSync(path); renameSync(path, `${path}.retained`); writeFileSync(path, bytes);
+  }
+  await Promise.resolve(); expect(source.assertCurrent).toThrow();
+  expect(source.source.workItems).toHaveLength(1);
+  if (change === 'contents') {
+    const fresh = acquireLearningCuratorSource(f.context, {}); fresh.assertCurrent();
+    expect(fresh.source.workItems.map(item => item.title)).toEqual(['Original authored source', 'Later independent source']);
+  }
+});
+
+test('ordinary work-plan stand-ins are freshly read and mutable returned data cannot borrow a native observation', async () => {
+  const item = { id: 'authored-work', title: 'Original stand-in source', status: 'done' as const, createdAt: 1, updatedAt: 1 };
+  let reads = 0;
+  const work = { listItems() { reads++; return [item]; } };
+  const source = acquireLearningCuratorSource({ workspace: { workPlanStore: work } }, {}), before = reads;
+  await Promise.resolve(); source.assertCurrent(); expect(reads).toBeGreaterThan(before);
+  item.title = 'Changed actual stand-in source';
+  expect(source.assertCurrent).toThrow(ToolInputProjectionError);
 });

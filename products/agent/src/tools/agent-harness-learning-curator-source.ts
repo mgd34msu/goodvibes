@@ -10,7 +10,7 @@ import { summarizeMemoryItem, summarizeNoteItem, summarizePersonaItem, summarize
 import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { captureWorkPlanLocation } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { captureWorkPlanItems, captureWorkPlanLocation } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath, captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
@@ -98,6 +98,14 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
     if (runtime?.sessionId !== sessionId) throw new ToolInputProjectionError('stale');
   };
   const assertReadingBackends = () => { assertNative(); for (const guard of retained) guard(); assertNative(); };
+  assertNative();
+  const nativeWorkItems = work && captureWorkPlanItems(work);
+  assertNative();
+  const readWorkItems = () => {
+    if (!nativeWorkItems) return work?.listItems({ readOnly: true }) ?? [];
+    try { nativeWorkItems.assertCurrent(); } catch { throw new ToolInputProjectionError('held'); }
+    return nativeWorkItems.items;
+  };
   const read = () => {
     assertNative();
     const memoryRecords = captureCatalogData(memory?.getAll() ?? []);
@@ -114,7 +122,7 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
       const exists = fs.existsSync(file.path);
       return { ...file, exists, bytes: exists ? fs.readFileSync(file.path, 'utf8') : undefined };
     });
-    const workItems = captureCatalogData(work?.listItems({ readOnly: true }) ?? []);
+    const workItems = captureCatalogData(readWorkItems());
     const sessionList = captureCatalogData(manager?.list() ?? []);
     const sessions = sessionList.filter(session => session.name !== sessionId).map(session => ({ session, loaded: captureCatalogData(manager?.load(session.name)) }));
     const vibe = shellPaths ? captureCatalogData(discoverVibeFiles(shellPaths)) : undefined;

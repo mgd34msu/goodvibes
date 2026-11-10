@@ -54,7 +54,7 @@ test('explicit fixture cleanup and the real global sweep join the same accepted 
   const observed = call.catch((error: unknown) => error);
   try {
     await entered.promise;
-    expect(preparedOptions).toBe(admittedOptions); expect(executingOptions).toBe(preparedOptions);
+    expect(preparedOptions).toBe(admittedOptions); expect(executingOptions === preparedOptions).toBe(true);
     expect(executingOptions?.assertCurrent).toBe(assertCurrent);
     const closing = fixture.cleanup();
     expect(fixture.cleanup()).toBe(closing);

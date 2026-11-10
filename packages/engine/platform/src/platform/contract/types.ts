@@ -299,9 +299,10 @@ export interface Nudge {
 
 // ── The tree ──────────────────────────────────────────────────────────────────
 
-/** HEAD and compact saved dirty-content commitments. Original local bytes stay private; version two distinguishes file bytes, symlink text and confirmed deletion. */
+/** HEAD and saved original dirty-file observations. Version three stores only
+ * physical source facts; original bytes remain private to the live owner. */
 export interface TreeBaseline {
-  readonly version?: 2;
+  readonly version?: 2 | 3;
   readonly head: string | null;
   readonly dirty: Readonly<Record<string, string | null>>;
 }

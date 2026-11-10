@@ -1,8 +1,6 @@
-/** Dirty baselines survive checkpoints without saving dirty file contents.
- * Fresh local equality uses private exact bytes. A digest exists only as the
- * compact saved baseline commitment used after a restart; it is neither a model
- * question nor authority and is dictionary-recoverable, not anonymization. */
-import { createHash } from 'node:crypto';
+/** Dirty baselines retain exact bytes only for the live operation. Saved
+ * physical observations confirm unchanged sources after restart; a source that
+ * cannot be confirmed remains excluded from scoped commits. No content hash. */
 import { resolve } from 'node:path';
 import { captureDirtyFile, captureDirtyTreeRoot, equalDirtyFiles, type CapturedDirtyFile, type DirtyTreeRoot } from '../orchestration/dirty-file-observation.js';
 import { nativeDirtySnapshotEntries, nativeDirtySnapshotRoot, snapshotDirtyTree, type ScopedCommitExclusion } from '../orchestration/dirty-guard.js';
@@ -22,20 +20,26 @@ interface BaselineOwner {
 }
 const owners = new WeakMap<TreeBaseline, BaselineOwner>();
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-function commitment(file: Comparable): string | null {
-  if (file.kind === 'missing') return null;
-  // Actual saved Contract/Group/Unit baseline consumer only: a restarted
-  // process cannot recover the original bytes from physical facts or an opaque
-  // ID. Keeping a digest avoids newly persisting possibly-secret dirty bytes.
-  return (file.kind === 'file' && file.executable ? 'executable' : file.kind) + ':' + createHash('sha256').update(file.bytes).digest('hex');
+const PHYSICAL_BASELINE = 'dirty-file-v3:';
+function savedObservation(file: Comparable, root: DirtyTreeRoot): string {
+  file.assertCurrent(); root.assertCurrent();
+  return PHYSICAL_BASELINE + JSON.stringify([file.kind, file.kind === 'file' && file.executable, root.revision, file.revision]);
+}
+function isSavedObservation(value: string): boolean {
+  if (!value.startsWith(PHYSICAL_BASELINE)) return false;
+  try {
+    const text = value.slice(PHYSICAL_BASELINE.length), fields: unknown = JSON.parse(text);
+    return Array.isArray(fields) && fields.length === 4 && ['file', 'symlink', 'missing'].includes(fields[0])
+      && typeof fields[1] === 'boolean' && typeof fields[2] === 'string' && typeof fields[3] === 'string' && JSON.stringify(fields) === text;
+  } catch { return false; }
 }
 export function createTreeBaseline(cwd: string, head: string | null): TreeBaseline {
   const snapshot = snapshotDirtyTree(cwd), entries = nativeDirtySnapshotEntries(snapshot, cwd), selection = nativeDirtySnapshotRoot(snapshot, cwd), dirty: Record<string, string | null> = Object.create(null) as Record<string, string | null>;
   for (const [path, file] of entries) {
     if (file.kind === 'unavailable') throw new Error('Original dirty baseline is unavailable; owner edits remain uncommitted');
-    dirty[path] = commitment(file);
+    dirty[path] = savedObservation(file, selection);
   }
-  const baseline: TreeBaseline = Object.freeze({ version: 2, head, dirty: Object.freeze(dirty) });
+  const baseline: TreeBaseline = Object.freeze({ version: 3, head, dirty: Object.freeze(dirty) });
   owners.set(baseline, { root: resolve(cwd), selection, native: true, retainBytes: true, historicalUnitRootPending: false, initial: new Map(entries), latest: new Map(), settledComparisons: new Map() }); return baseline;
 }
 function current(owner: BaselineOwner, path: string): CapturedDirtyFile {
@@ -79,19 +83,12 @@ export function baselinePathUnchanged(cwd: string, baseline: TreeBaseline, path:
   if (cached?.file === now && cached.equal !== undefined) return cached.equal;
   const saved = baseline.dirty[path];
   let equal: boolean;
-  if (baseline.version === 2) {
-    if (saved === null) equal = now.kind === 'missing';
-    else if (now.kind === 'missing') equal = false;
-    else if (!saved?.startsWith((now.kind === 'file' && now.executable ? 'executable' : now.kind) + ':')) equal = false;
-    else equal = commitment(now) === saved;
-  } else {
-    // Old null conflated deletion with failed reads; old symlinks hashed their
-    // external target. Neither can certify an original source after restart.
-    if (saved === null || now.kind === 'symlink') return undefined;
-    // Only an actual owned pre-v2 checkpoint can reach this compatibility
-    // digest. Fresh launches and JSON/import copies never hash through here.
-    equal = now.kind !== 'missing' && createHash('sha256').update(now.bytes).digest('hex') === saved;
-  }
+  // A restarted cache can confirm only unchanged original physical facts.
+  // A differing or older content-only receipt is uncertain, never permission
+  // to include the owner's dirty file in a commit.
+  if (baseline.version !== 3 || typeof saved !== 'string' || !owner.selection) return undefined;
+  if (savedObservation(now, owner.selection) !== saved) return undefined;
+  equal = true;
   if (owner.retainBytes) owner.latest.set(path, { file: now, equal });
   else owner.settledComparisons.set(path, { assertCurrent: now.assertCurrent, equal }); // Metadata-only; the closure captures no leaf-byte scope.
   if (equal && owner.retainBytes) owner.initial.set(path, now); // Actual verified adoption once, not a raw-content global cache.
@@ -118,14 +115,14 @@ export function baselineChangedPaths(cwd: string, paths: readonly string[], base
 }
 function parsed(value: unknown): TreeBaseline {
   if (!record(value) || !Object.keys(value).every(key => key === 'head' || key === 'dirty' || key === 'version')
-    || !(value['head'] === null || typeof value['head'] === 'string') || !record(value['dirty']) || !(value['version'] === undefined || value['version'] === 2)) throw new Error('Invalid original tree baseline');
+    || !(value['head'] === null || typeof value['head'] === 'string') || !record(value['dirty']) || !(value['version'] === undefined || value['version'] === 2 || value['version'] === 3)) throw new Error('Invalid original tree baseline');
   const dirty: Record<string, string | null> = Object.create(null) as Record<string, string | null>;
   for (const [path, saved] of Object.entries(value['dirty'])) {
     if (!path || path.startsWith('/') || path.includes('\0') || path.split('/').some(part => part === '' || part === '.' || part === '..' || part === '.git' || part === '.goodvibes')
-      || !(saved === null || typeof saved === 'string' && (value['version'] === 2 ? /^(?:file|executable|symlink):[a-f0-9]{64}$/ : /^[a-f0-9]{64}$/).test(saved))) throw new Error('Invalid original tree baseline');
+      || !(saved === null || typeof saved === 'string' && (value['version'] === 3 ? isSavedObservation(saved) : (value['version'] === 2 ? /^(?:file|executable|symlink):[a-f0-9]{64}$/ : /^[a-f0-9]{64}$/).test(saved)))) throw new Error('Invalid original tree baseline');
     dirty[path] = saved;
   }
-  return Object.freeze({ head: value['head'], dirty: Object.freeze(dirty), ...(value['version'] === 2 ? { version: 2 as const } : {}) });
+  return Object.freeze({ head: value['head'], dirty: Object.freeze(dirty), ...(value['version'] === undefined ? {} : { version: value['version'] as 2 | 3 }) });
 }
 function locations(contract: Contract): Array<{ readonly key: string; readonly root: string; readonly get: () => TreeBaseline | undefined; readonly set: (baseline: TreeBaseline) => void }> {
   const contractRoot = contract.worktreePath ?? contract.projectRoot;
@@ -202,7 +199,7 @@ export function retainOriginalTreeBaselines(original: Contract, copy: Contract):
     const baseline = location.get(), target = targets.get(location.key);
     if (!target) throw new Error('Original tree baseline copy has different locations');
     if (baseline) {
-      const copied: TreeBaseline = Object.freeze({ head: baseline.head, dirty: baseline.dirty, ...(baseline.version === 2 ? { version: 2 as const } : {}) });
+      const copied: TreeBaseline = Object.freeze({ head: baseline.head, dirty: baseline.dirty, ...(baseline.version === undefined ? {} : { version: baseline.version }) });
       const owner = owners.get(baseline);
       if (owner) owners.set(copied, { ...owner, initial: new Map(owner.initial), latest: new Map(owner.latest), settledComparisons: new Map(owner.settledComparisons) });
       target.set(copied);

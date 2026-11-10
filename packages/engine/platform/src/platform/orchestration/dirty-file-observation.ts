@@ -32,7 +32,7 @@ function selectedPath(cwd: string, path: string): string {
 /** Original lexical selection plus its actual physical directory tree. Root
  * aliases such as Darwin /tmp -> /private/tmp are supported, but neither later
  * retargets nor a copied token can select a different root after an await. */
-export interface DirtyTreeRoot { readonly path: string; readonly resolvedPath: string; assertCurrent(): void }
+export interface DirtyTreeRoot { readonly path: string; readonly resolvedPath: string; readonly revision: string; assertCurrent(): void }
 const nativeRoots = new WeakSet<DirtyTreeRoot>();
 function rootSlot(path: string): string {
   const value = lstatSync(path, { bigint: true });
@@ -55,7 +55,7 @@ export function captureDirtyTreeRoot(cwd: string): DirtyTreeRoot {
     if (realpathSync(path) !== resolvedPath) throw new Error('Dirty snapshot root target changed');
     for (const entry of physical) if (directory(entry.path) !== entry.value) throw new Error('Dirty snapshot physical root changed');
   };
-  assertCurrent(); const selected = Object.freeze({ path, resolvedPath, assertCurrent }); nativeRoots.add(selected); return selected;
+  assertCurrent(); const selected = Object.freeze({ path, resolvedPath, revision: JSON.stringify({ lexical, physical }), assertCurrent }); nativeRoots.add(selected); return selected;
 }
 /** A synchronous detached source read, or explicit unavailable. A read failure
  * cannot become the missing-file state used for a real working-tree deletion. */

@@ -143,7 +143,7 @@ test('public JSON deserialization/import cannot mint native review provenance fr
 });
 
 test('importing an old SHA review cannot launder it into an owned historical review after save and restart', () => {
-  const f = fixture(), sha256 = crypto.createHash('sha256').update('Ready.\n').digest('hex');
+  const f = fixture(), sha256 = 'a'.repeat(64);
   const old = { ...f.contract, schemaVersion: 5, units: [{ ...f.contract.units[0]!, checks: [{ ...f.check, reviewedFiles: [{ path: 'report.md', sha256 }] }] }] };
   const text = JSON.stringify({ schemaVersion: 5, writtenAt: 1, contract: old });
   expect(f.store.importContract(text)).toBe(true);
@@ -168,8 +168,8 @@ test('checkpoint projection touches only actual unit/check slots and cannot dump
   expect(JSON.stringify(f.contract)).not.toContain('nativeFileObservation');
 });
 
-test('actual schema-five SHA review records remain readable without rewriting their earlier check and hash only on compatibility matching', () => {
-  const f = fixture(), sha256 = crypto.createHash('sha256').update('Ready.\n').digest('hex');
+test('actual schema-five SHA review records remain readable without rewriting their earlier check and require a fresh native observation instead of hashing', () => {
+  const f = fixture(), sha256 = 'a'.repeat(64);
   const check = { ...f.check, reviewedFiles: [{ path: 'report.md', sha256 }] };
   const old = { ...f.contract, schemaVersion: 5, units: [{ ...f.contract.units[0]!, checks: [check] }] };
   mkdirSync(contractsDir(f.root), { recursive: true });
@@ -181,14 +181,14 @@ test('actual schema-five SHA review records remain readable without rewriting th
   const reference = loaded.units[0]!.checks[0]!.reviewedFiles![0]!, current = currentFileObservations(f.root, ['report.md'])[0]!;
   const hash = spyOn(crypto, 'createHash');
   try {
-    expect(reviewedFileVersionState(current, reference)).toBe('current');
-    expect(reviewedFileVersionState(current, reference)).toBe('current');
-    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+    expect(reviewedFileVersionState(current, reference)).toBe('unverified');
+    expect(reviewedFileVersionState(current, reference)).toBe('unverified');
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
   } finally { hash.mockRestore(); }
   f.store.hold(loaded); expect(f.store.write(loaded.id)).toBe(true);
   expect(readFileSync(oldPath, 'utf8')).toBe(text);
   const reloaded = f.store.load(loaded.id)!;
-  expect(reviewedFileVersionState(current, reloaded.units[0]!.checks[0]!.reviewedFiles![0]!)).toBe('current');
+  expect(reviewedFileVersionState(current, reloaded.units[0]!.checks[0]!.reviewedFiles![0]!)).toBe('unverified');
 });
 
 test('the native checkpoint writer declares its format before creating any contract checkpoint file', () => {

@@ -3,7 +3,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { JsonValue } from '@goodvibes-jev/judgment';
 import type { Contract, ContractUnit } from './types.js';
-import { currentFileReviewFacts, currentFileMatchesSavedDigest, parseCurrentFileReviewFacts, retainCurrentFileLabels, type CurrentFileReviewFacts } from './current-file-observations.js';
+import { currentFileReviewFacts, parseCurrentFileReviewFacts, retainCurrentFileLabels, type CurrentFileReviewFacts } from './current-file-observations.js';
 import { ownedContractCheckpointText, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 
 export type ReviewedFileReference =
@@ -31,9 +31,8 @@ export function reviewedFileVersionState(currentFile: JsonValue, descriptor: Rev
       return current && isDeepStrictEqual(current, retained.facts) ? 'current' : 'changed';
     } catch { return 'changed'; }
   }
-  if ('sha256' in descriptor && historicalReviews.has(descriptor)) {
-    return currentFileMatchesSavedDigest(currentFile, descriptor.sha256) ? 'current' : 'changed';
-  }
+  // Earlier saved hashes remain history. A fresh native review establishes
+  // currentness without recomputing a cache digest.
   return 'unverified';
 }
 export function reviewedFileProvenance(descriptor: ReviewedFileReference): string {
@@ -41,7 +40,7 @@ export function reviewedFileProvenance(descriptor: ReviewedFileReference): strin
     : reviews.get(descriptor)?.native ? 'native-original-physical-file-observation' : 'unverified-import-or-copy';
 }
 export function hasNativeReviewedFileReference(descriptor: ReviewedFileReference): boolean {
-  return reviews.get(descriptor)?.native === true || historicalReviews.has(descriptor);
+  return reviews.get(descriptor)?.native === true;
 }
 function serializeReference(descriptor: ReviewedFileReference) {
   if ('sha256' in descriptor) return { ...descriptor, historicalReviewOrigin: historicalReviews.has(descriptor) ? 'owned-historical-checkpoint' : 'unverified-import' };

@@ -7,14 +7,14 @@ import { captureContractInput, assertContractInputOwner } from '../../platform/s
 import { makeRepo } from './runner-support.js';
 import { git } from './steps-support.js';
 
-test('actual capture hashes the saved logical index once; owner rechecks retain exact private index observations', async () => {
+test('actual capture hashes no index; owner rechecks compare exact original physical observations', async () => {
   const root = makeRepo('sha1'), hashing = spyOn(crypto, 'createHash');
   try {
     const snapshot = await captureContractInput(root);
     const files = snapshot.files.filter(file => file.kind !== 'missing').length;
     // SHA-1 files still carry their recorded strong byte commitments. This
-    // budget includes one complete file pass plus the saved logical index.
-    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(files + 1);
+    // budget includes only the actual strong file commitments, not an index digest.
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(files);
     hashing.mockClear();
     await assertContractInputOwner(snapshot);
     expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
@@ -50,7 +50,7 @@ test('index flag changes after the saved commitment check still refuse at the en
 });
 
 
-test('an incidental index rewrite still compares the whole saved logical state instead of refusing physical drift alone', async () => {
+test('an incidental index rewrite retires the physical input observation instead of hashing a second representation', async () => {
   const root = makeRepo('sha1');
   try {
     const snapshot = await captureContractInput(root), controller = new AbortController();
@@ -64,11 +64,23 @@ test('an incidental index rewrite still compares the whole saved logical state i
       }
     });
     try {
-      await assertContractInputOwner(structuredClone(snapshot), controller.signal);
+      await expect(assertContractInputOwner(structuredClone(snapshot), controller.signal)).rejects.toThrow('changed during recheck');
       expect(rewritten).toBe(true);
       const files = snapshot.files.filter(file => file.kind !== 'missing').length;
-      // The physical change alone triggers exactly one extra full comparison.
-      expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(files + 2);
+      // No index checksum is computed to adopt a replacement physical source.
+      expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(files);
     } finally { interrupt.mockRestore(); hashing.mockRestore(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test('saved old index digests remain readable history but never hash to acquire freshness', async () => {
+  const root = makeRepo('sha1');
+  try {
+    const snapshot = await captureContractInput(root), hashing = spyOn(crypto, 'createHash');
+    try {
+      await expect(assertContractInputOwner({ ...snapshot, indexFingerprint: 'a'.repeat(64) })).rejects.toThrow('capture a fresh input');
+      expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    } finally { hashing.mockRestore(); }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

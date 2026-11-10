@@ -37,6 +37,7 @@ export interface ContractInputSnapshot {
   readonly gitIdentity: string;
   readonly ownerHead: string;
   readonly ownerRef: string;
+  /** Original physical Git index observation. Older digest values are history only. */
   readonly indexFingerprint: string;
   readonly inputTree: string;
   readonly inputCommit: string;
@@ -68,7 +69,6 @@ interface InputFileObservation {
 interface InputOwnerObservation {
   readonly metadata: RetainedOwnedJson;
   readonly files: Map<string, InputFileObservation>;
-  index: string | undefined;
 }
 // Physical proof belongs to this exact admitted receipt only. No source bytes
 // are retained; copied/restored JSON must independently check its saved hashes.
@@ -159,17 +159,15 @@ async function assertNoSpecialFiles(root: string, exclusions: readonly string[],
   }
 }
 
-/** The complete logical index includes excluded credential-directory paths.
- * Persist one opaque commitment instead of exposing those paths through contract
- * inspection or treating an incidental index-file rewrite as a source change.
- * Git has no native ID for the combination of staged entries and index flags.
- */
-interface LogicalIndex { readonly entries: Buffer; readonly flags: Buffer }
-function readLogicalIndex(root: string): LogicalIndex {
-  return { entries: git(root, ['ls-files', '--stage', '-z']), flags: git(root, ['ls-files', '-v', '-z']) };
-}
-function indexFingerprint(index: LogicalIndex): string {
-  return createHash('sha256').update(index.entries).update(index.flags).digest('hex');
+/** The original index is native filesystem bookkeeping, not a cryptographic
+ * identity. Persist only its physical observation, never private staged paths.
+ * A changed/replaced index requires a fresh input capture. */
+const INDEX_OBSERVATION_PREFIX = 'git-index-v2:';
+function savedIndexObservation(identity: string): string { return INDEX_OBSERVATION_PREFIX + identity; }
+function indexObservation(value: string): string | undefined {
+  if (!value.startsWith(INDEX_OBSERVATION_PREFIX)) return undefined;
+  const observation = value.slice(INDEX_OBSERVATION_PREFIX.length);
+  return observation === 'missing' || /^-?\d+(?::-?\d+){5}$/.test(observation) ? observation : undefined;
 }
 function objectFormat(root: string): 'sha1' | 'sha256' {
   const format = gitText(root, ['rev-parse', '--show-object-format']);
@@ -360,7 +358,7 @@ async function capture(root: string, options: CaptureContractInputOptions): Prom
   const ownerHead = gitText(root, ['rev-parse', 'HEAD']);
   const ownerRef = gitText(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
   const originalIndex = await indexIdentity(root);
-  const index = indexFingerprint(readLogicalIndex(root));
+  const index = savedIndexObservation(originalIndex);
   await assertNoSpecialFiles(root, CONTRACT_INPUT_EXCLUSIONS, signal);
   const selected = paths(root, CONTRACT_INPUT_EXCLUSIONS);
   if (options.maxFiles !== undefined && selected.length > options.maxFiles) throw new Error('contract input exceeds caller file-count budget');
@@ -393,7 +391,7 @@ async function capture(root: string, options: CaptureContractInputOptions): Prom
     // Encode generated opaque IDs without numeric runs; the privacy floor still
     // evaluates every original/captured path and must not be relaxed for UUIDs.
     const receipt: ContractInputSnapshot = { version: 2, id: randomUUID().replace(/[0-9]/g, (digit) => String.fromCharCode(107 + Number(digit))), sourceRoot: root, sourceIdentity, gitIdentity, ownerHead, ownerRef, indexFingerprint: index, inputTree, inputCommit, capturedAt: Date.now(), dirty, exclusions: [...CONTRACT_INPUT_EXCLUSIONS], files };
-    inputOwnerObservations.set(receipt, { metadata: retainOwnedJson(receipt, nodeTypes.isProxy), files: observations, index: originalIndex });
+    inputOwnerObservations.set(receipt, { metadata: retainOwnedJson(receipt, nodeTypes.isProxy), files: observations });
     check();
     await assertContractInputOwnerOriginal(receipt, signal, originalIndex);
     if (await indexIdentity(root) !== originalIndex) throw new Error('contract input index replaced during capture');
@@ -423,7 +421,7 @@ export async function assertContractInputOwner(snapshot: ContractInputSnapshot, 
  */
 async function assertContractInputOwnerOriginal(snapshot: ContractInputSnapshot, signal?: AbortSignal, capturedIndex?: string): Promise<void> {
   const observation = inputOwnerObservations.get(snapshot) ?? {
-    metadata: retainOwnedJson(snapshot, nodeTypes.isProxy), files: new Map<string, InputFileObservation>(), index: undefined,
+    metadata: retainOwnedJson(snapshot, nodeTypes.isProxy), files: new Map<string, InputFileObservation>(),
   };
   observation.metadata.assertCurrent();
   const original = snapshot;
@@ -437,19 +435,12 @@ async function assertContractInputOwnerOriginal(snapshot: ContractInputSnapshot,
   if (await repositoryIdentity(root) !== snapshot.gitIdentity) throw new Error('contract input Git directory was replaced');
   if (gitText(root, ['rev-parse', '--abbrev-ref', 'HEAD']) !== snapshot.ownerRef) throw new Error('contract input owner HEAD or branch changed');
   if (gitText(root, ['rev-parse', 'HEAD']) !== snapshot.ownerHead) throw new ContractInputOwnerChangedError('head', 'contract input owner HEAD or branch changed');
-  let selectedIndex = await indexIdentity(root);
-  const indexMatches = async (): Promise<boolean> => {
-    const current = await indexIdentity(root);
-    if (current === selectedIndex) return true;
-    if (indexFingerprint(readLogicalIndex(root)) !== snapshot.indexFingerprint || await indexIdentity(root) !== current) return false;
-    selectedIndex = current;
-    return true;
-  };
-  const retainedIndex = capturedIndex ?? observation.index;
-  if (retainedIndex === undefined || retainedIndex !== selectedIndex) {
-    if (indexFingerprint(readLogicalIndex(root)) !== snapshot.indexFingerprint || await indexIdentity(root) !== selectedIndex)
-      throw new ContractInputOwnerChangedError('index', 'contract input owner index changed');
-  }
+  const selectedIndex = indexObservation(snapshot.indexFingerprint);
+  // Earlier saved digests are readable as history, but never trigger another
+  // hash just to adopt a freshness cache after restart.
+  if (selectedIndex === undefined || (capturedIndex !== undefined && capturedIndex !== selectedIndex)
+    || await indexIdentity(root) !== selectedIndex) throw new ContractInputOwnerChangedError('index', 'contract input owner index changed; capture a fresh input');
+  const indexMatches = async (): Promise<boolean> => await indexIdentity(root) === selectedIndex;
   await assertNoSpecialFiles(root, snapshot.exclusions, signal);
   if (JSON.stringify(paths(root, snapshot.exclusions)) !== JSON.stringify(snapshot.files.map((file) => file.path))) throw new ContractInputOwnerChangedError('paths', 'contract input owner path set changed');
   const format = objectFormat(root);
@@ -467,7 +458,6 @@ async function assertContractInputOwnerOriginal(snapshot: ContractInputSnapshot,
   // An earlier file can change while a later asynchronous check is running.
   // Finish with the original complete physical readset, without another read.
   for (const file of observation.files.values()) file.assertCurrent();
-  observation.index = selectedIndex;
   inputOwnerObservations.set(original, observation);
   for (const file of original.files) {
     const physical = observation.files.get(file.path);
@@ -507,6 +497,8 @@ export async function restoreContractInputDevice(snapshot: ContractInputSnapshot
     ...snapshot,
     sourceIdentity: current,
     gitIdentity: snapshot.gitIdentity.split('|').map(replaceDevice).join('|'),
+    indexFingerprint: indexObservation(snapshot.indexFingerprint) === undefined ? snapshot.indexFingerprint
+      : savedIndexObservation(replaceDevice(indexObservation(snapshot.indexFingerprint)!)),
     files: snapshot.files.map(file => file.identity === undefined ? file : { ...file, identity: replaceDevice(file.identity) }),
   };
   await assertContractInputOwner(restored, signal);
@@ -650,7 +642,7 @@ export function isContractInputSnapshot(value: unknown): value is ContractInputS
   const v = value as Record<string, unknown>;
   if ((v['version'] !== 1 && v['version'] !== 2) || typeof v['id'] !== 'string' || (!/^[0-9a-f-]{36}$/.test(v['id']) && !/^[a-fk-t]{8}-[a-fk-t]{4}-[a-fk-t]{4}-[a-fk-t]{4}-[a-fk-t]{12}$/.test(v['id'])) || typeof v['sourceRoot'] !== 'string' || !isAbsolute(v['sourceRoot']) || typeof v['sourceIdentity'] !== 'string' || typeof v['gitIdentity'] !== 'string' || typeof v['ownerRef'] !== 'string' || typeof v['capturedAt'] !== 'number' || !Number.isFinite(v['capturedAt']) || typeof v['dirty'] !== 'boolean') return false;
   if (!['ownerHead', 'inputTree', 'inputCommit'].every((key) => typeof v[key] === 'string' && HASH.test(v[key] as string))
-    || typeof v['indexFingerprint'] !== 'string' || !SHA256.test(v['indexFingerprint']) || v['ownerIndex'] !== undefined) return false;
+    || typeof v['indexFingerprint'] !== 'string' || !(SHA256.test(v['indexFingerprint']) || v['version'] === 2 && indexObservation(v['indexFingerprint']) !== undefined) || v['ownerIndex'] !== undefined) return false;
   if (!Array.isArray(v['exclusions']) || JSON.stringify(v['exclusions']) !== JSON.stringify(CONTRACT_INPUT_EXCLUSIONS) || !Array.isArray(v['files'])) return false;
   const pathsSeen = new Set<string>();
   for (const file of v['files']) {

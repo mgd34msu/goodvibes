@@ -229,7 +229,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
       }
     },
     beforeWrite: contract => {
-      const formats: import('./native-reader-compatibility.js').NativeDataFormat[] = ['contract-review-observations-v1', 'contract-tree-baselines-v2', 'contract-answer-claim-scopes-v2'];
+      const formats: import('./native-reader-compatibility.js').NativeDataFormat[] = ['contract-review-observations-v1', 'contract-tree-baselines-v3', 'contract-answer-claim-scopes-v2'];
       if (contract) {
         const units = [...contract.units];
         let optionalDigest = [...contract.checks, ...contract.groups.flatMap(group => group.checks)]
@@ -241,6 +241,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
         }
         if (optionalDigest) formats.push('contract-optional-check-digests-v1');
       }
+      if (contract?.inputSnapshot?.indexFingerprint.startsWith('git-index-v2:')) formats.push('contract-input-index-observations-v1');
       if (isOpaqueContractId(contract?.id)) formats.push('contract-opaque-identities-v1');
       if (contract?.nativeSource?.continuation?.version === 2) formats.push('native-conversation-captures-v2');
       for (const format of formats) {

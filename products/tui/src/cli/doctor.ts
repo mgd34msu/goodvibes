@@ -72,6 +72,7 @@ const DECISION_SOURCE_LABELS: Readonly<Record<PermissionCheckResult['sourceLayer
   boundary: 'Boundary checks', stakes_preset: 'Stakes preset',
   config_policy: 'Configured permission policy', managed_policy: 'Managed runtime policy',
   safety_check: 'Safety check', runtime_mode: 'Active permission mode',
+  invocation_admission: 'Current invocation admission',
   session_override: 'Remembered session decision', user_rule: 'Durable owner rule',
   user_prompt: 'Human approval prompt (Human-in-the-Loop)',
 };

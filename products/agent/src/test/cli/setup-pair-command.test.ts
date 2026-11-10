@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '../../config/index.ts';
@@ -10,13 +10,14 @@ import { CommandRegistry, type CommandContext } from '../../input/command-regist
 import { readAgentHostPairing } from '../../runtime/connected-host-pairing-store.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
-async function withFixture(run: (f: { homeDirectory: string; configManager: ConfigManager; host: string; migrations: () => number }) => Promise<void>) {
+async function withFixture(run: (f: { homeDirectory: string; configManager: ConfigManager; host: string; requests: () => number; migrations: () => number }) => Promise<void>) {
   const saved = [process.env.GOODVIBES_CONNECTED_HOST_TOKEN, process.env.GOODVIBES_DAEMON_TOKEN];
   delete process.env.GOODVIBES_CONNECTED_HOST_TOKEN; delete process.env.GOODVIBES_DAEMON_TOKEN;
   const homeDirectory = makeProjectTempDir('setup-pair-cli');
   const configManager = new ConfigManager({ surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT, configDir: join(homeDirectory, '.goodvibes', 'agent'), workingDir: homeDirectory, homeDir: homeDirectory });
-  const minted = 'gvp_' + 'c'.repeat(32); const id = 'pair-12345678-1234-1234-1234-123456789abc'; let migrations = 0;
+  const minted = 'gvp_' + 'c'.repeat(32); const id = 'pair-12345678-1234-1234-1234-123456789abc'; let migrations = 0; let requests = 0;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    requests++;
     if (new URL(request.url).pathname === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false, principalId: request.headers.get('authorization') === `Bearer ${minted}` ? `pairing:${id}` : 'shared-token', principalKind: 'token', admin: true, scopes: ['*'], roles: [] });
     if (new URL(request.url).pathname === '/api/control-plane/methods/pairing.tokens.migrate/invoke') {
       migrations++; const { body } = await request.json() as { body: { name: string } };
@@ -26,11 +27,31 @@ async function withFixture(run: (f: { homeDirectory: string; configManager: Conf
   } });
   configManager.set('controlPlane.host', '127.0.0.1'); configManager.set('controlPlane.port', server.port!); configManager.set('daemon.connectedHost.enabled', true);
   mkdirSync(join(homeDirectory, '.goodvibes', 'daemon'), { recursive: true }); writeFileSync(join(homeDirectory, '.goodvibes', 'daemon', 'operator-tokens.json'), JSON.stringify({ token: 'synthetic-bootstrap' }));
-  try { await run({ homeDirectory, configManager, host: server.url.origin, migrations: () => migrations }); }
+  try { await run({ homeDirectory, configManager, host: server.url.origin, requests: () => requests, migrations: () => migrations }); }
   finally { server.stop(true); for (const [i, key] of ['GOODVIBES_CONNECTED_HOST_TOKEN', 'GOODVIBES_DAEMON_TOKEN'].entries()) { if (saved[i] === undefined) delete process.env[key]; else process.env[key] = saved[i]; } }
 }
 
 describe('standalone setup pair confirmation boundary', () => {
+  for (const args of [
+    ['setup', 'pair', '--name'],
+    ['setup', 'pair', '--name', '--apply'],
+    ['setup', 'pair', '--apply', '--name', '--apply'],
+    ['setup', 'pair', '--name', 'GoodVibes Agent', '--name', 'Other'],
+    ['setup', 'pair', '--name', 'First', '--name', 'Other'],
+  ]) {
+    test(`${args.join(' ')} rejects malformed names before contacting the host`, async () => withFixture(async f => {
+      const errors = spyOn(console, 'error').mockImplementation(() => {});
+      let questions = 0;
+      try {
+        const code = await runSetupPairingCommand({ ...f, workingDirectory: f.homeDirectory, cli: parseGoodVibesCli(args) },
+          { interactive: true, write: () => {}, question: async () => { questions++; return 'yes'; } });
+        expect(code).toBe(2); expect(errors).toHaveBeenCalledWith(expect.stringContaining('Usage: goodvibes-agent setup pair'));
+        expect(questions).toBe(0); expect(f.requests()).toBe(0); expect(f.migrations()).toBe(0);
+        expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('missing');
+      } finally { errors.mockRestore(); }
+    }));
+  }
+
   for (const args of [['setup', 'pair'], ['setup', 'pair', '--apply', '--yes'], ['setup', 'pair', '--apply', '--json'], ['setup', 'pair', '--apply', '--output-format', 'stream-json']]) {
     test(`${args.join(' ')} never bypasses action-time confirmation`, async () => withFixture(async f => {
       let questions = 0;

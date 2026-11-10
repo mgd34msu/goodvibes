@@ -14,11 +14,13 @@ export interface SetupPairingTerminal {
 /** No --yes, scripted answer, or model-supplied confirmation bypass. */
 export async function runSetupPairingCommand(runtime: CliCommandRuntime, terminal?: SetupPairingTerminal): Promise<number> {
   const args = runtime.cli.commandArgs.slice(1);
-  let name = 'GoodVibes Agent'; let apply = false;
+  let name = 'GoodVibes Agent'; let apply = false; let named = false;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--apply' && !apply) { apply = true; continue; }
-    if (arg === '--name' && args[index + 1] && name === 'GoodVibes Agent') { name = args[++index]!; continue; }
+    if (arg === '--name' && !named && args[index + 1] && !args[index + 1]!.startsWith('--')) {
+      named = true; name = args[++index]!; continue;
+    }
     console.error('Usage: goodvibes-agent setup pair [--name <device-name>] [--apply]. --apply requires fresh terminal confirmation; --yes is unsupported.');
     return 2;
   }

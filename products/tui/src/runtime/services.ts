@@ -466,6 +466,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     projectPlanningProjectId,
     workPlanStore,
   } = createKnowledgeServices({
+    ownership: disposalScope.registry,
     configManager,
     providerRegistry,
     artifactStore,

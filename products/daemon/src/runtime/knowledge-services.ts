@@ -90,8 +90,11 @@ export function createKnowledgeServices(deps: KnowledgeServicesDeps): KnowledgeS
   configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: configManager.getControlPlaneConfigDir(), stores: [knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore] });
   const knowledgeSemanticLlm = createProviderBackedKnowledgeSemanticLlm(providerRegistry, { timeoutMs: 20_000, maxConcurrent: 1 });
   const knowledgeSemanticService = new KnowledgeSemanticService(knowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, isBackgroundPaused, admitExpensiveWork });
+  deps.ownership.registry.add('regular knowledge semantic service', () => knowledgeSemanticService.dispose());
   const homeGraphSemanticService = new KnowledgeSemanticService(homeGraphKnowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, objectProfiles: HOME_GRAPH_KNOWLEDGE_EXTENSION.objectProfiles, isBackgroundPaused, admitExpensiveWork });
+  deps.ownership.registry.add('home graph semantic service', () => homeGraphSemanticService.dispose());
   const agentKnowledgeSemanticService = new KnowledgeSemanticService(agentKnowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, isBackgroundPaused, admitExpensiveWork });
+  deps.ownership.registry.add('agent knowledge semantic service', () => agentKnowledgeSemanticService.dispose());
   const knowledgeService = new KnowledgeService(knowledgeStore, artifactStore, undefined, { memoryRegistry, runtimeBus, semanticService: knowledgeSemanticService, admitExpensiveWork });
   deps.ownership.ownUntilRegistered('knowledge service', () => knowledgeService.dispose());
   knowledgeService.attachRuntimeBus(runtimeBus);

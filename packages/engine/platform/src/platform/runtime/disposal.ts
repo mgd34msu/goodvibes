@@ -161,8 +161,8 @@ export interface RuntimePollerOwners {
   readonly memoryConsolidationScheduler: { stop(): void };
   readonly codeIndexReindexScheduler: { dispose(): void };
   readonly sessionOrchestration: { dispose(): void };
-  readonly knowledgeService: { dispose(): void };
-  readonly agentKnowledgeService: { dispose(): void };
+  readonly knowledgeService: { dispose(): void | Promise<void> };
+  readonly agentKnowledgeService: { dispose(): void | Promise<void> };
   /**
    * Cancels the Home Graph post-sync self-improvement pump, a rescheduling
    * loop with a 5s start delay and a 5-15s sleep between as many as ten rounds.

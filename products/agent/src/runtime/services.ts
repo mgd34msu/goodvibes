@@ -1446,6 +1446,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     isBackgroundPaused: isKnowledgeBackgroundPaused,
     admitExpensiveWork,
   });
+  disposalScope.registry.add('agent knowledge semantic service', () => agentKnowledgeSemanticService.dispose());
   const homeGraphSemanticService = new KnowledgeSemanticService(homeGraphKnowledgeStore, {
     llm: knowledgeSemanticLlm,
     maxLlmSourcesPerReindex: 3,
@@ -1453,12 +1454,14 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     isBackgroundPaused: isKnowledgeBackgroundPaused,
     admitExpensiveWork,
   });
+  disposalScope.registry.add('home graph semantic service', () => homeGraphSemanticService.dispose());
   const agentKnowledgeService = new KnowledgeService(agentKnowledgeStore, artifactStore, undefined, {
     memoryRegistry,
     runtimeBus: options.runtimeBus,
     semanticService: agentKnowledgeSemanticService,
     admitExpensiveWork,
   });
+  disposalScope.registry.add('agent knowledge service', () => agentKnowledgeService.dispose());
   agentKnowledgeService.attachRuntimeBus(options.runtimeBus);
   const homeGraphService = new HomeGraphService(homeGraphKnowledgeStore, artifactStore, {
     semanticService: homeGraphSemanticService,

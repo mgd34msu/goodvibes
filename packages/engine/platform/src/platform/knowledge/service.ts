@@ -127,6 +127,7 @@ export interface KnowledgeServiceConfig {
   };
   readonly memoryRegistry: Pick<MemoryRegistry, 'add' | 'getAll' | 'getStore'>;
   readonly runtimeBus?: RuntimeEventBus | null | undefined;
+  /** Borrowed; its creator must dispose it after this service's work drains. */
   readonly semanticService?: KnowledgeSemanticService | undefined;
   /**
    * MemoryGovernor admission gate for the expensive entry points (job runs,
@@ -144,6 +145,8 @@ export class KnowledgeService {
   private readonly projectionService: KnowledgeProjectionService;
   private readonly scheduleService: KnowledgeScheduleService;
   private readonly semanticService: KnowledgeSemanticService;
+  private readonly ownsSemanticService: boolean;
+  private closing: Promise<void> | undefined;
   private runtimeBus: RuntimeEventBus | null;
 
   constructor(
@@ -159,7 +162,9 @@ export class KnowledgeService {
     this.projectionService = new KnowledgeProjectionService(this.store, this.artifactStore, {
       connectors: () => this.listConnectors(),
     });
-    this.semanticService = options.semanticService ?? new KnowledgeSemanticService(this.store);
+    const semanticService = options.semanticService;
+    this.ownsSemanticService = semanticService === undefined;
+    this.semanticService = semanticService ?? new KnowledgeSemanticService(this.store);
     this.scheduleService = new KnowledgeScheduleService({
       store: this.store,
       emitIfReady: this.emitIfReady.bind(this),
@@ -1008,13 +1013,27 @@ export class KnowledgeService {
     await syncKnowledgeMemoryNodes(this.store, this.options.memoryRegistry);
   }
 
-  /**
-   * Release the knowledge scheduler's pending timers. Was `private` with no
-   * caller, so every graph left six `reconcileSchedules` timers pending out to
-   * a 24h horizon; runtime/services.ts registers it for teardown. Idempotent.
-   */
-  dispose(): void {
-    this.scheduleService.dispose();
+  /** Stop timers immediately and drain startup plus internally owned semantic
+   * background work. Injected semantic services remain their creator's property;
+   * foreground operations retain their original caller cancellation signals. */
+  dispose(): Promise<void> {
+    if (this.closing) return this.closing;
+    const closing = Promise.withResolvers<void>();
+    this.closing = closing.promise;
+    // Compatibility callers may still ignore dispose's return; close owners can
+    // await the same promise and observe its original failure after all drains.
+    drainOwned(this.closing);
+    let semanticDrain: Promise<void> | undefined;
+    try {
+      this.scheduleService.dispose();
+      semanticDrain = this.ownsSemanticService ? this.semanticService.dispose() : undefined;
+    } catch (error) { semanticDrain = Promise.reject(error); }
+    void Promise.allSettled([this.scheduleService.whenReady(), semanticDrain]).then(results => {
+      const failure = results.find(result => result.status === 'rejected');
+      if (failure?.status === 'rejected') closing.reject(failure.reason);
+      else closing.resolve();
+    });
+    return this.closing;
   }
 
   async lint(): Promise<readonly KnowledgeIssueRecord[]> {

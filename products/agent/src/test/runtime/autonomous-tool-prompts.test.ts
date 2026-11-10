@@ -106,5 +106,14 @@ test('actual agent graph public terminal control preserves Jev ownership and lif
     expect(intercepted).toBe(true); expect(disposed[0]!.success).toBe(false);
     expect(JSON.parse(disposed[0]!.output ?? '{}').stdout ?? '').not.toContain('owned-terminal-receipt');
     expect(humanAsks).toBe(0);
-  } finally { server.stop(true); spy.mockRestore(); services.dispose(); rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    const closed = await Promise.allSettled([
+      Promise.resolve().then(() => server.stop(true)),
+      Promise.resolve().then(() => services.close()),
+    ]);
+    spy.mockRestore();
+    const failures = closed.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Autonomous terminal fixture did not close');
+    rmSync(root, { recursive: true, force: true });
+  }
 }, 30000);

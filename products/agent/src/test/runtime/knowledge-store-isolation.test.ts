@@ -35,7 +35,7 @@ async function makeRuntime() {
   const runtime = {
     configManager,
     services: (await createPreparedAgentRuntimeServices({
-      // Opt out: this process does not outlive the unawaited sweep.
+      // Discovery is outside this storage fixture; all original graph writers close before root removal.
       modelDiscovery: 'skip',
       configManager,
       runtimeBus: new RuntimeEventBus(),
@@ -48,8 +48,10 @@ async function makeRuntime() {
   return runtime;
 }
 
-afterEach(() => {
-  for (const runtime of runtimes.splice(0)) runtime.dispose();
+afterEach(async () => {
+  const closed = await Promise.allSettled(runtimes.splice(0).map(runtime => runtime.close()));
+  const failures = closed.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Knowledge isolation fixtures did not close');
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }

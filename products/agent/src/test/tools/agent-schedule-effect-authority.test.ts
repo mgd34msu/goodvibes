@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, renameSync, rmSync, writeFileSync, type Stats } from 'node:fs';
 import { join } from 'node:path';
 import { createShellPathService, type ShellPathService } from '@/runtime/index.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
@@ -93,19 +93,34 @@ describe('concrete schedule effect admission', () => {
     test(`a ${change} during child admission prevents HTTP dispatch`, async () => {
       const abort = new AbortController();
       let state: ReturnType<typeof setup>;
+      let replacement: Stats | undefined;
       state = setup('prompt', index => {
         if (index !== 2) return;
         if (change === 'revoke') state.fixture.revoke();
         if (change === 'cancel') abort.abort();
         if (change === 'config ABA') { state.config.set('controlPlane.port', 3422); state.config.set('controlPlane.port', 3421); }
         if (change === 'credential ABA') { writeFileSync(state.tokenPath, JSON.stringify({ token: 'changed-synthetic-token' })); writeFileSync(state.tokenPath, JSON.stringify({ token: 'synthetic-schedule-token' })); }
-        if (change === 'workspace replacement') { renameSync(state.root, `${state.root}-retired`); mkdirSync(state.root); }
+        if (change === 'workspace replacement') { renameSync(state.root, `${state.root}-retired`); mkdirSync(state.root); replacement = lstatSync(state.root); }
       });
-      await withMockHost(async calls => {
-        const result = await state.fixture.run(state.admitted(createAgentReminderScheduleTool), cases[1]!.args, { signal: abort.signal });
-        expect(result.success).toBe(false);
-        expect(calls()).toBe(0);
-      });
+      const original = lstatSync(state.root);
+      try {
+        await withMockHost(async calls => {
+          const result = await state.fixture.run(state.admitted(createAgentReminderScheduleTool), cases[1]!.args, { signal: abort.signal });
+          expect(result.success).toBe(false);
+          expect(calls()).toBe(0);
+        });
+      } finally {
+        if (replacement) {
+          // Restore the exact original test namespace after the refusal. Only
+          // this test's captured creator-owned replacement may be removed.
+          const current = lstatSync(state.root), retired = lstatSync(`${state.root}-retired`);
+          const same = (left: Stats, right: Stats) => left.isDirectory() && !left.isSymbolicLink()
+            && left.dev === right.dev && left.ino === right.ino && left.birthtimeMs === right.birthtimeMs && left.uid === right.uid;
+          if (!same(current, replacement) || !same(retired, original)) throw new Error('Schedule fixture replacement custody changed');
+          rmSync(state.root, { recursive: true, force: true });
+          renameSync(`${state.root}-retired`, state.root);
+        }
+      }
     });
   }
 

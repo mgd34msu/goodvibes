@@ -64,8 +64,6 @@ test('the actual Agent graph exposes the published contract services and dispose
       if (bridge.agentStatusIntervalRef.value) clearInterval(bridge.agentStatusIntervalRef.value);
     }
   } finally {
-    services.dispose();
-    await Promise.resolve();
-    await Promise.resolve();
+    await services.close();
   }
 }, 15_000);

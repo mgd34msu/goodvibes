@@ -50,8 +50,8 @@ async function composed(body: (context: { registry: ReturnType<typeof composeAge
     };
     await body({ registry: toolRegistry, runAccount, accountFile: services.shellPaths.resolveUserPath('agent', ...ACCOUNT_REGISTRY_PATH_SEGMENTS), memoryCount: () => services.memoryRegistry.getAll().length });
   } finally {
-    try { await services.processManager.close(); }
-    finally { services.dispose(); installJudgmentPort(previous); }
+    try { await services.close(); }
+    finally { installJudgmentPort(previous); }
   }
 }
 function source(text: string, origin = 'https://untrusted.example.test') {

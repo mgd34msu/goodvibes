@@ -13,8 +13,14 @@ import { ConnectedHostVerbError } from '../../runtime/client/daemon-verbs.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 
-const disposals: (() => void)[] = [];
-afterEach(() => { for (const dispose of disposals.splice(0).reverse()) dispose(); });
+const disposals: (() => void | Promise<void>)[] = [];
+afterEach(async () => {
+  const failures: unknown[] = [];
+  for (const dispose of disposals.splice(0).reverse()) {
+    try { await dispose(); } catch (error) { failures.push(error); }
+  }
+  if (failures.length) throw new AggregateError(failures, 'Hosted origin fixtures did not close');
+});
 
 for (const surface of ['composer', 'inbound'] as const) {
   test(`${surface} initial and recreated sessions write only Agent-owned settings`, async () => {
@@ -28,7 +34,7 @@ for (const surface of ['composer', 'inbound'] as const) {
     const configManager = new ConfigManager({ surfaceRoot: 'goodvibes', configDir: hostDir, homeDir: home, workingDir: workspace });
     seedProviderMetadataCacheFixture({ configManager, homeDirectory: home, workingDirectory: workspace, surfaceRoot: 'goodvibes' });
     const services = createClientRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), surfaceRoot: 'goodvibes', workingDir: workspace, homeDirectory: home, requestApproval: async () => ({ approved: false }), modelDiscovery: 'skip' });
-    disposals.push(() => services.dispose());
+    disposals.push(() => services.close());
     const sessions: HostedSessionRuntime[] = [];
     let stale = false;
     const verbs: DaemonVerbCaller = {

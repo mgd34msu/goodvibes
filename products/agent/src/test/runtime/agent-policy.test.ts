@@ -50,15 +50,19 @@ function recordedOperatorEffect(tool: Tool, args: Record<string, unknown>, paths
 describe('Agent user-first autonomy policy', () => {
   let root = '';
 
-  afterEach(() => {
+  const runtimes: Awaited<ReturnType<typeof createPreparedAgentRuntimeServices>>[] = [];
+  afterEach(async () => {
+    const closed = await Promise.allSettled(runtimes.splice(0).map(services => services.close()));
+    const failures = closed.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Agent policy fixture did not close');
     if (root) rmSync(root, { recursive: true, force: true });
     root = '';
   });
 
   async function makeRuntimeServices() {
     root = makeProjectTempDir('gv-agent-policy');
-    return (await createPreparedAgentRuntimeServices({
-      // Opt out: this process does not outlive the unawaited sweep.
+    const services = await createPreparedAgentRuntimeServices({
+      // Discovery is outside this policy fixture; its original graph closes before root removal.
       modelDiscovery: 'skip',
       runtimeBus: new RuntimeEventBus(),
       runtimeStore: createRuntimeStore(),
@@ -71,7 +75,9 @@ describe('Agent user-first autonomy policy', () => {
       workingDir: root,
       homeDirectory: root,
       getConversationTitle: () => 'Agent policy test',
-    }));
+    });
+    runtimes.push(services);
+    return services;
   }
 
   test('model tool policy allows visible agent orchestration and local implementation tools', () => {

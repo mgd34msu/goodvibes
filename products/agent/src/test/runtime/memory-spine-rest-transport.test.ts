@@ -87,7 +87,7 @@ describe('memory-spine REST transport against a real daemon', () => {
     mkdirSync(homeDir, { recursive: true });
     port = await reservePort();
     daemonServices = (await createPreparedAgentRuntimeServices({
-      // Opt out: this process does not outlive the unawaited sweep.
+      // Discovery is outside this isolated transport fixture; the graph closes before its root is removed.
       modelDiscovery: 'skip',
       runtimeStore: createRuntimeStore(),
       runtimeBus: new RuntimeEventBus(),
@@ -116,12 +116,13 @@ describe('memory-spine REST transport against a real daemon', () => {
   });
 
   afterEach(async () => {
-    try {
-      await daemon?.stop();
-    } finally {
-      installJudgmentPort(previousPort);
-      daemonServices?.dispose();
-    }
+    const failures: unknown[] = [];
+    try { await daemon?.stop(); } catch (error) { failures.push(error); }
+    // This daemon borrows its graph; stop the actual graph and its writers
+    // before restoring the model owner or removing its physical workspace.
+    try { await daemonServices?.close(); } catch (error) { failures.push(error); }
+    installJudgmentPort(previousPort);
+    if (failures.length) throw new AggregateError(failures, 'Memory transport fixture did not close');
     rmSync(tempRoot, { recursive: true, force: true });
   });
 

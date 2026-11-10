@@ -232,8 +232,8 @@ describe('Agent memory issuer protection', () => {
       expect(accepted.success).toBe(true);
       expect(services.memoryRegistry.getAll()[0]?.detail).toBe(ALLOWED.join('\n'));
     } finally {
-      try { await services.processManager.close(); }
-      finally { services.dispose(); installJudgmentPort(previous); }
+      try { await services.close(); }
+      finally { installJudgmentPort(previous); }
     }
   });
 

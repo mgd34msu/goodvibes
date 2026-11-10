@@ -55,9 +55,6 @@ test('actual default Agent registration fits full protected schema bounds before
     expect(Math.max(...batches.flatMap(batch => batch.parts.map(part => part.length)))).toBeLessThanOrEqual(40_000);
     expect(batches.every(batch => batch.parts.length <= 8 && batch.parts.reduce((sum, part) => sum + part.length, 0) <= 40_000)).toBe(true);
   } finally {
-    screeningStatus.mockRestore();
-    services.dispose();
-    await Promise.resolve();
-    await Promise.resolve();
+    try { await services.close(); } finally { screeningStatus.mockRestore(); }
   }
 }, 15_000);

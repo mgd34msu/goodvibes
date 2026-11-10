@@ -94,15 +94,16 @@ function writeClaim(home: string, claim: { pid: number; identity: string }): voi
   writeFileSync(path, JSON.stringify({ ...claim, claimedAt: Date.now() }), { mode: 0o600 });
 }
 
-afterEach(() => {
-  for (const services of built.splice(0)) {
-    try {
-      services.dispose();
-    } catch {
-      // A graph that never finished building has nothing to give back.
-    }
-  }
-  for (const child of holders.splice(0)) child.kill('SIGKILL');
+afterEach(async () => {
+  const graphs = built.splice(0).map(services => Promise.resolve().then(() => services.close()));
+  const children = holders.splice(0).map(child => new Promise<void>((resolve, reject) => {
+    if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }
+    child.once('close', () => resolve()); child.once('error', reject);
+    child.kill('SIGKILL');
+  }));
+  const closed = await Promise.allSettled([...graphs, ...children]);
+  const failures = closed.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Home ownership fixtures did not close');
 });
 
 describe('live holder identity readiness', () => {

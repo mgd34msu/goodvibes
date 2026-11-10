@@ -35,8 +35,6 @@ test('Agent policy exposes public contract reads and rejects retired WRFC modes'
     }
     expect(services.contractRunner.list({ includeTerminal: true })).toEqual([]);
   } finally {
-    services.dispose();
-    await Promise.resolve();
-    await Promise.resolve();
+    await services.close();
   }
 }, 15_000);

@@ -24,12 +24,11 @@ const runtimes: RuntimeServices[] = [];
 const logs: SqliteDecisionLog[] = [];
 let previous = installJudgmentPort(undefined);
 afterEach(async () => {
-  for (const services of runtimes.splice(0)) {
-    await services.processManager.close();
-    services.dispose();
-  }
+  const closed = await Promise.allSettled(runtimes.splice(0).map(services => services.close()));
   for (const log of logs.splice(0)) log[Symbol.dispose]();
   installJudgmentPort(previous);
+  const failures = closed.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Permission safety fixture did not close');
 });
 function deferred<T = void>() {
   let resolve!: (value: T) => void;

@@ -144,7 +144,8 @@ export function createEmbeddedSession(options: EmbedSessionOptions): Promise<Emb
 
 // @public
 export class DaemonServer {
-    constructor(config?: DaemonConfig);
+    // Warning: (ae-forgotten-export) The symbol "AsyncDisposalScope" needs to be exported by the entry point embed.d.ts
+    constructor(config?: DaemonConfig, supplementalOwnership?: AsyncDisposalScope);
     get approvals(): ApprovalBroker;
     get boundHost(): string;
     get boundPort(): number;

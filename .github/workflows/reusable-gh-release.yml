@@ -58,6 +58,11 @@ on:
           newline-separated form before use, so both separators work.
         required: true
         type: string
+      use-existing-checksums:
+        description: Verify and publish the exact staged 64-payload checksum manifest without regenerating it.
+        required: false
+        type: boolean
+        default: false
       notes-file:
         description: Optional release-body override. `{version}` expands to the
           tag without its v prefix. When set and the file exists at the
@@ -166,6 +171,36 @@ jobs:
             tr -s ' \t' '\n' <<< "$RAW_GLOBS" | sed '/^$/d'
             echo 'GOODVIBES_GLOBS_EOF'
           } >> "$GITHUB_OUTPUT"
+      - name: Resolve payload paths excluding the checksum manifest
+        id: payloads
+        env:
+          NORMALIZED_GLOBS: ${{ steps.globs.outputs.paths }}
+          SHA256_NAME: ${{ inputs.sha256-name }}
+        run: |
+          python3 - <<'PY_PAYLOADS'
+          import glob, os, re
+          from pathlib import Path
+          checksum = os.environ['SHA256_NAME']
+          assert re.fullmatch(r'[A-Za-z0-9_.-]+', checksum), 'Checksum name must be flat'
+          selected = {}
+          for pattern in os.environ['NORMALIZED_GLOBS'].split():
+              matches = glob.glob(pattern)
+              assert matches, f'No asset matched: {pattern}'
+              for value in matches:
+                  path = Path(value)
+                  assert path.is_file() and not path.is_symlink(), f'Invalid release asset: {path}'
+                  if path.name == checksum:
+                      continue
+                  assert re.fullmatch(r'[A-Za-z0-9_.-]+', path.name), f'Invalid release name: {path}'
+                  prior = selected.get(path.name)
+                  assert prior is None or prior.resolve() == path.resolve(), f'Ambiguous release basename: {path.name}'
+                  selected[path.name] = path
+          assert selected, 'No payload assets selected'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('paths<<GOODVIBES_PAYLOADS_EOF\n')
+              output.write(''.join(str(selected[name]) + '\n' for name in sorted(selected)))
+              output.write('GOODVIBES_PAYLOADS_EOF\n')
+          PY_PAYLOADS
       - name: Inspect existing release without treating API failures as absence
         id: publication
         env:
@@ -192,7 +227,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
-          NORMALIZED_GLOBS: ${{ steps.globs.outputs.paths }}
+          NORMALIZED_GLOBS: ${{ steps.payloads.outputs.paths }}
           SHA256_NAME: ${{ inputs.sha256-name }}
         run: |
           set -euo pipefail
@@ -204,34 +239,55 @@ jobs:
           stage_release_assets(os.environ['COMPLETION_DIR'], os.environ['NORMALIZED_GLOBS'], os.environ['SHA256_NAME'])
           PY_STAGE
           python3 .github/scripts/publish-missing-suite-assets.py "$COMPLETION_DIR" "$RELEASE_TAG" "$SHA256_NAME"
-      - name: Generate SHA256SUMS (missing asset is fatal)
+      - name: Generate or verify the consumer checksum manifest
+        id: checksums
         if: steps.publication.outputs.exists == 'false'
         env:
-          NORMALIZED_GLOBS: ${{ steps.globs.outputs.paths }}
-          ASSETS_GLOB: ${{ inputs.assets-glob }}
+          PAYLOAD_PATHS: ${{ steps.payloads.outputs.paths }}
           TOOLCHAIN_SPEC: ${{ inputs.toolchain-spec }}
           TOOLCHAIN_SOURCE: ${{ inputs.toolchain-source }}
           SHA256_NAME: ${{ inputs.sha256-name }}
+          USE_EXISTING_CHECKSUMS: ${{ inputs.use-existing-checksums }}
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          assets=()
-          while IFS= read -r glob; do
-            [ -n "$glob" ] || continue
-            for match in $glob; do assets+=( "$match" ); done
-          done <<< "$NORMALIZED_GLOBS"
-          if [ ${#assets[@]} -eq 0 ]; then
-            echo "No assets matched $ASSETS_GLOB" >&2
-            exit 1
-          fi
-          if [ "$TOOLCHAIN_SOURCE" = workspace ]; then
-            bun packages/engine/toolchain/src/bin/sha256sums.ts --out "$SHA256_NAME" "${assets[@]}"
-          elif [ "$TOOLCHAIN_SOURCE" = registry ]; then
-            bunx --package "$TOOLCHAIN_SPEC" goodvibes-sha256sums --out "$SHA256_NAME" "${assets[@]}"
+          mapfile -t assets <<< "$PAYLOAD_PATHS"
+          if [ "$USE_EXISTING_CHECKSUMS" = true ]; then
+            if [ "$TOOLCHAIN_SOURCE" != workspace ]; then
+              echo "Existing checksum verification requires the workspace toolchain" >&2
+              exit 1
+            fi
+            # The acceptance artifact contains this exact manifest beside its
+            # 64 payloads. Validate its complete name set before the source CLI
+            # consumes its expected pins; never hash a new publication manifest.
+            CHECKSUM_PATH="dist/$SHA256_NAME"
+            export CHECKSUM_PATH
+            python3 - <<'PY_CHECKSUMS'
+          import os, re
+          from pathlib import Path
+          paths = [Path(value) for value in os.environ['PAYLOAD_PATHS'].splitlines()]
+          manifest = Path(os.environ['CHECKSUM_PATH'])
+          assert manifest.is_file() and not manifest.is_symlink(), 'Staged checksum manifest is missing'
+          assert len(paths) == 64 and all(path.parent == manifest.parent for path in paths), 'Expected exactly 64 staged payloads beside the manifest'
+          names = []
+          for line in manifest.read_text().splitlines():
+              match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9_.-]+)', line)
+              assert match and match[2] != manifest.name, 'Invalid staged checksum entry'
+              names.append(match[2])
+          assert len(names) == 64 and len(set(names)) == 64 and set(names) == {path.name for path in paths}, 'Staged checksum names must exactly cover all 64 payloads'
+          PY_CHECKSUMS
+            bun packages/engine/toolchain/src/bin/sha256sums.ts --verify "$CHECKSUM_PATH"
           else
-            echo "Unknown checksum toolchain source" >&2
-            exit 1
+            CHECKSUM_PATH="$SHA256_NAME"
+            if [ "$TOOLCHAIN_SOURCE" = workspace ]; then
+              bun packages/engine/toolchain/src/bin/sha256sums.ts --out "$CHECKSUM_PATH" "${assets[@]}"
+            elif [ "$TOOLCHAIN_SOURCE" = registry ]; then
+              bunx --package "$TOOLCHAIN_SPEC" goodvibes-sha256sums --out "$CHECKSUM_PATH" "${assets[@]}"
+            else
+              echo "Unknown checksum toolchain source" >&2
+              exit 1
+            fi
           fi
+          echo "path=$CHECKSUM_PATH" >> "$GITHUB_OUTPUT"
       - name: Create GitHub release
         if: steps.publication.outputs.exists == 'false'
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
@@ -242,5 +298,5 @@ jobs:
           fail_on_unmatched_files: true
           overwrite_files: false
           files: |
-            ${{ steps.globs.outputs.paths }}
-            ${{ inputs.sha256-name }}
+            ${{ steps.payloads.outputs.paths }}
+            ${{ steps.checksums.outputs.path }}

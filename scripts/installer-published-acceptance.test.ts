@@ -1,6 +1,6 @@
 /** Owned tooling regressions; they do not claim published native/service proof. */
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, runHistoricalUpgradeSteps, assertHistoricalRollbackRefusal, type HistoricalUpgradeSteps, type AcceptanceSteps } from './accept-published-suite.mjs';
@@ -61,6 +61,98 @@ test('actual owned command cancellation drains a SIGTERM-resistant child before 
     await expect(running).rejects.toThrow();
     expect(() => process.kill(pid, 0)).toThrow();
   } finally { controller.abort(); await Promise.allSettled([running]); }
+});
+
+test('failed owned installers report actual source refusals while stdout and expanded credentials stay private', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-diagnostics-')); roots.push(root);
+  const secret = 'acceptance-secret-do-not-publish-7e384b';
+  for (const stream of ['stdout', 'stderr']) {
+    const installer = join(root, `install-${stream}.sh`);
+    const source = `#!/bin/sh
+set -eu
+fail() { printf 'install.sh: %s\\n' "$*" ${stream === 'stderr' ? '>&2' : ''}; exit 1; }
+printf '%s\\n' "$ACCEPTANCE_SECRET"
+printf 'unrelated credential: %s\\n' "$ACCEPTANCE_SECRET" >&2
+fail "Missing or ambiguous checksum: $ACCEPTANCE_SECRET. Release $ACCEPTANCE_SECRET is incomplete; no source build will be attempted."
+`;
+    writeFileSync(installer, source, { mode: 0o600 });
+    const result = await runOwnedCommand('sh', [installer], { env: { ...process.env, ACCEPTANCE_SECRET: secret }, installerSource: source });
+    expect(result.code).toBe(1); expect(result.stdout).toContain(secret);
+    expect(result.diagnostics).toContain('install.sh: Missing or ambiguous checksum: [redacted]. Release [redacted] is incomplete; no source build will be attempted.');
+    expect(JSON.stringify({ stage: 'install', exitCode: result.code, diagnostics: result.diagnostics })).not.toContain(secret);
+    expect(result).not.toHaveProperty('stderr');
+  }
+});
+
+test('actual shell failures retain their source line and OS cause without disclosing the failing path', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-shell-diagnostics-')); roots.push(root);
+  const installer = join(root, 'install.sh'), secretPath = join(root, 'acceptance-secret-missing-file');
+  const source = '#!/bin/sh\nset -eu\nexec 9< "$ACCEPTANCE_SECRET"\n';
+  writeFileSync(installer, source, { mode: 0o600 });
+  const result = await runOwnedCommand('sh', [installer], { env: { ...process.env, ACCEPTANCE_SECRET: secretPath }, installerSource: source });
+  expect(result.code).not.toBe(0);
+  expect(result.diagnostics).toContain('Shell/OS failure at installer line 3: no such file or directory');
+  expect(JSON.stringify(result)).not.toContain(secretPath);
+});
+
+test('unclassified installer output retains an owned source line while withholding credentials and arbitrary text', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-unknown-diagnostics-')); roots.push(root);
+  const installer = join(root, 'install.sh'), secret = 'acceptance-unrecognized-secret-812adb';
+  const source = '#!/bin/sh\nprintf "%s: 2: unknown-%s\\n" "$0" "$ACCEPTANCE_SECRET" >&2\nexit 1\n';
+  writeFileSync(installer, source, { mode: 0o600 });
+  const result = await runOwnedCommand('sh', [installer], { env: { ...process.env, ACCEPTANCE_SECRET: secret }, installerSource: source });
+  expect(result.diagnostics).toContain('Unclassified shell failure at installer line 2; dynamic output withheld.');
+  expect(JSON.stringify(result)).not.toContain(secret);
+});
+
+test('installer diagnostics preserve the shared stdout/stderr output bound without exposing overflow data', async () => {
+  let failure: unknown;
+  try {
+    await runOwnedCommand(process.execPath, ['-e', `const fs=require('node:fs');fs.writeSync(1,Buffer.alloc(300000,120));fs.writeSync(2,Buffer.alloc(300000,121));`],
+      { installerSource: '#!/bin/sh\n' });
+  } catch (error) { failure = error; }
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as Error).message).toBe('Acceptance command output exceeded its bound.');
+});
+
+test('silent Bash set-e failure retains its actual function line before successful EXIT cleanup and hides credentials', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-silent-diagnostics-')); roots.push(root);
+  const installer = join(root, 'install.sh'), cleanup = join(root, 'cleaned'), secret = 'acceptance-silent-secret-3d485f';
+  const source = `#!/bin/sh
+set -eu
+[ "$0" = "$ACCEPTANCE_SCRIPT" ] && [ "$1" = original-argument ]
+cleanup_release_install() {
+  _install_exit=$?
+  printf 'cleanup credential: %s\\n' "$ACCEPTANCE_SECRET" >&2
+  printf 'cleaned\\n' > "$ACCEPTANCE_CLEANUP"
+  exit "$_install_exit"
+}
+trap cleanup_release_install EXIT
+refuse() {
+  return 1
+}
+refuse
+`;
+  writeFileSync(installer, source, { mode: 0o600 });
+  const result = await runOwnedCommand('bash', [installer, 'original-argument'], {
+    env: { ...process.env, ACCEPTANCE_SCRIPT: installer, ACCEPTANCE_CLEANUP: cleanup, ACCEPTANCE_SECRET: secret }, installerSource: source,
+  });
+  const failedLine = source.split('\n').findIndex(line => line === '  return 1') + 1;
+  expect(result.code).toBe(1); expect(readFileSync(cleanup, 'utf8')).toBe('cleaned\n');
+  expect(result.diagnostics).toContain(`Installer exited nonzero after source line ${failedLine}; line captured before EXIT cleanup.`);
+  expect(JSON.stringify(result)).not.toContain(secret);
+  expect(result).not.toHaveProperty('stderr');
+});
+
+(existsSync('/bin/dash') ? test : test.skip)('dash parses the Bash-only metadata branch without changing original arguments or ordinary output', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-dash-diagnostics-')); roots.push(root);
+  const installer = join(root, 'install.sh');
+  const source = '#!/bin/sh\nset -eu\n[ "$0" = "$ACCEPTANCE_SCRIPT" ]\n[ "$1" = original-argument ]\nprintf "ordinary output\\n"\n';
+  writeFileSync(installer, source, { mode: 0o600 });
+  const result = await runOwnedCommand('/bin/dash', [installer, 'original-argument'], {
+    env: { ...process.env, ACCEPTANCE_SCRIPT: installer }, installerSource: source,
+  });
+  expect(result).toEqual({ code: 0, stdout: 'ordinary output\n' });
 });
 
 test('public producer proof reads only real program sidecars, never archive-only suite inventory', async () => {

@@ -386,21 +386,43 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  staged-install-acceptance:
+    # Skip npm ancestors without skipping native acceptance; every staged lane
+    # must finish successfully before the first public release is created.
+    if: >-
+      !cancelled() &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'release')) &&
+      needs.verify-tag-version.result == 'success' &&
+      needs.prepare-native-assets.result == 'success'
+    needs: [verify-tag-version, prepare-native-assets]
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/reusable-staged-install-acceptance.yml
+    with:
+      tag: ${{ needs.verify-tag-version.outputs.tag }}
+      source: ${{ needs.verify-tag-version.outputs.sha }}
+      tooling-sha: ${{ github.sha }}
+      artifact-run-id: ${{ format('{0}', github.run_id) }}
+
   github-release:
     if: >-
-      always() &&
+      !cancelled() &&
       (github.event_name == 'push' ||
        (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'release')) &&
       (needs.publish-npm.result == 'success' ||
        (vars.PUBLISH_NPM != 'true' && needs.publish-npm.result == 'skipped')) &&
-      needs.prepare-native-assets.result == 'success'
-    needs: [verify-tag-version, publish-npm, prepare-native-assets]
+      needs.prepare-native-assets.result == 'success' &&
+      needs.staged-install-acceptance.result == 'success'
+    needs: [verify-tag-version, publish-npm, prepare-native-assets, staged-install-acceptance]
     permissions:
       contents: write
     uses: ./.github/workflows/reusable-gh-release.yml
     with:
       tag: ${{ needs.verify-tag-version.outputs.tag }}
-      artifact-name: native-release-assets
+      artifact-name: staged-release-assets
+      use-existing-checksums: true
       assets-glob: dist/*
       changelog-path: packages/engine/CHANGELOG.md
       toolchain-source: workspace

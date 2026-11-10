@@ -15,7 +15,7 @@ export interface HistoricalUpgradeSteps {
   uninstall(): Promise<void>; verifyPreserved(): Promise<void>;
 }
 export function runHistoricalUpgradeSteps(host: HistoricalUpgradeSteps): Promise<void>;
-export function assertHistoricalRollbackRefusal(input: { bin: string; version: string; webuiDirectory: string; signal?: AbortSignal },
+export function assertHistoricalRollbackRefusal(input: { bin: string; version: string; webuiDirectory: string; signal?: AbortSignal; sourceRoot?: string },
   verifier?: {
     resolveSuiteUpdatePlan(input: object): { files: readonly { path: string }[]; directories: readonly { path: string }[]; assertCurrent(): void };
     rollbackSuiteUpdate(input: { beforeCommit(): void; assertCurrent(): void }): unknown;
@@ -27,9 +27,21 @@ export function assertHistoricalRollbackRefusal(input: { bin: string; version: s
 export function assertHostedContext(input: HostedContext): void;
 export function runAcceptanceSteps(host: AcceptanceSteps): Promise<void>;
 export function runOwnedCommand(command: string, args: readonly string[], options?: SpawnOptionsWithoutStdio & {
-  signal?: AbortSignal; timeoutMs?: number;
-}): Promise<{ code: number; stdout: string }>;
-export function acceptPublishedSuite(input: { tag: string; source: string; target: string; scenario?: 'fresh' | 'upgrade-v3.1.1'; signal?: AbortSignal }): Promise<void>;
+  signal?: AbortSignal; timeoutMs?: number; installerSource?: string;
+}): Promise<{ code: number; stdout: string; diagnostics?: string[] }>;
+export interface AcceptanceDelivery {
+  installerSource?: string; rollbackSourceRoot?: string;
+  admit(input: { tag: string; source: string; target: string; root: string; signal?: AbortSignal }): Promise<{
+    readers: Map<string, unknown>; installer: string; published: { url: string; bytes: Uint8Array };
+  }>;
+  preparePrevious(input: {
+    invoke(command: string, args: readonly string[]): Promise<string>;
+    daemon: string; setting(key: string): Promise<unknown>;
+  }): Promise<void>;
+  assertCurrent(): void;
+  finish?(): Promise<void>;
+}
+export function acceptPublishedSuite(input: { tag: string; source: string; target: string; scenario?: 'fresh' | 'upgrade-v3.1.1'; signal?: AbortSignal; delivery?: AcceptanceDelivery }): Promise<void>;
 export function readPublishedReaders(input: { tag: string; source: string; target: string; assets: ReadonlySet<string> },
   load: (name: string) => Promise<{ target: string; sourceCommit: string; headCommit: string; version?: string;
     readers: { version: string }; files: readonly { path: string }[] }>): Promise<Map<string, unknown>>;

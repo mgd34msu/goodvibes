@@ -865,7 +865,8 @@ describe('release.yml: by-reference release', () => {
     expect(needsOf(release)).toContain('prepare-native-assets');
     expect(release.uses).toBe('./.github/workflows/reusable-gh-release.yml');
     expect(release.with).toEqual(expect.objectContaining({
-      'artifact-name': 'native-release-assets',
+      'artifact-name': 'staged-release-assets',
+      'use-existing-checksums': true,
       'assets-glob': 'dist/*',
       'toolchain-source': 'workspace',
     }));
@@ -908,6 +909,9 @@ describe('release.yml: by-reference release', () => {
       ['prepare-native-assets', 'complete-suite-assets'],
       ['github-release', 'publish-npm'],
       ['github-release', 'prepare-native-assets'],
+      ['github-release', 'staged-install-acceptance'],
+      ['staged-install-acceptance', 'verify-tag-version'],
+      ['staged-install-acceptance', 'prepare-native-assets'],
     ] as const) {
       const job = rel.jobs![target]!;
       expect(needsOf(job)).toContain(prerequisite);
@@ -927,7 +931,7 @@ describe('release.yml: by-reference release', () => {
     for (const event of ['push', 'workflow_dispatch']) {
       expect(permitsPublication(npm, { 'verify-tag-version': 'success', 'release-verify': 'success' }, event, 'release', false)).toBe(false);
       expect(permitsPublication(preparation, { 'verify-tag-version': 'success', 'release-verify': 'success', 'complete-suite-assets': 'success' }, event, 'release', false)).toBe(true);
-      const results: Record<string, JobResult> = { 'publish-npm': 'skipped', 'prepare-native-assets': 'success' };
+      const results: Record<string, JobResult> = { 'verify-tag-version': 'success', 'publish-npm': 'skipped', 'prepare-native-assets': 'success', 'staged-install-acceptance': 'success' };
       expect(permitsPublication(release, results, event, 'release', false)).toBe(true);
       expect(permitsPublication(release, results, event, 'release', true)).toBe(false);
       results['publish-npm'] = 'failure';
@@ -935,6 +939,28 @@ describe('release.yml: by-reference release', () => {
       results['publish-npm'] = 'success'; results['prepare-native-assets'] = 'failure';
       expect(permitsPublication(release, results, event, 'release', false)).toBe(false);
     }
+  });
+
+  test('the native prepublication gate survives skipped npm ancestors and fails closed on cancellation', () => {
+    const acceptance = rel.jobs!['staged-install-acceptance']!;
+    expect(acceptance.uses).toBe('./.github/workflows/reusable-staged-install-acceptance.yml');
+    expect(needsOf(acceptance)).toEqual(['verify-tag-version', 'prepare-native-assets']);
+    expect(acceptance.with).toEqual({
+      tag: '${{ needs.verify-tag-version.outputs.tag }}',
+      source: '${{ needs.verify-tag-version.outputs.sha }}',
+      'tooling-sha': '${{ github.sha }}',
+      'artifact-run-id': "${{ format('{0}', github.run_id) }}",
+    });
+    const ready: Record<string, JobResult> = { 'verify-tag-version': 'success', 'prepare-native-assets': 'success', 'publish-npm': 'skipped' };
+    expect(permitsPublication(acceptance, ready, 'push', 'release', false)).toBe(true);
+    expect(permitsPublication(acceptance, { ...ready, 'publish-npm': 'cancelled' }, 'push', 'release', false)).toBe(false);
+    const release = rel.jobs!['github-release']!;
+    expect(needsOf(release)).toContain('staged-install-acceptance');
+    for (const result of ['failure', 'cancelled', 'skipped'] as const) {
+      expect(permitsPublication(release, { ...ready, 'staged-install-acceptance': result }, 'push', 'release', false)).toBe(false);
+    }
+    expect(prerequisites(rel, 'published-install-acceptance').has('github-release')).toBe(true);
+    expect(prerequisites(rel, 'github-release').has('published-install-acceptance')).toBe(false);
   });
 
   test('concurrency never cancels an in-progress release', () => {
@@ -965,7 +991,7 @@ describe('release.yml: by-reference release', () => {
     expect(pubIf).toContain("github.event_name == 'push'");
     expect(pubIf).toContain("github.event_name == 'workflow_dispatch'");
     expect(pubIf).toContain("inputs.mode == 'release'");
-    for (const target of ['publish-npm', 'prepare-native-assets', 'github-release']) {
+    for (const target of ['publish-npm', 'prepare-native-assets', 'staged-install-acceptance', 'github-release']) {
       const job = rel.jobs![target]!;
       const results: Record<string, JobResult> = Object.fromEntries(needsOf(job).map((name) => [name, 'success']));
       expect(permitsPublication(job, results, 'workflow_dispatch', 'dry-run')).toBe(false);
@@ -1043,7 +1069,7 @@ describe('release.yml: by-reference release', () => {
   test('the tag-push publish path is preserved unchanged (manual redo)', () => {
     // Every release job that gates on a release-mode dispatch must still also
     // gate on a plain push, so pushing a v* tag by hand releases exactly as before.
-    for (const name of ['verify-tag-version', 'release-verify', 'publish-npm', 'prepare-native-assets', 'github-release']) {
+    for (const name of ['verify-tag-version', 'release-verify', 'publish-npm', 'prepare-native-assets', 'staged-install-acceptance', 'github-release']) {
       expect(String(rel.jobs![name]!.if)).toContain("github.event_name == 'push'");
     }
   });
@@ -1221,7 +1247,10 @@ describe('reusable workflows: workflow_call contracts', () => {
     expect((relNormalize!.env as Record<string, string>).RAW_GLOBS).toContain('inputs.assets-glob');
     const ghRelease = steps(relJob).find((s) => s.uses?.toString().includes('action-gh-release'))!;
     const files = String((ghRelease.with as Record<string, unknown>).files);
-    expect(files).toContain('steps.globs.outputs.paths');
+    expect(files).toContain('steps.payloads.outputs.paths');
+    expect(files).toContain('steps.checksums.outputs.path');
+    const payloads = steps(relJob).find((s) => s.id === 'payloads');
+    expect(payloads?.env).toHaveProperty('NORMALIZED_GLOBS', '${{ steps.globs.outputs.paths }}');
     expect(files).not.toContain('inputs.assets-glob');
   });
 

@@ -1,16 +1,65 @@
-/** Public-release acceptance on disposable GitHub-hosted native accounts only.
- * No build output, Actions payload or simulated service substitutes for install. */
+/** Native lifecycle acceptance on disposable GitHub-hosted accounts only.
+ * Public and staged delivery share the actual source installer, compiled native
+ * programs and original service manager; no simulated service substitutes. */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { userInfo } from 'node:os';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
 import { isAbsolute, join, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { boundedNativeProcessClose, drainNativeProcessGroup, signalNativeProcessGroup } from '../products/daemon/scripts/native-execution-process.mjs';
 
 const repository = 'mgd34msu/goodvibes';
 const products = ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent'];
 const unit = 'goodvibes.service', label = 'sh.goodvibes.daemon';
+
+// Acceptance-only metadata: Bash (including macOS sh) records source line
+// numbers without tracing commands, arguments or credentials. Dash skips this.
+// Opening/closing the private scalar journal avoids passing another descriptor
+// into installed services. Freeze before the installer's EXIT cleanup runs.
+const installerLineProbe = `if [ -n "\${BASH_VERSION:-}" ]; then
+  set -T
+  trap 'case "\${FUNCNAME[0]-}:$BASH_COMMAND" in cleanup_release_install:*|*:cleanup_release_install) trap - DEBUG ;; *) if [ "$LINENO" -gt 0 ] && [ "$LINENO" -le "$GOODVIBES_ACCEPTANCE_LINE_LIMIT" ]; then printf "%s\\n" "$LINENO" 2>/dev/null >"$GOODVIBES_ACCEPTANCE_LINE_PATH" || :; fi ;; esac' DEBUG
+fi
+. "$0"`;
+
+/** Emit public source literals and fixed error classes only. In particular,
+ * paths, expanded shell variables and unrelated stdout/stderr stay private. */
+function installerFailureDiagnostics(source, stdout, stderr) {
+  const templates = [], sourceLines = source.split('\n').length;
+  for (const match of source.matchAll(/\bfail\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g)) {
+    const text = (match[1] ?? match[2]).split('\n')[0];
+    // Unsupported shell quoting/substitution must never turn into raw output.
+    if (!text || /[\\`]|\$\(/.test(text)) continue;
+    const parts = match[1] !== undefined ? [text] : text.split(/(\$(?:\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?]))/g);
+    if (!parts.some((part, index) => index % 2 === 0 && /[A-Za-z]{3}/.test(part))) continue;
+    templates.push({ literals: parts.filter((_part, index) => index % 2 === 0).map((part, index) => index === 0 ? `install.sh: ${part}` : part),
+      diagnostic: `install.sh: ${parts.map((part, index) => index % 2 ? '[redacted]' : part).join('')}`.slice(0, 512) });
+  }
+  const diagnostics = new Set();
+  for (const line of `${stderr}\n${stdout}`.split(/\r?\n/)) {
+    const template = templates.find(({ literals }) => {
+      if (literals.length === 1) return line === literals[0];
+      if (!line.startsWith(literals[0]) || !line.endsWith(literals.at(-1))) return false;
+      let offset = literals[0].length;
+      return literals.slice(1).every(literal => {
+        const found = line.indexOf(literal, offset); if (found < 0) return false;
+        offset = found + literal.length; return true;
+      });
+    });
+    if (template) diagnostics.add(template.diagnostic);
+    // Shells print different prefixes; preserve only an in-range source line.
+    const number = /:\s*(?:line\s+)?(\d+):/.exec(line)?.[1];
+    const location = number && Number(number) > 0 && Number(number) <= sourceLines ? ` at installer line ${Number(number)}` : '';
+    const reason = /(?:^|: )(Bad file descriptor|Bad fd number|Is a directory|Not a directory|Permission denied|Operation not permitted|No such file or directory|not found|command not found|parameter not set|unbound variable|Illegal instruction|Segmentation fault|Exec format error|Argument list too long|Syntax error|Bad substitution|Read-only file system|Too many open files|No space left on device|unexpected operator)(?:$|[ .(:])/i.exec(line)?.[1];
+    if (reason) diagnostics.add(`Shell/OS failure${location}: ${reason.toLowerCase()}`);
+    else if (location && !template) diagnostics.add(`Unclassified shell failure${location}; dynamic output withheld.`);
+    const curl = /^curl: \((\d{1,3})\)/.exec(line);
+    if (curl) diagnostics.add(`curl failed with error ${Number(curl[1])}; dynamic output withheld.`);
+    if (diagnostics.size >= 8) break;
+  }
+  return [...diagnostics].slice(0, 8);
+}
 
 export function assertHostedContext(input) {
   assert.equal(input.env.GITHUB_ACTIONS, 'true', 'Acceptance requires a disposable Actions account.');
@@ -27,15 +76,26 @@ export function assertHostedContext(input) {
 /** Drain the exact admitted child before reporting timeout/cancellation. Output
  * stays bounded/private: installer/status output can contain local credentials. */
 export async function runOwnedCommand(command, args, options = {}) {
-  const { timeoutMs = 120_000, signal, ...spawnOptions } = options;
+  const { timeoutMs = 120_000, signal, installerSource, ...spawnOptions } = options;
   signal?.throwIfAborted();
-  const child = spawn(command, args, { ...spawnOptions, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  let stdout = '', bytes = 0, failOutput;
+  const shell = command.split(sep).at(-1);
+  const probe = installerSource !== undefined && ['sh', 'bash', 'dash'].includes(shell);
+  const probeRoot = probe ? mkdtempSync(join(tmpdir(), 'goodvibes-acceptance-line-')) : undefined;
+  const probePath = probeRoot && join(probeRoot, 'line');
+  let child;
+  try {
+    if (probePath) writeFileSync(probePath, '', { flag: 'wx', mode: 0o600 });
+    child = spawn(command, probe ? [...(shell === 'bash' ? ['--posix'] : []), '-c', installerLineProbe, ...args] : args,
+      { ...spawnOptions, ...(probePath ? { env: { ...(spawnOptions.env ?? process.env), GOODVIBES_ACCEPTANCE_LINE_PATH: probePath,
+        GOODVIBES_ACCEPTANCE_LINE_LIMIT: String(installerSource.split('\n').length) } } : {}), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (error) { if (probeRoot) rmSync(probeRoot, { recursive: true, force: true }); throw error; }
+  let stdout = '', stderr = '', bytes = 0, failOutput;
   const overflow = new Promise((_yes, no) => { failOutput = no; });
   const consume = (chunk, retain) => {
     bytes += chunk.length;
     if (bytes > 512 * 1024) failOutput(new Error('Acceptance command output exceeded its bound.'));
     else if (retain) stdout += chunk.toString('utf8');
+    else if (installerSource !== undefined) stderr += chunk.toString('utf8');
   };
   child.stdout.on('data', chunk => consume(chunk, true));
   child.stderr.on('data', chunk => consume(chunk, false));
@@ -50,7 +110,7 @@ export async function runOwnedCommand(command, args, options = {}) {
     catch (error) { rejectCancellation(error); }
   };
   signal?.addEventListener('abort', cancel, { once: true });
-  let result, failure;
+  let result, failure, lastInstallerLine;
   try {
     if (signal?.aborted) cancel();
     result = await boundedNativeProcessClose(Promise.race([closed, overflow, cancelled]), timeoutMs, 'Acceptance command exceeded its bound.');
@@ -59,8 +119,21 @@ export async function runOwnedCommand(command, args, options = {}) {
     signal?.removeEventListener('abort', cancel);
     try { await drainNativeProcessGroup(child, closed); }
     catch (error) { failure = failure ? new AggregateError([failure, error], 'Acceptance child drain failed.') : error; }
+    if (probeRoot) {
+      try {
+        const metadata = readFileSync(probePath, 'utf8');
+        if (/^\d{1,10}\n$/.test(metadata) && Number(metadata) > 0 && Number(metadata) <= installerSource.split('\n').length)
+          lastInstallerLine = Number(metadata);
+      } catch { /* Numeric metadata is optional; original failures stay primary. */ }
+      finally { rmSync(probeRoot, { recursive: true, force: true }); }
+    }
   }
   if (failure) throw failure;
+  if (result.code !== 0 && installerSource !== undefined) {
+    result.diagnostics = installerFailureDiagnostics(installerSource, stdout, stderr);
+    if (lastInstallerLine) result.diagnostics.unshift(`Installer exited nonzero after source line ${lastInstallerLine}; line captured before EXIT cleanup.`);
+    result.diagnostics = result.diagnostics.slice(0, 8);
+  }
   signal?.throwIfAborted(); return result;
 }
 
@@ -112,9 +185,12 @@ export async function runHistoricalUpgradeSteps(host) {
  * an interactive compiled /update rollback was driven by this acceptance. */
 export async function assertHistoricalRollbackRefusal(input, verifier) {
   input.signal?.throwIfAborted();
-  const api = verifier ?? await import('../packages/engine/platform/dist/platform/runtime/self-update.js');
-  const sources = verifier ?? await import('../packages/engine/platform/dist/platform/runtime/compiled-native-startup.js');
-  const trees = verifier ?? await import('../packages/engine/platform/dist/platform/runtime/update-directories.js');
+  const modulePath = name => input.sourceRoot
+    ? pathToFileURL(join(input.sourceRoot, 'packages/engine/platform/dist/platform/runtime', name)).href
+    : new URL(`../packages/engine/platform/dist/platform/runtime/${name}`, import.meta.url).href;
+  const api = verifier ?? await import(modulePath('self-update.js'));
+  const sources = verifier ?? await import(modulePath('compiled-native-startup.js'));
+  const trees = verifier ?? await import(modulePath('update-directories.js'));
   const options = { execPath: join(input.bin, 'goodvibes-daemon'), platform: 'linux', arch: process.arch,
     currentVersion: input.version, version: input.version, webuiDirectory: input.webuiDirectory };
   const plan = api.resolveSuiteUpdatePlan(options);
@@ -177,15 +253,15 @@ export async function acceptPublishedSuite(input) {
   try { await performPublishedAcceptance(input, evidence); }
   catch (error) {
     const diagnostic = { tag: input.tag, source: input.source, target: input.target, accepted: false,
-      failures: evidence.failures.length ? evidence.failures : [{ stage: evidence.stage, command: evidence.command, exitCode: evidence.exitCode }],
-      diagnostic: 'Published native install/service/cleanup acceptance failed.' };
+      failures: evidence.failures.length ? evidence.failures : [{ stage: evidence.stage, command: evidence.command, exitCode: evidence.exitCode, diagnostics: evidence.diagnostics }],
+      diagnostic: input.delivery ? 'Staged native install/service/cleanup acceptance failed.' : 'Published native install/service/cleanup acceptance failed.' };
     if (evidence.root) writeFileSync(join(evidence.root, 'acceptance-result.json'), JSON.stringify(diagnostic) + '\n', { flag: 'wx', mode: 0o600 });
     console.error(JSON.stringify(diagnostic));
     throw error;
   }
 }
 
-async function performPublishedAcceptance({ tag, source, target, signal, scenario = 'fresh' }, evidence) {
+async function performPublishedAcceptance({ tag, source, target, signal, scenario = 'fresh', delivery }, evidence) {
   assert.ok(scenario === 'fresh' || scenario === 'upgrade-v3.1.1', 'Unknown published acceptance scenario.');
   const historical = scenario === 'upgrade-v3.1.1';
   if (historical) {
@@ -216,10 +292,11 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   const env = { ...process.env, HOME: home };
   for (const name of Object.keys(env)) if (/^(?:GOODVIBES_|OPENAI_|ANTHROPIC_|GOOGLE_|GEMINI_|JEV_|CLEF_)/.test(name)
     || ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'DBUS_SESSION_BUS_ADDRESS', 'NODE_OPTIONS', 'BUN_OPTIONS'].includes(name)) delete env[name];
-  const invoke = async (command, args, extra = {}, cleanup = false) => {
-    assertHome(); evidence.command = command.split(sep).at(-1); evidence.exitCode = undefined;
-    const result = await runOwnedCommand(command, args, { cwd: home, env: { ...env, ...extra }, timeoutMs: 300_000, signal: cleanup ? undefined : signal }); assertHome();
-    evidence.exitCode = result.code;
+  const invoke = async (command, args, extra = {}, cleanup = false, installerSource) => {
+    assertHome(); evidence.command = command.split(sep).at(-1); evidence.exitCode = undefined; evidence.diagnostics = undefined;
+    const result = await runOwnedCommand(command, args, { cwd: home, env: { ...env, ...extra }, timeoutMs: 300_000,
+      signal: cleanup ? undefined : signal, installerSource }); assertHome();
+    evidence.exitCode = result.code; evidence.diagnostics = result.diagnostics;
     assert.equal(result.code, 0, `Acceptance command failed: ${command.split(sep).at(-1)}`); return result.stdout.trim();
   };
   if (process.platform === 'linux') {
@@ -239,22 +316,28 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   }
   evidence.stage = 'published-catalog'; evidence.command = undefined; evidence.exitCode = undefined;
   const api = `https://api.github.com/repos/${repository}`;
-  const release = JSON.parse((await fetchBytes(`${api}/releases/tags/${tag}`)).bytes);
-  assert.equal(release.tag_name, tag); assert.equal(release.draft, false);
-  assert.ok(Array.isArray(release.assets) && release.assets.length >= 65, 'The complete native suite must be published first.');
-  const names = new Set(release.assets.map(asset => asset.name));
-  assert.equal(names.size, release.assets.length); assert.ok(names.has('SHA256SUMS.txt'));
-  const readers = await readPublishedReaders({ tag, source, target, assets: names }, async name =>
-    JSON.parse((await fetchBytes(`https://github.com/${repository}/releases/download/${tag}/${name}`, 131_072)).bytes));
-  const latest = JSON.parse((await fetchBytes(`${api}/releases/latest`)).bytes);
-  assert.equal(latest.tag_name, tag, 'Default updater acceptance requires this exact tag to be latest.');
-  evidence.stage = 'public-installer';
-  const immutable = await fetchBytes(`https://raw.githubusercontent.com/${repository}/${source}/scripts/install.sh`);
-  const published = await fetchBytes('https://goodvibes.sh/install.sh');
-  assert.match(published.url, /^https:\/\/raw\.githubusercontent\.com\/mgd34msu\/goodvibes\/(?:main|[a-f0-9]{40})\/scripts\/install\.sh$/);
-  assert.ok(published.bytes.equals(immutable.bytes), 'The public installer differs from the accepted release source.');
-  const installer = join(root, 'install.sh'); writeFileSync(installer, published.bytes, { flag: 'wx', mode: 0o600 });
-  writeFileSync(join(root, 'immutable-install.sh'), immutable.bytes, { flag: 'wx', mode: 0o600 });
+  let readers, published, installer;
+  if (delivery) {
+    evidence.stage = 'staged-candidate';
+    ({ readers, published, installer } = await delivery.admit({ tag, source, target, root, signal }));
+  } else {
+    const release = JSON.parse((await fetchBytes(`${api}/releases/tags/${tag}`)).bytes);
+    assert.equal(release.tag_name, tag); assert.equal(release.draft, false);
+    assert.ok(Array.isArray(release.assets) && release.assets.length >= 65, 'The complete native suite must be published first.');
+    const names = new Set(release.assets.map(asset => asset.name));
+    assert.equal(names.size, release.assets.length); assert.ok(names.has('SHA256SUMS.txt'));
+    readers = await readPublishedReaders({ tag, source, target, assets: names }, async name =>
+      JSON.parse((await fetchBytes(`https://github.com/${repository}/releases/download/${tag}/${name}`, 131_072)).bytes));
+    const latest = JSON.parse((await fetchBytes(`${api}/releases/latest`)).bytes);
+    assert.equal(latest.tag_name, tag, 'Default updater acceptance requires this exact tag to be latest.');
+    evidence.stage = 'public-installer';
+    const immutable = await fetchBytes(`https://raw.githubusercontent.com/${repository}/${source}/scripts/install.sh`);
+    published = await fetchBytes('https://goodvibes.sh/install.sh');
+    assert.match(published.url, /^https:\/\/raw\.githubusercontent\.com\/mgd34msu\/goodvibes\/(?:main|[a-f0-9]{40})\/scripts\/install\.sh$/);
+    assert.ok(published.bytes.equals(immutable.bytes), 'The public installer differs from the accepted release source.');
+    installer = join(root, 'install.sh'); writeFileSync(installer, published.bytes, { flag: 'wx', mode: 0o600 });
+    writeFileSync(join(root, 'immutable-install.sh'), immutable.bytes, { flag: 'wx', mode: 0o600 });
+  }
   const installEnv = { GOODVIBES_VERSION: tag, GOODVIBES_WAKE_MODEL: '0', GOODVIBES_SHADOW_REMOVE: '0' };
   let previousInstaller, previousSource, previousReader;
   if (historical) {
@@ -311,7 +394,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   };
   const host = {
     async admit() { assertHome(); },
-    async install() { await invoke('sh', [installer], installEnv); },
+    async install() { await invoke('sh', [installer], installEnv, false, delivery?.installerSource ?? readFileSync(installer, 'utf8')); },
     async verifyInstalled() {
       for (const name of products) {
         assert.equal(await invoke(join(bin, name), ['--version']), `${name} ${version}`);
@@ -351,13 +434,13 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     },
     async restartAndVerifyOptOut() { await service('restart'); await host.verifyInstalled(); await verifyOptOut(); },
     verifyOptOut,
-    async uninstall() { await invoke('sh', [installer], { ...installEnv, GOODVIBES_UNINSTALL: '1' }, true); },
+    async uninstall() { await invoke('sh', [installer], { ...installEnv, GOODVIBES_UNINSTALL: '1' }, true, delivery?.installerSource ?? readFileSync(installer, 'utf8')); },
     verifyPreserved,
   };
   const previousInstallEnv = { GOODVIBES_VERSION: 'v3.1.1', GOODVIBES_WAKE_MODEL: '0' };
   const upgrade = {
     admit: host.admit,
-    async installPrevious() { await invoke('sh', [previousInstaller], { ...previousInstallEnv, GOODVIBES_DAEMON_SERVICE: '0' }); },
+    async installPrevious() { await invoke('sh', [previousInstaller], { ...previousInstallEnv, GOODVIBES_DAEMON_SERVICE: '0' }, false, readFileSync(previousInstaller, 'utf8')); },
     async verifyPrevious() {
       for (const name of products) assert.equal(await invoke(join(bin, name), ['--version']), `${name} 3.1.1`);
       await host.verifyDefaults();
@@ -373,11 +456,12 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       // A real supported saved value, distinct from its default, must survive.
       await invoke(daemon, ['config', 'set', 'update.intervalMinutes', '61']);
       assert.equal(await setting('update.intervalMinutes'), 61);
+      if (delivery) await delivery.preparePrevious({ invoke, daemon, setting });
     },
     async startPreviousService() {
       // Deliberately re-run the OLD installer. No current installer or direct
       // apply API is permitted to perform the version transition being proved.
-      await invoke('sh', [previousInstaller], previousInstallEnv); await service('check');
+      await invoke('sh', [previousInstaller], previousInstallEnv, false, readFileSync(previousInstaller, 'utf8')); await service('check');
     },
     async awaitAutomaticUpgrade() {
       const deadline = Date.now() + 10 * 60_000; let complete = false;
@@ -403,7 +487,8 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       await service('restart'); await host.verifyInstalled(); await upgrade.verifyUpgradedData();
       // Implemented below through the actual source-bound platform rollback
       // API, never by inventing old reader metadata or a nonexistent CLI verb.
-      await assertHistoricalRollbackRefusal({ bin, version, webuiDirectory: originalWebui, signal });
+      await assertHistoricalRollbackRefusal({ bin, version, webuiDirectory: originalWebui, signal,
+        ...(delivery?.rollbackSourceRoot ? { sourceRoot: delivery.rollbackSourceRoot } : {}) });
       await host.verifyInstalled(); await upgrade.verifyUpgradedData();
     },
     uninstall: host.uninstall, verifyPreserved,
@@ -412,14 +497,21 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   for (const name of Object.keys(selectedHost)) {
     const original = selectedHost[name];
     selectedHost[name] = async () => {
-      evidence.stage = name; evidence.command = undefined; evidence.exitCode = undefined;
+      evidence.stage = name; evidence.command = undefined; evidence.exitCode = undefined; evidence.diagnostics = undefined;
       try { return await original(); }
-      catch (error) { evidence.failures.push({ stage: name, command: evidence.command, exitCode: evidence.exitCode }); throw error; }
+      catch (error) { evidence.failures.push({ stage: name, command: evidence.command, exitCode: evidence.exitCode, diagnostics: evidence.diagnostics }); throw error; }
     };
   }
   if (historical) await runHistoricalUpgradeSteps(selectedHost);
   else await runAcceptanceSteps(selectedHost);
-  writeFileSync(join(root, 'acceptance-result.json'), JSON.stringify({ tag, source, target, scenario, ...(historical ? { previousTag: 'v3.1.1', previousSource } : {}), publicInstaller: published.url,
+  if (delivery?.finish) {
+    evidence.stage = 'staged-delivery-drain'; evidence.command = undefined; evidence.exitCode = undefined; evidence.diagnostics = undefined;
+    await delivery.finish();
+  }
+  delivery?.assertCurrent();
+  writeFileSync(join(root, 'acceptance-result.json'), JSON.stringify({ tag, source, target, scenario, ...(historical ? { previousTag: 'v3.1.1', previousSource } : {}),
+    ...(delivery ? { delivery: historical ? 'exact staged candidate; installer fetch adapter and owned loopback update feed'
+      : 'exact staged candidate; installer fetch adapter', candidateInstaller: published.url, publicDelivery: 'not claimed' } : { publicInstaller: published.url }),
     installedProducts: [...products, 'goodvibes-webui'], defaultService: true, updateDefaults: true, optOutPersisted: !historical,
     uninstallPreservedData: true, futureVersionUpgrade: historical ? 'actual old unattended daemon plus pre-graph suite repair' : 'not claimed', publicRollback: historical ? 'incomplete historical cohort refused without effects' : 'not claimed' }) + '\n', { flag: 'wx', mode: 0o600 });
 

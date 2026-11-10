@@ -5,7 +5,7 @@
 |                                                                                                                        |
 |            ✦ Settings › Search                                                                        esc              |
 |                                                                                                                        |
-|            theme▏                                                                              426 results             |
+|            theme▏                                                                              427 results             |
 |                                                                                                                        |
 |                                                                                                                        |
 |              display.theme · default goodvibes · enum with 13 possible value(s) · source default                       |
@@ -34,7 +34,7 @@
 |              toolResultReconciliation  Behavior                                                reconcile               |
 |                                                                                                                        |
 |                                                                                                                        |
-|             ↑↓  move    ⏎  change    ⌫  edit search    ctrl+r  reset                            412 more ↓             |
+|             ↑↓  move    ⏎  change    ⌫  edit search    ctrl+r  reset                            413 more ↓             |
 |                                                                                                                        |
 |        ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀         |
 |                                                                                                                        |

@@ -94,7 +94,8 @@ function fixture() {
     return Response.json({ error: `Unexpected route ${path}` }, { status: 500 });
   } });
   const baseUrl = `http://127.0.0.1:${server.port}`;
-  const view = createNativeWorkLedgerView(() => ({ baseUrl, token: 'synthetic-intake-token', workspace: home, journalPath }), () => {});
+  let selectionIdentity = 'original-selection';
+  const view = createNativeWorkLedgerView(() => ({ baseUrl, token: 'synthetic-intake-token', workspace: home, journalPath, selectionIdentity }), () => {});
   const extraViews: ReturnType<typeof createNativeWorkLedgerView>[] = [];
   const intake = view.intake!; const close = () => { view.close(); for (const extra of extraViews) extra.close(); };
   const printed: string[] = []; let dispatches = 0; const registry = new CommandRegistry();
@@ -110,6 +111,7 @@ function fixture() {
     },
     newIntake() { const extra = createNativeWorkLedgerView(() => ({ baseUrl, token: 'synthetic-intake-token', workspace: home, journalPath }), () => {}); extraViews.push(extra); return extra.intake!; },
     holdHostedStart() { heldHostedStart = new Promise(resolve => { releaseHostedStart = resolve; }); return { arrived: new Promise<void>(resolve => { hostedStartArrived = resolve; }), release: () => releaseHostedStart() }; },
+    setSelectionIdentity(value: string) { selectionIdentity = value; },
     setHostedFault(value: typeof hostedFault) { hostedFault = value; }, dispatches: () => dispatches,
     run: (action: string) => registry.execute('work', [action], context),
     journal: () => JSON.parse(readFileSync(`${journalPath}.intake`, 'utf8')),
@@ -177,6 +179,35 @@ test('real turn permit outlives intake transport, preserves exact source and rec
     f.revoke(); await expect(revalidateNativeConversationTurnPermit(permit)).rejects.toThrow();
   } finally { f.close(); }
 });
+test('retained turn permits never revive after explicit project reselection', async () => {
+  const f = fixture(); f.turn();
+  try {
+    const state = await f.intake.submit({ text: 'Original selected project', unsupportedSources: [] });
+    expect(state?.turnPermit).toBeDefined();
+    f.view.close();
+    f.view.selectProject('other-project');
+    f.view.selectProject('p');
+    const before = f.requests.length;
+    await expect(revalidateNativeConversationTurnPermit(state!.turnPermit!)).rejects.toThrow('selection changed');
+    expect(f.requests).toHaveLength(before);
+  } finally { f.close(); }
+});
+
+test('retained turn permits retire observed paired selection replacement even after restoration', async () => {
+  const f = fixture(); f.turn();
+  try {
+    const state = await f.intake.submit({ text: 'Original paired selection', unsupportedSources: [] });
+    expect(state?.turnPermit).toBeDefined();
+    f.view.close();
+    const before = f.requests.length;
+    f.setSelectionIdentity('replacement-selection');
+    await expect(revalidateNativeConversationTurnPermit(state!.turnPermit!)).rejects.toThrow('selection changed');
+    f.setSelectionIdentity('original-selection');
+    await expect(revalidateNativeConversationTurnPermit(state!.turnPermit!)).rejects.toThrow('selection changed');
+    expect(f.requests).toHaveLength(before);
+  } finally { f.close(); }
+});
+
 test('lost settled turn reply requires explicit resume and a single durable dispatch claim', async () => {
   const f = fixture(); f.turn(); f.loseAdmit();
   try {

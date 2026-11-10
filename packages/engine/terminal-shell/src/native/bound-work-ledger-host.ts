@@ -100,6 +100,8 @@ export function createBoundNativeWorkLedgerView(
   let discovery: AbortController | undefined;
   let discoveryHost: Exclude<NativeLedgerHost, { reason: string }> | undefined;
   let selectionEpoch = 0;
+  // Admitted turn permits outlive polling/UI disposal, but never a new selection.
+  let intakeSelectionEpoch = 0;
   let active = false;
   let epoch = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -109,7 +111,8 @@ export function createBoundNativeWorkLedgerView(
     a.workspace === b.workspace &&
     a.journalPath === b.journalPath &&
     a.selectionIdentity === b.selectionIdentity &&
-    a.expectedPrincipalId === b.expectedPrincipalId;
+    a.expectedPrincipalId === b.expectedPrincipalId &&
+    (policy.identityFormat !== 'credential' || a.credentialIdentity === b.credentialIdentity);
   const submission = new NativeWorkSubmissionControls(() => {
     const host = resolve();
     if ('reason' in host) return { available: false, identity: 'unavailable', reason: host.reason };
@@ -145,12 +148,15 @@ export function createBoundNativeWorkLedgerView(
           reason: 'Native conversation intake requires its durable journal and selected daemon project.',
         };
       const projectId = selected.project;
+      const retainedSelection = intakeSelectionEpoch;
+      const originalHost = { ...host };
+      const workspace = realpathSync(host.workspace);
       return {
         available: true,
         identity,
         endpoint: host.baseUrl,
         projectId,
-        workspace: realpathSync(host.workspace),
+        workspace,
         journal: new NativeConversationIntakeJournal(`${host.journalPath}.intake`, {}, policy.intake),
         bind: () =>
           createNativeConversationIntakeBinding(
@@ -158,7 +164,14 @@ export function createBoundNativeWorkLedgerView(
             projectId,
             () => {
               const now = resolve();
-              return !('reason' in now) && nativeIdentity(now, projectId) === identity && selected?.project === projectId;
+              if (retainedSelection !== intakeSelectionEpoch) return false;
+              let current = false;
+              try {
+                current = !('reason' in now) && same(originalHost, now) &&
+                  realpathSync(now.workspace) === workspace && selected?.project === projectId;
+              } catch { /* A missing/replaced workspace retires the original selection. */ }
+              if (!current) intakeSelectionEpoch++;
+              return current;
             },
             { allowHosted: policy.intake.allowHosted, ...(host.readExecutionMode ? { readMode: host.readExecutionMode } : {}) },
           ),
@@ -204,6 +217,7 @@ export function createBoundNativeWorkLedgerView(
       submission.close();
       intake.close();
       selectionEpoch++;
+      intakeSelectionEpoch++;
       selected = undefined;
       active = false;
       stop();
@@ -220,11 +234,15 @@ export function createBoundNativeWorkLedgerView(
     active = true;
     const host = resolve();
     if ('reason' in host) {
+      intakeSelectionEpoch++;
       selected = undefined;
       model.unavailable(host.reason);
       return;
     }
-    if (selected && !same(host, selected.host)) selected = undefined;
+    if (selected && !same(host, selected.host)) {
+      intakeSelectionEpoch++;
+      selected = undefined;
+    }
     if (!selected) {
       const generation = epoch;
       const controller = new AbortController();
@@ -246,6 +264,7 @@ export function createBoundNativeWorkLedgerView(
             model.unavailable('Host changed during discovery. Reopen /work.');
             return;
           }
+          intakeSelectionEpoch++;
           selected = { host, project };
           open(true);
         },
@@ -387,6 +406,7 @@ export function createBoundNativeWorkLedgerView(
       preflight.close();
       intakePreflight.close();
       selectionEpoch++;
+      intakeSelectionEpoch++;
       stop();
       model.close();
       const host = resolve();

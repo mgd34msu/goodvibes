@@ -13,7 +13,7 @@ import { createOperatorInputProjector } from '../../tools/agent-operator-input-p
 import { recordedEffectFixture } from '../helpers/recorded-effect-admission.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
-const cleanups: Array<() => void> = [];
+const cleanups: Array<() => void | Promise<void>> = [];
 let previous: ReturnType<typeof installJudgmentPort>, log: SqliteDecisionLog;
 let readings: ReturnType<typeof fakePort>['requests'];
 beforeEach(() => {
@@ -28,8 +28,8 @@ beforeEach(() => {
   readings = fake.requests;
   previous = installJudgmentPort(withDecisionLog(fake.port, log));
 });
-afterEach(() => {
-  for (const cleanup of cleanups.splice(0).reverse()) cleanup();
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   installJudgmentPort(previous); log[Symbol.dispose]();
 });
 
@@ -50,18 +50,29 @@ async function scene(mode: 'prompt' | 'plan' | 'custom') {
   const destination = join(root, 'existing-project-file.png');
   writeFileSync(destination, 'original project content');
   let screenshots = 0;
-  const sessions = new BrowserSessionManager({ profileRoot: join(root, 'browser-profile'), surfaceRoot: 'test' });
-  // Only the external Playwright page seam is synthetic. BrowserEngine chooses
-  // the actual path and the seam performs the filesystem write on that path.
-  Object.defineProperty(sessions, 'page', { value: async () => ({ pageId: 'audit-page', page: {
-    url: () => 'about:blank',
-    async screenshot(options: { readonly path: string }) {
+  type Driver = NonNullable<ReturnType<NonNullable<NonNullable<ConstructorParameters<typeof BrowserSessionManager>[0]>['loadDriver']>>>;
+  type ExternalBrowser = Awaited<ReturnType<Driver['chromium']['connectOverCDP']>>;
+  type ExternalContext = ReturnType<ExternalBrowser['contexts']>[number];
+  type ExternalPage = ReturnType<ExternalContext['pages']>[number];
+  // The external Playwright protocol objects are synthetic. The original
+  // manager really attaches and tracks its page through withPage and shutdown.
+  const page = {
+    on() {}, url: () => 'about:blank',
+    async screenshot(options: { readonly fullPage: boolean }) {
       screenshots++;
-      const bytes = Buffer.from('synthetic isolated screenshot');
-      writeFileSync(options.path, bytes);
-      return bytes;
+      expect(options).toEqual({ fullPage: false });
+      // Native BrowserEngine owns publication; the protocol only returns bytes.
+      return Buffer.from('synthetic isolated screenshot');
     },
-  } }) });
+  } as unknown as ExternalPage;
+  const context = { pages: () => [page], on() {}, isClosed: () => false, async close() {} } as unknown as ExternalContext;
+  const externalBrowser = { contexts: () => [context], _connection: { close() {} } } as unknown as ExternalBrowser;
+  const sessions = new BrowserSessionManager({ profileRoot: join(root, 'browser-profile'), surfaceRoot: 'test',
+    loadDriver: () => ({ chromium: { async connectOverCDP() { return externalBrowser; }, async launchPersistentContext() { return context; } } }),
+    probeEndpoint: async () => ({ endpoint: 'http://127.0.0.1:9222', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/owned-synthetic-browser' }),
+  });
+  cleanups.push(() => sessions.shutdown());
+  const attached = await sessions.attach({ cdpEndpoint: '9222' });
   const browser = new BrowserEngine(sessions, { screenshotDirectory, untrusted: {
     rule: 'Untrusted browser content', originOf: url => url,
     label: () => { throw new Error('No content label is requested by screenshot'); },
@@ -77,7 +88,7 @@ async function scene(mode: 'prompt' | 'plan' | 'custom') {
       const input: unknown = await request.json();
       const supplied = input && typeof input === 'object' && 'path' in input && typeof input.path === 'string'
         ? input.path.trim() : '';
-      return Response.json(await browser.screenshot({ sessionId: 'audit-session' }, supplied ? { path: supplied } : {}));
+      return Response.json(await browser.screenshot({ sessionId: attached.sessionId }, supplied ? { path: supplied } : {}));
     }
     if (path === '/api/memory/review-queue') return Response.json({ records: await registry.reviewQueue(10) });
     if (path === `/api/memory/records/${record.id}`) return Response.json({ record: registry.get(record.id) });

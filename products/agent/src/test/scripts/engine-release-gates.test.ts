@@ -148,9 +148,9 @@ describe('engine-release-gates', () => {
     expect(issues[0]).toContain('not in the published exports map');
   });
 
-  test('public engine engine and toolchain exports pass', () => {
+  test('public engine platform and toolchain exports pass', () => {
     const root = makeFixture({ srcFiles: {
-      'public.ts': `import { engine } from '${engine}/engine';\nimport { state } from '${PUBLIC_IMPORT}';\nimport { tools } from '${engine}/toolchain';\n`,
+      'public.ts': `import { platform } from '${engine}/platform';\nimport { state } from '${PUBLIC_IMPORT}';\nimport { tools } from '${engine}/toolchain';\n`,
     } });
     expect(engineReleaseGateIssues(root)).toEqual([]);
   });

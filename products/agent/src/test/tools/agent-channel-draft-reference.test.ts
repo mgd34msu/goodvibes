@@ -106,10 +106,14 @@ test('actual registered harness delivers an exact legacy native reference withou
   expect(result.output).not.toContain(legacyId);
   expect(readings.requests.filter(request => request.context?.battery !== 'engine.gate.side-effect+engine.gate.risk-family+engine.gate.boundary')).toHaveLength(0);
   expect(JSON.stringify(f.screening.calls)).toContain('Send the completed review to the owned fixture channel.');
+  const adopted = getDraft(f.paths, legacyId)?.wireReference;
+  if (typeof adopted !== 'string') throw new Error('Missing the actual saved canonical draft reference');
+  expect(adopted.startsWith('draft-reference-v2-')).toBe(true);
+  expect(getDraft(f.paths, publicId)?.wireReference).toBe(adopted);
   const retry = await f.run({ mode: 'channel_draft_send', draftId: publicId });
   expect(retry.success).toBe(false);
   expect(retry.error).toContain('already sent');
-  expect(retry.error).toContain(publicId);
+  expect(retry.error).toContain(adopted);
   expect(JSON.stringify(retry)).not.toContain(legacyId);
   expect(f.delivery).toHaveLength(1);
   expect(getDraft(f.paths, legacyId)?.status).toBe('sent');

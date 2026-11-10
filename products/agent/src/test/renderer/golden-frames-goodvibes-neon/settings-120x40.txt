@@ -24,7 +24,7 @@
 |                                       theme                                                    goodvibes               |
 |          ✦ models and providers       themeMode                                                     auto               |
 |            Provider            8      treeGlyphs                                                 rounded               |
-|            Judgment            8      showThinking                                                 false               |
+|            Judgment            9      showThinking                                                 false               |
 |            Subscriptions       1      showReasoningSummary                                         false               |
 |            Helper              3      showTokenSpeed                                               false               |
 |            Tools               9      showToolPreview                                              false               |

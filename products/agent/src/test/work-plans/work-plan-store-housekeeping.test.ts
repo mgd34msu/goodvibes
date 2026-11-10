@@ -10,7 +10,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import {
   WorkPlanStore,
   WORK_PLAN_TERMINAL_ITEM_CAP,
@@ -33,12 +33,16 @@ interface StoredItem {
 function withStore<T>(fn: (make: () => WorkPlanStore) => T): T {
   const homeDirectory = makeProjectTempDir('gv-work-plan-housekeeping');
   try {
-    return fn(() => new WorkPlanStore({
+    const make = () => new WorkPlanStore({
       homeDirectory,
       surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
       projectId: 'project:housekeeping',
       projectRoot: '/tmp/housekeeping',
-    }));
+    });
+    // The filePath of a new readonly store is an unowned candidate. Allocate
+    // the genuine project assignment before installing saved/corrupt test bytes.
+    expect(make().getActivePlan().registration).toBe('registered');
+    return fn(make);
   } finally {
     rmSync(homeDirectory, { recursive: true, force: true });
   }
@@ -78,7 +82,7 @@ function writePlanWithItems(filePath: string, items: readonly StoredItem[], extr
 /** The preserved copies of unreadable plan files sitting beside the plan. */
 function quarantineFiles(filePath: string): string[] {
   const marker = `${basename(filePath)}.corrupt-`;
-  return readdirSync(dirname(filePath)).filter((name) => name.startsWith(marker));
+  return readdirSync(dirname(filePath)).filter((name) => name.startsWith(marker) && !name.endsWith('.why'));
 }
 
 describe('the Agent work plan recovers from a bad file', () => {
@@ -130,7 +134,9 @@ describe('the Agent work plan recovers from a bad file', () => {
       const store = make();
       expect(store.listItems()).toHaveLength(0);
       expect(store.getActivePlan().housekeeping?.resetFromUnreadableFile).toBe(true);
-      expect(quarantineFiles(store.filePath)).toHaveLength(1);
+      const copies = quarantineFiles(store.filePath);
+      expect(copies).toHaveLength(1);
+      expect(readFileSync(join(dirname(store.filePath), copies[0]!), 'utf8')).toBe('[1,2,3]\n');
     });
   });
 });

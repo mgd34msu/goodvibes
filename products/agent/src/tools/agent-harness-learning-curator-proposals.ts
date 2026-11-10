@@ -1,6 +1,7 @@
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
+import { personalOpsEntry } from './agent-harness-personal-ops-source.ts';
 import type { AgentNoteRecord } from '../agent/note-registry.ts';
 import { type AgentResearchRunRecord } from '../agent/research-run-registry.ts';
 import type { WorkPlanItem } from '@goodvibes-jev/engine/platform/platform/workflow';
@@ -435,14 +436,60 @@ export function assertLearningCandidateCollection(collection: LearningCandidateC
 }
 
 export async function buildLearningCandidates(context: LearningCuratorNativeContext, options: CatalogRankingOptions = {}): Promise<LearningCandidateCollection> {
+  return withLearningSource(context, options, source => buildOwnedLearningCandidates(context, options, source));
+}
+
+async function withLearningSource<T>(context: LearningCuratorNativeContext, options: CatalogRankingOptions,
+  prepare: (source: LearningCuratorSource) => Promise<T>): Promise<T> {
   return withConfiguredDecisionModelPolicy(async () => {
     const source = acquireLearningCuratorSource(context, options);
-    return decisionOrClassic(() => buildOwnedLearningCandidates(context, options, source),
+    return decisionOrClassic(() => prepare(source),
       () => withModelReadingSource(source.source, source.options, async (_captured, current) => {
         current.assertCurrent?.();
-        const collection = await buildOwnedLearningCandidates(context, options, source);
-        current.assertCurrent?.(); return collection;
+        const result = await prepare(source);
+        current.assertCurrent?.(); return result;
       }), () => { source.assertCurrent(); return true; });
+  });
+}
+
+/** Aggregate inspection cannot provide candidates, ranks or transition authority. */
+export interface LearningCandidateCounts {
+  readonly candidates: number;
+  readonly needsReview: number;
+  readonly needsSetup: number;
+  readonly needsConsolidation: number | null;
+  readonly lowConfidence: number;
+  readonly proposedBehavior: number | null;
+  readonly personalityIssues: number;
+  readonly readyToPromote: number;
+  readonly assertCurrent: () => void;
+}
+
+/** Keep the complete original source-protection boundary of an unconsumed grade
+ * input without dispatching a decision whose ranking has no aggregate reader. */
+async function protectCountInput(input: unknown, source: LearningCuratorSource): Promise<void> {
+  await withModelReadingSource(input, source.options, async (captured, current) => {
+    personalOpsEntry(captured); current.assertCurrent?.();
+  });
+}
+
+export async function buildLearningCandidateCounts(context: LearningCuratorNativeContext,
+  options: CatalogRankingOptions = {}): Promise<LearningCandidateCounts> {
+  return withLearningSource(context, options, async source => {
+    const drafts = await collectLearningDrafts(source, async (domain, record) => {
+      if (!isClassicOperation()) await protectCountInput({ proposedUse: 'priority of existing eligible prompt context', domain, capturedAt: source.source.capturedAt, ...record }, source);
+      source.assertCurrent();
+    });
+    for (const { candidate, record } of drafts) {
+      if (!isClassicOperation()) await protectCountInput({ capturedAt: source.source.capturedAt, proposedUse: candidate.status, candidate, record }, source);
+      source.assertCurrent();
+    }
+    const count = (status: LearningCandidateDraft['status']) => drafts.filter(({ candidate }) => candidate.status === status).length;
+    const result = Object.freeze({ candidates: drafts.length, needsReview: count('needs-review'), needsSetup: count('needs-setup'),
+      needsConsolidation: isClassicOperation() ? null : count('needs-consolidation'), lowConfidence: count('low-confidence'),
+      proposedBehavior: isClassicOperation() ? null : count('proposal-ready'), personalityIssues: drafts.filter(({ candidate }) => candidate.domain === 'vibe').length,
+      readyToPromote: count('ready-to-promote'), assertCurrent: source.assertCurrent });
+    source.assertCurrent(); return result;
   });
 }
 
@@ -451,45 +498,13 @@ function comparePriority(left: { readonly priority: number | null }, right: { re
 }
 
 async function buildOwnedLearningCandidates(context: LearningCuratorNativeContext, options: CatalogRankingOptions, source: LearningCuratorSource): Promise<LearningCandidateCollection> {
-  const drafts: { readonly candidate: LearningCandidateDraft; readonly record: unknown }[] = [];
   const promptRecords: LearningCandidateCollection['promptRecords'][number][] = [];
-  for (const [domain, records] of Object.entries(source.libraries)) {
-    // Iterate the domain's closed set below rather than accepting text as a domain.
-    if (domain !== 'memory' && domain !== 'note' && domain !== 'persona' && domain !== 'skill' && domain !== 'skill_bundle' && domain !== 'routine') continue;
-    for (const record of records) {
-      const local = await candidatesForItem(domain, record, source); source.assertCurrent();
-      for (const candidate of local) drafts.push({ candidate, record });
-      if (isClassicOperation() && local.length === 0) drafts.push({ candidate: candidateBase(domain, record.item, 'unassessed',
-        'Stored record; semantic curation was not evaluated.', 'Inspect the source record and use explicit review, update or stale actions.'), record });
-      const eligible = domain === 'memory' ? (record.item.confidence ?? 100) >= 70
-        : domain === 'persona' ? record.item.active === true
-        : domain !== 'note' && record.item.enabled === true && missingRequirementCount(record.item) === 0;
-      if (eligible) {
-        const grade = isClassicOperation() ? null : await readLearningGrade({ proposedUse: 'priority of existing eligible prompt context', domain, capturedAt: source.source.capturedAt, ...record }, source.options);
-        source.assertCurrent(); promptRecords.push({ domain, item: record.item, priority: grade?.priority ?? null, scores: grade?.scores ?? null });
-      }
-    }
-    const consolidation = isClassicOperation() ? [] : await consolidationCandidatesForDomain(domain, records, source.options, source.source); source.assertCurrent();
-    for (const candidate of consolidation) drafts.push({ candidate, record: records });
-  }
-  for (const item of source.source.workItems) {
-    const candidate = await workPlanCompletionCandidate(item, source); source.assertCurrent();
-    if (candidate) drafts.push({ candidate, record: item });
-  }
-  for (const run of source.source.researchSnapshot?.completed ?? []) {
-    const candidate = await researchRunCompletionCandidate(run, source); source.assertCurrent();
-    if (candidate) drafts.push({ candidate, record: run });
-  }
-  for (const session of source.source.sessions) {
-    const candidate = await sessionCompletionCandidate(session, source); source.assertCurrent();
-    if (candidate) drafts.push({ candidate, record: session });
-  }
-  for (const candidate of vibeHealthCandidates(source)) drafts.push({ candidate, record: { health: source.source.vibe, files: source.source.vibeEvidence } });
-  if (drafts.length === 0) drafts.push({ candidate: captureCandidate(), record: { source: source.source, noUrgentCandidates: true } });
-  const promotedReferences = new Set(Object.values(source.libraries).flatMap(records => records.flatMap(record => recordedPromotionReferences(record.record))));
+  const drafts = await collectLearningDrafts(source, async (domain, record) => {
+    const grade = isClassicOperation() ? null : await readLearningGrade({ proposedUse: 'priority of existing eligible prompt context', domain, capturedAt: source.source.capturedAt, ...record }, source.options);
+    source.assertCurrent(); promptRecords.push({ domain, item: record.item, priority: grade?.priority ?? null, scores: grade?.scores ?? null });
+  });
   const candidates: LearningCandidate[] = [];
   for (const { candidate, record } of drafts) {
-    if (candidate.proposalTarget && promotedReferences.has(learningPromotionReference(candidate.id))) continue;
     const grade = isClassicOperation() ? null : await readLearningGrade({ capturedAt: source.source.capturedAt, proposedUse: candidate.status, candidate, record }, source.options); source.assertCurrent();
     candidates.push({ ...candidate, scores: grade?.scores ?? null, priority: grade?.priority ?? null,
       ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
@@ -520,4 +535,43 @@ async function buildOwnedLearningCandidates(context: LearningCuratorNativeContex
     assertFields: captureCatalogMethods(collection, ['candidates', 'promptRecords', 'assertCurrent', 'assertCandidateCurrent', 'prepareTransition', 'options']),
     assertCandidates: captureCatalogSnapshotGuard(collection.candidates), assertPromptRecords: captureCatalogSnapshotGuard(collection.promptRecords) });
   return collection;
+}
+
+async function collectLearningDrafts(source: LearningCuratorSource,
+  consumePromptRecord: (domain: LocalLearningCandidateDomain, record: LearningRecord) => Promise<void>) {
+  const drafts: { readonly candidate: LearningCandidateDraft; readonly record: unknown }[] = [];
+  for (const [domain, records] of Object.entries(source.libraries)) {
+    // Iterate the domain's closed set below rather than accepting text as a domain.
+    if (domain !== 'memory' && domain !== 'note' && domain !== 'persona' && domain !== 'skill' && domain !== 'skill_bundle' && domain !== 'routine') continue;
+    for (const record of records) {
+      const local = await candidatesForItem(domain, record, source); source.assertCurrent();
+      for (const candidate of local) drafts.push({ candidate, record });
+      if (isClassicOperation() && local.length === 0) drafts.push({ candidate: candidateBase(domain, record.item, 'unassessed',
+        'Stored record; semantic curation was not evaluated.', 'Inspect the source record and use explicit review, update or stale actions.'), record });
+      const eligible = domain === 'memory' ? (record.item.confidence ?? 100) >= 70
+        : domain === 'persona' ? record.item.active === true
+        : domain !== 'note' && record.item.enabled === true && missingRequirementCount(record.item) === 0;
+      if (eligible) {
+        await consumePromptRecord(domain, record);
+      }
+    }
+    const consolidation = isClassicOperation() ? [] : await consolidationCandidatesForDomain(domain, records, source.options, source.source); source.assertCurrent();
+    for (const candidate of consolidation) drafts.push({ candidate, record: records });
+  }
+  for (const item of source.source.workItems) {
+    const candidate = await workPlanCompletionCandidate(item, source); source.assertCurrent();
+    if (candidate) drafts.push({ candidate, record: item });
+  }
+  for (const run of source.source.researchSnapshot?.completed ?? []) {
+    const candidate = await researchRunCompletionCandidate(run, source); source.assertCurrent();
+    if (candidate) drafts.push({ candidate, record: run });
+  }
+  for (const session of source.source.sessions) {
+    const candidate = await sessionCompletionCandidate(session, source); source.assertCurrent();
+    if (candidate) drafts.push({ candidate, record: session });
+  }
+  for (const candidate of vibeHealthCandidates(source)) drafts.push({ candidate, record: { health: source.source.vibe, files: source.source.vibeEvidence } });
+  if (drafts.length === 0) drafts.push({ candidate: captureCandidate(), record: { source: source.source, noUrgentCandidates: true } });
+  const promotedReferences = new Set(Object.values(source.libraries).flatMap(records => records.flatMap(record => recordedPromotionReferences(record.record))));
+  return drafts.filter(({ candidate }) => !candidate.proposalTarget || !promotedReferences.has(learningPromotionReference(candidate.id)));
 }

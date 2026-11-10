@@ -2,7 +2,7 @@ import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModel
 import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
-import { buildLearningCandidates, candidateSearchText } from './agent-harness-learning-curator-proposals.ts';
+import { buildLearningCandidateCounts, buildLearningCandidates, candidateSearchText } from './agent-harness-learning-curator-proposals.ts';
 import { localRegistryRoute, missingRequirementCount, routeValue } from './agent-harness-learning-curator-common.ts';
 import type { LearningCandidateCollection } from './agent-harness-learning-curator-source.ts';
 import type { AgentHarnessLearningCuratorArgs, LearningCandidate, LearningCandidateResolution, LearningConsolidationBatchPlan, LearningPromptPlan, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
@@ -271,20 +271,19 @@ export async function learningCuratorCatalogStatus(context: CommandContext, opti
 }
 
 async function ownedLearningCuratorCatalogStatus(context: CommandContext, options: CatalogRankingOptions): Promise<Record<string, unknown>> {
-  const collection = await buildLearningCandidates(context, options); collection.assertCurrent();
-  const { candidates } = collection;
+  const counts = await buildLearningCandidateCounts(context, options); counts.assertCurrent();
   return {
     ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
       interpretationNotice: 'Classic shows stored records and mechanical review flags. Automatic proposal, quality and duplicate analysis is unavailable.' } : {}),
     modes: ['learning_curator', 'learning_candidate'],
-    candidates: candidates.length,
-    needsReview: candidates.filter((candidate) => candidate.status === 'needs-review').length,
-    needsSetup: candidates.filter((candidate) => candidate.status === 'needs-setup').length,
-    needsConsolidation: isClassicOperation() ? null : candidates.filter((candidate) => candidate.status === 'needs-consolidation').length,
-    lowConfidence: candidates.filter((candidate) => candidate.status === 'low-confidence').length,
-    proposedBehavior: isClassicOperation() ? null : candidates.filter((candidate) => candidate.status === 'proposal-ready').length,
-    personalityIssues: candidates.filter((candidate) => candidate.domain === 'vibe').length,
-    readyToPromote: candidates.filter((candidate) => candidate.status === 'ready-to-promote').length,
+    candidates: counts.candidates,
+    needsReview: counts.needsReview,
+    needsSetup: counts.needsSetup,
+    needsConsolidation: counts.needsConsolidation,
+    lowConfidence: counts.lowConfidence,
+    proposedBehavior: counts.proposedBehavior,
+    personalityIssues: counts.personalityIssues,
+    readyToPromote: counts.readyToPromote,
     readOnly: true,
   };
 }

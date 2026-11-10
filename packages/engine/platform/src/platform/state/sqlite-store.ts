@@ -1248,6 +1248,7 @@ const nativeReadImages = new WeakMap<object, {
   readonly store: SQLiteStore;
   readonly origin: object;
   readonly evidence: SQLiteImageObservation;
+  readonly baseline: SQLiteBaselineObservation | undefined;
   readonly state: OwnedSqlDatabase;
   readonly revision: bigint;
 }>();
@@ -1270,6 +1271,7 @@ const expectedRecordReadsets = new WeakMap<object, {
   readonly store: SQLiteStore;
   readonly origin: object | undefined;
   readonly persistence: SQLiteStorePersistence | null;
+  readonly engine: SqlJsStatic | null;
   readonly plan: NativeKnowledgeSchemaReadPlan | undefined;
   readonly validator: SqliteStoreInitOptions['validateCurrentSchema'];
   readonly schemaVersion: number;
@@ -1277,6 +1279,13 @@ const expectedRecordReadsets = new WeakMap<object, {
   readonly canonical: boolean;
   readonly selectors: readonly PersistedKnowledgeRecordSelector[];
   readonly records: readonly ActualKnowledgeRecordValues[];
+}>();
+/** Complete persisted-row equality only. Each actual token retains at most its
+ * last accepted physical baseline's result. Every use still opens a fresh
+ * original-byte image and executes the current native/source boundary fences. */
+const expectedBaselineMatches = new WeakMap<ExpectedKnowledgeRecordReadset, {
+  readonly baseline: SQLiteBaselineObservation;
+  readonly matches: boolean;
 }>();
 
 const artifactReferenceObservation = SQLiteStorePersistence.prototype.observationIdentity;
@@ -1664,9 +1673,11 @@ export class SQLiteStore {
       const expected = Object.freeze<ExpectedKnowledgeRecordReadset>({ [expectedReadsetBrand]: true });
       privateMapSet(expectedRecordReadsets, expected, nativeFreeze({ token: expected, store: this,
         origin: frame ? privateMapGet(nativeReadFrameIdentities, frame)?.identity : undefined, persistence: this.persistence,
+        engine: this.sqlEngine,
         plan: this.nativeSchemaReadPlan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion,
         evidence: frame?.persisted, canonical, selectors: Object.freeze(captured.map(selector => Object.freeze(selector))),
         records: original.records }));
+      if (canonical && image?.baseline) privateMapSet(expectedBaselineMatches, expected, nativeFreeze({ baseline: image.baseline, matches: true }));
       result = Object.freeze({ expected, originalGenerations });
     });
     if (!result) throw new SQLiteObservationRetiredError();
@@ -1713,9 +1724,11 @@ export class SQLiteStore {
         const expected = Object.freeze<ExpectedKnowledgeRecordReadset>({ [expectedReadsetBrand]: true });
         privateMapSet(expectedRecordReadsets, expected, nativeFreeze({ token: expected, store: this,
           origin: frame ? privateMapGet(nativeReadFrameIdentities, frame)?.identity : undefined, persistence: this.persistence,
+          engine: this.sqlEngine,
           plan: this.nativeSchemaReadPlan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion,
           evidence: frame?.persisted, canonical, selectors: Object.freeze(selectors.map(selector => Object.freeze(selector))),
           records: original.records }));
+        if (canonical && image?.baseline) privateMapSet(expectedBaselineMatches, expected, nativeFreeze({ baseline: image.baseline, matches: true }));
         values.push(Object.freeze({ expected, originalGenerations }));
       }
       result = Object.freeze(values);
@@ -1755,10 +1768,15 @@ export class SQLiteStore {
         for (const input of captured) {
           const retained = privateMapGet(expectedRecordReadsets, input.expected);
           if (!retained) throw new TypeError('SQLiteStore: unknown expected readset');
-          if (closed && retained.canonical && retained.origin && retained.persistence === this.persistence
+          const originalOwner = closed && retained.canonical && retained.origin && retained.persistence === this.persistence
+            && retained.engine === this.sqlEngine
             && retained.plan === this.nativeSchemaReadPlan && retained.validator === this.validateCurrentSchema
-            && retained.schemaVersion === this.schemaVersion && retained.evidence === frame?.persisted) {
-            values.push(true);
+            && retained.schemaVersion === this.schemaVersion;
+          const previousBaseline = originalOwner && image?.baseline ? privateMapGet(expectedBaselineMatches, input.expected) : undefined;
+          const knownMatches = originalOwner && retained.evidence === frame?.persisted ? true
+            : previousBaseline && previousBaseline.baseline === image?.baseline ? previousBaseline.matches : undefined;
+          if (knownMatches !== undefined) {
+            values.push(knownMatches);
           } else {
             frame?.assertCurrent();
             const equality = closed && frame ? assertReadFrameOrigin(this, frame).expectedMatches : undefined;
@@ -1768,6 +1786,7 @@ export class SQLiteStore {
             frame?.assertCurrent();
             const matches = previous ?? sameActualRecordValues(current!, retained.records);
             if (equality && previous === undefined) privateMapSet(equality, input.expected, matches);
+            if (originalOwner && image?.baseline) privateMapSet(expectedBaselineMatches, input.expected, nativeFreeze({ baseline: image.baseline, matches }));
             values.push(matches);
           }
         }
@@ -2439,7 +2458,7 @@ export class SQLiteStore {
         this.privateSchemaImages.add(current);
         const frame = this.persistedReadFrame, state = privateMapGet(ownedDatabases, current), origin = frame ? privateMapGet(nativeReadFrameIdentities, frame)?.identity : undefined;
         if (entryEvidence && origin && state && frame) privateMapSet(nativeReadImages, frame, nativeFreeze({ db: current, store: this, origin,
-          evidence: entryEvidence, state, revision: state.revision }));
+          evidence: entryEvidence, baseline, state, revision: state.revision }));
       } else if (previouslyValidated) {
         // The original native reader compared fresh bytes against the existing
         // accepted baseline. Borrowed callback images and physical replacements

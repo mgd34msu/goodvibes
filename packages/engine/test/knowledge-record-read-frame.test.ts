@@ -1435,7 +1435,7 @@ test('compiled expected readsets return equality only and still open a fresh phy
   } finally { rows.restore(); physical.restore(); }
 });
 
-test.each([false, true])('one original synchronous frame compares a compiled full row once with changed content = %s', async changed => {
+test.each([false, true])('one accepted baseline compares a compiled full row once across frames with changed content = %s', async changed => {
   const { store, source, extraction, sqlite } = await fixture();
   const selectors = [{ kind: 'source' as const, id: source.id }, { kind: 'extraction' as const, id: extraction.id }];
   const compiled = store.captureExpectedRecordReadset(selectors);
@@ -1451,23 +1451,45 @@ test.each([false, true])('one original synchronous frame compares a compiled ful
     }
     return freeze(value);
   });
-  const bytes = readFileSync(store.storagePath), input = [{ expected: compiled.expected, selectors }];
+  const input = [{ expected: compiled.expected, selectors }], physical = observePhysicalReads();
   let callbacks = 0;
   try {
     store.assertRecordSnapshotFrame(() => {
       for (let index = 0; index < 8; index++) {
-        // Every caller assertion still runs. Only its deterministic full-row
-        // comparison shares this native frame; authority is never memoized.
+        // Every caller assertion still runs. Only its deterministic persisted
+        // full-row comparison is reusable; authority is never memoized.
         callbacks++;
         expect(store.matchesExpectedRecordReadsets(input)).toEqual([!changed]);
       }
     });
     expect(callbacks).toBe(8); expect(tuples.get(source.id)).toBe(1); expect(tuples.get(extraction.id)).toBe(1);
-    store.assertRecordSnapshotFrame(() => { expect(store.matchesExpectedRecordReadsets(input)).toEqual([!changed]); });
+    const firstReads = physical.count();
+    for (let index = 0; index < 4; index++) {
+      await Promise.resolve();
+      store.assertRecordSnapshotFrame(() => { callbacks++; expect(store.matchesExpectedRecordReadsets(input)).toEqual([!changed]); });
+    }
+    expect(callbacks).toBe(12); expect(physical.count() - firstReads).toBe(8);
+    expect(tuples.get(source.id)).toBe(1); expect(tuples.get(extraction.id)).toBe(1);
+    // An actual acknowledged save issues a new baseline even when the saved
+    // bytes mean the same thing. It must compare again before reusing either
+    // a true result or the earlier false result.
+    await sqlite.save();
+    expect(store.matchesExpectedRecordReadsets(input)).toEqual([!changed]);
     expect(tuples.get(source.id)).toBe(2); expect(tuples.get(extraction.id)).toBe(2);
+    expect(store.matchesExpectedRecordReadsets(input)).toEqual([!changed]);
+    expect(tuples.get(source.id)).toBe(2); expect(tuples.get(extraction.id)).toBe(2);
+    const bytes = readFileSync(store.storagePath);
+    copyFileSync(store.storagePath, `${store.storagePath}.replacement`); renameSync(`${store.storagePath}.replacement`, store.storagePath);
+    // Foreign same-byte files never acquire an accepted-baseline proof just
+    // because an earlier original token matched their contents.
+    expect(store.matchesExpectedRecordReadsets(input)).toEqual([!changed]);
+    expect(tuples.get(source.id)).toBe(3); expect(tuples.get(extraction.id)).toBe(3);
+    expect(store.matchesExpectedRecordReadsets(input)).toEqual([!changed]);
+    expect(tuples.get(source.id)).toBe(4); expect(tuples.get(extraction.id)).toBe(4);
     expect(readFileSync(store.storagePath)).toEqual(bytes);
     expect(Reflect.get(sqlite, 'expectedMatches')).toBeUndefined();
-  } finally { observing.mockRestore(); }
+    expect(Reflect.get(sqlite, 'expectedBaselineMatches')).toBeUndefined();
+  } finally { observing.mockRestore(); physical.restore(); }
 });
 
 test.each(['native callback mutation', 'identical file replacement', 'native alias restore'] as const)(
@@ -1482,6 +1504,9 @@ test.each(['native callback mutation', 'identical file replacement', 'native ali
     const main = writer.exec('PRAGMA database_list')[0]?.values.find(row => row[1] === 'main')?.[2];
     if (typeof main !== 'string') throw new Error('No original native VFS filename');
     alias.run('ATTACH DATABASE ? AS original', [main]);
+    const input = [{ expected: compiled.expected, selectors }];
+    expect(store.matchesExpectedRecordReadsets(input)).toEqual([true]);
+    await Promise.resolve();
     const bytes = readFileSync(store.storagePath); let callback = false, consumed = false;
     try {
       expect(() => store.assertRecordSnapshotFrame(() => {
@@ -1501,6 +1526,48 @@ test.each(['native callback mutation', 'identical file replacement', 'native ali
     } finally { alias.close(); }
   },
 );
+
+test('accepted-baseline equality still invokes actual scope authority and physical readers after every await', async () => {
+  const { store, source } = await fixture(), fake = fakePort(() => noulAnswer(0.99));
+  const previous = installJudgmentPort(fake.port); let callbacks = 0;
+  try {
+    const selection = await prepareKnowledgeScopeSelection(store, {}, { kinds: ['source'], assertCurrent() { callbacks++; } });
+    const requests = fake.requests.length, bytes = readFileSync(store.storagePath), physical = observePhysicalReads();
+    try {
+      for (let index = 0; index < 4; index++) {
+        await Promise.resolve();
+        const before = callbacks, reads = physical.count();
+        selection.assertCurrent();
+        expect(callbacks).toBeGreaterThan(before); expect(physical.count() - reads).toBe(2);
+      }
+      expect(fake.requests).toHaveLength(requests); expect(readFileSync(store.storagePath)).toEqual(bytes);
+      Object.defineProperty(source.metadata, 'newPrivateMeaning', { value: 'Unacknowledged source meaning', configurable: true });
+      expect(() => selection.assertCurrent()).toThrow(KnowledgeScopeSelectionHeldError);
+      expect(fake.requests).toHaveLength(requests);
+    } finally { physical.restore(); }
+  } finally { installJudgmentPort(previous); }
+});
+
+test('a public borrowed database callback still poisons a warmed equality frame and never receives its private image', async () => {
+  const { store, source, sqlite } = await fixture();
+  const selectors = [{ kind: 'source' as const, id: source.id }], compiled = store.captureExpectedRecordReadset(selectors);
+  const input = [{ expected: compiled.expected, selectors }], bytes = readFileSync(store.storagePath);
+  expect(store.matchesExpectedRecordReadsets(input)).toEqual([true]); await Promise.resolve();
+  let callbacks = 0, consumed = false;
+  expect(() => store.assertRecordSnapshotFrame(() => {
+    expect(store.matchesExpectedRecordReadsets(input)).toEqual([true]);
+    sqlite.readPersisted(db => {
+      callbacks++;
+      expect(Object.isFrozen(db)).toBe(true); expect(Object.keys(db).sort()).toEqual(['close', 'exec', 'export', 'run']);
+      expect(db.run('UPDATE knowledge_sources SET title=? WHERE id=?', ['Callback-only image', source.id])).toBeUndefined();
+      expect(db.exec('SELECT title FROM knowledge_sources WHERE id=?', [source.id])[0]?.values[0]?.[0]).toBe('Callback-only image');
+    });
+    store.matchesExpectedRecordReadsets(input); consumed = true;
+  })).toThrow(SQLiteObservationRetiredError);
+  expect(callbacks).toBe(1); expect(consumed).toBe(false);
+  expect(readFileSync(store.storagePath)).toEqual(bytes); expect(store.getSource(source.id)).toBe(source);
+  expect(store.matchesExpectedRecordReadsets(input)).toEqual([true]);
+});
 
 test('compiled expected readsets allow unrelated persistence and reject changed complete raw content', async () => {
   const { store, source, extraction, sqlite } = await fixture();
@@ -1605,6 +1672,8 @@ test.each(['row rollback', 'native alias restore', 'identical file replacement',
     const main = writer!.exec('PRAGMA database_list')[0]?.values.find(row => row[1] === 'main')?.[2];
     if (typeof main !== 'string') throw new Error('No original native main');
     alias.run('ATTACH DATABASE ? AS original', [main]);
+    expect(store.matchesExpectedRecordReadsets([{ expected: captured.expected, selectors }])).toEqual([true]);
+    await Promise.resolve();
     const original: unknown = Reflect.get(sqlite, 'readPrivatePersistedRows');
     if (typeof original !== 'function') throw new Error('No private reader');
     let changed = false, consumed = false;

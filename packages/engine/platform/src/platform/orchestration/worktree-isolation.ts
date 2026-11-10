@@ -23,7 +23,7 @@
  *   reconcileOrphans()   , at import (a resumed/crashed workstream), put any
  *                           passed item whose branch had not integrated back
  *                           on the integration lane, then find any
- *                           on-disk worktree in this manager's namespace not already
+ *                           on-disk worktree associated with its actual records, not already
  *                           recorded on one of the imported items and either
  *                           ADOPT it (the item still has unresolved work) or
  *                           REPORT it (leave in place for the operator, NEVER
@@ -46,7 +46,6 @@
  * reconciliation is done with Bun.spawnSync, paid once per import, exactly
  * like the launch-dirty snapshot.
  */
-import { createHash } from 'node:crypto';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { captureExistingDirectory } from '../utils/atomic-json-store.js';
 import { WorktreeIdentityRegistry, type StoredWorktreeIdentity, type WorktreeIdentityKey } from './worktree-identities.js';
@@ -116,24 +115,6 @@ export interface WorktreeIsolationManager {
   diffItem(item: WorkItem): Promise<{ files: string[]; unifiedDiff: string; stat: string } | null>;
 }
 
-/** Existing old selector spelling only; never a new namespace allocation. The suffix after the last '-' when it's plain alphanumerics, else a stable short hash of the whole id (caller-supplied WorkItemSpec.id can be arbitrary text). */
-function legacyShortId(id: string): string {
-  const dash = id.lastIndexOf('-');
-  const candidate = dash >= 0 ? id.slice(dash + 1) : id;
-  if (candidate.length > 0 && /^[A-Za-z0-9]+$/.test(candidate)) return candidate;
-  return createHash('sha1').update(id).digest('hex').slice(0, 8);
-}
-
-/** Lookup only already-existing old Git selectors. New names are allocated
- * from the exact private tuple store, never this content commitment. */
-function legacyWorkstreamBranchPrefixes(workstreamId: string, stateNamespace?: string): readonly string[] {
-  const stream = legacyShortId(workstreamId);
-  if (stateNamespace === undefined) return [`ws/${stream}/`];
-  const hex = createHash('sha256').update(stateNamespace).digest('hex');
-  const encoded = hex.replace(/[0-9]/g, digit => String.fromCharCode(107 + Number(digit)));
-  return [...new Set([`ws-ns/${encoded}/${stream}/`, `ws-ns/${hex}/${stream}/`])];
-}
-
 function itemWorktreeDir(projectRoot: string, branch: string): string {
   return join(projectRoot, '.goodvibes', '.worktrees', ...branch.split('/'));
 }
@@ -149,6 +130,7 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
   const now = deps.now ?? ((): number => Date.now());
   const ownedWork = deps.ownedWork ?? new OwnedWork();
   const keptCap = deps.keptWorktreeCap ?? 20;
+  const reportedUnknownResources = new Set<string>();
   const rootGit = new GitService(deps.projectRoot);
   // Entity identity includes its real workstream; equal caller item IDs in
   // different streams must never borrow each other's live resource.
@@ -483,12 +465,6 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
     let registry: WorktreeIdentityRegistry, rows: readonly StoredWorktreeIdentity[];
     try { registry = identityRegistrySync(); rows = registry.forWorkstream(deps.stateNamespace ?? null, workstream.id); }
     catch (error) { logger.warn('worktree-isolation: private identity store unavailable; resources preserved', { error: summarizeError(error) }); return; }
-    const oldResources = resources.filter(resource => (resource.branch.startsWith('ws/') || resource.branch.startsWith('ws-ns/'))
-      && !rows.some(row => row.branch === resource.branch)
-      && !workstream.items.some(item => item.worktreePath === resource.path || item.worktreeBranch === resource.branch));
-    // Existing old Git selectors are consulted only for an actual old inventory,
-    // never to mint a new namespace or infer original acquisition authority.
-    const prefixes = oldResources.length === 0 ? [] : legacyWorkstreamBranchPrefixes(workstream.id, deps.stateNamespace);
     const recordedBranchFromPath = (path: string): string | undefined => {
       const part = relative(join(deps.projectRoot, '.goodvibes', '.worktrees'), path);
       if (!part || part === '..' || part.startsWith(`..${sep}`) || isAbsolute(part)) return undefined;
@@ -525,10 +501,20 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
         }
       }
       if (adopted) continue;
-      if (recorded.length > 0 || mapped.length > 0 || prefixes.some(prefix => branch.startsWith(prefix))) {
+      if (recorded.length > 0 || mapped.length > 0) {
         // A historical name, reserved UUID, or ambiguous record is a discovery
         // hint only. Preserve/report it; neither proves that we created it.
         deps.emit({ type: 'orphan-worktree-reconciled', workstreamId: workstream.id, path, branch, disposition: 'reported' });
+      } else if (branch.startsWith('ws/') || branch.startsWith('ws-ns/')) {
+        // An old spelling is only an inventory hint. Without an original item
+        // record or native acquisition it cannot identify a workstream owner.
+        // Report the unassigned resource once; do not hash private namespaces
+        // merely to filter this read-only inventory, adopt it or delete it.
+        const key = JSON.stringify([path, branch]);
+        if (!reportedUnknownResources.has(key)) {
+          reportedUnknownResources.add(key);
+          deps.emit({ type: 'unattributed-worktree-discovered', path, branch });
+        }
       }
     }
   }

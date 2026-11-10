@@ -1,5 +1,6 @@
 /** Namespace allocation, recovery and cleanup against real Git, without model calls. */
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { WorktreeIdentityRegistry } from '../platform/src/platform/orchestration/worktree-identities.js';
 import { createHash } from 'node:crypto';
@@ -244,16 +245,23 @@ test.each(['both', 'path-only', 'branch-only'] as const)('recorded hex namespace
   expect(existsSync(own.path)).toBe(false);
 });
 
-test('unknown old hex labels are reported without implying resource ownership', async () => {
+test('unknown old labels are reported once without namespace hashing or claimed ownership', async () => {
   const root = repo(); const own = legacyHexResource(root, 'contract-A'); const foreign = legacyHexResource(root, 'contract-B');
   const newForeignStream = stream(); const newForeign = await manager(root, 'contract-C').ensureWorktree(newForeignStream, newForeignStream.items[0]!);
   const legacyStream = stream(); const legacy = await manager(root).ensureWorktree(legacyStream, legacyStream.items[0]!);
   const resumed = stream(); const events: OrchestrationEvent[] = []; const recovering = manager(root, 'contract-A', events);
-  recovering.reconcileOrphans(resumed);
-  expect(resumed.items[0]!.worktreePath).toBeUndefined(); expect(resumed.items[0]!.worktreeBranch).toBeUndefined();
-  expect(events.filter(event => event.type === 'orphan-worktree-reconciled')).toEqual([
-    expect.objectContaining({ path: own.path, disposition: 'reported' }),
-  ]);
+  const hashing = spyOn(crypto, 'createHash');
+  try {
+    recovering.reconcileOrphans(resumed);
+    recovering.reconcileOrphans(resumed);
+    expect(resumed.items[0]!.worktreePath).toBeUndefined(); expect(resumed.items[0]!.worktreeBranch).toBeUndefined();
+    expect(events.filter(event => event.type === 'orphan-worktree-reconciled')).toEqual([]);
+    const discovered = events.filter(event => event.type === 'unattributed-worktree-discovered');
+    expect(discovered).toHaveLength(2);
+    expect(discovered.map(event => event.path).sort()).toEqual([own.path, foreign.path].sort());
+    for (const event of discovered) expect(event).not.toHaveProperty('workstreamId');
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256' || algorithm === 'sha1')).toHaveLength(0);
+  } finally { hashing.mockRestore(); }
   await recovering.cleanupTerminated(resumed, resumed.items[0]!); await recovering.join();
   expect(existsSync(own.path)).toBe(true); expect(existsSync(foreign.path)).toBe(true);
   expect(existsSync(newForeign.path)).toBe(true); expect(existsSync(legacy.path)).toBe(true);
@@ -288,7 +296,8 @@ test('actual acquired native receipt restores independently while unknown old sp
   const resumed = stream(); const events: OrchestrationEvent[] = []; const recovering = manager(root, 'contract-A', events);
   recovering.reconcileOrphans(resumed);
   expect(resumed.items[0]!.worktreePath).toBe(next.path); expect(resumed.items[0]!.worktreeBranch).toBe(fresh.items[0]!.worktreeBranch);
-  expect(events.filter(event => event.type === 'orphan-worktree-reconciled').map(event => 'disposition' in event ? event.disposition : null).sort()).toEqual(['adopted', 'reported']);
+  expect(events.filter(event => event.type === 'orphan-worktree-reconciled')).toEqual([expect.objectContaining({ path: next.path, disposition: 'adopted' })]);
+  expect(events.filter(event => event.type === 'unattributed-worktree-discovered')).toEqual([{ type: 'unattributed-worktree-discovered', path: old.path, branch: old.branch }]);
   await recovering.cleanupTerminated(resumed, resumed.items[0]!); await recovering.join();
   expect(existsSync(old.path)).toBe(true); expect(existsSync(next.path)).toBe(false);
 });

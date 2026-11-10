@@ -773,6 +773,9 @@ export type OrchestrationEvent =
    * sight).
    */
   | { readonly type: 'orphan-worktree-reconciled'; readonly workstreamId: string; readonly path: string; readonly branch: string; readonly disposition: 'adopted' | 'reported' }
+  /** Old-looking resource without an original item/native acquisition. Engine-wide
+   * inventory only; no workstream ownership, adoption or cleanup is inferred. */
+  | { readonly type: 'unattributed-worktree-discovered'; readonly path: string; readonly branch: string }
   /**
    * Emitted once per engine instance (see CHANGELOG 0.38.0), right after the
    * launch-time dirty-tree snapshot resolves, ONLY when it is non-empty.

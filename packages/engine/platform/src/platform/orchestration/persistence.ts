@@ -595,9 +595,8 @@ export function attachDebouncedWriter(
   }
 
   const unsubscribe = subscribe((event) => {
-    // 'dirty-tree-at-launch' (see CHANGELOG 0.38.0) is engine-wide, not
-    // workstream-scoped, it has no workstreamId to schedule a write for.
-    if (event.type === 'dirty-tree-at-launch') return;
+    // Engine-wide inventory observations cannot schedule a workstream write.
+    if (event.type === 'dirty-tree-at-launch' || event.type === 'unattributed-worktree-discovered') return;
     scheduleWrite(event.workstreamId);
   });
 

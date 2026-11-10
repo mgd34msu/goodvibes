@@ -33,10 +33,16 @@ const nativeInit = KnowledgeStore.prototype.init;
 /** Exact compatibility for a real old-format selector found in saved metadata.
  * Fresh contexts never derive public labels from their private workspace path.
  */
-function previousDefault(workspace: string, candidates: readonly string[]): string | null {
+function previousDefault(workspace: string, candidates: readonly string[], associatedProjectId?: string): string | null {
   const resolved = resolve(workspace);
   const prefix = `${normalizeSpaceComponent(basename(resolved) || 'project')}-`;
-  if (!candidates.some(id => id.startsWith(prefix) && /^[a-f0-9]{10}$/.test(id.slice(prefix.length)))) return null;
+  const oldCandidates = [...new Set(candidates.filter(id => id.startsWith(prefix) && /^[a-f0-9]{10}$/.test(id.slice(prefix.length))))];
+  if (oldCandidates.length === 0) return null;
+  // An actual native workspace binding or exact saved projectRoot association
+  // already identifies this sole old selector. No checksum is needed to rediscover
+  // the same association. Distinct unassociated labels still need the deployed
+  // recipe below to distinguish a real conflict from a same-basename workspace.
+  if (associatedProjectId !== undefined && oldCandidates.length === 1 && oldCandidates[0] === associatedProjectId) return associatedProjectId;
   const previous = `${prefix}${createHash('sha256').update(resolved).digest('hex').slice(0, 10)}`;
   return candidates.includes(previous) ? previous : null;
 }
@@ -68,13 +74,19 @@ export async function prepareConfiguredProjectContext(config: ConfigManager, wor
   if (home) for (const surface of ['tui', 'agent', 'daemon']) plans.push(join(home, '.goodvibes', surface, 'work-plans'));
   const ownership = [...new Set(plans)].map(path => inspectWorkPlanProjects(path, workspace.directory!));
   const known = new Set(ownership.flatMap(plan => plan.projectIds));
-  const old = previousDefault(workingDirectory, [...sources.values()].flatMap(selected => selected.projectIds).concat([...known]));
+  const originalSourcesCurrent = () => {
+    current(); registered?.assertCurrent();
+    for (const selected of sources.values()) selected.assertInitialImage();
+    for (const plan of ownership) plan.assertCurrent();
+  };
+  originalSourcesCurrent();
+  const associatedProjectId = registered?.projectId ?? (known.size === 1 ? [...known][0] : undefined);
+  const old = previousDefault(workingDirectory, [...sources.values()].flatMap(selected => selected.projectIds).concat([...known]), associatedProjectId);
   if ((registered && old !== null && old !== registered.projectId) || (!registered && old === null && known.size > 1)) throw new ProjectIdentityUnavailableError();
   const previous = old ?? [...known][0] ?? null;
   if (!registered) {
-    if (!activate) return Object.freeze({ registration: previous === null ? 'unregistered' : 'registered', projectId: previous });
-    const migrationCurrent = () => { current(); for (const selected of sources.values()) selected.assertInitialImage(); for (const plan of ownership) plan.assertCurrent(); };
-    registered = await registry.activate(physicalWorkspace.canonical, previous, config.getNativeDataWriter(), migrationCurrent); current();
+    if (!activate) { originalSourcesCurrent(); return Object.freeze({ registration: previous === null ? 'unregistered' : 'registered', projectId: previous }); }
+    registered = await registry.activate(physicalWorkspace.canonical, previous, config.getNativeDataWriter(), originalSourcesCurrent); current();
   }
   if (activate) {
     const binding = registered, prepared = Object.freeze({ path: selectedPath, projectId: binding.projectId, binding, source,
@@ -83,6 +95,7 @@ export async function prepareConfiguredProjectContext(config: ConfigManager, wor
     const previous = mapGet(entries, file); if (previous && previous.projectId !== prepared.projectId) throw new ProjectIdentityUnavailableError();
     apply(mapSetMethod, entries, [file, prepared]);
   }
+  originalSourcesCurrent();
   return Object.freeze({ registration: 'registered', projectId: registered.projectId });
 }
 function requirePreparedProject(config: ConfigManager, file: string): PreparedProject {

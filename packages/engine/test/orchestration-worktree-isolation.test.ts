@@ -546,12 +546,12 @@ describe('WorktreeIsolationManager: orphan reconciliation (adopt-or-report)', ()
     const imported = engineB.importWorkstream(snapshotJson, true);
     expect(imported).toBe(true);
 
-    const reconciled = events.filter((e): e is Extract<OrchestrationEvent, { type: 'orphan-worktree-reconciled' }> => e.type === 'orphan-worktree-reconciled');
+    const reconciled = events.filter((e): e is Extract<OrchestrationEvent, { type: 'unattributed-worktree-discovered' }> => e.type === 'unattributed-worktree-discovered');
     expect(reconciled).toHaveLength(2);
     const adopted = reconciled.find((e) => e.branch === 'ws/orphan/x');
     const reported = reconciled.find((e) => e.branch === 'ws/orphan/ghost');
-    expect(adopted?.disposition).toBe('reported');
-    expect(reported?.disposition).toBe('reported');
+    expect(adopted).toEqual({ type: 'unattributed-worktree-discovered', branch: 'ws/orphan/x', path: canonicalPath });
+    expect(reported).toEqual({ type: 'unattributed-worktree-discovered', branch: 'ws/orphan/ghost', path: ghostPath });
 
     const importedWs = engineB.getWorkstream('ws-orphan')!;
     const itemX = importedWs.items.find((i) => i.id === 'item-x')!;

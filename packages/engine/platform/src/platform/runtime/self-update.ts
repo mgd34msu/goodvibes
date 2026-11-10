@@ -613,6 +613,20 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     // retains physical facts only; borrowed adapters still retain exact bytes.
     assertNativeCurrent = retainDaemonNativeFiles(expected, io);
     if (currentReaders) { assertSynchronousCurrent(readerGuard); assertNativeCurrent(); }
+    // Required modes are local facts, independent of release checksums. Refuse
+    // an invalid current cohort before asking the release server for anything.
+    // A genuinely old binary without a native receipt still uses its explicit
+    // adoption path; existing native receipts require the complete cohort.
+    const observe = io.observe;
+    if (!observe) throw new Error('Native daemon I/O requires retained file observations');
+    const receipt = expected[expected.length - 1]!;
+    const required = native.allowLegacyBinary && observe(receipt.path) === null ? expected.slice(0, 1) : expected;
+    for (const target of required) {
+      const current = observe(target.path);
+      if (!current || current.mode !== (target.executable ? 0o755 : 0o644))
+        throw new Error(`Native daemon payload is missing or has the wrong mode: ${target.label}`);
+    }
+    assertNativeCurrent();
   }
   const admitInstalledNative = (): void => {
     if (!native) return;
@@ -640,11 +654,27 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
   }
   const deadline = performance.now() + (options.timeoutMs ?? DEFAULT_UPDATE_TIMEOUT_MS);
   const verified = await withUpdateBudget(options, async (signal) => {
+    const assertDownloadCurrent = (): void => {
+      signal.throwIfAborted();
+      directory?.assertCurrent();
+      assertSynchronousCurrent(options.assertCurrent);
+      assertSynchronousCurrent(readerGuard);
+      assertNativeCurrent?.();
+      directory?.assertCurrent();
+      signal.throwIfAborted();
+    };
+    const fetchCurrent = async (url: string): Promise<Awaited<ReturnType<UpdateFetchLike>>> => {
+      assertDownloadCurrent();
+      const response = await options.fetchImpl(url, { signal });
+      assertDownloadCurrent();
+      return response;
+    };
     const manifestUrl = `${options.downloadBaseUrl}/${CHECKSUM_MANIFEST_NAME}`;
-    const manifestResponse = await options.fetchImpl(manifestUrl, { signal });
+    const manifestResponse = await fetchCurrent(manifestUrl);
     signal.throwIfAborted();
     if (!manifestResponse.ok) throw new Error(`download failed (${manifestResponse.status}) for ${manifestUrl}`);
     const checksumText = await manifestResponse.text();
+    assertDownloadCurrent();
     const checksums = parseChecksumFile(checksumText);
     signal.throwIfAborted();
     const readerAsset = native ? daemonTargets[daemonTargets.length - 1]!.assetName.replace(/\.ci-artifact\.json$/, '.reader-ci-artifact.json') : undefined;
@@ -663,10 +693,11 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     const verified: StagedUpdate[] = [];
     for (const { target, expected } of pinnedTargets) {
       const url = `${options.downloadBaseUrl}/${target.assetName}`;
-      const response = await options.fetchImpl(url, { signal });
+      const response = await fetchCurrent(url);
       signal.throwIfAborted();
       if (!response.ok) throw new Error(`download failed (${response.status}) for ${url}`);
       const buffer = Buffer.from(new Uint8Array(await response.arrayBuffer()));
+      assertDownloadCurrent();
       signal.throwIfAborted();
       const pin = sha256(buffer);
       verifyChecksum(target.assetName, pin, expected);
@@ -693,10 +724,11 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       const target: DaemonNativeTarget = native.arch === 'x64' ? 'linux-x64' : 'linux-arm64';
       let artifact = parseDaemonCiArtifact(JSON.parse(descriptor.buffer.toString('utf8')), target);
       if (readerAsset !== undefined && readerPin !== undefined) {
-        const response = await options.fetchImpl(`${options.downloadBaseUrl}/${readerAsset}`, { signal });
+        const response = await fetchCurrent(`${options.downloadBaseUrl}/${readerAsset}`);
         signal.throwIfAborted();
         if (!response.ok) throw new Error('Native daemon reader artifact download failed');
         const bytes = Buffer.from(new Uint8Array(await response.arrayBuffer())); signal.throwIfAborted();
+        assertDownloadCurrent();
         verifyChecksum(readerAsset, sha256(bytes), readerPin);
         const candidate = parseDaemonCiArtifact(JSON.parse(bytes.toString('utf8')), target);
         if (candidate.schema !== 2 || candidate.sourceCommit !== artifact.sourceCommit || candidate.sourceTree !== artifact.sourceTree

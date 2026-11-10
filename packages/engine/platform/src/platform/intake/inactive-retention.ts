@@ -36,7 +36,12 @@ export interface InactiveInboxRetentionOptions {
 }
 const unavailable = () => new Error('Inactive inbox retention storage is unavailable');
 const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
-function synchronous(check: () => void): void { const result: unknown = check(); if (result !== undefined) { drainOwned(result); throw unavailable(); } }
+function synchronous(check: () => void): void {
+  let result: unknown;
+  try { result = check(); }
+  catch (error) { drainOwned(error); throw error; }
+  if (result !== undefined) { drainOwned(result); throw unavailable(); }
+}
 function rootStamp(path: string): string {
   const stat = lstatSync(path, { bigint: true }); if (!stat.isDirectory() || stat.isSymbolicLink()) throw unavailable();
   return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.birthtimeNs].join(':');
@@ -58,11 +63,29 @@ function scalar(db: SqlDatabase, sql: string, params?: (string | number)[]): num
 function knownSchema(db: SqlDatabase): void {
   const tables = db.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")[0]?.values.map(row => row[0]);
   if (!tables || !['items', 'cursors', 'imap_checkpoints'].every(table => tables.includes(table))
-    || tables.some(table => !['items', 'cursors', 'imap_checkpoints', 'inbox_retention_policy'].includes(String(table)))
+    || tables.some(table => !['items', 'cursors', 'imap_checkpoints', 'inbox_retention_policy', 'inbox_source_revision_policy'].includes(String(table)))
     || scalar(db, "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('trigger', 'view')") !== 0) throw unavailable();
-  const columns = db.exec('PRAGMA table_info(items)')[0]?.values.map(row => row[1]);
+  const itemColumns = db.exec('PRAGMA table_info(items)')[0]?.values;
+  const columns = itemColumns?.map(row => row[1]);
   const expected = ['id', 'provider', 'kind', 'fromDigest', 'subjectPreview', 'bodyPreview', 'routeId', 'receivedAt', 'unread'];
-  if (!columns || columns.length !== expected.length || expected.some((name, index) => columns[index] !== name)) throw unavailable();
+  if (!columns || expected.some((name, index) => columns[index] !== name)) throw unavailable();
+  const sourcePolicy = tables.includes('inbox_source_revision_policy');
+  if (columns.length === expected.length) {
+    // Original nine-column mirrors predate mutation-issued source revisions.
+    if (sourcePolicy) throw unavailable();
+  } else {
+    if (columns.length !== expected.length + 1 || columns[expected.length] !== 'triage_revision' || !sourcePolicy) throw unavailable();
+    const revisionColumn = itemColumns?.[expected.length];
+    if (revisionColumn?.[2] !== 'TEXT' || revisionColumn[3] !== 0 || revisionColumn[4] !== null || revisionColumn[5] !== 0) throw unavailable();
+    const policyInfo = db.exec('PRAGMA table_info(inbox_source_revision_policy)')[0]?.values;
+    const policyColumns = policyInfo?.map(row => row[1]);
+    const policy = db.exec('SELECT singleton, version FROM inbox_source_revision_policy')[0]?.values;
+    if (!policyColumns || policyColumns.length !== 2 || policyColumns[0] !== 'singleton' || policyColumns[1] !== 'version'
+      || policyInfo?.[0]?.[2] !== 'INTEGER' || policyInfo[0]?.[5] !== 1
+      || policyInfo[1]?.[2] !== 'INTEGER' || policyInfo[1]?.[3] !== 1 || policyInfo[1]?.[5] !== 0
+      || !policy || policy.length !== 1 || policy[0]?.[0] !== 1 || policy[0]?.[1] !== 1) throw unavailable();
+    if (scalar(db, "SELECT COUNT(*) FROM items WHERE triage_revision IS NULL OR typeof(triage_revision) != 'text' OR length(triage_revision) != 35 OR length(CAST(triage_revision AS BLOB)) != 35 OR substr(triage_revision, 1, 3) != 'ir-' OR substr(triage_revision, 4) GLOB '*[^0-9a-f]*'") !== 0) throw unavailable();
+  }
   if (scalar(db, "SELECT COUNT(*) FROM items WHERE typeof(id) != 'text' OR typeof(provider) != 'text' OR typeof(receivedAt) != 'integer'") !== 0) throw unavailable();
 }
 function policyFor(db: SqlDatabase, historical: InboxRetentionPolicy | undefined): InboxRetentionPolicy | null {

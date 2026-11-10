@@ -174,3 +174,105 @@ test('an admitted source read keeps its mirror excluded while source close is st
   read.release(); await closing;
   expect((await owner.sweep()).expired).toBe(1); await owner.close(); expect(await row.count()).toBe(1);
 });
+
+async function mirrorWitness(root: string, fileName: string) {
+  const database = new HandlerSqliteStore({ workingDirectory: root, fileName, schema: [] }); await database.init();
+  try {
+    return {
+      recent: database.all("SELECT * FROM items WHERE id LIKE '%:recent'"),
+      cursors: database.all('SELECT * FROM cursors'),
+      checkpoints: database.all('SELECT * FROM imap_checkpoints'),
+      sourcePolicy: database.all('SELECT * FROM inbox_source_revision_policy'),
+      retentionPolicy: database.all('SELECT * FROM inbox_retention_policy'),
+    };
+  } finally { database.close(); }
+}
+
+test('current ten-column mirror cleanup preserves surviving native revisions, protected fields, cursors and both policies', async () => {
+  const root = makeProjectTempDir('inactive-inbox-current-schema'), row = await archived(root, 'email'); await row.store.close();
+  await editImage(root, row.name, "INSERT INTO cursors (provider, nextSince) VALUES ('email', 123)");
+  await editImage(root, row.name, "INSERT INTO imap_checkpoints (provider, checkpoint) VALUES ('email', 'original-checkpoint')");
+  const before = await mirrorWitness(root, row.name);
+  expect(before.sourcePolicy).toEqual([{ singleton: 1, version: 1 }]);
+  expect(before.recent[0]?.triage_revision).toMatch(/^ir-[0-9a-f]{32}$/);
+  let result: InactiveInboxSweep | undefined;
+  const owner = janitor(root, value => { result = value; }); await owner.ready; await owner.close();
+  expect(result).toMatchObject({ expired: 1, capped: 0, unavailable: 0, unknownPolicy: 0 });
+  expect(await mirrorWitness(root, row.name)).toEqual(before);
+  expect(await row.count()).toBe(1);
+});
+
+test('the historical nine-column mirror remains supported without adopting new source policy or revisions', async () => {
+  const root = makeProjectTempDir('inactive-inbox-old-nine'), row = await archived(root, 'slack'); await row.store.close();
+  await editImage(root, row.name, 'ALTER TABLE items DROP COLUMN triage_revision');
+  await editImage(root, row.name, 'DROP TABLE inbox_source_revision_policy');
+  let result: InactiveInboxSweep | undefined;
+  const owner = janitor(root, value => { result = value; }); await owner.ready; await owner.close();
+  expect(result).toMatchObject({ expired: 1, capped: 0, unavailable: 0 });
+  const read = new HandlerSqliteStore({ workingDirectory: root, fileName: row.name, schema: [] }); await read.init();
+  try {
+    expect(read.all('PRAGMA table_info(items)').map(column => column.name)).toEqual([
+      'id', 'provider', 'kind', 'fromDigest', 'subjectPreview', 'bodyPreview', 'routeId', 'receivedAt', 'unread',
+    ]);
+    expect(read.all("SELECT name FROM sqlite_master WHERE name = 'inbox_source_revision_policy'")).toEqual([]);
+    expect(read.all('SELECT id, bodyPreview FROM items')).toEqual([{ id: 'slack:recent', bodyPreview: 'Current protected preview' }]);
+  } finally { read.close(); }
+});
+
+for (const [name, sql] of [
+  ['missing-source-policy', 'DROP TABLE inbox_source_revision_policy'],
+  ['empty-source-policy', 'DELETE FROM inbox_source_revision_policy'],
+  ['newer-source-policy', 'UPDATE inbox_source_revision_policy SET version = 2'],
+  ['extra-source-policy-column', 'ALTER TABLE inbox_source_revision_policy ADD COLUMN future TEXT'],
+  ['extra-item-column', 'ALTER TABLE items ADD COLUMN future TEXT'],
+  ['source-policy-with-old-nine-columns', 'ALTER TABLE items DROP COLUMN triage_revision'],
+  ['null-source-revision', 'UPDATE items SET triage_revision = NULL'],
+  ['newline-source-revision', 'UPDATE items SET triage_revision = triage_revision || char(10)'],
+  ['nul-source-revision', 'UPDATE items SET triage_revision = triage_revision || char(0)'],
+  ['foreign-table', 'CREATE TABLE future_private_data (body TEXT)'],
+] as const) test(`unsupported ${name} refuses offline deletion and preserves the complete original image`, async () => {
+  const root = makeProjectTempDir(`inactive-inbox-${name}`), row = await archived(root, 'email'); await row.store.close();
+  await editImage(root, row.name, sql); const before = readFileSync(row.path);
+  let result: InactiveInboxSweep | undefined;
+  const owner = janitor(root, value => { result = value; }); await owner.ready; await owner.close();
+  expect(result).toMatchObject({ expired: 0, capped: 0, unavailable: 1 });
+  expect(readFileSync(row.path)).toEqual(before);
+});
+
+test('a thrown owned Promise is refused while held, never writes and drains its later rejection without thenable assimilation', async () => {
+  const root = makeProjectTempDir('inactive-inbox-thrown-owner-work'), row = await archived(root, 'email'); await row.store.close();
+  const before = readFileSync(row.path), held = Promise.withResolvers<void>();
+  const unhandled: unknown[] = []; let thenReads = 0;
+  const observe = (reason: unknown) => { unhandled.push(reason); };
+  Object.defineProperty(held.promise, 'then', { get() { thenReads++; throw new Error('Borrowed then accessor must stay unread'); } });
+  process.on('unhandledRejection', observe);
+  let result: InactiveInboxSweep | undefined;
+  const owner = createInactiveInboxRetentionOwner({ workingDirectory: root, now: () => clock,
+    assertCurrent() { throw held.promise; }, onSweep(value) { result = value; } });
+  cleanups.push(() => owner.close());
+  try {
+    await owner.ready;
+    expect(result).toMatchObject({ expired: 0, capped: 0, unavailable: 1 });
+    expect(readFileSync(row.path)).toEqual(before);
+    expect(thenReads).toBe(0);
+    held.reject(new Error('Synthetic retired owner rejection'));
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(unhandled).toEqual([]); expect(thenReads).toBe(0);
+    expect(readFileSync(row.path)).toEqual(before);
+  } finally {
+    held.reject(new Error('Ensure held owner work settles on assertion failure'));
+    await owner.close(); process.removeListener('unhandledRejection', observe);
+  }
+});
+
+test('ordinary synchronous owner restriction errors retain their original identity and cannot expire stored rows', async () => {
+  const root = makeProjectTempDir('inactive-inbox-original-owner-error'), row = await archived(root, 'email'); await row.store.close();
+  const before = readFileSync(row.path), failure = new Error('Synthetic original owner retired');
+  const owner = createInactiveInboxRetentionOwner({ workingDirectory: root, now: () => clock, assertCurrent() { throw failure; } });
+  cleanups.push(() => owner.close());
+  try {
+    await owner.ready;
+    await expect(owner.sweep()).rejects.toBe(failure);
+    expect(readFileSync(row.path)).toEqual(before);
+  } finally { await owner.close(); }
+});

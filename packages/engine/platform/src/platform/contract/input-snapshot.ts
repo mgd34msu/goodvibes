@@ -376,7 +376,7 @@ async function capture(root: string, options: CaptureContractInputOptions): Prom
   const ownerRef = gitText(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
   const originalIndex = await indexIdentity(root);
   const logicalIndex = readLogicalIndex(root);
-  if (await indexIdentity(root) !== originalIndex) throw new Error('contract input index replaced during capture');
+  if (await indexIdentity(root) !== originalIndex) throw new ContractInputOwnerChangedError('index', 'contract input index replaced during capture');
   const index = indexFingerprint(logicalIndex);
   await assertNoSpecialFiles(root, CONTRACT_INPUT_EXCLUSIONS, signal);
   const selected = paths(root, CONTRACT_INPUT_EXCLUSIONS);
@@ -413,7 +413,7 @@ async function capture(root: string, options: CaptureContractInputOptions): Prom
     inputOwnerObservations.set(receipt, { metadata: retainOwnedJson(receipt, nodeTypes.isProxy), files: observations, index: originalIndex, logicalIndex, retainLogicalIndex: true });
     check();
     await assertContractInputOwnerOriginal(receipt, signal, originalIndex);
-    if (await indexIdentity(root) !== originalIndex) throw new Error('contract input index replaced during capture');
+    if (await indexIdentity(root) !== originalIndex) throw new ContractInputOwnerChangedError('index', 'contract input index replaced during capture');
     check();
     inputOwnerObservations.get(receipt)!.metadata.assertCurrent();
     for (const observation of observations.values()) observation.assertCurrent();

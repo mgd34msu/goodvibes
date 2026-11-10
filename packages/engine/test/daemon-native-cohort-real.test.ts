@@ -1,4 +1,5 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -56,16 +57,31 @@ for (const index of [0, 1, 2, 3, 4, 5]) nativeTest(`real release with missing me
   expect(f.targets.some(target => existsSync(target.path + '.update-transaction'))).toBe(false);
 });
 
+for (const index of [0, 1, 2, 3, 4, 5]) nativeTest(`invalid initial native member mode ${index} refuses before any release request or integrity hashing`, async () => {
+  const f = fixture(), target = f.targets[index];
+  if (!target) throw new Error('Test native member missing');
+  chmodSync(target.path, target.executable ? 0o644 : 0o755);
+  const original = f.state(); let requests = 0;
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    await expect(f.apply(async (url, init) => { requests++; return f.fetchImpl(url, init); })).rejects.toThrow('wrong mode');
+    expect(requests).toBe(0); expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    expect(f.state()).toEqual(original);
+    expect(f.targets.some(target => existsSync(target.path + '.update-download') || existsSync(target.path + '.update-transaction') || existsSync(target.path + '.previous'))).toBe(false);
+  } finally { hash.mockRestore(); }
+});
+
 nativeTest('real equal-byte inode replacement during native download is rejected before publication', async () => {
-  const f = fixture(), original = f.state(); let replaced = false;
+  const f = fixture(), original = f.state(); let replaced = false, requests = 0;
   await expect(f.apply(async (url, init) => {
+    requests++;
     if (!replaced) {
       replaced = true; const victim = f.execPath + '.bun';
       writeFileSync(victim + '.foreign', readFileSync(victim)); chmodSync(victim + '.foreign', 0o755); renameSync(victim + '.foreign', victim);
     }
     return f.fetchImpl(url, init);
   })).rejects.toThrow('changed');
-  expect(replaced).toBe(true); expect(f.state()).toEqual(original);
+  expect(replaced).toBe(true); expect(requests).toBe(1); expect(f.state()).toEqual(original);
   expect(f.targets.some(target => existsSync(target.path + '.previous'))).toBe(false);
 });
 

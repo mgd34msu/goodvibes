@@ -76,7 +76,7 @@ export type RecoveryFileInfo = {
  * (`getRecoveryDir(homeDirectory, surfaceRoot)`) and surface
  * (`surface.recoveryDir`) call forms share one implementation.
  */
-function listRecoveryFiles(dir: string): Array<{ path: string; mtimeMs: number }> {
+function listRecoveryFiles(dir: string): Array<{ path: string; mtimeNs: bigint }> {
   if (!existsSync(dir)) return [];
   let names: string[];
   try {
@@ -86,16 +86,16 @@ function listRecoveryFiles(dir: string): Array<{ path: string; mtimeMs: number }
   } catch {
     return [];
   }
-  const entries: Array<{ path: string; mtimeMs: number }> = [];
+  const entries: Array<{ path: string; mtimeNs: bigint }> = [];
   for (const name of names) {
     const path = join(dir, name);
     try {
-      entries.push({ path, mtimeMs: statSync(path).mtimeMs });
+      entries.push({ path, mtimeNs: statSync(path, { bigint: true }).mtimeNs });
     } catch {
       // File vanished between readdir and stat, skip.
     }
   }
-  return entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return entries.sort((a, b) => a.mtimeNs === b.mtimeNs ? 0 : a.mtimeNs > b.mtimeNs ? -1 : 1);
 }
 
 /**
@@ -105,12 +105,12 @@ function listRecoveryFiles(dir: string): Array<{ path: string; mtimeMs: number }
  * "which snapshot is THE snapshot" decision (check / load / consume / remove),
  * so the file that is offered is always exactly the file that is retired.
  */
-function listRecoveryCandidates(options?: SessionPersistenceOptions): Array<{ path: string; mtimeMs: number }> {
+function listRecoveryCandidates(options?: SessionPersistenceOptions): Array<{ path: string; mtimeNs: bigint }> {
   const scoped = listRecoveryFiles(resolveRecoveryDirPath(options));
   if (!isSurfaceOptions(options)) return scoped;
   const legacy = listRecoveryFiles(legacySharedRecoveryDir(requireSurface(options)));
   if (legacy.length === 0) return scoped;
-  return [...scoped, ...legacy].sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return [...scoped, ...legacy].sort((a, b) => a.mtimeNs === b.mtimeNs ? 0 : a.mtimeNs > b.mtimeNs ? -1 : 1);
 }
 
 /**
@@ -236,10 +236,10 @@ export function deleteRecoveryFile(options?: SessionPersistenceOptions, sessionI
 }
 
 /** Read the first-line meta of a recovery file into a RecoveryFileInfo. */
-function readRecoveryMetaObservation(recoveryFile: string): { readonly info: RecoveryFileInfo; readonly physical: string; readonly mtimeMs: number } {
-  const { header: meta, physical, mtimeMs } = readRecoveryHeaderObservation(recoveryFile);
+function readRecoveryMetaObservation(recoveryFile: string): { readonly info: RecoveryFileInfo; readonly physical: string; readonly mtimeNs: bigint } {
+  const { header: meta, physical, mtimeNs } = readRecoveryHeaderObservation(recoveryFile);
   if (meta['type'] !== 'meta') throw new Error('Invalid recovery header');
-  return { physical, mtimeMs, info: {
+  return { physical, mtimeNs, info: {
     title: typeof meta['title'] === 'string' ? meta['title'] : '',
     timestamp: typeof meta['timestamp'] === 'number' ? meta['timestamp'] : 0,
     sessionId: typeof meta['sessionId'] === 'string' ? meta['sessionId'] : '',
@@ -253,10 +253,10 @@ function readRecoveryMetaObservation(recoveryFile: string): { readonly info: Rec
  * for a snapshot that carries no session id at all, which nothing in the store
  * can correspond to.
  */
-function sessionStoreMtimeMs(sessionsDir: string, sessionId: string): number | null {
+function sessionStoreMtimeNs(sessionsDir: string, sessionId: string): bigint | null {
   if (!sessionId.trim()) return null;
   try {
-    return statSync(resolveSessionStorePath(sessionsDir, sessionId)).mtimeMs;
+    return statSync(resolveSessionStorePath(sessionsDir, sessionId), { bigint: true }).mtimeNs;
   } catch {
     return null;
   }
@@ -296,8 +296,8 @@ const LIVE_REFRESH_WINDOW_MS = 90_000;
  * one: suppressing an offer never destroys anything, and the file stays on
  * disk to be offered once the clock catches up.
  */
-function isActivelyRefreshed(snapshotMtimeMs: number, nowMs: number, windowMs: number): boolean {
-  return nowMs - snapshotMtimeMs < windowMs;
+function isActivelyRefreshed(snapshotMtimeNs: bigint, nowMs: number, windowMs: number): boolean {
+  return BigInt(nowMs) * 1_000_000n - snapshotMtimeNs < BigInt(windowMs) * 1_000_000n;
 }
 
 /**
@@ -313,10 +313,13 @@ function isActivelyRefreshed(snapshotMtimeMs: number, nowMs: number, windowMs: n
  * written last", and a snapshot whose content the store already holds is worth
  * nothing, so the tie goes to not re-offering data the user already has.
  */
-function isSupersededByOwnStore(sessionsDir: string, sessionId: string, snapshotMtimeMs: number): boolean {
-  const storeMtimeMs = sessionStoreMtimeMs(sessionsDir, sessionId);
-  if (storeMtimeMs === null) return false;
-  return snapshotMtimeMs <= storeMtimeMs;
+function isSupersededByOwnStore(sessionsDir: string, sessionId: string, snapshotMtimeNs: bigint): boolean {
+  const storeMtimeNs = sessionStoreMtimeNs(sessionsDir, sessionId);
+  if (storeMtimeNs === null) return false;
+  // Preserve the original native timestamps on both sides. Converting one
+  // through Number(nanoseconds) and the other through Stats.mtimeMs can round
+  // an actual tie in opposite directions and offer an already durable copy.
+  return snapshotMtimeNs <= storeMtimeNs;
 }
 
 /**
@@ -363,8 +366,8 @@ export function checkRecoveryForSession(surface: SessionSurface, sessionId: stri
   try {
     const path = pickRecoverySnapshotPath(options, sessionId);
     if (!path) return null;
-    const { info, mtimeMs } = readRecoveryMetaObservation(path);
-    if (isSupersededByOwnStore(resolveSessionsDirPath(options), sessionId, mtimeMs)) return null;
+    const { info, mtimeNs } = readRecoveryMetaObservation(path);
+    if (isSupersededByOwnStore(resolveSessionsDirPath(options), sessionId, mtimeNs)) return null;
     return info.sessionId === sessionId ? info : null;
   } catch (error) {
     logger.warn('[Recovery] Per-session check failed', { error: summarizeError(error) });
@@ -394,7 +397,7 @@ function findLiveRecoveryCandidate(
     for (const entry of listRecoveryCandidates(options)) {
       // Newest-first; the first snapshot that no live writer is maintaining
       // and its own session has not already superseded is the one to offer.
-      if (isActivelyRefreshed(entry.mtimeMs, nowMs, LIVE_REFRESH_WINDOW_MS)) continue;
+      if (isActivelyRefreshed(entry.mtimeNs, nowMs, LIVE_REFRESH_WINDOW_MS)) continue;
       let selected: ReturnType<typeof readRecoveryMetaObservation>;
       try {
         selected = readRecoveryMetaObservation(entry.path);
@@ -402,9 +405,9 @@ function findLiveRecoveryCandidate(
         // Unreadable/partial snapshot, skip to the next candidate.
         continue;
       }
-      const { info, physical, mtimeMs } = selected;
-      if (isActivelyRefreshed(mtimeMs, nowMs, LIVE_REFRESH_WINDOW_MS)) continue;
-      if (isSupersededByOwnStore(sessionsDir, info.sessionId, mtimeMs)) continue;
+      const { info, physical, mtimeNs } = selected;
+      if (isActivelyRefreshed(mtimeNs, nowMs, LIVE_REFRESH_WINDOW_MS)) continue;
+      if (isSupersededByOwnStore(sessionsDir, info.sessionId, mtimeNs)) continue;
       return { path: entry.path, info, physical };
     }
     return null;

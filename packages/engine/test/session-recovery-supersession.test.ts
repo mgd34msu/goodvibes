@@ -149,6 +149,37 @@ describe('recovery offer: supersession is per-session, not the global pointer', 
     expect(checkRecoveryFile({ surface })).toBeNull();
   });
 
+  test('equal native fractional timestamps remain a tie through both boot and named-session probes', () => {
+    const { surface } = tempSurface();
+    writeRecoveryFile(snapshotOf('same fractional instant'), 'sess-fractional-tie', 'Tie', { surface });
+    saveSession('sess-fractional-tie', snapshotOf('same fractional instant'), 'm', 'p', 'Tie', { surface });
+    const recovery = surface.recoveryFile('sess-fractional-tie'), durable = storePath(surface, 'sess-fractional-tie');
+    // This old fractional epoch reproduces opposite rounding through
+    // Number(mtimeNs)/1e6 and Stats.mtimeMs on high-resolution filesystems.
+    // The actual native timestamps must decide the tie, regardless of either
+    // floating representation or a filesystem's coarser timestamp precision.
+    const seconds = 1_700_000_000.000008;
+    utimesSync(recovery, seconds, seconds); utimesSync(durable, seconds, seconds);
+    expect(statSync(recovery, { bigint: true }).mtimeNs).toBe(statSync(durable, { bigint: true }).mtimeNs);
+    expect(checkRecoveryFile({ surface })).toBeNull();
+    expect(checkRecoveryForSession(surface, 'sess-fractional-tie')).toBeNull();
+    expect(existsSync(recovery)).toBe(true);
+  });
+
+  test('a genuinely newer fractional timestamp is offered without a millisecond tolerance', () => {
+    const { surface } = tempSurface();
+    saveSession('sess-fractional-tail', snapshotOf('durable body'), 'm', 'p', 'Tail', { surface });
+    writeRecoveryFile(snapshotOf('unsaved fractional tail'), 'sess-fractional-tail', 'Tail', { surface });
+    const recovery = surface.recoveryFile('sess-fractional-tail'), durable = storePath(surface, 'sess-fractional-tail');
+    const seconds = 1_700_000_000.000008;
+    utimesSync(durable, seconds, seconds); utimesSync(recovery, seconds + 0.0001, seconds + 0.0001);
+    const difference = statSync(recovery, { bigint: true }).mtimeNs - statSync(durable, { bigint: true }).mtimeNs;
+    expect(difference).toBeGreaterThan(0n); expect(difference).toBeLessThan(1_000_000n);
+    expect(checkRecoveryFile({ surface })?.sessionId).toBe('sess-fractional-tail');
+    expect(checkRecoveryForSession(surface, 'sess-fractional-tail')?.sessionId).toBe('sess-fractional-tail');
+    expect(existsSync(recovery)).toBe(true);
+  });
+
   test('a snapshot strictly newer than its own store IS offered', () => {
     const { surface } = tempSurface();
     saveSession('sess-tail', snapshotOf('what the store has'), 'm', 'p', 'Tail', { surface });

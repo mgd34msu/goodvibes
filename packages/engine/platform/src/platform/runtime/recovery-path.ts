@@ -20,7 +20,7 @@ function regularIdentity(stat: BigIntStats): string {
 
 /** Read only the complete first line, not an arbitrary 4 KiB prefix or the
  * conversation body. Replacement while reading refuses this observation. */
-export function readRecoveryHeaderObservation(path: string): { readonly header: Record<string, unknown>; readonly physical: string; readonly mtimeMs: number } {
+export function readRecoveryHeaderObservation(path: string): { readonly header: Record<string, unknown>; readonly physical: string; readonly mtimeMs: number; readonly mtimeNs: bigint } {
   const stat = lstatSync(path, { bigint: true });
   const original = regularIdentity(stat);
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -44,7 +44,7 @@ export function readRecoveryHeaderObservation(path: string): { readonly header: 
     try { parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, length))); }
     catch { throw new Error('Invalid recovery header'); }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid recovery header');
-    return { header: parsed as Record<string, unknown>, physical: original, mtimeMs: Number(stat.mtimeNs) / 1e6 };
+    return { header: parsed as Record<string, unknown>, physical: original, mtimeMs: Number(stat.mtimeNs) / 1e6, mtimeNs: stat.mtimeNs };
   } finally { closeSync(fd); }
 }
 

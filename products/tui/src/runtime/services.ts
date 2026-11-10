@@ -45,7 +45,7 @@ import { ChannelPolicyManager } from '@goodvibes-jev/engine/platform/platform/ch
 import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { createClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import { wireIdlePowerAndLiveTurn } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
+import { createAsyncDisposalScope, createRuntimeStopRequests } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { registerSurfaceRuntimePollers } from './disposal-wiring.ts';
 import { composeCredentialServices } from './credential-composition.ts';
 import { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
@@ -138,6 +138,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const disposalScope = createAsyncDisposalScope('RuntimeServices');
   let homeGraphClosing: Promise<void> | undefined;
   let conversationRewindClosing: Promise<void> | undefined;
+  let requestStops: (() => void) | undefined;
   try {
   const workingDirectory = options.workingDir;
   const homeDirectory = options.homeDirectory;
@@ -595,10 +596,11 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     hosts: hasSessionConversation,
     label: 'the terminal app',
   });
-  disposalScope.registry.add('conversation rewind host', () => {
-    conversationRewindClosing = conversationRewindHost.stop();
-    void conversationRewindClosing.catch(() => {});
-  });
+  const requestConversationRewindStop = () => {
+    conversationRewindClosing ??= conversationRewindHost.stop();
+    return conversationRewindClosing;
+  };
+  disposalScope.registry.add('conversation rewind host', () => { void requestConversationRewindStop().catch(() => {}); });
   const workspaceCheckpointManager = createWorkspaceCheckpointing({
     workspaceRoot: workingDirectory,
     surface,
@@ -721,6 +723,12 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const notificationDispatcher = createNotificationDispatcher(configManager);
   wireRuntimeNotificationBridge(options.runtimeBus, notificationDispatcher);
   wireMemoryPressureNotice(options.runtimeBus, notificationDispatcher);
+
+  const stopRequests = createRuntimeStopRequests(disposalScope.registry, {
+    homeGraphService: { dispose: () => { homeGraphClosing = homeGraphService.dispose(); return homeGraphClosing; } },
+    memoryGovernor, watcherRegistry, conversationRewind: requestConversationRewindStop,
+  });
+  requestStops = stopRequests.request;
 
   const services: RuntimeServices = {
     workingDirectory,
@@ -857,19 +865,16 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     integrationHelpers,
     rerootStores: createStoreRerooter({ codeIndexStore, projectIndex, surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT }),
     cancelHostedAgentRuns: () => cancelAllAgentRuns(agentManager),
-    dispose: (): void => disposalScope.dispose(),
-    close: (): Promise<void> => disposalScope.close(),
+    dispose: (): void => { stopRequests.request(); disposalScope.dispose(); },
+    close: (): Promise<void> => { stopRequests.request(); return disposalScope.close(); },
   };
   registerSurfaceRuntimePollers(
     disposalScope.registry,
     {
       ...services,
-      homeGraphService: {
-        dispose: () => {
-          homeGraphClosing = homeGraphService.dispose();
-          void homeGraphClosing.catch(() => {});
-        },
-      },
+      homeGraphService: { dispose: stopRequests.homeGraph },
+      memoryGovernor: { stop: stopRequests.memoryGovernor },
+      watcherRegistry: { dispose: stopRequests.watchers },
     },
     { stopConfigWatch },
   );
@@ -877,6 +882,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   } catch (error) {
     // Synchronous construction starts the same owned drain before propagating
     // its failure. Registrations capture only resources already constructed.
+    requestStops?.();
     disposalScope.dispose();
     throw error;
   }

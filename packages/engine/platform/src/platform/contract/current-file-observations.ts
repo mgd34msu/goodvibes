@@ -28,6 +28,7 @@ interface NativeFileObservation {
   readonly bytes: Buffer;
   readonly facts: CurrentFileReviewFacts;
   readonly assertCurrent: () => void;
+  savedDigest?: string;
 }
 // Original native objects own these bytes. Copies, reconstructed JSON and
 // source flags cannot acquire the observation. No global path/content cache.
@@ -104,6 +105,19 @@ export function currentFileReviewFacts(value: unknown): CurrentFileReviewFacts |
   if (!observation) return undefined;
   observation.assertCurrent(); return observation.facts;
 }
+/** Match an independently saved reviewed-byte pin from an actual owned earlier
+ * checkpoint. Modern native observations and ordinary live text reads need no
+ * digest. Repeated checks reuse only this exact still-current original read. */
+export function currentFileMatchesSavedDigest(value: unknown, digest: string): boolean {
+  const observation = retained(value);
+  if (!observation || !/^[a-f0-9]{64}$/.test(digest)) return false;
+  try {
+    observation.assertCurrent();
+    observation.savedDigest ??= createHash('sha256').update(observation.bytes).digest('hex');
+    observation.assertCurrent(); return observation.savedDigest === digest;
+  } catch { return false; }
+}
+
 /** Actual file identity observations shared by native checks and repair context. */
 export function currentFileObservations(cwd: string, paths: readonly string[], options: {
   readonly includeText?: boolean;
@@ -176,7 +190,8 @@ export function currentFileObservations(cwd: string, paths: readonly string[], o
         ...(sha256 === undefined ? {} : { sha256 }), ...(expectedOid ? { inputBlobOid: expectedOid } : {}),
         ...(text !== undefined && Buffer.from(text, 'utf8').equals(bytes) ? { text } : {}),
         meaning: 'A native read from the original current physical tree, with text when requested and representable. The observation ID labels this owner’s latest observed physical file version; it proves neither byte equality nor semantic correctness, worker inspection, execution or native approval.' });
-      nativeFiles.set(observation, { bytes, facts, assertCurrent: assertObservationCurrent });
+      nativeFiles.set(observation, { bytes, facts, assertCurrent: assertObservationCurrent,
+        ...(sha256 === undefined ? {} : { savedDigest: sha256 }) });
       return [observation];
     } catch (error) {
       return [{ operation: 'read-current-file', source: 'native-host-filesystem', success: false, path,

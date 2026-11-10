@@ -168,8 +168,8 @@ test('checkpoint projection touches only actual unit/check slots and cannot dump
   expect(JSON.stringify(f.contract)).not.toContain('nativeFileObservation');
 });
 
-test('actual schema-five SHA review records remain readable without rewriting their earlier check and require a fresh native observation instead of hashing', () => {
-  const f = fixture(), sha256 = 'a'.repeat(64);
+test('actual schema-five SHA review records remain readable without rewriting their earlier check and verify actual independently saved reviewed bytes on recovery', () => {
+  const f = fixture(), sha256 = crypto.createHash('sha256').update('Ready.\n').digest('hex');
   const check = { ...f.check, reviewedFiles: [{ path: 'report.md', sha256 }] };
   const old = { ...f.contract, schemaVersion: 5, units: [{ ...f.contract.units[0]!, checks: [check] }] };
   mkdirSync(contractsDir(f.root), { recursive: true });
@@ -181,14 +181,18 @@ test('actual schema-five SHA review records remain readable without rewriting th
   const reference = loaded.units[0]!.checks[0]!.reviewedFiles![0]!, current = currentFileObservations(f.root, ['report.md'])[0]!;
   const hash = spyOn(crypto, 'createHash');
   try {
-    expect(reviewedFileVersionState(current, reference)).toBe('unverified');
-    expect(reviewedFileVersionState(current, reference)).toBe('unverified');
-    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    expect(reviewedFileVersionState(current, reference)).toBe('current');
+    expect(reviewedFileVersionState(current, reference)).toBe('current');
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
   } finally { hash.mockRestore(); }
   f.store.hold(loaded); expect(f.store.write(loaded.id)).toBe(true);
   expect(readFileSync(oldPath, 'utf8')).toBe(text);
   const reloaded = f.store.load(loaded.id)!;
-  expect(reviewedFileVersionState(current, reloaded.units[0]!.checks[0]!.reviewedFiles![0]!)).toBe('unverified');
+  expect(reviewedFileVersionState(current, reloaded.units[0]!.checks[0]!.reviewedFiles![0]!)).toBe('current');
+  const stage = join(f.root, 'same-byte-review.md'); writeFileSync(stage, 'Ready.\n'); renameSync(stage, f.path);
+  expect(reviewedFileVersionState(currentFileObservations(f.root, ['report.md'])[0]!, reference)).toBe('current');
+  writeFileSync(f.path, 'Different reviewed bytes\n');
+  expect(reviewedFileVersionState(currentFileObservations(f.root, ['report.md'])[0]!, reference)).toBe('changed');
 });
 
 test('the native checkpoint writer declares its format before creating any contract checkpoint file', () => {

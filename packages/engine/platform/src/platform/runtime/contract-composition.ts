@@ -221,17 +221,32 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
     throw new Error('Native composition requires both authenticated owners and the original read authorization');
   }
   const writer = options.nativeDataWriter;
+  const declare = (format: import('./native-reader-compatibility.js').NativeDataFormat, refusal: string): void => {
+    let result: unknown;
+    try { result = writer?.declare(format); }
+    catch (error) { drainOwned(error); throw error; }
+    if (result !== undefined) { drainOwned(result); throw new Error(refusal); }
+  };
   const store = new ContractStore({ projectRoot: options.projectRoot,
     beforeCreate: id => {
       if (isOpaqueContractId(id)) {
-        const result: unknown = writer?.declare('contract-opaque-identities-v1');
-        if (result !== undefined) { drainOwned(result); throw new Error('Contract identity publication requires a synchronous native owner'); }
+        declare('contract-opaque-identities-v1', 'Contract identity publication requires a synchronous native owner');
       }
     },
     beforeWrite: contract => {
-      const formats: import('./native-reader-compatibility.js').NativeDataFormat[] = ['contract-review-observations-v1', 'contract-tree-baselines-v3', 'contract-answer-claim-scopes-v2'];
+      const formats: import('./native-reader-compatibility.js').NativeDataFormat[] = ['contract-review-observations-v1', 'contract-answer-claim-scopes-v2'];
       if (contract) {
         const units = [...contract.units];
+        const baselines = [contract.baseline, ...contract.groups.map(group => group.baseline)];
+        const baselineUnits = [...contract.units];
+        while (baselineUnits.length) {
+          const unit = baselineUnits.pop();
+          if (!unit) break;
+          baselines.push(unit.baseline);
+          baselineUnits.push(...(unit.attemptUnits ?? []));
+        }
+        if (baselines.some(baseline => baseline?.version === 2)) formats.push('contract-tree-baselines-v2');
+        if (baselines.some(baseline => baseline?.version === 3)) formats.push('contract-tree-baselines-v3');
         let optionalDigest = [...contract.checks, ...contract.groups.flatMap(group => group.checks)]
           .some(check => check.result === 'pass' && check.evidenceDigest === undefined);
         while (units.length && !optionalDigest) {
@@ -245,8 +260,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
       if (isOpaqueContractId(contract?.id)) formats.push('contract-opaque-identities-v1');
       if (contract?.nativeSource?.continuation?.version === 2) formats.push('native-conversation-captures-v2');
       for (const format of formats) {
-        const result: unknown = writer?.declare(format);
-        if (result !== undefined) { drainOwned(result); throw new Error('Contract data format publication requires a synchronous native owner'); }
+        declare(format, 'Contract data format publication requires a synchronous native owner');
       }
     } });
   const { priceUsage, priceProvenance } = buildPricingSeams(options.providerRegistry);

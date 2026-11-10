@@ -58,7 +58,7 @@ import { emitContractEvent } from './events.js';
 import type { OwnerReplyOutcome } from './escalation.js';
 import { createGroupRunner, takeBaseline, type ContractEngineInput } from './group-runner.js';
 import { CONTRACT_RUNNER_AGENT_ID } from './nudge.js';
-import { captureContractInput, contractInputPath, materializeContractInput, assertContractInputView, assertContractExecutionView, prepareContractInputParent, restoreContractInputDevice } from './input-snapshot.js';
+import { captureContractInput, releaseContractInputObservations, contractInputPath, materializeContractInput, assertContractInputView, assertContractExecutionView, prepareContractInputParent, restoreContractInputDevice } from './input-snapshot.js';
 import { planContract, shapeContract, type ContractPlannerDeps, type PlanningOutcome, type ShapeOutcome } from './planner.js';
 import type { NativeContractDecisionHost, NativeContractServices } from './native-decisions.js';
 import { bindNativeContractSource, captureNativeContractSource, nativeSourceCriteria } from './native-source.js';
@@ -273,7 +273,9 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       // executor drainage, rather than a terminal status event, ends private
       // dirty-byte ownership; durable commitments/provenance remain intact.
       releaseTreeBaselineBytes(run.contract);
-      const disposal = disposalCheckpoints.get(run.id); if (disposal) releaseTreeBaselineBytes(disposal);
+      releaseContractInputObservations(run.contract.inputSnapshot);
+      const disposal = disposalCheckpoints.get(run.id);
+      if (disposal) { releaseTreeBaselineBytes(disposal); releaseContractInputObservations(disposal.inputSnapshot); }
       let checkpointed = false;
       try {
         if (deps.store.get(run.id) !== run.contract) throw new Error('Contract settlement checkpoint owner changed');

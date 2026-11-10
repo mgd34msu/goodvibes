@@ -62,11 +62,11 @@ test('fresh baseline checks use original exact bytes and same-byte source replac
     writeFileSync(f.path, 'Potentially-secret owner bytes\n'); expect(baselinePathUnchanged(f.root, f.baseline, 'owner-dirty')).toBe(true);
     expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
     const text = serializeContract(f.contract, 1)!; expect(text).not.toContain('Potentially-secret owner bytes');
-    expect(text).toContain('dirty-file-v3:');
+    expect(text).toContain('file:');
   } finally { hash.mockRestore(); f.store.dispose(); }
 });
 
-test('actual owned checkpoint restore compares original physical facts, then retains exact bytes', () => {
+test('actual owned checkpoint restore verifies its saved byte pin once, then compares retained exact bytes', () => {
   const f = fixture(), restored = stored(f), hash = spyOn(crypto, 'createHash');
   try {
     const baseline = restored.baseline!;
@@ -74,20 +74,30 @@ test('actual owned checkpoint restore compares original physical facts, then ret
     for (let index = 0; index < 4; index++) expect(baselinePathUnchanged(f.root, baseline, 'owner-dirty')).toBe(true);
     copyFileSync(f.path, f.path + '.replacement'); renameSync(f.path + '.replacement', f.path);
     expect(baselinePathUnchanged(f.root, baseline, 'owner-dirty')).toBe(true);
-    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
     expect(partitionBaselinePaths(f.root, ['owner-dirty', 'new-work'], baseline).included).toEqual(['new-work']);
   } finally { hash.mockRestore(); f.store.dispose(); }
 });
 
-test('a changed physical source before original restoration stays uncertain without hashing', () => {
+test('a cold restart accepts an equal-byte replacement against its independently saved original pin', () => {
+  const f = fixture(), restored = stored(f);
+  copyFileSync(f.path, f.path + '.replacement'); renameSync(f.path + '.replacement', f.path);
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    expect(baselinePathUnchanged(f.root, restored.baseline!, 'owner-dirty')).toBe(true);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+  } finally { hash.mockRestore(); f.store.dispose(); }
+});
+
+test('a changed cold source is compared with its saved original byte pin once per physical version', () => {
   const f = fixture(), restored = stored(f); writeFileSync(f.path, 'Different unit version\n');
   const hash = spyOn(crypto, 'createHash');
   try {
     const baseline = restored.baseline!;
-    for (let index = 0; index < 4; index++) expect(baselinePathUnchanged(f.root, baseline, 'owner-dirty')).toBeUndefined();
-    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
-    writeFileSync(f.path, 'Another actual version\n'); expect(baselinePathUnchanged(f.root, baseline, 'owner-dirty')).toBeUndefined();
-    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    for (let index = 0; index < 4; index++) expect(baselinePathUnchanged(f.root, baseline, 'owner-dirty')).toBe(false);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+    writeFileSync(f.path, 'Another actual version\n'); expect(baselinePathUnchanged(f.root, baseline, 'owner-dirty')).toBe(false);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(2);
   } finally { hash.mockRestore(); f.store.dispose(); }
 });
 
@@ -127,10 +137,10 @@ test('saved symlink state compares link text without reading or exposing externa
   f.store.dispose();
 });
 
-test('confirmed physical deletion survives restart while unsupported directory reads never become deletion', () => {
+test('confirmed v2 deletion survives restart while unsupported directory reads never become deletion', () => {
   const f = fixture(); unlinkSync(join(f.root, 'tracked')); f.contract.baseline = takeBaseline(f.root)!;
   const restored = stored(f), baseline = restored.baseline!;
-  expect(baseline.dirty['tracked']).toStartWith('dirty-file-v3:'); expect(baselinePathUnchanged(f.root, baseline, 'tracked')).toBe(true);
+  expect(baseline.dirty['tracked']).toBeNull(); expect(baselinePathUnchanged(f.root, baseline, 'tracked')).toBe(true);
   mkdirSync(join(f.root, 'tracked'));
   expect(captureDirtyFile(f.root, 'tracked').kind).toBe('unavailable');
   expect(baselinePathUnchanged(f.root, baseline, 'tracked')).toBeUndefined();
@@ -140,7 +150,7 @@ test('confirmed physical deletion survives restart while unsupported directory r
 });
 
 test('owned historical ordinary-file commitments remain compatible; old ambiguous null and symlink records remain uncertain', () => {
-  const f = fixture(), digest = 'a'.repeat(64);
+  const f = fixture(), digest = crypto.createHash('sha256').update(readFileSync(f.path)).digest('hex');
   symlinkSync('owner-dirty', join(f.root, 'old-link'));
   const legacy: TreeBaseline = { head: f.baseline.head, dirty: {
     'owner-dirty': digest, 'old-link': digest, deleted: null,
@@ -149,11 +159,11 @@ test('owned historical ordinary-file commitments remain compatible; old ambiguou
   const path = contractPath(f.root, f.contract.id); mkdirSync(join(path, '..'), { recursive: true });
   writeFileSync(path, JSON.stringify({ schemaVersion: 6, writtenAt: 1, contract: f.contract }));
   const restored = f.store.load(f.contract.id)!;
-  expect(baselinePathUnchanged(f.root, restored.baseline!, 'owner-dirty')).toBeUndefined();
+  expect(baselinePathUnchanged(f.root, restored.baseline!, 'owner-dirty')).toBe(true);
   expect(baselinePathUnchanged(f.root, restored.baseline!, 'deleted')).toBeUndefined();
   expect(baselinePathUnchanged(f.root, restored.baseline!, 'old-link')).toBeUndefined();
   unlinkSync(f.path); symlinkSync('missing-external-target', f.path);
-  expect(baselinePathUnchanged(f.root, restored.baseline!, 'owner-dirty')).toBeUndefined();
+  expect(baselinePathUnchanged(f.root, restored.baseline!, 'owner-dirty')).toBe(false);
   f.store.dispose();
 });
 
@@ -212,7 +222,7 @@ test('nested attempt baselines restore their actual captured item root rather th
 test('only an owned historical unit can bind its previously unrecorded root through executor restoration', () => {
   const f = fixture(), item = join(f.root, '.goodvibes', 'historical-item'); mkdirSync(item, { recursive: true });
   writeFileSync(join(item, 'attempt-dirty'), 'Historical original bytes');
-  const baseline: TreeBaseline = { head: null, dirty: { 'attempt-dirty': 'a'.repeat(64) } };
+  const baseline: TreeBaseline = { head: null, dirty: { 'attempt-dirty': crypto.createHash('sha256').update('Historical original bytes').digest('hex') } };
   f.contract.units[0]!.baseline = baseline;
   const text = JSON.stringify({ schemaVersion: 6, writtenAt: 1, contract: f.contract }), path = contractPath(f.root, f.contract.id);
   mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, text);
@@ -223,7 +233,7 @@ test('only an owned historical unit can bind its previously unrecorded root thro
   f.store.hold(restored); expect(f.store.write(restored.id)).toBe(true);
   const pending = f.store.load(restored.id)!.units[0]!.baseline!;
   selectBaselineExecutionRoot(pending, item);
-  expect(baselinePathUnchanged(item, pending, 'attempt-dirty')).toBeUndefined();
+  expect(baselinePathUnchanged(item, pending, 'attempt-dirty')).toBe(true);
   const imported = deserializeContract(text)!.units[0]!.baseline!;
   selectBaselineExecutionRoot(imported, item);
   expect(baselinePathUnchanged(item, imported, 'attempt-dirty')).toBeUndefined();
@@ -323,6 +333,27 @@ test('settled terminal history releases private buffers while preserving seriali
     expect(baselinePathUnchanged(f.root, f.baseline, 'owner-dirty')).toBe(true);
     expect(baselinePathUnchanged(f.root, disposal.baseline!, 'owner-dirty')).toBe(true);
     expect(baselinePathUnchanged(f.root, f.baseline, 'owner-dirty')).toBe(true);
-    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(2);
   } finally { hash.mockRestore(); f.store.dispose(); }
+});
+
+
+test('owned unreleased v3 physical checkpoints remain readable without inventing omitted original bytes', () => {
+  const f = fixture(), root = captureDirtyTreeRoot(f.root), leaf = captureDirtyFile(f.root, 'owner-dirty', root);
+  if (leaf.kind !== 'file') throw new Error('Original fixture leaf must be a file');
+  const envelope = JSON.parse(serializeContract(f.contract, 1)!);
+  const physical: TreeBaseline = { version: 3, head: f.baseline.head, dirty: {
+    'owner-dirty': 'dirty-file-v3:' + JSON.stringify([leaf.kind, leaf.executable, root.revision, leaf.revision]),
+  } };
+  envelope.contract.baseline = physical; envelope.contract.units[0].baseline = physical;
+  const path = contractPath(f.root, f.contract.id); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, JSON.stringify(envelope));
+  const first = f.store.load(f.contract.id)!, cold = f.store.load(f.contract.id)!;
+  const hashing = spyOn(crypto, 'createHash');
+  try {
+    expect(baselinePathUnchanged(f.root, first.baseline!, 'owner-dirty')).toBe(true);
+    copyFileSync(f.path, f.path + '.replacement'); renameSync(f.path + '.replacement', f.path);
+    expect(baselinePathUnchanged(f.root, first.baseline!, 'owner-dirty')).toBe(true);
+    expect(baselinePathUnchanged(f.root, cold.baseline!, 'owner-dirty')).toBeUndefined();
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+  } finally { hashing.mockRestore(); f.store.dispose(); }
 });

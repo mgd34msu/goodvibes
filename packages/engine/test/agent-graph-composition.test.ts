@@ -109,3 +109,43 @@ test('actual canonical composition publishes optional-check reader floor before 
       formats: capabilities.formats.filter(format => format !== 'contract-optional-check-digests-v1') })).toThrow('does not confirm');
   } finally { composed.dispose(); graph.agentOrchestrator.dispose(); rmSync(f.workingDirectory, { recursive: true, force: true }); }
 });
+
+// Source-first regressions: authored without running during the audit pass.
+for (const boundary of ['identity', 'checkpoint'] as const) for (const mode of ['throw-promise', 'return-promise', 'throw-error', 'return-thenable'] as const) {
+  test(`contract ${boundary} publication ${mode} preserves refusal and observes owned rejected work`, async () => {
+    const f = fixture(), graph = createAgentExecutionGraph(f), contract = makeContract({ projectRoot: f.workingDirectory });
+    const work = Promise.withResolvers<void>(), originalError = new Error('Original native reader refused');
+    let reads = 0, declarations = 0;
+    Object.defineProperty(work.promise, 'then', { get() { reads++; throw new Error('Borrowed Promise then must not run'); } });
+    const thenable = { get then() { reads++; throw new Error('Borrowed thenable must not run'); } };
+    const nativeDataWriter = { declare(_format: NativeDataFormat) {
+      expect(this).toBe(nativeDataWriter); declarations++;
+      if (mode === 'throw-promise') throw work.promise;
+      if (mode === 'throw-error') throw originalError;
+      return mode === 'return-promise' ? work.promise : thenable;
+    } };
+    const composed = composition.composeContractRunner({ ...f, projectRoot: f.workingDirectory, nativeDataWriter,
+      agentManager: graph.agentManager, agentMessageBus: graph.agentMessageBus,
+      fleetCapacity: composition.nativeAgentFleetCapacity(f.configManager, graph.agentManager) });
+    try {
+      let refusal: unknown;
+      try {
+        if (boundary === 'identity') composed.store.reserveCreation(contract.id);
+        else composed.store.prepareCheckpointWrite(contract);
+      } catch (error) { refusal = error; }
+      if (mode === 'throw-promise') expect(refusal).toBe(work.promise);
+      else if (mode === 'throw-error') expect(refusal).toBe(originalError);
+      else expect(refusal).toMatchObject({ message: boundary === 'identity'
+        ? 'Contract identity publication requires a synchronous native owner'
+        : 'Contract data format publication requires a synchronous native owner' });
+      expect(declarations).toBe(1);
+      expect(reads).toBe(0);
+      expect(existsSync(contractPath(f.workingDirectory, contract.id))).toBe(false);
+      if (mode === 'throw-promise' || mode === 'return-promise') {
+        work.reject(new Error('Late native declaration rejection'));
+        await new Promise<void>(resolve => setTimeout(resolve, 0));
+        expect(reads).toBe(0);
+      }
+    } finally { composed.dispose(); graph.agentOrchestrator.dispose(); rmSync(f.workingDirectory, { recursive: true, force: true }); }
+  });
+}

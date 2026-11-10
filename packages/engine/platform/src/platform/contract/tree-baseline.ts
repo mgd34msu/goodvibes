@@ -1,6 +1,8 @@
-/** Dirty baselines retain exact bytes only for the live operation. Saved
- * physical observations confirm unchanged sources after restart; a source that
- * cannot be confirmed remains excluded from scoped commits. No content hash. */
+/** Dirty baselines preserve exact owner edits across checkpoints without
+ * persisting private file bodies. Live originals compare bytes directly; an
+ * owned cold checkpoint verifies its independent saved content pin. Compact
+ * pins are dictionary-recoverable, not anonymization. */
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { captureDirtyFile, captureDirtyTreeRoot, equalDirtyFiles, type CapturedDirtyFile, type DirtyTreeRoot } from '../orchestration/dirty-file-observation.js';
 import { nativeDirtySnapshotEntries, nativeDirtySnapshotRoot, snapshotDirtyTree, type ScopedCommitExclusion } from '../orchestration/dirty-guard.js';
@@ -20,6 +22,16 @@ interface BaselineOwner {
 }
 const owners = new WeakMap<TreeBaseline, BaselineOwner>();
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+/** Actual durable baseline bytes, not a local cache identity. The saved pin is
+ * independently consumed after restart, including equal-byte replacement and
+ * reversion where inode/timestamp observations cannot recover the original. */
+function bytePin(file: Exclude<Comparable, { readonly kind: 'missing' }>): string {
+  return createHash('sha256').update(file.bytes).digest('hex');
+}
+function commitment(file: Comparable): string | null {
+  if (file.kind === 'missing') return null;
+  return (file.kind === 'file' && file.executable ? 'executable' : file.kind) + ':' + bytePin(file);
+}
 const PHYSICAL_BASELINE = 'dirty-file-v3:';
 function savedObservation(file: Comparable, root: DirtyTreeRoot): string {
   file.assertCurrent(); root.assertCurrent();
@@ -37,9 +49,9 @@ export function createTreeBaseline(cwd: string, head: string | null): TreeBaseli
   const snapshot = snapshotDirtyTree(cwd), entries = nativeDirtySnapshotEntries(snapshot, cwd), selection = nativeDirtySnapshotRoot(snapshot, cwd), dirty: Record<string, string | null> = Object.create(null) as Record<string, string | null>;
   for (const [path, file] of entries) {
     if (file.kind === 'unavailable') throw new Error('Original dirty baseline is unavailable; owner edits remain uncommitted');
-    dirty[path] = savedObservation(file, selection);
+    file.assertCurrent(); dirty[path] = commitment(file); file.assertCurrent();
   }
-  const baseline: TreeBaseline = Object.freeze({ version: 3, head, dirty: Object.freeze(dirty) });
+  const baseline: TreeBaseline = Object.freeze({ version: 2, head, dirty: Object.freeze(dirty) });
   owners.set(baseline, { root: resolve(cwd), selection, native: true, retainBytes: true, historicalUnitRootPending: false, initial: new Map(entries), latest: new Map(), settledComparisons: new Map() }); return baseline;
 }
 function current(owner: BaselineOwner, path: string): CapturedDirtyFile {
@@ -83,12 +95,22 @@ export function baselinePathUnchanged(cwd: string, baseline: TreeBaseline, path:
   if (cached?.file === now && cached.equal !== undefined) return cached.equal;
   const saved = baseline.dirty[path];
   let equal: boolean;
-  // A restarted cache can confirm only unchanged original physical facts.
-  // A differing or older content-only receipt is uncertain, never permission
-  // to include the owner's dirty file in a commit.
-  if (baseline.version !== 3 || typeof saved !== 'string' || !owner.selection) return undefined;
-  if (savedObservation(now, owner.selection) !== saved) return undefined;
-  equal = true;
+  if (baseline.version === 2) {
+    if (saved === null) equal = now.kind === 'missing';
+    else if (now.kind === 'missing') equal = false;
+    else if (!saved?.startsWith((now.kind === 'file' && now.executable ? 'executable' : now.kind) + ':')) equal = false;
+    else equal = commitment(now) === saved;
+  } else if (baseline.version === 3) {
+    // Unreleased physical-only checkpoints remain readable. They omitted the
+    // original bytes/pin, so changed facts cannot be promoted into byte proof.
+    if (typeof saved !== 'string' || !owner.selection || savedObservation(now, owner.selection) !== saved) return undefined;
+    equal = true;
+  } else {
+    // Old null conflated deletion with failed reads; old symlink digests came
+    // from external targets. Neither can prove an original source on restart.
+    if (saved === null || now.kind === 'symlink') return undefined;
+    equal = now.kind !== 'missing' && bytePin(now) === saved;
+  }
   if (owner.retainBytes) owner.latest.set(path, { file: now, equal });
   else owner.settledComparisons.set(path, { assertCurrent: now.assertCurrent, equal }); // Metadata-only; the closure captures no leaf-byte scope.
   if (equal && owner.retainBytes) owner.initial.set(path, now); // Actual verified adoption once, not a raw-content global cache.

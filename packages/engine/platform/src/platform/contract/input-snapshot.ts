@@ -37,7 +37,7 @@ export interface ContractInputSnapshot {
   readonly gitIdentity: string;
   readonly ownerHead: string;
   readonly ownerRef: string;
-  /** Original physical Git index observation. Older digest values are history only. */
+  /** Independent saved logical-index pin; unreleased physical-only records remain readable. */
   readonly indexFingerprint: string;
   readonly inputTree: string;
   readonly inputCommit: string;
@@ -69,9 +69,13 @@ interface InputFileObservation {
 interface InputOwnerObservation {
   readonly metadata: RetainedOwnedJson;
   readonly files: Map<string, InputFileObservation>;
+  index: string | undefined;
+  logicalIndex: LogicalIndex | undefined;
+  retainLogicalIndex: boolean;
 }
-// Physical proof belongs to this exact admitted receipt only. No source bytes
-// are retained; copied/restored JSON must independently check its saved hashes.
+// Physical proof and private logical index originals belong to this exact
+// admitted receipt only. No file bodies are retained; terminal drainage releases
+// the logical inventory. Copies independently verify their saved expectations.
 const inputOwnerObservations = new WeakMap<ContractInputSnapshot, InputOwnerObservation>();
 interface OriginalInputFileDigest {
   readonly digest: string;
@@ -159,9 +163,22 @@ async function assertNoSpecialFiles(root: string, exclusions: readonly string[],
   }
 }
 
-/** The original index is native filesystem bookkeeping, not a cryptographic
- * identity. Persist only its physical observation, never private staged paths.
- * A changed/replaced index requires a fresh input capture. */
+/** The saved index pin includes staged entries AND flags, including excluded
+ * private paths. Git supplies no object ID for this complete logical state.
+ * Persisting those raw paths would duplicate private source material. The pin
+ * lets a restarted owner verify the same state after a benign index rewrite. */
+interface LogicalIndex { readonly entries: Buffer; readonly flags: Buffer }
+function readLogicalIndex(root: string): LogicalIndex {
+  return { entries: git(root, ['ls-files', '--stage', '-z']), flags: git(root, ['ls-files', '-v', '-z']) };
+}
+function sameLogicalIndex(left: LogicalIndex, right: LogicalIndex): boolean {
+  return left.entries.equals(right.entries) && left.flags.equals(right.flags);
+}
+function indexFingerprint(index: LogicalIndex): string {
+  return createHash('sha256').update(index.entries).update(index.flags).digest('hex');
+}
+/** Compatibility for unreleased physical-only records; it cannot manufacture a
+ * missing original logical state after that physical source changes. */
 const INDEX_OBSERVATION_PREFIX = 'git-index-v2:';
 function savedIndexObservation(identity: string): string { return INDEX_OBSERVATION_PREFIX + identity; }
 function indexObservation(value: string): string | undefined {
@@ -358,7 +375,9 @@ async function capture(root: string, options: CaptureContractInputOptions): Prom
   const ownerHead = gitText(root, ['rev-parse', 'HEAD']);
   const ownerRef = gitText(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
   const originalIndex = await indexIdentity(root);
-  const index = savedIndexObservation(originalIndex);
+  const logicalIndex = readLogicalIndex(root);
+  if (await indexIdentity(root) !== originalIndex) throw new Error('contract input index replaced during capture');
+  const index = indexFingerprint(logicalIndex);
   await assertNoSpecialFiles(root, CONTRACT_INPUT_EXCLUSIONS, signal);
   const selected = paths(root, CONTRACT_INPUT_EXCLUSIONS);
   if (options.maxFiles !== undefined && selected.length > options.maxFiles) throw new Error('contract input exceeds caller file-count budget');
@@ -391,7 +410,7 @@ async function capture(root: string, options: CaptureContractInputOptions): Prom
     // Encode generated opaque IDs without numeric runs; the privacy floor still
     // evaluates every original/captured path and must not be relaxed for UUIDs.
     const receipt: ContractInputSnapshot = { version: 2, id: randomUUID().replace(/[0-9]/g, (digit) => String.fromCharCode(107 + Number(digit))), sourceRoot: root, sourceIdentity, gitIdentity, ownerHead, ownerRef, indexFingerprint: index, inputTree, inputCommit, capturedAt: Date.now(), dirty, exclusions: [...CONTRACT_INPUT_EXCLUSIONS], files };
-    inputOwnerObservations.set(receipt, { metadata: retainOwnedJson(receipt, nodeTypes.isProxy), files: observations });
+    inputOwnerObservations.set(receipt, { metadata: retainOwnedJson(receipt, nodeTypes.isProxy), files: observations, index: originalIndex, logicalIndex, retainLogicalIndex: true });
     check();
     await assertContractInputOwnerOriginal(receipt, signal, originalIndex);
     if (await indexIdentity(root) !== originalIndex) throw new Error('contract input index replaced during capture');
@@ -415,13 +434,16 @@ export async function assertContractInputOwner(snapshot: ContractInputSnapshot, 
 
 /** The capture supplies its actual private index-file observation; a public or
  * restored snapshot verifies its saved logical commitment once. Later awaits
- * recheck the original physical index without retaining its potentially large,
- * private path inventory. A changed index is read and compared in full, so an
- * incidental rewrite with the same staged entries/flags remains acceptable.
+ * recheck the original physical index. Active native owners retain the exact
+ * private logical inventory; terminal drainage releases it. A changed index is
+ * compared directly while originals are live and against its saved pin on cold
+ * recovery, so an incidental rewrite with the same staged entries/flags
+ * remains acceptable.
  */
 async function assertContractInputOwnerOriginal(snapshot: ContractInputSnapshot, signal?: AbortSignal, capturedIndex?: string): Promise<void> {
   const observation = inputOwnerObservations.get(snapshot) ?? {
     metadata: retainOwnedJson(snapshot, nodeTypes.isProxy), files: new Map<string, InputFileObservation>(),
+    index: undefined, logicalIndex: undefined, retainLogicalIndex: true,
   };
   observation.metadata.assertCurrent();
   const original = snapshot;
@@ -435,12 +457,31 @@ async function assertContractInputOwnerOriginal(snapshot: ContractInputSnapshot,
   if (await repositoryIdentity(root) !== snapshot.gitIdentity) throw new Error('contract input Git directory was replaced');
   if (gitText(root, ['rev-parse', '--abbrev-ref', 'HEAD']) !== snapshot.ownerRef) throw new Error('contract input owner HEAD or branch changed');
   if (gitText(root, ['rev-parse', 'HEAD']) !== snapshot.ownerHead) throw new ContractInputOwnerChangedError('head', 'contract input owner HEAD or branch changed');
-  const selectedIndex = indexObservation(snapshot.indexFingerprint);
-  // Earlier saved digests are readable as history, but never trigger another
-  // hash just to adopt a freshness cache after restart.
-  if (selectedIndex === undefined || (capturedIndex !== undefined && capturedIndex !== selectedIndex)
-    || await indexIdentity(root) !== selectedIndex) throw new ContractInputOwnerChangedError('index', 'contract input owner index changed; capture a fresh input');
-  const indexMatches = async (): Promise<boolean> => await indexIdentity(root) === selectedIndex;
+  let selectedIndex = await indexIdentity(root);
+  let originalLogicalIndex = observation.logicalIndex;
+  const physicalOnly = indexObservation(snapshot.indexFingerprint);
+  const verifyIndex = async (physical: string): Promise<boolean> => {
+    const candidate = readLogicalIndex(root);
+    if (await indexIdentity(root) !== physical) return false;
+    const equal = originalLogicalIndex !== undefined ? sameLogicalIndex(originalLogicalIndex, candidate)
+      : physicalOnly !== undefined ? physical === physicalOnly
+      : indexFingerprint(candidate) === snapshot.indexFingerprint;
+    if (!equal) return false;
+    // Private originals belong to this actual read/capture lifetime only. The
+    // terminal runner explicitly releases the retained logical path inventory.
+    originalLogicalIndex ??= candidate;
+    return true;
+  };
+  const indexMatches = async (): Promise<boolean> => {
+    const current = await indexIdentity(root);
+    if (current === selectedIndex) return true;
+    if (!await verifyIndex(current)) return false;
+    selectedIndex = current; return true;
+  };
+  const retainedIndex = capturedIndex ?? observation.index;
+  if (retainedIndex === undefined || retainedIndex !== selectedIndex) {
+    if (!await verifyIndex(selectedIndex)) throw new ContractInputOwnerChangedError('index', 'contract input owner index changed');
+  }
   await assertNoSpecialFiles(root, snapshot.exclusions, signal);
   if (JSON.stringify(paths(root, snapshot.exclusions)) !== JSON.stringify(snapshot.files.map((file) => file.path))) throw new ContractInputOwnerChangedError('paths', 'contract input owner path set changed');
   const format = objectFormat(root);
@@ -458,6 +499,8 @@ async function assertContractInputOwnerOriginal(snapshot: ContractInputSnapshot,
   // An earlier file can change while a later asynchronous check is running.
   // Finish with the original complete physical readset, without another read.
   for (const file of observation.files.values()) file.assertCurrent();
+  observation.index = selectedIndex;
+  if (observation.retainLogicalIndex) observation.logicalIndex = originalLogicalIndex;
   inputOwnerObservations.set(original, observation);
   for (const file of original.files) {
     const physical = observation.files.get(file.path);
@@ -471,6 +514,17 @@ async function assertContractInputOwnerOriginal(snapshot: ContractInputSnapshot,
     } });
     originalInputFileDigests.set(file, { root, path: physical.file.path, observation: physical, proof });
   }
+}
+
+/** Actual executor drainage ends private logical-index retention. Public saved
+ * receipts retain their independent pin and tiny physical recheck metadata;
+ * an explicit later history read owns only its temporary logical buffers. */
+export function releaseContractInputObservations(snapshot: ContractInputSnapshot | undefined): void {
+  if (!snapshot) return;
+  const original = inputOwnerObservations.get(snapshot);
+  if (!original) return;
+  original.logicalIndex = undefined;
+  original.retainLogicalIndex = false;
 }
 
 /** Historical readers retain the recorded repository identity without requiring live owner files/HEAD. */

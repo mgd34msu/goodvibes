@@ -62,15 +62,21 @@ export async function runHomeGraphSyncSelfImprovementPump(
 export async function enrichHomeGraphSpaceSources(
   runtime: HomeGraphSelfImprovementRuntime,
   spaceId: string,
+  signal?: AbortSignal | undefined,
 ): Promise<void> {
+  signal?.throwIfAborted();
   const sources = readHomeGraphSearchState(runtime.store, spaceId).sources;
-  await runtime.semanticService.enrichSources(sources, { knowledgeSpaceId: spaceId });
+  signal?.throwIfAborted();
+  await runtime.semanticService.enrichSources(sources, { knowledgeSpaceId: spaceId, ...(signal ? { signal } : {}) });
+  signal?.throwIfAborted();
   // stopWhenPaused: the sync pump is background work, a governor pause stops
   // it at the next safe boundary instead of running through memory pressure.
-  const result = await runtime.semanticService.selfImprove({ knowledgeSpaceId: spaceId, reason: 'reindex' }, { stopWhenPaused: true });
+  const result = await runtime.semanticService.selfImprove({ knowledgeSpaceId: spaceId, reason: 'reindex', ...(signal ? { signal } : {}) }, { stopWhenPaused: true });
+  signal?.throwIfAborted();
   const installationId = readHomeGraphInstallationIdFromSpace(spaceId);
   if (installationId && ((result.acceptedSourceIds?.length ?? 0) > 0 || (result.promotedFactCount ?? 0) > 0 || result.closedGaps > 0)) {
-    await refreshHomeGraphDevicePagesForSourceIds(runtime, spaceId, installationId, result.acceptedSourceIds ?? []);
+    await refreshHomeGraphDevicePagesForSourceIds(runtime, spaceId, installationId, result.acceptedSourceIds ?? [], signal);
+    signal?.throwIfAborted();
   }
 }
 

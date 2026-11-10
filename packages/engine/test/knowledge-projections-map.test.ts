@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -20,7 +20,6 @@ import { createSemanticFactIdentityPlanner } from '../platform/src/platform/know
 import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '../platform/src/platform/state/index.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.js';
-import { waitFor } from './_helpers/test-timeout.js';
 
 const answerReadings = useKnowledgeAnswerReadings();
 
@@ -192,13 +191,22 @@ describe('knowledge generated projections and maps', () => {
     expect(artifactStore.list(20)).toEqual([]);
   });
 
-  test('preserves an unpublished canceled candidate until a genuine clean publication permits cleanup', async () => {
+  test.each(['clean-empty', 'unreadable'] as const)('cancelled generated candidate cleanup requires the actual complete native family (%s)', async family => {
     const { store, artifactStore } = createStores();
+    if (family === 'unreadable') {
+      const seed = await store.upsertSource({ id: 'native-empty-family', connectorId: 'test', sourceType: 'document', title: 'Original native family', status: 'indexed' });
+      await store.deleteSource(seed.id);
+    }
     const controller = new AbortController();
+    let candidateId = '', contentPath = '', metadataPath = '';
     const abortingArtifactStore = Object.create(artifactStore) as ArtifactStore;
     abortingArtifactStore.captureOriginal = artifactStore.captureOriginal.bind(artifactStore);
     abortingArtifactStore.createForPublication = async (input, ownership) => {
       const artifact = await artifactStore.createForPublication(input, ownership);
+      candidateId = artifact.artifact.id;
+      const record = artifactStore.getRecord(candidateId); if (!record) throw new Error('Missing actual created candidate');
+      contentPath = record.contentPath; metadataPath = record.metadataPath;
+      if (family === 'unreadable') writeFileSync(store.storagePath, 'Unreadable native family image');
       controller.abort();
       return artifact;
     };
@@ -218,16 +226,16 @@ describe('knowledge generated projections and maps', () => {
 
     expect(store.getSource('kg-gen-cancelled-device-page')).toBeNull();
     expect(store.listSources()).toEqual([]);
-    expect(existsSync(store.storagePath)).toBe(false);
-    const [candidate] = artifactStore.list(20);
-    expect(candidate).toBeDefined();
-    const clean = await store.upsertSource({ id: 'actual-clean-boundary', connectorId: 'test', sourceType: 'document', title: 'Cleanup boundary', status: 'indexed' });
-    const bytes = readFileSync(store.storagePath);
-    await waitFor(() => artifactStore.get(candidate!.id) === null);
-    expect(readFileSync(store.storagePath)).toEqual(bytes);
-    await store.deleteSource(clean.id);
-    expect(store.listSources()).toEqual([]);
-    expect(artifactStore.list(20)).toEqual([]);
+    expect(candidateId).not.toBe('');
+    if (family === 'clean-empty') {
+      expect(existsSync(store.storagePath)).toBe(false);
+      expect(artifactStore.get(candidateId)).toBeNull(); expect(artifactStore.list(20)).toEqual([]);
+      expect(existsSync(contentPath)).toBe(false); expect(existsSync(metadataPath)).toBe(false);
+    } else {
+      expect(artifactStore.get(candidateId)).not.toBeNull(); expect(existsSync(contentPath)).toBe(true); expect(existsSync(metadataPath)).toBe(true);
+      expect(readFileSync(contentPath, 'utf8')).toBe('# Device\n\nCancelled before source persistence.');
+      expect(readFileSync(store.storagePath, 'utf8')).toBe('Unreadable native family image');
+    }
   });
 
   test('removes newly-created generated sources when cancellation happens after source persistence', async () => {

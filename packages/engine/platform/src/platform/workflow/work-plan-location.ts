@@ -70,9 +70,36 @@ function readDocument(path: string) {
   const value: unknown = JSON.parse(new TextDecoder('utf8', { fatal: true }).decode(source.bytes)); current();
   return { value, current };
 }
-function readAssignment(path: string, slot: number): { readonly value: Assignment; current(): void } | undefined {
-  let observed: ReturnType<typeof readDocument>;
-  try { observed = readDocument(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw new Error('Work plan project assignment is unreadable; preserve it before repairing the store.'); }
+/** A populated no-replace link briefly has two names. Wait only for that same
+ * private original to finish its transfer; never read/adopt a multi-link row. */
+function readInitialAssignment(path: string, assertParents: (() => void) | undefined, retained: (() => void) | undefined) {
+  const original = lstatSync(path, { bigint: true }); retained?.();
+  if (!original.isFile() || original.nlink !== 2n || (original.mode & 0o777n) !== 0o600n
+    || (process.geteuid && original.uid !== BigInt(process.geteuid()))) return readDocument(path);
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const sameTransfer = (entry: BigIntStats) => entry.isFile() && !entry.isSymbolicLink() && sameFile(entry, original)
+    && entry.mode === original.mode && entry.size === original.size && entry.mtimeNs === original.mtimeNs;
+  const deadline = performance.now() + 1_000, sleeper = new Int32Array(new SharedArrayBuffer(4));
+  try {
+    for (;;) {
+      assertParents?.();
+      const descriptor = fstatSync(fd, { bigint: true }), selected = lstatSync(path, { bigint: true });
+      if (!sameTransfer(descriptor) || !sameTransfer(selected)
+        || (descriptor.nlink !== 1n && descriptor.nlink !== 2n) || (selected.nlink !== 1n && selected.nlink !== 2n)) unavailable();
+      if (descriptor.nlink === 1n && selected.nlink === 1n && stamp(descriptor) === stamp(selected)) break;
+      if (performance.now() >= deadline) unavailable();
+      Atomics.wait(sleeper, 0, 0, 2);
+    }
+    const observed = readDocument(path); assertParents?.();
+    const descriptor = fstatSync(fd, { bigint: true }), selected = lstatSync(path, { bigint: true });
+    if (!sameTransfer(descriptor) || !sameTransfer(selected) || descriptor.nlink !== 1n || stamp(descriptor) !== stamp(selected)) unavailable();
+    observed.current(); return observed;
+  } finally { closeSync(fd); }
+}
+function readAssignment(path: string, slot: number, assertParents?: () => void, retained?: () => void): { readonly value: Assignment; current(): void } | undefined {
+  let observed: ReturnType<typeof readDocument>, existed = false;
+  try { observed = readInitialAssignment(path, assertParents, () => { existed = true; retained?.(); }); }
+  catch (error) { if (!existed && (error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw new Error('Work plan project assignment is unreadable; preserve it before repairing the store.'); }
   const value = observed.value;
   if (!object(value) || value.version !== 1 || typeof value.projectId !== 'string' || !value.projectId || typeof value.projectRoot !== 'string'
     || typeof value.planId !== 'string' || !value.planId || (!planFilename(value.planFile) && !nativePlanFilename(value.planFile))
@@ -134,7 +161,7 @@ function resolveLocation(directory: string, project: Project, options: LocationO
   for (const name of [...ownerFiles, ...nativeFiles]) { const numbered = /^(0|[1-9]\d*)\.json$/.exec(name); if (!numbered) continue; const slot = Number(numbered[1]); if (!Number.isSafeInteger(slot) || slot >= MAX_PROJECTS) unavailable(); highest = Math.max(highest, slot); }
   let existing: ReturnType<typeof findExisting> | undefined;
   for (let slot = 0; slot < MAX_PROJECTS; slot++) {
-    current(); const path = join(owners, `${slot}.json`), assigned = readAssignment(path, slot);
+    current(); const path = join(owners, `${slot}.json`), assigned = readAssignment(path, slot, current, () => { source.retained = true; });
     if (assigned) { source.retained = true; selectedRows.push(assigned.current); if (sameProject(assigned.value, project)) { if (!options.readOnly) { confirmFileDurable(path); current(); } return selectedLocation(assigned.value); } continue; }
     if (slot <= highest) throw new Error('Work plan project assignment is missing; saved plan files were left untouched.');
     existing ??= findExisting(directory, project); if (existing.hasOriginals) source.retained = true; existing.current();
@@ -151,7 +178,7 @@ function resolveLocation(directory: string, project: Project, options: LocationO
       if (stamp(fstatSync(fd, { bigint: true })) !== prepared || stamp(lstatSync(temporary, { bigint: true })) !== prepared) unavailable();
       try { linkSync(temporary, path); } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        current(); const winner = readAssignment(path, slot); if (!winner) unavailable(); selectedRows.push(winner.current);
+        current(); const winner = readAssignment(path, slot, current); if (!winner) unavailable(); selectedRows.push(winner.current);
         if (sameProject(winner.value, project)) { confirmFileDurable(path); current(); return selectedLocation(winner.value); }
         continue;
       }
@@ -159,7 +186,7 @@ function resolveLocation(directory: string, project: Project, options: LocationO
       unlinkSync(temporary); const published = stamp(fstatSync(fd, { bigint: true }));
       const publicationCurrent = () => { current(); if (stamp(fstatSync(fd, { bigint: true })) !== published || stamp(lstatSync(path, { bigint: true })) !== published) unavailable(); };
       publicationCurrent(); invoke(() => options.onEffect?.(false)); publicationCurrent(); confirmFileDurable(path); publicationCurrent();
-      const actual = readAssignment(path, slot); if (!actual || !sameProject(actual.value, project) || actual.value.planId !== proposed.planId) unavailable(); selectedRows.push(actual.current);
+      const actual = readAssignment(path, slot, current); if (!actual || !sameProject(actual.value, project) || actual.value.planId !== proposed.planId) unavailable(); selectedRows.push(actual.current);
       return selectedLocation(actual.value);
     } finally {
       try { directoryGuard.physical(); ownerGuard.physical(); const actual = lstatSync(temporary, { bigint: true, throwIfNoEntry: false }); if (actual && sameFile(actual, original)) { unlinkSync(temporary); invoke(() => options.onEffect?.(false)); } }

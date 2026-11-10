@@ -9,8 +9,8 @@ import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
 import { KnowledgeConnectorRegistry } from '../platform/src/platform/knowledge/connectors.js';
 import { ingestBrowserKnowledge } from '../platform/src/platform/knowledge/browser-history/ingest.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import * as nativeEdgeWrites from '../platform/src/platform/knowledge/store-edge-writes.js';
 import { RuntimeEventBus, type KnowledgeEvent } from '../platform/src/platform/runtime/events/index.js';
-import { loadSqlJsEngine, type SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 import { runKnowledgeServiceJobByKind, type KnowledgeServiceJobRunnerContext } from '../platform/src/platform/knowledge/service-jobs.js';
 import { createDaemonKnowledgeRouteHandlers } from '../daemon-api/src/knowledge-routes.js';
 import type { DaemonKnowledgeRouteContext } from '../daemon-api/src/knowledge-route-types.js';
@@ -22,14 +22,13 @@ let root: string;
 let previous: JudgmentPort | undefined;
 const opened: KnowledgeStore[] = [];
 const uri = 'https://synthetic.example.test/aurora';
-const sqlite = (store: KnowledgeStore) => (store as unknown as { sqlite: SQLiteStore }).sqlite;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'knowledge-browser-outcomes-'));
   previous = installJudgmentPort(undefined);
 });
-afterEach(() => {
+afterEach(async () => {
   installJudgmentPort(previous);
-  opened.splice(0).forEach((store) => sqlite(store).close());
+  await Promise.all(opened.splice(0).map(store => store.close()));
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -201,13 +200,13 @@ describe('browser capture and compilation outcomes', () => {
   test('operational compile failure is failed, retains capture and rolls back compiler writes', async () => {
     const f = await fixture();
     installJudgmentPort(knowledgeIngestErrorReadings().port);
-    const SQL = await loadSqlJsEngine(), run = SQL.Database.prototype.run;
+    const writeEdge = nativeEdgeWrites.writeKnowledgeEdgeRow;
     let edgeWrites = 0;
-    const write = spyOn(SQL.Database.prototype, 'run').mockImplementation(function(this: InstanceType<typeof SQL.Database>, sql, params) {
-      if (sql.includes('INSERT OR REPLACE INTO knowledge_edges') && ++edgeWrites === 2) {
+    const write = spyOn(nativeEdgeWrites, 'writeKnowledgeEdgeRow').mockImplementation((...args) => {
+      if (++edgeWrites === 2) {
         throw new Error('Synthetic compiler SQL failure');
       }
-      run.call(this, sql, params);
+      return writeEdge(...args);
     });
     let result;
     try { result = await f.ingest(); }

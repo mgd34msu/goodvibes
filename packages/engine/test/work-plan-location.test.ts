@@ -1,5 +1,6 @@
-import { describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { describe, expect, spyOn, test } from 'bun:test';
+import * as fs from 'node:fs';
+import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { WorkPlanStore, type WorkPlanStoreOptions } from '../platform/src/platform/workflow/work-plan-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
@@ -152,4 +153,46 @@ describe('exact work-plan project ownership', () => {
       await Promise.allSettled(output);
     }
   }, 30_000);
+
+  test.each(['complete', 'replace'] as const)('initial assignment read retains its original across a real two-link transfer (%s)', async action => {
+    const o = options(), writer = new WorkPlanStore(o); writer.addItem('Original saved work');
+    const assignment = join(directory(o), '.project-owners', '0.json'), stage = assignment + '.transfer';
+    const bytes = readFileSync(assignment), ready = join(o.homeDirectory, 'transfer-ready'), reading = join(o.homeDirectory, 'original-open');
+    linkSync(assignment, stage);
+    const script = `import { existsSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+      const [assignment, stage, ready, reading, action] = process.argv.slice(1);
+      writeFileSync(ready, 'ready');
+      const deadline = Date.now() + 5000;
+      while (!existsSync(reading)) { if (Date.now() > deadline) throw Error('Original reader did not open'); await Bun.sleep(1); }
+      if (action === 'complete') unlinkSync(stage);
+      else { const bytes = await Bun.file(assignment).arrayBuffer(); renameSync(assignment, assignment + '.retained'); writeFileSync(assignment, new Uint8Array(bytes), { mode: 0o600 }); }`;
+    const child = Bun.spawn([process.execPath, '--eval', script, assignment, stage, ready, reading, action], { stdout: 'pipe', stderr: 'pipe' });
+    const output = Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    let opened = false; const nativeOpen = fs.openSync;
+    try {
+      const deadline = Date.now() + 5000;
+      while (!existsSync(ready)) { if (Date.now() > deadline) throw Error('Transfer child did not become ready'); await Bun.sleep(1); }
+      const opening = spyOn(fs, 'openSync').mockImplementation((selected, flags, mode) => {
+        const fd = nativeOpen(selected, flags, mode);
+        if (!opened && selected === assignment) { opened = true; writeFileSync(reading, 'Original descriptor retained'); }
+        return fd;
+      });
+      try {
+        if (action === 'complete') {
+          const reader = new WorkPlanStore(o); expect(reader.getActivePlan({ readOnly: true }).items.map(item => item.title)).toEqual(['Original saved work']);
+        } else expect(() => new WorkPlanStore(o)).toThrow('assignment is unreadable');
+      } finally { opening.mockRestore(); }
+      expect(opened).toBe(true); expect(await output).toEqual([0, '', '']); expect(readFileSync(assignment)).toEqual(bytes);
+      if (action === 'replace') expect(readFileSync(assignment + '.retained')).toEqual(bytes);
+    } finally { if (child.exitCode === null) child.kill(); await output; }
+  });
+
+  test('an unfinished multi-link assignment remains unreadable and is never adopted or rewritten', () => {
+    const o = options(), writer = new WorkPlanStore(o); writer.addItem('Preserve original work');
+    const assignment = join(directory(o), '.project-owners', '0.json'), foreign = assignment + '.foreign-link';
+    const bytes = readFileSync(assignment), plan = readFileSync(writer.filePath); linkSync(assignment, foreign);
+    expect(() => new WorkPlanStore(o)).toThrow('assignment is unreadable');
+    expect(readFileSync(assignment)).toEqual(bytes); expect(readFileSync(foreign)).toEqual(bytes); expect(readFileSync(writer.filePath)).toEqual(plan);
+    expect(fs.statSync(assignment).nlink).toBe(2);
+  });
 });

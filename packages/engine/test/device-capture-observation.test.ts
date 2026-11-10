@@ -55,13 +55,13 @@ test.each(['matching', 'damaged'] as const)('saved v1 capture pin migration veri
 
 test('a real native writer floor precedes fresh capture bytes and blocks an older same-version reader profile', async () => {
   const f = fixture(), execPath = join(f.root, 'goodvibes-daemon'), native = createNativeDataWriteOwner({ execPath, version: '3.1.2', assertCurrent() {} });
-  let first = true; const store = new DeviceCaptureArtifactStore(f.directory, { beforeObservationWrite() {
-    if (first) expect(readdirSync(f.directory).filter(name => name.endsWith('.png'))).toEqual([]); first = false;
+  let declared = 0; const store = new DeviceCaptureArtifactStore(f.directory, { beforeObservationWrite() {
+    if (declared++ === 0) expect(readdirSync(f.directory).filter(name => name.endsWith('.png'))).toEqual([]);
     native.declare('device-capture-observations-v2');
     expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo,
       { ...nativeReaderCapabilities('3.1.2'), formats: nativeReaderCapabilities('3.1.2').formats.filter(name => name !== 'device-capture-observations-v2') })).toThrow();
   } });
-  const captured = await store.retain(originalInput); expect(existsSync(store.pathFor(captured))).toBe(true);
+  const captured = await store.retain(originalInput); expect(existsSync(store.pathFor(captured))).toBe(true); expect(declared).toBe(3);
 });
 
 test('a live capture holds the real index lease so another sweeper cannot delete its unindexed bytes', async () => {
@@ -89,7 +89,13 @@ test('a failed exclusive capture open preserves the other owner’s same-name fi
 test('failed format publication cleans only the completed unindexed capture after actual write drainage', async () => {
   const f = fixture(); let declared = 0;
   const store = new DeviceCaptureArtifactStore(f.directory, { beforeObservationWrite() { if (++declared > 2) throw new Error('publisher retired'); } });
-  await expect(store.retain(originalInput)).rejects.toThrow('publisher retired'); expect(readdirSync(f.directory)).toEqual([]);
+  await expect(store.retain(originalInput)).rejects.toThrow('publisher retired'); expect(declared).toBe(3);
+  // The completed original payload is gone; its already durable pending proof
+  // survives until a later genuine owner observes the missing leaf.
+  expect(readdirSync(f.directory)).toEqual(['capture-index.json']);
+  const pending = JSON.parse(readFileSync(f.index, 'utf8')); expect(pending.artifacts).toEqual([]); expect(pending.pending).toHaveLength(1);
+  expect((await new DeviceCaptureArtifactStore(f.directory).sweep()).bytesReclaimed).toBe(0);
+  expect(JSON.parse(readFileSync(f.index, 'utf8')).pending).toBeUndefined();
 });
 
 test('unsupported index formats remain intact rather than becoming an empty capture namespace', async () => {

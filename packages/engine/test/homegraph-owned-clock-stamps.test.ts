@@ -1,5 +1,4 @@
 import { expect, spyOn, test } from 'bun:test';
-import { join } from 'node:path';
 import { assertJudgmentInput } from '../platform/src/platform/gate/judgment-input.js';
 import { knowledgeRawRepresentation } from '../platform/src/platform/knowledge/store-record-representation.js';
 import { prepareKnowledgeRecordAdmission } from '../platform/src/platform/knowledge/store-record-snapshot.js';
@@ -42,7 +41,7 @@ test('retirement and reappearance preserve canonical native clocks and complete 
   const retiredClock = 1791723639004;
   const clock = spyOn(Date, 'now').mockReturnValue(initialClock);
   try {
-    const { service, store, root } = createHomeGraphService();
+    const { service, store } = createHomeGraphService();
     const device = { id: 'returning-display', name: 'Returning Display', manufacturer: 'Vendor', model: 'RET-1',
       metadata: { retainedContext: { text: 'Original installation details.' } } };
     await service.syncSnapshot({ installationId: 'owned-retirement', devices: [device] });
@@ -80,9 +79,9 @@ test('retirement and reappearance preserve canonical native clocks and complete 
     expect(pages.pages.some(page => page.source.id === source.id)).toBe(true);
     expect(store.getNode(node.id)?.metadata.staleAt).toBe(retiredIso);
     expect(store.getSource(source.id)?.metadata.staleAt).toBe(retiredIso);
-    service.dispose();
+    await service.dispose();
     await store.close();
-    const reopened = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+    const reopened = new KnowledgeStore({ dbPath: store.storagePath });
     try {
       await reopened.init();
       const currentNode = reopened.getNode(node.id);

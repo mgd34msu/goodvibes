@@ -332,9 +332,19 @@ jobs:
           git config --global user.email "ci@goodvibes.local"
           git config --global user.name "GoodVibes CI"
       - name: Run complete declared product test suite
+        id: product-test-run
         env:
           PRODUCT: ${{ matrix.product }}
         run: bun run products:test "$PRODUCT"
+
+      - name: Upload exact settled product owner diagnostics
+        if: ${{ always() && steps.product-test-run.outputs.owner_evidence != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: product-owner-evidence-${{ matrix.product }}-${{ github.run_attempt }}
+          path: ${{ steps.product-test-run.outputs.owner_evidence }}
+          if-no-files-found: error
+          retention-days: 7
 
       # Only this matrix leg produces the daemon binary; the consumer never rebuilds it.
       - name: Build and record daemon native artifact

@@ -164,9 +164,11 @@ export class DeviceCaptureArtifactStore {
           const returned: unknown = beforePublish?.(); if (returned !== undefined) { drainOwned(returned); throw new Error('Device capture owner assertions must be synchronous'); }
           physicalCurrent();
         };
-        const declare = () => { current(); const result: unknown = this.beforeObservationWrite?.(); if (result !== undefined) { drainOwned(result); throw new Error('Device capture format declaration must be synchronous'); } current(); };
+        // Avoid a bare `declare()` statement: Bun's TypeScript parser treats it
+        // as an ambient declaration and can erase the actual writer-floor call.
+        const declareFormat = () => { current(); const result: unknown = this.beforeObservationWrite?.(); if (result !== undefined) { drainOwned(result); throw new Error('Device capture format declaration must be synchronous'); } current(); };
         const publish = async (rows: SavedArtifact[], final: boolean, additional?: () => void) => {
-          current(); additional?.(); declare();
+          current(); additional?.(); declareFormat();
           const guarded = () => { current(); additional?.(); };
           await this.index.persist({ version: 2, artifacts: rows, ...(saved.pending.size ? { pending: [...saved.pending.values()] } : {}),
             ...(saved.preserved.size ? { preservedFiles: [...saved.preserved].sort() } : {}) }, {
@@ -175,7 +177,7 @@ export class DeviceCaptureArtifactStore {
           }); guarded();
           beforeRows = JSON.stringify(rows); beforePreserved = JSON.stringify([...saved.preserved].sort()); beforePending = JSON.stringify([...saved.pending.values()]);
         };
-        const mutation: Mutation = { owner, current, declare, pending: saved.pending, preserved: saved.preserved,
+        const mutation: Mutation = { owner, current, declare: declareFormat, pending: saved.pending, preserved: saved.preserved,
           retain(assertion) { assertion(); retained.push(assertion); },
           create(name) { current(); const leaf = owner.leaf(name); created.push(leaf); return leaf; },
           async stage(capture, assertion) {

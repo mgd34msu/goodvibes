@@ -32,9 +32,9 @@ async function fixture() {
   const backing: unknown = Reflect.get(store, 'sqlite');
   if (!(backing instanceof SQLiteStore)) throw new Error('Original SQLite owner unavailable');
   const source = await store.upsertSource({ id: 'source', connectorId: 'edge-batch', sourceType: 'document', title: 'Original edge source', status: 'indexed' });
-  const first = await store.upsertEdge({ id: 'first-edge', fromKind: 'source', fromId: source.id, toKind: 'node', toId: 'first-node',
+  const first = await store.upsertEdge({ fromKind: 'source', fromId: source.id, toKind: 'node', toId: 'first-node',
     relation: 'documents', metadata: { exact: 'original' } });
-  const second = await store.upsertEdge({ id: 'second-edge', fromKind: 'source', fromId: source.id, toKind: 'node', toId: 'second-node',
+  const second = await store.upsertEdge({ fromKind: 'source', fromId: source.id, toKind: 'node', toId: 'second-node',
     relation: 'documents', metadata: { exact: 'second' } });
   return { store, sqlite: backing, first, second };
 }

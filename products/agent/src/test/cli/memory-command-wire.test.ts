@@ -9,10 +9,10 @@ import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-
  *    the "up" half plus one direct side-by-side proof that the SAME CLI command,
  *    run against the two different fixtures, lands in two different stores.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { mkdirSync, rmSync } from 'node:fs';
+import { installJudgmentPort, judgmentPort, JudgmentPortMissingError, restoreJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { existsSync, mkdirSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { ConfigManager as PlatformConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -25,10 +25,18 @@ import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { ConfigManager } from '../../config/index.ts';
 import { handleGoodVibesCliCommand, parseGoodVibesCli } from '../../cli/index.ts';
-import { makeProjectTempDir } from '../helpers/project-temp.ts';
+import { makeProjectTempDir, registerProjectTempDrain, sweepCreatedProjectTempDirs } from '../helpers/project-temp.ts';
 import { authoredPrivacyAnswer, errorText, errorSpan } from '../helpers/authored-diagnostic-readings.ts';
 
 const TEST_TOKEN = 'memory-cli-wire-token-321';
+function currentJudgmentPort(): ReturnType<typeof installJudgmentPort> {
+  try { return judgmentPort('memory-wire-fixture'); }
+  catch (error) {
+    if (error instanceof JudgmentPortMissingError) return undefined;
+    throw error;
+  }
+}
+
 function privacyReadings(modelTierPath: string) { return authoredPrivacyAnswer({
   fields: { cls: 'other', class: 'other', summary: 'content', detail: 'content', tags: 'other', query: 'content',
     kind: 'other', data: 'other', id: 'other', scope: 'other', confidence: 'other', path: 'other', records: 'other',
@@ -93,12 +101,41 @@ describe('memory CLI: daemon up routes over the wire', () => {
   let homeDir: string;
   let daemon: DaemonServer;
   let daemonServices: RuntimeServices;
-  let previousPort: ReturnType<typeof installJudgmentPort>;
+  let cleanup: () => Promise<void>;
+  let preGraphPort: ReturnType<typeof installJudgmentPort>;
+  let composedPort: ReturnType<typeof installJudgmentPort>;
   let searchRequests: ReturnType<typeof fakePort>['requests'];
   let port: number;
 
   beforeEach(async () => {
+    preGraphPort = currentJudgmentPort();
     root = makeProjectTempDir('gv-memory-cli-wire');
+    // Register before the first await so partial setup and the global sweep
+    // retain this fixture's exact owners. Only their shared close removes root.
+    const owned: {
+      daemon?: DaemonServer;
+      services?: RuntimeServices;
+      restoreJudgment?: () => void;
+    } = {};
+    cleanup = registerProjectTempDrain(root, async () => {
+      try {
+        await owned.daemon?.stop();
+      } finally {
+        try {
+          // Reveal the graph's still-live composed port before graph.close
+          // retires it and restores its own predecessor. A newer owner wins.
+          owned.restoreJudgment?.();
+        } finally {
+          try {
+            await owned.services?.close();
+          } finally {
+            // The facade initializes the borrowed graph's canonical store;
+            // graph.close drains pollers but does not close that store.
+            owned.services?.memoryStore.close();
+          }
+        }
+      }
+    });
     workingDir = join(root, 'workspace');
     homeDir = join(root, 'home');
     mkdirSync(workingDir, { recursive: true });
@@ -109,8 +146,8 @@ describe('memory CLI: daemon up routes over the wire', () => {
     mkdirSync(daemonHomeDir, { recursive: true });
     mkdirSync(daemonWorkingDir, { recursive: true });
     port = await reservePort();
-    daemonServices = (await createPreparedAgentRuntimeServices({
-      // Opt out: this process does not outlive the unawaited sweep.
+    daemonServices = owned.services = (await createPreparedAgentRuntimeServices({
+      // The wire-memory fixture does not need provider model discovery.
       modelDiscovery: 'skip',
       runtimeStore: createRuntimeStore(),
       runtimeBus: new RuntimeEventBus(),
@@ -137,8 +174,10 @@ describe('memory CLI: daemon up routes over the wire', () => {
       return noulAnswer(0.97);
     });
     searchRequests = readings.requests;
-    previousPort = installJudgmentPort(readings.port);
-    daemon = new DaemonServer({ port, host: '127.0.0.1', runtimeServices: daemonServices.asDaemonGradeView(), userAuth: createUserAuth(daemonHomeDir) });
+    const previousPort = installJudgmentPort(readings.port);
+    composedPort = previousPort;
+    owned.restoreJudgment = () => { restoreJudgmentPort(readings.port, previousPort); };
+    daemon = owned.daemon = new DaemonServer({ port, host: '127.0.0.1', runtimeServices: daemonServices.asDaemonGradeView(), userAuth: createUserAuth(daemonHomeDir) });
     daemon.enable({ daemon: true }, TEST_TOKEN);
     await daemon.start();
 
@@ -156,13 +195,71 @@ describe('memory CLI: daemon up routes over the wire', () => {
   });
 
   afterEach(async () => {
+    await cleanup?.();
+  });
+
+  test('wire fixture cleanup and the global sweep join the same real daemon and borrowed graph', async () => {
+    const originalStop = daemon.stop.bind(daemon);
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const stop = spyOn(daemon, 'stop').mockImplementation(async () => { await held; await originalStop(); });
+    const originalClose = daemonServices.close.bind(daemonServices);
+    const close = spyOn(daemonServices, 'close').mockImplementation(() => {
+      expect(currentJudgmentPort()).toBe(composedPort);
+      return originalClose();
+    });
+    const storeClose = spyOn(daemonServices.memoryStore, 'close');
+    let swept = false;
+    const closing = cleanup();
+    const sweep = sweepCreatedProjectTempDirs().then(() => { swept = true; });
     try {
-      await daemon?.stop();
+      expect(cleanup()).toBe(closing);
+      await Promise.resolve();
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(close).not.toHaveBeenCalled();
+      expect(storeClose).not.toHaveBeenCalled();
+      expect(existsSync(root)).toBe(true);
+      expect(daemon.isRunning).toBe(true);
+      expect(swept).toBe(false);
+      release();
+      await Promise.all([closing, sweep]);
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(storeClose).toHaveBeenCalledTimes(1);
+      expect(daemon.isRunning).toBe(false);
+      expect(existsSync(root)).toBe(false);
+      expect(currentJudgmentPort()).not.toBe(composedPort);
+      expect(cleanup()).toBe(closing);
     } finally {
-      installJudgmentPort(previousPort);
-      await daemonServices?.close();
+      release();
+      try { await Promise.all([closing, sweep]); }
+      finally { stop.mockRestore(); close.mockRestore(); storeClose.mockRestore(); }
     }
-    rmSync(root, { recursive: true, force: true });
+  });
+
+  test('wire fixture cleanup preserves an unrelated newer judgment owner', async () => {
+    const privacyAnswer = privacyReadings(join(root, 'daemon-home', '.goodvibes', 'tui', 'model-tiers.json'));
+    const newer = fakePort((name, question, state) => {
+      const answer = privacyAnswer(name, question, state);
+      if (answer === undefined) throw new Error(`Unexpected newer-owner question: ${name}`);
+      return answer;
+    });
+    const originalClose = daemonServices.close.bind(daemonServices);
+    const close = spyOn(daemonServices, 'close').mockImplementation(() => {
+      expect(currentJudgmentPort()).toBe(newer.port);
+      return originalClose();
+    });
+    installJudgmentPort(newer.port);
+    try {
+      await cleanup();
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(currentJudgmentPort()).toBe(newer.port);
+      expect(existsSync(root)).toBe(false);
+    } finally {
+      // The fixture and its graph have retired; restore the predecessor that
+      // existed before either was installed, never either retired port.
+      restoreJudgmentPort(newer.port, preGraphPort);
+      close.mockRestore();
+    }
   });
 
   test('memory add reaches the DAEMON store, not the CLI\'s local canonical file', async () => {

@@ -93,7 +93,12 @@ function assertCreatedDirCurrent(entry: CreatedProjectDir): void {
   const current = lstatSync(entry.path);
   if (!current.isDirectory() || current.isSymbolicLink() || realpathSync(entry.path) !== entry.path
     || current.dev !== entry.dev || current.ino !== entry.ino || current.birthtimeMs !== entry.birthtimeMs || current.uid !== entry.uid) {
-    throw new Error('Refusing cleanup of a replaced Agent fixture root');
+    throw new Error('Refusing cleanup of a replaced Agent fixture root', { cause: {
+      path: entry.path,
+      expected: { dev: entry.dev, ino: entry.ino, birthtimeMs: entry.birthtimeMs, uid: entry.uid },
+      observed: { dev: current.dev, ino: current.ino, birthtimeMs: current.birthtimeMs, uid: current.uid,
+        directory: current.isDirectory(), symlink: current.isSymbolicLink() },
+    } });
   }
 }
 

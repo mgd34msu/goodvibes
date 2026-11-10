@@ -112,6 +112,27 @@ test('both actual publication workflows await one shared four-native-target acce
     .toBe('node scripts/accept-published-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET"');
 });
 
+test('native release preparation retains its complete current merge tooling before the immutable tag checkout', () => {
+  const workflow = Bun.YAML.parse(readFileSync(resolve(import.meta.dir, '../.github/workflows/release.yml'), 'utf8')) as {
+    jobs: Record<string, { steps?: { name?: string; uses?: string; run?: string; with?: { ref?: string } }[] }>;
+  };
+  const steps = workflow.jobs['prepare-native-assets']?.steps;
+  if (!steps) throw new Error('Missing native release preparation steps.');
+  const retained = steps.findIndex(step => step.name === 'Retain release merge tooling');
+  const released = steps.findIndex(step => step.name === 'Checkout released source');
+  expect(steps[0]?.name).toBe('Checkout release tooling');
+  expect(steps[0]?.uses).toStartWith('actions/checkout@');
+  expect(steps[0]?.with?.ref).toBeUndefined();
+  expect(retained).toBeGreaterThan(0); expect(released).toBeGreaterThan(retained);
+  expect(steps[released]?.with?.ref).toBe('refs/tags/${{ needs.verify-tag-version.outputs.tag }}');
+  for (const filename of ['merge-suite-release-assets.py', 'release_asset_pins.py', 'release_asset_sources.py']) {
+    expect(steps[retained]?.run).toContain(`.github/scripts/${filename}`);
+  }
+  const complete = steps.find(step => step.name === 'Complete the admitted native release');
+  expect(complete?.run).toContain('python3 "$RUNNER_TEMP/release-merge-tooling/merge-suite-release-assets.py"');
+  expect(complete?.run).toContain('"$RELEASE_TAG" "$SOURCE_SHA"');
+});
+
 
 function historicalSteps(events: string[]): HistoricalUpgradeSteps {
   const record = (name: string) => async () => { events.push(name); };

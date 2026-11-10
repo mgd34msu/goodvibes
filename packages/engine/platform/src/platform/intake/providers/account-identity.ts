@@ -60,7 +60,7 @@ const format: InboxIdentityRegistryFormat<Registry> = {
 };
 declare const identityBrand: unique symbol;
 export interface AccountInboxIdentity { readonly [identityBrand]: true }
-interface RetainedIdentity { readonly binding: AccountInboxBinding; readonly selectors: AccountInboxSelectors; readonly current: () => void; electionScope?: string }
+interface RetainedIdentity { readonly binding: AccountInboxBinding; readonly selectors: AccountInboxSelectors; readonly current: () => void; electionScope: string | undefined }
 const identities = new WeakMap<AccountInboxIdentity, RetainedIdentity>();
 function captureBinding(input: AccountInboxBinding): AccountInboxBinding {
   const binding = bindingSchema.parse(input);

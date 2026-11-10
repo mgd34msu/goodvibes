@@ -26,7 +26,7 @@ const entrySchema = z.object({ binding: bindingSchema, id: opaqueId,
 }).strict();
 const registrySchema = z.object({ schema: z.literal(1), registries: z.array(revisionSchema).max(1024), scopes: z.array(entrySchema).max(1024) }).strict();
 type Registry = z.infer<typeof registrySchema>;
-interface IdentityData { readonly configuredRegistry: boolean; electionScope?: string; readonly binding: DiscordInboxBinding; readonly scopeId: string; readonly triageFileName: string; readonly assertDirectoryCurrent: () => void }
+interface IdentityData { readonly configuredRegistry: boolean; electionScope: string | undefined; readonly binding: DiscordInboxBinding; readonly scopeId: string; readonly triageFileName: string; readonly assertDirectoryCurrent: () => void }
 declare const discordIdentity: unique symbol;
 export interface DiscordInboxIdentity { readonly [discordIdentity]: true }
 const identities = new WeakMap<DiscordInboxIdentity, IdentityData>();

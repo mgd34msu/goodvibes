@@ -92,12 +92,24 @@ test('both actual publication workflows await one shared four-native-target acce
   const fresh = object(release['published-install-acceptance']), existing = object(suite['published-install-acceptance']);
   expect(fresh.uses).toBe(reusable); expect(existing.uses).toBe(reusable);
   expect(fresh.needs).toEqual(['verify-tag-version', 'github-release']); expect(existing.needs).toBe('collect');
-  expect(fresh.if).toBe("needs.github-release.result == 'success'");
+  // An explicit status check avoids implicit success() propagating a skipped
+  // publish-npm ancestor; both required direct jobs must still have succeeded.
+  expect(String(fresh.if).split(/\s*&&\s*/)).toEqual([
+    '!cancelled()', "needs.verify-tag-version.result == 'success'", "needs.github-release.result == 'success'",
+  ]);
   expect(existing.if).toBe("inputs.publish_existing && needs.collect.result == 'success'");
   expect(object(existing.with).source).toBe('${{ needs.collect.outputs.source }}');
   expect(object(object(suite.collect).outputs).source).toBe('${{ steps.admit.outputs.source }}');
   for (const caller of [fresh, existing]) expect(object(caller.with)['tooling-sha']).toBe('${{ github.sha }}');
   const definition = workflow('reusable-published-install-acceptance.yml');
+  for (const trigger of ['workflow_call', 'workflow_dispatch']) {
+    const inputs = object(object(object(definition.on)[trigger]).inputs);
+    expect(Object.keys(inputs).sort()).toEqual(['source', 'tag', 'tooling-sha']);
+    for (const input of Object.values(inputs).map(object)) {
+      expect(input).toMatchObject({ required: true, type: 'string' });
+      expect(input.default).toBeUndefined();
+    }
+  }
   const native = object(object(definition.jobs)['native-install']);
   const include = object(object(native.strategy).matrix).include;
   expect(include).toEqual([
@@ -108,7 +120,11 @@ test('both actual publication workflows await one shared four-native-target acce
   const steps = native.steps; if (!Array.isArray(steps)) throw new Error('Expected native steps.');
   expect(steps.map(object).find(step => String(step.uses).startsWith('actions/checkout@'))?.with)
     .toEqual({ ref: '${{ inputs.tooling-sha }}' });
-  expect(steps.map(object).find(step => step.name === 'Download, install, serve and uninstall the published suite')?.run)
+  const install = steps.map(object).find(step => step.name === 'Download, install, serve and uninstall the published suite');
+  expect(install?.env).toEqual({
+    RELEASE_TAG: '${{ inputs.tag }}', RELEASE_SOURCE: '${{ inputs.source }}', RELEASE_TARGET: '${{ matrix.target }}',
+  });
+  expect(install?.run)
     .toBe('node scripts/accept-published-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET"');
 });
 
@@ -197,7 +213,7 @@ test('historical rollback accepts only the actual admission refusal and checks o
 
 test('historical upgrade uses separate Linux-only hosted accounts and a verifier build without native payload copying', () => {
   const value = Bun.YAML.parse(readFileSync(resolve(import.meta.dir, '../.github/workflows/reusable-published-install-acceptance.yml'), 'utf8')) as {
-    jobs: Record<string, { if: string; strategy: { matrix: { include: Array<{ target: string; runner: string }> } }; steps: Array<{ name?: string; run?: string; uses?: string; with?: Record<string, unknown> }> }>;
+    jobs: Record<string, { if: string; strategy: { matrix: { include: Array<{ target: string; runner: string }> } }; steps: Array<{ name?: string; run?: string; uses?: string; with?: Record<string, unknown>; env?: Record<string, string> }> }>;
   };
   const job = value.jobs['historical-linux-upgrade']!;
   expect(job.if).toBe("inputs.tag == 'v3.1.2'");
@@ -206,6 +222,10 @@ test('historical upgrade uses separate Linux-only hosted accounts and a verifier
   expect(job.steps.find(step => step.name === 'Verify the original released payload source')?.run).toBe('test "$(git rev-parse HEAD)" = "$PAYLOAD_SOURCE"');
   expect(job.steps.find(step => step.name === 'Build only the source-bound rollback verifier')?.run)
     .toBe('bun install --frozen-lockfile\nbun packages/engine/scripts/build.ts\n');
-  expect(job.steps.find(step => step.name === 'Observe actual old unattended upgrade and unsupported rollback refusal')?.run)
+  const upgrade = job.steps.find(step => step.name === 'Observe actual old unattended upgrade and unsupported rollback refusal');
+  expect(upgrade?.env).toEqual({
+    RELEASE_TAG: '${{ inputs.tag }}', RELEASE_SOURCE: '${{ inputs.source }}', RELEASE_TARGET: '${{ matrix.target }}',
+  });
+  expect(upgrade?.run)
     .toBe('node scripts/accept-published-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET" upgrade-v3.1.1');
 });

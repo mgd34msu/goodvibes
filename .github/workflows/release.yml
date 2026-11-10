@@ -407,7 +407,13 @@ jobs:
 
   published-install-acceptance:
     needs: [verify-tag-version, github-release]
-    if: needs.github-release.result == 'success'
+    # Native-only releases skip publish-npm. Override implicit success() so
+    # that skipped ancestor cannot suppress acceptance after publication,
+    # while cancellation still stops new acceptance jobs.
+    if: >-
+      !cancelled() &&
+      needs.verify-tag-version.result == 'success' &&
+      needs.github-release.result == 'success'
     permissions:
       contents: read
     uses: ./.github/workflows/reusable-published-install-acceptance.yml

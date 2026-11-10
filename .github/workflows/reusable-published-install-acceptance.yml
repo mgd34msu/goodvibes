@@ -1,6 +1,21 @@
 name: Reusable published native install acceptance
 
 on:
+  # Recheck already-published bytes without rebuilding or uploading payloads.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to install and verify.
+        required: true
+        type: string
+      source:
+        description: Full original payload commit recorded by the published readers.
+        required: true
+        type: string
+      tooling-sha:
+        description: Full commit containing the acceptance tooling to run.
+        required: true
+        type: string
   workflow_call:
     inputs:
       tag:

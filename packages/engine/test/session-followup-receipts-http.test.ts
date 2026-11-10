@@ -11,6 +11,7 @@ import type { RouteBindingManager } from '../platform/src/platform/channels/inde
 import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-api/src/runtime-session-routes.js';
 import type { DaemonRuntimeRouteContext } from '../daemon-api/src/runtime-route-types.js';
 import { dispatchSessionRoutes } from '../daemon-api/src/sessions.js';
+import { readStructuredDaemonRefusal } from '../platform/src/platform/judgment-browser/batteries/webui-readers.js';
 
 const SESSION_ID = 's-tui-idle';
 const BODY = 'Queue a cleanup pass for later';
@@ -190,3 +191,35 @@ for (const outcome of ['completed', 'failed', 'cancelled'] as const) {
     } finally { await fixture.stop(); }
   });
 }
+
+
+test('missing shared-session HTTP routes preserve the canonical structured refusal without a semantic reading', async () => {
+  const fixture = serveSessions();
+  const base = '/api/sessions/owned-missing-session';
+  const cases = [
+    { methodId: 'sessions.get', path: base },
+    { methodId: 'sessions.messages.list', path: `${base}/messages` },
+    { methodId: 'sessions.inputs.list', path: `${base}/inputs` },
+    { methodId: 'sessions.close', path: `${base}/close`, body: {} },
+    { methodId: 'sessions.reopen', path: `${base}/reopen`, body: {} },
+    { methodId: 'sessions.detach', path: `${base}/detach`, body: { surfaceId: 'surface:tui:owned-missing' } },
+  ];
+  try {
+    for (const entry of cases) {
+      const response = await fetch(`${fixture.baseUrl}${entry.path}`, {
+        method: entry.body === undefined ? 'GET' : 'POST',
+        ...(entry.body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(entry.body) }),
+      });
+      expect(response.status, entry.methodId).toBe(404);
+      const body = await response.json();
+      expect(body, entry.methodId).toEqual({ error: 'Unknown shared session', code: 'SESSION_NOT_FOUND', status: 404 });
+      expect(readStructuredDaemonRefusal({ methodId: entry.methodId, status: response.status, message: body.error, code: body.code }), entry.methodId).toEqual({
+        status: 'ready', basis: 'structured', value: {
+          session_not_found: true, session_closed: false, session_active: false, session_not_local: false, method_unknown: false,
+        },
+      });
+    }
+    expect(fixture.broker.getSession('owned-missing-session')).toBeNull();
+    expect(fixture.spawnCount).toBe(0);
+  } finally { await fixture.stop(); }
+});

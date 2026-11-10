@@ -16,7 +16,7 @@ npm install @goodvibes-jev/judgment
 - `@goodvibes-jev/judgment/decisions`: the runtime-neutral part (batteries, readings, bands, port types and the autonomous `JevDecision` schema/validation) with no transport, decision log, Node or Bun module. Code that runs in browsers and Workers imports this subpath.
 - `@goodvibes-jev/judgment/testing`: a fake port and answer builders for tests that must not call a model.
 
-## Current contract and migration status
+## Decision receipts and compatibility
 
 The autonomous Jev decision contract
 is the target for every semantic decision. Consumers use `act`, `revise`, `defer`
@@ -28,10 +28,8 @@ service or atomic execution ledger. Historical band/log outcomes `confirm` and
 All configured decision chains use finite attempts and halt on exhaustion.
 Targets may use different supported models or protocols. A valid semantic answer
 ends the chain; cancellation, host authority and decision-log failures remain
-terminal. Products consume that shared lifecycle without local recovery loops;
-legacy autonomous consumer migration remains unfinished. See the
-[repository status](../../README.md#status) for the open admission and
-grant/revocation work. No live-provider proof is established by these interfaces.
+terminal. Products consume that shared lifecycle without local recovery loops.
+These interfaces do not establish live-provider behavior or model accuracy.
 
 ## A port and a battery
 

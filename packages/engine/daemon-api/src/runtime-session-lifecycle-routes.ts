@@ -17,7 +17,7 @@ export async function handleGetSharedSession(context: DaemonRuntimeRouteContext,
   await context.sessionBroker.start();
   const session = context.sessionBroker.getSession(sessionId);
   if (!session) {
-    return jsonErrorResponse({ error: 'Unknown shared session' }, { status: 404 });
+    return jsonErrorResponse({ error: 'Unknown shared session', code: 'SESSION_NOT_FOUND' }, { status: 404 });
   }
   const messages = context.sessionBroker.getMessages(sessionId, 100);
   return Response.json({
@@ -37,7 +37,7 @@ export async function handleSharedSessionLifecycle(
     : await context.sessionBroker.reopenSession(sessionId);
   return session
     ? Response.json({ session: toSharedSessionRecordResponse(sessionId, session, { status: action === 'close' ? 'closed' : 'active' }) })
-    : jsonErrorResponse({ error: 'Unknown shared session' }, { status: 404 });
+    : jsonErrorResponse({ error: 'Unknown shared session', code: 'SESSION_NOT_FOUND' }, { status: 404 });
 }
 
 /**
@@ -82,5 +82,5 @@ export async function handleSharedSessionDetach(
   const session = await context.sessionBroker.detachParticipant(sessionId, surfaceId);
   return session
     ? Response.json({ session: toSharedSessionRecordResponse(sessionId, session) })
-    : jsonErrorResponse({ error: 'Unknown shared session' }, { status: 404 });
+    : jsonErrorResponse({ error: 'Unknown shared session', code: 'SESSION_NOT_FOUND' }, { status: 404 });
 }

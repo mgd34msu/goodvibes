@@ -1,8 +1,8 @@
-/** Real daemon-served bundle and routes. No intercepted requests or model calls. */
+/** Real native HTTP/SSE and daemon-served bundle; no browser interception or live model quality claim. */
 import { strict as assert } from 'node:assert';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { chromium, expect, type Page, type Request } from '@playwright/test';
+import { chromium, expect, type Page, type Request, type APIResponse } from '@playwright/test';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
 import { isJsonRecord } from '@goodvibes-jev/engine/daemon-api';
 
@@ -137,6 +137,14 @@ try {
         && new URL(response.url()).pathname === `/api/sessions/${createdId}`);
       await page.getByRole('alertdialog', { name: 'Delete this session?', exact: true }).getByRole('button', { name: 'Delete', exact: true }).click();
       assert.equal((await deleted).status(), 200, 'The browser deletion must reach the real daemon');
+      const missingMessages: APIResponse = await page.request.get(new URL(`/api/sessions/${encodeURIComponent(createdId)}/messages`, origin).href,
+        { headers: { authorization: `Bearer ${token}` } });
+      assert.equal(missingMessages.status(), 404, 'The original deleted session remains absent');
+      const missingBody: unknown = await missingMessages.json();
+      assert.ok(isJsonRecord(missingBody));
+      assert.equal(missingBody.code, 'SESSION_NOT_FOUND', 'The native producer must provide the existing structural refusal');
+      assert.equal(Object.hasOwn(missingBody, 'errorRef'), false, 'A known missing session needs no semantic refusal reference');
+
       const listed = await invoke(page, 'sessions.list');
       assert.ok(Array.isArray(listed.sessions), 'The final list must contain session records');
       assert.equal(listed.sessions.some((record: unknown) => isJsonRecord(record) && record.id === createdId), false, 'The daemon must verify hard deletion');
@@ -177,11 +185,11 @@ try {
       await context.close();
     }
   }
-  writeFileSync(resolve(output, 'receipts.json'), `${JSON.stringify({ scope: 'real daemon-served browser, no model calls or interception', passed: true, receipts, routes }, null, 2)}\n`);
+  writeFileSync(resolve(output, 'receipts.json'), `${JSON.stringify({ scope: 'real daemon-served native HTTP/SSE, no browser interception; configured synthetic decision transport is wiring proof, not live model quality', passed: true, receipts, routes }, null, 2)}\n`);
   process.stdout.write(`Connected browser smoke passed ${receipts.length} stages across desktop and phone. No model or live calibration claim.\n`);
 } catch (error: unknown) {
   writeFileSync(resolve(output, 'receipts.json'), `${JSON.stringify({
-    scope: 'real daemon-served browser, no model calls or interception', passed: false, receipts, routes,
+    scope: 'real daemon-served native HTTP/SSE, no browser interception; configured synthetic decision transport is wiring proof, not live model quality', passed: false, receipts, routes,
   }, null, 2)}\n`);
   const message = error instanceof Error ? error.message : 'Unknown browser failure';
   process.stderr.write(`Connected browser smoke failed: ${message.replaceAll(token, '[redacted]')}\n`);

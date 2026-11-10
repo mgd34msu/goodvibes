@@ -388,7 +388,7 @@ async function handleGetSharedSessionMessages(
   await context.sessionBroker.start();
   const session = context.sessionBroker.getSession(sessionId);
   if (!session) {
-    return jsonErrorResponse({ error: 'Unknown shared session' }, { status: 404 });
+    return jsonErrorResponse({ error: 'Unknown shared session', code: 'SESSION_NOT_FOUND' }, { status: 404 });
   }
   const limit = readBoundedLimit(url);
   const offset = Number(url.searchParams.get('offset') ?? 0);
@@ -411,7 +411,7 @@ async function handleGetSharedSessionInputs(
   await context.sessionBroker.start();
   const session = context.sessionBroker.getSession(sessionId);
   if (!session) {
-    return jsonErrorResponse({ error: 'Unknown shared session' }, { status: 404 });
+    return jsonErrorResponse({ error: 'Unknown shared session', code: 'SESSION_NOT_FOUND' }, { status: 404 });
   }
   const limit = readBoundedLimit(url);
   // Collection cursor for live surfaces: filter by state (e.g. 'queued') and/or a

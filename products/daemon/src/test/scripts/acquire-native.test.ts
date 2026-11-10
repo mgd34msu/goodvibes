@@ -4,11 +4,11 @@ import { expect, test } from 'bun:test';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { DAEMON_CI_PAYLOADS, recordDaemonCiArtifact } from '../../../scripts/ci-artifact.ts';
+import { DAEMON_CI_PAYLOADS } from '../../../scripts/ci-artifact.ts';
 import { acquireDaemonNative, DAEMON_CI_REPOSITORY, stageDaemonCiArchive, type RunGitHub } from '../../../scripts/acquire-native.ts';
 import { readDaemonInstallOwner, type DaemonInstallOwner } from '../../../scripts/install-native.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
-import { nativeRuntimeProvenance } from '../helpers/native-runtime-provenance.ts';
+import { nativeRuntimeProvenance, writeV1NativeArtifactFixture } from '../helpers/native-runtime-provenance.ts';
 
 const nativeTest = process.platform === 'linux' && process.arch === 'x64' ? test : test.skip;
 const owner: DaemonInstallOwner = { target: 'linux-x64', sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40), version: '1.2.3' };
@@ -18,7 +18,8 @@ async function fixture() {
     const full = join(source, 'native', path); mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, index === 3 ? nativeRuntimeProvenance('synthetic-1') : `synthetic-${index}`); chmodSync(full, index < 2 ? 0o755 : 0o644);
   }
-  await recordDaemonCiArtifact(source, owner);
+  // Archive admission uses inert payloads, not compiled reader evidence.
+  writeV1NativeArtifactFixture(source, owner);
   const archive = join(root, 'native.tgz');
   const pack = () => execFileSync('tar', ['-czf', archive, ...[...DAEMON_CI_PAYLOADS, 'ci-artifact.json'].map(path => `products/daemon/native/${path}`)], { cwd: root });
   pack();
@@ -124,13 +125,13 @@ nativeTest('actual native:acquire CLI uses the fixed CI owner and immutable prod
   const f = await fixture(); mkdirSync(join(f.source, 'scripts'));
   writeFileSync(join(f.root, '.gitignore'), 'node_modules/\nproducts/daemon/native/\nnative.tgz\ninstalled prefix/\nfake-bin/\nfixture.json\n');
   writeFileSync(join(f.source, 'package.json'), JSON.stringify({ name: '@goodvibes-jev/daemon', private: true, version: '1.2.3', type: 'module', scripts: { 'native:acquire': 'sh scripts/install-native.sh acquire' } }));
-  for (const name of ['acquire-native.ts', 'install-native.ts', 'ci-artifact.ts', 'install-native.sh', 'check-bun.sh']) copyFileSync(resolve(import.meta.dir, '../../../scripts', name), join(f.source, 'scripts', name));
+  for (const name of ['acquire-native.ts', 'install-native.ts', 'ci-artifact.ts', 'native-execution-process.mjs', 'install-native.sh', 'check-bun.sh']) copyFileSync(resolve(import.meta.dir, '../../../scripts', name), join(f.source, 'scripts', name));
   mkdirSync(join(f.source, 'src/cli'), { recursive: true });
   for (const name of ['native-artifact.ts', 'native-installation.ts']) writeFileSync(join(f.source, 'src/cli', name), readFileSync(resolve(import.meta.dir, '../../cli', name)));
   const git = (...args: string[]) => execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: f.root, encoding: 'utf8', stdio: 'pipe', env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))) }).trim();
   git('init', '--quiet'); git('add', '.'); git('-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'fixture');
   const sha = git('rev-parse', 'HEAD'); const selected = readDaemonInstallOwner(f.root, sha, sha);
-  await recordDaemonCiArtifact(f.source, selected); f.pack(); f.run.head_sha = sha; f.artifact.workflow_run.head_sha = sha;
+  writeV1NativeArtifactFixture(f.source, selected); f.pack(); f.run.head_sha = sha; f.artifact.workflow_run.head_sha = sha;
   const engine = dirname(createRequire(import.meta.url).resolve('@goodvibes-jev/engine/package.json'));
   mkdirSync(join(f.root, 'node_modules/@goodvibes-jev'), { recursive: true }); symlinkSync(engine, join(f.root, 'node_modules/@goodvibes-jev/engine'), 'dir');
   const bin = join(f.root, 'fake-bin'); mkdirSync(bin);

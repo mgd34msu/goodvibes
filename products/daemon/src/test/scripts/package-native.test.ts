@@ -7,12 +7,12 @@ import { stageDaemonCiArchive } from '../../../scripts/acquire-native.ts';
 import { installDaemonNative, readDaemonInstallOwner, type DaemonInstallOwner } from '../../../scripts/install-native.ts';
 import { packDaemonNative, parseNativePackageArgs, verifyDaemonNativePackage } from '../../../scripts/package-native.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
-import { nativeRuntimeProvenance } from '../helpers/native-runtime-provenance.ts';
+import { nativeReaderProbeScript, nativeRuntimeProvenance } from '../helpers/native-runtime-provenance.ts';
 
 const owner: DaemonInstallOwner = { target: 'linux-x64', sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40), version: '1.2.3' };
 async function fixture() {
   const root = makeOwnedTempDir('daemon-private-package'); const source = join(root, 'source');
-  const data = ['#!/bin/sh\nexec "$(dirname "$0")/goodvibes-daemon-linux-x64.bun" "$@"\n', '#!/bin/sh\nprintf "fixture daemon 1.2.3\\n"\n', 'fixture license', '{}', 'fixture addon'];
+  const data = [nativeReaderProbeScript(owner.version, 'exec "$0.bun" "$@"'), '#!/bin/sh\nprintf "fixture daemon 1.2.3\\n"\n', 'fixture license', '{}', 'fixture addon'];
   data[3] = nativeRuntimeProvenance(data[1]!);
   for (const [i, path] of DAEMON_CI_PAYLOADS.entries()) {
     const file = join(source, 'native', path); mkdirSync(dirname(file), { recursive: true });

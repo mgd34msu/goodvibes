@@ -8,7 +8,7 @@ import { DAEMON_CI_PAYLOADS, recordDaemonCiArtifact } from '../../../scripts/ci-
 import { installDaemonNative, readDaemonInstallOwner } from '../../../scripts/install-native.ts';
 import { verifiedDaemonNativePath } from '../../cli/native-launch.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
-import { nativeRuntimeProvenance } from '../helpers/native-runtime-provenance.ts';
+import { nativeReaderProbeScript, nativeRuntimeProvenance } from '../helpers/native-runtime-provenance.ts';
 const nativeTest = process.platform === 'linux' && process.arch === 'x64' ? test : test.skip;
 
 async function fixture(runtime = 'console.log(JSON.stringify(process.argv.slice(2))); process.exitCode = 17;') {
@@ -20,7 +20,7 @@ async function fixture(runtime = 'console.log(JSON.stringify(process.argv.slice(
   writeFileSync(join(product, 'tsconfig.json'), '{}');
   writeFileSync(join(product, 'dist/cli/entrypoint.js'), 'console.log("emitted-default");');
   copyFileSync(resolve(import.meta.dir, '../../../bin/goodvibes-daemon'), join(product, 'bin/goodvibes-daemon'));
-  for (const file of ['install-native.ts', 'acquire-native.ts', 'run-native.ts', 'ci-artifact.ts', 'install-native.sh', 'check-bun.sh']) copyFileSync(resolve(import.meta.dir, '../../../scripts', file), join(product, 'scripts', file));
+  for (const file of ['install-native.ts', 'acquire-native.ts', 'run-native.ts', 'ci-artifact.ts', 'native-execution-process.mjs', 'install-native.sh', 'check-bun.sh']) copyFileSync(resolve(import.meta.dir, '../../../scripts', file), join(product, 'scripts', file));
   for (const file of ['native-artifact.ts', 'native-installation.ts', 'native-launch.ts']) copyFileSync(resolve(import.meta.dir, '../../cli', file), join(product, 'src/cli', file));
   const git = (...args: string[]) => execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: root, encoding: 'utf8', stdio: 'pipe', env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))) }).trim();
   git('init', '--quiet'); git('add', '.'); git('-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'fixture');
@@ -30,7 +30,7 @@ async function fixture(runtime = 'console.log(JSON.stringify(process.argv.slice(
   const source = join(root, 'artifacts/products/daemon');
   const runtimeBytes = `#!${process.execPath}\n${runtime}\n`;
   for (const [index, file] of DAEMON_CI_PAYLOADS.entries()) {
-    const bytes = index === 0 ? '#!/bin/sh\nexec "$0.bun" "$@"\n' : index === 1 ? runtimeBytes : index === 3 ? nativeRuntimeProvenance(runtimeBytes) : `fixture-${index}`;
+    const bytes = index === 0 ? nativeReaderProbeScript(owner.version, 'exec "$0.bun" "$@"') : index === 1 ? runtimeBytes : index === 3 ? nativeRuntimeProvenance(runtimeBytes) : `fixture-${index}`;
     const path = join(source, 'native', file); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, bytes); chmodSync(path, index < 2 ? 0o755 : 0o644);
   }
   await recordDaemonCiArtifact(source, owner);

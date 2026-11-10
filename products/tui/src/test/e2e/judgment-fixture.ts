@@ -276,6 +276,6 @@ export function startE2EJudgments(options: { readonly ordinaryHomes?: readonly s
   } });
   return { baseURL: `http://127.0.0.1:${server.port}`, accepted, rejected, unexpected,
     assertNoUnexpected: () => { if (unexpected.length) throw new Error(`E2E encountered ${unexpected.length} unknown judgment request(s): ${JSON.stringify(unexpected)}`); },
-    stop: () => { void server.stop(true); },
+    stop: () => server.stop(true),
   };
 }

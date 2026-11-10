@@ -63,7 +63,7 @@ test('the owned loopback service rejects unknown judgments and only exempts exac
       { ...unavailable[0], model: 'changed' },
     ]) expect((await post(body)).status).toBe(422);
     expect(server.unexpected).toHaveLength(4);
-  } finally { server.stop(); }
+  } finally { await server.stop(); }
 });
 
 

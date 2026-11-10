@@ -5,7 +5,7 @@
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { startE2ENativeHost } from './native-host-fixture.ts';
-import { inputAreaVisible, isolatedEnv, lastUserText, launchTui, makeHome, resolveBinary, screenText, startStubModel, type TuiSession } from './harness.ts';
+import { closeE2EFixture, inputAreaVisible, isolatedEnv, lastUserText, launchTui, makeHome, resolveBinary, screenText, startStubModel, type TuiSession } from './harness.ts';
 
 const PROMPT = 'give this project a code review';
 const REPLY = 'I will review the project code.';
@@ -15,7 +15,7 @@ const model = startStubModel((request) => (
 ));
 let tui: TuiSession | null = null;
 let host: Awaited<ReturnType<typeof startE2ENativeHost>> | null = null;
-afterAll(async () => { try { await tui?.stop(); } finally { try { await host?.stop(); } finally { model.stop(); } } });
+afterAll(() => closeE2EFixture(null, () => tui?.stop(), () => host?.stop(), () => model.stop()));
 
 describe('first turn', () => {
   test('a code-review prompt reaches the model from the composer and CLI without native admission', async () => {

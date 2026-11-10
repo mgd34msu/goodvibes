@@ -6,7 +6,7 @@
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { startE2ENativeHost } from './native-host-fixture.ts';
-import { inputAreaVisible, lastUserText, launchTui, makeHome, screenText, startStubModel, waitFor, type TuiSession } from './harness.ts';
+import { closeE2EFixture, inputAreaVisible, lastUserText, launchTui, makeHome, screenText, startStubModel, waitFor, type TuiSession } from './harness.ts';
 
 const PROMPT = 'summarize the heron migration notes';
 const REPLY = 'Herons migrate south in autumn.';
@@ -16,7 +16,7 @@ const model = startStubModel((request) => (
 ));
 let tui: TuiSession | null = null;
 let host: Awaited<ReturnType<typeof startE2ENativeHost>> | null = null;
-afterAll(async () => { try { await tui?.stop(); } finally { try { await host?.stop(); } finally { model.stop(); } } });
+afterAll(() => closeE2EFixture(null, () => tui?.stop(), () => host?.stop(), () => model.stop()));
 
 /** Every OSC 9 payload in a raw terminal stream. */
 function osc9Payloads(raw: string): string[] {

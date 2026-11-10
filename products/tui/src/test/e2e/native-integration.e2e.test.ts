@@ -159,7 +159,7 @@ async function fixture(withoutInspection = false) {
         await attempt(() => proxy?.stop(true));
         await attempt(() => model.stop());
         await attempt(() => { violations = existsSync(networkViolations) ? readFileSync(networkViolations, 'utf8') : ''; });
-        await attempt(() => rmSync(home.root, { recursive: true, force: true }));
+        if (errors.length === 0) await attempt(() => rmSync(home.root, { recursive: true, force: true }));
         await attempt(() => { expect(output).not.toContain(ready.token); expect(screen).not.toContain(ready.token); });
         await attempt(() => { expect(model.requests).toEqual([]); expect(violations).toBe(''); });
         if (errors.length) throw new AggregateError(primaryError === undefined ? errors : [primaryError, ...errors], 'Compiled native assertion or owned cleanup failed');
@@ -168,9 +168,9 @@ async function fixture(withoutInspection = false) {
   } catch (error) {
     const cleanup = await Promise.allSettled([Promise.resolve().then(() => tui?.stop()), Promise.resolve().then(() => client?.dispose()),
       Promise.resolve().then(() => proxy?.stop(true)), host.stop(), Promise.resolve().then(() => model.stop())]);
-    rmSync(home.root, { recursive: true, force: true });
     const failures = cleanup.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
     if (failures.length) throw new AggregateError([error, ...failures], 'Native fixture setup and cleanup failed');
+    rmSync(home.root, { recursive: true, force: true });
     throw error;
   }
 }

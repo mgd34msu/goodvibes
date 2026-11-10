@@ -5,7 +5,7 @@
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { startE2ENativeHost } from './native-host-fixture.ts';
-import { inputAreaVisible, lastUserText, launchTui, makeHome, screenText, startStubModel, type TuiSession } from './harness.ts';
+import { closeE2EFixture, inputAreaVisible, lastUserText, launchTui, makeHome, screenText, startStubModel, type TuiSession } from './harness.ts';
 
 const PROMPT = 'describe the lighthouse keeper routine';
 const REPLY = 'The keeper trims the wick at dusk.';
@@ -15,7 +15,7 @@ const model = startStubModel((request) => (
 ));
 let tui: TuiSession | null = null;
 let host: Awaited<ReturnType<typeof startE2ENativeHost>> | null = null;
-afterAll(async () => { try { await tui?.stop(); } finally { try { await host?.stop(); } finally { model.stop(); } } });
+afterAll(() => closeE2EFixture(null, () => tui?.stop(), () => host?.stop(), () => model.stop()));
 
 /** Width of the composer's top bar (the ▄ run), which spans the screen minus its gutters. */
 function composerBarWidth(screen: string): number {

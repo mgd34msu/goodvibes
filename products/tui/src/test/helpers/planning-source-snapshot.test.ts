@@ -20,10 +20,17 @@ async function fixture(run: (store: KnowledgeStore, path: string) => Promise<voi
   } finally { await store.close(); rmSync(root, { recursive: true, force: true }); }
 }
 
-test('planning snapshots exclude legitimate bootstrap schedule writes but preserve every saved raw source generation', async () => fixture(async (store, path) => {
+test('planning snapshots exclude legitimate bootstrap schedule writes but preserve every saved raw source row and native generation', async () => fixture(async (store, path) => {
   const before = await readPlanningSourceSnapshots(path, projectId); const bytes = readFileSync(path);
   expect(before).toHaveLength(2);
-  expect(before.every(snapshot => typeof snapshot.generation === 'string' && snapshot.generation.length > 0)).toBe(true);
+  for (const snapshot of before) {
+    expect(snapshot.source).not.toBeNull(); expect(snapshot.raw).not.toBeNull();
+    expect(snapshot.generation).toMatch(/^kr-[0-9a-f]{32}$/);
+    expect(snapshot.raw?.id).toBe(snapshot.source?.id);
+    expect(snapshot.generation).toBe(`kr-${snapshot.raw?.gv_revision}`);
+    expect(snapshot.raw?.canonical_uri).toBe(snapshot.source?.canonicalUri);
+    expect(JSON.parse(String(snapshot.raw?.metadata))).toEqual(snapshot.source?.metadata);
+  }
   for (const jobId of ['knowledge-light-consolidation', 'knowledge-deep-consolidation', 'knowledge-semantic-self-improvement']) {
     await store.upsertSchedule({ jobId, label: jobId, enabled: true, schedule: { kind: 'every', intervalMs: 86_400_000 }, nextRunAt: Date.now() + 86_400_000, metadata: { bootstrap: true } });
   }

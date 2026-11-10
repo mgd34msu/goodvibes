@@ -168,7 +168,7 @@ test('compiled native reviewed repair fails review, fixes, genuinely re-reviews,
     });
     await attempt(() => host.stop()); await attempt(() => proxy?.stop(true)); await attempt(() => model.stop());
     await attempt(() => { if (home) { const path = join(home.root, 'network-violations.log'); violations = existsSync(path) ? readFileSync(path, 'utf8') : ''; } });
-    await attempt(() => { if (home) rmSync(home.root, { recursive: true, force: true }); });
+    if (errors.length === 0) await attempt(() => { if (home) rmSync(home.root, { recursive: true, force: true }); });
     await attempt(() => { if (token) { expect(output).not.toContain(token); expect(screen).not.toContain(token); } });
     await attempt(() => { expect(model.requests).toEqual([]); expect(violations).toBe(''); });
     if (errors.length) throw new AggregateError(primaryError === undefined ? errors : [primaryError, ...errors], 'Reviewed native assertion or owned cleanup failed');

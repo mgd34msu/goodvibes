@@ -1,27 +1,29 @@
 /** The built TUI in a real PTY: passive historical records survive a process restart. */
 import { expect, test } from 'bun:test';
-import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { KnowledgeStore, ProjectPlanningService, prepareConfiguredProjectContext, createConfiguredPlanningStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { TuiConfigManager } from '../../config/host-settings.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { readPlanningSourceSnapshots } from '../helpers/planning-source-snapshot.ts';
-import { inputAreaVisible, launchTui, makeHome, screenText, startStubModel, type TuiSession } from './harness.ts';
+import { closeE2EFixture, inputAreaVisible, launchTui, makeHome, screenText, startStubModel, type TuiSession } from './harness.ts';
 
 const goal = 'Retained PTY retry history';
 const question = 'Which saved retry helper belonged in scope?';
 
 test('built terminal history refresh, native view and restart retain saved questions and approval without model input', async () => {
   const model = startStubModel(() => ({ text: 'Unexpected historical model request' }));
-  const home = await makeHome(model);
+  let ownedHome: Awaited<ReturnType<typeof makeHome>> | null = null;
+  let failure: { error: unknown } | undefined;
   let tui: TuiSession | undefined;
-  const config = new TuiConfigManager({ configDir: join(home.home, '.goodvibes', 'tui'), homeDir: home.home, workingDir: home.workspace, surfaceRoot: 'tui' });
-  seedProviderMetadataCacheFixture({ configManager: config, homeDirectory: home.home, workingDirectory: home.workspace });
-  const context = await prepareConfiguredProjectContext(config, home.workspace, 'knowledge-wiki.sqlite', { activate: true });
-  if (!context.projectId) throw new Error('Missing activated project context');
-  const store = createConfiguredPlanningStore(config);
-  const dbPath = store.storagePath; const projectId = context.projectId;
+  let store: ReturnType<typeof createConfiguredPlanningStore> | undefined;
   try {
+    const home = await makeHome(model); ownedHome = home;
+    const config = new TuiConfigManager({ configDir: join(home.home, '.goodvibes', 'tui'), homeDir: home.home, workingDir: home.workspace, surfaceRoot: 'tui' });
+    seedProviderMetadataCacheFixture({ configManager: config, homeDirectory: home.home, workingDirectory: home.workspace });
+    const context = await prepareConfiguredProjectContext(config, home.workspace, 'knowledge-wiki.sqlite', { activate: true });
+    if (!context.projectId) throw new Error('Missing activated project context');
+    store = createConfiguredPlanningStore(config);
+    const dbPath = store.storagePath; const projectId = context.projectId;
     const service = new ProjectPlanningService(store);
     await service.upsertState({ projectId, state: {
       goal, scope: 'Historical fixture only', executionApproved: true,
@@ -32,12 +34,19 @@ test('built terminal history refresh, native view and restart retain saved quest
     } });
     await store.close();
     // TUI startup creates/reconciles unrelated bootstrap knowledge_schedules.
-    // Fingerprint every raw column of the complete planning source set instead
-    // of freezing the entire multi-owner SQLite file. This still catches raw
+    // Retain every raw column and native generation of the planning source set
+    // instead of freezing the entire multi-owner SQLite file. This catches raw
     // JSON/provenance changes, replacement, deletion, and added planning rows.
     const sources = await readPlanningSourceSnapshots(dbPath, projectId);
     expect(sources).toHaveLength(2);
-    expect(sources.every(snapshot => snapshot.source && snapshot.generation?.length === 64)).toBe(true);
+    for (const snapshot of sources) {
+      expect(snapshot.source).not.toBeNull(); expect(snapshot.raw).not.toBeNull();
+      expect(snapshot.generation).toMatch(/^kr-[0-9a-f]{32}$/);
+      expect(snapshot.raw?.id).toBe(snapshot.source?.id);
+      expect(snapshot.generation).toBe(`kr-${snapshot.raw?.gv_revision}`);
+      expect(snapshot.raw?.canonical_uri).toBe(snapshot.source?.canonicalUri);
+      expect(JSON.parse(String(snapshot.raw?.metadata))).toEqual(snapshot.source?.metadata);
+    }
     const assertSavedPlanning = async () => { expect(await readPlanningSourceSnapshots(dbPath, projectId)).toEqual(sources); };
     for (let generation = 0; generation < 2; generation++) {
       tui = launchTui(home, { cols: 180, rows: 45 });
@@ -66,7 +75,7 @@ test('built terminal history refresh, native view and restart retain saved quest
       await assertSavedPlanning();
       const reopened = new KnowledgeStore({ dbPath }); await reopened.init();
       try {
-        // The complete source records and raw generations were checked above;
+        // The complete source records, raw values, and native generations were checked above;
         // retain explicit user-facing approval checks after each process exit.
         const saved = await new ProjectPlanningService(reopened).getState({ projectId });
         expect(saved.state?.executionApproved).toBe(true);
@@ -74,5 +83,12 @@ test('built terminal history refresh, native view and restart retain saved quest
       } finally { await reopened.close(); }
     }
     expect(model.requests).toEqual([]);
-  } finally { await tui?.stop(); await store.close(); model.stop(); rmSync(home.root, { recursive: true, force: true }); }
+  } catch (error) { failure = { error }; throw error; }
+  finally {
+    try { await closeE2EFixture(ownedHome, () => tui?.stop(), () => store?.close(), () => model.stop()); }
+    catch (cleanup) {
+      if (failure) throw new AggregateError([failure.error, cleanup], 'Planning history assertion/setup and cleanup failed');
+      throw cleanup;
+    }
+  }
 }, 150_000);

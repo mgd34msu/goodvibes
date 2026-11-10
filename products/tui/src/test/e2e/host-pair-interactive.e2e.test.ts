@@ -2,7 +2,7 @@ import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspac
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
 /** Compiled TUI, real owner PTY, and owned production pairing/native-capture handlers. */
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
@@ -11,7 +11,7 @@ import { startDaemonFixture } from '@goodvibes-jev/daemon/testing';
 import { TuiConfigManager } from '../../config/host-settings.ts';
 import { beginTuiHostPairing, completeTuiHostPairing, tuiHostPairingStorePath, readTuiHostPairing } from '../../runtime/tui-host-credential-store.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
-import { isolatedEnv, makeHome, resolveBinary, startHomeDaemonServer, startStubModel, waitFor } from './harness.ts';
+import { closeE2EFixture, isolatedEnv, makeHome, resolveBinary, startHomeDaemonServer, startStubModel, waitFor } from './harness.ts';
 import { startE2EJudgments } from './judgment-fixture.ts';
 
 const AUTH = '/api/control-plane/auth';
@@ -40,7 +40,11 @@ function deferred() {
 
 async function fixture(nativeCaptureFailure = false) {
   const model = startStubModel(() => ({ text: 'Unexpected pairing model request' }));
-  const home = await makeHome(model).catch(error => { model.stop(); throw error; });
+  const home = await makeHome(model).catch(async error => {
+    try { await closeE2EFixture(null, () => model.stop()); }
+    catch (cleanup) { throw new AggregateError([error, cleanup], 'Pairing home setup and cleanup failed'); }
+    throw error;
+  });
   mkdirSync(join(home.root, 'tmp'), { recursive: true });
   const tuiDir = join(home.home, '.goodvibes/tui');
   const daemonHome = join(home.home, '.goodvibes/daemon');
@@ -58,15 +62,18 @@ async function fixture(nativeCaptureFailure = false) {
   const judgments = startE2EJudgments({ ordinaryHomes: [home.home, join(daemonRoot, 'home')] });
   const previousJudgmentKey = process.env.TYPESAFE_API_KEY;
   process.env.TYPESAFE_API_KEY = 'local-e2e-judgment-fixture-not-a-secret';
-  const restoreJudgments = () => {
-    if (previousJudgmentKey === undefined) delete process.env.TYPESAFE_API_KEY;
-    else process.env.TYPESAFE_API_KEY = previousJudgmentKey;
-    judgments.stop();
+  const restoreJudgments = async () => {
+    try { await judgments.stop(); }
+    finally {
+      if (previousJudgmentKey === undefined) delete process.env.TYPESAFE_API_KEY;
+      else process.env.TYPESAFE_API_KEY = previousJudgmentKey;
+    }
   };
   try {
     configManager.set('judgment.endpoint', judgments.baseURL);
   } catch (error) {
-    restoreJudgments(); model.stop(); rmSync(home.root, { recursive: true, force: true });
+    try { await closeE2EFixture(home, restoreJudgments, () => model.stop()); }
+    catch (cleanup) { throw new AggregateError([error, cleanup], 'Pairing configuration setup and cleanup failed'); }
     throw error;
   }
   const daemon = await startDaemonFixture({ root: daemonRoot, token: 'synthetic-tui-interactive-pairing-bootstrap', hostSessions: false,
@@ -84,7 +91,11 @@ async function fixture(nativeCaptureFailure = false) {
       }
     },
     inboxFactory: (context, _routing, options) => registerInboxSurface(context, { ...options, adapters: new Map() }),
-  }).catch(error => { restoreJudgments(); model.stop(); rmSync(home.root, { recursive: true, force: true }); throw error; });
+  }).catch(async error => {
+    try { await closeE2EFixture(home, restoreJudgments, () => model.stop()); }
+    catch (cleanup) { throw new AggregateError([error, cleanup], 'Pairing daemon setup and cleanup failed'); }
+    throw error;
+  });
   let stopProxy: (() => Promise<void>) | undefined;
   try {
     const legacyPath = join(daemonHome, 'operator-tokens.json');
@@ -243,7 +254,7 @@ async function fixture(nativeCaptureFailure = false) {
       completedAuth: () => completedAuth,
       authTokens,
       async stop() {
-        try {
+        await closeE2EFixture(home, async () => {
           const stopped = await Promise.allSettled(sessions.map(session => session.stop()));
           gate.release(); requests.abort();
           const servers = await Promise.allSettled([proxy.stop(true), daemon.stop()]);
@@ -255,11 +266,12 @@ async function fixture(nativeCaptureFailure = false) {
           expect(model.requests).toEqual([]);
           expect(existsSync(networkViolations) ? readFileSync(networkViolations, 'utf8') : '').toBe('');
           judgments.assertNoUnexpected();
-        } finally { restoreJudgments(); model.stop(); rmSync(home.root, { recursive: true, force: true }); }
+        }, restoreJudgments, () => model.stop());
       },
     };
   } catch (error) {
-    try { await stopProxy?.(); } finally { try { await daemon.stop(); } finally { restoreJudgments(); model.stop(); rmSync(home.root, { recursive: true, force: true }); } }
+    try { await closeE2EFixture(home, () => stopProxy?.(), () => daemon.stop(), restoreJudgments, () => model.stop()); }
+    catch (cleanup) { throw new AggregateError([error, cleanup], 'Pairing fixture setup and cleanup failed'); }
     throw error;
   }
 }

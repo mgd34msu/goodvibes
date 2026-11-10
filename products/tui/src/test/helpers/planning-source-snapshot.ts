@@ -1,7 +1,7 @@
 import { KnowledgeStore, type KnowledgeSourceSnapshot } from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 /**
- * Fresh persisted planning rows, including their exact raw-value generations.
+ * Fresh persisted planning rows, opaque native row generations, and complete raw SQL values.
  * The full TUI also writes bootstrap/reconciled knowledge_schedules to this DB;
  * those independent scheduler rows are outside the saved planning contract.
  * Compare the complete returned set, not only the IDs expected by a fixture,
@@ -15,8 +15,8 @@ export async function readPlanningSourceSnapshots(dbPath: string, projectId: str
       .filter(source => (source.metadata.projectId === projectId || source.metadata.knowledgeSpaceId === `project:${projectId}`)
         && (source.metadata.projectPlanning === true || source.connectorId === 'goodvibes-project-planning'))
       .sort((left, right) => left.id.localeCompare(right.id))
-      // The public platform generation retains column names and every raw SQLite
-      // value, including unparsed JSON, rather than only timestamps/objects.
+      // The snapshot's raw field retains every SQL column/value (including
+      // unparsed JSON); generation separately identifies its native row revision.
       .map(source => store.getSourceSnapshot({ id: source.id }));
   } finally { await store.close(); }
 }

@@ -14,12 +14,13 @@
  * OpenAI-compatible server in this test process (startStubModel).
  */
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { getProviderModelsCachePath } from '@goodvibes-jev/engine/platform/platform/providers';
 import { TuiConfigManager } from '../../config/host-settings.ts';
+import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts';
 import { TerminalFrame } from '../helpers/terminal-frame.ts';
@@ -101,7 +102,7 @@ export type ModelReply =
 export interface StubModel {
   readonly baseURL: string;
   readonly requests: ModelRequest[];
-  stop(): void;
+  stop(): Promise<void>;
 }
 
 /** Text of a message's content, whether a string or content parts. */
@@ -195,7 +196,7 @@ export function startStubModel(answer: (request: ModelRequest, index: number) =>
   return {
     baseURL: `http://127.0.0.1:${server.port}/v1`,
     requests,
-    stop: () => { void server.stop(true); },
+    stop: () => server.stop(true),
   };
 }
 
@@ -210,6 +211,15 @@ export interface E2EHome {
   setDaemonPort(port: number): void;
   /** Write a settings key (dot path) into the TUI's own settings file. */
   setTuiSetting(key: string, value: unknown): void;
+}
+
+/** Drain every original owner before removing its fixture home. Failed or
+ * unknown drains retain the home; the shared scope preserves each failure. */
+export async function closeE2EFixture(home: Pick<E2EHome, 'root'> | null, ...stops: readonly (() => void | Promise<void>)[]): Promise<void> {
+  const scope = createAsyncDisposalScope('TUI E2E fixture');
+  for (let index = stops.length - 1; index >= 0; index--) scope.registry.add(`owner ${index + 1}`, stops[index]!);
+  await scope.close();
+  if (home) rmSync(home.root, { recursive: true, force: true });
 }
 
 function setDotted(target: Record<string, unknown>, key: string, value: unknown): void {

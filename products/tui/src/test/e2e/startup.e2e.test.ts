@@ -5,11 +5,11 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { inputAreaVisible, launchTui, makeHome, startStubModel, type TuiSession } from './harness.ts';
+import { closeE2EFixture, inputAreaVisible, launchTui, makeHome, startStubModel, type TuiSession } from './harness.ts';
 
 const model = startStubModel(() => ({ text: 'unused' }));
 let tui: TuiSession | null = null;
-afterAll(async () => { await tui?.stop(); model.stop(); });
+afterAll(() => closeE2EFixture(null, () => tui?.stop(), () => model.stop()));
 
 describe('startup', () => {
   test('a fresh home reaches the input area with no error', async () => {

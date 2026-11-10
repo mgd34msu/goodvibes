@@ -10,14 +10,14 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { bootDaemon, type BootedDaemon } from '@goodvibes-jev/engine/platform/daemon';
-import { inputAreaVisible, launchTui, makeHome, screenText, startStubModel, waitFor, type TuiSession } from './harness.ts';
+import { closeE2EFixture, inputAreaVisible, launchTui, makeHome, screenText, startStubModel, waitFor, type TuiSession } from './harness.ts';
 
 const TOKEN = 'e2e-shared-daemon-token';
 
 const model = startStubModel(() => ({ text: 'unused' }));
 let tui: TuiSession | null = null;
 let daemon: BootedDaemon | null = null;
-afterAll(async () => { await tui?.stop(); await daemon?.stop(); model.stop(); });
+afterAll(() => closeE2EFixture(null, () => tui?.stop(), () => daemon?.stop(), () => model.stop()));
 
 interface DaemonSession { readonly kind: string; readonly project: string; readonly surfaceKinds: readonly string[] }
 

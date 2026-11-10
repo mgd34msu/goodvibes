@@ -11,7 +11,7 @@ import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
 import { nativeReaderProbeScript, nativeRuntimeProvenance } from '../helpers/native-runtime-provenance.ts';
 const nativeTest = process.platform === 'linux' && process.arch === 'x64' ? test : test.skip;
 
-async function fixture(runtime = 'console.log(JSON.stringify(process.argv.slice(2))); process.exitCode = 17;') {
+async function fixture(runtime = 'console.log(JSON.stringify(process.argv.slice(2))); process.exitCode = 17;', { nativePayload = true } = {}) {
   const root = makeOwnedTempDir('daemon-owned-native-launch'); const product = join(root, 'products/daemon'); const prefix = join(root, 'owned prefix');
   for (const dir of ['scripts', 'src/cli', 'bin', 'dist/cli']) mkdirSync(join(product, dir), { recursive: true });
   writeFileSync(join(root, '.gitignore'), 'node_modules/\nartifacts/\nowned prefix/\nfake-bin/\nfixture.json\ntrace\nstopped\n');
@@ -29,11 +29,13 @@ async function fixture(runtime = 'console.log(JSON.stringify(process.argv.slice(
   mkdirSync(join(root, 'node_modules/@goodvibes-jev'), { recursive: true }); symlinkSync(engine, join(root, 'node_modules/@goodvibes-jev/engine'), 'dir');
   const source = join(root, 'artifacts/products/daemon');
   const runtimeBytes = `#!${process.execPath}\n${runtime}\n`;
-  for (const [index, file] of DAEMON_CI_PAYLOADS.entries()) {
-    const bytes = index === 0 ? nativeReaderProbeScript(owner.version, 'exec "$0.bun" "$@"') : index === 1 ? runtimeBytes : index === 3 ? nativeRuntimeProvenance(runtimeBytes) : `fixture-${index}`;
-    const path = join(source, 'native', file); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, bytes); chmodSync(path, index < 2 ? 0o755 : 0o644);
+  if (nativePayload) {
+    for (const [index, file] of DAEMON_CI_PAYLOADS.entries()) {
+      const bytes = index === 0 ? nativeReaderProbeScript(owner.version, 'exec "$0.bun" "$@"') : index === 1 ? runtimeBytes : index === 3 ? nativeRuntimeProvenance(runtimeBytes) : `fixture-${index}`;
+      const path = join(source, 'native', file); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, bytes); chmodSync(path, index < 2 ? 0o755 : 0o644);
+    }
+    await recordDaemonCiArtifact(source, owner);
   }
-  await recordDaemonCiArtifact(source, owner);
   const launcher = join(product, 'bin/goodvibes-daemon');
   const env = { ...process.env, HOME: root, GOODVIBES_HOME: join(root, 'uncreated-home'), GOODVIBES_DAEMON_NATIVE_PREFIX: prefix };
   const invoke = (args: string[] = []) => spawnSync(process.execPath, [launcher, ...args], { cwd: root, encoding: 'utf8', env, timeout: 5000 });
@@ -52,12 +54,13 @@ nativeTest('explicit owned native prefix wins over emitted/source runtimes and p
 
 nativeTest('native selection refuses missing, changed, wrong-version, symlink and fenced cohorts without source fallback', async () => {
   for (const mutation of ['missing', 'changed', 'version', 'symlink', 'fence'] as const) {
-    const f = await fixture(); if (mutation !== 'missing') await f.install();
+    const f = await fixture(undefined, { nativePayload: mutation !== 'missing' }); if (mutation !== 'missing') await f.install();
     if (mutation === 'changed') writeFileSync(join(f.prefix, DAEMON_CI_PAYLOADS[4]), 'changed');
     if (mutation === 'version') writeFileSync(join(f.product, 'package.json'), JSON.stringify({ name: '@goodvibes-jev/daemon', private: true, version: '2.0.0' }));
     if (mutation === 'symlink') { const alias = join(f.root, 'alias'); symlinkSync(f.prefix, alias); f.env.GOODVIBES_DAEMON_NATIVE_PREFIX = alias; }
     if (mutation === 'fence') writeFileSync(join(f.prefix, DAEMON_CI_PAYLOADS[1] + '.update-transaction'), 'recovery');
     const result = f.invoke(); expect(result.status, mutation).toBe(1); expect(result.stdout).toBe(''); expect(result.stderr).not.toBe('');
+    if (mutation === 'missing') expect(existsSync(f.source)).toBe(false);
   }
 });
 

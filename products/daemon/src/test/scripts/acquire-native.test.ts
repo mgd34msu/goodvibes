@@ -14,27 +14,31 @@ const nativeTest = process.platform === 'linux' && process.arch === 'x64' ? test
 const owner: DaemonInstallOwner = { target: 'linux-x64', sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40), version: '1.2.3' };
 async function fixture() {
   const root = makeOwnedTempDir('daemon-ci-acquisition'); const source = join(root, 'products/daemon');
-  for (const [index, path] of DAEMON_CI_PAYLOADS.entries()) {
-    const full = join(source, 'native', path); mkdirSync(dirname(full), { recursive: true });
-    writeFileSync(full, index === 3 ? nativeRuntimeProvenance('synthetic-1') : `synthetic-${index}`); chmodSync(full, index < 2 ? 0o755 : 0o644);
-  }
-  // Archive admission uses inert payloads, not compiled reader evidence.
-  writeV1NativeArtifactFixture(source, owner);
+  let prepared = false;
+  const prepareSource = () => {
+    if (prepared) return;
+    for (const [index, path] of DAEMON_CI_PAYLOADS.entries()) {
+      const full = join(source, 'native', path); mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, index === 3 ? nativeRuntimeProvenance('synthetic-1') : `synthetic-${index}`); chmodSync(full, index < 2 ? 0o755 : 0o644);
+    }
+    // Archive admission uses inert payloads, not compiled reader evidence.
+    writeV1NativeArtifactFixture(source, owner); prepared = true;
+  };
   const archive = join(root, 'native.tgz');
-  const pack = () => execFileSync('tar', ['-czf', archive, ...[...DAEMON_CI_PAYLOADS, 'ci-artifact.json'].map(path => `products/daemon/native/${path}`)], { cwd: root });
-  pack();
+  const pack = () => { prepareSource(); execFileSync('tar', ['-czf', archive, ...[...DAEMON_CI_PAYLOADS, 'ci-artifact.json'].map(path => `products/daemon/native/${path}`)], { cwd: root }); };
+  const selectedArchive = () => { if (!existsSync(archive)) pack(); return archive; };
   const run = { id: 123, run_attempt: 1, head_sha: owner.headCommit, path: '.github/workflows/ci.yml', status: 'completed', conclusion: 'success', repository: { full_name: DAEMON_CI_REPOSITORY } };
   const jobs = ['Product tests (daemon)', 'Daemon native artifact (isolated Linux)'].map(name => ({ name, run_attempt: 1, status: 'completed', conclusion: 'success' }));
   const artifact = { id: 456, name: 'daemon-native-linux-x64', expired: false, workflow_run: { head_sha: owner.headCommit } };
   const calls: string[][] = []; let downloadDir: string | undefined;
   const gh: RunGitHub = args => {
     calls.push([...args]); const endpoint = args[args.length - 1]!;
-    if (args[0] === 'run') { downloadDir = endpoint; copyFileSync(archive, join(downloadDir, 'daemon-native-linux-x64.tgz')); return ''; }
+    if (args[0] === 'run') { downloadDir = endpoint; copyFileSync(selectedArchive(), join(downloadDir, 'daemon-native-linux-x64.tgz')); return ''; }
     if (endpoint.includes('/jobs?')) return JSON.stringify([{ jobs }]);
     if (endpoint.includes('/artifacts?')) return JSON.stringify([{ artifacts: [artifact] }]);
     return JSON.stringify(run);
   };
-  return { root, source, archive, pack, run, jobs, artifact, calls, gh, downloaded: () => downloadDir, prefix: join(root, 'installed prefix') };
+  return { root, get source() { prepareSource(); return source; }, get archive() { return selectedArchive(); }, pack, run, jobs, artifact, calls, gh, downloaded: () => downloadDir, prefix: join(root, 'installed prefix') };
 }
 
 for (const attempt of [1, 2]) nativeTest(`exact successful CI acquisition after ${attempt} attempt(s) stages only the owned cohort then uses the verified installer`, async () => {
@@ -63,6 +67,7 @@ nativeTest('wrong workflow/repository/head/run, skipped qualification and expire
     if (mutation === 'artifact-head') f.artifact.workflow_run.head_sha = owner.sourceCommit;
     await expect(acquireDaemonNative({ runId: '123', prefix: f.prefix, owner, gh: f.gh })).rejects.toThrow();
     expect(existsSync(f.prefix)).toBe(false); expect(f.calls.some(args => args[0] === 'run')).toBe(false);
+    expect(existsSync(join(f.root, 'native.tgz'))).toBe(false); expect(existsSync(join(f.root, 'products', 'daemon'))).toBe(false);
   }
 });
 

@@ -73,10 +73,12 @@ test('private CLI requires explicit immutable identity and normalized output wit
 });
 
 test('CLI rejection leaves no output tarball and returns a failing exit status', async () => {
-  const f = await fixture(); const output = join(f.root, 'must-not-exist.tgz');
-  const result = spawnSync(process.execPath, [join(import.meta.dir, '../../../scripts/package-native.ts'), '--artifact-root', f.source, '--output', output, '--source-commit', owner.sourceCommit, '--head-commit', owner.headCommit], { encoding: 'utf8' });
+  const root = makeOwnedTempDir('daemon-package-cli-refusal'), source = join(root, 'source'), output = join(root, 'must-not-exist.tgz');
+  mkdirSync(source);
+  const result = spawnSync(process.execPath, [join(import.meta.dir, '../../../scripts/package-native.ts'), '--artifact-root', source, '--output', output, '--source-commit', owner.sourceCommit, '--head-commit', owner.headCommit], { encoding: 'utf8' });
   expect(result.status).toBe(1); expect(existsSync(output)).toBe(false);
   expect(result.stdout).not.toContain('Verified private offline cohort');
+  expect(readdirSync(source)).toEqual([]);
 });
 
 

@@ -87,7 +87,12 @@ describe('original triage code assertions with recorded readings', () => {
     await runInboxTriage([item('unavailable')], { store: owner.store });
     const saved = owner.rows.get(current.id);
     if (!saved || saved.latest.status !== 'settled' || saved.latest.receiptVersion !== 4) throw new Error('The current fixture must have actual settled v4 evidence.');
-    owner.rows.set('invalid', { latest: { ...saved.latest, id: 'invalid', source: undefined }, settled: saved.settled });
+    const invalidLatest = { ...saved.latest, id: 'invalid' };
+    // Deliberately malformed stored data has an OWN undefined source field;
+    // ordinary v4 receipts may omit it, but this image must fail strict parsing.
+    Object.defineProperty(invalidLatest, 'source', { value: undefined, enumerable: true });
+    expect(Object.hasOwn(invalidLatest, 'source')).toBe(true);
+    owner.rows.set('invalid', { latest: invalidLatest, settled: saved.settled });
     const unscored = [...Array.from({ length: 20 }, (_, index) => item(`missing-${index}`)), item('held'), item('unavailable'), item('invalid')];
     const hashes = spyOn(crypto, 'createHash');
     const count = () => hashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;

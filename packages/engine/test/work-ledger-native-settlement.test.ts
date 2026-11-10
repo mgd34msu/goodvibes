@@ -10,7 +10,7 @@ import * as atomicStore from '../platform/src/platform/utils/atomic-json-store.j
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonicalJson, SqliteDecisionLog, withDecisionLog, createSystemOnePort, DEFAULT_MODEL, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { canonicalJson, SqliteDecisionLog, withDecisionLog, createSystemOnePort, DEFAULT_MODEL, type JudgmentPort, type StateHash } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
@@ -133,7 +133,7 @@ test('native settlement requires real scope-bound decisions covering the whole a
         if (id !== claimId || entry?.status !== 'answered') return entry;
         if (mutation === 'missing') return undefined;
         if (mutation === 'uncertain') return { ...entry, answers: { unsupported: noulAnswer(0.4) } };
-        if (mutation === 'wrong-state') return { ...entry, stateHash: 'another-passage' as typeof entry.stateHash };
+        if (mutation === 'wrong-state') return { ...entry, stateHash: 'another-passage' as StateHash };
         return { ...entry, questions: { unsupported: { type: 'noul', instructions: 'Check a different passage.' } } };
       } }, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
       signal: new AbortController().signal, assertCurrent() {} })).rejects.toThrow('genuine final-answer content review');
@@ -161,7 +161,7 @@ test('native settlement verifies the logical goal proof and all actual premises 
           const entry = f.log.get(id); if (id !== proofId || entry?.status !== 'answered') return entry;
           if (mutation === 'missing') return undefined;
           if (mutation === 'uncertain') return { ...entry, answers: { omitted: noulAnswer(0.4) } };
-          if (mutation === 'wrong-state') return { ...entry, stateHash: 'another-goal' as typeof entry.stateHash };
+          if (mutation === 'wrong-state') return { ...entry, stateHash: 'another-goal' as StateHash };
           return { ...entry, questions: { omitted: { type: 'noul', instructions: 'Different literal original source' } } };
         } }, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
         signal: new AbortController().signal, assertCurrent() {} })).rejects.toThrow('genuine deliverable check');
@@ -193,7 +193,7 @@ test('native settlement refuses missing, failing or mismatched final-content pro
         if (id !== contentId || entry?.status !== 'answered') return entry;
         if (mutation === 'absent') return undefined;
         if (mutation === 'failed-answer') return { ...entry, answers: { ...entry.answers as object, unsupported: noulAnswer(0.99) } };
-        if (mutation === 'wrong-state') return { ...entry, stateHash: 'copied-from-another-state' as typeof entry.stateHash };
+        if (mutation === 'wrong-state') return { ...entry, stateHash: 'copied-from-another-state' as StateHash };
         return { ...entry, questions: { unfinished: { type: 'noul', instructions: 'A different check' }, unsupported: { type: 'noul', instructions: 'A different check' } } };
       } }, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
       signal: new AbortController().signal, assertCurrent() {} })).rejects.toThrow('genuine final-answer content review');
@@ -217,7 +217,7 @@ test('native settlement requires recorded original-obligation coverage bound to 
           if (id !== coverageId || entry?.status !== 'answered') return entry;
           if (mutation === 'absent') return undefined;
           if (mutation === 'failed-answer') return { ...entry, answers: { original_obligations_unmet: noulAnswer(0.99) } };
-          if (mutation === 'wrong-state') return { ...entry, stateHash: 'copied-from-another-state' as typeof entry.stateHash };
+          if (mutation === 'wrong-state') return { ...entry, stateHash: 'copied-from-another-state' as StateHash };
           if (mutation === 'wrong-policy') return { ...entry, context: { ...entry.context, batteryVersion: 0 } };
           return { ...entry, questions: { original_obligations_unmet: { type: 'noul', instructions: 'A different check' } } };
         } }, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
@@ -297,7 +297,7 @@ test('native settlement proves every original question across actual deliverable
         if (id !== targetId || entry?.status !== 'answered') return entry;
         if (mutation === 'missing-entry') return undefined;
         if (mutation === 'missing-state-hash') { const { stateHash: _stateHash, ...unbound } = entry; return unbound; }
-        if (mutation === 'wrong-state') return { ...entry, stateHash: 'different-batch-state' as typeof entry.stateHash };
+        if (mutation === 'wrong-state') return { ...entry, stateHash: 'different-batch-state' as StateHash };
         const questions = JSON.parse(JSON.stringify(entry.questions)), answers = JSON.parse(JSON.stringify(entry.answers));
         if (mutation === 'missing-question') { delete questions.criterion_1; delete answers.criterion_1; }
         if (mutation === 'extra-question') { questions.criterion_99 = questions.criterion_1; answers.criterion_99 = answers.criterion_1; }
@@ -318,7 +318,7 @@ test('native settlement proves every original question across actual deliverable
         const entry = f.log.get(id);
         if (id !== contentIds[1] || entry?.status !== 'answered') return entry;
         if (mutation === 'missing-entry') return undefined;
-        if (mutation === 'wrong-state') return { ...entry, stateHash: 'different-content-state' as typeof entry.stateHash };
+        if (mutation === 'wrong-state') return { ...entry, stateHash: 'different-content-state' as StateHash };
         const questions = JSON.parse(JSON.stringify(entry.questions)), answers = JSON.parse(JSON.stringify(entry.answers));
         if (mutation === 'missing-question') { delete questions.unsupported; delete answers.unsupported; }
         else { questions.unfinished = (f.log.get(contentIds[0]!)!.questions as Record<string, unknown>)['unfinished']; answers.unfinished = noulAnswer(0.03); }
@@ -618,7 +618,8 @@ for (const mode of ['absent', 'failed', 'id', 'id-number', 'id-empty', 'hash-abs
     const f = await fixture(); const started = await f.host.start(f.target, f.authority);
     await completed(f.harness, started.admission.contractId);
     const original = f.storage.current(f.key).record!, seed = f.log.query({ status: 'answered', limit: 1 })[0];
-    if (!seed || seed.status !== 'answered') throw new Error('Actual runner reading missing');
+    if (!seed || seed.status !== 'answered' || seed.stateHash === undefined) throw new Error('Actual bound runner reading missing');
+    const { stateHash: _seedStateHash, ...seedWithoutHash } = seed;
     const fake = fakePort(() => noulAnswer(0.01)), id = 'synthetic-unrecorded-verifier';
     const attemptedStates = new Set<string>();
     const candidates = new Map<string, import('@goodvibes-jev/judgment').DecisionEntry | undefined>(); let sequence = 0;
@@ -629,10 +630,11 @@ for (const mode of ['absent', 'failed', 'id', 'id-number', 'id-empty', 'hash-abs
       const context = (mode === 'context' ? { site: 'unrelated-settlement-site' } : mode === 'context-absent' ? undefined : { ...request.context }) as typeof seed.context;
       const questions = mode === 'questions' ? {} : JSON.parse(canonicalJson(request.questions as unknown as import('@goodvibes-jev/judgment').EntryType)) as typeof seed.questions;
       const common = { id: (mode === 'id' ? 'another-recorded-id' : candidateId) as typeof seed.id, at: seed.at, context, questions, requestedModel: seed.requestedModel,
-        stateHash: (mode === 'hash-absent' ? undefined : mode === 'hash-shape' ? 'not-a-sha256' : 'f'.repeat(64)) as typeof seed.stateHash, latencyMs: 0, requestId: undefined };
+        // This fixture deliberately supplies forged untrusted provenance.
+        ...(mode === 'hash-absent' ? {} : { stateHash: (mode === 'hash-shape' ? 'not-a-sha256' : 'f'.repeat(64)) as StateHash }), latencyMs: 0, requestId: undefined };
       const candidate: import('@goodvibes-jev/judgment').DecisionEntry | undefined = mode === 'absent' ? undefined : mode === 'failed'
         ? { ...common, status: 'failed', error: { kind: 'unavailable', message: 'Synthetic failed reading' } }
-        : { ...seed, ...common, answers: mode === 'answers' ? {} : JSON.parse(canonicalJson(raw.answers as unknown as import('@goodvibes-jev/judgment').EntryType)) as typeof seed.answers };
+        : { ...seedWithoutHash, ...common, answers: mode === 'answers' ? {} : JSON.parse(canonicalJson(raw.answers as unknown as import('@goodvibes-jev/judgment').EntryType)) as typeof seed.answers };
       candidates.set(candidateId, candidate);
       return { ...raw, decisionId: mode === 'id-number' ? 42 : mode === 'id-empty' ? '' : candidateId } as never;
     } };

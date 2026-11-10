@@ -1341,9 +1341,11 @@ test('actual native daemon mirror and settled receipt publication declare source
   await fx.host.start();
   expect(decision.requests).toHaveLength(1);
   expect(receipts).toMatchObject([{ receiptVersion: 4, status: 'settled', source: { providerId: 'fixture', accountScopeId: 'original-account' } }]);
+  const receipt = receipts[0];
+  if (!receipt || receipt.receiptVersion !== 4) throw new Error('Expected the actual settled native source receipt, not a preview');
   const disk = new SqliteTriageStore(fx.workingDir, 'native-source-receipts.sqlite');
   try {
-    expect((await disk.readBatch(['fixture:one'])).get('fixture:one')?.latest).toEqual(receipts[0]);
+    expect((await disk.readBatch(['fixture:one'])).get('fixture:one')?.latest).toEqual(receipt);
     const bytes = readFileSync(disk.dbPath); expect(bytes.includes(Buffer.from('inputHash'))).toBe(false);
     expect(bytes.includes(Buffer.from('Original protected subject'))).toBe(false); expect(bytes.includes(Buffer.from('Original protected message'))).toBe(false);
   } finally { await disk.close(); }

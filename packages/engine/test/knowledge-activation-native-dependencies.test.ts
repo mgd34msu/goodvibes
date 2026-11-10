@@ -108,7 +108,7 @@ test.each(['operator-replacement','merge'] as const)('fallible native acknowledg
   const fake = fakePort(() => noulAnswer(.99)), previous = installJudgmentPort(fake.port);
   try {
     const current = await store.upsertNode(node('acknowledgment-subject')), winner = await store.upsertNode(node('acknowledgment-winner'));
-    await store.upsertEdge({ id: 'original-edge', fromKind: 'node', fromId: current.id, toKind: 'node', toId: winner.id, relation: 'related_to' });
+    const originalEdge = await store.upsertEdge({ fromKind: 'node', fromId: current.id, toKind: 'node', toId: winner.id, relation: 'related_to' });
     const before = publicationSnapshot(store), bytes = readFileSync(path), originalRun = SQLiteStore.prototype.run, originalExec = SQLiteStore.prototype.exec;
     let candidateWritten = false, failedReads = 0;
     const written = spyOn(SQLiteStore.prototype,'run').mockImplementation(function(this: SQLiteStore, sql, params) {
@@ -126,9 +126,10 @@ test.each(['operator-replacement','merge'] as const)('fallible native acknowledg
       await expect(work).rejects.toThrow('Original native acknowledgment refused');
     } finally { fault.mockRestore(); written.mockRestore(); }
     expect(candidateWritten).toBe(true); expect(failedReads).toBe(1); expect(publicationSnapshot(store)).toEqual(before); expect(readFileSync(path)).toEqual(bytes);
+    expect(store.listEdges()).toEqual([originalEdge]);
     await store.upsertSource({ id: 'later-ack-save', connectorId: 'fixture', sourceType: 'manual', title: 'Later', status: 'indexed' });
     const reopened = new KnowledgeStore({ dbPath: path }); stores.push(reopened); await reopened.init();
-    expect(reopened.getNode(current.id)).toEqual(current); expect(reopened.listEdges()).toEqual(store.listEdges());
+    expect(reopened.getNode(current.id)).toEqual(current); expect(reopened.listEdges()).toEqual([originalEdge]);
   } finally { installJudgmentPort(previous); }
 });
 

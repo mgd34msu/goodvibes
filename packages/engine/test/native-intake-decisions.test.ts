@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from 'bun:test';
-import { canonicalJson, createSystemOnePort, JudgmentError, DEFAULT_MODEL, SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions,
+import { canonicalJson, createSystemOnePort, JudgmentError, DEFAULT_MODEL, SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions, type StateHash,
 } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import {
@@ -259,7 +259,8 @@ for (const mode of ['absent', 'failed', 'id', 'id-number', 'id-empty', 'hash-abs
     using log = new SqliteDecisionLog(':memory:'); const seedFake = answers(), recorded = withDecisionLog(seedFake.port, log);
     const seeded = await readNativeIntakeRoute(input(recorded, log));
     const seed = log.get(seeded.decisionId);
-    if (!seed || seed.status !== 'answered') throw new Error('Actual recorded fixture missing');
+    if (!seed || seed.status !== 'answered' || seed.stateHash === undefined) throw new Error('Actual bound recorded fixture missing');
+    const { stateHash: _seedStateHash, ...seedWithoutHash } = seed;
     const fake = answers(); let reads = 0, assertions = 0;
     let candidate: import('@goodvibes-jev/judgment').DecisionEntry | undefined;
     const port: JudgmentPort = { ...recorded, async ask(request) {
@@ -267,10 +268,12 @@ for (const mode of ['absent', 'failed', 'id', 'id-number', 'id-empty', 'hash-abs
       const context = (mode === 'context' ? { site: 'unrelated-native-site' } : mode === 'context-absent' ? undefined : { ...request.context }) as typeof seed.context;
       const questions = mode === 'questions' ? {} : JSON.parse(canonicalJson(request.questions as unknown as import('@goodvibes-jev/judgment').EntryType)) as typeof seed.questions;
       const common = { id: (mode === 'id' ? 'another-recorded-id' : seed.id) as typeof seed.id, at: seed.at, context, questions, requestedModel: seed.requestedModel,
-        stateHash: (mode === 'hash-absent' ? undefined : mode === 'hash-shape' ? 'not-a-sha256' : 'f'.repeat(64)) as typeof seed.stateHash, latencyMs: 0, requestId: undefined };
+        // Deliberately forged field values exercise the untrusted log boundary;
+        // an absent optional field is omitted rather than set to undefined.
+        ...(mode === 'hash-absent' ? {} : { stateHash: (mode === 'hash-shape' ? 'not-a-sha256' : 'f'.repeat(64)) as StateHash }), latencyMs: 0, requestId: undefined };
       candidate = mode === 'absent' ? undefined : mode === 'failed'
         ? { ...common, status: 'failed', error: { kind: 'unavailable', message: 'Synthetic failed reading' } }
-        : { ...seed, ...common, answers: mode === 'answers' ? {} : JSON.parse(canonicalJson(raw.answers as unknown as import('@goodvibes-jev/judgment').EntryType)) as typeof seed.answers };
+        : { ...seedWithoutHash, ...common, answers: mode === 'answers' ? {} : JSON.parse(canonicalJson(raw.answers as unknown as import('@goodvibes-jev/judgment').EntryType)) as typeof seed.answers };
       return { ...raw, decisionId: mode === 'id-number' ? 42 : mode === 'id-empty' ? '' : seed.id } as never;
     } };
     const hashing = spyOn(Bun.CryptoHasher, 'hash');

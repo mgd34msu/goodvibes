@@ -49,6 +49,7 @@ for (const change of [{ subject: 'Changed subject' }, { snippet: 'Changed previe
 test('native row revisions survive actual mirror restart, while another account cannot borrow them', async () => {
   const original = item(), source = await triageSource([original]), store = receiptStore(source.directory);
   const [receipt] = await runInboxTriage([original], { ...source.options, store, port: model().port });
+  if (receipt?.status !== 'settled' || receipt.receiptVersion !== 4 || !receipt.source) throw new Error('Restart fixture requires genuine settled native evidence');
   await source.mirror.flush(); await source.mirror.close();
   const restarted = new InboxCursorStore(source.directory, 'mirror.sqlite', { sweepIntervalMs: 0, triageScope: source.scope });
   try {

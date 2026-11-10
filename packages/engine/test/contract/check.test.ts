@@ -607,7 +607,7 @@ test('only native unshown holds retain a restart commitment; only the native jud
     expect(restored.units[0]!.checks[0]!.evidenceDigest).toBe(actual.check.evidenceDigest);
     // This real cold verification preserves the saved refusal; it does not ask
     // the model again or convert the persisted uncertainty into approval.
-    expect(hashState(judgeState(restored.units[0]!, current))).toBe(actual.check.evidenceDigest);
+    expect(hashState(judgeState(restored.units[0]!, current)) === actual.check.evidenceDigest).toBe(true);
     expect(nativeRecordedCheck(restored.units[0]!, restored.units[0]!.checks[0]!).check.result).not.toBe('pass');
     expect(port.requests).toHaveLength(2);
   } finally { hashing.mockRestore(); }

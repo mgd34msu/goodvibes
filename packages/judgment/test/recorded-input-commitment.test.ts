@@ -83,7 +83,7 @@ test('explicit successful proofs preserve the existing canonical commitment and 
   const unbound = await port.ask({ state: { message: 'Payouts failing for 3 days' }, questions });
   // Independently pinned canonical-state digest; do not derive the expected
   // value by calling the implementation being exercised.
-  expect(log.get(bound.decisionId!)?.stateHash).toBe('f4c8dfe18fb3814ce2c19b8ca80bc7d6ec6a979d770cafae346e532aa66b6bcf');
+  expect(log.get(bound.decisionId!)?.stateHash === 'f4c8dfe18fb3814ce2c19b8ca80bc7d6ec6a979d770cafae346e532aa66b6bcf').toBe(true);
   expect(log.get(unbound.decisionId!)).not.toHaveProperty('stateHash');
   expect(log.query({ status: 'answered' })).toHaveLength(2);
 });

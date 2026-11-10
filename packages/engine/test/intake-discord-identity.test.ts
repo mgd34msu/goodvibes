@@ -188,7 +188,10 @@ test('native Discord published bot/DM election key is shared across nodes and co
 
 test('an unrelated actual old Discord mirror lookup shares both deployed wire computations with the native clustered selection', async () => {
   const f = fixture(), source = input(), expected = historicalScope(source, true), name = `inbox-discord-${'a'.repeat(64)}.sqlite`;
-  const mirror = new InboxCursorStore(f.root, name, { sweepIntervalMs: 0 }); await mirror.init(); await mirror.close();
+  const mirror = new InboxCursorStore(f.root, name, { sweepIntervalMs: 0 }); await mirror.init();
+  mirror.upsertItems([{ id: 'discord:historical-other', provider: 'discord', kind: 'dm', fromDigest: 'cafebabedeadbeef',
+    subjectPreview: '', bodyPreview: 'Original unrelated historical candidate', receivedAt: Date.now(), unread: true }]);
+  await mirror.flush(); await mirror.close();
   const original = readFileSync(join(f.directory, name)), hash = spyOn(crypto, 'createHash');
   try {
     const identity = await acquireDiscordInboxIdentity(f.owner, source, { configuredRegistry: true });

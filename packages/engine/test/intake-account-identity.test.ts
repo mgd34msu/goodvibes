@@ -230,7 +230,10 @@ test.each([slack, email])('clustered $provider selection preserves the published
 
 test('an unrelated actual old mirror lookup shares its computed account codec with subsequent clustered selection', async () => {
   const f = fixture(), name = `inbox-slack-${'a'.repeat(64)}.sqlite`;
-  const mirror = new InboxCursorStore(f.root, name, { sweepIntervalMs: 0 }); await mirror.init(); await mirror.close();
+  const mirror = new InboxCursorStore(f.root, name, { sweepIntervalMs: 0 }); await mirror.init();
+  mirror.upsertItems([{ id: 'slack:historical-other', provider: 'slack', kind: 'dm', fromDigest: 'cafebabedeadbeef',
+    subjectPreview: '', bodyPreview: 'Original unrelated historical candidate', receivedAt: Date.now(), unread: true }]);
+  await mirror.flush(); await mirror.close();
   const original = readFileSync(join(f.directory, name)), hash = spyOn(crypto, 'createHash');
   try {
     const identity = await acquireAccountInboxIdentity(f.owner, slack);

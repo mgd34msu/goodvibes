@@ -50,7 +50,7 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import { buildDaemonGatewayCatalog } from '../helpers/daemon-gateway.ts';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
+import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { makeLongLivedProjectTempDir } from '../helpers/project-temp.ts';
 import { type RuntimeServices } from '../../runtime/services.ts';
@@ -75,7 +75,7 @@ interface Harness {
 }
 
 const roots: string[] = [];
-const runtimes: Array<{ services: RuntimeServices; catalogScope: ReturnType<typeof createDisposalScope> }> = [];
+const runtimes: Array<{ services: RuntimeServices; catalogScope: ReturnType<typeof createAsyncDisposalScope> }> = [];
 const restoreReadings: Array<() => void> = [];
 
 async function harness(): Promise<Harness> {
@@ -129,7 +129,7 @@ async function harness(): Promise<Harness> {
     homeDirectory: root,
     getConversationTitle: () => 'occasions-push-test',
   }));
-  const catalogScope = createDisposalScope('occasions fixture daemon catalog');
+  const catalogScope = createAsyncDisposalScope('occasions fixture daemon catalog');
   runtimes.push({ services, catalogScope });
   const readDiagnostic = authoredPrivacyAnswer({ parts: [
     [errorText('No agent conversation sender is '), errorSpan('sender'), errorText(', so a message addressed to the agent has nowhere to land. The agent product registers one through ChannelDeliveryRouter.agentDelivery.register().')],
@@ -172,7 +172,7 @@ afterAll(async () => {
   for (const restore of restoreReadings.splice(0)) restore();
   const failures: unknown[] = [];
   for (const { services, catalogScope } of runtimes.splice(0).reverse()) {
-    try { catalogScope.dispose(); } catch (error) { failures.push(error); }
+    try { await catalogScope.close(); } catch (error) { failures.push(error); }
     try { await services.close(); } catch (error) { failures.push(error); }
   }
   if (failures.length) throw new AggregateError(failures, 'Occasions fixture cleanup failed');

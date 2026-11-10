@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { createDisposalScope, registerDaemonRuntimeBasePollers, registerDaemonRuntimePollers, type DaemonRuntimePollerOwners } from '../../runtime/disposal-wiring.ts';
 
 function owners(calls: string[], close: () => Promise<void>): DaemonRuntimePollerOwners {
@@ -63,4 +63,29 @@ test('the fleet reader stops before the trigger owner drains and older dependenc
   try { expect(calls).toEqual([...expected.slice(0, 7), 'trigger-join']); }
   finally { release(); await closed; }
   expect(calls).toEqual([...expected.slice(0, 7), 'trigger-join', 'trigger-drained', ...expected.slice(7)]);
+});
+
+
+test('the actual daemon graph retains its owned browser shutdown promise', async () => {
+  const { BrowserSessionManager } = await import('@goodvibes-jev/engine/platform/platform/browser');
+  const { startGatewayFixture } = await import('../helpers/gateway-route-fixture.js');
+  let release!: () => void, entered!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  const arrived = new Promise<void>(resolve => { entered = resolve; });
+  const original = BrowserSessionManager.prototype.shutdown;
+  const shutdown = spyOn(BrowserSessionManager.prototype, 'shutdown').mockImplementation(async function(this: InstanceType<typeof BrowserSessionManager>) {
+    entered(); await hold; await original.call(this);
+  });
+  let daemon: Awaited<ReturnType<typeof startGatewayFixture>> | undefined;
+  let stop: Promise<void> | undefined;
+  try {
+    daemon = await startGatewayFixture();
+    // Listing builds the real lazy owner without launching a browser/driver.
+    await daemon.invoke('browser.sessions.list', {});
+    let settled = false;
+    stop = daemon.stop().then(() => { settled = true; });
+    await Promise.race([arrived, stop.then(() => { throw new Error('Daemon stopped before its original browser shutdown entered'); })]);
+    await Promise.resolve(); expect(settled).toBe(false); expect(shutdown).toHaveBeenCalledTimes(1);
+    release(); await stop; expect(settled).toBe(true);
+  } finally { release(); try { await (stop ?? daemon?.stop()); } finally { shutdown.mockRestore(); } }
 });

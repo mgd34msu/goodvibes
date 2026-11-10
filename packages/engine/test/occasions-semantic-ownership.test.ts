@@ -28,7 +28,8 @@ import { RAISE_BOUNDARIES } from '../platform/src/platform/occasions/types.ts';
 import { OccasionReadingWork } from '../platform/src/platform/occasions/readings.ts';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import { registerOccasionsGatewayMethods } from '../platform/src/platform/control-plane/routes/occasions.ts';
-import { composeOccasions } from '../platform/src/platform/control-plane/routes/occasions-composition.ts';
+import { composeOccasions, installOccasions } from '../platform/src/platform/control-plane/routes/occasions-composition.ts';
+import { createAsyncDisposalScope } from '../platform/src/platform/runtime/async-disposal.js';
 import type { ConfigManager } from '../platform/src/platform/config/manager.ts';
 
 // Logger role readings carry only field names; count the actual content readers.
@@ -301,6 +302,27 @@ for (const reason of ['cancel', 'authorization'] as const) {
     await composition.dispose();
     await failed;
   }
+ });
+ test('installed occasions scope waits for its genuine original state drain', async () => {
+  const h = harness(), scope = createAsyncDisposalScope('installed occasions fixture');
+  const get: ConfigManager['get'] = ((key: string) => key === 'daemon.timezone' ? 'UTC' : undefined) as ConfigManager['get'];
+  const composition = installOccasions(new GatewayMethodCatalog(), h.profile, {
+    configManager: { get }, surfaceRoot: 'goodvibes',
+    shellPaths: { resolveUserPath: (...segments) => join(h.statePath + '-scope', ...segments) },
+    disposal: scope.registry,
+  });
+  const entered = deferred<void>(), release = deferred<void>();
+  const original = composition.state.drain.bind(composition.state);
+  const drain = spyOn(composition.state, 'drain').mockImplementation(async () => {
+    entered.resolve(); await release.promise; await original();
+  });
+  let settled = false;
+  const closed = scope.close().then(() => { settled = true; });
+  try {
+    await entered.promise; await Promise.resolve();
+    expect(settled).toBe(false); expect(drain).toHaveBeenCalledTimes(1);
+  } finally { release.resolve(); await closed; drain.mockRestore(); }
+  expect(settled).toBe(true); await scope.close();
  });
  test('failed shared-store publication leaves no tentative interview and does not poison successor writes', async () => {
   install(recorded().port); const h = harness(); await h.state.acknowledgements();

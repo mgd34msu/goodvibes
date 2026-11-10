@@ -548,7 +548,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   registerDaemonEmailVerbs(catalog, { ...deps, configManager: deps.configManager });
   const browserGateway = composeDaemonBrowser(deps);
   if (browserGateway) registerBrowserGatewayMethods(catalog, browserGateway);
-  if (browserGateway) deps.disposal?.add('browser sessions', () => void browserGateway.shutdown());
+  if (browserGateway) deps.disposal?.add('browser sessions', () => browserGateway.shutdown());
   registerSessionRuntimeGatewayMethods(
     catalog,
     createSessionRuntimeControls({

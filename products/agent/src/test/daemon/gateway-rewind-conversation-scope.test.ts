@@ -38,13 +38,13 @@ import { ConversationManager } from '../../core/conversation.ts';
 import { recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { registerSessionConversation, unregisterSessionConversation } from '../../runtime/conversation-rewind-port.ts';
 import { getTestRuntimeServices } from '../helpers/runtime-services.ts';
-import { createDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
+import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { buildDaemonGatewayCatalog } from '../helpers/daemon-gateway.ts';
 
-let catalogScope = createDisposalScope('rewind fixture daemon catalog');
-afterEach(() => {
-  catalogScope.dispose();
-  catalogScope = createDisposalScope('rewind fixture daemon catalog');
+let catalogScope = createAsyncDisposalScope('rewind fixture daemon catalog');
+afterEach(async () => {
+  await catalogScope.close();
+  catalogScope = createAsyncDisposalScope('rewind fixture daemon catalog');
 });
 
 interface RewindPlanResult {

@@ -41,7 +41,7 @@ import { buildDaemonGatewayCatalog } from '../helpers/daemon-gateway.ts';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MemoryGovernorSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
-import { createDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
+import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { ConfigManager } from '../../config/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
@@ -51,14 +51,14 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 describe('voice-setup + memory-governance composition', () => {
   let root = '';
   let runtime: RuntimeServices | undefined;
-  let catalogScope: ReturnType<typeof createDisposalScope> | undefined;
+  let catalogScope: ReturnType<typeof createAsyncDisposalScope> | undefined;
   const gateway = (services: RuntimeServices) => {
     if (!catalogScope || runtime !== services) throw new Error('Original fixture catalog owner missing');
     return buildDaemonGatewayCatalog(services, { disposal: catalogScope.registry });
   };
 
   afterEach(async () => {
-    try { catalogScope?.dispose(); } finally { await runtime?.close(); }
+    try { await catalogScope?.close(); } finally { await runtime?.close(); }
     catalogScope = undefined; runtime = undefined;
     if (root) rmSync(root, { recursive: true, force: true });
     root = '';
@@ -82,12 +82,12 @@ describe('voice-setup + memory-governance composition', () => {
       workingDir,
       homeDirectory: homeDir,
     });
-    catalogScope = createDisposalScope('voice memory fixture daemon catalog');
+    catalogScope = createAsyncDisposalScope('voice memory fixture daemon catalog');
     return runtime;
   }
 
   async function cleanup(services: RuntimeServices): Promise<void> {
-    try { catalogScope?.dispose(); } finally { await services.close(); }
+    try { await catalogScope?.close(); } finally { await services.close(); }
   }
 
   test('services.voiceSetup is present and its status() reflects the real (fresh, not-provisioned) managed runtime', async () => {

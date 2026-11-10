@@ -247,6 +247,6 @@ export function installOccasions(
       ? {}
       : { channelDeliveryRouter: deps.channelDeliveryRouter }),
   });
-  deps.disposal?.add('occasions', () => void composition.dispose());
+  deps.disposal?.add('occasions', () => composition.dispose());
   return composition;
 }

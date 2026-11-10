@@ -43,7 +43,7 @@ import { dirname, join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
-import { createDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
+import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { createAgentProfileTool, registerAgentProfileTool } from '../../tools/agent-profile-tool.ts';
@@ -117,10 +117,9 @@ async function liveProfile(): Promise<LiveProfile> {
     homeDirectory: root,
     getConversationTitle: () => 'profile-live',
   });
-  const catalogScope = createDisposalScope('profile live fixture catalog');
+  const catalogScope = createAsyncDisposalScope('profile live fixture catalog');
   closeFixtures.push(async () => {
-    catalogScope.dispose();
-    await services.close();
+    try { await catalogScope.close(); } finally { await services.close(); }
   });
 
   const invoke = createProfileGatewayInvoke({

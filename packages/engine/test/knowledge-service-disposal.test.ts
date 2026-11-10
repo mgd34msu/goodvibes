@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
-import { KnowledgeService } from '../platform/src/platform/knowledge/service.js';
+import { KnowledgeService, type KnowledgeServiceConfig } from '../platform/src/platform/knowledge/service.js';
 import { KnowledgeSemanticService } from '../platform/src/platform/knowledge/semantic/service.js';
 import type { KnowledgeSemanticSelfImproveInput, KnowledgeSemanticSelfImproveResult } from '../platform/src/platform/knowledge/semantic/types.js';
 import { createAsyncDisposalScope, registerRuntimePollers } from '../platform/src/platform/runtime/disposal.js';
@@ -19,7 +19,11 @@ function fixture() {
   const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
   const artifacts = new ArtifactStore({ rootDir: join(root, 'artifacts') });
   cleanups.push(async () => { await store.close(); rmSync(root, { recursive: true, force: true }); });
-  const options = { memoryRegistry: { async add() { throw new Error('Unexpected memory publication'); }, getAll: () => [], getStore: () => undefined } };
+  const options = { memoryRegistry: {
+    async add() { throw new Error('Unexpected memory publication'); },
+    getAll: () => [],
+    getStore(): never { throw new Error('Disposal must not read a memory store'); },
+  } } satisfies KnowledgeServiceConfig;
   return { store, artifacts, options };
 }
 

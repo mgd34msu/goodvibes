@@ -279,7 +279,7 @@ test(`URL ingestion owns its actual ${stage} acquisition when cancelled by ${can
   const entered = Promise.withResolvers<AbortSignal | null | undefined>(), release = Promise.withResolvers<void>();
   const controller = new AbortController();
   let bodyCancelled = false, acquiredSignal: AbortSignal | null | undefined;
-  const transport = spyOn(globalThis, 'fetch').mockImplementation(async (_request, init) => {
+  const transport = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async (_request: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     acquiredSignal = init?.signal;
     if (stage === 'fetch') {
       entered.resolve(acquiredSignal);
@@ -293,7 +293,7 @@ test(`URL ingestion owns its actual ${stage} acquisition when cancelled by ${can
       cancel() { bodyCancelled = true; },
     });
     return new Response(body, { headers: { 'Content-Type': 'text/plain' } });
-  });
+  }, { preconnect: fetch.preconnect }));
   const outcome = service.ingestUrl({ installationId: 'url-close-house', url: 'https://example.org/owned-note.txt' },
     cancelledBy === 'caller' ? { signal: controller.signal } : {}).then(() => 'completed', (error: unknown) => error);
   let closing: Promise<void> | undefined, disposed = false;

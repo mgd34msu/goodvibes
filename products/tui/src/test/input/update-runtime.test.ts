@@ -1,7 +1,9 @@
-/** Actual TUI update commands over a complete synthetic suite release.
+/** Actual TUI updates use complete release fixtures; preflight-only cases keep inert originals.
  * Regression source intentionally UNRUN during the coding-first pass. */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { realUpdateFileIo, type UpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { join } from 'node:path';
 import { suiteReleaseFixture } from '@goodvibes-jev/engine/toolchain/testing/suite-release';
 import { applyUpdate, checkForUpdate, createUpdateSwapProgress, detectDaemonServiceManaged, rollbackUpdate, UPDATE_ABORTED_MESSAGE,
@@ -26,9 +28,14 @@ function fixture() {
 }
 
 test('source installs remain read-only and print their actual update guidance', async () => {
-  const f = fixture(); let calls = 0;
-  await applyUpdate({ ...f.options, execPath: '/usr/bin/bun', fetchImpl: async () => { calls++; throw new Error('Source installs never download'); } });
-  expect(calls).toBe(0); expect(f.progress.begun).toBe(false);
+  let calls = 0;
+  const printed: string[] = [], progress = createUpdateSwapProgress();
+  const result = await applyUpdate({ execPath: '/usr/bin/bun', platform: 'darwin', arch: 'x64', currentVersion: '3.1.2',
+    configManager: { get: () => undefined }, print: line => printed.push(line), progress,
+    fetchImpl: async () => { calls++; throw new Error('Source installs never download'); } });
+  expect(result).toBeUndefined(); expect(calls).toBe(0); expect(progress.begun).toBe(false); expect(progress.committed).toBe(false);
+  expect(printed.join('\n')).toContain('running from source');
+  expect(printed.join('\n')).toContain('Update with:');
 });
 
 test('the actual TUI apply and rollback paths include Agent, daemon, native companions and served WebUI', async () => {
@@ -67,23 +74,49 @@ test('a missing required macOS companion refuses every live replacement', async 
   expect(f.progress.begun).toBe(false); expect(f.progress.committed).toBe(false);
 });
 
+/** Real inert originals for guards that must run before any native receipt/body read.
+ * No descriptor or checksum is claimed: these cases never enter verification. */
+function preflightOriginals() {
+  const root = mkdtempSync(join(tmpdir(), 'gv-tui-update-preflight-'));
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const executable = join(root, 'goodvibes'), webui = join(root, 'webui', 'served');
+  mkdirSync(webui, { recursive: true });
+  const original = new Map([[executable, Buffer.from('Inert original TUI')],
+    [join(webui, 'index.html'), Buffer.from('Inert original served WebUI')]]);
+  for (const [path, bytes] of original) writeFileSync(path, bytes);
+  const reads: string[] = [], sentinel = new Error('Preflight must not read native descriptors or payload bodies');
+  const io: UpdateFileIo = { ...realUpdateFileIo, readFile(path) { reads.push(path); throw sentinel; } };
+  // Positive controls keep the descriptor/body observer from becoming inert.
+  expect(() => io.readFile!(executable + '.readers.json')).toThrow(sentinel.message);
+  expect(() => io.readFile!(executable)).toThrow(sentinel.message);
+  expect(reads).toHaveLength(2); reads.length = 0;
+  const assertOriginals = () => { for (const [path, bytes] of original) expect(readFileSync(path)).toEqual(bytes); };
+  return { root, executable, webui, io, reads, assertOriginals };
+}
+
 test('the original served WebUI selection is checked after latest-release lookup', async () => {
-  const f = fixture(); let selected = f.webui;
-  const fetchImpl: UpdateFetchLike = async (url, init) => { const response = await f.options.fetchImpl(url, init); if (url === LATEST) selected = join(f.root, 'webui', 'other'); return response; };
-  await expect(applyUpdate({ ...f.options, fetchImpl, configManager: { get: () => selected } })).rejects.toThrow('selection changed');
-  for (const [path, bytes] of f.original) {
-    if (bytes === undefined) throw new Error('Original suite fixture member is missing');
-    expect(bytes).toEqual(readFileSync(path));
-  }
+  const f = preflightOriginals(); let selected = f.webui;
+  const calls: string[] = [], progress = createUpdateSwapProgress();
+  const fetchImpl: UpdateFetchLike = async (url, init) => {
+    calls.push(url); if (url !== LATEST) throw new Error('Changed selection must refuse before asset download');
+    const response = await latest('v3.1.3')(url, init); selected = join(f.root, 'webui', 'other'); return response;
+  };
+  await expect(applyUpdate({ execPath: f.executable, platform: 'darwin', arch: 'x64', currentVersion: '3.1.2',
+    fetchImpl, print: () => {}, progress, io: f.io, configManager: { get: key => key === 'controlPlane.webui.bundleDir' ? selected : undefined },
+  })).rejects.toThrow('Configured WebUI update selection changed');
+  expect(calls).toEqual([LATEST]); expect(f.reads).toEqual([]);
+  expect(progress.begun).toBe(false); expect(progress.committed).toBe(false); f.assertOriginals();
 });
 
 test('an aborted update performs no publication', async () => {
-  const f = fixture(), owner = new AbortController(); owner.abort();
-  await expect(applyUpdate({ ...f.options, signal: owner.signal })).rejects.toThrow(UPDATE_ABORTED_MESSAGE);
-  for (const [path, bytes] of f.original) {
-    if (bytes === undefined) throw new Error('Original suite fixture member is missing');
-    expect(bytes).toEqual(readFileSync(path));
-  }
+  const f = preflightOriginals(), owner = new AbortController(); owner.abort();
+  let calls = 0; const progress = createUpdateSwapProgress();
+  await expect(applyUpdate({ execPath: f.executable, platform: 'darwin', arch: 'x64', currentVersion: '3.1.2',
+    configManager: { get: key => key === 'controlPlane.webui.bundleDir' ? f.webui : undefined }, print: () => {}, progress,
+    io: f.io, signal: owner.signal, fetchImpl: async () => { calls++; throw new Error('An aborted update never downloads'); },
+  })).rejects.toThrow(UPDATE_ABORTED_MESSAGE);
+  expect(calls).toBe(0); expect(f.reads).toEqual([]);
+  expect(progress.begun).toBe(false); expect(progress.committed).toBe(false); f.assertOriginals();
 });
 
 test('version check reports the actual release tag', async () => {

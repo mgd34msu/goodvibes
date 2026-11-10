@@ -1,8 +1,9 @@
 /** Actual Agent apply/rollback entry points over the complete shared suite.
  * Regression source is unrun while implementation work remains. */
 import { afterAll, expect, test } from 'bun:test';
-import { readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { realUpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { applyUpdate, rollbackUpdate } from '../../input/commands/update-runtime.ts';
 import type { UpdateFetchLike } from '../../runtime/update-check.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -55,11 +56,32 @@ test('a verified archive missing a required driver entry refuses before replacin
   await expect(applyUpdate(f.options)).rejects.toThrow(); originals(f);
 });
 test('a changed configured bundle path during latest-release lookup is never adopted after the await', async () => {
-  const f = fixture(), originalFetch = f.options.fetchImpl; let selected = f.installed.webui;
+  // Configuration changes reject immediately after HEAD, before any installed
+  // payload, reader descriptor or future release content is needed.
+  const root = makeProjectTempDir('agent-suite-config-preflight-'); roots.push(root);
+  const appPath = join(root, 'goodvibes-agent'), webui = join(root, 'webui', OLD);
+  mkdirSync(webui, { recursive: true });
+  writeFileSync(appPath, 'original-agent');
+  writeFileSync(join(webui, 'index.html'), 'old-webui');
+  let selected = webui;
+  const requests: { url: string; method: string | undefined }[] = [], contentReads: string[] = [];
   const configManager = { get: (key: string) => key === 'controlPlane.webui.bundleDir' ? selected : undefined };
-  await expect(applyUpdate({ ...f.options, configManager, fetchImpl: async (url, init) => {
-    const response = await originalFetch(url, init); if (url.endsWith('/latest')) selected = join(f.root, 'webui', 'foreign'); return response;
-  } })).rejects.toThrow('selection changed'); originals(f);
+  await expect(applyUpdate({ execPath: appPath, platform: 'linux', arch: 'x64', currentVersion: OLD,
+    configManager, print: () => {}, io: { ...realUpdateFileIo, readFile(path) {
+      contentReads.push(path); throw new Error('Configuration preflight must not read native payloads or reader descriptors');
+    } }, fetchImpl: async (url, init) => {
+      requests.push({ url, method: init?.method });
+      if (url !== 'https://github.com/mgd34msu/goodvibes/releases/latest' || init?.method !== 'HEAD') {
+        throw new Error('Configuration preflight must not fetch release content');
+      }
+      selected = join(root, 'webui', 'foreign');
+      const response = new Response(null, { status: 302, headers: { location: `https://github.com/mgd34msu/goodvibes/releases/tag/v${NEXT}` } });
+      Object.defineProperty(response, 'url', { value: url }); return response;
+    } })).rejects.toThrow('selection changed');
+  expect(requests).toEqual([{ url: 'https://github.com/mgd34msu/goodvibes/releases/latest', method: 'HEAD' }]);
+  expect(contentReads).toEqual([]);
+  expect(readFileSync(appPath, 'utf8')).toBe('original-agent');
+  expect(readFileSync(join(webui, 'index.html'), 'utf8')).toBe('old-webui');
 });
 test('package-managed installs retain install-kind gating and never enter suite downloads', async () => {
   let requested = 0; const lines: string[] = [];

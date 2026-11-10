@@ -38,6 +38,8 @@ describe('the complete native daemon installation', () => {
 
   test('a daemon update owns every payload and the installation receipt', () => {
     const { io } = installation();
+    const verified = inspectDaemonNativeInstallation(execPath, 'linux', 'x64', '', io);
+    expect(verified?.version).toBe('2.0.23'); expect(verified?.artifact).toEqual(cohort.artifact);
     const files = resolveDaemonInstalledFiles({ execPath, platform: 'linux', arch: 'x64', io });
     expect(files.map(file => file.path)).toEqual(ownedPaths);
     expect(files.map(file => file.assetName)).toEqual([
@@ -79,6 +81,8 @@ describe('the complete native daemon installation', () => {
   test('the arm64 installation owns its matching complete cohort', () => {
     const arm = nativeCohortFixture({ version: '2.0.23', daemonBytes: 'arm-daemon', arch: 'arm64' });
     const memory = nativeMemoryIo(arm.installation(execPath));
+    const verified = inspectDaemonNativeInstallation(execPath, 'linux', 'arm64', '', memory.io);
+    expect(verified?.version).toBe('2.0.23'); expect(verified?.artifact).toEqual(arm.artifact);
     const files = resolveDaemonInstalledFiles({ execPath, platform: 'linux', arch: 'arm64', io: memory.io });
     expect(files.map(file => file.path)).toEqual([
       execPath, `${execPath}.bun`, `${execPath}.bun.LICENSE.md`, `${execPath}.bun.json`,

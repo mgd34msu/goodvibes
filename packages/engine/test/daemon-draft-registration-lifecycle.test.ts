@@ -50,7 +50,7 @@ test('registration close drains an accepted save and its persistence before owne
     const reopened = new DraftSyncStore({ workingDirectory: ctx.workingDirectory, cipher });
     await reopened.init();
     try {
-      expect(reopened.get('fixture')?.message).toHaveLength(12);
+      expect(reopened.get('fixture')?.message).toBe('[redacted]');
       expect(readFileSync(reopened.dbPath).includes(Buffer.from('fixture body held during shutdown'))).toBe(false);
     } finally { await reopened.close(); }
   } finally { release.resolve(); await Promise.allSettled([saving, registration.close()]); delayed.mockRestore(); }

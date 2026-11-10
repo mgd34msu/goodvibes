@@ -17,7 +17,7 @@
  * plus soft status fills for chip-sized backgrounds (--ok-soft etc.) and
  * --on-accent for the rare text drawn on an accent fill.
  *
- * WEBUI-ONLY LAYER. The SDK presentation contract (status glyphs, tone table)
+ * WEBUI-ONLY LAYER. The platform presentation contract (status glyphs, tone table)
  * lives in src/styles/generated/presentation-tokens.css and is untouched here.
  */
 

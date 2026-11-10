@@ -1,7 +1,7 @@
 /* Self-hosted Geist and Geist Mono (400, 500, 600), bundled by Vite: no font CDN. */
 @import './styles/fonts.css';
 @import './styles/tokens.css';
-/* Generated from the SDK presentation contract: see
+/* Generated from the platform presentation contract: see
    src/styles/generated/presentation-tokens.css's own header for what this
    layer is (and is not) and scripts/generate-presentation-tokens.ts for how
    it is produced. */

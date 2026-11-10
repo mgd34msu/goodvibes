@@ -1,5 +1,6 @@
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, renameSync, unlinkSync, writeFileSync, type BigIntStats } from 'fs';
 import { basename, dirname, join, resolve } from 'path';
+import { execFile } from 'node:child_process';
 import { captureExistingDirectory } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation, type FileObservation } from '../utils/file-observation.js';
 // `simple-git` is an optionalDependency and is built through
@@ -43,6 +44,21 @@ const ownsIndexLock = (current: BigIntStats | undefined, original: BigIntStats):
   && current.isFile() && !current.isSymbolicLink() && current.nlink === 1n
   && current.dev === original.dev && current.ino === original.ino && current.uid === original.uid
   && current.gid === original.gid && current.birthtimeNs === original.birthtimeNs;
+
+function ignoredPaths(cwd: string, paths: readonly string[]): Promise<readonly string[]> {
+  return new Promise((resolve, reject) => {
+    const child = execFile('git', ['check-ignore', '--stdin', '-z'],
+      { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => {
+        // Git uses exit 1 when none of the supplied paths are ignored.
+        if (error && error.code !== 1) { reject(error); return; }
+        resolve(stdout.split('\0').filter(Boolean).map(path => path.slice(2)));
+      });
+    child.stdin?.on('error', () => { /* The command callback reports early Git refusal. */ });
+    // Prefix filenames with ./ so a leading colon is never pathspec magic.
+    // check-ignore rejects even Git's global --literal-pathspecs flag.
+    child.stdin?.end(`${paths.map(path => `./${path}`).join('\0')}\0`);
+  });
+}
 
 /**
  * AgentWorktree, Manages git worktree lifecycle for spawned agents.
@@ -158,7 +174,7 @@ export class AgentWorktree {
       // check-ignore consumes filenames, not staging pathspecs. Keep leading
       // dashes/pathspec-like names literal and preserve whitespace with NULs.
       const ignored = existingPaths.length > 0
-        ? (await git.raw(['--literal-pathspecs', 'check-ignore', '-z', '--', ...existingPaths])).split('\0').filter(Boolean)
+        ? await ignoredPaths(cwd, existingPaths)
         : [];
       root.assertCurrent();
       const ignoredSet = new Set(ignored);

@@ -1,54 +1,663 @@
 {
+  "format": 2,
   "decision": "errors.stale-server-kind@2",
   "model": "jev-latest",
   "readings": {
     "docs/browser-integration.md": {
-      "sha256": "452150e606d33220bf36b0d2b5b6df25b164a70fe702c9357fdc3c9e6a64657f",
-      "verdict": "no",
-      "outcome": "act",
-      "probability": 0.01
+      "windows": [
+        {
+          "format": 1,
+          "call": {
+            "id": "feabmccc-bdkl-engh-lmio-njdclemoamag",
+            "at": "2026-11-10T16:22:56.537Z",
+            "battery": "errors.stale-server-kind",
+            "version": 2,
+            "site": "errors.stale-server-kind.docs",
+            "state": {
+              "path": "docs/browser-integration.md",
+              "currentKinds": [
+                "auth",
+                "config",
+                "contract",
+                "network",
+                "not-found",
+                "protocol",
+                "rate-limit",
+                "service",
+                "internal",
+                "tool",
+                "validation",
+                "unknown"
+              ],
+              "text": "1| # Browser integration\n2| \n3| This is the **companion surface** for browser runtimes. See [Runtime Surfaces](./surfaces.md).\n4| \n5| Browser apps cannot run the full agentic surface (tool execution, LSP, MCP, workflows, daemon HTTP). Those require Bun. This guide is the shared foundation for every browser entrypoint: auth, transport, realtime events, error handling, and observability. For web-UI-application patterns built on this foundation, entrypoint selection, companion chat, attachments, and voice playback, see [Web UI integration](./web-ui-integration.md).\n6| \n7| Use `@goodvibes-jev/engine/platform/browser` when a browser app needs the complete\n8| operator route contract. Use scoped browser entrypoints when an app owns one\n9| extension surface:\n10| \n11| - `@goodvibes-jev/engine/platform/browser/knowledge` for the base knowledge/wiki WebUI.\n12| - `@goodvibes-jev/engine/platform/browser/homeassistant` for Home Assistant panels.\n13| - `@goodvibes-jev/engine/platform/browser/agent` (`createBrowserAgentPlatform`) for the GoodVibes Agent surface: the agent's own knowledge/wiki space under `/api/goodvibes-agent/knowledge`, plus work-plan, artifact, and companion-chat routes.\n14| \n15| ```ts\n16| import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';\n17| \n18| const platformClient = createBrowserGoodVibesPlatform({\n19|   baseUrl: 'https://goodvibes.example.com',\n20| });\n21| ```\n22| \n23| Scoped entrypoints expose the same auth/token options and shared session routes\n24| without loading unrelated route metadata:\n25| \n26| ```ts\n27| import { createBrowserKnowledgePlatform } from '@goodvibes-jev/engine/platform/browser/knowledge';\n28| \n29| const platformClient = createBrowserKnowledgePlatform({\n30|   baseUrl: 'https://goodvibes.example.com',\n31| });\n32| \n33| await platformClient.knowledge.status();\n34| ```\n35| \n36| ## Auth\n37| \n38| Preferred browser auth modes:\n39| - same-origin cookie session\n40| - bearer token when operating cross-origin or inside a custom shell\n41| \n42| The HTTP transport always uses `credentials: 'include'`, so same-origin cookie-backed sessions work without additional wiring.\n43| \n44| If you are using bearer tokens in the browser, pair the platform with `createBrowserTokenStore()` or your own `tokenStore` implementation.\n45| \n46| ## Realtime\n47| \n48| For browser UIs:\n49| - use `platformClient.realtime.viaSse()` for operator dashboards and status views\n50| - use `platformClient.realtime.viaWebSocket()` when you need a persistent duplex connection model\n51| \n52| The browser entrypoint also enables conservative defaults for:\n53| - HTTP retry on safe/idempotent requests\n54| - SSE reconnect\n55| - WebSocket reconnect\n56| \n57| ## Example\n58| \n59| ```ts\n60| const events = platformClient.realtime.viaSse();\n61| const unsubscribe = events.agents.on('AGENT_COMPLETED', (event) => {\n62|   console.log(event);\n63| });\n64| ```\n65| \n66| ## Same-origin recommendation\n67| \n68| If the web UI is hosted with the daemon:\n69| - prefer same-origin routing\n70| - prefer cookie-backed session auth\n71| - use SSE for live operator dashboards\n72| \n73| If the app is cross-origin:\n74| - use bearer tokens\n75| - validate CORS explicitly\n76| - prefer WebSocket if the deployment path is hostile to SSE\n77| \n78| ## Error handling\n79| \n80| All platform errors extend `GoodVibesError`. See [Error Kinds](./error-kinds.md) for the full taxonomy.\n81| \n82| ```ts\n83| import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';\n84| \n85| try {\n86|   await platformClient.operator.control.snapshot();\n87| } catch (err) {\n88|   if (err instanceof GoodVibesError) {\n89|     switch (err.kind) {\n90|       case 'auth':\n91|         // session expired, redirect to login or refresh token\n92|         break;\n93|       case 'network':\n94|         // transport failure, reconnect SSE/WS or retry\n95|         break;\n96|       case 'service':\n97|         // daemon or upstream service returned 5xx, log and degrade gracefully\n98|         break;\n99|       case 'protocol':\n100|         // client and daemon disagreed about the wire contract\n101|         break;\n102|       default:\n103|         throw err;\n104|     }\n105|   }\n106| }\n107| ```\n108| \n109| ## Observability\n110| \n111| `PlatformObserver` is the right mechanism for dev-time logging in browser consoles. `createConsoleObserver()` logs auth transitions (`console.log`) and errors (`console.error`) by default; pass `createConsoleObserver({ level: 'debug' })` to also trace transport activity and every runtime event via `console.debug`. See [Observability](./observability.md) for the full observer API.\n112| \n113| ```ts\n114| import { createConsoleObserver } from '@goodvibes-jev/engine/platform/observer';\n115| \n116| const platformClient = createBrowserGoodVibesPlatform({\n117|   baseUrl: 'https://goodvibes.example.com',\n118|   observer: createConsoleObserver({ level: 'debug' }),\n119| });\n120| ```\n121| "
+            },
+            "questions": {
+              "stale": {
+                "type": "noul",
+                "instructions": "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not."
+              }
+            },
+            "requestedModel": "jev-latest",
+            "observedModel": "jev-1.14.0",
+            "requestId": "req_01a1c6450cd6777cb9a37327bc1b07ab",
+            "answers": {
+              "stale": {
+                "type": "noul",
+                "noul": 0.01
+              }
+            }
+          },
+          "usage": {
+            "inputTokens": 2015,
+            "outputTokens": 21
+          },
+          "latencyMs": 204.73294099999998
+        }
+      ]
     },
     "docs/error-handling.md": {
-      "sha256": "dc932b6e0255eeb7e5de286f863a7c3c7819cf005b5ee47d4e7115e34656d2c9",
-      "verdict": "no",
-      "outcome": "act",
-      "probability": 0.01
+      "windows": [
+        {
+          "format": 1,
+          "call": {
+            "id": "emgnpeem-mhbe-empf-jlbo-icmpnffdacpi",
+            "at": "2026-11-10T16:22:56.520Z",
+            "battery": "errors.stale-server-kind",
+            "version": 2,
+            "site": "errors.stale-server-kind.docs",
+            "state": {
+              "path": "docs/error-handling.md",
+              "currentKinds": [
+                "auth",
+                "config",
+                "contract",
+                "network",
+                "not-found",
+                "protocol",
+                "rate-limit",
+                "service",
+                "internal",
+                "tool",
+                "validation",
+                "unknown"
+              ],
+              "text": "1| # Error handling\n2| \n3| > Consumer guidance. For internal error architecture see [Error Architecture](./errors.md).\n4| \n5| All public client packages normalize transport failures into structured platform errors.\n6| \n7| ## Typed error discrimination\n8| \n9| Consumers should switch on `err.kind` rather than `instanceof` chains or message parsing. Every error thrown from the public API surface is a `GoodVibesError` with a stable `kind` discriminant.\n10| \n11| ```ts\n12| import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';\n13| \n14| try {\n15|   await platformClient.operator.control.snapshot();\n16| } catch (err) {\n17|   if (err instanceof GoodVibesError) {\n18|     switch (err.kind) {\n19|       case 'auth':\n20|         // Redirect to login or surface auth UI\n21|         break;\n22|       case 'rate-limit':\n23|         // Wait retryAfterMs then retry\n24|         await delay(err.retryAfterMs ?? 1000);\n25|         break;\n26|       case 'network':\n27|       case 'service':\n28|         if (err.recoverable) {\n29|           // Retry with backoff\n30|         }\n31|         break;\n32|       case 'config':\n33|         // Fix platform initialization options, do not retry\n34|         break;\n35|       case 'contract':\n36|       case 'protocol':\n37|       case 'internal':\n38|       case 'tool':\n39|       case 'validation':\n40|       case 'not-found':\n41|       case 'unknown':\n42|         // Log and surface to the user\n43|         break;\n44|     }\n45|   } else {\n46|     throw err;\n47|   }\n48| }\n49| ```\n50| \n51| See [error-kinds.md](./error-kinds.md) for the full reference on each kind.\n52| \n53| ## TUI and consumer example\n54| \n55| ```ts\n56| import type { GoodVibesPlatform } from '@goodvibes-jev/engine/platform';\n57| import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';\n58| import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';\n59| \n60| async function safeSnapshot(platformClient: GoodVibesPlatform): Promise<OperatorMethodOutput<'control.snapshot'> | null> {\n61|   try {\n62|     return await platformClient.operator.control.snapshot();\n63|   } catch (err) {\n64|     if (!(err instanceof GoodVibesError)) throw err;\n65|     if (err.kind === 'auth') {\n66|       // surface login prompt in TUI\n67|       return null;\n68|     }\n69|     if (err.kind === 'network' && err.recoverable) {\n70|       // schedule reconnect\n71|       return null;\n72|     }\n73|     throw err;\n74|   }\n75| }\n76| ```\n77| \n78| ## Class-specific handling\n79| \n80| The `HttpStatusError`, `ConfigurationError`, and `ContractError` subclasses remain available when callers need class-specific handling. Prefer `err.kind` for broad control flow.\n81| \n82| ```ts\n83| import { HttpStatusError } from '@goodvibes-jev/engine/platform/errors';\n84| \n85| try {\n86|   await platformClient.operator.accounts.snapshot();\n87| } catch (error) {\n88|   if (error instanceof HttpStatusError) {\n89|     if (error.status === 401) {\n90|       // redirect to login, refresh token, or surface auth UI\n91|     }\n92|     console.error(error.status, error.category, error.hint);\n93|   }\n94|   throw error;\n95| }\n96| ```\n97| \n98| ## Useful fields\n99| \n100| Every error exposes the full set of 18 structured fields. See the canonical [Useful fields on every `GoodVibesError`](./error-kinds.md#useful-fields-on-every-goodvibeserror) table for the complete list and types.\n101| \n102| Do not parse `message` strings when the structured fields are available.\n103| \n104| ## Core error classes\n105| \n106| Four classes cover everything the platform throws; the three specialized classes\n107| extend the base, so an `instanceof GoodVibesError` check catches them all.\n108| \n109| | Class | When you get it |\n110| | --- | --- |\n111| | `GoodVibesError` | The base class for every platform error; carries the structured fields above |\n112| | `ConfigurationError` | The platform was constructed or configured incorrectly (`ENGINE_CONFIGURATION_ERROR`, kind `config`) |\n113| | `ContractError` | Client and daemon disagree about the contract (`ENGINE_CONTRACT_ERROR`, kind `contract`) |\n114| | `HttpStatusError` | An HTTP failure with no more specific mapping (`ENGINE_HTTP_STATUS_ERROR`, source `transport`) |\n115| \n116| ## Category guidance\n117| \n118| `ErrorCategory` has 16 values: the 15 daemon wire categories plus `contract`, which is added by the platform and is never marshalled over the wire.\n119| \n120| - `authentication`\n121|   Missing or invalid credentials.\n122| - `authorization`\n123|   Valid credentials, insufficient scopes/roles.\n124| - `billing`\n125|   Payment required or quota/billing failure.\n126| - `rate_limit`\n127|   Retry after backoff.\n128| - `timeout`\n129|   Remote timeout or transport timeout.\n130| - `network`\n131|   Connectivity failure before a response was received.\n132| - `bad_request`\n133|   Malformed or schema-invalid request payload.\n134| - `not_found`\n135|   Remote resource does not exist.\n136| - `permission`\n137|   Operation denied due to insufficient permissions.\n138| - `tool`\n139|   Tool execution failure.\n140| - `config`\n141|   Local platform misconfiguration.\n142| - `protocol`\n143|   Wire-format or protocol-level failure.\n144| - `service`\n145|   Remote failure or server instability.\n146| - `internal`\n147|   Daemon or platform internal failure.\n148| - `unknown`\n149|   Unclassified error.\n150| - `contract`\n151|   Contract drift or invalid method/endpoint usage (platform-local; not a wire category).\n152| "
+            },
+            "questions": {
+              "stale": {
+                "type": "noul",
+                "instructions": "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not."
+              }
+            },
+            "requestedModel": "jev-latest",
+            "observedModel": "jev-1.14.0",
+            "requestId": "req_01a1c6450cce7a4994d89c5de3d53858",
+            "answers": {
+              "stale": {
+                "type": "noul",
+                "noul": 0.01
+              }
+            }
+          },
+          "usage": {
+            "inputTokens": 2193,
+            "outputTokens": 21
+          },
+          "latencyMs": 185.263625
+        }
+      ]
     },
     "docs/error-kinds.md": {
-      "sha256": "b497d5dadc545e6ecb6a873f6afe5b82a26ff01d999a22673face7bae7e82976",
-      "verdict": "no",
-      "outcome": "act",
-      "probability": 0.01
+      "windows": [
+        {
+          "format": 1,
+          "call": {
+            "id": "hbfidfpn-mnca-efkc-iang-mcdhafdfonjh",
+            "at": "2026-11-10T16:22:56.526Z",
+            "battery": "errors.stale-server-kind",
+            "version": 2,
+            "site": "errors.stale-server-kind.docs",
+            "state": {
+              "path": "docs/error-kinds.md",
+              "currentKinds": [
+                "auth",
+                "config",
+                "contract",
+                "network",
+                "not-found",
+                "protocol",
+                "rate-limit",
+                "service",
+                "internal",
+                "tool",
+                "validation",
+                "unknown"
+              ],
+              "text": "1| # platform error kinds\n2| \n3| > Consumer reference. For handling patterns see [Error Handling](./error-handling.md); for internals see [Error Architecture](./errors.md).\n4| \n5| Every error thrown by the platform's public surface is an instance of `GoodVibesError`. The `kind` field is the primary discriminant. Use it in `switch` statements or `if` chains instead of parsing `message` strings or using `instanceof` on subclasses.\n6| \n7| ## Quick reference\n8| \n9| | `kind` | Description | Retryable |\n10| |--------|-------------|----------|\n11| | `auth` | Credential or permission failure | No |\n12| | `config` | Local platform misconfiguration | No |\n13| | `contract` | Method/route contract violation | No |\n14| | `network` | Transport or connectivity failure | Yes |\n15| | `not-found` | Remote resource does not exist | No |\n16| | `rate-limit` | Upstream rate limit exceeded | Yes |\n17| | `protocol` | Wire-format or protocol failure | Sometimes |\n18| | `service` | Upstream service or HTTP 5xx failure | Sometimes |\n19| | `internal` | Daemon/internal platform failure | No |\n20| | `tool` | Tool execution failure | Sometimes |\n21| | `validation` | Input failed schema or value checks | No |\n22| | `unknown` | Unclassified error | No |\n23| \n24| ## Kinds in detail\n25| \n26| ### `auth`\n27| \n28| **When it fires:** The request was rejected due to authentication or authorization failure. Covers HTTP 401 (missing/invalid credentials), 402 (billing), and 403 (insufficient scopes).\n29| \n30| **Remediation:**\n31| - On 401: refresh the auth token or redirect to login.\n32| - On 403: check the required scopes in `err.hint`; the user may need elevated permissions.\n33| \n34| **Retryable:** No. Fix the credential situation first.\n35| \n36| **Example `category` values:** `authentication`, `authorization`, `billing`, `permission`\n37| \n38| ---\n39| \n40| ### `config`\n41| \n42| **When it fires:** The platform was called with a missing or invalid configuration value. For example, the HTTP transport's base-URL normalization throws this when `baseUrl` is empty (`ENGINE_TRANSPORT_BASE_URL_REQUIRED`) or is not a parseable absolute URL (`ENGINE_TRANSPORT_BASE_URL_INVALID`).\n43| \n44| **Remediation:** Inspect `err.message` and `err.code` to identify the missing field, then fix the platform initialization options before retrying.\n45| \n46| **Retryable:** No.\n47| \n48| **Example `code` values:** `ENGINE_CONFIGURATION_ERROR`, `ENGINE_TRANSPORT_BASE_URL_REQUIRED`, `ENGINE_TRANSPORT_BASE_URL_INVALID`\n49| \n50| ---\n51| \n52| ### `contract`\n53| \n54| **When it fires:** A method was invoked that has no registered HTTP binding, or a route ID was requested that does not exist in the contract manifest. These represent usage errors. The caller is invoking something the contract does not define.\n55| \n56| **Remediation:** Verify the method ID or route ID against the operator contract manifest. This is typically a programming error caught at development time.\n57| \n58| **Retryable:** No.\n59| \n60| **Example `code` values:** `ENGINE_CONTRACT_ERROR`\n61| \n62| ---\n63| \n64| ### `network`\n65| \n66| **When it fires:** The HTTP fetch failed before a response was received (DNS failure, connection refused, SSE stream error, transport timeout).\n67| \n68| **Remediation:** Check connectivity and retry with exponential backoff. The platform's built-in retry policy (`DEFAULT_HTTP_RETRY_POLICY`) handles common transient cases automatically.\n69| \n70| **Retryable:** Yes. `err.recoverable` will be `true`.\n71| \n72| **Example `category` values:** `network`, `timeout`\n73| \n74| ---\n75| \n76| ### `not-found`\n77| \n78| **When it fires:** The remote server returned HTTP 404.\n79| \n80| **Remediation:** The resource does not exist at the server. Verify identifiers and do not retry.\n81| \n82| **Retryable:** No.\n83| \n84| ---\n85| \n86| ### `rate-limit`\n87| \n88| **When it fires:** The remote server returned HTTP 429.\n89| \n90| **Remediation:** Wait for `err.retryAfterMs` milliseconds (if present) or use exponential backoff, then retry. The platform's retry policy handles this automatically.\n91| \n92| **Retryable:** Yes. `err.recoverable` will be `true`.\n93| \n94| ---\n95| \n96| ### `protocol`\n97| \n98| **When it fires:** The daemon or transport detected a wire-format, stream, contract framing, or protocol-level failure after a request reached the target.\n99| \n100| **Remediation:** Check server/client version alignment and transport logs. Retry only when the operation is idempotent and `err.recoverable` is true.\n101| \n102| **Retryable:** Sometimes. Check `err.recoverable`.\n103| \n104| ---\n105| \n106| ### `service`\n107| \n108| **When it fires:** The remote service returned HTTP 5xx, or a daemon error body surfaced category `service`.\n109| \n110| **Remediation:** Log `err.requestId` for debugging. Retry with backoff for 500/502/503/504, these are typically transient. Do not retry on 501.\n111| \n112| **Retryable:** Sometimes. Check `err.recoverable`. The platform sets it based on status code. HTTP 500/502/503/504 are retryable by default.\n113| \n114| ---\n115| \n116| ### `internal`\n117| \n118| **When it fires:** The daemon or platform surfaced a bug or invariant violation from inside GoodVibes rather than from user input, transport, or an upstream provider.\n119| \n120| **Remediation:** Log the full structured error and report the bug. Do not rely on retry unless `err.recoverable` is explicitly true.\n121| \n122| **Retryable:** No by default.\n123| \n124| ---\n125| \n126| ### `tool`\n127| \n128| **When it fires:** Tool execution failed after dispatch, including tool runtime errors and tool-specific rejected operations.\n129| \n130| **Remediation:** Inspect `err.category`, `err.message`, and the tool-specific trace. Retry only when the tool operation is idempotent and marked recoverable.\n131| \n132| **Retryable:** Sometimes. Check `err.recoverable`.\n133| \n134| ---\n135| \n136| ### `validation`\n137| \n138| **When it fires:** Input passed to a daemon route handler failed a required-field check or schema validation. For example, a schedule definition with an invalid or missing field.\n139| \n140| **Remediation:** Fix the input payload. `err.message` describes which field or constraint failed.\n141| \n142| **Retryable:** No.\n143| \n144| **Example `category` values:** `bad_request`\n145| \n146| ---\n147| \n148| ### `unknown`\n149| \n150| **When it fires:** The error could not be mapped to a specific kind. This is a catch-all for unexpected conditions that do not expose structured category metadata.\n151| \n152| **Remediation:** Log the full error including `err.message`, `err.category`, and `err.requestId` for investigation.\n153| \n154| **Retryable:** No (conservative default).\n155| \n156| ---\n157| \n158| ## Route-level error codes\n159| \n160| Daemon HTTP routes return structured error bodies with a `code` string that is separate from the platform-layer `kind` discriminant. These codes appear in route-specific error responses and are not `GoodVibesError` instances. They are HTTP error body fields returned by the daemon before the platform maps them to a `GoodVibesError`.\n161| \n162| Route-level codes are not standardized across the daemon. Different routes emit different strings for the same HTTP status, and some 401 responses omit a `code` field entirely (a bare `{ error: 'Unauthorized' }`). Treat this as a sample of codes actually in use, not an exhaustive or normalized catalog:\n163| \n164| | Code | HTTP Status | Meaning |\n165| |------|-------------|----------|\n166| | `INVALID_KIND` | 400 | The `kind` field in a shared-session message body is not `task`, `message`, or `followup`. |\n167| | `INVALID_REQUEST` | 400 | The request body failed a required-field or schema check. |\n168| | `PROVIDER_NOT_CONFIGURED` | 409 | The requested media (voice/TTS) provider is not registered with the daemon's provider registry. |\n169| | `AUTH_REQUIRED` | 401 | No valid bearer token or session cookie was present. Some routes return this code; others return a bare `{ error: 'Unauthorized' }` with no `code` field at all. |\n170| | `MISSING_SCOPE` | 403 | The caller's principal authenticated but lacks the scope the route requires. |\n171| | `NOT_FOUND` | 404 | The resource (session, artifact, job, etc.) does not exist. |\n172| | `RATE_LIMITED` | 429 | The request was rejected by an upstream rate-limit policy. |\n173| | `INTERNAL_ERROR` | 500 | The daemon encountered an unhandled internal error. |\n174| \n175| The platform maps these HTTP error responses to `GoodVibesError` instances using the `kind` mapping above. To inspect the raw route-level code, read `err.code` on the thrown `GoodVibesError`. To cross-reference route-specific codes, check the route documentation for that namespace (e.g., [Companion Message Routing](./companion-message-routing.md) for `INVALID_KIND`).\n176| "
+            },
+            "questions": {
+              "stale": {
+                "type": "noul",
+                "instructions": "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not."
+              }
+            },
+            "requestedModel": "jev-latest",
+            "observedModel": "jev-1.14.0",
+            "requestId": "req_01a1c6450cc97896a957fd7a11594e0e",
+            "answers": {
+              "stale": {
+                "type": "noul",
+                "noul": 0.01
+              }
+            }
+          },
+          "usage": {
+            "inputTokens": 3066,
+            "outputTokens": 21
+          },
+          "latencyMs": 190.24935899999997
+        },
+        {
+          "format": 1,
+          "call": {
+            "id": "cphgjbjn-cphi-eccc-klji-jfejnhplogff",
+            "at": "2026-11-10T16:22:56.549Z",
+            "battery": "errors.stale-server-kind",
+            "version": 2,
+            "site": "errors.stale-server-kind.docs",
+            "state": {
+              "path": "docs/error-kinds.md",
+              "currentKinds": [
+                "auth",
+                "config",
+                "contract",
+                "network",
+                "not-found",
+                "protocol",
+                "rate-limit",
+                "service",
+                "internal",
+                "tool",
+                "validation",
+                "unknown"
+              ],
+              "text": "177| > **Three overlapping `code` value-spaces:** `err.code` is a single `string` field, but the value you read may come from any of three overlapping spaces:\n178| >\n179| > 1. **Canonical `EngineErrorCode`.** Codes the platform assigns to `GoodVibesError` (e.g. `RATE_LIMITED`, `AUTH_REQUIRED`, `PROTOCOL_ERROR`, `INTERNAL_ERROR`); see [Canonical platform error codes](#canonical-platform-error-codes).\n180| > 2. **Daemon route-body codes.** Raw `code` strings in daemon HTTP error bodies (e.g. `INVALID_KIND`, `PROVIDER_NOT_CONFIGURED`, `RATE_LIMITED`, `INTERNAL_ERROR`, enumerated above) before the platform normalises them.\n181| > 3. **`AppError`-subclass codes.** Literal codes declared by `AppError` subclasses (e.g. `CONFIG_ERROR`, `PROVIDER_ERROR`, `TOOL_ERROR`, `ACP_ERROR`, `PERMISSION_DENIED`, `RENDER_ERROR`); see [Config errors and the AppError hierarchy](#config-errors-and-the-apperror-hierarchy).\n182| >\n183| > There is **no suffix rule** distinguishing these spaces: `INTERNAL_ERROR` appears as both a route-body code and a canonical code, and subclass codes exist both with (`CONFIG_ERROR`) and without (`PERMISSION_DENIED`) the `_ERROR` suffix. Always switch on `err.kind` (the `EngineErrorKind` discriminant) first, then read `err.code` only to disambiguate further.\n184| \n185| ---\n186| \n187| ## Canonical platform error codes\n188| \n189| Beyond the `kind` discriminant, every `GoodVibesError` carries a `code`. platform-produced errors set one of the canonical values in the `EngineErrorCode` union; caller-supplied codes may be any string, since `code` is typed `EngineErrorCode | (string & {})`.\n190| \n191| Prefer the `EngineErrorCodes` const and the runtime guards over bare string literals:\n192| \n193| - `isErrorCode(err, EngineErrorCodes.RATE_LIMITED)` returns `true` and narrows `err.code` to the given literal. It works on any object with an optional `code` field.\n194| - `isKnownErrorCode(value)` returns `true` when an arbitrary string is one of the canonical codes, useful for values received over the wire.\n195| \n196| ```ts\n197| import { isErrorCode, EngineErrorCodes, GoodVibesError } from '@goodvibes-jev/engine/errors';\n198| \n199| try {\n200|   await platformClient.operator.accounts.snapshot();\n201| } catch (err) {\n202|   if (err instanceof GoodVibesError && isErrorCode(err, EngineErrorCodes.RATE_LIMITED)) {\n203|     await delay(err.retryAfterMs ?? 1000);\n204|   }\n205| }\n206| ```\n207| \n208| The full set of canonical codes, available as `EngineErrorCodes.*`, is twenty\n209| five values grouped by the failure family they name.\n210| \n211| | Code | What it signals |\n212| | --- | --- |\n213| | `AUTH_REQUIRED` | The call needs authentication that was not presented |\n214| | `TOKEN_EXPIRED` | The presented token is no longer valid; refresh and retry |\n215| | `PERMISSION_DENIED` | The authenticated principal lacks the required scope or permission |\n216| | `PAYMENT_REQUIRED` | The account's billing state blocks the call |\n217| | `RATE_LIMITED` | Too many requests; honor `retryAfterMs` before retrying |\n218| | `NETWORK_UNREACHABLE` | The transport could not reach the daemon at all |\n219| | `TIMEOUT` | The call started but did not finish in time |\n220| | `CANCELLED` | The caller or runtime cancelled the call |\n221| | `NOT_FOUND` | The addressed resource does not exist |\n222| | `CONFLICT` | The mutation conflicts with current resource state |\n223| | `SESSION_CLOSED` | The target session has already been closed |\n224| | `NOT_INVOKABLE` | The gateway method exists but cannot be invoked over this path |\n225| | `METHOD_NOT_FOUND` | No gateway method with that id exists |\n226| | `VALIDATION_FAILED` | The input failed schema or contract validation |\n227| | `AGENT_TIMEOUT` | A spawned agent exceeded its time budget |\n228| | `AGENT_FAILED` | A spawned agent ended in failure |\n229| | `TOOL_EXEC_FAILED` | A tool execution errored |\n230| | `SERVICE_UNAVAILABLE` | A dependent service is down or refusing work |\n231| | `CONTRACT_MISMATCH` | Client and daemon disagree about the contract shape |\n232| | `PROTOCOL_ERROR` | The wire exchange itself violated the protocol |\n233| | `INTERNAL_ERROR` | An unexpected internal failure with no more specific code |\n234| | `ENGINE_CONFIGURATION_ERROR` | The platform was constructed or configured incorrectly |\n235| | `ENGINE_CONTRACT_ERROR` | The platform detected a contract violation on its own side |\n236| | `ENGINE_HTTP_STATUS_ERROR` | An HTTP status error carried no more specific mapping |\n237| | `UNKNOWN` | Nothing more specific could be inferred |\n238| \n239| ### Kind → representative code\n240| \n241| The platform infers a representative canonical code for each `kind` (via `inferKind` and `inferCodeFromCategory`). The mapping is representative, not exhaustive. One `kind` may surface several codes (for example, `auth` covers `AUTH_REQUIRED`, `TOKEN_EXPIRED`, `PERMISSION_DENIED`, and `PAYMENT_REQUIRED`).\n242| \n243| | `kind` | Representative `code` |\n244| |--------|-----------------------|\n245| | `auth` | `AUTH_REQUIRED` |\n246| | `config` | `ENGINE_CONFIGURATION_ERROR` |\n247| | `contract` | `CONTRACT_MISMATCH` |\n248| | `network` | `NETWORK_UNREACHABLE` |\n249| | `not-found` | `NOT_FOUND` |\n250| | `protocol` | `PROTOCOL_ERROR` |\n251| | `rate-limit` | `RATE_LIMITED` |\n252| | `service` | `SERVICE_UNAVAILABLE` |\n253| | `internal` | `INTERNAL_ERROR` |\n254| | `tool` | `TOOL_EXEC_FAILED` |\n255| | `validation` | `VALIDATION_FAILED` |\n256| | `unknown` | `UNKNOWN` |\n257| \n258| ---\n259| \n260| ## Contract failure kinds and unmet criteria\n261| \n262| > These are not `GoodVibesError` error kinds. They describe how a contract run by the contract runner ended or what its checks read, and can be confused for error kinds.\n263| \n264| A contract that fails emits `CONTRACT_FAILED` on the `contracts` event domain with a `failureKind`, also stored as `Contract.failureKind` (`CONTRACT_FAILURE_KINDS`, `packages/engine/platform/src/events/contract.ts`):\n265| \n266| | `failureKind` | Meaning |\n267| |---|---|\n268| | `transport` | A unit agent failed on a network error and its transport retries (`contract.transportRetryLimit`) were spent |\n269| | `max_turns` | Declared on the wire with `turnLimit` and `turnLimitSource`. The runner does not end a contract with it: a unit agent that spends its turn budget is checked and woken with a nudge (the `agent-failed` check trigger) |\n270| | `planning` | The planner agent failed: spawn error, cancel, bound exceeded, or a plan still unparseable after its repairs |\n271| | `budget` | Declared on the wire. The runner does not end a contract with it: a unit held back by the contract's budget ceiling waits in `blocked` with the engine's reason |\n272| | `owner-rejected` | The owner stopped the contract in reply to an escalation; recorded on the contract, which ends `cancelled` (`CONTRACT_CANCELLED`, reason \"stopped by the owner\") rather than failed |\n273| | `judgment-unavailable` | Jev could not be asked or could not answer: no judgment port was installed, or the endpoint returned an error |\n274| | `zombie` | At startup the contract's workstream snapshot or worktree was gone |\n275| | `other` | Anything else; `reason` carries the message |\n276| \n277| The contract's owner agent record fails with the same reason, so `AGENT_FAILED` for the owner carries it too.\n278| \n279| Unmet acceptance criteria are not failures at all. A check that finds a criterion unmet emits `CONTRACT_CHECKED` with that criterion's `verdict: 'unmet'` and nudges the unit's agent (`CONTRACT_NUDGED`); the work continues until the criterion reads met or the owner decides. None of this is thrown or reaches the error handler or `PlatformObserver.onError`. See [Contract criteria](./contract-criteria.md).\n280| \n281| ---\n282| \n283| ## Typed error codes\n284| \n285| Concrete `AppError` subclasses declare a **literal `code`** via `declare readonly code: '<LITERAL>'`, so narrowing to a specific subclass instance gives you that exact literal:\n286| \n287| ```ts\n288| export class ConfigError extends AppError {\n289|   declare readonly code: 'CONFIG_ERROR';\n290|   // ...\n291| }\n292| \n293| export class ProviderError extends AppError {\n294|   declare readonly code: 'PROVIDER_ERROR';\n295|   // ...\n296| }\n297| ```\n298| "
+            },
+            "questions": {
+              "stale": {
+                "type": "noul",
+                "instructions": "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not."
+              }
+            },
+            "requestedModel": "jev-latest",
+            "observedModel": "jev-1.14.0",
+            "requestId": "req_01a1c6450cd37b2eafb98326c774d9cd",
+            "answers": {
+              "stale": {
+                "type": "noul",
+                "noul": 0.01
+              }
+            }
+          },
+          "usage": {
+            "inputTokens": 2987,
+            "outputTokens": 21
+          },
+          "latencyMs": 213.89313299999998
+        },
+        {
+          "format": 1,
+          "call": {
+            "id": "dbjbpfli-epie-ecio-kilh-nmdoelecdbca",
+            "at": "2026-11-10T16:22:56.542Z",
+            "battery": "errors.stale-server-kind",
+            "version": 2,
+            "site": "errors.stale-server-kind.docs",
+            "state": {
+              "path": "docs/error-kinds.md",
+              "currentKinds": [
+                "auth",
+                "config",
+                "contract",
+                "network",
+                "not-found",
+                "protocol",
+                "rate-limit",
+                "service",
+                "internal",
+                "tool",
+                "validation",
+                "unknown"
+              ],
+              "text": "299| > **`err.code` is not compiler-exhaustive.** A `switch (err.code)` with a `const _exhaustive: never = err.code` default does **not** type-check on a `GoodVibesError` or `AppError` value. `GoodVibesError.code` is typed `EngineErrorCode | (string & {})` and `AppError.code` is plain `string`. Both are wide string types, so the `never` assignment is a type error. The trick only compiles after you narrow to a finite, hand-built union of concrete subclasses, where each branch contributes its literal `code`:\n300| \n301| ```ts\n302| // Compiles only because `err` is narrowed to a finite subclass union first.\n303| function handle(err: ConfigError | ProviderError): void {\n304|   switch (err.code) {\n305|     case 'CONFIG_ERROR':    /* ... */ break;\n306|     case 'PROVIDER_ERROR':  /* ... */ break;\n307|     default: {\n308|       const _exhaustive: never = err.code;\n309|       throw new Error('unhandled error code: ' + String(_exhaustive));\n310|     }\n311|   }\n312| }\n313| ```\n314| \n315| Prefer `err.kind` for coarse handling (retry / auth / validation), and `err.code` when you need to disambiguate *which* concrete subclass a given `kind` came from.\n316| \n317| ## Config errors and the AppError hierarchy\n318| \n319| Two distinct error types relate to configuration; do not confuse them:\n320| \n321| | Type | Code | Import subpath |\n322| |------|------|----------------|\n323| | `ConfigurationError` | `ENGINE_CONFIGURATION_ERROR` | `@goodvibes-jev/engine/platform/errors` |\n324| | `ConfigError` | `CONFIG_ERROR` | `@goodvibes-jev/engine/platform/platform/types` |\n325| \n326| `ConfigurationError` extends `GoodVibesError` directly and is thrown for invalid platform setup (category and kind `config`). `ConfigError` is an `AppError` subclass used by the platform/runtime layer.\n327| \n328| `AppError` extends `GoodVibesError` and adds `statusCode`, `guidance`, `detail`, and `rawMessage`; its `code` is widened to plain `string`. The concrete subclasses ship under `@goodvibes-jev/engine/platform/platform/types`:\n329| \n330| | Subclass | `code` | Recoverable |\n331| |----------|--------|-------------|\n332| | `ConfigError` | `CONFIG_ERROR` | No |\n333| | `ProviderError` | `PROVIDER_ERROR` | When `statusCode` is in `RETRYABLE_STATUS_CODES` |\n334| | `ToolError` | `TOOL_ERROR` | Yes |\n335| | `AcpError` | `ACP_ERROR` | Yes |\n336| | `PermissionError` | `PERMISSION_DENIED` | No |\n337| | `RenderError` | `RENDER_ERROR` | Yes |\n338| \n339| Subclass codes do **not** share one naming convention. `PERMISSION_DENIED` has no `_ERROR` suffix, while the others do.\n340| \n341| ## Useful fields on every `GoodVibesError`\n342| \n343| The class exposes 18 structured fields; `toJSON()` serializes them with `undefined` values omitted.\n344| \n345| | Field | Type | Description |\n346| |-------|------|-------------|\n347| | `kind` | `EngineErrorKind` | Primary discriminant for switch/if handling. |\n348| | `code` | `EngineErrorCode \\| (string & {})` | Typed error code; canonical for platform errors, any string for caller-supplied codes. |\n349| | `category` | `ErrorCategory` | Fine-grained classification (e.g. `authentication`, `rate_limit`). |\n350| | `source` | `ErrorSource` | Where the error originated (`transport`, `contract`, `config`, etc.). |\n351| | `recoverable` | `boolean` | Whether a retry is expected to succeed. |\n352| | `status` | `number \\| undefined` | HTTP status code if from a transport response. |\n353| | `url` | `string \\| undefined` | Request URL for transport failures. |\n354| | `method` | `string \\| undefined` | HTTP method for transport failures. |\n355| | `body` | `unknown` | Parsed response body, when available. |\n356| | `hint` | `string \\| undefined` | Human-readable remediation hint from the server. |\n357| | `provider` | `string \\| undefined` | Provider name if the error originated in a provider call. |\n358| | `operation` | `string \\| undefined` | Operation/method name in progress when the error occurred. |\n359| | `phase` | `string \\| undefined` | Lifecycle phase in which the failure happened. |\n360| | `requestId` | `string \\| undefined` | Opaque ID for log correlation with the daemon. |\n361| | `providerCode` | `string \\| undefined` | Provider-specific error code. |\n362| | `providerType` | `string \\| undefined` | Provider type/family identifier. |\n363| | `retryAfterMs` | `number \\| undefined` | Milliseconds to wait before retrying (rate-limit). |\n364| | `cause` | `unknown` | Original underlying error, preserved without loss. |\n365| "
+            },
+            "questions": {
+              "stale": {
+                "type": "noul",
+                "instructions": "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not."
+              }
+            },
+            "requestedModel": "jev-latest",
+            "observedModel": "jev-1.14.0",
+            "requestId": "req_01a1c6450ccd75e080517e479cd8d21e",
+            "answers": {
+              "stale": {
+                "type": "noul",
+                "noul": 0.02
+              }
+            }
+          },
+          "usage": {
+            "inputTokens": 1922,
+            "outputTokens": 21
+          },
+          "latencyMs": 206.47578700000003
+        }
+      ]
     },
     "docs/expo-integration.md": {
-      "sha256": "81d288ac6f46d28770c0bc558c4d1e8e7562e906491894c71bd3e339e7ca8bcb",
-      "verdict": "no",
-      "outcome": "act",
-      "probability": 0.01
+      "windows": [
+        {
+          "format": 1,
+          "call": {
+            "id": "iaggdlki-lekm-eblo-khmg-hppkfkkokakm",
+            "at": "2026-11-10T16:22:56.543Z",
+            "battery": "errors.stale-server-kind",
+            "version": 2,
+            "site": "errors.stale-server-kind.docs",
+            "state": {
+              "path": "docs/expo-integration.md",
+              "currentKinds": [
+                "auth",
+                "config",
+                "contract",
+                "network",
+                "not-found",
+                "protocol",
+                "rate-limit",
+                "service",
+                "internal",
+                "tool",
+                "validation",
+                "unknown"
+              ],
+              "text": "1| # Expo integration\n2| \n3| This is the **companion surface** for Expo (Hermes runtime). See [Published Surface Matrix](./surfaces.md).\n4| \n5| Expo apps cannot run the full agentic surface (tool execution, LSP, MCP, workflows, daemon HTTP). Those require Bun. This guide covers auth, transport, realtime events, and error handling for the companion surface.\n6| \n7| Use `@goodvibes-jev/engine/platform/expo` for Expo-managed React Native apps.\n8| \n9| ```ts\n10| import { createExpoGoodVibesPlatform } from '@goodvibes-jev/engine/platform/expo';\n11| \n12| const platformClient = createExpoGoodVibesPlatform({\n13|   baseUrl: 'https://goodvibes.example.com',\n14|   authToken: token,\n15| });\n16| ```\n17| \n18| ## Installation\n19| \n20| ```bash\n21| npm install @goodvibes-jev/engine\n22| ```\n23| \n24| See [Getting started](./getting-started.md#install) for the canonical install command and version. Token persistence uses the optional peer dependency [`expo-secure-store`](https://docs.expo.dev/versions/latest/sdk/securestore/) (`>=13.0.0`); install it only when you use `createExpoSecureTokenStore`.\n25| \n26| ## Guidance\n27| \n28| - prefer bearer tokens for Expo apps\n29| - persist tokens with a secure `tokenStore` (see [Token storage](#token-storage)) rather than rolling a custom adapter\n30| - use `platformClient.realtime.viaWebSocket()` for realtime. The Expo surface is WebSocket-only (no `viaSse()`), so the inherited `sseReconnect` option is a no-op\n31| - reconnect on foreground/resume transitions\n32| - wrap token access in a `tokenStore` or `getAuthToken` so reconnects do not keep stale tokens\n33| \n34| ## Realtime\n35| \n36| The Expo entrypoint wraps the React Native factory, so realtime is WebSocket-only: `platformClient.realtime` exposes `runtime()` and `viaWebSocket()` (there is no `viaSse()`). The factory applies the same defaults, which you can override through `GoodVibesPlatformOptions`:\n37| \n38| - `realtime.webSocketReconnect`: `{ enabled: true, baseDelayMs: 500, maxDelayMs: 5000 }`\n39| - `retry` (HTTP): `{ maxAttempts: 3, baseDelayMs: 250, maxDelayMs: 2000 }`\n40| - `realtime.onError`: called when the realtime transport hits an unrecoverable error\n41| \n42| The daemon authenticates the WebSocket upgrade request itself and answers 401\n43| when it carries no `Authorization` header. Pass a header-attaching wrapper as\n44| the `WebSocketImpl`, exactly as shown in\n45| [React Native integration](./react-native-integration.md#realtime); the Expo\n46| runtime's `WebSocket` supports the same headers option.\n47| \n48| Scope a feed to a single session with `forSession` (re-exported from `@goodvibes-jev/engine/platform/expo`):\n49| \n50| ```ts\n51| import { createExpoGoodVibesPlatform, forSession } from '@goodvibes-jev/engine/platform/expo';\n52| \n53| const sessionEvents = forSession(platformClient.realtime.viaWebSocket(AuthorizedWebSocket), sessionId);\n54| sessionEvents.agents.on('AGENT_COMPLETED', (event) => console.log(event));\n55| ```\n56| \n57| ## Token storage\n58| \n59| Pass a `tokenStore` to persist and rotate the bearer token. `tokenStore` is the highest-precedence auth option. It overrides both `getAuthToken` and the static `authToken`. Use `createExpoSecureTokenStore` (backed by `expo-secure-store`), exported from `@goodvibes-jev/engine/platform/expo`:\n60| \n61| ```ts\n62| import {\n63|   createExpoGoodVibesPlatform,\n64|   createExpoSecureTokenStore,\n65| } from '@goodvibes-jev/engine/platform/expo';\n66| \n67| const platformClient = createExpoGoodVibesPlatform({\n68|   baseUrl: 'https://goodvibes.example.com',\n69|   tokenStore: createExpoSecureTokenStore(),\n70| });\n71| ```\n72| \n73| ## Typical Expo shape\n74| \n75| - login or bootstrap the token once\n76| - hydrate the platform from secure storage on app start\n77| - load initial operator snapshots over HTTP\n78| - subscribe to WebSocket runtime events for companion-app updates\n79| - refresh read models after important events or foreground resumes\n80| \n81| ## Error handling and observability\n82| \n83| Error handling (the `GoodVibesError` taxonomy) and observability (`PlatformObserver` and `createConsoleObserver`) are identical to the React Native surface. The Expo factory wraps `createReactNativeGoodVibesPlatform`. See [Error handling](./react-native-integration.md#error-handling) and [Observability](./react-native-integration.md#observability) in the React Native guide.\n84| \n85| ## Example\n86| \n87| See [expo-quickstart.tsx](../examples/expo-quickstart.tsx).\n88| "
+            },
+            "questions": {
+              "stale": {
+                "type": "noul",
+                "instructions": "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not."
+              }
+            },
+            "requestedModel": "jev-latest",
+            "observedModel": "jev-1.14.0",
+            "requestId": "req_01a1c6450cd5759a9a08bdd3c4c4347a",
+            "answers": {
+              "stale": {
+                "type": "noul",
+                "noul": 0.01
+              }
+            }
+          },
+          "usage": {
+            "inputTokens": 1933,
+            "outputTokens": 21
+          },
+          "latencyMs": 207.112975
+        }
+      ]
     },
     "docs/react-native-integration.md": {
-      "sha256": "20c150d89f22b91b687cf3921ce7171c667bd0be20b0c00a9ab712cc4e2dae15",
-      "verdict": "no",
-      "outcome": "act",
-      "probability": 0.01
+      "windows": [
+        {
+          "format": 1,
+          "call": {
+            "id": "nmhadbkb-cjlh-ekga-jcbi-cdofhigcgibb",
+            "at": "2026-11-10T16:22:56.541Z",
+            "battery": "errors.stale-server-kind",
+            "version": 2,
+            "site": "errors.stale-server-kind.docs",
+            "state": {
+              "path": "docs/react-native-integration.md",
+              "currentKinds": [
+                "auth",
+                "config",
+                "contract",
+                "network",
+                "not-found",
+                "protocol",
+                "rate-limit",
+                "service",
+                "internal",
+                "tool",
+                "validation",
+                "unknown"
+              ],
+              "text": "1| # React Native integration\n2| \n3| This is the **companion surface** for React Native (Hermes). See [Published Surface Matrix](./surfaces.md).\n4| \n5| React Native apps cannot run the full agentic surface (tool execution, LSP, MCP, workflows, daemon HTTP). Those require Bun. This guide covers auth, transport, realtime events, and error handling for the companion surface.\n6| \n7| Use `@goodvibes-jev/engine/platform/react-native` for Android and iOS apps.\n8| \n9| ```ts\n10| import { createReactNativeGoodVibesPlatform } from '@goodvibes-jev/engine/platform/react-native';\n11| \n12| const platformClient = createReactNativeGoodVibesPlatform({\n13|   baseUrl: 'https://goodvibes.example.com',\n14|   authToken: token,\n15| });\n16| ```\n17| \n18| ## Installation\n19| \n20| ```bash\n21| npm install @goodvibes-jev/engine\n22| ```\n23| \n24| See [Getting started](./getting-started.md#install) for the canonical install command and version. For persistent secure token storage on bare React Native, also install the optional peer dependency [`react-native-keychain`](https://github.com/oblador/react-native-keychain) (`>=8.0.0`); it is only needed when you use `createIOSKeychainTokenStore` / `createAndroidKeystoreTokenStore`.\n25| \n26| ## Realtime\n27| \n28| The React Native realtime surface is WebSocket-only. `platformClient.realtime` exposes `runtime()` and `viaWebSocket()`. There is no `viaSse()`. SSE is unavailable on this surface, so the inherited `realtime.sseReconnect` option is a no-op here. Only `webSocketReconnect` applies.\n29| \n30| The daemon authenticates the WebSocket upgrade request itself and answers 401\n31| when it carries neither an `Authorization` header nor an operator session\n32| cookie. The platform's in-band auth frame is only read after an authenticated\n33| upgrade. React Native's `WebSocket` accepts a headers option, so pass a\n34| wrapper as the `WebSocketImpl` that attaches the bearer token to the upgrade:\n35| \n36| ```ts\n37| const token = await SecureStore.getItemAsync('gv-token');\n38| \n39| // React Native's WebSocket accepts (url, protocols, { headers }); the DOM\n40| // types do not declare the third argument, hence the constructor cast.\n41| type RNWebSocketCtor = new (\n42|   url: string,\n43|   protocols: string[],\n44|   options: { headers: Record<string, string> },\n45| ) => WebSocket;\n46| \n47| const AuthorizedWebSocket = function (url: string | URL): WebSocket {\n48|   return new (WebSocket as unknown as RNWebSocketCtor)(\n49|     String(url),\n50|     [],\n51|     { headers: { Authorization: `Bearer ${token}` } },\n52|   );\n53| } as unknown as typeof WebSocket;\n54| \n55| const events = platformClient.realtime.viaWebSocket(AuthorizedWebSocket);\n56| const unsubscribe = events.agents.on('AGENT_COMPLETED', (event) => {\n57|   console.log(event);\n58| });\n59| ```\n60| \n61| The factory applies React-Native-tuned defaults that you can override through `GoodVibesPlatformOptions`:\n62| \n63| - `realtime.webSocketReconnect`: `{ enabled: true, baseDelayMs: 500, maxDelayMs: 5000 }`\n64| - `retry` (HTTP): `{ maxAttempts: 3, baseDelayMs: 250, maxDelayMs: 2000 }`\n65| - `realtime.onError`: called when the realtime transport hits an unrecoverable error\n66| \n67| To scope a feed to a single session, wrap it with `forSession` (re-exported from `@goodvibes-jev/engine/platform/react-native`):\n68| \n69| ```ts\n70| import { createReactNativeGoodVibesPlatform, forSession } from '@goodvibes-jev/engine/platform/react-native';\n71| \n72| const sessionEvents = forSession(platformClient.realtime.viaWebSocket(AuthorizedWebSocket), sessionId);\n73| sessionEvents.agents.on('AGENT_COMPLETED', (event) => console.log(event));\n74| ```\n75| \n76| ## Token storage\n77| \n78| Pass a `tokenStore` to persist and rotate the bearer token. `tokenStore` is the highest-precedence auth option. It overrides both `getAuthToken` and the static `authToken`. Use `createIOSKeychainTokenStore` (iOS Keychain) or `createAndroidKeystoreTokenStore` (Android Keystore), both exported from `@goodvibes-jev/engine/platform/react-native`, rather than rolling a custom `GoodVibesTokenStore`:\n79| \n80| ```ts\n81| import {\n82|   createReactNativeGoodVibesPlatform,\n83|   createIOSKeychainTokenStore,\n84| } from '@goodvibes-jev/engine/platform/react-native';\n85| \n86| const platformClient = createReactNativeGoodVibesPlatform({\n87|   baseUrl: 'https://goodvibes.example.com',\n88|   tokenStore: createIOSKeychainTokenStore(),\n89| });\n90| ```\n91| \n92| On Android, use `createAndroidKeystoreTokenStore()` in place of the Keychain store.\n93| \n94| ## Error handling\n95| \n96| All platform errors extend `GoodVibesError`. See [Error Kinds](./error-kinds.md) for the full taxonomy.\n97| \n98| ```ts\n99| import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';\n100| \n101| try {\n102|   await platformClient.operator.control.snapshot();\n103| } catch (err) {\n104|   if (err instanceof GoodVibesError) {\n105|     switch (err.kind) {\n106|       case 'auth':\n107|         // token expired, refresh and retry\n108|         break;\n109|       case 'network':\n110|         // transport failure, reconnect or surface to user\n111|         break;\n112|       case 'service':\n113|         // daemon or upstream service returned 5xx, log and degrade gracefully\n114|         break;\n115|       case 'protocol':\n116|         // client and daemon disagreed about the wire contract\n117|         break;\n118|       default:\n119|         throw err;\n120|     }\n121|   }\n122| }\n123| ```\n124| \n125| ## Observability\n126| \n127| `PlatformObserver` and `createConsoleObserver` work from React Native exactly like from the full surface. They are imported from `@goodvibes-jev/engine/platform` root, which is companion-safe. See [Observability](./observability.md) for the full observer API.\n128| \n129| ```ts\n130| import { createConsoleObserver } from '@goodvibes-jev/engine/platform';\n131| \n132| const platformClient = createReactNativeGoodVibesPlatform({\n133|   baseUrl: 'https://goodvibes.example.com',\n134|   authToken: token,\n135|   observer: createConsoleObserver(),\n136| });\n137| ```\n138| \n139| ## Example\n140| \n141| See [react-native-quickstart.ts](../examples/react-native-quickstart.ts) for a runnable end-to-end example.\n142| \n143| ## Notes\n144| \n145| - `fetch` can come from the React Native runtime or be injected explicitly.\n146| - `WebSocket` can come from the runtime or be passed through `WebSocketImpl`.\n147| - The React Native entrypoint is WebSocket-only; SSE (`viaSse`) is not exposed and `sseReconnect` is a no-op.\n148| - Provide a token store or `getAuthToken` when token state can rotate during the app session. See [Token storage](#token-storage).\n149| - Reconnect after foreground/resume and network transitions.\n150| - Use HTTP for snapshots/mutations and WebSocket for live updates.\n151| - For Expo-managed apps, use [expo-integration.md](./expo-integration.md).\n152| - For native Kotlin or Swift apps, use [android-integration.md](./android-integration.md) and [ios-integration.md](./ios-integration.md).\n153| "
+            },
+            "questions": {
+              "stale": {
+                "type": "noul",
+                "instructions": "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not."
+              }
+            },
+            "requestedModel": "jev-latest",
+            "observedModel": "jev-1.14.0",
+            "requestId": "req_01a1c6450ccf74d8a5977e9f4e145741",
+            "answers": {
+              "stale": {
+                "type": "noul",
+                "noul": 0.01
+              }
+            }
+          },
+          "usage": {
+            "inputTokens": 2792,
+            "outputTokens": 21
+          },
+          "latencyMs": 204.278235
+        }
+      ]
     },
     "docs/web-ui-integration.md": {
-      "sha256": "3a8004dd58a0d7f0c1c21fa87d539f536db6a64d878832a360bbff3977f92725",
-      "verdict": "no",
-      "outcome": "act",
-      "probability": 0.01
+      "windows": [
+        {
+          "format": 1,
+          "call": {
+            "id": "dnghofef-gegh-ebjb-lbdp-ljochfllidaf",
+            "at": "2026-11-10T16:22:56.532Z",
+            "battery": "errors.stale-server-kind",
+            "version": 2,
+            "site": "errors.stale-server-kind.docs",
+            "state": {
+              "path": "docs/web-ui-integration.md",
+              "currentKinds": [
+                "auth",
+                "config",
+                "contract",
+                "network",
+                "not-found",
+                "protocol",
+                "rate-limit",
+                "service",
+                "internal",
+                "tool",
+                "validation",
+                "unknown"
+              ],
+              "text": "1| # Web UI integration\n2| \n3| This is the **companion surface** for web UI applications (browser runtime). See [Runtime Surfaces](./surfaces.md).\n4| \n5| Web UI apps cannot run the full agentic surface (tool execution, LSP, MCP, workflows, daemon HTTP). Those require Bun. This guide covers web-UI-specific patterns: entrypoint selection, companion chat, attachments, and voice playback. The shared browser foundation, auth, transport, realtime, error handling, and observability, lives in [Browser integration](./browser-integration.md).\n6| \n7| Use the narrowest browser entrypoint that matches the app. A normal GoodVibes\n8| WebUI that presents the base knowledge/wiki system should use\n9| `@goodvibes-jev/engine/platform/browser/knowledge`; it contains base knowledge routes,\n10| shared session/auth/provider routes, and realtime domains without loading Home\n11| Assistant Home Graph route metadata. Use `@goodvibes-jev/engine/platform/browser` only\n12| when the app intentionally needs the complete operator route contract.\n13| \n14| ```ts\n15| import { createBrowserKnowledgePlatform } from '@goodvibes-jev/engine/platform/browser/knowledge';\n16| \n17| const platformClient = createBrowserKnowledgePlatform({\n18|   baseUrl: 'https://goodvibes.example.com',\n19| });\n20| ```\n21| \n22| ## Deployment topology: same-origin vs cross-origin\n23| \n24| The daemon can reach a browser two ways. Both are opt-in and off by default; the\n25| daemon stays loopback-only until you enable one.\n26| \n27| **Same-origin bundle serving (recommended).** Set `controlPlane.webui.serve` on and\n28| point `controlPlane.webui.bundleDir` at the built web UI directory (`index.html` +\n29| `assets/`). The daemon then serves the bundle at `/` from its own origin, so the\n30| browser's same-origin policy is a non-issue. Bundle and API share one origin. Static\n31| assets carry correct content types and caching (hashed `assets/*` immutable, the shell\n32| `no-cache`), and unknown navigation routes fall back to `index.html` (SPA). The daemon's\n33| own routes always keep precedence over the bundle: every `/api/*` path, `/login`,\n34| `/webhook/*`, `/task`, the OpenAI-compatible prefix, and every other top-level path\n35| segment any operator method advertises (for example `/status` and `/config`) is\n36| dispatched to the API and never served as a file, so an SPA fallback can never shadow\n37| a liveness probe or an admin read with the HTML shell. The bundle is public; the\n38| app still token-authenticates every API call.\n39| \n40| For cross-machine reach, front the single daemon origin with `tailscale serve` over\n41| HTTPS: bundle + API arrive same-origin on the Tailscale hostname with zero CORS. This\n42| is the supported remote path.\n43| \n44| **Cross-origin (dev or separate host).** When the UI is served from a different origin,\n45| the Vite dev server on `http://localhost:5173`, or a deliberately separate static host\n46| set `controlPlane.cors.enabled` on and list the exact browser origins in\n47| `controlPlane.cors.allowedOrigins` (comma-separated). The daemon then answers OPTIONS\n48| preflight and emits `Access-Control-Allow-*` only for those origins, never a wildcard,\n49| credentials allowlist-gated, `Authorization` allowed so the bearer-token flow works.\n50| A non-allowlisted origin is refused honestly (403 preflight, no allow-origin header).\n51| CORS controls only which origin may read a response; it does not change any route's auth\n52| or admin scoping.\n53| \n54| ## Recommended model\n55| \n56| For a browser-based web UI:\n57| - use the narrowest scoped browser entrypoint\n58| - prefer same-origin cookie-backed auth when hosting the UI with the daemon\n59| - use `platformClient.realtime.viaSse()` for dashboards and live status panes\n60| - use `platformClient.knowledge.*` or `platformClient.operator.invoke(...)` for the base knowledge/wiki methods exposed by the scoped entrypoint\n61| - use `platformClient.chat.*` for standalone companion chat sessions\n62| - use `platformClient.operator.invoke('control.snapshot', {})` for shared control-plane state\n63| - treat realtime as live update flow, not as the only source of truth\n64| \n65| ## Choosing browser entrypoints\n66| \n67| `@goodvibes-jev/engine/platform/browser/knowledge` is the default for the base GoodVibes\n68| WebUI. `@goodvibes-jev/engine/platform/browser/homeassistant` is for Home Assistant\n69| panels and includes Home Graph routes without pulling the base knowledge/wiki\n70| route table. `@goodvibes-jev/engine/platform/browser/agent` (via `createBrowserAgentPlatform`)\n71| scopes to the GoodVibes Agent surface: the agent's own knowledge/wiki space\n72| served under `/api/goodvibes-agent/knowledge`, plus work-plan, artifact, and\n73| companion-chat routes. `@goodvibes-jev/engine/platform/browser` and\n74| `@goodvibes-jev/engine/platform/web` remain full all-method browser clients for\n75| applications that need the entire operator contract.\n76| \n77| See [public-surface.md](./public-surface.md) for the full entry-point reference.\n78| \n79| ## Typical web UI pattern\n80| \n81| 1. Load an initial snapshot with operator APIs.\n82| 2. Subscribe to runtime events or telemetry streams.\n83| 3. Refresh affected read models when key events arrive.\n84| 4. Keep mutation calls on HTTP even when realtime is enabled.\n85| \n86| ## Companion chat\n87| \n88| Use `platformClient.chat` from `@goodvibes-jev/engine/platform/browser/knowledge` for standalone\n89| browser chat. These sessions are separate from operator task sessions and do\n90| not call `sessions.followUp`.\n91| \n92| ```ts\n93| const created = await platformClient.chat.sessions.create({\n94|   title: 'WebUI chat',\n95|   provider: 'openai-subscriber',\n96|   model: 'gpt-5.5',\n97| });\n98| \n99| await platformClient.chat.events.stream(created.sessionId, {\n100|   onEvent(eventName, payload) {\n101|     // companion-chat.turn.delta / companion-chat.turn.completed / companion-chat.turn.error\n102|   },\n103| });\n104| \n105| await platformClient.chat.messages.create(created.sessionId, {\n106|   body: 'Hello',\n107| });\n108| ```\n109| \n110| `provider` is the selected runtime provider row id from the model catalog, for\n111| example `openai-subscriber`. `model` is the selected model id for that provider\n112| row, for example `gpt-5.5`. When a runtime provider is an alias for a catalog\n113| provider, the daemon also accepts the provider-qualified registry key as\n114| `model`, such as `openai:gpt-5.5`, as long as `provider` remains the selected\n115| runtime provider row id.\n116| \n117| Use `platformClient.chat.sessions.list()` for the chat sidebar and\n118| `platformClient.chat.sessions.update(sessionId, { provider, model })` when a user changes\n119| the model for an existing companion-chat session. Do not send provider/model on\n120| `messages.create`; message creation uses the session's stored route.\n121| \n122| ### Chat attachments\n123| \n124| Companion chat attachments are artifact-backed. Upload the file to the daemon\n125| artifact store first, then reference the returned artifact id when creating the\n126| chat message. Do not encode files in message metadata and do not create local\n127| attachment-only state in the WebUI.\n128| \n129| ```ts\n130| const uploaded = await platformClient.artifacts.create({\n131|   filename: file.name,\n132|   mimeType: file.type || 'application/octet-stream',\n133|   dataBase64: await fileToBase64(file),\n134|   metadata: { surface: 'webui' },\n135| });\n136| \n137| await platformClient.chat.messages.create(created.sessionId, {\n138|   body: 'Use this file in your answer.',\n139|   attachments: [\n140|     {\n141|       artifactId: uploaded.artifact.id,\n142|       label: file.name,\n143|     },\n144|   ],\n145| });\n146| ```\n147| \n148| `messages.create` accepts text-only, attachment-only, and text-plus-attachment\n149| messages, up to 8 attachments per message. Message history and\n150| `companion-chat.turn.started` events include the resolved attachment descriptors.\n151| \n152| What the daemon does with an attachment depends on its size and MIME type. A text\n153| artifact (`text/*`, `application/json`, `application/xml`, `application/yaml`, or\n154| `text/csv`) up to 200 KB is read back and inlined into the provider prompt as plain\n155| text. An image artifact (`image/png`, `image/jpeg`, `image/gif`, or `image/webp`) up\n156| to 20 MB is base64-encoded and passed as multimodal image content. Everything else,\n157| and anything over those size limits, stays a durable artifact reference: the model\n158| sees only a text summary listing the attachment's name, MIME type, and size, not\n159| its contents.\n160| \n161| ## Voice playback (streaming TTS)\n162| \n163| `POST /api/voice/tts/stream` returns raw audio bytes as a stream (see"
+            },
+            "questions": {
+              "stale": {
+                "type": "noul",
+                "instructions": "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not."
+              }
+            },
+            "requestedModel": "jev-latest",
+            "observedModel": "jev-1.14.0",
+            "requestId": "req_01a1c6450ccb7ca0a131d50b66257103",
+            "answers": {
+              "stale": {
+                "type": "noul",
+                "noul": 0.01
+              }
+            }
+          },
+          "usage": {
+            "inputTokens": 3014,
+            "outputTokens": 21
+          },
+          "latencyMs": 195.427415
+        },
+        {
+          "format": 1,
+          "call": {
+            "id": "nchecnec-oeai-egfd-lghl-dkliejpncjff",
+            "at": "2026-11-10T16:22:56.535Z",
+            "battery": "errors.stale-server-kind",
+            "version": 2,
+            "site": "errors.stale-server-kind.docs",
+            "state": {
+              "path": "docs/web-ui-integration.md",
+              "currentKinds": [
+                "auth",
+                "config",
+                "contract",
+                "network",
+                "not-found",
+                "protocol",
+                "rate-limit",
+                "service",
+                "internal",
+                "tool",
+                "validation",
+                "unknown"
+              ],
+              "text": "164| [Voice and Streaming TTS](./voice.md)). A web UI owns local playback. Read the\n165| `fetch` response body as a `ReadableStream` and feed it to the Web Audio API or\n166| a `MediaSource` so audio starts before the full clip arrives.\n167| \n168| ```ts\n169| const controller = new AbortController();\n170| const res = await fetch(`${baseUrl}/api/voice/tts/stream`, {\n171|   method: 'POST',\n172|   credentials: 'include',\n173|   headers: { 'content-type': 'application/json' },\n174|   body: JSON.stringify({ providerId: 'elevenlabs', text: 'Read this aloud' }),\n175|   signal: controller.signal,\n176| });\n177| \n178| if (!res.ok || !res.body) {\n179|   throw new Error(`tts/stream failed: ${res.status}`);\n180| }\n181| \n182| const mediaSource = new MediaSource();\n183| const audio = new Audio();\n184| audio.src = URL.createObjectURL(mediaSource);\n185| \n186| mediaSource.addEventListener('sourceopen', async () => {\n187|   const contentType = res.headers.get('content-type') ?? 'audio/mpeg';\n188|   const sourceBuffer = mediaSource.addSourceBuffer(contentType);\n189|   const reader = res.body!.getReader();\n190| \n191|   for (;;) {\n192|     const { done, value } = await reader.read();\n193|     if (done) break;\n194|     await new Promise((resolve) => {\n195|       sourceBuffer.addEventListener('updateend', resolve, { once: true });\n196|       sourceBuffer.appendBuffer(value);\n197|     });\n198|   }\n199|   mediaSource.endOfStream();\n200| });\n201| \n202| await audio.play();\n203| ```\n204| \n205| The `Content-Type` and `X-GoodVibes-Audio-Format` response headers describe the\n206| audio encoding; use them to pick the `MediaSource` MIME type or Web Audio decode\n207| path. Call `controller.abort()` when the user stops playback so the daemon\n208| cancels the upstream provider stream.\n209| \n210| ## Error handling\n211| \n212| All platform errors extend `GoodVibesError` and expose the same `kind` taxonomy\n213| across every browser surface. See\n214| [Browser Integration → Error handling](./browser-integration.md#error-handling)\n215| for the handling pattern and [Error Kinds](./error-kinds.md) for the full\n216| taxonomy.\n217| \n218| ## Observability\n219| \n220| Observability works from web UI contexts exactly as on the full surface. Import\n221| observer helpers from `@goodvibes-jev/engine/platform/observer` so scoped browser bundles\n222| stay narrow, and pass `createConsoleObserver()` as the `observer` option when\n223| creating the platform. See\n224| [Browser Integration → Observability](./browser-integration.md#observability) for\n225| the shared example and [Observability](./observability.md) for the full observer\n226| API.\n227| "
+            },
+            "questions": {
+              "stale": {
+                "type": "noul",
+                "instructions": "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not."
+              }
+            },
+            "requestedModel": "jev-latest",
+            "observedModel": "jev-1.14.0",
+            "requestId": "req_01a1c6450ccf794090df79b3c3f086ec",
+            "answers": {
+              "stale": {
+                "type": "noul",
+                "noul": 0.01
+              }
+            }
+          },
+          "usage": {
+            "inputTokens": 1384,
+            "outputTokens": 21
+          },
+          "latencyMs": 197.592916
+        }
+      ]
     },
     "test/workers-wrangler/wrangler.test.ts": {
-      "sha256": "cb4d543d0a71de94378c22e9f2dc2eb0d8d8cbc421667d1a53c32e68d9847dbc",
-      "verdict": "no",
-      "outcome": "act",
-      "probability": 0.02
+      "windows": [
+        {
+          "format": 1,
+          "call": {
+            "id": "inlhoion-ampd-egfk-jlll-fooaidjokbmb",
+            "at": "2026-11-10T16:22:56.521Z",
+            "battery": "errors.stale-server-kind",
+            "version": 2,
+            "site": "errors.stale-server-kind.docs",
+            "state": {
+              "path": "test/workers-wrangler/wrangler.test.ts",
+              "currentKinds": [
+                "auth",
+                "config",
+                "contract",
+                "network",
+                "not-found",
+                "protocol",
+                "rate-limit",
+                "service",
+                "internal",
+                "tool",
+                "validation",
+                "unknown"
+              ],
+              "text": "1| /**\n2|  * wrangler-CLI harness, @goodvibes-jev/engine/platform Workers parity test.\n3|  *\n4|  * Spawns `wrangler dev --local` against test/workers-wrangler/worker.ts and\n5|  * exercises the same endpoint surface as the Miniflare harness in\n6|  * test/workers/workers.test.ts.\n7|  *\n8|  * IMPORTANT: `wrangler dev --local` uses Miniflare 4 as its local runtime\n9|  * layer internally, it is NOT the raw workerd binary. Both this harness and\n10|  * the standalone Miniflare harness share the same Miniflare 4 runtime, which\n11|  * means EventSource IS available in both harnesses (Miniflare injects it).\n12|  * The production EventSource absence can only be verified via a real CF\n13|  * deployment. See test/workers/NOTES.md for details.\n14|  *\n15|  * What this harness adds over the standalone Miniflare harness:\n16|  *   - Exercises wrangler's esbuild bundling pipeline (not the manual esbundle step)\n17|  *   - Exercises wrangler CLI config surface (wrangler.toml, entry resolution)\n18|  *   - EventSource is present in BOTH harnesses (Miniflare 4 injects it in both)\n19|  *\n20|  * Run:\n21|  *   bun run build && bun run test:workers:wrangler\n22|  *\n23|  * Prerequisites:\n24|  *   - wrangler must be installed (devDependency)\n25|  *   - platform must be built (dist/web.js must exist)\n26|  *   - No Cloudflare account or API token required (--local mode)\n27|  *\n28|  * Startup behaviour:\n29|  *   - wrangler dev cold-starts in ~5-15s (first run populates Miniflare's workerd cache)\n30|  *   - CI timeout: 120s for the job; wrangler startup timeout here: 60s\n31|  *   - Port: reserved via the OS ephemeral-port allocator before wrangler starts\n32|  */\n33| \n34| import { resolve, dirname } from 'node:path';\n35| import { fileURLToPath } from 'node:url';\n36| import { spawn, execFileSync, type ChildProcess } from 'node:child_process';\n37| import { createServer } from 'node:net';\n38| import { describe, test, expect, beforeAll, afterAll } from 'bun:test';\n39| \n40| // ---------------------------------------------------------------------------\n41| // Wrangler availability check, skip all tests if wrangler is not accessible.\n42| // wrangler ships as a devDependency; invoke via bunx in this project.\n43| // ---------------------------------------------------------------------------\n44| function checkWranglerAvailable(): boolean {\n45|   try {\n46|     execFileSync('bunx', ['wrangler', '--version'], { stdio: 'ignore', timeout: 10_000 });\n47|     return true;\n48|   } catch {\n49|     return false;\n50|   }\n51| }\n52| \n53| const wranglerAvailable = checkWranglerAvailable();\n54| \n55| \n56| const __dirname = dirname(fileURLToPath(import.meta.url));\n57| const HARNESS_DIR = resolve(__dirname); // test/workers-wrangler/\n58| \n59| let port = 0;\n60| let baseUrl = '';\n61| \n62| // Maximum time to wait for wrangler to report ready (ms).\n63| const STARTUP_TIMEOUT_MS = 60_000;\n64| // Interval between health-check polls (ms).\n65| const POLL_INTERVAL_MS = 500;\n66| \n67| let wranglerProcess: ChildProcess;\n68| \n69| async function findAvailablePort(): Promise<number> {\n70|   const server = createServer();\n71|   await new Promise<void>((resolveListen, rejectListen) => {\n72|     server.once('error', rejectListen);\n73|     server.listen(0, '127.0.0.1', resolveListen);\n74|   });\n75|   const address = server.address();\n76|   await new Promise<void>((resolveClose, rejectClose) => {\n77|     server.close((error) => error ? rejectClose(error) : resolveClose());\n78|   });\n79|   if (!address || typeof address === 'string') {\n80|     throw new Error('Unable to reserve an ephemeral port for wrangler.');\n81|   }\n82|   return address.port;\n83| }\n84| \n85| // ---------------------------------------------------------------------------\n86| // Lifecycle: spawn wrangler dev, poll /health, kill after tests\n87| // ---------------------------------------------------------------------------\n88| \n89| beforeAll(async () => {\n90|   if (!wranglerAvailable) {\n91|     // wrangler is not accessible via bunx, fail fast with a clear message.\n92|     // Install via: npm install -g wrangler  OR ensure devDependencies are installed (bun install).\n93|     throw new Error('[wrangler.test.ts] FAIL: wrangler unavailable via bunx. Run `bun install` or install wrangler globally.');\n94|   }\n95| \n96|   port = await findAvailablePort();\n97|   baseUrl = `http://127.0.0.1:${port}`;\n98|   wranglerProcess = spawn(\n99|     'bunx',\n100|     [\n101|       'wrangler',\n102|       'dev',\n103|       '--local',\n104|       '--port', String(port),\n105|     ],\n106|     {\n107|       cwd: HARNESS_DIR,\n108|       // Inherit stderr so wrangler startup/error output appears in test logs.\n109|       stdio: ['ignore', 'pipe', 'pipe'],\n110|       env: {\n111|         ...process.env,\n112|         // Suppress wrangler telemetry and update checks in CI.\n113|         WRANGLER_SEND_METRICS: 'false',\n114|         NO_COLOR: '1',\n115|         // Signal non-interactive mode to wrangler (suppresses prompts).\n116|         CI: 'true',\n117|       },\n118|     },\n119|   );\n120| \n121|   // Capture wrangler stderr for diagnostics on failure.\n122|   const stderrLines: string[] = [];\n123|   wranglerProcess.stderr?.on('data', (chunk: Buffer) => {\n124|     stderrLines.push(chunk.toString());\n125|   });\n126|   wranglerProcess.stdout?.on('data', (chunk: Buffer) => {\n127|     stderrLines.push(chunk.toString());\n128|   });\n129| \n130|   // Poll /health until wrangler is ready or timeout.\n131|   const deadline = Date.now() + STARTUP_TIMEOUT_MS;\n132|   let ready = false;\n133| \n134|   while (Date.now() < deadline) {\n135|     await sleep(POLL_INTERVAL_MS);\n136| \n137|     // If wrangler exited early, fail immediately with diagnostics.\n138|     if (wranglerProcess.exitCode !== null) {\n139|       const logs = stderrLines.join('');\n140|       throw new Error(\n141|         `wrangler dev exited early (code ${wranglerProcess.exitCode}).\\n` +\n142|         `Port: ${port}\\n` +\n143|         `Output:\\n${logs}`,\n144|       );\n145|     }\n146| \n147|     try {\n148|       const res = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(1000) });\n149|       if (res.status === 200) {\n150|         ready = true;\n151|         break;\n152|       }\n153|     } catch {\n154|       // Not ready yet, keep polling.\n155|     }\n156|   }\n157| \n158|   if (!ready) {\n159|     const logs = stderrLines.join('');\n160|     wranglerProcess.kill('SIGKILL');\n161|     throw new Error(\n162|       `wrangler dev did not become ready within ${STARTUP_TIMEOUT_MS}ms on port ${port}.\\n` +\n163|       `Output:\\n${logs}`,\n164|     );\n165|   }\n166| }, STARTUP_TIMEOUT_MS + 5_000);\n167| \n168| afterAll(async () => {\n169|   if (wranglerProcess && wranglerProcess.exitCode === null) {\n170|     wranglerProcess.kill('SIGTERM');\n171|     // Give it 3s to clean up before force-killing.\n172|     await sleep(3000);\n173|     if (wranglerProcess.exitCode === null) {\n174|       wranglerProcess.kill('SIGKILL');\n175|     }\n176|   }\n177| });\n178| \n179| function sleep(ms: number): Promise<void> {\n180|   return new Promise((resolve) => {\n181|     const timer = setTimeout(resolve, ms);\n182|     timer.unref?.();\n183|   });\n184| }\n185| \n186| async function get(path: string): Promise<{ status: number; body: unknown }> {\n187|   const res = await fetch(`${baseUrl}${path}`, { signal: AbortSignal.timeout(10_000) });\n188|   const body = await res.json();\n189|   return { status: res.status, body };\n190| }\n191| \n192| // ---------------------------------------------------------------------------\n193| // Tests, match the Miniflare harness assertions\n194| // ---------------------------------------------------------------------------\n195| \n196| describe('Workers wrangler: smoke', () => {\n197|   test('platform loads and factory produces a valid platform object through wrangler bundling pipeline', async () => {\n198|     const { status, body } = await get('/smoke');\n199|     expect(status).toBe(200);\n200| "
+            },
+            "questions": {
+              "stale": {
+                "type": "noul",
+                "instructions": "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not."
+              }
+            },
+            "requestedModel": "jev-latest",
+            "observedModel": "jev-1.14.0",
+            "requestId": "req_01a1c6450cc77535b423235401190a52",
+            "answers": {
+              "stale": {
+                "type": "noul",
+                "noul": 0.02
+              }
+            }
+          },
+          "usage": {
+            "inputTokens": 3133,
+            "outputTokens": 21
+          },
+          "latencyMs": 182.944895
+        },
+        {
+          "format": 1,
+          "call": {
+            "id": "jhhbhjjk-khpd-epid-ikjo-plofkdccanfi",
+            "at": "2026-11-10T16:22:56.528Z",
+            "battery": "errors.stale-server-kind",
+            "version": 2,
+            "site": "errors.stale-server-kind.docs",
+            "state": {
+              "path": "test/workers-wrangler/wrangler.test.ts",
+              "currentKinds": [
+                "auth",
+                "config",
+                "contract",
+                "network",
+                "not-found",
+                "protocol",
+                "rate-limit",
+                "service",
+                "internal",
+                "tool",
+                "validation",
+                "unknown"
+              ],
+              "text": "201|     const b = body as Record<string, unknown>;\n202|     expect(b.ok).toBe(true);\n203|     expect(b.hasOperator).toBe(true);\n204|     expect(b.hasAuth).toBe(true);\n205|     expect(b.hasRealtime).toBe(true);\n206| \n207|     const keys = b.engineKeys as string[];\n208|     expect(keys).toContain('operator');\n209|     expect(keys).toContain('auth');\n210|     expect(keys).toContain('realtime');\n211|   }, 15_000);\n212| });\n213| \n214| describe('Workers wrangler: auth flow', () => {\n215|   test('auth token is stored and retrievable inside wrangler-hosted worker', async () => {\n216|     const { status, body } = await get('/auth');\n217|     expect(status).toBe(200);\n218| \n219|     const b = body as Record<string, unknown>;\n220|     expect(b.ok).toBe(true);\n221|     expect(b.tokenMatches).toBe(true);\n222|     expect(b.storedToken).toBe('workers-auth-token-abc123');\n223|   }, 10_000);\n224| });\n225| \n226| describe('Workers wrangler: transport-http round-trip', () => {\n227|   test('success path: mock returns real-shape JSON, result is populated', async () => {\n228|     const { status, body } = await get('/transport-success');\n229|     expect(status).toBe(200);\n230| \n231|     const b = body as Record<string, unknown>;\n232|     expect(b.ok).toBe(true);\n233|     expect(b.result).not.toBeNull();\n234| \n235|     const result = b.result as Record<string, unknown>;\n236|     expect(result).toHaveProperty('totals');\n237|     expect(result).toHaveProperty('sessions');\n238|     const [session] = result.sessions as [Record<string, unknown>];\n239|     expect(session.kind).toBe('tui');\n240|     expect(session.lastActivityAt).toBe(1700000000000);\n241|     expect(b.kind).toBeNull();\n242|     expect(b.ctor).toBeNull();\n243|   }, 10_000);\n244| \n245|   test('error path: mock returns 5xx, errorKind is typed \\'service\\'', async () => {\n246|     const { status, body } = await get('/transport-error');\n247|     expect(status).toBe(200);\n248| \n249|     const b = body as Record<string, unknown>;\n250|     expect(b.ok).toBe(true);\n251|     expect(b.result).toBeNull();\n252| \n253|     const validKinds = ['auth', 'config', 'contract', 'network', 'not-found', 'protocol', 'rate-limit', 'service', 'internal', 'tool', 'validation', 'unknown'];\n254|     expect(b.kind).toBe('service');\n255|     expect(validKinds).toContain(b.kind as string);\n256|     // esbuild mangles class names with '_' prefix; match pattern instead of exact name\n257|     expect(typeof b.ctor).toBe('string');\n258|     expect(b.ctor as string).toMatch(/Error$/);\n259|     expect(b.kind).not.toBeNull();\n260|   }, 10_000);\n261| });\n262| \n263| describe('Workers wrangler: error taxonomy', () => {\n264|   test('errors subpath loads and GoodVibesError is instantiable', async () => {\n265|     const { status, body } = await get('/errors');\n266|     expect(status).toBe(200);\n267| \n268|     const b = body as Record<string, unknown>;\n269|     expect(b.ok).toBe(true);\n270|     expect(b.engineErrorWorks).toBe(true);\n271| \n272|     const names = b.errorClassNames as string[];\n273|     expect(names).toContain('GoodVibesError');\n274|   }, 10_000);\n275| });\n276| \n277| describe('Workers wrangler: crypto', () => {\n278|   test('crypto.randomUUID produces valid UUID v4 in wrangler-hosted worker', async () => {\n279|     const { status, body } = await get('/crypto');\n280|     expect(status).toBe(200);\n281| \n282|     const b = body as Record<string, unknown>;\n283|     expect(b.ok).toBe(true);\n284|     expect(b.isValidUuid).toBe(true);\n285|     expect(b.hasCryptoSubtle).toBe(true);\n286|     expect(b.sha256Vector).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');\n287|     expect(b.sha256HashLength).toBe(64);\n288|   }, 10_000);\n289| });\n290| \n291| describe('Workers wrangler: globals audit', () => {\n292|   test('fetch, Request, Response, Headers, URL, crypto are available', async () => {\n293|     const { status, body } = await get('/globals');\n294|     expect(status).toBe(200);\n295| \n296|     const b = body as Record<string, unknown>;\n297|     const globals = b.globals as Record<string, boolean>;\n298|     expect(globals.fetch).toBe(true);\n299|     expect(globals.Request).toBe(true);\n300|     expect(globals.Response).toBe(true);\n301|     expect(globals.Headers).toBe(true);\n302|     expect(globals.URL).toBe(true);\n303|     expect(globals.crypto).toBe(true);\n304|     expect(globals.cryptoSubtle).toBe(true);\n305|     expect(globals.cryptoRandomUUID).toBe(true);\n306|     expect(globals.setTimeout).toBe(true);\n307|   }, 10_000);\n308| \n309|   // wrangler dev --local uses Miniflare 4 internally as its local runtime layer.\n310|   // Both this harness and the Miniflare standalone harness share the same\n311|   // Miniflare 4 runtime, which injects EventSource as a simulation artifact.\n312|   // EventSource === true in BOTH harnesses, the gap cannot be exercised locally\n313|   // without a real Cloudflare deployment (CF_API_TOKEN required).\n314|   //\n315|   // See test/workers/NOTES.md for the runtime boundary.\n316|   test('EventSource: wrangler dev --local uses Miniflare 4 (EventSource present, same as standalone Miniflare)', async () => {\n317|     const { status, body } = await get('/globals');\n318|     expect(status).toBe(200);\n319| \n320|     const b = body as Record<string, unknown>;\n321|     const globals = b.globals as Record<string, boolean>;\n322| \n323|     // wrangler dev --local routes through Miniflare 4, which injects EventSource.\n324|     // This matches the standalone Miniflare harness (both true).\n325|     // A real production Workers deployment would return false, not testable locally.\n326|     expect(globals.EventSource).toBe(true);\n327|   }, 10_000);\n328| \n329|   test('location is NOT available in wrangler-hosted worker (must pass explicit baseUrl)', async () => {\n330|     const { status, body } = await get('/globals');\n331|     expect(status).toBe(200);\n332| \n333|     const b = body as Record<string, unknown>;\n334|     const globals = b.globals as Record<string, boolean>;\n335|     expect(globals.location).toBe(false);\n336|   }, 10_000);\n337| });\n338| "
+            },
+            "questions": {
+              "stale": {
+                "type": "noul",
+                "instructions": "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not."
+              }
+            },
+            "requestedModel": "jev-latest",
+            "observedModel": "jev-1.14.0",
+            "requestId": "req_01a1c6450cc6777899a8e248e0f6869d",
+            "answers": {
+              "stale": {
+                "type": "noul",
+                "noul": 0.02
+              }
+            }
+          },
+          "usage": {
+            "inputTokens": 2659,
+            "outputTokens": 21
+          },
+          "latencyMs": 189.179508
+        }
+      ]
     },
     "test/workers/workers.test.ts": {
-      "sha256": "c4f8819107780cdf0bea3829f010311210d76e589317061b891e8766cf68a825",
-      "verdict": "no",
-      "outcome": "act",
-      "probability": 0.03
+      "windows": [
+        {
+          "format": 1,
+          "call": {
+            "id": "ippabdpj-bdhe-ellg-iocf-fejgellbicgp",
+            "at": "2026-11-10T16:22:56.540Z",
+            "battery": "errors.stale-server-kind",
+            "version": 2,
+            "site": "errors.stale-server-kind.docs",
+            "state": {
+              "path": "test/workers/workers.test.ts",
+              "currentKinds": [
+                "auth",
+                "config",
+                "contract",
+                "network",
+                "not-found",
+                "protocol",
+                "rate-limit",
+                "service",
+                "internal",
+                "tool",
+                "validation",
+                "unknown"
+              ],
+              "text": "1| /**\n2|  * Cloudflare Workers runtime harness.\n3|  *\n4|  * Uses Miniflare (programmatic API, v4) to run the built ./web entry under\n5|  * the actual workerd V8 isolate. Each test dispatches a real HTTP fetch to\n6|  * the worker and asserts the JSON response.\n7|  *\n8|  * Architecture decision: ./web entry (dist/web.js) is sufficient for normal\n9|  * Worker-hosted operator HTTP clients. The separate ./workers entry is only\n10|  * for the optional GoodVibes Worker bridge around daemon batch queue/tick\n11|  * integration.\n12|  *\n13|  * Module resolution: Miniflare resolves static imports relative to the\n14|  * worker script location. We copy worker.ts into a tmp directory outside\n15|  * dist/ to avoid racing with concurrent builds, and point modulesRoot at\n16|  * packages/platform/dist/ so that `import './web.js'` resolves correctly.\n17|  * The tmp directory is cleaned up in afterAll().\n18|  *\n19|  * Run:\n20|  *   bun run build && bun test test/workers/workers.test.ts\n21|  *\n22|  * Or via the dedicated script:\n23|  *   bun run test:workers\n24|  */\n25| \n26| import { resolve, dirname } from 'node:path';\n27| import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, copyFileSync } from 'node:fs';\n28| import { fileURLToPath } from 'node:url';\n29| import { describe, test, expect, beforeAll, afterAll } from 'bun:test';\n30| import { Miniflare } from 'miniflare';\n31| \n32| // fileURLToPath alias: __dirname here is a local const, not the Node.js global\n33| // __dirname, which is unavailable in ESM.\n34| const __dirname = dirname(fileURLToPath(import.meta.url));\n35| const PLATFORM_DIST = resolve(__dirname, '../../platform/dist');\n36| const WORKER_SOURCE = resolve(__dirname, 'worker.ts');\n37| \n38| // Write to a tmp dir outside dist so concurrent builds that clean/rewrite dist\n39| // cannot clobber the staged file.\n40| const TMP_DIR = resolve(__dirname, '../../.test-tmp/workers-harness');\n41| const WORKER_IN_TMP = resolve(TMP_DIR, '_workers-test-entry.mjs');\n42| const WORKER_BUNDLED = resolve(TMP_DIR, '_workers-test-bundled.mjs');\n43| \n44| let mf: Miniflare;\n45| \n46| beforeAll(async () => {\n47|   // Stage a full snapshot of PLATFORM_DIST in a tmp dir outside dist. modulesRoot\n48|   // points to TMP_DIR so static imports resolve from a stable location that\n49|   // concurrent builds cannot race against.\n50|   if (existsSync(TMP_DIR)) {\n51|     rmSync(TMP_DIR, { recursive: true, force: true });\n52|   }\n53|   // (esbuild handles module resolution; no copyDir needed)\n54|   mkdirSync(TMP_DIR, { recursive: true });\n55|   // Stage the worker source INSIDE PLATFORM_DIST so its ./web.js / ./errors.js\n56|   // relative imports resolve against the built dist during bundling.\n57|   const WORKER_IN_DIST = resolve(PLATFORM_DIST, '_workers-test-entry.ts');\n58|   writeFileSync(WORKER_IN_DIST, readFileSync(WORKER_SOURCE, 'utf8'), 'utf8');\n59| \n60|   // Pre-bundle the worker entry via esbuild so bare-module specifiers\n61|   // (e.g. 'zod/v4') that Miniflare cannot resolve locally are inlined\n62|   // into a single self-contained module. Output lands in TMP_DIR.\n63|   const { execFileSync: execBundle } = await import('node:child_process');\n64|   try {\n65|     execBundle(\n66|       'bunx',\n67|       [\n68|         'esbuild',\n69|         '--bundle',\n70|         '--platform=browser',\n71|         '--format=esm',\n72|         '--target=es2022',\n73|         // Keep node built-ins external so esbuild does not try to bundle them.\n74|         // Miniflare resolves them via the nodejs_compat compatibility flag\n75|         // added to the Miniflare config below.\n76|         '--external:fs',\n77|         '--external:path',\n78|         '--external:node:fs',\n79|         '--external:node:path',\n80|         `--outfile=${WORKER_BUNDLED}`,\n81|         WORKER_IN_DIST,\n82|       ],\n83|       { stdio: 'inherit' },\n84|     );\n85|   } finally {\n86|     // Clean up the staged worker file from dist so concurrent builds don't trip over it.\n87|     if (existsSync(WORKER_IN_DIST)) {\n88|       rmSync(WORKER_IN_DIST, { force: true });\n89|     }\n90|   }\n91| \n92|   mf = new Miniflare({\n93|     modules: true,\n94|     scriptPath: WORKER_BUNDLED,\n95|     modulesRoot: TMP_DIR,\n96|     modulesRules: [\n97|       { type: 'ESModule', include: ['**/*.js', '**/*.mjs'] },\n98|     ],\n99|     // Worker compatibility date policy: bump quarterly and pick a date within\n100|     // the last calendar quarter.\n101|     compatibilityDate: '2026-04-01',\n102|     // nodejs_compat lets Miniflare resolve bare node built-in specifiers\n103|     // (fs, path, node:fs, node:path) that esbuild leaves in the bundle when\n104|     // they are marked --external. Without this flag Miniflare throws\n105|     // ERR_MODULE_RULE for any bare 'fs' import encountered at load time.\n106|     compatibilityFlags: ['nodejs_compat'],\n107|   });\n108|   // Wait for Miniflare to be ready\n109|   await mf.ready;\n110| }, 30_000);\n111| \n112| afterAll(async () => {\n113|   await mf?.dispose();\n114|   // Clean up staged worker file and tmp dir\n115|   if (existsSync(TMP_DIR)) {\n116|     rmSync(TMP_DIR, { recursive: true, force: true });\n117|   }\n118| });\n119| \n120| // ─── Smoke ───────────────────────────────────────────────────────────────────\n121| \n122| describe('Workers harness: smoke', () => {\n123|   test('platform loads and factory produces a valid platform object', async () => {\n124|     const res = await mf.dispatchFetch('http://workers.test/smoke');\n125|     expect(res.status).toBe(200);\n126| \n127|     const body = await res.json() as Record<string, unknown>;\n128|     expect(body.ok).toBe(true);\n129|     expect(body.hasOperator).toBe(true);\n130|     expect(body.hasAuth).toBe(true);\n131|     expect(body.hasRealtime).toBe(true);\n132|     // Verify expected top-level platform namespaces are present\n133|     const keys = body.engineKeys as string[];\n134|     expect(keys).toContain('operator');\n135|     expect(keys).toContain('auth');\n136|     expect(keys).toContain('realtime');\n137|   }, 15_000);\n138| });\n139| \n140| // ─── Auth ─────────────────────────────────────────────────────────────────────\n141| \n142| describe('Workers harness: auth flow', () => {\n143|   test('auth token is stored and retrievable inside isolate', async () => {\n144|     const res = await mf.dispatchFetch('http://workers.test/auth');\n145|     expect(res.status).toBe(200);\n146| \n147|     const body = await res.json() as Record<string, unknown>;\n148|     expect(body.ok).toBe(true);\n149|     expect(body.tokenMatches).toBe(true);\n150|     expect(body.storedToken).toBe('workers-auth-token-abc123');\n151|   }, 10_000);\n152| });\n153| \n154| // ─── Transport HTTP ───────────────────────────────────────────────────────────\n155| \n156| describe('Workers harness: transport-http round-trip', () => {\n157|   // Success path: mock returns real-shape JSON for GET /api/sessions.\n158|   // Asserts that result is non-null and contains expected fields, proving the\n159|   // transport completed the full HTTP round-trip successfully, not just that\n160|   // it didn't crash.\n161|   test('success path: mock returns real-shape JSON, result is populated', async () => {\n162|     const res = await mf.dispatchFetch('http://workers.test/transport-success');\n163|     expect(res.status).toBe(200);\n164| \n165|     const body = await res.json() as Record<string, unknown>;\n166|     expect(body.ok).toBe(true);\n167|     // result must be non-null: mock matched the real platform route (GET /api/sessions)\n168|     expect(body.result).not.toBeNull();\n169|     // Verify real-shape fields from sessions.list output schema\n170|     const result = body.result as Record<string, unknown>;\n171|     expect(result).toHaveProperty('totals');\n172|     expect(result).toHaveProperty('sessions');\n173|     const [session] = result.sessions as [Record<string, unknown>];\n174|     expect(session.kind).toBe('tui');\n175|     expect(session.lastActivityAt).toBe(1700000000000);\n176|     // No error on the success path\n177|     expect(body.kind).toBeNull();\n178|     expect(body.ctor).toBeNull();\n179|   }, 10_000);\n180| \n181|   // Error path: mock returns 5xx. Asserts errorKind === 'service' (exact\n182|   // literal, not regex), proving platform error taxonomy works under Workers runtime.\n183|   // kind and ctor are returned as separate fields to avoid conflating\n184|   // typed EngineErrorKind values with raw constructor names.\n185|   test('error path: mock returns 5xx, errorKind is typed \\'service\\'', async () => {\n186|     const res = await mf.dispatchFetch('http://workers.test/transport-error');\n187|     // Worker must not crash (status 200 = error was caught and returned as JSON)\n188|     expect(res.status).toBe(200);\n189| \n190|     const body = await res.json() as Record<string, unknown>;\n191|     expect(body.ok).toBe(true);"
+            },
+            "questions": {
+              "stale": {
+                "type": "noul",
+                "instructions": "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not."
+              }
+            },
+            "requestedModel": "jev-latest",
+            "observedModel": "jev-1.14.0",
+            "requestId": "req_01a1c6450cd3768ea4059bb5109976b9",
+            "answers": {
+              "stale": {
+                "type": "noul",
+                "noul": 0.03
+              }
+            }
+          },
+          "usage": {
+            "inputTokens": 3456,
+            "outputTokens": 21
+          },
+          "latencyMs": 202.88171999999997
+        },
+        {
+          "format": 1,
+          "call": {
+            "id": "fekadacl-egco-eebe-lbcc-mjjeailddcfc",
+            "at": "2026-11-10T16:22:56.524Z",
+            "battery": "errors.stale-server-kind",
+            "version": 2,
+            "site": "errors.stale-server-kind.docs",
+            "state": {
+              "path": "test/workers/workers.test.ts",
+              "currentKinds": [
+                "auth",
+                "config",
+                "contract",
+                "network",
+                "not-found",
+                "protocol",
+                "rate-limit",
+                "service",
+                "internal",
+                "tool",
+                "validation",
+                "unknown"
+              ],
+              "text": "192|     // result is null because the call threw\n193|     expect(body.result).toBeNull();\n194| \n195|     // Assert 'kind' is a typed EngineErrorKind, not a constructor name.\n196|     const validKinds = ['auth', 'config', 'contract', 'network', 'not-found', 'protocol', 'rate-limit', 'service', 'internal', 'tool', 'validation', 'unknown'];\n197|     expect(body.kind).toBe('service'); // 500 maps to category 'service' -> kind 'service'\n198|     expect(validKinds).toContain(body.kind as string);\n199| \n200|     // Assert 'ctor' is a string ending with 'Error' (the constructor name of\n201|     // the thrown error). esbuild mangles class names with a '_' prefix to avoid\n202|     // collisions, so we cannot assert an exact name, just that it is a named\n203|     // Error subclass (ends with 'Error') and not a raw RuntimeError or string.\n204|     expect(typeof body.ctor).toBe('string');\n205|     expect(body.ctor as string).toMatch(/Error$/);\n206|     // The thrown error must have a typed kind (not null)\n207|     expect(body.kind).not.toBeNull();\n208|   }, 10_000);\n209| });\n210| \n211| // ─── Error taxonomy ───────────────────────────────────────────────────────────\n212| \n213| describe('Workers harness: error taxonomy', () => {\n214|   test('errors subpath loads and GoodVibesError is instantiable', async () => {\n215|     const res = await mf.dispatchFetch('http://workers.test/errors');\n216|     expect(res.status).toBe(200);\n217| \n218|     const body = await res.json() as Record<string, unknown>;\n219|     expect(body.ok).toBe(true);\n220|     expect(body.engineErrorWorks).toBe(true);\n221|     // errorClassNames contains only actual Error subclasses.\n222|     const names = body.errorClassNames as string[];\n223|     // Sentinel: GoodVibesError must be present (it IS an Error subclass)\n224|     expect(names).toContain('GoodVibesError');\n225|   }, 10_000);\n226| });\n227| \n228| // ─── Crypto ───────────────────────────────────────────────────────────────────\n229| \n230| describe('Workers harness: crypto.subtle + randomUUID', () => {\n231|   test('crypto.randomUUID produces valid UUID v4', async () => {\n232|     const res = await mf.dispatchFetch('http://workers.test/crypto');\n233|     expect(res.status).toBe(200);\n234| \n235|     const body = await res.json() as Record<string, unknown>;\n236|     expect(body.ok).toBe(true);\n237|     expect(body.isValidUuid).toBe(true);\n238|     expect(body.hasCryptoSubtle).toBe(true);\n239|     expect(body.sha256Vector).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');\n240|     expect(body.sha256HashLength).toBe(64); // SHA-256 = 32 bytes = 64 hex chars\n241|   }, 10_000);\n242| });\n243| \n244| // ─── Globals audit ────────────────────────────────────────────────────────────\n245| \n246| describe('Workers harness: globals audit', () => {\n247|   test('fetch, Request, Response, Headers, URL, crypto are available', async () => {\n248|     const res = await mf.dispatchFetch('http://workers.test/globals');\n249|     expect(res.status).toBe(200);\n250| \n251|     const body = await res.json() as Record<string, unknown>;\n252|     const globals = body.globals as Record<string, boolean>;\n253|     expect(globals.fetch).toBe(true);\n254|     expect(globals.Request).toBe(true);\n255|     expect(globals.Response).toBe(true);\n256|     expect(globals.Headers).toBe(true);\n257|     expect(globals.URL).toBe(true);\n258|     expect(globals.crypto).toBe(true);\n259|     expect(globals.cryptoSubtle).toBe(true);\n260|     expect(globals.cryptoRandomUUID).toBe(true);\n261|     expect(globals.setTimeout).toBe(true);\n262|   }, 10_000);\n263| \n264|   // Assert the actual observed value, not just typeof.\n265|   // Miniflare simulates EventSource; production workerd does NOT.\n266|   // Local verification is impossible, both Miniflare and wrangler dev --local share the Miniflare 4\n267|   // runtime and inject EventSource. See test/workers/NOTES.md for the runtime boundary.\n268|   test('EventSource availability (Miniflare injects it, real Workers does not)', async () => {\n269|     const res = await mf.dispatchFetch('http://workers.test/globals');\n270|     const body = await res.json() as Record<string, unknown>;\n271|     const globals = body.globals as Record<string, boolean>;\n272| \n273|     // Miniflare simulates EventSource; production workerd does NOT.\n274|     // Both Miniflare and wrangler dev --local share the Miniflare 4 runtime, EventSource is\n275|     // injected in both local harnesses. Production absence is unverifiable without a real CF deploy.\n276|     expect(globals.EventSource).toBe(true);\n277|   }, 10_000);\n278| \n279|   test('location is NOT available (must pass explicit baseUrl)', async () => {\n280|     const res = await mf.dispatchFetch('http://workers.test/globals');\n281|     const body = await res.json() as Record<string, unknown>;\n282|     const globals = body.globals as Record<string, boolean>;\n283| \n284|     // location.origin is absent in Workers, platform throws ConfigurationError\n285|     // if baseUrl is omitted. Workers callers must pass baseUrl explicitly.\n286|     expect(globals.location).toBe(false);\n287|   }, 10_000);\n288| });\n289| "
+            },
+            "questions": {
+              "stale": {
+                "type": "noul",
+                "instructions": "`currentKinds` lists every error kind the engine has today; 'server' is not one of them. Does `text` present 'server' as an error kind that callers of the engine should use, match on or expect today, for example a kind table or list that includes it, a code sample that sets or switches on `kind` 'server' as a live value, or advice to handle or use the 'server' kind? Text that says 'server' was an old kind that was removed or replaced, text that checks it is absent, and text that uses the word server for a remote server, a server process or a server-side component rather than as an error kind are not."
+              }
+            },
+            "requestedModel": "jev-latest",
+            "observedModel": "jev-1.14.0",
+            "requestId": "req_01a1c6450cd17cdfbc302a3f4dbf2655",
+            "answers": {
+              "stale": {
+                "type": "noul",
+                "noul": 0.02
+              }
+            }
+          },
+          "usage": {
+            "inputTokens": 2371,
+            "outputTokens": 21
+          },
+          "latencyMs": 186.12196799999998
+        }
+      ]
     }
   }
 }

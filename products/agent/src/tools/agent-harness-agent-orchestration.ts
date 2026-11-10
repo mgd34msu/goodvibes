@@ -9,7 +9,7 @@ import { captureRedactionSource, containsIssuerCredential } from '@goodvibes-jev
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureNativeReadModelObservation } from './agent-harness-autonomy-live-records.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { WorkPlanItem } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { captureWorkPlanItems, type WorkPlanItem } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { AGENT_TEMPLATES, AGENT_TOOL_MODES, agentOrchestrationDecisionCards } from './agent-harness-agent-orchestration-policy.ts';
 import { remoteReadModelSnapshot, captureNativeRemoteReadModelSnapshot, settleNativeRemotePublisherSemantics, currentNativeRemoteReadModelSnapshot, bindNativeRemoteWorkspaceDisplays, projectNativeRemoteWorkspaceDisplayReferences, captureNativeRemoteWorkspacePathSource, projectNativeRemoteWorkspacePathSource, type RemoteCaptureOutcomeRecord, type RemoteWorkspaceEvidenceRecord } from './agent-harness-remote-read-models.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -708,8 +708,8 @@ export function agentOrchestrationCatalogStatus(context: CommandContext, toolReg
   };
 }
 
-function orchestrationSourceData(context: CommandContext, originalSources: readonly unknown[], toolRegistry?: ToolRegistry, remoteSource?: OrchestrationRemoteSource) {
-  const records = exportAgents(context), workItems = workPlanItems(context), sessionId = context.session.runtime.sessionId;
+function orchestrationSourceData(context: CommandContext, backend: ReturnType<typeof captureOrchestrationBackend>, toolRegistry?: ToolRegistry, remoteSource?: OrchestrationRemoteSource, originalSources = backend.originalSources) {
+  const records = exportAgents(context), workItems = backend.workItems(), sessionId = context.session.runtime.sessionId;
   const tools = toolRegistry ? { tools: toolRegistry.getToolDefinitions() } : {};
   // The current native token closes every producer callback, including these
   // fact reads, before checking publisher records and bound workspace displays.
@@ -717,8 +717,8 @@ function orchestrationSourceData(context: CommandContext, originalSources: reado
   return { originalSources, records, remote, workItems, sessionId, ...tools };
 }
 
-function orchestrationSources(context: CommandContext, originalSources: readonly unknown[], toolRegistry?: ToolRegistry, remoteSource?: OrchestrationRemoteSource) {
-  const data = orchestrationSourceData(context, originalSources, toolRegistry, remoteSource);
+function orchestrationSources(context: CommandContext, backend: ReturnType<typeof captureOrchestrationBackend>, toolRegistry?: ToolRegistry, remoteSource?: OrchestrationRemoteSource) {
+  const data = orchestrationSourceData(context, backend, toolRegistry, remoteSource);
   const sources = captureCatalogData(data);
   const receipts = artifactReceiptClocks.get(data.remote.artifacts);
   artifactReceiptClocks.set(sources.remote.artifacts, new Set(sources.remote.artifacts.filter((_record, index) => {
@@ -825,7 +825,9 @@ function captureOrchestrationBackend(context: CommandContext, toolRegistry?: Too
     }
   }
   if (toolRegistry) guards.push(retainMethods(toolRegistry, ['getToolDefinitions']));
-  return { originalSources: captureCatalogData(originalSources), nativeWorkspaceSources, assertMethods: () => { for (const guard of methodGuards) guard(); }, assertCurrent: () => { for (const guard of guards) guard(); } };
+  const nativeWorkItems = context.workspace.workPlanStore && captureWorkPlanItems(context.workspace.workPlanStore);
+  const readWorkItems = () => { if (!nativeWorkItems) return workPlanItems(context); nativeWorkItems.assertCurrent(); return nativeWorkItems.items; };
+  return { originalSources: captureCatalogData(originalSources), nativeWorkspaceSources, workItems: readWorkItems, assertMethods: () => { for (const guard of methodGuards) guard(); }, assertCurrent: () => { for (const guard of guards) guard(); } };
 }
 
 function retainOrchestrationSources(context: CommandContext, sources: ReturnType<typeof orchestrationSources>, options: CatalogRankingOptions, backend: ReturnType<typeof captureOrchestrationBackend>, toolRegistry?: ToolRegistry) {
@@ -849,8 +851,8 @@ function retainOrchestrationSources(context: CommandContext, sources: ReturnType
     if (nativeDisplayToken) backend.assertMethods(); else backend.assertCurrent();
     // The current-token read is last and checks complete publisher and bound
     // display state after all native method reads.
-    const { originalSources: currentOriginals, ...currentFacts } = orchestrationSourceData(context, originalSources, toolRegistry,
-      nativeDisplayToken ? { kind: 'current', token: nativeDisplayToken } : undefined);
+    const { originalSources: currentOriginals, ...currentFacts } = orchestrationSourceData(context, backend, toolRegistry,
+      nativeDisplayToken ? { kind: 'current', token: nativeDisplayToken } : undefined, originalSources);
     if (currentOriginals !== originalSources) throw new ToolInputProjectionError('held');
     assertSnapshot(currentFacts);
     if (!nativeDisplayToken) backend.assertCurrent();
@@ -902,11 +904,11 @@ function projectOrchestrationPublisherClocks(facts: ReturnType<typeof orchestrat
   };
 }
 
-function orchestrationPublisherFacts(context: CommandContext, toolRegistry?: ToolRegistry) {
+function orchestrationPublisherFacts(context: CommandContext, backend: ReturnType<typeof captureOrchestrationBackend>, toolRegistry?: ToolRegistry) {
   return {
     records: exportAgents(context),
     remote: { pools: remotePools(context), contracts: remoteContracts(context), artifacts: remoteArtifacts(context) },
-    workItems: workPlanItems(context), sessionId: context.session.runtime.sessionId,
+    workItems: backend.workItems(), sessionId: context.session.runtime.sessionId,
     ...(toolRegistry ? { tools: toolRegistry.getToolDefinitions() } : {}),
   };
 }
@@ -915,13 +917,13 @@ async function captureOrchestrationPublisher(context: CommandContext, backend: R
   options: CatalogRankingOptions, toolRegistry?: ToolRegistry): Promise<Extract<OrchestrationRemoteSource, { readonly kind: 'native' }>> {
   const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const { signal, sourceOwner, assertCurrent: callerCurrent, retainCurrent } = options;
-  const facts = orchestrationPublisherFacts(context, toolRegistry), factsSnapshot = capturePersonalOpsSnapshot(facts);
+  const facts = orchestrationPublisherFacts(context, backend, toolRegistry), factsSnapshot = capturePersonalOpsSnapshot(facts);
   const assertSourceCurrent = () => {
     assertOptions(); signal?.throwIfAborted();
     if (options.signal !== signal || options.sourceOwner !== sourceOwner || options.assertCurrent !== callerCurrent || options.retainCurrent !== retainCurrent)
       throw new ToolInputProjectionError('held');
     backend.assertCurrent();
-    factsSnapshot.assertCurrent(facts); factsSnapshot.assertCurrent(orchestrationPublisherFacts(context, toolRegistry));
+    factsSnapshot.assertCurrent(facts); factsSnapshot.assertCurrent(orchestrationPublisherFacts(context, backend, toolRegistry));
     backend.assertCurrent(); assertOptions(); signal?.throwIfAborted();
   };
   const assertCallerCurrent = () => {
@@ -1414,7 +1416,7 @@ export async function agentOrchestrationSummary(context: CommandContext, toolReg
   if (query) admitOrchestrationQuery(query);
   const backend = captureOrchestrationBackend(context, toolRegistry);
   const remoteSource = await captureOrchestrationPublisher(context, backend, options, toolRegistry);
-  const sources = orchestrationSources(context, backend.originalSources, toolRegistry, remoteSource);
+  const sources = orchestrationSources(context, backend, toolRegistry, remoteSource);
   const { assertCurrent, publish } = retainOrchestrationSources(context, sources, options, backend, toolRegistry);
   const records = sources.records;
   const toolRegistered = agentToolRegistered(toolRegistry);
@@ -1482,7 +1484,7 @@ export async function describeAgentOrchestrationAgent(context: CommandContext, a
   }
   if (lookup.source !== 'agentId') admitOrchestrationQuery(lookup.input);
   const remoteSource = await captureOrchestrationPublisher(context, backend, options);
-  const sources = orchestrationSources(context, backend.originalSources, undefined, remoteSource);
+  const sources = orchestrationSources(context, backend, undefined, remoteSource);
   const { assertCurrent, publish } = retainOrchestrationSources(context, sources, options, backend);
   const records = sources.records;
   if (!records) {

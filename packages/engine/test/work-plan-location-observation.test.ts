@@ -1,8 +1,9 @@
-import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as fs from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captureWorkPlanLocation, WorkPlanStore } from '../platform/src/platform/workflow/work-plan-store.ts';
+import { captureWorkPlanItems, captureWorkPlanLocation, WorkPlanStore } from '../platform/src/platform/workflow/work-plan-store.ts';
 import { ToolInputProjectionError } from '../platform/src/platform/tools/input-projection.ts';
 
 const roots: string[] = [];
@@ -84,4 +85,51 @@ test('retirement during original selection still refuses before directory creati
     if (++checks === 2) throw new Error('Selection retired');
   } })).toThrow('Selection retired');
   expect(existsSync(join(store.homeDirectory, '.goodvibes'))).toBe(false);
+});
+
+test('a native item observation reads once without publication and checks its original source without rereading', () => {
+  const store = fixture(); store.addItem('Actual retained work', { linked: { agentId: 'native-agent' } });
+  const before = readFileSync(store.filePath), read = spyOn(fs, 'readFileSync'), sync = spyOn(fs, 'fsyncSync');
+  try {
+    const observed = captureWorkPlanItems(store);
+    if (!observed) throw new Error('Expected the genuine native item observation.');
+    expect(observed.items.map(item => item.title)).toEqual(['Actual retained work']);
+    expect(Object.isFrozen(observed.items)).toBe(true); expect(Object.isFrozen(observed.items[0])).toBe(true);
+    expect(Object.isFrozen(observed.items[0]?.linked)).toBe(true);
+    const reads = read.mock.calls.length;
+    expect(reads).toBeGreaterThan(0);
+    for (let index = 0; index < 20; index++) observed.assertCurrent();
+    expect(read.mock.calls.length).toBe(reads); expect(sync.mock.calls).toHaveLength(0);
+  } finally { read.mockRestore(); sync.mockRestore(); }
+  expect(readFileSync(store.filePath)).toEqual(before);
+});
+
+test('an empty native observation creates nothing and cannot adopt later actual work', () => {
+  const store = fixture(), observed = captureWorkPlanItems(store);
+  if (!observed) throw new Error('Expected the genuine native item observation.');
+  expect(observed.items).toEqual([]); expect(existsSync(join(store.homeDirectory, '.goodvibes'))).toBe(false);
+  store.addItem('Later independent work');
+  expect(() => observed.assertCurrent()).toThrow(); expect(observed.items).toEqual([]);
+  expect(captureWorkPlanItems(store)?.items.map(item => item.title)).toEqual(['Later independent work']);
+});
+
+test.each(['contents', 'equal-byte-replacement', 'assignment'] as const)('native observation refuses original %s changes', kind => {
+  const store = fixture(); store.addItem('Actual retained work');
+  const observed = captureWorkPlanItems(store);
+  if (!observed) throw new Error('Expected the genuine native item observation.');
+  if (kind === 'contents') store.addItem('Newer actual work');
+  else {
+    const path = kind === 'assignment' ? join(store.homeDirectory, '.goodvibes', 'test', 'work-plans', '.project-owners', '0.json') : store.filePath;
+    const original = readFileSync(path); renameSync(path, `${path}.retained`); writeFileSync(path, original);
+  }
+  expect(() => observed.assertCurrent()).toThrow(); expect(observed.items.map(item => item.title)).toEqual(['Actual retained work']);
+});
+
+test('copied stores and changed native methods cannot mint or retain native item observations', () => {
+  const store = fixture(), observed = captureWorkPlanItems(store);
+  if (!observed) throw new Error('Expected the genuine native item observation.');
+  expect(captureWorkPlanItems(Object.assign(Object.create(WorkPlanStore.prototype), store))).toBeUndefined();
+  expect(captureWorkPlanItems(new Proxy(store, { getPrototypeOf() { throw new Error('Must not invoke a borrowed proxy'); } }))).toBeUndefined();
+  Object.defineProperty(store, 'listItems', { value: () => [] });
+  expect(captureWorkPlanItems(store)).toBeUndefined(); expect(() => observed.assertCurrent()).toThrow();
 });

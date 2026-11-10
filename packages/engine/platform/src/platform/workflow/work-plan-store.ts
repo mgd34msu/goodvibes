@@ -773,7 +773,38 @@ export class WorkPlanStore {
 }
 
 const workPlanPrototype = WorkPlanStore.prototype;
+const nativeReadActivePlan = workPlanPrototype.getActivePlan;
 const nativePathDescriptor = ownDescriptor(workPlanPrototype, 'filePath');
+const nativePlanDescriptors = Object.getOwnPropertyDescriptors(workPlanPrototype);
+
+export interface WorkPlanItemsObservation {
+  readonly items: readonly WorkPlanItem[];
+  assertCurrent(): void;
+}
+
+/** One readonly native read for a caller-owned operation. Rechecks retain the
+ * original assignment, ancestry and complete file incarnation without opening,
+ * reparsing or durably publishing the plan again. Custom stores keep their own
+ * ordinary read path; a copied object cannot mint a native observation. */
+export function captureWorkPlanItems(store: object): WorkPlanItemsObservation | undefined {
+  if (!nativeApply(nativeStoreHas, nativeWorkPlanStores, [store]) || prototypeOf(store) !== workPlanPrototype) return undefined;
+  const methodsMatch = () => Reflect.ownKeys(workPlanPrototype).length === Reflect.ownKeys(nativePlanDescriptors).length
+    && Reflect.ownKeys(nativePlanDescriptors).every(key => key === 'constructor'
+      || !ownDescriptor(store, key) && sameDescriptor(ownDescriptor(workPlanPrototype, key), nativePlanDescriptors[key as keyof typeof nativePlanDescriptors]));
+  if (!methodsMatch()) return undefined;
+  const plan = nativeApply(nativeReadActivePlan, store, [{ readOnly: true }]) as WorkPlan;
+  const location = captureWorkPlanLocation(store);
+  const assignment = ownDescriptor(store, 'locationCurrent')?.value as unknown;
+  const source = ownDescriptor(store, 'planReadCurrent')?.value as unknown;
+  if (typeof assignment !== 'function' || typeof source !== 'function') throw new ToolInputProjectionError('held');
+  for (const item of plan.items) { if (item.linked) Object.freeze(item.linked); Object.freeze(item); }
+  const items = Object.freeze(plan.items);
+  const assertCurrent = () => {
+    if (!methodsMatch()) throw new ToolInputProjectionError('held');
+    location(); nativeApply(assignment, undefined, []); nativeApply(source, undefined, []); location();
+  };
+  assertCurrent(); return Object.freeze({ items, assertCurrent });
+}
 
 /** Retain the original path descriptor without invoking an unknown getter.
  * This observes a location; it grants neither filesystem ownership nor writes.

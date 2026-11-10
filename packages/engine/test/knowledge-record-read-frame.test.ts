@@ -14,6 +14,7 @@ import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/e
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { prepareKnowledgeScopeSelection, KnowledgeScopeSelectionHeldError } from '../platform/src/platform/knowledge/scope-selection.js';
 import { knowledgeNodeContentRevisionTriggers } from '../platform/src/platform/knowledge/store-node-content-revisions.js';
+import { nodeServingWithoutReview } from '../platform/src/platform/knowledge/activation/battery.js';
 import * as nativeReadSchema from '../platform/src/platform/state/knowledge-schema-read-plan.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [], databases: SQLiteStore[] = [];
@@ -1717,13 +1718,24 @@ test('compiled expected readsets do not trust an intercepted modified private co
 
 test('compiled expected readsets retain missing rows and every actual node selector', async () => {
   const { store, source } = await fixture();
+  const fake = fakePort((name, question) => {
+    expect(name).toBe('serve');
+    expect(question).toEqual(nodeServingWithoutReview.items.serve.question);
+    return noulAnswer(0.99);
+  });
+  const previous = installJudgmentPort(fake.port);
+  try {
   const node = await store.upsertNode({ kind: 'topic', slug: 'bounded-record', title: 'Bounded record', status: 'active', confidence: 0.9, sourceId: source.id });
+  expect(node.status).toBe('active');
   const selectors = [{ kind: 'node' as const, id: node.id }, { kind: 'extraction' as const, id: 'missing-extraction' }];
   const captured = store.captureExpectedRecordReadset(selectors);
   expect(captured.originalGenerations).toEqual([store.getRecordSnapshot('node', node.id).generation, null]);
   expect(store.matchesExpectedRecordReadsets([{ expected: captured.expected, selectors }])).toEqual([true]);
-  await store.upsertNode({ ...node, title: 'Changed bounded record' });
+  const changed = await store.upsertNode({ ...node, title: 'Changed bounded record' });
+  expect(changed.status).toBe('active');
   expect(store.matchesExpectedRecordReadsets([{ expected: captured.expected, selectors }])).toEqual([false]);
+  expect(fake.requests).toHaveLength(2);
+  } finally { installJudgmentPort(previous); }
 });
 
 test('actual scope adoption rejects a compiler capture that disagrees with the original snapshot before dispatch', async () => {

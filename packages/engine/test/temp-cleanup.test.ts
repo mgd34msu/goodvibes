@@ -6,8 +6,22 @@ import { createTempDirRegistry, drainTempDirsUntilSettled } from '../toolchain/s
 import { withRunTmpDir, RUN_TMP_PREFIX } from '../toolchain/src/test-runner/test-run-tmp.ts';
 import { runOwnedTestChild } from '../toolchain/src/test-runner/owned-test-child.ts';
 const roots: string[] = [];
+const fixtureRuns = new Set<Promise<unknown>>();
 function scratch(): string { const p = mkdtempSync(join(tmpdir(), 'cleanup-proof-')); roots.push(p); return p; }
-afterEach(() => { for (const p of roots.splice(0)) rmSync(p, { recursive: true, force: true }); });
+async function cleanupFixtures(): Promise<void> {
+  const failures: unknown[] = [];
+  // A Bun timeout may detach the test callback while its original fixture is
+  // still draining. Retain every admitted run through all of its finally work.
+  while (fixtureRuns.size) {
+    const accepted = [...fixtureRuns];
+    const results = await Promise.allSettled(accepted);
+    accepted.forEach(run => fixtureRuns.delete(run));
+    for (const result of results) if (result.status === 'rejected') failures.push(result.reason);
+  }
+  for (const p of roots.splice(0)) rmSync(p, { recursive: true, force: true });
+  if (failures.length) throw new AggregateError(failures, 'Temporary fixture work failed before cleanup');
+}
+afterEach(cleanupFixtures);
 
 test('registry deduplicates, unregisters and tolerates already deleted paths', () => {
   const root = scratch(); const registry = createTempDirRegistry(root);
@@ -70,16 +84,35 @@ test('parent cleanup rejects a replaced path', async () => {
 });
 
 const helper = resolve(import.meta.dir, '_helpers/project-temp.ts');
-async function fixture(body: string, options: { interrupt?: boolean; ceiling?: number; unregistered?: boolean } = {}) {
+interface FixtureOptions { interrupt?: boolean; ceiling?: number; unregistered?: boolean; holdReadyPublication?: boolean }
+function fixture(body: string, options: FixtureOptions = {}) {
+  const run = runFixture(body, options);
+  fixtureRuns.add(run);
+  // Retain the original rejection for cleanupFixtures even when a timeout has
+  // detached its caller. The cleanup owner reports it after draining all runs.
+  void run.then(() => {}, () => {});
+  return run;
+}
+async function runFixture(body: string, options: FixtureOptions) {
   const root = scratch(); const record = join(root, 'record.json'); const file = join(root, 'fixture.test.ts');
+  const stage = join(root, 'record.stage'), publish = join(root, 'publish-ready');
   mkdirSync(join(root, '.test-tmp')); writeFileSync(join(root, '.test-tmp', 'keep'), 'keep');
   const allocation = options.unregistered
     ? `mkdtempSync(${JSON.stringify(join(root, '.test-tmp', 'unregistered-'))})`
     : "makeProjectTempDir('owned')";
-  writeFileSync(file, `import {test,expect} from 'bun:test'; import {existsSync,mkdtempSync,writeFileSync,mkdirSync} from 'node:fs'; import {makeProjectTempDir} from ${JSON.stringify(helper)}; const dir=${allocation}; writeFileSync(${JSON.stringify(record)},JSON.stringify({dir,pid:process.pid,existedDuring:existsSync(dir)})); ${body}`);
+  writeFileSync(file, `import {test,expect} from 'bun:test'; import {existsSync,mkdtempSync,writeFileSync,mkdirSync,renameSync} from 'node:fs'; import {makeProjectTempDir} from ${JSON.stringify(helper)}; const dir=${allocation};
+    const ready=JSON.stringify({dir,pid:process.pid,existedDuring:existsSync(dir)});
+    writeFileSync(${JSON.stringify(stage)},${options.holdReadyPublication ? "'{'" : 'ready'},{flag:'wx'});
+    ${options.holdReadyPublication ? `while(!existsSync(${JSON.stringify(publish)})) await Bun.sleep(1); writeFileSync(${JSON.stringify(stage)},ready);` : ''}
+    renameSync(${JSON.stringify(stage)},${JSON.stringify(record)}); ${body}`);
   let timer: ReturnType<typeof setInterval> | undefined;
   let observedWhileAlive = false;
+  let observedIncompleteReady = false;
   timer = setInterval(() => {
+    if (options.holdReadyPublication && !existsSync(publish) && existsSync(stage) && readFileSync(stage, 'utf8') === '{') {
+      observedIncompleteReady = !existsSync(record);
+      writeFileSync(publish, 'release');
+    }
     if (!existsSync(record)) return;
     const data = JSON.parse(readFileSync(record, 'utf8'));
     if (options.interrupt) { options.interrupt = false; process.kill(process.pid, 'SIGTERM'); }
@@ -100,7 +133,7 @@ async function fixture(body: string, options: { interrupt?: boolean; ceiling?: n
       try { live = !/\) Z /.test(readFileSync(`/proc/${descendant}/stat`, 'utf8')); } catch { /* Gone. */ }
       expect(live, 'ordinary descendant must be dead before fixture cleanup').toBe(false);
     }
-    return { result, observedWhileAlive, root };
+    return { result, observedWhileAlive, observedIncompleteReady, root };
   } finally {
     clearInterval(timer);
     try { process.kill(Number(readFileSync(join(root, 'descendant.pid'), 'utf8')), 'SIGKILL'); } catch { /* Only our recorded fixture child. */ }
@@ -121,6 +154,35 @@ test('failure and abrupt child exit both clean their owned root', async () => {
 test('runner interruption kills and cleans its child', async () => {
   const { result } = await fixture("test('waiting',async()=>await Bun.sleep(10000));", { interrupt: true });
   expect(result.stopped).toBe('interrupted');
+}, 15000);
+test('interruption waits for the complete readiness publication while its original stage is incomplete', async () => {
+  const { result, observedIncompleteReady } = await fixture("test('waiting',async()=>await Bun.sleep(10000));", {
+    interrupt: true, holdReadyPublication: true,
+  });
+  expect(observedIncompleteReady).toBe(true);
+  expect(result.stopped).toBe('interrupted');
+}, 15000);
+test('fixture cleanup retains its root until the original admitted child has drained', async () => {
+  const run = fixture("test('held original',async()=>{writeFileSync('entered','entered');while(!existsSync('release')) await Bun.sleep(1);});");
+  const root = roots.at(-1);
+  if (!root) throw new Error('No original fixture root');
+  let cleaned = false;
+  let cleanup: Promise<void> | undefined;
+  try {
+    while (!existsSync(join(root, 'entered'))) await Bun.sleep(5);
+    cleanup = cleanupFixtures().then(() => { cleaned = true; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(cleaned).toBe(false);
+    expect(existsSync(root)).toBe(true);
+    writeFileSync(join(root, 'release'), 'release');
+    expect((await run).result.exitCode).toBe(0);
+    await cleanup;
+    expect(cleaned).toBe(true);
+    expect(existsSync(root)).toBe(false);
+  } finally {
+    if (existsSync(root)) writeFileSync(join(root, 'release'), 'release');
+    await run; await cleanup;
+  }
 }, 15000);
 test('ordinary POSIX descendant is stopped before root removal', async () => {
   if (process.platform === 'win32') return;

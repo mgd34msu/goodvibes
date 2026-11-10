@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
-import type { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
+import { SQLiteStore, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
 import { retainHomeGraphPageInputs } from '../platform/src/platform/knowledge/home-graph/page-read-set.js';
 import { KnowledgeSourceQualityHeldError } from '../platform/src/platform/knowledge/source-quality.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
@@ -43,17 +43,49 @@ async function fixture() {
 
 test('page guards compare every original record and edge generation in closed batches', async () => {
   const f = await fixture(), current = f.retain();
-  const records = spyOn(f.store, 'getRecordGenerations'), edges = spyOn(f.store, 'getEdgeGenerations');
-  const source = spyOn(f.store, 'getSourceGeneration'), record = spyOn(f.store, 'getRecordGeneration'), edge = spyOn(f.store, 'getEdgeSnapshot');
+  const sqlite = (f.store as unknown as { sqlite: SQLiteStore }).sqlite;
+  const reader = sqlite as unknown as { readPrivatePersistedRows(sql: string, params: string[], closedReadSet?: boolean): ReturnType<SqlDatabase['exec']> };
+  const read = reader.readPrivatePersistedRows.bind(sqlite);
+  const queries: { sql: string; params: string[]; closed: boolean }[] = [];
+  const reading = spyOn(reader, 'readPrivatePersistedRows').mockImplementation((sql, params, closedReadSet) => {
+    queries.push({ sql, params: [...params], closed: closedReadSet === true });
+    return read(sql, params, closedReadSet);
+  });
   try {
     expect(current).not.toThrow();
-    expect(records).toHaveBeenCalledTimes(1);
-    expect(records).toHaveBeenCalledWith([{ kind: 'source', id: f.source.id }, { kind: 'extraction', id: f.extraction.id },
-      { kind: 'node', id: f.device.id }, { kind: 'node', id: f.area.id }]);
-    expect(edges).toHaveBeenCalledTimes(1); expect(edges).toHaveBeenCalledWith([f.edge.id]);
-    expect(source).not.toHaveBeenCalled(); expect(record).not.toHaveBeenCalled(); expect(edge).not.toHaveBeenCalled();
-  } finally { records.mockRestore(); edges.mockRestore(); source.mockRestore(); record.mockRestore(); edge.mockRestore(); }
+    expect(queries.filter(query => query.sql.startsWith('SELECT gv_revision FROM '))).toEqual([
+      { sql: 'SELECT gv_revision FROM knowledge_sources WHERE id = ? LIMIT 1', params: [f.source.id], closed: true },
+      { sql: 'SELECT gv_revision FROM knowledge_extractions WHERE id = ? LIMIT 1', params: [f.extraction.id], closed: true },
+      { sql: 'SELECT gv_revision FROM knowledge_nodes WHERE id = ? LIMIT 1', params: [f.device.id], closed: true },
+      { sql: 'SELECT gv_revision FROM knowledge_nodes WHERE id = ? LIMIT 1', params: [f.area.id], closed: true },
+      { sql: 'SELECT gv_revision FROM knowledge_edges WHERE id = ? LIMIT 1', params: [f.edge.id], closed: true },
+    ]);
+    expect(queries.some(query => query.sql.startsWith('SELECT * FROM knowledge_edges'))).toBe(false);
+  } finally { reading.mockRestore(); }
 });
+
+for (const kind of ['record', 'edge'] as const) for (const layer of ['store-instance', 'store-prototype', 'sqlite-instance', 'sqlite-prototype'] as const) {
+  test(`a replaced ${layer} ${kind} generation getter cannot forge the original page read-set after a real revision change`, async () => {
+    const f = await fixture(), current = f.retain();
+    const sqlite = (f.store as unknown as { sqlite: SQLiteStore }).sqlite;
+    const expected = kind === 'record' ? f.store.getRecordGenerations([
+      { kind: 'source', id: f.source.id }, { kind: 'extraction', id: f.extraction.id },
+      { kind: 'node', id: f.device.id }, { kind: 'node', id: f.area.id },
+    ]) : f.store.getEdgeGenerations([f.edge.id]);
+    const table = kind === 'record' ? 'knowledge_nodes' : 'knowledge_edges', id = kind === 'record' ? f.device.id : f.edge.id;
+    const original = sqlite.exec(`SELECT gv_revision FROM ${table} WHERE id = ?`, [id])[0]?.values[0]?.[0];
+    const revision = `kr-${(original === `kr-${'a'.repeat(32)}` ? 'b' : 'a').repeat(32)}`;
+    sqlite.run(`UPDATE ${table} SET gv_revision = ? WHERE id = ?`, [revision, id]); await sqlite.save();
+    const storeMethod = kind === 'record' ? 'getRecordGenerations' : 'getEdgeGenerations';
+    const sqliteMethod = kind === 'record' ? 'readPersistedRecordGenerations' : 'readPersistedEdgeGenerations';
+    const spoof = layer === 'store-instance' ? spyOn(f.store, storeMethod).mockReturnValue(expected)
+      : layer === 'store-prototype' ? spyOn(KnowledgeStore.prototype, storeMethod).mockReturnValue(expected)
+      : layer === 'sqlite-instance' ? spyOn(sqlite, sqliteMethod).mockReturnValue(expected)
+      : spyOn(SQLiteStore.prototype, sqliteMethod).mockReturnValue(expected);
+    try { expectStale(current); expect(spoof).not.toHaveBeenCalled(); }
+    finally { spoof.mockRestore(); }
+  });
+}
 
 test.each(['source', 'extraction', 'node', 'edge'] as const)('a changed actual %s cannot reuse the retained page input', async kind => {
   const f = await fixture(), current = f.retain();

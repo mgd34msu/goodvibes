@@ -2,6 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { KnowledgeRecordAdmissionHeldError } from '../platform/src/platform/knowledge/store-record-snapshot.js';
 import { loadSqlJsEngine, SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
@@ -11,6 +12,19 @@ afterEach(async () => {
   for (const store of stores.splice(0)) await store.close();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+
+for (const first of ['page', 'store'] as const) {
+test(`canonical page generation bindings cold-load without a module cycle (${first} first)`, async () => {
+  const pagePath = fileURLToPath(new URL('../platform/src/platform/knowledge/home-graph/page-read-set.ts', import.meta.url));
+  const storePath = fileURLToPath(new URL('../platform/src/platform/knowledge/store.ts', import.meta.url));
+  const paths = first === 'page' ? [pagePath, storePath] : [storePath, pagePath];
+  const script = `await import(${JSON.stringify(paths[0])}); await import(${JSON.stringify(paths[1])}); process.stdout.write('cold-load-complete');`;
+  const child = Bun.spawn([process.execPath, '--eval', script], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+  const [exit, output, errors] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  expect({ exit, errors }).toEqual({ exit: 0, errors: '' });
+  expect(output).toBe('cold-load-complete');
+});
+}
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'knowledge-edge-generation-')); roots.push(root);

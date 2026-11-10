@@ -193,6 +193,8 @@ const nativeArtifactReferenceStores = new WeakMap<KnowledgeStore, NativeArtifact
 const nativeHomeGraphSourceRead = SQLiteStore.prototype.readHomeGraphSourceCandidates;
 const nativeHomeGraphNodeRead = SQLiteStore.prototype.readHomeGraphNodeCandidates;
 const nativeSemanticFactIdentityRead = SQLiteStore.prototype.readSemanticFactIdentityCandidates;
+const nativeRecordGenerationRead = SQLiteStore.prototype.readPersistedRecordGenerations;
+const nativeEdgeGenerationRead = SQLiteStore.prototype.readPersistedEdgeGenerations;
 const nativeNodeMapGet = Map.prototype.get;
 const nativeArtifactReferenceRead = SQLiteStore.prototype.withArtifactReferenceReads;
 const nativeArtifactReferenceSubscribe = SQLiteStore.prototype.subscribeArtifactReferenceClean;
@@ -883,11 +885,11 @@ export class KnowledgeStore {
   }
 
   getRecordGenerations(selectors: readonly PersistedKnowledgeRecordSelector[]): readonly (string | null)[] {
-    return this.sqlite.readPersistedRecordGenerations(selectors);
+    return nativePublicationApply(nativeRecordGenerationRead, this.sqlite, [selectors]);
   }
 
   getEdgeGenerations(ids: readonly string[]): readonly (string | null)[] {
-    return this.sqlite.readPersistedEdgeGenerations(ids);
+    return nativePublicationApply(nativeEdgeGenerationRead, this.sqlite, [ids]);
   }
 
   getNodeActivationCache(nodeId: string) {

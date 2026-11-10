@@ -1,9 +1,13 @@
-import type { KnowledgeStore } from '../store.js';
+import { KnowledgeStore } from '../store.js';
 import type { KnowledgeEdgeRecord, KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
 import { knowledgeRecordVersion, sameKnowledgeRecord } from '../store-record-representation.js';
 import { KnowledgeRecordAdmissionHeldError } from '../store-record-snapshot.js';
 import { KnowledgeSourceQualityHeldError } from '../source-quality.js';
 import type { PersistedKnowledgeRecordSelector } from '../../state/sqlite-store.js';
+
+const nativeRecordGenerations = KnowledgeStore.prototype.getRecordGenerations;
+const nativeEdgeGenerations = KnowledgeStore.prototype.getEdgeGenerations;
+const applyGenerationRead = Reflect.apply;
 
 /** Retain actual page inputs before any semantic reading can yield. */
 export function retainHomeGraphPageInputs(store: KnowledgeStore, input: {
@@ -71,12 +75,13 @@ export function retainHomeGraphPageInputs(store: KnowledgeStore, input: {
   return () => { frame(() => {
     for (const check of checks) check();
     if (selectors.length) {
-      const current = store.getRecordGenerations(selectors);
+      const current: ReturnType<KnowledgeStore['getRecordGenerations']> = applyGenerationRead(nativeRecordGenerations, store, [selectors]);
       if (current.length !== generations.length || current.some((generation, index) => generation !== generations[index])) stale();
     }
     if (edgeVersions.size) {
       const edges = new Map(store.listEdges().map(edge => [edge.id, edge]));
-      const selected = [...edgeVersions], current = store.getEdgeGenerations(selected.map(([id]) => id));
+      const selected = [...edgeVersions];
+      const current: ReturnType<KnowledgeStore['getEdgeGenerations']> = applyGenerationRead(nativeEdgeGenerations, store, [selected.map(([id]) => id)]);
       if (current.length !== selected.length) stale();
       for (const [index, [id, original]] of selected.entries()) {
         if (knowledgeRecordVersion(edges.get(id)) !== original.version || current[index] !== original.generation) stale();

@@ -45,6 +45,7 @@ export async function getHomeGraphRefinementTask(input: HomeGraphSpaceInput & {
 export async function runHomeGraphRefinement(input: HomeGraphSpaceInput & {
   readonly store: KnowledgeStore;
   readonly semanticService?: KnowledgeSemanticService | undefined;
+  readonly signal?: AbortSignal | undefined;
   readonly gapIds?: readonly string[] | undefined;
   readonly sourceIds?: readonly string[] | undefined;
   readonly limit?: number | undefined;
@@ -65,8 +66,11 @@ export async function runHomeGraphRefinement(input: HomeGraphSpaceInput & {
   readonly result?: Awaited<ReturnType<KnowledgeSemanticService['selfImprove']>> | undefined;
   readonly triage?: HomeGraphTriageResult | undefined;
 }> {
+  const signal = input.signal;
+  signal?.throwIfAborted();
   requireDecisionFeature('automatic Home Graph refinement and triage');
   await input.store.init();
+  signal?.throwIfAborted();
   const { spaceId } = resolveReadableHomeGraphSpace(input.store, input);
 
   const triageRequested = input.triage !== undefined && input.triage !== false;
@@ -76,9 +80,11 @@ export async function runHomeGraphRefinement(input: HomeGraphSpaceInput & {
         ...(input.semanticService ? { semanticService: input.semanticService } : {}),
         ...(input.installationId ? { installationId: input.installationId } : {}),
         ...(input.knowledgeSpaceId ? { knowledgeSpaceId: input.knowledgeSpaceId } : {}),
+        signal,
         options: typeof input.triage === 'object' ? input.triage : {},
       })
     : undefined;
+  signal?.throwIfAborted();
 
   if (input.skipGapRefinement === true) {
     return { ok: true, spaceId, ...(triage ? { triage } : {}) };
@@ -95,7 +101,9 @@ export async function runHomeGraphRefinement(input: HomeGraphSpaceInput & {
     maxRunMs: input.maxRunMs,
     force: input.force,
     reason: 'manual',
+    signal,
   });
+  signal?.throwIfAborted();
   return { ok: true, spaceId, result, ...(triage ? { triage } : {}) };
 }
 

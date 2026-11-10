@@ -10,12 +10,14 @@ import type { HomeGraphMapInput, HomeGraphMapResult } from './types.js';
 export async function mapHomeGraph(input: HomeGraphMapInput & {
   readonly store: KnowledgeStore;
   readonly assertCurrent?: (() => void) | undefined;
+  readonly signal?: AbortSignal | undefined;
 }): Promise<HomeGraphMapResult> {
-  const { store, assertCurrent: callerCurrent, ...request } = input;
+  const { store, assertCurrent: callerCurrent, signal, ...request } = input;
   const options = snapshotNodeInput(request);
   const requestCurrent = () => {
-    const { store: currentStore, assertCurrent: currentOwner, ...current } = input;
-    if (currentStore !== store || currentOwner !== callerCurrent || !sameKnowledgeRecord(snapshotNodeInput(current), options)) throw new KnowledgeScopeSelectionHeldError('stale');
+    if (signal?.aborted) throw new KnowledgeScopeSelectionHeldError('aborted');
+    const { store: currentStore, assertCurrent: currentOwner, signal: currentSignal, ...current } = input;
+    if (currentStore !== store || currentOwner !== callerCurrent || currentSignal !== signal || !sameKnowledgeRecord(snapshotNodeInput(current), options)) throw new KnowledgeScopeSelectionHeldError('stale');
     callerCurrent?.();
   };
   requestCurrent();
@@ -54,7 +56,7 @@ export async function mapHomeGraph(input: HomeGraphMapInput & {
     });
   };
   const selection = await prepareKnowledgeScopeSelection(store, { knowledgeSpaceId: spaceId }, {
-    sourceIds: state.sources.map(source => source.id), nodeIds: state.nodes.map(node => node.id), issueIds: state.issues.map(issue => issue.id), assertCurrent,
+    sourceIds: state.sources.map(source => source.id), nodeIds: state.nodes.map(node => node.id), issueIds: state.issues.map(issue => issue.id), assertCurrent, signal,
   });
   const selectedEdgeIds = new Set(selection.edges.map(edge => edge.id));
   const edgesCurrent = selection.retainEdges(state.edges.filter(edge => selectedEdgeIds.has(edge.id)), {

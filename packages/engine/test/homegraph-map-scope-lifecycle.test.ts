@@ -5,9 +5,61 @@ import { renderHomeGraphMap } from '../platform/src/platform/knowledge/home-grap
 import { renderHomeGraphState } from '../platform/src/platform/knowledge/home-graph/state.js';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.js';
 import { createHomeGraphService, useHomeGraphFixtures } from './_helpers/homegraph-service-fixtures.js';
+import { mapHomeGraph } from '../platform/src/platform/knowledge/home-graph/map-view.js';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 
 const readings = useKnowledgeAnswerReadings();
 useHomeGraphFixtures();
+
+test('Home Graph map refuses an already cancelled owner before initializing the store', async () => {
+  const { store } = createHomeGraphService();
+  const controller = new AbortController();
+  controller.abort();
+  const init = spyOn(store, 'init');
+  try {
+    await expect(mapHomeGraph({ store, signal: controller.signal })).rejects.toMatchObject({ reason: 'aborted' });
+    expect(init).not.toHaveBeenCalled();
+  } finally { init.mockRestore(); }
+});
+
+test('Home Graph map forwards owner cancellation to the active scope reading and discards its late result', async () => {
+  const { store, artifactStore } = createHomeGraphService();
+  // Explicit default-space maps exercise semantic scope eligibility. Native
+  // Home Assistant namespaces are admitted locally and need no model reading.
+  const spaceId = 'default';
+  await store.upsertSource({ id: 'map-cancellation-manual', connectorId: 'fixture', sourceType: 'manual',
+    title: 'Map cancellation manual', summary: 'Instructions for resetting the household switch.', status: 'indexed', metadata: { knowledgeSpaceId: spaceId } });
+  const original = store.listSources();
+  const controller = new AbortController();
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const fake = fakePort(() => noulAnswer(0.99));
+  let readingSignal: AbortSignal | undefined;
+  const previous = installJudgmentPort({ ...fake.port, async ask(request) {
+    expect(request.context?.site).toBe('engine.knowledge.scope-selection');
+    readingSignal = request.signal;
+    entered.resolve();
+    await release.promise;
+    return fake.port.ask(request);
+  } });
+  const mapping = mapHomeGraph({ store, knowledgeSpaceId: spaceId, includeSources: true, signal: controller.signal });
+  try {
+    await Promise.race([entered.promise, mapping.then(() => { throw new Error('Map returned before its scope reading'); })]);
+    expect(readingSignal?.aborted).toBe(false);
+    controller.abort();
+    expect(readingSignal?.aborted).toBe(true);
+    release.resolve();
+    await expect(mapping).rejects.toMatchObject({ reason: 'aborted' });
+    expect(store.listSources()).toEqual(original);
+    expect(artifactStore.list()).toEqual([]);
+  } finally {
+    release.resolve();
+    await mapping.catch(() => undefined);
+    installJudgmentPort(previous);
+  }
+  const fresh = await mapHomeGraph({ store, knowledgeSpaceId: spaceId, includeSources: true });
+  expect(fresh.nodes.some(node => node.id === 'map-cancellation-manual')).toBe(true);
+});
 
 test('Home Graph map keeps its caller request through awaited scope preparation', async () => {
   const { service, store } = createHomeGraphService();

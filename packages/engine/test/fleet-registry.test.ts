@@ -1,5 +1,5 @@
 /**
- * Live process registry (packages/platform/src/platform/runtime/fleet/).
+ * Live process registry (packages/engine/platform/src/platform/runtime/fleet/).
  *
  * Exercises process-registry behavior with stub managers:
  *  - Per-kind adapter mapping (agent/contract/group/unit/workflow/trigger/schedule/watcher/background-process).
@@ -12,11 +12,13 @@
  *  - Control dispatch (interrupt/kill routing incl. contract, group and unit kills).
  *  - Empty fleet → empty snapshot, no throw.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { logger } from '../platform/src/platform/utils/logger.js';
 import { createProcessRegistry } from '../platform/src/platform/runtime/fleet/index.js';
 import type {
   ProcessNode,
   ProcessRegistry,
+  FleetSnapshot,
 } from '../platform/src/platform/runtime/fleet/index.js';
 import type { ProcessRegistryDeps, RegistryTimers } from '../platform/src/platform/runtime/fleet/registry.js';
 import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
@@ -1375,4 +1377,23 @@ describe('fleet registry: steer', () => {
     expect(result.queued).toBe(false);
     registry.dispose();
   });
+});
+
+
+test('fleet timer reports an unavailable original source without an empty snapshot or masking direct query failure, and publishes after recovery', () => {
+  const harness = makeFakeTimers(), failure = new Error('Synthetic original trigger source retired');
+  let unavailable = false;
+  const deps = makeDeps({ timers: harness.timers });
+  const registry = createProcessRegistry({ ...deps, workflow: { ...deps.workflow,
+    triggerManager: { ...deps.workflow.triggerManager, list() { if (unavailable) throw failure; return []; } } } });
+  const seen: FleetSnapshot[] = [], warning = spyOn(logger, 'warn');
+  try {
+    registry.subscribe(snapshot => { seen.push(snapshot); }); harness.fire(); expect(seen).toHaveLength(1);
+    unavailable = true;
+    expect(() => harness.fire()).not.toThrow(); expect(() => harness.fire()).not.toThrow();
+    expect(seen).toHaveLength(1); expect(() => registry.query()).toThrow(failure);
+    expect(warning.mock.calls.filter(call => call[0] === '[fleet] refresh unavailable: an original source refused observation')).toHaveLength(1);
+    unavailable = false; harness.fire(); expect(seen).toHaveLength(2);
+    registry.dispose(); harness.fire(); expect(seen).toHaveLength(2);
+  } finally { warning.mockRestore(); registry.dispose(); }
 });

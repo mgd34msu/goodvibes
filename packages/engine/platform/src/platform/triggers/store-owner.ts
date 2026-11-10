@@ -37,7 +37,7 @@ export class TriggerFileOwner {
     while (!lstatSync(parent, { throwIfNoEntry: false })) {
       this.missing.unshift(parent); const next = dirname(parent); if (next === parent) throw new TriggerStoreError('unavailable'); parent = next;
     }
-    this.directories.push(captureExistingDirectory(parent));
+    this.directories.push(captureExistingDirectory(parent, { allowPrivatePermissionTightening: true }));
     for (const name of [basename(absolute), reportName, ...additional]) {
       if (!name || basename(name) !== name) throw new TriggerStoreError('unavailable');
       this.expected.set(name, this.observe(name));
@@ -67,7 +67,7 @@ export class TriggerFileOwner {
         const opened = fstatSync(fd, { bigint: true }); if (!opened.isDirectory() || !sameOwner(original, opened)) throw new TriggerStoreError('unavailable');
         fchmodSync(fd, 0o700); const current = lstatSync(path, { bigint: true }); if (!sameOwner(current, opened) || current.isSymbolicLink()) throw new TriggerStoreError('unavailable');
       } finally { closeSync(fd); }
-      this.missing.shift(); this.directories.push(captureExistingDirectory(path)); this.assertCurrent();
+      this.missing.shift(); this.directories.push(captureExistingDirectory(path, { allowPrivatePermissionTightening: true })); this.assertCurrent();
     }
   }
   acquire(name: string): void {

@@ -34,6 +34,9 @@ test('the helper reports a real close failure after draining and permits a separ
 
 test('the live fleet remains readable after the actual first credential key is created', async () => {
   const services = await getTestRuntimeServices();
+  // Retain the real trigger/source parents before the first encrypted write.
+  // The production fleet interval can reach this same read during startup.
+  expect(() => services.processRegistry.query()).not.toThrow();
   await services.secretsManager.set('GV_AGENT_FIXTURE_LIFETIME', 'synthetic-owned-value');
   expect(() => services.processRegistry.query()).not.toThrow();
   await services.secretsManager.delete('GV_AGENT_FIXTURE_LIFETIME');

@@ -215,3 +215,38 @@ test('retiring only a configured alias still cleans the original owned temp in i
   expect(fs.readFileSync(join(first, 'state.json'), 'utf8')).toBe('Original target');
   expect(temp(first, file)).toBeUndefined(); expect(fs.readdirSync(second)).toEqual([]);
 });
+
+test('private existing-directory observation permits only same-owner permission tightening; ordinary owners remain exact', () => {
+  const { root } = fixture(), parent = join(root, 'private'); fs.mkdirSync(parent, { mode: 0o755 }); fs.chmodSync(parent, 0o755);
+  const strict = captureExistingDirectory(parent), privateOwner = captureExistingDirectory(parent, { allowPrivatePermissionTightening: true });
+  const before = fs.lstatSync(parent, { bigint: true });
+  fs.chmodSync(parent, 0o710); expect(() => privateOwner.assertCurrent()).not.toThrow();
+  fs.chmodSync(parent, 0o700); expect(() => privateOwner.assertPhysicalCurrent()).not.toThrow();
+  expect(() => privateOwner.assertCurrent()).not.toThrow(); expect(() => strict.assertCurrent()).toThrow('Atomic file parent changed');
+  const after = fs.lstatSync(parent, { bigint: true });
+  expect([after.dev, after.ino, after.uid, after.gid, after.birthtimeNs]).toEqual([before.dev, before.ino, before.uid, before.gid, before.birthtimeNs]);
+});
+
+test.each([0o755, 0o600, 0o1700])('private directory guard refuses restored permissive, owner-access or special bits (%s)', mode => {
+  const { root } = fixture(), parent = join(root, 'private'); fs.mkdirSync(parent, { mode: 0o755 }); fs.chmodSync(parent, 0o755);
+  const owner = captureExistingDirectory(parent, { allowPrivatePermissionTightening: true });
+  fs.chmodSync(parent, 0o700); owner.assertCurrent();
+  // Bun's chmodSync masks special bits; use the native command so this control
+  // actually installs the sticky bit instead of repeating the permitted 0700.
+  expect(spawnSync('chmod', [mode.toString(8), parent]).status).toBe(0);
+  expect(fs.lstatSync(parent).mode & 0o7777).toBe(mode);
+  try { expect(() => owner.assertCurrent()).toThrow('Atomic file parent changed'); expect(() => owner.assertPhysicalCurrent()).toThrow('Atomic physical parent changed'); }
+  finally { fs.chmodSync(parent, 0o700); }
+});
+
+test('private permission policy retains exact aliases and physical parents rather than adopting replacements', () => {
+  const { root } = fixture(), parent = join(root, 'private'), other = join(root, 'other'), alias = join(root, 'alias');
+  fs.mkdirSync(parent, { mode: 0o755 }); fs.chmodSync(parent, 0o755); fs.mkdirSync(other, { mode: 0o700 }); fs.symlinkSync(parent, alias, 'dir');
+  const owner = captureExistingDirectory(alias, { allowPrivatePermissionTightening: true });
+  fs.chmodSync(parent, 0o700); owner.assertCurrent();
+  fs.unlinkSync(alias); fs.symlinkSync(other, alias, 'dir');
+  expect(() => owner.assertCurrent()).toThrow('Atomic file parent alias changed'); expect(() => owner.assertPhysicalCurrent()).not.toThrow();
+  fs.renameSync(parent, `${parent}.original`); fs.mkdirSync(parent, { mode: 0o700 }); fs.writeFileSync(join(parent, 'foreign'), 'Foreign original replacement');
+  expect(() => owner.assertPhysicalCurrent()).toThrow('Atomic physical parent changed');
+  expect(fs.readFileSync(join(parent, 'foreign'), 'utf8')).toBe('Foreign original replacement');
+});

@@ -279,16 +279,26 @@ function atomicMissing(error: unknown): boolean { return error !== null && typeo
 /** Plan the actual parent lookup, including configured existing aliases and
  * symlink-aware '..', before creating anything. Never create a dangling alias's
  * target. Original directories and links stay pinned through publication. */
-function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effect: (() => void) | undefined, mkdirp: boolean, concurrentInitialCreation = false): AtomicDirectoryOwner {
+function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effect: (() => void) | undefined, mkdirp: boolean, concurrentInitialCreation = false, privatePermissionTightening = false): AtomicDirectoryOwner {
   const directories = new Map<string, string>(), links: Array<{ path: string; identity: string; target: string }> = [];
   const absent = new Set<string>(), createdDirectories = new Set<string>();
   let cursor = parse(absolute).root, pending = absolute.slice(cursor.length).split(sep);
   directories.set(cursor, atomicDirectoryStamp(lstatSync(cursor, { bigint: true })));
-  const observe = (path: string) => {
-    const stat = lstatSync(path, { bigint: true }), identity = atomicDirectoryStamp(stat), previous = directories.get(path);
-    if (previous !== undefined && previous !== identity) throw new Error('Atomic file parent changed during capture');
+  const retainCurrent = (path: string, stat: BigIntStats, message = 'Atomic file parent changed'): void => {
+    const identity = atomicDirectoryStamp(stat), previous = directories.get(path);
+    if (previous !== undefined && previous !== identity) {
+      const originalMode = BigInt(previous.split(':')[2]!);
+      // A private shared writer can remove group/other access on the SAME
+      // original directory. Owner access, special bits, inode, owner and birth
+      // remain exact. Advance the observed mode so restoring removed bits is
+      // refused too; no alias or foreign directory can inherit this policy.
+      if (!privatePermissionTightening || (stat.mode & ~0o077n) !== (originalMode & ~0o077n)
+        || ((stat.mode & 0o077n) | (originalMode & 0o077n)) !== (originalMode & 0o077n)
+        || [stat.dev, stat.ino, originalMode, stat.uid, stat.gid, stat.birthtimeNs].join(':') !== previous) throw new Error(message);
+    }
     directories.set(path, identity);
   };
+  const observe = (path: string) => retainCurrent(path, lstatSync(path, { bigint: true }), 'Atomic file parent changed during capture');
   while (pending.length) {
     const component = pending.shift(); if (!component || component === '.') continue;
     if (component === '..') { cursor = dirname(cursor); if (!absent.has(cursor)) observe(cursor); continue; }
@@ -309,7 +319,7 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effec
   }
   const canonical = cursor;
   const current = (checkAbsent = true) => {
-    for (const [path, identity] of directories) if (atomicDirectoryStamp(lstatSync(path, { bigint: true })) !== identity) throw new Error('Atomic file parent changed');
+    for (const path of directories.keys()) retainCurrent(path, lstatSync(path, { bigint: true }));
     for (const link of links) if (atomicFileStamp(lstatSync(link.path, { bigint: true })) !== link.identity || readlinkSync(link.path) !== link.target) throw new Error('Atomic file parent alias changed');
     for (const path of checkAbsent ? absent : []) {
       try { lstatSync(path); } catch (error) { if (atomicMissing(error)) continue; throw error; }
@@ -344,21 +354,21 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effec
     // realpathSync (including .native under Bun) may normalize '..' before
     // resolving aliases. Compare the kernel's actual selected directory with
     // the original physical target instead, retaining every traversed alias.
-    if (atomicDirectoryStamp(statSync(absolute, { bigint: true })) !== directories.get(canonical)) throw new Error('Atomic file parent lookup changed');
+    retainCurrent(canonical, statSync(absolute, { bigint: true }), 'Atomic file parent lookup changed');
     current();
   };
   assertLookupCurrent();
-  const physical: Array<{ path: string; identity: string }> = [];
+  const physical: string[] = [];
   for (let path = canonical;; path = dirname(path)) {
-    const identity = directories.get(path); if (identity === undefined) throw new Error('Atomic physical parent proof is unavailable');
-    physical.push({ path, identity }); if (dirname(path) === path) break;
+    if (!directories.has(path)) throw new Error('Atomic physical parent proof is unavailable');
+    physical.push(path); if (dirname(path) === path) break;
   }
   const durability = new Set([canonical]);
   for (const created of createdDirectories) { durability.add(created); durability.add(dirname(created)); }
   return { canonical, durabilityDirectories: Object.freeze([...durability].sort((left, right) => right.length - left.length)),
     ancestryDirectories: Object.freeze([...directories.keys()].sort((left, right) => right.length - left.length)),
     assertCurrent: assertLookupCurrent,
-    assertPhysicalCurrent() { for (const parent of physical) if (atomicDirectoryStamp(lstatSync(parent.path, { bigint: true })) !== parent.identity) throw new Error('Atomic physical parent changed'); },
+    assertPhysicalCurrent() { for (const path of physical) retainCurrent(path, lstatSync(path, { bigint: true }), 'Atomic physical parent changed'); },
   };
 }
 
@@ -367,9 +377,9 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effec
  * check the selected alias; compensation may use the retained canonical tree
  * only while its original physical parents still exist unchanged.
  */
-export function captureExistingDirectory(directory: string): AtomicDirectoryOwner {
+export function captureExistingDirectory(directory: string, options: { readonly allowPrivatePermissionTightening?: boolean } = {}): AtomicDirectoryOwner {
   const absolute = isAbsolute(directory) ? directory : `${process.cwd()}${sep}${directory}`;
-  return Object.freeze(prepareAtomicDirectory(absolute, () => {}, undefined, false));
+  return Object.freeze(prepareAtomicDirectory(absolute, () => {}, undefined, false, false, options.allowPrivatePermissionTightening === true));
 }
 
 /** The shared native parent plan for actual asynchronous publishers. No second

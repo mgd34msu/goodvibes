@@ -471,10 +471,25 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
   const listeners = new Set<(snapshot: FleetSnapshot) => void>();
   let tickHandle: unknown = null;
   let lastSignature: string | null = null;
+  let refreshUnavailable = false;
 
   function tick(): void {
     if (listeners.size === 0) return;
-    const snapshot = query();
+    let snapshot: FleetSnapshot;
+    try { snapshot = query(); }
+    catch {
+      // A retired/unreadable native source is an unavailable observation, never
+      // an empty fleet. Direct query/control calls still report their failure.
+      // Report once per outage and publish a fresh real snapshot after recovery.
+      lastSignature = null;
+      if (!refreshUnavailable) {
+        refreshUnavailable = true;
+        try { logger.warn('[fleet] refresh unavailable: an original source refused observation'); }
+        catch { /* Reporting cannot grant a fleet observation. */ }
+      }
+      return;
+    }
+    refreshUnavailable = false;
     const signature = snapshotSignature(snapshot.nodes);
     if (signature === lastSignature) return;
     lastSignature = signature;
@@ -499,7 +514,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     if (tickHandle === null) return;
     timers.clearInterval(tickHandle);
     tickHandle = null;
-    lastSignature = null;
+    lastSignature = null; refreshUnavailable = false;
   }
 
   function subscribe(listener: (snapshot: FleetSnapshot) => void): () => void {

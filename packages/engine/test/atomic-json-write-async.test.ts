@@ -6,6 +6,9 @@ import { AtomicWriteDurabilityError } from '../platform/src/platform/utils/atomi
 import { writeJsonFileAtomicAsync } from '../platform/src/platform/utils/atomic-json-write-async.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 
+// The spy mutates the actual native module, not a copied adapter. These tests
+// select fsync's callback API; Node's separate __promisify__ namespace is unused.
+const callbackFs: { fsync(fd: number, callback: fs.NoParamCallback): void } = fs;
 const restore: Array<() => void> = [];
 afterEach(() => { for (const close of restore.splice(0).reverse()) close(); });
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
@@ -13,7 +16,7 @@ function fixture() { const root = makeProjectTempDir('atomic-async-publication')
 function holdFirstDirectorySync(requiredFiles = 1) {
   const entered = deferred(), staged = deferred(), original = fs.fsync;
   let release: (() => void) | undefined, files = 0, held = false;
-  const sync = spyOn(fs, 'fsync').mockImplementation((fd, callback) => {
+  const sync = spyOn(callbackFs, 'fsync').mockImplementation((fd, callback) => {
     const directory = fs.fstatSync(fd).isDirectory();
     original(fd, error => {
       if (!directory) { if (++files === requiredFiles) staged.resolve(); callback(error); return; }
@@ -103,7 +106,7 @@ test('queued publications cannot enter a replaced original parent', async () => 
 
 test('a failed directory sync stays published-indeterminate and does not strand the next publisher', async () => {
   const f = fixture(), actual = fs.fsync; let failed = false;
-  const sync = spyOn(fs, 'fsync').mockImplementation((fd, callback) => {
+  const sync = spyOn(callbackFs, 'fsync').mockImplementation((fd, callback) => {
     if (!failed && fs.fstatSync(fd).isDirectory()) { failed = true; callback(new Error('Original directory sync failed')); return; }
     actual(fd, callback);
   }); restore.push(() => sync.mockRestore());

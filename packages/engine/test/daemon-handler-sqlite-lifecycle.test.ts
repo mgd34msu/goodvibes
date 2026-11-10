@@ -7,7 +7,8 @@ import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handle
 import { loadSqlJsEngine, SQLiteStore } from '../platform/src/platform/state/sqlite-store.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
-const SCHEMA = ['CREATE TABLE IF NOT EXISTS probe (id TEXT PRIMARY KEY, value TEXT)'];
+const PROBE_SCHEMA = 'CREATE TABLE IF NOT EXISTS probe (id TEXT PRIMARY KEY, value TEXT)';
+const SCHEMA = [PROBE_SCHEMA];
 let directory: string;
 const stores: HandlerSqliteStore[] = [];
 beforeEach(() => { directory = makeProjectTempDir('gv-handler-sqlite-lifecycle'); });
@@ -88,7 +89,7 @@ describe('daemon handler store preservation', () => {
     const store = makeStore();
     const nativeRun = SQL.Database.prototype.run;
     const runSpy = spyOn(SQL.Database.prototype, 'run').mockImplementationOnce((statement) => {
-      expect(statement).toBe(SCHEMA[0]);
+      expect(statement).toBe(PROBE_SCHEMA);
       throw new Error('fixture transient schema failure');
     });
     try { await expect(store.init()).rejects.toThrow('fixture transient schema failure'); }

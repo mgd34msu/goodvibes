@@ -197,7 +197,10 @@ test.each([false, true])('passport input plans survive a logical thirty-second d
       expect(activation).toEqual([]);
     } else {
       const page = await generate(context, 'passport');
-      expect(context.store.getSource(page.source!.id)).toBe(page.source);
+      const savedSource = page.source;
+      expect(savedSource).toBeDefined();
+      if (!savedSource) throw new Error('The generated passport must retain its actual saved source.');
+      expect(context.store.getSource(savedSource.id)).toBe(savedSource);
       const facts = context.store.listNodesInSpace(spaceId).filter(row => row.kind === 'fact');
       expect(facts.length).toBeGreaterThan(0);
       for (const fact of facts) {

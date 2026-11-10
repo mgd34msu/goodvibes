@@ -129,7 +129,7 @@ function makeRealToolDeps(defaultDir: string, scratchRoot: string): Record<strin
 }
 
 describe('AgentOrchestrator: getFullRegistry(cwd) against REAL tool deps', () => {
-  test('two distinct cwds get two DISTINCT registries; the default cwd is unaffected by a later override call', () => {
+  test('two distinct cwds get two DISTINCT registries; the default cwd is unaffected by a later override call', async () => {
     const defaultDir = mkdtempSync(join(tmpdir(), 'agent-cwd-default-'));
     const otherDir = mkdtempSync(join(tmpdir(), 'agent-cwd-other-'));
     const scratchRoot = mkdtempSync(join(tmpdir(), 'agent-cwd-scratch-'));
@@ -149,9 +149,13 @@ describe('AgentOrchestrator: getFullRegistry(cwd) against REAL tool deps', () =>
       // Requesting the default again after building the override is unchanged.
       expect(orchestrator.getFullRegistry()).toBe(defaultRegistry);
     } finally {
-      rmSync(defaultDir, { recursive: true, force: true });
-      rmSync(otherDir, { recursive: true, force: true });
-      rmSync(scratchRoot, { recursive: true, force: true });
+      try {
+        await disposables.flush();
+      } finally {
+        rmSync(defaultDir, { recursive: true, force: true });
+        rmSync(otherDir, { recursive: true, force: true });
+        rmSync(scratchRoot, { recursive: true, force: true });
+      }
     }
   });
 
@@ -188,9 +192,13 @@ describe('AgentOrchestrator: getFullRegistry(cwd) against REAL tool deps', () =>
       expect(existsSync(join(defaultDir, 'from-default.txt'))).toBe(true);
       expect(existsSync(join(worktreeDir, 'from-default.txt'))).toBe(false);
     } finally {
-      rmSync(defaultDir, { recursive: true, force: true });
-      rmSync(worktreeDir, { recursive: true, force: true });
-      rmSync(scratchRoot, { recursive: true, force: true });
+      try {
+        await disposables.flush();
+      } finally {
+        rmSync(defaultDir, { recursive: true, force: true });
+        rmSync(worktreeDir, { recursive: true, force: true });
+        rmSync(scratchRoot, { recursive: true, force: true });
+      }
     }
   });
 });

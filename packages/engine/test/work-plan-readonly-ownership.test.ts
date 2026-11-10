@@ -25,7 +25,7 @@ test('two readonly openers freeze a shared real assignment only when actual work
   expect(first.filePath).toBe(second.filePath); expect(first.getActivePlan().id).toBe(second.getActivePlan().id); expect(first.listItems().map(item => item.title)).toEqual(['First saved work', 'Second saved work']);
 });
 test('initial readonly discovery can observe another genuine first activation without making its own effects', () => {
-  const f = fixture(); let activated = false, effects = 0, saved: string | undefined, bytes: Buffer | undefined;
+  const f = fixture(); let activated = false, effects = 0, saved: string | undefined, bytes: Buffer<ArrayBuffer> | undefined;
   const selected = resolveWorkPlanLocation(f.directory, f.options, { readOnly: true, onEffect() { effects++; }, assertCurrent() {
     if (activated) return; activated = true;
     const writer = new WorkPlanStore(f.options); writer.addItem('Genuine concurrent first work');
@@ -45,7 +45,7 @@ test.each(['physical', 'alias'] as const)('initial readonly retry never adopts a
   const f = fixture(), original = join(f.root, 'original'), foreign = join(f.root, 'foreign'), alias = join(f.root, 'selected');
   mkdirSync(original); mkdirSync(foreign); if (kind === 'alias') symlinkSync(original, alias);
   const home = kind === 'alias' ? alias : original, directory = join(home, '.goodvibes', 'test', 'work-plans'); let changed = false;
-  expect(() => resolveWorkPlanLocation(directory, { ...f.options, homeDirectory: home }, { readOnly: true, assertCurrent() {
+  expect(() => resolveWorkPlanLocation(directory, { projectId: f.options.projectId, projectRoot: f.options.projectRoot }, { readOnly: true, assertCurrent() {
     if (changed) return; changed = true;
     if (kind === 'alias') { rmSync(alias); symlinkSync(foreign, alias); }
     else { renameSync(original, `${original}.retained`); mkdirSync(original); }

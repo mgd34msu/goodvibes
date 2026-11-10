@@ -219,7 +219,7 @@ describe('the quarantine directory is bounded and the reap is disclosed', () => 
     expect(quarantines.filter(existsSync)).toHaveLength(policy === 'expired' ? 0 : 3);
     const reopened = new HandlerSqliteStore({ workingDirectory: tmpDir, fileName: `${FILE_NAME}.corrupt-secondary.sqlite`, schema: SCHEMA });
     await reopened.init();
-    expect(reopened.get('SELECT value FROM probe WHERE id = ?', ['owned'])).toEqual({ value: 'healthy secondary' });
+    expect(reopened.get<{ value: string }>('SELECT value FROM probe WHERE id = ?', ['owned'])).toEqual({ value: 'healthy secondary' });
     reopened.close();
   });
 

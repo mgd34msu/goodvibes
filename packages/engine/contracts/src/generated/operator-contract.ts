@@ -144025,6 +144025,43 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       "sessionId"
                                     ],
                                     "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "version": {
+                                        "type": "number",
+                                        "enum": [
+                                          4
+                                        ]
+                                      },
+                                      "sourceId": {
+                                        "type": "string",
+                                        "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                      },
+                                      "sourceRevision": {
+                                        "type": "string",
+                                        "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                      },
+                                      "inputId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200
+                                      },
+                                      "sessionId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200
+                                      }
+                                    },
+                                    "required": [
+                                      "version",
+                                      "sourceId",
+                                      "sourceRevision",
+                                      "inputId",
+                                      "sessionId"
+                                    ],
+                                    "additionalProperties": false
                                   }
                                 ]
                               },
@@ -144854,6 +144891,43 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         "sessionId"
                                       ],
                                       "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "version": {
+                                          "type": "number",
+                                          "enum": [
+                                            4
+                                          ]
+                                        },
+                                        "sourceId": {
+                                          "type": "string",
+                                          "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                        },
+                                        "sourceRevision": {
+                                          "type": "string",
+                                          "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                        },
+                                        "inputId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 200
+                                        },
+                                        "sessionId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 200
+                                        }
+                                      },
+                                      "required": [
+                                        "version",
+                                        "sourceId",
+                                        "sourceRevision",
+                                        "inputId",
+                                        "sessionId"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   ]
                                 },
@@ -145492,6 +145566,43 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                             "sourceRevision": {
                                               "type": "string",
                                               "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "inputId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 200
+                                            },
+                                            "sessionId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 200
+                                            }
+                                          },
+                                          "required": [
+                                            "version",
+                                            "sourceId",
+                                            "sourceRevision",
+                                            "inputId",
+                                            "sessionId"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "version": {
+                                              "type": "number",
+                                              "enum": [
+                                                4
+                                              ]
+                                            },
+                                            "sourceId": {
+                                              "type": "string",
+                                              "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                            },
+                                            "sourceRevision": {
+                                              "type": "string",
+                                              "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
                                             },
                                             "inputId": {
                                               "type": "string",
@@ -146314,6 +146425,43 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                               "sourceRevision": {
                                                 "type": "string",
                                                 "pattern": "^[a-f0-9]{64}$"
+                                              },
+                                              "inputId": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 200
+                                              },
+                                              "sessionId": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 200
+                                              }
+                                            },
+                                            "required": [
+                                              "version",
+                                              "sourceId",
+                                              "sourceRevision",
+                                              "inputId",
+                                              "sessionId"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "version": {
+                                                "type": "number",
+                                                "enum": [
+                                                  4
+                                                ]
+                                              },
+                                              "sourceId": {
+                                                "type": "string",
+                                                "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                              },
+                                              "sourceRevision": {
+                                                "type": "string",
+                                                "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
                                               },
                                               "inputId": {
                                                 "type": "string",
@@ -158349,6 +158497,43 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   "sessionId"
                                 ],
                                 "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "version": {
+                                    "type": "number",
+                                    "enum": [
+                                      4
+                                    ]
+                                  },
+                                  "sourceId": {
+                                    "type": "string",
+                                    "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                  },
+                                  "sourceRevision": {
+                                    "type": "string",
+                                    "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                  },
+                                  "inputId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "sessionId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  }
+                                },
+                                "required": [
+                                  "version",
+                                  "sourceId",
+                                  "sourceRevision",
+                                  "inputId",
+                                  "sessionId"
+                                ],
+                                "additionalProperties": false
                               }
                             ]
                           },
@@ -158923,6 +159108,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "sessionId"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "type": "number",
+                              "enum": [
+                                4
+                              ]
+                            },
+                            "sourceId": {
+                              "type": "string",
+                              "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                            },
+                            "sourceRevision": {
+                              "type": "string",
+                              "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                            },
+                            "sessionId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "sourceId",
+                            "sourceRevision",
+                            "sessionId"
+                          ],
+                          "additionalProperties": false
                         }
                       ]
                     },
@@ -159175,6 +159391,37 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "sourceRevision": {
                           "type": "string",
                           "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "sourceId",
+                        "sourceRevision",
+                        "sessionId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            4
+                          ]
+                        },
+                        "sourceId": {
+                          "type": "string",
+                          "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                        },
+                        "sourceRevision": {
+                          "type": "string",
+                          "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
                         },
                         "sessionId": {
                           "type": "string",

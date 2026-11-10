@@ -32280,6 +32280,12 @@ export interface OperatorMethodOutputMap {
                     sourceRevision: string;
                     inputId: string;
                     sessionId: string;
+                } | {
+                    version: 4;
+                    sourceId: string;
+                    sourceRevision: string;
+                    inputId: string;
+                    sessionId: string;
                 };
                 revision: number;
                 criteriaRevision: number;
@@ -32404,6 +32410,12 @@ export interface OperatorMethodOutputMap {
                     sourceRevision: string;
                     inputId: string;
                     sessionId: string;
+                } | {
+                    version: 4;
+                    sourceId: string;
+                    sourceRevision: string;
+                    inputId: string;
+                    sessionId: string;
                 };
                 revision: number;
                 criteriaRevision: number;
@@ -32492,6 +32504,12 @@ export interface OperatorMethodOutputMap {
                     };
                 } | {
                     version: 3;
+                    sourceId: string;
+                    sourceRevision: string;
+                    inputId: string;
+                    sessionId: string;
+                } | {
+                    version: 4;
                     sourceId: string;
                     sourceRevision: string;
                     inputId: string;
@@ -32616,6 +32634,12 @@ export interface OperatorMethodOutputMap {
                     };
                 } | {
                     version: 3;
+                    sourceId: string;
+                    sourceRevision: string;
+                    inputId: string;
+                    sessionId: string;
+                } | {
+                    version: 4;
                     sourceId: string;
                     sourceRevision: string;
                     inputId: string;
@@ -34495,6 +34519,12 @@ export interface OperatorMethodOutputMap {
                     sourceRevision: string;
                     inputId: string;
                     sessionId: string;
+                } | {
+                    version: 4;
+                    sourceId: string;
+                    sourceRevision: string;
+                    inputId: string;
+                    sessionId: string;
                 };
                 revision: number;
                 criteriaRevision: number;
@@ -34575,6 +34605,11 @@ export interface OperatorMethodOutputMap {
                 sourceId: string;
                 sourceRevision: string;
                 sessionId: string;
+            } | {
+                version: 4;
+                sourceId: string;
+                sourceRevision: string;
+                sessionId: string;
             };
             goal: string;
             criteria: readonly string[];
@@ -34605,6 +34640,11 @@ export interface OperatorMethodOutputMap {
                 sessionId: string;
             } | {
                 version: 3;
+                sourceId: string;
+                sourceRevision: string;
+                sessionId: string;
+            } | {
+                version: 4;
                 sourceId: string;
                 sourceRevision: string;
                 sessionId: string;

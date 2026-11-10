@@ -1,6 +1,6 @@
 # Changelog
 
-## [3.1.2] - 2026-11-07
+## [3.1.2] - 2026-11-10
 
 ### Fixed
 
@@ -97,16 +97,19 @@
   the terminal products and WebUI. Persist and apply changed settings to the
   running monitor, and stop its timer and subscription before the log closes.
 
-- Remove hash-derived Home Graph quality issue IDs. Reuse saved subject/code
-  identities and select new opaque IDs once. Reuse existing comparison digests
-  for unchanged native inputs, preserve reviews when related evidence is
-  recreated unchanged, and distinguish genuine recurring facts from delayed
-  older results through the existing issue lifecycle.
+- Remove hash-derived Home Graph quality issue IDs and comparison digests.
+  Reuse saved subject/code identities and track quality lifecycles through actual
+  node revisions and saved history. Equivalent unchanged evidence preserves
+  reviews; deleting and recreating a source starts a new lifecycle. Preserve
+  earlier explicit reviews conservatively when their original history is absent.
+  Publish node/history changes atomically and declare the new reader requirement
+  before saving revision-aware issues.
 
-- Remove unused Home Graph triage hashing from new or forced attempts that do
-  not settle. Compute the saved comparison only when used, and require a fresh
-  reading after the provider or configuration changes even if its model name
-  stays the same. Preserve acknowledged writes if later cache readback fails.
+- Remove Home Graph triage content hashing. Reuse settled readings only while
+  their original live issue, node, provider and complete relevant input remain
+  unchanged. Restart or provider replacement requires a fresh reading even when
+  the model name stays the same. Keep explicit operator reviews and preserve
+  acknowledged writes if later cache readback fails.
 
 - Drain rejected work thrown by synchronous decision-source restrictions before
   reporting the retired source. Refused capture, retry and recording checks
@@ -116,10 +119,11 @@
   unequal original/used state-token counts. A configured fallback receives the
   complete original evidence; malformed truncation metadata cannot pass.
 
-- Stop hashing passing contract checks when nothing compares that digest.
-  Nonpass checks retain their saved refusal comparison; earlier stored digests
-  remain readable. Update inspection, work receipts and WebUI together, and
-  declare reader compatibility before saving the changed check shape.
+- Remove unused contract-check evidence digests from passing and ordinary
+  failing checks. Retain the saved unchanged-evidence comparison only for native
+  uncertainty that must remain held after restart. Earlier stored digests remain
+  readable. Update inspection, work receipts and WebUI together, and declare
+  reader compatibility before saving the changed check shape.
 
 - Preserve the Home Assistant installation when syncing through a recognized
   space alias with a different prefix case or display spelling. Reuse the same
@@ -140,9 +144,11 @@
   Later memory-sync failures remain visible without a false extraction-failed
   event after publication.
 
-- Skip full-source hashing in offline checker advisories that have no saved
-  readings to compare. Preserve the same source scopes and retain complete
-  source bindings for actual preparation and saved-reading checks.
+- Compare exact source windows and their original policy files when preparing
+  or reusing static-check readings, without whole-file or policy hashes. Offline
+  advisories keep the same source scopes, and changed source or policy requires
+  a fresh reading. Store repeated source strings once without replacing them
+  with digest identifiers.
 
 - Preserve the actual checkpoint read when quarantining malformed contracts,
   without replacing earlier forensic copies. Apply the existing owned archive
@@ -161,10 +167,9 @@
   promise or another value. Observe rejected work without treating it as
   permission, and recheck restrictions after the readability model returns.
 
-- Read and hash the static-check policy once per actual preparation or checker
-  pass. Recheck the original files before reuse and after callbacks or waits;
-  missing saved evidence skips policy hashing. Saved report comparisons retain
-  their existing format.
+- Retain the exact static-check policy source and original file observations
+  through each preparation or checker pass. Recheck those files after callbacks
+  or waits; changed or replaced policy files cannot publish or reuse a reading.
 
 - Exercise Home Graph publication interruptions at the actual artifact lease
   boundary, and finish async fixture disposal before deleting its directories.
@@ -175,8 +180,9 @@
 
 - Match Agent end-to-end completion fixtures to the actual text-only target
   adapter and remove diagnostic-only payload hashes. Saved static-source checks
-  stop after a matching wire format and reject wrong metadata before hashing
-  request state or questions. Historical captured wire records remain intact.
+  compare the complete captured request, questions and answer metadata directly;
+  mismatched recordings cannot be reused. Historical captured wire records remain
+  intact.
 
 - Skip repair-candidate hashing for shared/session work, whose planner output
   cannot be reused after restart. Keep the existing saved comparison only when
@@ -201,10 +207,10 @@
   deferred decision. Ordinary decision history reuses its existing action
   incarnation; saved deferred comparisons and exact live claim guards remain.
 
-- Avoid hashing successful private-source screening merely to deduplicate work
-  in flight. Compare the already-owned pending inputs directly, and retain a
-  compact commitment only when recording or matching an actual unsettled input
-  after its raw source is released. Preserve prior refusals in Classic fallback.
+- Remove private-source screening fingerprints. Compare already-owned pending
+  inputs directly. Releasing an unsettled original retains an owner-wide hold
+  without its text or a fingerprint; further screening then requires a fresh
+  owner. Preserve prior refusals in Classic fallback.
 
 - Set up native configuration after the installer releases its completed suite
   claims, install required vector companions on macOS as well as Linux, and
@@ -215,10 +221,11 @@
   and remove classification-only context from the answering adapter request.
   Preserve the original conversation and tool arrays for the selected model.
 
-- Stop hashing fresh formatted read output at creation, clipping and evidence
-  projection. Keep versioned line and truncation metadata with the actual
-  retained tool result; owner evidence still compares returned rows against
-  immutable source. Verify checksums only on saved earlier observations.
+- Remove formatted read-output hashing at creation, clipping and evidence
+  projection, including checksum recomputation for earlier saved observations.
+  Keep versioned line and truncation metadata with the retained tool result.
+  The native owner compares returned rows against immutable source; a checksum
+  serialized alongside that same text does not establish its authenticity.
 
 - Preserve Sol xhigh and max effort choices when cached catalog rows list only
   high or incorrectly disable reasoning. Apply the documented exact-model
@@ -277,10 +284,23 @@
   selected configuration and installed reader capability.
 
 - Compare exact historical-import source images and duplicate fields instead of
-  repeatedly hashing them. Fresh manifests retain one complete saved-review
-  commitment; older per-source receipts remain readable. Live checks preserve
-  validated immutable originals, and new ledger writes establish the matching
-  installed-reader capability before publication.
+  hashing them. Fresh preparations and explicit work sources retain opaque
+  revisions with their complete original saved records; earlier independently
+  saved commitments remain readable. Live checks preserve immutable originals,
+  and new ledger writes establish the matching installed-reader capability
+  before publication.
+
+- Match native inbox triage labels to the original account and message revision
+  instead of hashing private previews. Changed messages withdraw stale labels;
+  settled receipts retain ordinary source references, while held or unavailable
+  attempts and dry-run previews retain no content commitment. Existing receipts
+  remain readable without inventing new source authority.
+
+- Retain original file observations for contract review, input indexes and dirty
+  tree baselines instead of repeatedly hashing live source. Changed files retire
+  current evidence. Earlier independently saved byte commitments remain checked,
+  and copied or imported records cannot acquire native file ownership. Declare
+  the new installed-reader formats before publishing them.
 
 - Reuse the actual recorded input commitment during conversational intake,
   keeping original source data immutable across custom provider callbacks.
@@ -362,9 +382,12 @@
   truncation metadata and continue to the next configured decision model with
   the complete original input.
 
-- Keep fresh durable configuration file observations without nested file-content
-  hashes. Existing configuration history remains readable; a real settings
-  mutation advances its owner before adopting the new observation format.
+- Keep durable configuration revisions as persisted opaque identities with
+  exact original file and effective-setting observations. Fresh public policy
+  snapshots and unchanged gateway catalogs no longer need content hashes.
+  Existing saved bindings remain readable; a real settings mutation advances its
+  owner before adopting the new format. New policy records declare their reader
+  requirements before publication.
 
 - Keep each trigger bound to its originally approved command, arguments and
   directory across saved grant edits and restart. New grants use independent
@@ -448,8 +471,7 @@
   authority from a receipt. Startup can wait for the first real ingress session;
   cancellation removes that wait and a later replacement cannot take it over.
   Paired operator answers remain available before expiry. Drain account reads,
-  archive writes and native receive work during shutdown. Source regression
-  cases are authored; runtime and release qualification remain pending.
+  archive writes and native receive work during shutdown.
 
 - Follow the repository rename to `mgd34msu/goodvibes` in install/uninstall
   downloads, native acquisition, updates, release tooling, workflow action
@@ -526,10 +548,10 @@
   reacquires the original page, paired grant and receiving capabilities.
 
 - Reuse one immutable gateway scope snapshot while registrations are unchanged.
-  Live continuation guards no longer rebuild and hash the complete catalog on
-  every read. Registration changes invalidate it after the durable revocation
-  precondition; reentrant reads cannot publish mixed scope state. Existing
-  continuation digest bytes are preserved pending their format migration.
+  Fresh snapshots use the actual policy owner's revision or an opaque identity,
+  without hashing the catalog. Registration changes invalidate it after the
+  durable revocation precondition; reentrant reads cannot publish mixed scope
+  state. Earlier saved continuations retain their original verification recipe.
 
 - Retain each checkout's original untrusted-source evidence before detached
   preflight. Later owner turns cannot erase taint, replace incomplete evidence
@@ -599,7 +621,7 @@
   Pass per-invocation gate facts directly instead of using a shared mutable cell.
 
 - Resolve Git placement asynchronously for every contract start path, including
-  compatibility APIs. SDK starts now return promises; await them before reading
+  compatibility APIs. Platform starts now return promises; await them before reading
   the contract. Carry cancellation through preparation and AgentManager ownership,
   and retain approved draft identity while concurrent launch or edit is pending.
 
@@ -643,8 +665,9 @@
   into both terminals, with provider/model and structured fallback editors in WebUI.
 - Preserve schema-2 catalog reasoning capabilities, including GPT-6.1 Sol xhigh
   and max, and retain stored effort preferences across model switches.
-- Route recoverable configuration diagnostics through the terminal output guard
-  and remove duplicate effort-remap messages after model changes.
+- Route configuration diagnostics, including refused live reloads, through the
+  terminal output guard. The boot-exit owner reports fatal startup failures
+  separately. Remove duplicate effort-remap messages after model changes.
 - Reject repeated claims of live autonomous action receipts and retain the
   decision and claim in the append-only audit history.
 - Redact private draft message bodies with a fixed marker and remove their
@@ -677,7 +700,7 @@
   live activation/compensation evidence directly. Metadata insertion order does
   not require a new reading for otherwise unchanged knowledge content.
 
-### SDK changes
+### Platform API changes
 
 - Automated checkout adapters must implement `CheckoutPageDriver.verifyTerms`;
   fill-only adapters may omit it. The browser seam supplies the current-page

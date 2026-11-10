@@ -7,8 +7,9 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { KnowledgeNodeActivationHeldError } from '../platform/src/platform/knowledge/activation/types.js';
 import { KnowledgeStore, hasKnowledgeNodePublication } from '../platform/src/platform/knowledge/store.js';
-import { prepareSourceLinkedRepairProfileFacts } from '../platform/src/platform/knowledge/semantic/self-improvement-promotion.js';
+import { prepareSourceLinkedRepairProfileFacts, prepareSourceLinkedRepairProfileFactInputs } from '../platform/src/platform/knowledge/semantic/self-improvement-promotion.js';
 import { prepareKnowledgeRecordAdmission } from '../platform/src/platform/knowledge/store-record-snapshot.js';
 import { prepareGeneratedFactIdentity, projectGeneratedFactRecordAdmission, retainGeneratedFactRecordReferences } from '../platform/src/platform/knowledge/generated-fact-record-references.js';
 import { captureNativeGeneratedFactPlanReferences, createGeneratedFactWritePlanner, generatedFactSupportMetadata } from '../platform/src/platform/knowledge/semantic/fact-support-write-plan.js';
@@ -28,7 +29,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function fixture(batched = false, extractionClock?: number, historical = true) {
+async function nativeFactFixture(extractionClock?: number, historical = true) {
   const root = mkdtempSync(join(tmpdir(), 'knowledge-native-fact-proof-')); roots.push(root);
   const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store);
   const fake = fakePort((name, question, state) => {
@@ -60,6 +61,12 @@ async function fixture(batched = false, extractionClock?: number, historical = t
     classification: { kind: 'specification' as const, title: 'HDMI ports', summary: 'AC-7 has four HDMI ports.', value: 'four hdmi ports', labels: [], aliases: [] },
   };
   if (historical) await seedProtectedHistoricalFact(store, spaceId, source.id, subject.id);
+  return { store, source, extraction, subject, fake, spaceId, input };
+}
+
+async function fixture(batched = false, extractionClock?: number, historical = true) {
+  const native = await nativeFactFixture(extractionClock, historical);
+  const { store, source, extraction, subject, fake, spaceId, input } = native;
   const prepared = await prepareSourceLinkedRepairProfileFacts([input]);
   const [fact] = batched ? await store.batch(async () => {
     const written = await prepared.write();
@@ -80,6 +87,40 @@ async function fixture(batched = false, extractionClock?: number, historical = t
   }
   return { store, source, extraction, subject, fact, plan, fake, spaceId, input };
 }
+
+test('input-only fact plans do not request unused activation and cannot extend the real writer deadline', async () => {
+  const f = await nativeFactFixture(undefined, false);
+  const inputs = await prepareSourceLinkedRepairProfileFactInputs([f.input]);
+  expect(Object.hasOwn(inputs, 'write')).toBe(false);
+  const activationRequests = () => f.fake.requests.filter(request => Object.hasOwn(request.questions, 'serve'));
+  expect(activationRequests()).toHaveLength(0);
+  const writer = await prepareSourceLinkedRepairProfileFacts([f.input]);
+  expect(activationRequests()).toHaveLength(1);
+  const calls = f.fake.requests.length, now = Date.now();
+  const clock = spyOn(Date, 'now').mockReturnValue(now + 30_001);
+  try {
+    inputs.assertCurrent();
+    expect(() => writer.assertCurrent()).toThrow(KnowledgeNodeActivationHeldError);
+    await expect(writer.write()).rejects.toThrow(KnowledgeNodeActivationHeldError);
+    expect(f.fake.requests).toHaveLength(calls);
+    expect(f.store.listNodes().filter(node => node.kind === 'fact')).toEqual([]);
+  } finally { clock.mockRestore(); }
+});
+
+test.each(['source', 'owner'] as const)('a delayed input-only fact plan still refuses its revoked %s', async change => {
+  const f = await nativeFactFixture(undefined, false); let active = true;
+  const inputs = await prepareSourceLinkedRepairProfileFactInputs([f.input], {
+    assertCurrent() { if (!active) throw new KnowledgeNodeActivationHeldError('stale'); },
+  });
+  const now = Date.now(), clock = spyOn(Date, 'now').mockReturnValue(now + 30_001);
+  try {
+    if (change === 'owner') active = false;
+    else await f.store.upsertSource({ ...f.source, summary: 'A genuine newer source correction.' });
+    expect(() => inputs.assertCurrent()).toThrow();
+    expect(f.fake.requests.filter(request => Object.hasOwn(request.questions, 'serve'))).toHaveLength(0);
+    expect(f.store.listNodes().filter(node => node.kind === 'fact')).toEqual([]);
+  } finally { clock.mockRestore(); }
+});
 
 test('fresh opaque fact labels stay safe without lending native record proof to copies', async () => {
   const item = await fixture(false, undefined, false), copy = structuredClone(item.fact);

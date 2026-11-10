@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { Writable } from 'node:stream';
@@ -26,8 +26,28 @@ function fixture(): { root: string; agent: string } {
   const root = mkdtempSync(join(tmpdir(), 'agent-partitions-')); roots.push(root);
   const agent = join(root, 'products/agent');
   for (const path of paths) write(agent, path);
+  // The copied product helpers use the Agent's declared workspace packages.
+  // Retain the actual installed export map/dependencies; never replace the
+  // shared test-runner leaf with a fixture module or global resolution fallback.
+  const originalAgent = resolve(import.meta.dir, '../../../products/agent');
+  copyFileSync(join(originalAgent, 'package.json'), join(agent, 'package.json'));
+  symlinkSync(join(originalAgent, 'node_modules'), join(agent, 'node_modules'), 'dir');
   return { root, agent };
 }
+
+test('copied Agent workspace resolves its declared original public test-runner export', () => {
+  const { root, agent } = fixture();
+  const originalAgent = resolve(import.meta.dir, '../../../products/agent');
+  expect(readFileSync(join(agent, 'package.json'), 'utf8')).toBe(readFileSync(join(originalAgent, 'package.json'), 'utf8'));
+  expect(lstatSync(join(agent, 'node_modules')).isSymbolicLink()).toBe(true);
+  expect(readlinkSync(join(agent, 'node_modules'))).toBe(join(originalAgent, 'node_modules'));
+  const specifier = '@goodvibes-jev/engine/toolchain/test-runner';
+  const originalEntry = Bun.resolveSync(specifier, originalAgent);
+  expect(Bun.resolveSync(specifier, agent)).toBe(originalEntry);
+  // Fixture cleanup removes the owned link, preserving the original dependency.
+  rmSync(root, { recursive: true, force: true });
+  expect(lstatSync(originalEntry).isFile()).toBe(true);
+});
 
 /** A retained discovery artifact, stored outside either product's inventory. */
 function manifestArgument(manifest: unknown): string {

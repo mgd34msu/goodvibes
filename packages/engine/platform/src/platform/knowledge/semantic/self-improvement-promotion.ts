@@ -459,11 +459,58 @@ export interface PreparedSourceLinkedRepairProfileFacts {
   readonly write: (observer?: RepairProfileWriteObserver) => Promise<KnowledgeNodeRecord[]>;
 }
 
+export interface PreparedSourceLinkedRepairProfileFactInputs {
+  readonly plans: readonly PreparedSourceLinkedRepairProfileFact[];
+  /** Original source/scoring/identity restriction, never permission to write. */
+  readonly assertCurrent: () => void;
+}
+type RepairProfilePreparationOptions = {
+  readonly signal?: AbortSignal | undefined; readonly shouldStop?: (() => boolean) | undefined;
+  readonly assertCurrent?: (() => void) | undefined; readonly identityPlanner?: SemanticFactIdentityPlanner | undefined;
+};
+interface OwnedRepairProfileInputs extends PreparedSourceLinkedRepairProfileFactInputs {
+  readonly store: KnowledgeStore | undefined;
+  readonly signal: AbortSignal | undefined;
+  readonly assertWriteInputsCurrent: () => void;
+}
+
+/** Graph input preparation performs all source/support/scoring admission. The
+ * graph's actual atomic writer independently activates its complete graph. */
+export async function prepareSourceLinkedRepairProfileFactInputs(
+  inputs: readonly SourceLinkedRepairProfileFactInput[], options: RepairProfilePreparationOptions = {},
+): Promise<PreparedSourceLinkedRepairProfileFactInputs> {
+  const prepared = await prepareOwnedRepairProfileInputs(inputs, options);
+  return Object.freeze({ plans: prepared.plans, assertCurrent: prepared.assertCurrent });
+}
+
 /** Resolve the entire pass before opening a batch. write() performs no judgments. */
 export async function prepareSourceLinkedRepairProfileFacts(
-  inputs: readonly SourceLinkedRepairProfileFactInput[],
-  options: { readonly signal?: AbortSignal | undefined; readonly shouldStop?: (() => boolean) | undefined; readonly assertCurrent?: (() => void) | undefined; readonly identityPlanner?: SemanticFactIdentityPlanner | undefined } = {},
+  inputs: readonly SourceLinkedRepairProfileFactInput[], options: RepairProfilePreparationOptions = {},
 ): Promise<PreparedSourceLinkedRepairProfileFacts> {
+  const prepared = await prepareOwnedRepairProfileInputs(inputs, options), { store, plans } = prepared;
+  if (!store) return { plans, assertCurrent: prepared.assertCurrent, async write() { prepared.assertCurrent(); return []; } };
+  const nodeSlug = createSemanticNodeSlugPlanner(store);
+  const activation = await store.prepareNodeWrites(plans.map(repairProfileNodeInput).map(nodeSlug), {
+    signal: prepared.signal, requireAccepted: true, assertCurrent: prepared.assertWriteInputsCurrent,
+  });
+  prepared.assertCurrent();
+  return {
+    plans,
+    assertCurrent() { store.assertRecordSnapshotFrame(() => { prepared.assertCurrent(); store.assertPreparedNodeWrites(activation); }); },
+    async write(observer?: RepairProfileWriteObserver): Promise<KnowledgeNodeRecord[]> {
+      store.assertRecordSnapshotFrame(() => { prepared.assertCurrent(); store.assertPreparedNodeWrites(activation); });
+      const facts: KnowledgeNodeRecord[] = [];
+      for (const [index, plan] of plans.entries()) facts.push(await writeResolvedSourceLinkedRepairProfileFact(
+        plan, observer, prepared.assertWriteInputsCurrent, () => store.upsertPreparedNode(activation, index),
+      ));
+      return facts;
+    },
+  };
+}
+
+async function prepareOwnedRepairProfileInputs(
+  inputs: readonly SourceLinkedRepairProfileFactInput[], options: RepairProfilePreparationOptions,
+): Promise<OwnedRepairProfileInputs> {
   const signal = options.signal, shouldStop = options.shouldStop, callerCurrent = options.assertCurrent, originalIdentityPlanner = options.identityPlanner;
   const assertOriginalOptions = () => {
     if (options.signal !== signal || options.shouldStop !== shouldStop || options.assertCurrent !== callerCurrent || options.identityPlanner !== originalIdentityPlanner) throw new KnowledgeRepairSourceAuthorityHeldError('stale');
@@ -480,7 +527,7 @@ export async function prepareSourceLinkedRepairProfileFacts(
   };
   assertCallerCurrent();
   const store = inputs[0]?.store;
-  if (!store) return { plans: [], assertCurrent() {}, async write(): Promise<KnowledgeNodeRecord[]> { return []; } };
+  if (!store) return { store, signal, plans: [], assertCurrent: assertCallerCurrent, assertWriteInputsCurrent: assertCallerCurrent };
   const originalInputs = inputs.map((original) => {
     const { store: _store, metadataBuilder: _builder, ...data } = original;
     const retained = retainOwnedJson(data), observed = observeKnowledgeValue(retained.snapshot);
@@ -616,27 +663,12 @@ export async function prepareSourceLinkedRepairProfileFacts(
       supportPlans, factIdentity, previousFact: existingFact ?? undefined }));
   }
   const assertScoringCurrent = () => { assertInputsCurrent(); scoringPlan.assertCurrent(); };
-  const assertActivationCurrent = () => { assertCallerCurrent(); assertScoringCurrent(); factIdentities.assertCurrent(); };
-  const nodeSlug = createSemanticNodeSlugPlanner(store);
-  guard.assertCurrent(); assertScoringCurrent();
-  const activation = await store.prepareNodeWrites(plans.map(repairProfileNodeInput).map(nodeSlug), { signal, requireAccepted: true, assertCurrent: assertActivationCurrent });
-  guard.assertCurrent(); scoringPlan.assertCurrent();
-  return {
-    plans: Object.freeze(plans),
-    assertCurrent: () => { store.assertRecordSnapshotFrame(() => { assertOriginalOptions(); guard.assertCurrent(); assertScoringCurrent(); factIdentities.assertCurrent(); store.assertPreparedNodeWrites(activation); }); },
-    async write(observer?: RepairProfileWriteObserver): Promise<KnowledgeNodeRecord[]> {
-      // Callers may have awaited other prepared work since this plan resolved.
-      // Validate once at entry, before this pass intentionally changes its rows.
-      store.assertRecordSnapshotFrame(() => { assertOriginalOptions(); guard.assertCurrent(); assertScoringCurrent(); store.assertPreparedNodeWrites(activation); });
-      const facts: KnowledgeNodeRecord[] = [];
-      for (const [index, plan] of plans.entries()) {
-        assertOriginalOptions();
-        facts.push(await writeResolvedSourceLinkedRepairProfileFact(plan, observer,
-          () => { assertCallerCurrent(); assertScoringCurrent(); factIdentities.assertCurrent(); }, () => store.upsertPreparedNode(activation, index)));
-      }
-      return facts;
-    },
-  };
+  const assertWriteInputsCurrent = () => { assertCallerCurrent(); assertScoringCurrent(); factIdentities.assertCurrent(); };
+  const assertCurrent = () => { store.assertRecordSnapshotFrame(() => {
+    assertWriteInputsCurrent(); guard.assertCurrent();
+  }); };
+  assertCurrent();
+  return { store, signal, plans: Object.freeze(plans), assertCurrent, assertWriteInputsCurrent };
 }
 
 function freezePlanData<T>(value: T): T {

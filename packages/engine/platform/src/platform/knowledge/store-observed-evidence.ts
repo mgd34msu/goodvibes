@@ -1,6 +1,6 @@
-import { isDeepStrictEqual } from 'node:util';
-import { captureOwnedJson, retainOwnedJson, type RetainedOwnedJson } from '../gate/judgment-input.js';
+import { retainOwnedJson, type RetainedOwnedJson } from '../gate/judgment-input.js';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
+import { sameKnowledgeRecord } from './store-record-representation.js';
 import type { KnowledgeStore } from './store.js';
 
 interface EvidenceWitness { readonly original: unknown; readonly owned: RetainedOwnedJson; }
@@ -35,7 +35,7 @@ export function prepareObservedEvidenceCheck(store: KnowledgeStore, evidence: un
     const current = readEvidence() ?? null;
     try {
       if (current === witness.original) witness.owned.assertCurrent();
-      else if (!isDeepStrictEqual(captureOwnedJson(current), witness.owned.snapshot)) throw new KnowledgeNodeActivationHeldError('stale');
+      else if (!sameKnowledgeRecord(current, witness.owned.snapshot)) throw new KnowledgeNodeActivationHeldError('stale');
     } catch { throw new KnowledgeNodeActivationHeldError('stale'); }
   };
 }

@@ -3,7 +3,7 @@
  * retire stale model results without rehashing or recopying source bodies. */
 import { isDeepStrictEqual } from 'node:util';
 import { captureSQLiteActivationPublication, type SQLiteStore, type PersistedKnowledgeRecordSelector } from '../state/sqlite-store.js';
-import type { KnowledgeStore } from './store.js';
+import { captureKnowledgePendingNode, type KnowledgeStore } from './store.js';
 import type { KnowledgeNodeRecord } from './types.js';
 import { KnowledgeNodeActivationHeldError as Held } from './activation/types.js';
 import { observeKnowledgeValue } from './local-value-observation.js';
@@ -31,8 +31,12 @@ export class KnowledgeActivationReadset {
     const current = this.read(kind, id);
     const original = observeKnowledgeValue(current);
     // The right side is decoded by the native SQL mapper, not caller JSON.
-    if (!isDeepStrictEqual(original.snapshot, snapshot.record)) throw new Held('stale');
-    this.rows.set(key, { selector: { kind, id }, generation: snapshot.generation, current: () => original.matches(this.read(kind, id)) });
+    const same = isDeepStrictEqual(original.snapshot, snapshot.record);
+    const pending = !same && kind === 'node' && current !== null
+      ? captureKnowledgePendingNode(this.store, current as KnowledgeNodeRecord) : undefined;
+    if (!same && !pending) throw new Held('stale');
+    this.rows.set(key, { selector: { kind, id }, generation: snapshot.generation,
+      current: () => original.matches(this.read(kind, id)), ...(pending ? { write: pending } : {}) });
   }
   /** Called in the original single synchronous read frame, before model I/O. */
   capture(nodeId: string, sourceIds: readonly string[], subjectIds: readonly string[], observation: string | null): ReturnType<KnowledgeStore['getNodeActivationState']> {

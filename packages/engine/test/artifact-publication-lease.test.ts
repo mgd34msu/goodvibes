@@ -1,6 +1,6 @@
 /** UNRUN: actual native artifact publication/cleanup mutual exclusion. */
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, renameSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, renameSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ArtifactStore, acquireArtifactPublication, tryAcquireArtifactPublication } from '../platform/src/platform/artifacts/store.ts';
@@ -28,7 +28,13 @@ test('original cleanup can remove its artifact then release the native lease wit
 test('original parent retirement cannot release through a replacement alias', async () => {
   const directory = root(), store = new ArtifactStore({ rootDir: directory }), created = await store.createForPublication({ text: 'page' }), record = store.getRecord(created.artifact.id)!;
   const retained = `${directory}-retained`; roots.push(retained); renameSync(directory, retained);
-  expect(() => created.lease.assertCurrent()).toThrow(); expect(() => created.lease.release()).toThrow();
+  expect(() => created.lease.assertCurrent()).toThrow();
+  let failure: unknown; try { created.lease.release(); } catch (error) { failure = error; }
+  expect(failure).toBeInstanceOf(Error);
+  for (let repeat = 0; repeat < 2; repeat++) {
+    let repeated: unknown; try { created.lease.release(); } catch (error) { repeated = error; }
+    expect(repeated).toBe(failure);
+  }
   expect(existsSync(join(retained, `${created.artifact.id}.json.projection-lock`))).toBe(true); expect(existsSync(record.metadataPath)).toBe(false);
 });
 
@@ -47,4 +53,22 @@ test('async and nonvoid write owners are drained and refused before any artifact
   await expect(store.create({ text: 'body' }, { assertCurrent: () => 1 })).rejects.toThrow('synchronously');
   await expect(store.createFromStream({ stream: ['body'] }, { assertCurrent: () => Promise.resolve() })).rejects.toThrow('synchronously');
   expect(readdirSync(directory)).toEqual([]);
+});
+
+
+test('retired artifact release preserves both the original lock and a foreign replacement lock', async () => {
+  const directory = root(), store = new ArtifactStore({ rootDir: directory });
+  const created = await store.createForPublication({ text: 'page' });
+  const record = store.getRecord(created.artifact.id)!;
+  const retained = `${directory}-retained`; roots.push(retained); renameSync(directory, retained);
+  mkdirSync(directory); const foreignLock = `${record.metadataPath}.projection-lock`;
+  writeFileSync(foreignLock, 'Foreign replacement owner', { mode: 0o600 });
+  let failure: unknown; try { created.lease.release(); } catch (error) { failure = error; }
+  expect(failure).toBeInstanceOf(Error);
+  for (let repeat = 0; repeat < 2; repeat++) {
+    let repeated: unknown; try { created.lease.release(); } catch (error) { repeated = error; }
+    expect(repeated).toBe(failure);
+  }
+  expect(readFileSync(foreignLock, 'utf8')).toBe('Foreign replacement owner');
+  expect(existsSync(join(retained, `${created.artifact.id}.json.projection-lock`))).toBe(true);
 });

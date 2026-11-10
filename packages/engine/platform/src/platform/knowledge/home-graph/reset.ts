@@ -64,7 +64,7 @@ function collectKnowledgeSpaceArtifactIds(store: KnowledgeStore, artifactStore: 
     const descriptor = artifactStore.get(artifactId);
     if (!descriptor) return false;
     const artifactSpace = getExplicitKnowledgeSpaceId({ metadata: descriptor.metadata });
-    return artifactSpace !== undefined && artifactSpace !== normalized;
+    return artifactSpace !== null && artifactSpace !== normalized;
   };
   for (const source of store.listSources(100_000)) {
     if (getKnowledgeSpaceId(source) !== normalized) continue;

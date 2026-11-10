@@ -63,15 +63,23 @@ describe('synthesized knowledge serving authority', () => {
   });
   test('observed evidence accepts an equal replacement but refuses changed array fields and preserves owner failures', async () => {
     const { store } = await fixture();
-    let current = { title: 'Declared evidence', values: ['Original'], extra: 'Complete' };
+    let current = { title: 'Declared evidence', values: Object.assign(['Original'], { meaning: 'Original named field' }), extra: 'Complete' };
     const prepared = prepareObservedKnowledgeNodeInput(store, { id: 'replacement', kind: 'topic', slug: 'replacement', title: 'Replacement' },
       'catalog-structure', current, () => current);
     const proof = resolveKnowledgeNodeObservation(prepared, undefined);
     if (!proof) throw new Error('Missing native observation');
-    current = { extra: 'Complete', values: ['Original'], title: 'Declared evidence' };
+    current = { extra: 'Complete', values: Object.assign(['Original'], { meaning: 'Original named field' }), title: 'Declared evidence' };
     proof.assertCurrent();
     Object.defineProperty(current.values, 'meaning', { value: 'Changed named array field', enumerable: true });
     expect(proof.assertCurrent).toThrow(Held);
+    let scalar: unknown = { value: -0, optional: undefined };
+    const scalarInput = prepareObservedKnowledgeNodeInput(store, { id: 'scalar-replacement', kind: 'topic', slug: 'scalar-replacement', title: 'Scalar replacement' },
+      'catalog-structure', scalar, () => scalar);
+    const scalarProof = resolveKnowledgeNodeObservation(scalarInput, undefined);
+    if (!scalarProof) throw new Error('Missing native scalar observation');
+    scalar = { optional: undefined, value: -0 }; scalarProof.assertCurrent();
+    scalar = { optional: undefined, value: 0 }; expect(scalarProof.assertCurrent).toThrow(Held);
+    scalar = { value: -0 }; expect(scalarProof.assertCurrent).toThrow(Held);
     const ownerFailure = new Error('Owner retired');
     const cancelled = prepareObservedKnowledgeNodeInput(store, { id: 'cancelled', kind: 'topic', slug: 'cancelled', title: 'Cancelled' },
       'catalog-structure', null, () => { throw ownerFailure; });

@@ -15,7 +15,7 @@ const issuers = new WeakMap<object, { readonly store: KnowledgeStore; readonly p
 export function createSemanticFactIdentityPlanner(store: KnowledgeStore) {
   const planned = new Map<string, PlannedSemanticFactIdentity>(), allocated = new Map<string, string>();
   function matching(selector: SemanticFactSelector) {
-    return store.getSemanticFactCandidates(selector).filter(record => semanticFactScopeMatches(record, selector));
+    return store.getSemanticFactIdentityCandidates(selector).filter(record => semanticFactScopeMatches(record, selector));
   }
   const planner = freeze({
     prepare(input: Parameters<typeof semanticFactSelector>[0]): PlannedSemanticFactIdentity {

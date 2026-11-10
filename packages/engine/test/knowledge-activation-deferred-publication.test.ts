@@ -6,7 +6,7 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import * as atomicStore from '../platform/src/platform/utils/atomic-json-store.js';
-import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { KnowledgeStore, captureKnowledgePendingNode } from '../platform/src/platform/knowledge/store.js';
 import { prepareKnowledgeRecordAdmission } from '../platform/src/platform/knowledge/store-record-snapshot.js';
 import { captureSQLiteActivationPublication, type SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 
@@ -65,6 +65,9 @@ test.each(['before-rename', 'after-rename'] as const)('failed %s save cannot ack
   } finally { spy.mockRestore(); }
   expect(entered).toBe(true);
   expect(() => f.store.assertPreparedNodeWrites(prepared)).toThrow();
+  const pending = f.store.getNode(f.inputs[0]!.id);
+  expect(pending).not.toBeNull();
+  expect(() => captureKnowledgePendingNode(f.store, pending!)).toThrow();
   const afterFailure = readFileSync(f.path);
   // A later actual successful retry cannot revive an already failed pass.
   const sqlite = (f.store as unknown as { sqlite: SQLiteStore }).sqlite;
@@ -88,4 +91,41 @@ test('a genuine newer local row retires the original pending write before its ne
 
 test('a copied owner cannot issue the private deferred-publication observation', () => {
   expect(() => captureSQLiteActivationPublication({} as SQLiteStore, 'fact', 'kr-' + 'a'.repeat(32))).toThrow();
+});
+
+test('only the exact issued pending row can prepare another write without admitting an unissued copy', async () => {
+  const f = await fixture(), prepared = await f.store.prepareNodeWrites(f.inputs, { requireAccepted: true });
+  await f.store.batch(async () => {
+    const first = await f.store.upsertPreparedNode(prepared, 0);
+    expect(captureKnowledgePendingNode(f.store, first)?.state()).toBe('pending');
+    expect(captureKnowledgePendingNode(f.store, structuredClone(first))).toBeUndefined();
+    expect(captureKnowledgePendingNode({ ...f.store } as KnowledgeStore, first)).toBeUndefined();
+    const other = await fixture(true);
+    expect(captureKnowledgePendingNode(other.store, first)).toBeUndefined();
+    expect(() => prepareKnowledgeRecordAdmission(f.store, 'node', first)).toThrow();
+    const nodes = Object.getOwnPropertyDescriptor(f.store, 'nodes')?.value as Map<string, typeof first>;
+    const copy = structuredClone(first); nodes.set(first.id, copy);
+    try { await expect(f.store.upsertNode({ ...copy, summary: 'Unissued cached replacement.' })).rejects.toThrow(); }
+    finally { nodes.set(first.id, first); }
+    f.store.assertPreparedNodeWrites(prepared);
+    await f.store.upsertPreparedNode(prepared, 1);
+  });
+});
+
+test('pending-node preparation cannot adopt an identical-byte replacement of its original database', async () => {
+  const f = await fixture(), prepared = await f.store.prepareNodeWrites(f.inputs, { requireAccepted: true });
+  const before = readFileSync(f.path);
+  await f.store.batch(async () => {
+    const first = await f.store.upsertPreparedNode(prepared, 0);
+    renameSync(f.path, `${f.path}.original`); writeFileSync(f.path, before);
+    expect(() => captureKnowledgePendingNode(f.store, first)).toThrow();
+    await expect(f.store.upsertNode({ ...first, summary: 'A new interpretation must retain its original database.' })).rejects.toThrow();
+    expect(() => f.store.assertPreparedNodeWrites(prepared)).toThrow();
+  });
+  // The existing byte-CAS batch may acknowledge its already admitted first
+  // write. Retirement must still prevent every subsequent interpretation.
+  expect(f.store.getRecordSnapshot('node', f.inputs[0]!.id).record?.summary).toBe(f.inputs[0]!.summary);
+  expect(f.store.getNode(f.inputs[1]!.id)).toBeNull();
+  expect(() => f.store.assertPreparedNodeWrites(prepared)).toThrow();
+  expect(readFileSync(`${f.path}.original`)).toEqual(before);
 });

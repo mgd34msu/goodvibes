@@ -201,7 +201,7 @@ export async function createNativeIntegrationRepairFixture(options: { withoutIns
     } }),
   });
   const originalDispose = f.dispose;
-  return { ...f, get acquisitions() { return f.acquisitions; }, planner, fixRequests, releaseRepair: repair.release, releaseTail: tail.release,
+  return { ...f, get key() { return f.key; }, get acquisitions() { return f.acquisitions; }, planner, fixRequests, releaseRepair: repair.release, releaseTail: tail.release,
     async waitForRepair() { await waitFor(() => fixRequests.length > 0, 'source-bound Jev repair request', 20_000); },
     async waitForRepaired(contractId: string) { await waitFor(() => f.harness.runner.get(contractId)?.units.some(unit => unit.checks.at(-1)?.trigger === 'fix-passed' && unit.status === 'passed') === true && f.harness.agentsOf('u3').length > 0, 'native repair and still-active later group', 20_000); },
     async dispose() { writersReady.release(); repair.release(); tail.release(); await originalDispose(); },

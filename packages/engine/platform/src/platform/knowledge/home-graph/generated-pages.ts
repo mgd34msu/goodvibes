@@ -51,7 +51,7 @@ import {
 } from './rendering.js';
 import { retainHomeGraphPageInputs } from './page-read-set.js';
 import { createSemanticWriteGuard } from '../semantic/primary-source-plan.js';
-import { prepareSourceLinkedRepairProfileFacts } from '../semantic/self-improvement-promotion.js';
+import { prepareSourceLinkedRepairProfileFactInputs } from '../semantic/self-improvement-promotion.js';
 import { repairProfileNodeInput, repairProfileEdgeInputs } from '../semantic/repair-profile-write-data.js';
 import { createSemanticNodeSlugPlanner } from '../semantic/node-slug.js';
 import { buildDevicePageProfileFacts, devicePageProfileFactInput } from './page-profile-facts.js';
@@ -318,7 +318,7 @@ async function refreshHomeGraphDevicePassportNow(
   });
   let assertFactQualityCurrent = () => {};
   const factIdentities = createSemanticFactIdentityPlanner(store);
-  const initialPreparedProfileFacts = await prepareSourceLinkedRepairProfileFacts(
+  const initialPreparedProfileFacts = await prepareSourceLinkedRepairProfileFactInputs(
     pageProfileFacts.map((fact) => devicePageProfileFactInput(store, spaceId, installationId, device, fact)),
     { signal: context.signal, assertCurrent: () => assertFactQualityCurrent(), identityPlanner: factIdentities },
   );
@@ -353,7 +353,7 @@ async function refreshHomeGraphDevicePassportNow(
   const acceptedProfiles = pageProfileFacts.filter((_fact, index) => acceptedIds.has(initialPreparedProfileFacts.plans[index]!.factId));
   const preparedProfileFacts = acceptedProfiles.length === pageProfileFacts.length
     ? initialPreparedProfileFacts
-    : await prepareSourceLinkedRepairProfileFacts(
+    : await prepareSourceLinkedRepairProfileFactInputs(
       acceptedProfiles.map((fact) => devicePageProfileFactInput(store, spaceId, installationId, device, fact)),
       { signal: context.signal, assertCurrent: () => assertFactQualityCurrent(), identityPlanner: factIdentities },
     );
@@ -372,6 +372,8 @@ async function refreshHomeGraphDevicePassportNow(
     assertPageInputsCurrent();
     sourceReader.assertCurrent((id) => store.getSource(id));
     writeGuard.assertCurrent();
+    // Input-only plans retain source/scoring/identity currentness. The actual
+    // atomic graph publisher activates the complete graph at publication.
     preparedProfileFacts.assertCurrent();
     factPlan.assertCurrent();
   };

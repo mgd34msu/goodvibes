@@ -1500,6 +1500,21 @@ export class SQLiteStore {
     catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
   }
 
+  /** Stable identity bookkeeping over this original writer's current image,
+   * including its pending batch rows. Never persisted semantic evidence. */
+  readSemanticFactIdentityCandidates(selector: SemanticFactSelector): ReturnType<SqlDatabase['exec']> {
+    const params = semanticFactCandidateParams(selector), db = this.getDb(), engine = this.sqlEngine;
+    const state = privateMapGet(ownedDatabases, db), origin = engine ? privateMapGet(nativeEngineIdentities, engine) : undefined;
+    if (!state || !origin?.statement) throw new SQLiteObservationRetiredError();
+    const revision = state.revision, epoch = this.imageEpoch;
+    const check = () => {
+      assertNativeEngineIdentity(engine);
+      if (this.db !== db || this.sqlEngine !== engine || this.imageEpoch !== epoch || state.inFlight || state.revision !== revision
+        || !nativeMethodsMatch(engine, state.raw) || !nativeExecutionDependenciesMatch(origin.statement!, state.raw)) throw new SQLiteObservationRetiredError();
+    };
+    check(); const rows = nativeApply(origin.methods.exec, state.raw, [semanticFactCandidateSql, params]); check(); return rows;
+  }
+
   readPersistedGeneratedProjectionSource(identity: GeneratedProjectionIdentity): ReturnType<SqlDatabase['exec']> {
     try { return this.readPrivatePersistedRows(generatedProjectionIdentitySql, projectionIdentityParams(identity)); }
     catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
@@ -2027,8 +2042,16 @@ export class SQLiteStore {
             || this.cleanContent !== clean || observeDatabase(original) !== local || observePhysical() !== physical) throw new SQLiteObservationRetiredError();
         };
         assertCurrent(); const source = readSQLitePersistedImage(persistence); assertCurrent();
-        if (!source.data) throw new SQLiteObservationRetiredError();
-        const referenced = await inspectNativeArtifactReferenceImage(source.data, selected, assertCurrent); assertCurrent();
+        // A fresh coordinated store deliberately has no file until its first
+        // save. Its original clean native image still participates in the
+        // reference ensemble. Persistence refuses absence after any published
+        // image was established; local pending writes already fail above.
+        const referenced = source.data
+          ? await inspectNativeArtifactReferenceImage(source.data, selected, assertCurrent)
+          : inspectPersistedArtifactReferences({ exec(sql, params) {
+            assertCurrent(); const rows = readDatabaseRow(original, sql, params ?? []); assertCurrent(); return rows;
+          } }, selected);
+        assertCurrent();
         const value = await operation(referenced, assertCurrent); assertCurrent();
         return { kind: 'completed', value };
       } finally { try { lock.release(); } catch (error) { this.fenced = true; throw error; } }

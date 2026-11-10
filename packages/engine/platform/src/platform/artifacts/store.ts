@@ -309,7 +309,24 @@ export interface ArtifactPublicationLease {
 function claimArtifactPublication(path: string, assertOwner: () => void): ArtifactPublicationLease | null {
   assertOwner(); const release = tryAcquireCrossProcessLock(`${path}.projection-lock`, { assertCurrent: assertOwner });
   if (!release) return null;
-  return Object.freeze({ assertCurrent: () => { assertOwner(); assertCrossProcessLockCurrent(release); }, release });
+  let released = false, releaseFailed = false;
+  let releaseFailure: unknown;
+  return Object.freeze({ assertCurrent: () => { assertOwner(); assertCrossProcessLockCurrent(release); }, release() {
+    if (released) { if (releaseFailed) throw releaseFailure; return; }
+    released = true;
+    // The lock primitive tolerates an already absent lock leaf. Parent-owner
+    // retirement can also throw ENOENT; keep that distinct and always close
+    // the original lock descriptor without adopting a replacement directory.
+    let ownerFailed = false, ownerFailure: unknown;
+    try { assertOwner(); } catch (error) { ownerFailed = true; ownerFailure = error; }
+    try { release(); }
+    catch (error) {
+      releaseFailed = true;
+      releaseFailure = ownerFailed ? new AggregateError([ownerFailure, error], 'Original artifact publication release failed.') : error;
+      throw releaseFailure;
+    }
+    if (ownerFailed) { releaseFailed = true; releaseFailure = ownerFailure; throw releaseFailure; }
+  } });
 }
 /** Cleanup and current-code publishers share this native metadata-file lock.
  * It is mutual exclusion, not a serialized receipt or permission grant. */

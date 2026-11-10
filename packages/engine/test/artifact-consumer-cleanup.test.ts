@@ -1,11 +1,11 @@
 /** UNRUN: actual reset/writeback consumers retain original files and the complete
  * native knowledge reference ensemble rather than trusting cached descriptors. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ArtifactStore } from '../platform/src/platform/artifacts/store.ts';
-import { KnowledgeStore } from '../platform/src/platform/knowledge/store.ts';
+import { KnowledgeStore, captureKnowledgeArtifactReferenceOwner } from '../platform/src/platform/knowledge/store.ts';
 import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.ts';
 import { resetHomeGraphSpace } from '../platform/src/platform/knowledge/home-graph/reset.ts';
 import { knowledgeSpaceMetadata } from '../platform/src/platform/knowledge/spaces.ts';
@@ -73,3 +73,42 @@ test('two actual analyses with the same UUID prefix keep separate original ident
   try { const first = await f.service.analyze({ artifactId: f.source.id }), second = await f.service.analyze({ artifactId: f.source.id }); expect(first.id).not.toBe(second.id); }
   finally { uuid.mockRestore(); }
 }));
+
+
+test('each active native family reports its actual persisted artifact relation under its original read guard', async () => {
+  const f = await fixture();
+  const artifact = await f.artifacts.create({ kind: 'document', text: 'shared original', retentionMs: 0 });
+  await f.wiki.upsertSource({ connectorId: 'wiki', sourceType: 'document', status: 'indexed', artifactId: artifact.id });
+  for (const [store, expected] of [[f.home, []], [f.wiki, [artifact.id]]] as const) {
+    const owner = captureKnowledgeArtifactReferenceOwner(store);
+    const observed = await owner.withReads([artifact.id], async (referenced, current) => { current(); expect(referenced).toEqual(expected); current(); });
+    expect(observed.kind).toBe('completed');
+  }
+});
+
+
+test('persisted native family reads distinguish references after another family reset', async () => {
+  const f = await fixture();
+  const artifact = await f.artifacts.create({ kind: 'document', text: 'shared original', retentionMs: 0 });
+  await f.home.upsertSource({ connectorId: 'homeassistant', sourceType: 'document', status: 'indexed', artifactId: artifact.id, metadata: knowledgeSpaceMetadata('homeassistant:house') });
+  await f.wiki.upsertSource({ connectorId: 'wiki', sourceType: 'document', status: 'indexed', artifactId: artifact.id });
+  await f.home.deleteKnowledgeSpace('homeassistant:house');
+  for (const [store, expected] of [[f.home, []], [f.wiki, [artifact.id]]] as const) {
+    const observed = await captureKnowledgeArtifactReferenceOwner(store).withReads([artifact.id], async (referenced, current) => {
+      current(); expect(referenced).toEqual(expected); current();
+    });
+    expect(observed.kind).toBe('completed');
+  }
+});
+
+
+test('loss of an established native family is never reinterpreted as an empty initial family', async () => {
+  const f = await fixture();
+  const artifact = await f.artifacts.create({ kind: 'document', text: 'referenced original', retentionMs: 0 });
+  await f.wiki.upsertSource({ connectorId: 'wiki', sourceType: 'document', status: 'indexed', artifactId: artifact.id });
+  const owner = captureKnowledgeArtifactReferenceOwner(f.wiki);
+  unlinkSync(join(f.root, 'knowledge-wiki.sqlite'));
+  let reads = 0;
+  await expect(owner.withReads([artifact.id], async () => { reads++; })).rejects.toThrow();
+  expect(reads).toBe(0); expect(f.artifacts.getRecord(artifact.id)).not.toBeNull();
+});

@@ -24,6 +24,8 @@ import { readHomeGraphState } from '../platform/src/platform/knowledge/home-grap
 import type { HomeGraphAskResult } from '../platform/src/platform/knowledge/home-graph/types.js';
 import { KnowledgeSourceQualityHeldError } from '../platform/src/platform/knowledge/source-quality.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.js';
+import { HOME_GRAPH_KNOWLEDGE_DB_FILE } from '../platform/src/platform/knowledge/store-config.js';
 import { SQLitePublicationError } from '../platform/src/platform/state/sqlite-store-persistence.js';
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../platform/src/platform/knowledge/types.js';
 import { withTestTimeout } from './_helpers/test-timeout.js';
@@ -35,10 +37,12 @@ const areaId = 'living-room';
 const deviceId = 'reference-device';
 const primaryPurpose = 'Choose a useful, credible primary reference supporting this exact claim and subject:';
 const roots: string[] = [];
+const stores: KnowledgeStore[] = [];
 let previous: JudgmentPort | undefined;
 
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => {
+afterEach(async () => {
+  for (const store of stores.splice(0)) await store.close();
   installJudgmentPort(previous);
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -110,9 +114,11 @@ function metadata(extra: Record<string, unknown> = {}) {
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-homegraph-page-quality-'));
   roots.push(root);
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  const store = new KnowledgeStore({ dbPath: join(root, HOME_GRAPH_KNOWLEDGE_DB_FILE), family: 'home-graph' });
+  stores.push(store);
   const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
   await store.init();
+  configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: root, stores: [store] });
   const area = await seedHomeAssistantObservation(store, {
     id: 'hg-node-47046541190b2b3bf5b27094', kind: 'ha_area', slug: areaId,
     title: 'Living Room', status: 'active',
@@ -164,6 +170,45 @@ function generate(context: Fixture, kind: PageKind, signal?: AbortSignal) {
     ? generateHomeGraphRoomPage({ ...context, input: { areaId }, signal })
     : refreshHomeGraphDevicePassport({ ...context, input: { deviceId }, signal });
 }
+
+test.each([false, true])('passport input plans survive a logical thirty-second delay with source revoked = %s', async revokeSource => {
+  const context = await fixture();
+  const source = await addSource(context, 'delayed-passport-reference', { profile: true });
+  const fake = readings(), now = Date.now();
+  let advanced = false;
+  const activation: Array<{ title: string; afterDelay: boolean }> = [];
+  const clock = spyOn(Date, 'now').mockImplementation(() => now + (advanced ? 30_001 : 0));
+  const reader: JudgmentPort = { ...fake.port, async ask(request) {
+    const names = Object.keys(request.questions).map(name => name.split('__').at(-1));
+    const advance = !advanced && names.includes('manufacturerPresent');
+    if (advance) advanced = true;
+    if (names.includes('serve')) activation.push({ title: (request.state as ReadingState).candidate.title, afterDelay: advanced });
+    const result = await fake.port.ask(request);
+    if (advance && revokeSource) await context.store.upsertSource({ ...source, summary: 'A genuine correction after the original page plan.' });
+    return result;
+  } };
+  installJudgmentPort(reader);
+  try {
+    if (revokeSource) {
+      await expect(generate(context, 'passport')).rejects.toThrow();
+      expect(context.store.listSourcesInSpace(spaceId).some(row => row.metadata.projectionKind === 'device-passport')).toBe(false);
+      expect(context.store.listNodesInSpace(spaceId).filter(row => row.kind === 'fact')).toEqual([]);
+      expect(context.store.getSource(source.id)?.summary).toBe('A genuine correction after the original page plan.');
+      expect(activation).toEqual([]);
+    } else {
+      const page = await generate(context, 'passport');
+      expect(context.store.getSource(page.source!.id)).toBe(page.source);
+      const facts = context.store.listNodesInSpace(spaceId).filter(row => row.kind === 'fact');
+      expect(facts.length).toBeGreaterThan(0);
+      for (const fact of facts) {
+        expect(activation.filter(read => read.title === fact.title)).toEqual([{ title: fact.title, afterDelay: true }]);
+        expect(fact.metadata.nodeActivation).toMatchObject({ dependencyVersion: 1 });
+      }
+      expect(activation).toHaveLength(facts.length);
+    }
+    expect(advanced).toBe(true);
+  } finally { clock.mockRestore(); }
+});
 
 async function addAskFact(context: Fixture, source: KnowledgeSourceRecord) {
   const extraction = context.store.getExtractionBySourceId(source.id);

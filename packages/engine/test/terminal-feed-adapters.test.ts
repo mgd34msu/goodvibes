@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { captureModalFeedState, capturePromptKeyState, refreshCommandAutocomplete } from '../terminal-shell/src/input-feed-adapters.js';
+import { withModalState } from '../terminal-shell/src/modal-input-routes.js';
 import { InfiniteBuffer } from '../terminal-shell/src/conversation-history.js';
 import type { SelectionResult } from '../terminal-shell/src/selection-modal.js';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
@@ -50,6 +51,20 @@ test('key snapshot uses the current block menu receiver without sharing mutable 
   state.blockActionsMenu.open(block);
   expect(opened).toEqual(['replacement']);
   state.prompt = 'route edit'; expect(source.prompt).toBe('text'); expect(state.maxInputRows).toBe(8);
+});
+
+test('modal writeback preserves replacement callback ownership and explicit clears', () => {
+  const { source } = modalSource();
+  const state = captureModalFeedState(source, key, new InfiniteBuffer());
+  const replacement = () => {};
+  source.selectionCallback = replacement;
+  expect(withModalState(state, true).selectionCallback).toBe(replacement);
+  expect(withModalState(state, true, { selectionCallback: null }).selectionCallback).toBeNull();
+  source.selectionCallback = null;
+  expect(withModalState(state, true).selectionCallback).toBeNull();
+  const newer = () => {};
+  source.selectionCallback = newer;
+  expect(withModalState(state, true).selectionCallback).toBe(newer);
 });
 
 test('opt-in shortcut repair follows command editing without changing another product’s policy', () => {

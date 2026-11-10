@@ -435,6 +435,7 @@ export function handleEscapeOnlyModalToken(state: EscapeOnlyModalRouteState, tok
 }
 export type ModalTokenSnapshot = {
     selectionCallback: ((result: SelectionResult | null) => void) | null;
+    getSelectionCallback?: (() => ((result: SelectionResult | null) => void) | null) | undefined;
     helpOverlayActive: boolean;
     helpScrollOffset: number;
     shortcutsOverlayActive: boolean;
@@ -455,7 +456,10 @@ export function withModalState(state: ModalTokenSnapshot, handled: boolean, over
 }> = {}) {
     return {
         handled,
-        selectionCallback: overrides.selectionCallback ?? state.selectionCallback,
+        // Opening or closing a nested picker can replace this callback during
+        // routing. Write back its live owner, including an explicit clear.
+        selectionCallback: overrides.selectionCallback !== undefined ? overrides.selectionCallback
+            : state.getSelectionCallback ? state.getSelectionCallback() : state.selectionCallback,
         helpOverlayActive: overrides.helpOverlayActive ?? state.helpOverlayActive,
         helpScrollOffset: overrides.helpScrollOffset ?? state.helpScrollOffset,
         shortcutsOverlayActive: overrides.shortcutsOverlayActive ?? state.shortcutsOverlayActive,

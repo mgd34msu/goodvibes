@@ -248,7 +248,10 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
       handleEscape: state.handleEscape,
     };
     if (bindings.handleSelectionModalToken(selectionState, token)) {
-      return withState(state, true, { selectionCallback: selectionState.selectionCallback });
+      return withState(state, true, {
+        selectionCallback: selectionState.getSelectionCallback
+          ? selectionState.getSelectionCallback() : selectionState.selectionCallback,
+      });
     }
   }
   function handleBookmarkModalToken(state: State, token: InputToken): ModalTokenResult | undefined {

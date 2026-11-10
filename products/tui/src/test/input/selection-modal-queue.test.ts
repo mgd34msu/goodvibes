@@ -22,6 +22,12 @@ import { createDefaultUiRuntimeServices } from '../helpers/ui-services.ts';
 import { disposeTestRuntimeServicesAfterAll } from '../helpers/runtime-services.ts';
 import type { SelectionItem, SelectionResult } from '../../input/selection-modal.ts';
 import { MAX_QUEUED_SELECTIONS } from '../../input/selection-modal-queue.ts';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createFeatureFlagManager } from '@/runtime/index.ts';
+import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 
 // Stop the shared test runtime graph when this file ends. Called here, not
 // registered inside the helper, for the reason its doc comment gives.
@@ -52,6 +58,81 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('InputHandler.openSelection: queueing overlapping calls', () => {
+  test('a picker opened inside settings can cancel, reopen, and save a complete provider/model selection', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'gv-nested-settings-picker-'));
+    const input = await makeHandler();
+    const configOptions = { surfaceRoot: 'tui' as const, workingDir: root, homeDir: root, configDir: join(root, 'config') };
+    const config = new ConfigManager(configOptions);
+    const printed: string[] = [];
+    // Only the settings route consumes this context. All picker operations and
+    // persistence below use the real queue, modal, keyboard feed, and manager.
+    input.setCommandRegistry(new CommandRegistry(), {
+      platform: { configManager: config },
+      openSelection: input.openSelection.bind(input),
+      print: (message: string) => { printed.push(message); },
+      renderRequest: () => {},
+    } as unknown as CommandContext);
+    const openSettings = () => {
+      input.settingsModal.open(config, createFeatureFlagManager(), new SubscriptionManager(join(root, 'subscriptions.json')), { getAll: () => ({}) });
+      input.modalOpened('settings');
+    };
+    try {
+      const before = config.get('judgment.model');
+      openSettings();
+      input.feed('judgment.model');
+      input.feed('\r');
+      expect(input.selectionModal.title).toBe('Choose decision model');
+      expect(input.selectionCallback).not.toBeNull();
+      input.feed('\x1b');
+      expect(input.selectionModal.active).toBe(false);
+      expect(input.selectionCallback).toBeNull();
+      input.feed('\x1b');
+      expect(input.settingsModal.active).toBe(false);
+      await flushMicrotasks();
+      expect(config.get('judgment.model')).toBe(before);
+
+      openSettings();
+      input.feed('judgment.backend');
+      input.feed('\r');
+      expect(input.selectionModal.title).toBe('Choose decision provider');
+      const providerCallback = input.selectionCallback;
+      expect(providerCallback).not.toBeNull();
+      expect(input.selectionModal.getSelected()?.id).toBe('system-one');
+      input.feed('\r');
+      await flushMicrotasks();
+      expect(input.selectionModal.title).toBe('Choose decision model');
+      expect(input.selectionCallback).not.toBe(providerCallback);
+      input.feed('Kev-9B');
+      expect(input.selectionModal.getSelected()?.id).toBe('kev-9b');
+      input.feed('\r');
+      await flushMicrotasks();
+      expect(input.selectionModal.title).toBe('Decision endpoint — type or paste its URL');
+      input.feed('http://127.0.0.1:19099');
+      expect(input.selectionModal.getSelected()?.id).toBe('http://127.0.0.1:19099');
+      input.feed('\r');
+      await flushMicrotasks();
+      expect(input.selectionModal.title).toBe('Decision credentials — references only');
+      expect(input.selectionModal.getSelected()?.id).toBe('none');
+      input.feed('\r');
+      await flushMicrotasks();
+      expect(input.selectionModal.active).toBe(false);
+      expect(input.selectionCallback).toBeNull();
+      expect(config.get('judgment.model')).toBe('kev-latest');
+      expect(config.get('judgment.backend')).toEqual({ adapter: 'system-one' });
+      expect(config.get('judgment.endpoint')).toBe('http://127.0.0.1:19099');
+      expect(config.get('judgment.keySource')).toBe('none');
+      expect(new ConfigManager(configOptions).get('judgment.model')).toBe('kev-latest');
+      expect(printed).toEqual([]);
+      input.feed('\x1b');
+      expect(input.settingsModal.active).toBe(false);
+    } finally {
+      input.exitApp();
+      input.settingsModal.close();
+      config.stopWatchingConfigFiles();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('two overlapping calls: both callbacks resolve, second opens with its own title/items after the first is answered', async () => {
     const input = (await makeHandler());
     const resultsA: (SelectionResult | null)[] = [];

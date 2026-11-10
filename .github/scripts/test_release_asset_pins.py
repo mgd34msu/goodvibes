@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from release_asset_pins import resume_existing_assets, stage_release_assets, validate_reader_assets
 from importlib.util import module_from_spec, spec_from_file_location
 
@@ -34,6 +35,37 @@ def reader(binary=b'original'):
 
 
 class ReleasePinSelection(unittest.TestCase):
+    def test_merge_hashes_only_fixed_reader_members_and_still_refuses_changed_required_bytes(self):
+        payloads, name, metadata = reader()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            old, incoming = root / 'ci', root / 'suite'
+            old.mkdir()
+            incoming.mkdir()
+            for asset, data in {**payloads, name: metadata}.items():
+                (old / asset).write_bytes(data)
+            unrelated = old / 'goodvibes-webui.tar.gz'
+            unrelated.write_bytes(b'already admitted unrelated archive')
+            original_open, original_digest = Path.open, hashlib.file_digest
+            hashed = []
+
+            def open_selected(path, *args, **kwargs):
+                self.assertNotEqual(path, unrelated, 'Local merge must not read an unrelated admitted archive')
+                return original_open(path, *args, **kwargs)
+
+            def digest_selected(stream, algorithm):
+                hashed.append(Path(stream.name).name)
+                return original_digest(stream, algorithm)
+
+            with patch.object(Path, 'open', open_selected), patch.object(hashlib, 'file_digest', digest_selected):
+                merger.merge(old, incoming, 'v3.1.2', SOURCE)
+                self.assertCountEqual(hashed, payloads)
+                hashed.clear()
+                (old / 'goodvibes-linux-x64').write_bytes(b'changed after the independent reader expectation')
+                with self.assertRaisesRegex(AssertionError, 'selected published bytes'):
+                    merger.merge(old, incoming, 'v3.1.2', SOURCE)
+                self.assertIn('goodvibes-linux-x64', hashed)
+
     def test_missing_program_evidence_refuses_publication(self):
         payloads = reader_payloads()
         with self.assertRaisesRegex(AssertionError, 'no reader evidence'):

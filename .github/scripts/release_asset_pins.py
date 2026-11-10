@@ -19,6 +19,32 @@ def needs_metadata(name):
     return bool(match and (match[4] == 'reader-ci-artifact' or match[1] == 'goodvibes-daemon' and match[2] == 'linux')) or bool(SQLITE.fullmatch(name))
 
 
+def reader_member_assets(name):
+    """Fixed installed-member to published-asset mapping, independent of JSON."""
+    match = PROFILE.fullmatch(name)
+    if not match or not needs_metadata(name):
+        return {}
+    product, platform, arch, _ = match.groups()
+    asset = f'{product}-{platform}-{arch}'
+    target = f'{"darwin" if platform == "macos" else platform}-{arch}'
+    members = [asset]
+    if platform == 'linux':
+        members += [asset + suffix for suffix in ['.bun', '.bun.LICENSE.md', '.bun.json']]
+        if product == 'goodvibes-daemon':
+            members.append(f'lib/sqlite-vec-{target}/vec0.so')
+    elif product == 'goodvibes-daemon':
+        members += [f'lib/sqlite-vec-{target}/vec0.dylib', f'lib/sqlite-{target}/libsqlite3.dylib', f'lib/sqlite-{target}/libsqlite3.dylib.json']
+    result = {}
+    for path in members:
+        if path.startswith('lib/sqlite-vec-'):
+            result[path] = f'sqlite-vec-{target}.{ "so" if platform == "linux" else "dylib" }'
+        elif path.startswith('lib/sqlite-'):
+            result[path] = f'sqlite-{target}.dylib' + ('.json' if path.endswith('.json') else '')
+        else:
+            result[path] = path
+    return result
+
+
 def validate_reader_assets(pins, metadata, tag, source=None):
     assert re.fullmatch(r'v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?', tag), 'Invalid release tag'
     version = tag[1:]
@@ -34,13 +60,8 @@ def validate_reader_assets(pins, metadata, tag, source=None):
         target = f'{"darwin" if platform == "macos" else platform}-{arch}'
         native_linux = product == 'goodvibes-daemon' and platform == 'linux'
         reader = kind == 'reader-ci-artifact'
-        expected = [asset]
-        if platform == 'linux':
-            expected += [asset + suffix for suffix in ['.bun', '.bun.LICENSE.md', '.bun.json']]
-            if native_linux:
-                expected.append(f'lib/sqlite-vec-{target}/vec0.so')
-        elif product == 'goodvibes-daemon':
-            expected += [f'lib/sqlite-vec-{target}/vec0.dylib', f'lib/sqlite-{target}/libsqlite3.dylib', f'lib/sqlite-{target}/libsqlite3.dylib.json']
+        member_assets = reader_member_assets(name)
+        expected = list(member_assets)
         assert len(raw) <= 128 * 1024, f'Oversized reader metadata: {name}'
         value = json.loads(raw)
         assert value['target'] == target, f'Reader target mismatch: {name}'
@@ -56,12 +77,7 @@ def validate_reader_assets(pins, metadata, tag, source=None):
         assert len(members) == len(expected) and {member['path'] for member in members} == set(expected), f'Incomplete reader cohort: {name}'
         for member in members:
             path = member['path']
-            if path.startswith('lib/sqlite-vec-'):
-                selected = f'sqlite-vec-{target}.{ "so" if platform == "linux" else "dylib" }'
-            elif path.startswith('lib/sqlite-'):
-                selected = f'sqlite-{target}.dylib' + ('.json' if path.endswith('.json') else '')
-            else:
-                selected = path
+            selected = member_assets[path]
             assert selected in pins, f'Reader references missing asset: {name}: {selected}'
             actual = pins[selected]
             assert member['sha256'] == actual['sha256'] and member['size'] == actual['size'], f'Reader pins do not match selected published bytes: {name}: {selected}'

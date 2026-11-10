@@ -3,9 +3,8 @@
 import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';
 import { sameKnowledgeRecord } from '../store-record-representation.js';
 import type { KnowledgeStore } from '../store.js';
-import type { KnowledgeExtractionRecord, KnowledgeSemanticEnrichmentStateRecord, KnowledgeSourceRecord } from '../types.js';
+import type { KnowledgeExtractionRecord, KnowledgeSourceRecord } from '../types.js';
 import { SemanticIdentityHeldError as Held } from '../store-semantic-fact-selector.js';
-import { historicalSourceSemanticHash } from './utils.js';
 
 export interface SemanticSourceRevision {
   readonly version: 2; readonly sourceId: string; readonly sourceRevision: string;
@@ -33,9 +32,8 @@ export function semanticSourceRevisionMetadata(binding: SemanticSourceRevision):
   if (!apply(weakGet, revisions, [binding])) throw new Held('malformed');
   return { semanticSourceVersion: 2, semanticSourceBinding: binding };
 }
-const historical = new WeakMap<KnowledgeSemanticEnrichmentStateRecord, { binding: string; hash: string; current: boolean }>();
-/** Old text commitments are computed only when an actual saved old state asks
- * for its exact old recipe, once for that state plus native source revisions. */
+/** Reconstructible caches require current native revisions. Old text digests
+ * remain readable history, but never establish freshness or require hashing. */
 export function semanticSourceIsCurrent(store: KnowledgeStore, source: KnowledgeSourceRecord, extraction: KnowledgeExtractionRecord,
   supplied?: SemanticSourceRevision): boolean {
   const binding = captureSemanticSourceRevision(store, source, extraction);
@@ -55,10 +53,5 @@ export function semanticSourceIsCurrent(store: KnowledgeStore, source: Knowledge
     return value['sourceId'] === binding.sourceId && value['sourceRevision'] === binding.sourceRevision
       && value['extractionId'] === binding.extractionId && value['extractionRevision'] === binding.extractionRevision;
   }
-  const hash = metadata.textHash ?? state.textHash;
-  if (typeof hash !== 'string' || !/^[a-f0-9]{16}$/.test(hash)) return false;
-  const key = JSON.stringify(binding), previous = apply(weakGet, historical, [state]) as { binding: string; hash: string; current: boolean } | undefined;
-  if (previous?.binding === key && previous.hash === hash) return previous.current;
-  const current = historicalSourceSemanticHash(source, extraction) === hash;
-  apply(weakSet, historical, [state, Object.freeze({ binding: key, hash, current })]); return current;
+  return false;
 }

@@ -1,5 +1,4 @@
 import { knowledgeNodeContentRevisionTriggers } from '../platform/src/platform/knowledge/store-node-content-revisions.js';
-import { knowledgeContentHash } from '../platform/src/platform/knowledge/content-hash.js';
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -127,7 +126,7 @@ test('an actual version ten image migrates once and keeps its original source va
 });
 
 
-test('native row migration preserves paid activation receipts without another model call', async () => {
+test('old activation cache is re-evaluated once and then uses native row revisions', async () => {
   const root = mkdtempSync(join(tmpdir(), 'knowledge-paid-revision-')); roots.push(root);
   const dbPath = join(root, 'knowledge.sqlite'), store = new KnowledgeStore({ dbPath });
   const fake = fakePort(() => noulAnswer(0.99)), previous = installJudgmentPort(fake.port);
@@ -141,8 +140,7 @@ test('native row migration preserves paid activation receipts without another mo
     expect(original.status).toBe('active'); expect(fake.requests).toHaveLength(1);
     const { dependencyReference: _reference, dependencyVersion: _dependencyVersion, ...oldReading } = original.metadata.nodeActivation as Record<string, unknown>;
     const historical = { ...original, metadata: { ...original.metadata, nodeActivation: { ...oldReading,
-      evidenceHash: knowledgeContentHash(JSON.stringify({ evidence: [{ id: 'manual', source: store.getSource('manual'),
-        extraction: store.getExtractionBySourceId('manual') }], subjects: [] })) } } };
+      evidenceHash: 'a'.repeat(64) } } };
     await store.close();
     const SQL = await loadSqlJsEngine(), old = new SQL.Database(readFileSync(dbPath));
     try { old.run('UPDATE knowledge_nodes SET metadata=? WHERE id=?', [JSON.stringify(historical.metadata), original.id]); old.run('UPDATE knowledge_node_revisions SET metadata=? WHERE node_id=?', [JSON.stringify(historical.metadata), original.id]); makeVersionTen(old); writeFileSync(dbPath, old.export()); } finally { old.close(); }
@@ -153,10 +151,10 @@ test('native row migration preserves paid activation receipts without another mo
       const adopted = await restarted.upsertNode({ ...historical });
       expect((adopted.metadata.nodeActivation as Record<string, unknown>).evidenceHash).toBeUndefined();
       expect((adopted.metadata.nodeActivation as Record<string, unknown>).dependencyVersion).toBe(1);
-      expect(fake.requests).toHaveLength(1);
+      expect(fake.requests).toHaveLength(2);
       const migrated = readFileSync(dbPath);
       expect(await restarted.upsertNode({ ...adopted })).toEqual(adopted);
-      expect(fake.requests).toHaveLength(1);
+      expect(fake.requests).toHaveLength(2);
       expect(readFileSync(dbPath)).toEqual(migrated);
     } finally { await restarted.close(); }
   } finally { installJudgmentPort(previous); await store.close(); }

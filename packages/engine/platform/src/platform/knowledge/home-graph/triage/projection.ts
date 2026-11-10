@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { captureStrictJudgmentJson } from '../../../gate/judgment-result.js';
 import type { JsonValue } from '@goodvibes-jev/judgment';
 import type { KnowledgeIssueRecord, KnowledgeNodeRecord } from '../../types.js';
 import { hasKnowledgeNodeOperatorReview } from '../../store-node-authority.js';
@@ -52,16 +52,14 @@ function copyString(target: Record<string, JsonValue>, record: Record<string, un
   if (typeof record[key] !== 'string') throw new Held('malformed');
   target[key] = record[key];
 }
-export function triageCacheFingerprint(input: TriageReadInput, issue: KnowledgeIssueRecord, node: KnowledgeNodeRecord | undefined, policy: { model: string; minConfidence: number; category?: string | undefined }): string {
-  // Same-store/source cache reuse must survive ordinary issue-row replacement
-  // while detecting relevant input, ephemeral guidance and policy changes.
-  // Keep a compact comparison instead of retaining the prior private prompt.
-  // Restart is cold; this is neither authority nor an independent cold-reader check.
-  return createHash('sha256').update(JSON.stringify({
+/** Local comparison only. The caller ties this value to its original live
+ * issue and node with weak ownership; no private prompt is persisted. */
+export function triageCacheSnapshot(input: TriageReadInput, issue: KnowledgeIssueRecord, node: KnowledgeNodeRecord | undefined, policy: { model: string; minConfidence: number; category?: string | undefined }) {
+  return captureStrictJudgmentJson({
     issue: input.issue, subject: input.subject, guidance: input.ruleGuidance, policy,
     issueId: issue.id, nodeId: issue.nodeId, sourceId: issue.sourceId,
     lifecycle: issue.metadata.issueLifecycle, issueReview: issue.metadata.review,
     nodeReview: node?.metadata.review,
-    batteries: [homeGraphTriageApplicability, homeGraphBatteryFacts, homeGraphManualFact].map(({ name, version }) => ({ name, version })),
-  })).digest('hex').slice(0, 24);
+    batteries: [homeGraphTriageApplicability, homeGraphBatteryFacts, homeGraphManualFact].map(({ name, version, items }) => ({ name, version, items })),
+  });
 }

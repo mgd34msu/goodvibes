@@ -9,7 +9,6 @@ import { createSemanticFactIdentityPlanner, assertSemanticFactIdentityPlanner, p
 import { semanticFactIdentityMetadata, SemanticIdentityHeldError } from '../platform/src/platform/knowledge/store-semantic-fact-selector.js';
 import { captureSemanticSourceRevision, semanticSourceIsCurrent, semanticSourceRevisionMetadata } from '../platform/src/platform/knowledge/semantic/source-revisions.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
-import { historicalSourceSemanticHash } from '../platform/src/platform/knowledge/semantic/utils.js';
 import type { NativeDataWriteOwner } from '../platform/src/platform/runtime/native-reader-compatibility.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [];
@@ -119,23 +118,23 @@ test('fresh cache uses actual saved source/extraction revisions, refuses copied 
   const updated = await store.upsertExtraction({ ...extraction });
   expect(semanticSourceIsCurrent(store, source, updated)).toBe(false);
 });
-test('actual old source commitment is compared only for saved old state and native cache mutation cannot forge a hit', async () => {
+test('old source cache is cold without hashing and native cache mutation cannot forge a hit', async () => {
   const { store, source, extraction } = await sourceFixture();
-  await store.upsertSemanticEnrichmentState({ sourceId: source.id, textHash: historicalSourceSemanticHash(source, extraction), metadata: { extractor: 'llm' } });
-  expect(semanticSourceIsCurrent(store, source, extraction)).toBe(true); expect(semanticSourceIsCurrent(store, source, extraction)).toBe(true);
+  await store.upsertSemanticEnrichmentState({ sourceId: source.id, textHash: '0123456789abcdef', metadata: { extractor: 'llm' } });
+  expect(semanticSourceIsCurrent(store, source, extraction)).toBe(false); expect(semanticSourceIsCurrent(store, source, extraction)).toBe(false);
   store.getSemanticEnrichmentState(source.id)!.metadata.semanticSourceVersion = 2;
   store.getSemanticEnrichmentState(source.id)!.metadata.semanticSourceBinding = captureSemanticSourceRevision(store, source, extraction);
   expect(() => semanticSourceIsCurrent(store, source, extraction)).toThrow(SemanticIdentityHeldError);
 });
-test('fresh cache checks issue no source digests; an actual historical cache hashes once per native revision', async () => {
+test('fresh and historical cache checks issue no source digests', async () => {
   const { store, source, extraction } = await sourceFixture();
-  const oldHash = historicalSourceSemanticHash(source, extraction);
+  const oldHash = '0123456789abcdef';
   await store.upsertSemanticEnrichmentState({ sourceId: source.id, textHash: oldHash });
   const hashing = spyOn(crypto, 'createHash');
   try {
-    expect(semanticSourceIsCurrent(store, source, extraction)).toBe(true);
-    expect(semanticSourceIsCurrent(store, source, extraction)).toBe(true);
-    expect(hashing.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(1);
+    expect(semanticSourceIsCurrent(store, source, extraction)).toBe(false);
+    expect(semanticSourceIsCurrent(store, source, extraction)).toBe(false);
+    expect(hashing.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(0);
     await store.upsertSemanticEnrichmentState({ sourceId: source.id, metadata: semanticSourceRevisionMetadata(captureSemanticSourceRevision(store, source, extraction)) });
     hashing.mockClear();
     expect(semanticSourceIsCurrent(store, source, extraction)).toBe(true);

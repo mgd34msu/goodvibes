@@ -1,5 +1,4 @@
 import { knowledgeRawRepresentation } from '../store-record-representation.js';
-import { createHash } from 'node:crypto';
 import type {
   KnowledgeExtractionRecord,
   KnowledgeNodeRecord,
@@ -44,15 +43,6 @@ const STOPWORDS = new Set([
   'which',
   'with',
 ]);
-
-function historicalSemanticHash(...parts: readonly unknown[]): string {
-  const hash = createHash('sha256');
-  for (const part of parts) {
-    hash.update(String(part ?? ''));
-    hash.update('\0');
-  }
-  return hash.digest('hex').slice(0, 16);
-}
 
 export function semanticSlug(value: string): string {
   return value
@@ -147,18 +137,6 @@ export function sourceSemanticText(source: KnowledgeSourceRecord, extraction?: K
     readString(nestedMetadata.text),
     readString(nestedMetadata.content),
   ]).join('\n\n');
-}
-
-/** Only an actual saved unversioned enrichment state compares this historical
- * text commitment. Fresh revision bindings never hash source text. */
-export function historicalSourceSemanticHash(source: KnowledgeSourceRecord, extraction?: KnowledgeExtractionRecord | null): string {
-  return historicalSemanticHash(
-    source.contentHash,
-    source.updatedAt,
-    extraction?.id,
-    extraction?.updatedAt,
-    sourceSemanticText(source, extraction),
-  );
 }
 
 export function sourceKnowledgeSpace(source: KnowledgeSourceRecord): string {

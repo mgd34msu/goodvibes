@@ -14,7 +14,6 @@ import { nodeServingWithoutReview } from './activation/battery.js';
 import { snapshotNodeInput, activationMeaning, activationSubjectIds, type ActivationSubject, activationContent, activationSourceIds, projectNodeActivation, type ActivationEvidence } from './activation/projection.js';
 import { classicNodeActivation, readNodeActivations } from './activation/reader.js';
 import { KnowledgeNodeActivationHeldError as Held, NODE_ACTIVATION_LIMITS as LIMITS, type KnowledgeNodeActivationOptions, type NodeActivationReading } from './activation/types.js';
-import { knowledgeContentHash } from './content-hash.js';
 import { getKnowledgeNodeObservation, prepareKnowledgeNodeObservation, type ObservedEvidence, type resolveKnowledgeNodeObservation } from './store-node-observation.js';
 import { retainKnowledgeNodeRecord } from './store-node-authority.js';
 import type { KnowledgeStore } from './store.js';
@@ -173,22 +172,9 @@ async function prepareOwnedNodeActivationPass(store: KnowledgeStore, drafts: rea
             if (stage) cacheWrites.set(index, { reference: receipt.dependencyReference, observation });
             return existing;
           }
-        } else if (typeof receipt.evidenceHash === 'string') {
-          // Only an actual saved pre-v13 receipt selects its historical checksum.
-          // Cached record views cannot migrate a stale source into a fresh native
-          // dependency stamp: the original native readset already proved the
-          // complete selected SQL rows, once per actual source in this pass.
-          const oldEvidenceHash = knowledgeContentHash(JSON.stringify({ evidence: draft.evidence, subjects: draft.subjects.map(({ id, node }) => ({ id,
-            content: proposed.has(id) ? activationContent(proposed.get(id)!) : node ? activationContent(node) : null })), observed: draft.observed?.record }));
-          if (receipt.evidenceHash === oldEvidenceHash) {
-            const reference = opaqueUuid(), { evidenceHash: _oldHash, ...previous } = receipt;
-            const migrated = retainKnowledgeNodeRecord({ ...existing, metadata: { ...knowledgeRawRepresentation(existing.metadata),
-              nodeActivation: { ...previous, dependencyVersion: 1, dependencyReference: reference } } }, existing);
-            cacheWrites.set(index, { reference, observation });
-            retainKnowledgeNodeActivationReferences(store, migrated, draft.evidence, draft.references);
-            return migrated;
-          }
         }
+        // Old evidenceHash receipts are reconstructible caches. Read them as
+        // history and re-evaluate current evidence; do not hash to adopt them.
       }
       // Ordinary native storage needs no model-bound projection or outbound privacy admission.
       // Its synthesized content remains an untrusted draft; changed active content still holds below.

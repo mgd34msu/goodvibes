@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import { drainOwned, matchesJudgmentModel } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
@@ -10,7 +12,7 @@ import { readHomeGraphState } from './state.js';
 import { resolveReadableHomeGraphSpace } from './space-selection.js';
 import type { HomeGraphSpaceInput } from './types.js';
 import { prepareHomeGraphTriageReadings, HomeGraphTriageHeldError as Held, TRIAGE_READING_LIMITS } from './triage/reader.js';
-import { hasTriageOperatorReview, projectTriageInput, triageCacheFingerprint } from './triage/projection.js';
+import { hasTriageOperatorReview, projectTriageInput, triageCacheSnapshot } from './triage/projection.js';
 import { applyTriageReadings } from './triage/application.js';
 
 /** Owner floor; settled registered readings remain mandatory regardless of this setting. */
@@ -18,15 +20,17 @@ export const HOME_GRAPH_TRIAGE_DEFAULT_MIN_CONFIDENCE = 85;
 export const HOME_GRAPH_TRIAGE_DEFAULT_CHUNK_SIZE = 25;
 export const HOME_GRAPH_TRIAGE_DEFAULT_LIMIT = 25;
 const TRIAGE_ISSUE_SCAN_LIMIT = 1_000;
-// A saved content fingerprint alone cannot prove a provider installation or
-// configuration lifetime. Only this store's acknowledged writes warm reuse.
-const triageReuse = new WeakMap<KnowledgeStore, WeakMap<object, Set<string>>>();
-function warmFingerprints(store: KnowledgeStore, owner: object): Set<string> {
+// Reuse is tied to the actual live issue, node and provider owner. Weak keys
+// release private comparison values when either original source retires.
+type TriageSnapshot = ReturnType<typeof triageCacheSnapshot>;
+type WarmTriage = WeakMap<KnowledgeIssueRecord, WeakMap<object, { readonly reference: string; readonly input: TriageSnapshot }>>;
+const triageReuse = new WeakMap<KnowledgeStore, WeakMap<object, WarmTriage>>();
+function warmReadings(store: KnowledgeStore, owner: object): WarmTriage {
   let sources = triageReuse.get(store);
   if (!sources) { sources = new WeakMap(); triageReuse.set(store, sources); }
-  let fingerprints = sources.get(owner);
-  if (!fingerprints) { fingerprints = new Set(); sources.set(owner, fingerprints); }
-  return fingerprints;
+  let readings = sources.get(owner);
+  if (!readings) { readings = new WeakMap(); sources.set(owner, readings); }
+  return readings;
 }
 export interface HomeGraphTriageRule {
   readonly code: string;
@@ -47,7 +51,7 @@ export interface HomeGraphTriageOptions {
   readonly limit?: number | undefined;
   /** Legacy batching hint retained for compatibility; judgment concurrency is bounded internally. */
   readonly chunkSize?: number | undefined;
-  /** Re-triage even issues whose cached fingerprint is unchanged. */
+  /** Re-triage even issues whose cached input is unchanged. */
   readonly force?: boolean | undefined;
   /** Issue ids to leave untouched this run. */
   readonly skipIssueIds?: readonly string[] | undefined;
@@ -82,7 +86,7 @@ export interface HomeGraphTriageResult {
   /** False when no judgment port is configured, the loop is a no-op. */
   readonly configured: boolean;
   readonly processed: number;
-  /** Open triageable issues skipped because their cached fingerprint was unchanged. */
+  /** Open triageable issues skipped because their cached input was unchanged. */
   readonly skipped: number;
   readonly applied: number;
   readonly reviewed: number;
@@ -125,7 +129,7 @@ export async function runHomeGraphIssueTriage(input: HomeGraphSpaceInput & {
   let owner: JudgmentPortCapture;
   try { owner = captureJudgmentPort('engine.knowledge.homegraph-triage', { signal: input.signal }); }
   catch (error) { if (error instanceof JudgmentPortMissingError) return empty(false, 'triage-judgment-not-configured'); throw error; }
-  const model = owner.port.model, warm = warmFingerprints(input.store, owner.identity);
+  const model = owner.port.model, warm = warmReadings(input.store, owner.identity);
   const assertCurrent = () => {
     if (input.signal?.aborted) throw new Held('aborted');
     try { owner.assertCurrent(); } catch { throw new Held('stale'); }
@@ -135,7 +139,7 @@ export async function runHomeGraphIssueTriage(input: HomeGraphSpaceInput & {
   if (input.signal?.aborted) return empty(true, 'triage-held-aborted');
   const skipIds = new Set(options.skipIssueIds ?? []);
   let skipped = 0;
-  const selected: Array<{ issue: KnowledgeIssueRecord; input: ReturnType<typeof projectTriageInput>; fingerprint: () => string }> = [];
+  const selected: Array<{ issue: KnowledgeIssueRecord; input: ReturnType<typeof projectTriageInput>; cacheReference: () => string; snapshot: TriageSnapshot }> = [];
   try {
     assertCurrent();
     for (const issue of open.slice(0, TRIAGE_ISSUE_SCAN_LIMIT)) {
@@ -146,37 +150,35 @@ export async function runHomeGraphIssueTriage(input: HomeGraphSpaceInput & {
       if (hasTriageOperatorReview(issue, node)) { skipped++; continue; }
       const rule = rules.get(issue.code)!;
       const projected = projectTriageInput(`issue-${selected.length + 1}`, issue, node, rule.promptGuidance);
-      let originalIssue = issue, originalNode = node, retainedFingerprint: string | undefined;
-      const fingerprint = () => retainedFingerprint ??= triageCacheFingerprint(projected, originalIssue, originalNode, { model, minConfidence, category: rule.defaultCategory });
-      const cached = readRecord(issue.metadata.triage);
+      const snapshot = triageCacheSnapshot(projected, issue, node, { model, minConfidence, category: rule.defaultCategory });
+      const cached = readRecord(issue.metadata.triage), remembered = warm.get(issue)?.get(node ?? issue);
       if (!options.force && cached.origin === 'automatic-judgment' && typeof cached.model === 'string' && matchesJudgmentModel(model, cached.model)
-        && cached.requestedModel === model && typeof cached.fingerprint === 'string' && warm.has(cached.fingerprint)
-        && cached.fingerprint === fingerprint()) { assertCurrent(); skipped++; continue; }
-      originalIssue = structuredClone(issue);
-      // Preserve the original cache recipe across model awaits without copying
-      // unrelated node metadata or retaining another guidance/source body.
-      originalNode = node ? { ...node, metadata: { review: structuredClone(node.metadata.review) } } : undefined;
-      if (selected.length < limit) selected.push({ issue: originalIssue, input: projected, fingerprint });
+        && cached.requestedModel === model && remembered && remembered.reference === cached.cacheReference
+        && isDeepStrictEqual(remembered.input, snapshot)) { assertCurrent(); skipped++; continue; }
+      const originalIssue = structuredClone(issue);
+      let reference: string | undefined;
+      const cacheReference = () => reference ??= opaqueUuid();
+      if (selected.length < limit) selected.push({ issue: originalIssue, input: projected, cacheReference, snapshot });
     }
     if (!selected.length) return empty(true, skipped ? 'no-untriaged-open-issues' : 'no-open-issues', skipped);
     assertCurrent();
     const plans = await prepareHomeGraphTriageReadings(selected.map((entry) => entry.input), {
       signal: input.signal, timeoutMs: options.timeoutMs, minConfidence,
     });
-    const applications = selected.map(({ issue, fingerprint }, index) => ({ issue, fingerprint, plan: plans[index]!,
+    const applications = selected.map(({ issue, cacheReference }, index) => ({ issue, cacheReference, plan: plans[index]!,
       node: issue.nodeId ? nodeById.get(issue.nodeId) : undefined, category: rules.get(issue.code)?.defaultCategory }));
     await applyTriageReadings(input.store, applications, input.signal, assertCurrent);
     // A cancellation queued after the synchronous commit cannot undo it. Report
     // the acknowledged writes, but never warm a retired provider observation.
     try {
       assertCurrent();
-      for (const { issue, fingerprint } of applications) {
-        const value = fingerprint(), saved = readRecord(input.store.getIssue(issue.id)?.metadata.triage);
-        if (saved.fingerprint !== value) continue;
-        if (!warm.has(value)) {
-          if (warm.size >= TRIAGE_ISSUE_SCAN_LIMIT) warm.delete(warm.values().next().value!);
-          warm.add(value);
-        }
+      for (const [index, { issue, cacheReference }] of applications.entries()) {
+        const savedIssue = input.store.getIssue(issue.id);
+        if (!savedIssue || readRecord(savedIssue.metadata.triage).cacheReference !== cacheReference()) continue;
+        const savedNode = savedIssue.nodeId ? input.store.getNode(savedIssue.nodeId) ?? undefined : undefined;
+        let byNode = warm.get(savedIssue);
+        if (!byNode) { byNode = new WeakMap(); warm.set(savedIssue, byNode); }
+        byNode.set(savedNode ?? savedIssue, { reference: cacheReference(), input: selected[index]!.snapshot });
       }
     } catch (error) { drainOwned(error); /* Committed facts remain reported; a later run rechecks cold. */ }
     const decisions: HomeGraphTriageDecision[] = applications.map(({ issue, plan, category }) => ({

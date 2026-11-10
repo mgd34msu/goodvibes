@@ -8,7 +8,7 @@ export interface TriageApplication {
   readonly issue: KnowledgeIssueRecord;
   readonly node?: KnowledgeNodeRecord | undefined;
   readonly plan: TriageReadingPlan;
-  readonly fingerprint: () => string;
+  readonly cacheReference: () => string;
   readonly category?: string | undefined;
 }
 /** Ordinary producer writes only. Automatic recommendations never mint review authority. */
@@ -41,11 +41,11 @@ export async function applyTriageReadings(store: KnowledgeStore, applications: r
       } });
   }
   const issueInputs: KnowledgeIssueUpsertInput[] = [];
-  for (const { issue, plan, fingerprint, category } of applications) {
+  for (const { issue, plan, cacheReference, category } of applications) {
     issueInputs.push({ id: issue.id, severity: issue.severity, code: issue.code,
       message: issue.message, status: plan.action === 'reject' ? 'resolved' : 'open',
       sourceId: issue.sourceId, nodeId: issue.nodeId,
-      metadata: { ...issue.metadata, triage: { fingerprint: fingerprint(), action: plan.action, category,
+      metadata: { ...issue.metadata, triage: { cacheReference: cacheReference(), action: plan.action, category,
         confidence: plan.probability * 100, probability: plan.probability, applied: plan.action === 'reject',
         origin: plan.origin, source: 'homegraph-triage', model: plan.model, requestedModel: plan.requestedModel,
         decisionIds: plan.decisionIds, batteries: plan.batteries, decidedAt: Date.now() },

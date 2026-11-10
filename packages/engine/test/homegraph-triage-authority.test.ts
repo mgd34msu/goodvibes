@@ -9,7 +9,7 @@ import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/test
 import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { runHomeGraphIssueTriage } from '../platform/src/platform/knowledge/home-graph/triage.js';
-import * as triageProjection from '../platform/src/platform/knowledge/home-graph/triage/projection.js';
+import * as crypto from 'node:crypto';
 import { applyTriageReadings } from '../platform/src/platform/knowledge/home-graph/triage/application.js';
 import { reviewHomeGraphFact } from '../platform/src/platform/knowledge/home-graph/review.js';
 import { reviewKnowledgeNodeRecord } from '../platform/src/platform/knowledge/service-node-admin.js';
@@ -203,16 +203,17 @@ describe('automatic triage respects operator authority and frozen state', () => 
 });
 
 
-test('new, forced and cold candidates hash only answered publication; held attempts hash no triage fingerprint', async () => {
-  const f = await fixture(), fake = readings('review'), hash = spyOn(triageProjection, 'triageCacheFingerprint');
+test('answered reuse, forced reads and held attempts perform no triage hashing', async () => {
+  const f = await fixture(), fake = readings('review'), hashing = spyOn(crypto, 'createHash');
   try {
-    expect((await f.run()).reviewed).toBe(1); expect(hash).toHaveBeenCalledTimes(1);
-    hash.mockClear(); expect((await f.run()).skipped).toBe(1); expect(hash).toHaveBeenCalledTimes(1);
-    hash.mockClear(); expect((await f.run({ force: true })).reviewed).toBe(1); expect(hash).toHaveBeenCalledTimes(1);
+    expect((await f.run()).reviewed).toBe(1);
+    expect((await f.run()).skipped).toBe(1);
+    expect((await f.run({ force: true })).reviewed).toBe(1);
     expect(fake.requests).toHaveLength(2);
-    readings('reject', 0.8); hash.mockClear();
-    expect((await f.run({ force: true })).processed).toBe(0); expect(hash).not.toHaveBeenCalled();
-  } finally { hash.mockRestore(); await f.store.close(); }
+    readings('reject', 0.8);
+    expect((await f.run({ force: true })).processed).toBe(0);
+    expect(hashing.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(0);
+  } finally { hashing.mockRestore(); await f.store.close(); }
 });
 
 test('same-model provider replacement and restoration require fresh acknowledged reads before cache reuse', async () => {
@@ -253,7 +254,7 @@ test('reopened native store conservatively retriages saved fingerprints once wit
   const f = await fixture(), fake = readings('review'); let reopened: KnowledgeStore | undefined;
   try {
     await f.run(); const saved = f.store.getIssue(f.issues[0]!.id)!.metadata.triage;
-    expect(saved).toHaveProperty('fingerprint'); expect(saved).not.toHaveProperty('providerIdentity');
+    expect(saved).toHaveProperty('cacheReference'); expect(saved).not.toHaveProperty('providerIdentity');
     reopened = await f.reload();
     const run = () => runHomeGraphIssueTriage({ store: reopened!, knowledgeSpaceId: spaceId });
     expect((await run()).reviewed).toBe(1); expect(fake.requests).toHaveLength(2);
@@ -263,7 +264,7 @@ test('reopened native store conservatively retriages saved fingerprints once wit
 
 test('application rejects an asynchronous or throwing source restriction before any ordinary write', async () => {
   const f = await fixture(), before = f.snapshot();
-  const application = { issue: f.issues[0]!, node: f.node, fingerprint: () => 'actual-answered-fingerprint',
+  const application = { issue: f.issues[0]!, node: f.node, cacheReference: () => 'actual-answered-reference',
     plan: { reference: 'issue-1', action: 'review' as const, probability: 0.97, facts: {}, decisionIds: [],
       model: 'jev-1.13.0', requestedModel: 'jev-latest', origin: 'automatic-judgment' as const, batteries: [] } };
   try {
@@ -289,7 +290,7 @@ test('a thrown rejected readback after acknowledged commit is drained without hi
   });
   try {
     expect((await f.run()).reviewed).toBe(1);
-    expect(read(f.issues[0]!.id)!.metadata.triage).toHaveProperty('fingerprint');
+    expect(read(f.issues[0]!.id)!.metadata.triage).toHaveProperty('cacheReference');
     expect((await f.run()).reviewed).toBe(1); expect(fake.requests).toHaveLength(2);
     expect((await f.run()).skipped).toBe(1);
   } finally { readback.mockRestore(); publication.mockRestore(); await f.store.close(); }

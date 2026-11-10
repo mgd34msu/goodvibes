@@ -203,9 +203,11 @@ for (const profile of ['old-version', 'same-version-unknown', 'same-version-miss
     const memory = nativeMemoryIo({ ...previous.installation(execPath), ...(hasRequirement ? { [floor]: Buffer.from(requirement()) } : {}) });
     const targets = resolveDaemonNativeTargets(execPath, 'linux', 'x64'); if (!targets) throw new Error('Native fixture target unavailable');
     let checked = false, installedReads = 0, readsAtManifest = -1, candidateFetches = 0;
+    const installedReadPaths: string[] = [];
     const readFile = memory.io.readFile;
     const io = { ...memory.io, readFile(path: string) {
       installedReads++;
+      installedReadPaths.push(path);
       if (path === floor) { checked = true; for (const target of targets) expect(memory.io.exists(target.path + '.update-transaction')).toBe(true); }
       return readFile(path);
     } };
@@ -222,7 +224,13 @@ for (const profile of ['old-version', 'same-version-unknown', 'same-version-miss
       daemonNative: { execPath, platform: 'linux', arch: 'x64', version: candidateVersion } });
     if (profile === 'malformed-reader-pin' || profile === 'ambiguous-reader-pin') {
       await expect(apply).rejects.toThrow('reader artifact checksum'); expect(checked).toBe(false);
-      expect(candidateFetches).toBe(0); expect(readsAtManifest).toBeGreaterThan(0); expect(installedReads).toBe(readsAtManifest);
+      expect(candidateFetches).toBe(0); expect(readsAtManifest).toBeGreaterThan(0);
+      // This borrowed adapter cannot certify bytes from its metadata alone.
+      // After the manifest-body await, custody rechecks each original member
+      // once before interpreting that response. These are source-order reads,
+      // not receipt-first installed-integrity admission or reader-floor reads.
+      expect(installedReadPaths.slice(readsAtManifest)).toEqual(targets.map(target => target.path));
+      expect(installedReads).toBe(readsAtManifest + targets.length);
       expect(hash).not.toHaveBeenCalled();
       for (const [path, bytes] of Object.entries(previous.installation(execPath))) expect(memory.files.get(path)).toEqual(bytes);
       expect(memory.mutations).toEqual([]);

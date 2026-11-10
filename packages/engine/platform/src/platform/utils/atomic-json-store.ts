@@ -19,8 +19,10 @@
  *      `rename(2)` is atomic on POSIX: a concurrent reader, and a process
  *      that dies mid-write, can only ever observe the previous complete file
  *      or the new complete one, never a torn write. `durable: true` additionally
- *      confirms the published file and complete canonical/alias ancestry before
- *      returning success; the historical default retains rename-only behavior.
+ *      flushes the original file and complete canonical/alias ancestry before
+ *      returning success. A guard or effect observer additionally retains the exact
+ *      visible image; unobserved replacing writes remain last-writer-wins.
+ *      The historical default retains rename-only behavior.
  *
  *      The temp name is unique per WRITE, not per process
  *      ({@link createAtomicTempPath}: `<name>.tmp-<pid>-<seq>-<random>`), and
@@ -265,7 +267,7 @@ export function confirmFileDurable(filePath: string): void {
   }
 }
 
-interface AtomicDirectoryOwner { readonly canonical: string; readonly durabilityDirectories: readonly string[]; assertCurrent(): void; assertPhysicalCurrent(): void }
+interface AtomicDirectoryOwner { readonly canonical: string; readonly durabilityDirectories: readonly string[]; readonly ancestryDirectories: readonly string[]; assertCurrent(): void; assertPhysicalCurrent(): void }
 const atomicDirectoryStamp = (stat: BigIntStats): string => {
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw Object.assign(new Error('Atomic file parent is not a physical directory'), { code: 'ENOTDIR' });
   return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.birthtimeNs].join(':');
@@ -277,7 +279,7 @@ function atomicMissing(error: unknown): boolean { return error !== null && typeo
 /** Plan the actual parent lookup, including configured existing aliases and
  * symlink-aware '..', before creating anything. Never create a dangling alias's
  * target. Original directories and links stay pinned through publication. */
-function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effect: (() => void) | undefined, mkdirp: boolean): AtomicDirectoryOwner {
+function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effect: (() => void) | undefined, mkdirp: boolean, concurrentInitialCreation = false): AtomicDirectoryOwner {
   const directories = new Map<string, string>(), links: Array<{ path: string; identity: string; target: string }> = [];
   const absent = new Set<string>(), createdDirectories = new Set<string>();
   let cursor = parse(absolute).root, pending = absolute.slice(cursor.length).split(sep);
@@ -314,21 +316,28 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effec
       throw new Error('Atomic file parent appeared during capture');
     }
   };
-  current();
+  current(!concurrentInitialCreation);
   if (!mkdirp && absent.size) throw Object.assign(new Error('Atomic publication parent does not exist'), { code: 'ENOENT' });
   for (const path of [...absent]) {
-    assertOwner(); current(); mkdirSync(path);
-    const created = lstatSync(path, { bigint: true }); createdDirectories.add(path);
+    assertOwner(); current(!concurrentInitialCreation); let made = false;
+    try { mkdirSync(path); made = true; }
+    catch (error) { if (!concurrentInitialCreation || (error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    const created = lstatSync(path, { bigint: true });
+    if (!made && (process.geteuid && created.uid !== BigInt(process.geteuid()))) throw new Error('Atomic initial parent belongs to another owner');
+    // A competing plain writer can establish an ordinary initial directory,
+    // never a symlink or replacement of any already retained original parent.
+    // Record its actual mode without chmodding somebody else's creation.
+    if (made) createdDirectories.add(path);
     directories.set(path, atomicDirectoryStamp(created)); absent.delete(path); current(false);
     // Retain inherited group/special bits while ensuring the creator can finish
     // a nested write even under a restrictive umask.
     const mode = Number(created.mode & 0o7777n) | 0o700;
-    if (Number(created.mode & 0o7777n) !== mode) {
+    if (made && Number(created.mode & 0o7777n) !== mode) {
       chmodSync(path, mode); const after = lstatSync(path, { bigint: true });
       if (after.dev !== created.dev || after.ino !== created.ino) throw new Error('Atomic file created parent changed');
       directories.set(path, atomicDirectoryStamp(after));
     }
-    current(); if (effect) { effect(); current(); }
+    current(!concurrentInitialCreation); if (effect) { effect(); current(); }
   }
   const assertLookupCurrent = () => {
     current();
@@ -347,6 +356,7 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effec
   const durability = new Set([canonical]);
   for (const created of createdDirectories) { durability.add(created); durability.add(dirname(created)); }
   return { canonical, durabilityDirectories: Object.freeze([...durability].sort((left, right) => right.length - left.length)),
+    ancestryDirectories: Object.freeze([...directories.keys()].sort((left, right) => right.length - left.length)),
     assertCurrent: assertLookupCurrent,
     assertPhysicalCurrent() { for (const parent of physical) if (atomicDirectoryStamp(lstatSync(parent.path, { bigint: true })) !== parent.identity) throw new Error('Atomic physical parent changed'); },
   };
@@ -431,7 +441,7 @@ export function writeFileAtomic(filePath: string, contents: string | Uint8Array,
   };
   try {
     if (!leaf || leaf === '.' || leaf === '..' || absolute.endsWith(sep) || absolute.includes('\0')) throw new Error('Atomic publication requires a file target');
-    parent = prepareAtomicDirectory(dirname(absolute), current, onEffect ? () => effect() : undefined, mkdirp); current();
+    parent = prepareAtomicDirectory(dirname(absolute), current, onEffect ? () => effect() : undefined, mkdirp, replaceExisting && !guard && !onEffect); current();
     target = join(parent.canonical, leaf);
     if (sweep) cleanupStaleTempFiles(parent.canonical, target, current, onEffect ? () => { parent?.assertCurrent(); effect(); parent?.assertCurrent(); } : undefined);
     tmpPath = createAtomicTempPath(target); current();
@@ -471,11 +481,25 @@ export function writeFileAtomic(filePath: string, contents: string | Uint8Array,
       // No observer is acknowledged until the exact original stage has become
       // the single-link destination. Failed transfer preserves its evidence.
     }
-    if (!onEffect && !durable) {
+    if (!onEffect && (!durable || (replaceExisting && !guard))) {
       // A plain atomic write promises complete publication, with the latest
       // concurrent writer winning. A later valid rename may already replace
-      // our image; it cannot undo this completed rename. Only a borrowed
-      // publication observer or durability receipt needs the exact live image.
+      // our image; it cannot undo this completed rename. Flush only our original
+      // FD and retained physical parents, never open/adopt the replacing leaf.
+      // Guarded, observed and exclusive durable publications retain their exact image.
+      if (durable) {
+        parent.assertCurrent(); fsyncSync(fd); parent.assertCurrent();
+        for (const directory of parent.ancestryDirectories) {
+          parent.assertCurrent(); const expected = atomicDirectoryStamp(lstatSync(directory, { bigint: true }));
+          const owner = openSync(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+          try {
+            parent.assertCurrent();
+            if (atomicDirectoryStamp(fstatSync(owner, { bigint: true })) !== expected || atomicDirectoryStamp(lstatSync(directory, { bigint: true })) !== expected) throw new Error('Atomic durability parent changed');
+            fsyncSync(owner); parent.assertCurrent();
+            if (atomicDirectoryStamp(fstatSync(owner, { bigint: true })) !== expected || atomicDirectoryStamp(lstatSync(directory, { bigint: true })) !== expected) throw new Error('Atomic durability parent changed during sync');
+          } finally { closeSync(owner); }
+        }
+      }
       parent.assertCurrent();
       const completedFd = fd; fd = undefined; closeSync(completedFd);
       return;

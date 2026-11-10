@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import * as nativeFs from 'node:fs';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { runStoreFileUpdate, writeStoreFile, writeStoreJson } from '../../utils/store-file.ts';
@@ -64,26 +65,29 @@ describe('writeStoreFile', () => {
   test('two writes to one path from this process never share a temp path', () => {
     withTempRoot((root) => {
       const path = join(root, 'store.json');
-      // The temp file only exists mid-write, so observe the names instead: a
-      // directory made read-only after the first write forces each attempt to
-      // fail with its own temp path in the error message.
+      // Observe actual exclusive native opens rather than a public failure
+      // diagnostic: the durability error intentionally identifies the store,
+      // not its private staging path.
       const dir = dirname(path);
       writeStoreFile(path, 'seed\n');
       chmodSync(dir, 0o500);
       const tempPaths: string[] = [];
+      const open = nativeFs.openSync;
+      const opening = spyOn(nativeFs, 'openSync').mockImplementation((selected, flags, mode) => {
+        if (typeof selected === 'string' && selected.startsWith(`${path}.tmp-`)) tempPaths.push(selected);
+        return open(selected, flags, mode);
+      });
       try {
         for (let attempt = 0; attempt < 2; attempt += 1) {
-          try {
-            writeStoreFile(path, 'blocked\n');
-          } catch (error) {
-            tempPaths.push(String((error as { path?: string }).path ?? error));
-          }
+          expect(() => writeStoreFile(path, 'blocked\n')).toThrow();
         }
       } finally {
+        opening.mockRestore();
         chmodSync(dir, 0o700);
       }
       expect(tempPaths).toHaveLength(2);
       expect(tempPaths[0]).not.toBe(tempPaths[1]);
+      expect(readFileSync(path, 'utf8')).toBe('seed\n'); expect(leftoverStoreTempFiles(path)).toEqual([]);
     });
   });
 

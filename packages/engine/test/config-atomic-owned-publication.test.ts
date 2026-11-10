@@ -107,3 +107,81 @@ test('same-length same-inode edits by a publication listener retire the image de
   expect(error.phase).toBe('published-indeterminate'); expect(publications).toBe(1);
   expect(fs.readFileSync(f.file, 'utf8')).toBe('Foreign content');
 });
+
+test('unobserved durable writers acknowledge their own rename without adopting a later complete replacement', () => {
+  const f = fixture(), rename = fs.renameSync; let replaced = false;
+  const swapping = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+    rename(from, to);
+    if (replaced || to !== f.file) return; replaced = true;
+    atomicWriteFileSync(f.file, 'Later complete image');
+  }); restore.push(() => swapping.mockRestore());
+  expect(() => atomicWriteFileSync(f.file, 'First complete image')).not.toThrow();
+  expect(replaced).toBe(true); expect(fs.readFileSync(f.file, 'utf8')).toBe('Later complete image');
+  expect(temporary(f.root, f.file)).toBeUndefined();
+});
+
+test('observed durable publication cannot acknowledge a later complete replacement as its original', () => {
+  const f = fixture(), rename = fs.renameSync; let replaced = false, acknowledged = 0;
+  const swapping = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+    rename(from, to);
+    if (replaced || to !== f.file) return; replaced = true;
+    atomicWriteFileSync(f.file, 'Later complete image');
+  }); restore.push(() => swapping.mockRestore());
+  const error = failure(() => atomicWriteFileSync(f.file, 'First complete image', { onEffect(published) { if (published) acknowledged++; } }));
+  expect(error.phase).toBe('published-indeterminate'); expect(acknowledged).toBe(0);
+  expect(fs.readFileSync(f.file, 'utf8')).toBe('Later complete image');
+});
+
+test('guarded-only durable publication retains its exact image despite having no effect observer', () => {
+  const f = fixture(), rename = fs.renameSync; let replaced = false, guards = 0;
+  const swapping = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+    rename(from, to);
+    if (replaced || to !== f.file) return; replaced = true;
+    atomicWriteFileSync(f.file, 'Later complete image');
+  }); restore.push(() => swapping.mockRestore());
+  const error = failure(() => atomicWriteFileSync(f.file, 'Guarded original image', { assertCurrent() { guards++; } }));
+  expect(error.phase).toBe('published-indeterminate'); expect(replaced).toBe(true); expect(guards).toBeGreaterThan(0);
+  expect(fs.readFileSync(f.file, 'utf8')).toBe('Later complete image'); expect(temporary(f.root, f.file)).toBeUndefined();
+});
+
+test('an unobserved durable write still refuses a retired physical parent during original-FD sync', () => {
+  const f = fixture(), directory = join(f.root, 'parent'), retained = join(f.root, 'retained'); fs.mkdirSync(directory);
+  const file = join(directory, 'state.json'), actual = fs.fsyncSync; let fileSyncs = 0;
+  const syncing = spyOn(fs, 'fsyncSync').mockImplementation(fd => {
+    actual(fd); if (fs.fstatSync(fd).isDirectory() || ++fileSyncs !== 2) return;
+    fs.renameSync(directory, retained); fs.mkdirSync(directory); fs.writeFileSync(file, 'Foreign parent image');
+  }); restore.push(() => syncing.mockRestore());
+  expect(failure(() => atomicWriteFileSync(file, 'Original published image')).phase).toBe('published-indeterminate');
+  expect(fs.readFileSync(file, 'utf8')).toBe('Foreign parent image'); expect(fs.readFileSync(join(retained, 'state.json'), 'utf8')).toBe('Original published image');
+});
+
+test('unobserved durable publication cannot hide a real directory fsync failure', () => {
+  const f = fixture(), actual = fs.fsyncSync;
+  const syncing = spyOn(fs, 'fsyncSync').mockImplementation(fd => { if (fs.fstatSync(fd).isDirectory()) throw new Error('Actual original directory sync failed'); actual(fd); });
+  restore.push(() => syncing.mockRestore());
+  const error = failure(() => atomicWriteFileSync(f.file, 'Visible complete image'));
+  expect(error.phase).toBe('published-indeterminate'); expect(error.cause).toBeInstanceOf(Error);
+  expect(fs.readFileSync(f.file, 'utf8')).toBe('Visible complete image');
+});
+
+test('plain concurrent first writers can share new ordinary parents without changing the competing owner mode', () => {
+  const f = fixture(), file = join(f.root, 'new', 'nested', 'settings.json'), mkdir = fs.mkdirSync;
+  let competed = false;
+  const creating = spyOn(fs, 'mkdirSync').mockImplementation((path, options) => {
+    if (!competed && path === join(f.root, 'new')) { competed = true; mkdir(path, { mode: 0o750 }); }
+    return mkdir(path, options);
+  }); restore.push(() => creating.mockRestore());
+  expect(() => atomicWriteFileSync(file, 'Complete image', { mkdirp: true })).not.toThrow();
+  expect(competed).toBe(true); expect(fs.readFileSync(file, 'utf8')).toBe('Complete image'); expect(fs.statSync(join(f.root, 'new')).mode & 0o777).toBe(0o750);
+});
+
+test('a new parent alias installed by a competing writer grants no outside publication', () => {
+  const f = fixture(), outside = join(f.root, 'outside'), file = join(f.root, 'new', 'settings.json'), mkdir = fs.mkdirSync; fs.mkdirSync(outside);
+  let competed = false;
+  const creating = spyOn(fs, 'mkdirSync').mockImplementation((path, options) => {
+    if (!competed && path === join(f.root, 'new')) { competed = true; fs.symlinkSync(outside, path); }
+    return mkdir(path, options);
+  }); restore.push(() => creating.mockRestore());
+  expect(failure(() => atomicWriteFileSync(file, 'Must not follow new alias', { mkdirp: true })).phase).toBe('before-publication');
+  expect(competed).toBe(true); expect(fs.readdirSync(outside)).toEqual([]); expect(fs.lstatSync(join(f.root, 'new')).isSymbolicLink()).toBe(true);
+});

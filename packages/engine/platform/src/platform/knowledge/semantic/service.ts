@@ -67,7 +67,7 @@ export interface KnowledgeSemanticServiceOptions {
    */
   readonly admitExpensiveWork?: ((label: string) => { allowed: boolean; reason?: string | undefined }) | undefined;
   /** Test seam: timer scheduling (defaults to scheduleBackground). */
-  readonly scheduleSeam?: ((callback: () => void, delayMs: number) => void) | undefined;
+  readonly scheduleSeam?: ((callback: () => void, delayMs: number, signal?: AbortSignal) => void) | undefined;
   /** Test seam: clock (defaults to Date.now). */
   readonly now?: (() => number) | undefined;
 }
@@ -77,7 +77,7 @@ const SELF_IMPROVE_SPACE_PAGE_SIZE = 500;
 
 export class KnowledgeSemanticService {
   private readonly activeGapRepairs = new Set<string>();
-  private readonly activeSelfImprovementRuns = new Map<string, Promise<KnowledgeSemanticSelfImproveResult>>();
+  private readonly activeSelfImprovementRuns = new Map<AbortSignal | undefined, Map<string, Promise<KnowledgeSemanticSelfImproveResult>>>();
 
   constructor(
     private readonly store: KnowledgeStore,
@@ -145,6 +145,8 @@ export class KnowledgeSemanticService {
     readonly maxRunMs?: number | undefined;
     readonly force?: boolean | undefined;
     readonly knowledgeSpaceId?: string | undefined;
+    /** Original caller lifetime; optional for standalone reindex operations. */
+    readonly signal?: AbortSignal | undefined;
   } = {}): Promise<{
     readonly scanned: number;
     readonly enriched: number;
@@ -154,13 +156,17 @@ export class KnowledgeSemanticService {
     readonly selfImprovement: KnowledgeSemanticSelfImproveResult;
   }> {
     requireDecisionFeature('semantic knowledge reindexing');
+    const signal = input.signal;
+    signal?.throwIfAborted();
     // Critical-tier admission: reindex is one of the expensive verbs the
     // governor refuses honestly under memory pressure.
     const admission = this.options.admitExpensiveWork?.('knowledge semantic reindex');
     if (admission && !admission.allowed) {
       throw new Error(admission.reason ?? 'knowledge semantic reindex refused: daemon is under critical memory pressure.');
     }
+    signal?.throwIfAborted();
     await this.store.init();
+    signal?.throwIfAborted();
     const allowed = input.sourceIds?.length ? new Set(input.sourceIds) : null;
     const sources = listSemanticSources(this.store, input.knowledgeSpaceId)
       .filter((source) => !allowed || allowed.has(source.id))
@@ -176,6 +182,7 @@ export class KnowledgeSemanticService {
     const errors: { sourceId: string; error: string }[] = [];
     for (const [index, source] of sources.entries()) {
       await yieldEvery(index);
+      signal?.throwIfAborted();
       if (Date.now() - startedAt >= maxRunMs) {
         skipped += sources.length - processed;
         break;
@@ -186,33 +193,41 @@ export class KnowledgeSemanticService {
           ? this.options.llm
           : null;
         if (llm) llmAttempts += 1;
-        const result = await enrichKnowledgeSource({ store: this.store, llm }, source, input);
+        const result = await enrichKnowledgeSource({ store: this.store, llm }, source, { ...input, signal });
+        signal?.throwIfAborted();
         if (result?.skipped) skipped += 1;
         else if (result) enriched += 1;
       } catch (error) {
+        signal?.throwIfAborted();
         failed += 1;
         errors.push({ sourceId: source.id, error: error instanceof Error ? error.message : String(error) });
       }
       await yieldToEventLoop();
+      signal?.throwIfAborted();
     }
+    signal?.throwIfAborted();
     const selfImprovement = await this.selfImprove({
       knowledgeSpaceId: input.knowledgeSpaceId,
       sourceIds: input.sourceIds,
       force: input.force,
       reason: 'reindex',
+      signal,
       limit: input.limit,
       maxRunMs: input.maxRunMs,
       deferRepair: Boolean(this.options.gapRepairer),
     });
+    signal?.throwIfAborted();
     const backgroundRepairLimit = Math.max(1, this.options.backgroundRepairLimit ?? 8);
     this.queueBackgroundSelfImprove({
       knowledgeSpaceId: input.knowledgeSpaceId,
       sourceIds: input.sourceIds,
       force: true,
       reason: 'reindex',
+      signal,
       limit: Math.min(Math.max(1, input.limit ?? backgroundRepairLimit), backgroundRepairLimit),
       maxRunMs: 30_000,
     }, this.options.backgroundRepairDelayMs ?? 2_000);
+    signal?.throwIfAborted();
     return { scanned: sources.length, enriched, skipped, failed, errors, selfImprovement };
   }
 
@@ -356,9 +371,9 @@ export class KnowledgeSemanticService {
     minDelayMs: () => this.options.backgroundSelfImproveMinDelayMs ?? DEFAULT_SELF_IMPROVE_MIN_DELAY_MS,
     backoffMs: () => this.options.backgroundSelfImproveZeroGapBackoffMs ?? DEFAULT_SELF_IMPROVE_ZERO_GAP_BACKOFF_MS,
     now: () => this.options.now?.() ?? Date.now(),
-    schedule: (callback, delayMs) => {
-      if (this.options.scheduleSeam) this.options.scheduleSeam(callback, delayMs);
-      else scheduleBackground(callback, delayMs);
+    schedule: (callback, delayMs, signal) => {
+      if (this.options.scheduleSeam) this.options.scheduleSeam(callback, delayMs, signal);
+      else scheduleBackground(callback, delayMs, signal);
     },
   });
 
@@ -373,25 +388,37 @@ export class KnowledgeSemanticService {
     this.backgroundScheduler.queue(input, delayMs);
   }
 
+  /** Retire scheduled work synchronously, then drain every admitted background run. */
+  dispose(): Promise<void> { return this.backgroundScheduler.dispose(); }
+
   async selfImprove(
     input: KnowledgeSemanticSelfImproveInput = {},
     runOptions: { readonly stopWhenPaused?: boolean } = {},
   ): Promise<KnowledgeSemanticSelfImproveResult> {
     requireDecisionFeature('automatic semantic knowledge improvement');
+    const signal = input.signal;
     await this.store.init();
-    if (input.deferRepair !== true) {
-      const runKey = selfImprovementRunKey(input);
-      const activeRun = this.activeSelfImprovementRuns.get(runKey);
-      if (activeRun && !input.gapIds?.length) return activeSelfImproveResult(input);
-      const run = this.runSelfImproveUnlocked(input, runOptions);
-      if (!input.gapIds?.length) this.activeSelfImprovementRuns.set(runKey, run);
+    const ownedInput = { ...input, signal };
+    if (ownedInput.deferRepair !== true) {
+      const runKey = selfImprovementRunKey(ownedInput);
+      let ownerRuns = this.activeSelfImprovementRuns.get(signal);
+      const activeRun = ownerRuns?.get(runKey);
+      if (activeRun && !ownedInput.gapIds?.length) return activeSelfImproveResult(ownedInput);
+      const run = this.runSelfImproveUnlocked(ownedInput, runOptions);
+      if (!ownedInput.gapIds?.length) {
+        if (!ownerRuns) { ownerRuns = new Map(); this.activeSelfImprovementRuns.set(signal, ownerRuns); }
+        ownerRuns.set(runKey, run);
+      }
       try {
         return await run;
       } finally {
-        if (this.activeSelfImprovementRuns.get(runKey) === run) this.activeSelfImprovementRuns.delete(runKey);
+        if (ownerRuns?.get(runKey) === run) {
+          ownerRuns.delete(runKey);
+          if (ownerRuns.size === 0 && this.activeSelfImprovementRuns.get(signal) === ownerRuns) this.activeSelfImprovementRuns.delete(signal);
+        }
       }
     }
-    return this.runSelfImproveUnlocked(input, runOptions);
+    return this.runSelfImproveUnlocked(ownedInput, runOptions);
   }
 
   /** True when a background run should stop at the next safe yield point. */

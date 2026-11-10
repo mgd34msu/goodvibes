@@ -109,6 +109,8 @@ import {
 
 interface DaemonHttpRouterContext {
   readonly configManager: ConfigManager;
+  /** Native listener facts, never request Host/Forwarded headers or a stored URL. */
+  readonly listenerBinding?: () => { readonly host: string; readonly port: number; readonly scheme: 'http' | 'https' };
   readonly serviceRegistry: ServiceRegistry;
   readonly userAuth: UserAuthManager;
   readonly agentManager: AgentManager;
@@ -706,7 +708,11 @@ export class DaemonHttpRouter {
         return token ? this.context.describeAuthenticatedPrincipal(token) : null;
       },
       sameOrigins: () => {
-        const binding = readControlPlaneBinding((key) => this.getConfigValue(key));
+        const configured = readControlPlaneBinding((key) => this.getConfigValue(key));
+        const listener = this.context.listenerBinding?.();
+        if (listener && (!Number.isSafeInteger(listener.port) || listener.port <= 0 || listener.port > 65535)) return [];
+        const binding = listener ? { ...configured, hostMode: 'custom', host: listener.host, port: listener.port,
+          tlsMode: listener.scheme === 'https' ? 'self-signed' : 'off' } : configured;
         return (['loopback', 'external'] as const).flatMap((audience) => {
           try { return [new URL(deriveControlPlaneBaseUrl(binding, audience)).origin]; }
           catch { return []; }

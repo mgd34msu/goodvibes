@@ -667,6 +667,7 @@ export function createDaemonFacadeCollaborators(
   });
   batchManager.start();
   const httpRouter = new DaemonHttpRouter({
+    listenerBinding: () => ({ ...options.transportBinding(), scheme: options.tlsState()?.tls ? 'https' : 'http' }),
     settingsAuthority: {
       settingsLifetime: options.settingsLifetime ?? (() => null),
       captureSettingsAdminAuthority: (req) => controlPlaneHelper.captureSettingsAdminAuthority(req),

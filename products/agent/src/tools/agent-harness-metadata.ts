@@ -22,6 +22,14 @@ export interface CommandExecutionPolicy {
 export function describeCommandPolicy(commandName: string): CommandExecutionPolicy {
   const root = commandName.replace(/^\//, '').trim().toLowerCase();
   const confirmation = 'Model command effects require current recorded engine admission. Caller confirmation and request fields grant no authority; owner-specific scope and effect checks remain mandatory.';
+  if (root === 'triggers') {
+    return {
+      effect: 'mixed',
+      confirmation: 'Status is read-only. Migration requires a direct owner-terminal acknowledgment that older instances are closed; a model command or confirmation flag grants no migration authority.',
+      preferredModelTool: `${agentHarnessModes('run_command')} commandName:"triggers"`,
+      boundary: '/triggers status inspects the actual surface supervisor without promoting ownership. /triggers migrate is owner-only and preserves the existing source, scope and explicit older-instances-closed checks; models cannot supply that acknowledgment.',
+    };
+  }
   if (root === 'work-import') {
     return {
       effect: 'mixed',

@@ -237,6 +237,13 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       .map((command) => command.name)
       .sort((a, b) => a.localeCompare(b));
     expect(unknownPolicies).toEqual([]);
+    const triggers = describeCommandPolicy('/triggers');
+    expect(triggers.effect).toBe('mixed');
+    expect(triggers.preferredModelTool).toContain('commandName:"triggers"');
+    expect(triggers.confirmation).toContain('direct owner-terminal acknowledgment');
+    expect(triggers.boundary).toContain('without promoting ownership');
+    expect(triggers.boundary).toContain('models cannot supply that acknowledgment');
+
 
     const missingPreferredRoutes = registry.list()
       .filter((command) => !describeCommandPolicy(command.name).preferredModelTool)

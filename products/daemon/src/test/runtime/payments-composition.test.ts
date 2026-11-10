@@ -384,8 +384,9 @@ test.each(['preflight', 'submit'] as const)('actual product close retains an adm
 function purchasePath(f: ReturnType<typeof fixture>) {
   return join(f.root, 'home', '.goodvibes', 'tui', 'control-plane', 'payments-purchases.json');
 }
-function recordedSubmission(): PurchaseRecord {
-  return { purchaseId: 'old-purchase', atUtc: '2026-11-08T12:00:00.000Z', dayKey: '2026-11-08', timezone: 'UTC',
+function recordedSubmission(atMs: number): PurchaseRecord {
+  const atUtc = new Date(atMs).toISOString();
+  return { purchaseId: 'old-purchase', atUtc, dayKey: atUtc.slice(0, 10), timezone: 'UTC',
     merchantDomain: 'bestbuy.com', item: 'Fixture item', currency: 'USD', itemMinorUnits: 1000, taxMinorUnits: 0,
     feesMinorUnits: 0, shippingMinorUnits: 0, totalMinorUnits: 1000, shippingTierRequested: 'normal', shippingTierUsed: 'normal',
     steppedDown: false, itemPoolDraw: 1000, overagePoolDraw: 0, tolerancePoolDraw: 0, cardLast4: '1111', windowKind: 'veto',
@@ -395,7 +396,9 @@ function recordedSubmission(): PurchaseRecord {
 
 test('actual boot recovery finds the real recorded submission without upgrading unverified to purchased', async () => {
   const f = fixture(); await f.services.ready;
-  const record = recordedSubmission();
+  // The actual composition prunes spend older than two days using Date.now.
+  // Keep this recovery receipt on that same clock, rather than an expiring date.
+  const record = recordedSubmission(Date.now());
   const hold = f.services.budget.reserve({ id: record.purchaseId, itemMinorUnits: record.itemPoolDraw, overageMinorUnits: record.overagePoolDraw, toleranceMinorUnits: record.tolerancePoolDraw,
     limits: readPaymentsServiceConfig(f.options.configManager).limits, nowMs: Date.parse(record.atUtc), timezone: 'UTC', retainUntilSettled: true });
   expect(hold).not.toBeNull(); expect(f.services.budget.commit(record.purchaseId, Date.parse(record.atUtc))).not.toBeNull();
@@ -409,7 +412,7 @@ test('actual boot recovery finds the real recorded submission without upgrading 
     expect(await new DurableCheckoutJournal(journalPath(f)).list()).toEqual([]);
     expect(JSON.stringify(f.deliveries)).toContain('submission is recorded');
     expect(JSON.stringify(f.deliveries)).not.toContain('the order completed');
-    expect(replacement.budget.state().spend).toMatchObject([{ purchaseId: 'old-purchase', itemMinorUnits: 1000 }]);
+    expect(replacement.budget.state().spend).toMatchObject([{ purchaseId: 'old-purchase', itemMinorUnits: 1000, atMs: Date.parse(record.atUtc) }]);
   } finally { await replacement.close(); }
 });
 

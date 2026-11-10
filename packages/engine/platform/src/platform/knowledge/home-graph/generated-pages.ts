@@ -342,10 +342,12 @@ async function refreshHomeGraphDevicePassportNow(
   });
   const factPlan = await factReader.prepare(candidateFacts);
   const assertPageCurrent = () => {
-    assertKnowledgeRestriction(assertCallerCurrent);
-    assertPageInputsCurrent();
-    factPlan.assertCurrent();
-    sourceReader.assertCurrent((id) => store.getSource(id));
+    store.assertRecordSnapshotFrame(() => {
+      assertKnowledgeRestriction(assertCallerCurrent);
+      assertPageInputsCurrent();
+      factPlan.assertCurrent();
+      sourceReader.assertCurrent((id) => store.getSource(id));
+    });
   };
   assertFactQualityCurrent = assertPageCurrent;
   const semanticFacts = candidateFacts.filter((fact) => factPlan.accepts(fact));
@@ -365,17 +367,19 @@ async function refreshHomeGraphDevicePassportNow(
   const markdown = renderDevicePassportPage({ spaceId, device, entities, sources, issues, missingFields, semanticFacts, factPlan });
   const passportId = passportIdentity.id;
   const assertPublicationCurrent = () => {
-    passportIdentity.assertCurrent();
-    for (const check of qualityGuards) check();
-    throwIfAborted(context.signal);
-    assertKnowledgeRestriction(assertCallerCurrent);
-    assertPageInputsCurrent();
-    sourceReader.assertCurrent((id) => store.getSource(id));
-    writeGuard.assertCurrent();
-    // Input-only plans retain source/scoring/identity currentness. The actual
-    // atomic graph publisher activates the complete graph at publication.
-    preparedProfileFacts.assertCurrent();
-    factPlan.assertCurrent();
+    store.assertRecordSnapshotFrame(() => {
+      passportIdentity.assertCurrent();
+      for (const check of qualityGuards) check();
+      throwIfAborted(context.signal);
+      assertKnowledgeRestriction(assertCallerCurrent);
+      assertPageInputsCurrent();
+      sourceReader.assertCurrent((id) => store.getSource(id));
+      writeGuard.assertCurrent();
+      // Input-only plans retain source/scoring/identity currentness. The actual
+      // atomic graph publisher activates the complete graph at publication.
+      preparedProfileFacts.assertCurrent();
+      factPlan.assertCurrent();
+    });
   };
   assertPublicationCurrent();
   const passportInput = prepareObservedKnowledgeNodeInput(store, {

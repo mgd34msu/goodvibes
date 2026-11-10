@@ -27,6 +27,7 @@ import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.js';
 import { HOME_GRAPH_KNOWLEDGE_DB_FILE } from '../platform/src/platform/knowledge/store-config.js';
 import { SQLitePublicationError } from '../platform/src/platform/state/sqlite-store-persistence.js';
+import type { SQLiteStore, SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../platform/src/platform/knowledge/types.js';
 import { withTestTimeout } from './_helpers/test-timeout.js';
 import { homeGraphRepairProfileValues, repairProfileFixtureReading, repairUsefulFixtureReading } from './_helpers/repair-profile-fixture-readings.js';
@@ -170,6 +171,59 @@ function generate(context: Fixture, kind: PageKind, signal?: AbortSignal) {
     ? generateHomeGraphRoomPage({ ...context, input: { areaId }, signal })
     : refreshHomeGraphDevicePassport({ ...context, input: { deviceId }, signal });
 }
+
+test.each([false, true])('passport complete synchronous checks share original native images without skipping callback mutation = %s', async mutateSource => {
+  const context = await fixture(), source = await addSource(context, 'framed-passport-reference', { profile: true });
+  readings();
+  const sqlite = (context.store as unknown as { sqlite: SQLiteStore }).sqlite;
+  const privateImages = sqlite as unknown as { openPrivateReadImage(...args: unknown[]): SqlDatabase };
+  const open = privateImages.openPrivateReadImage.bind(sqlite), frame = context.store.assertRecordSnapshotFrame.bind(context.store);
+  let opened = 0, depth = 0, callbacks = 0, mutateNext = false, probed = false;
+  const frameImages: number[] = [];
+  const opening = spyOn(privateImages, 'openPrivateReadImage').mockImplementation((...args) => { opened++; return open(...args); });
+  const framing = spyOn(context.store, 'assertRecordSnapshotFrame').mockImplementation(assertion => {
+    const outer = depth++ === 0, before = opened;
+    try { return frame(assertion); }
+    finally { depth--; if (outer) frameImages.push(opened - before); }
+  });
+  const originalCreate = context.artifactStore.createForPublication.bind(context.artifactStore);
+  const creating = spyOn(context.artifactStore, 'createForPublication').mockImplementation(async (input, ownership) => {
+    probed = true;
+    const before = frameImages.length, beforeCallbacks = callbacks;
+    mutateNext = mutateSource;
+    try {
+      if (!ownership?.assertCurrent) throw new Error('Actual artifact admission must retain its original page owner.');
+      ownership.assertCurrent();
+      expect(callbacks).toBeGreaterThan(beforeCallbacks);
+      // The generic materializer calls both original authority and graph
+      // checks. Each complete synchronous check keeps all nested reads in one
+      // original native image, without sharing it across this await or write.
+      expect(frameImages.slice(before)).toEqual([1, 1]);
+    } finally { if (mutateSource) expect(callbacks).toBeGreaterThan(beforeCallbacks); }
+    return originalCreate(input, ownership);
+  });
+  const bytes = readFileSync(context.store.storagePath), artifacts = context.artifactStore.list().map(artifact => artifact.id);
+  const owner = () => {
+    callbacks++;
+    if (mutateNext) {
+      mutateNext = false;
+      sqlite.run('UPDATE knowledge_sources SET summary = ? WHERE id = ?', ['A changed native source during the original callback.', source.id]);
+    }
+  };
+  try {
+    const pending = refreshHomeGraphDevicePassport({ ...context, input: { deviceId }, assertCurrent: owner });
+    if (mutateSource) {
+      await expect(pending).rejects.toMatchObject({ reason: 'stale' });
+      expect(readFileSync(context.store.storagePath)).toEqual(bytes);
+      expect(context.artifactStore.list().map(artifact => artifact.id)).toEqual(artifacts);
+      expect(context.store.listSourcesInSpace(spaceId).some(row => row.metadata.projectionKind === 'device-passport')).toBe(false);
+    } else {
+      const page = await pending;
+      expect(page.source).toBeDefined(); expect(page.markdown).toContain('Wi-Fi');
+    }
+    expect(probed).toBe(true);
+  } finally { creating.mockRestore(); framing.mockRestore(); opening.mockRestore(); }
+});
 
 test.each([false, true])('passport input plans survive a logical thirty-second delay with source revoked = %s', async revokeSource => {
   const context = await fixture();

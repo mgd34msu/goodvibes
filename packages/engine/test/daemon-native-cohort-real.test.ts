@@ -93,7 +93,10 @@ nativeTest('an equal-byte foreign inode substituted inside a real native rename 
   expect(replaced).toBe(true); expect(failure).toBeInstanceOf(UpdateTransactionError);
   if (!(failure instanceof UpdateTransactionError)) throw new Error('Expected an authentic uncertain native publication receipt');
   expect(failure.receipt.committed).toBe(false); expect(failure.receipt.recoveryRequired).toBe(true);
-  expect(failure.message).toContain('rename result is unknown');
+  // An open original descriptor may detect its unlinked inode before the
+  // pathname comparison. Both are real post-rename ownership failures.
+  expect(failure.receipt.phase).toBe('commit');
+  expect(failure.message).toContain('cohort not committed; recovery required, blind retry is fenced');
   const nextPrimary = f.next.members[0], oldPrimary = f.old.members[0];
   if (!nextPrimary || !oldPrimary) throw new Error('Native fixture must provide both primary executable payloads');
   expect(readFileSync(f.execPath)).toEqual(nextPrimary.bytes);

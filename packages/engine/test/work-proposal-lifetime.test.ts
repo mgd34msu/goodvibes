@@ -8,6 +8,7 @@ import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { DaemonServer } from '../platform/src/platform/daemon/facade.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
 import { WorkProposalStore } from '../platform/src/platform/agents/work-proposal-store.ts';
+import { prepareConfiguredProjectContext } from '../platform/src/platform/knowledge/project-planning/configured-project.ts';
 
 const roots: string[] = [];
 const stores: WorkProposalStore[] = [];
@@ -54,6 +55,7 @@ for (const ending of ['stop', 'failed-start'] as const) test(`${ending} releases
   const root = await mkdtemp(join(tmpdir(), 'proposal-daemon-')); roots.push(root);
   seedBenchmarkCache(root, 'goodvibes');
   const configManager = new ConfigManager({ surfaceRoot: 'daemon', configDir: join(root, 'cfg'), workingDir: root, homeDir: root });
+  await prepareConfiguredProjectContext(configManager, root, undefined, { activate: true });
   const dir = configManager.getControlPlaneConfigDir(); await mkdir(dir, { recursive: true });
   await writeFile(join(dir, 'work-proposals.json'), JSON.stringify({ version: 1, proposals: [{ ...input, id: 'wp_fixture', createdAt: Date.now(), expiresAt: Date.now() + 60_000, status: 'pending', delivered: true }] }));
   const timers = track(); let daemon: DaemonServer | undefined;
@@ -88,6 +90,7 @@ for (const exit of ['stop', 'failed-start'] as const) test(`${exit} drains admit
   const root = await mkdtemp(join(tmpdir(), 'proposal-write-drain-')); roots.push(root);
   seedBenchmarkCache(root, 'goodvibes');
   const configManager = new ConfigManager({ surfaceRoot: 'daemon', configDir: join(root, 'cfg'), workingDir: root, homeDir: root });
+  await prepareConfiguredProjectContext(configManager, root, undefined, { activate: true });
   const directory = configManager.getControlPlaneConfigDir();
   let bindAttempts = 0;
   const daemon = new DaemonServer({ configManager, workingDir: root, homeDirectory: root, daemonHomeDir: join(root, 'daemon'), port: 0, host: '127.0.0.1', serveFactory: () => { bindAttempts++; throw new Error('synthetic restart bind'); } });

@@ -1,7 +1,7 @@
 /** Actual Home Graph source tuple migration/producer/ownership source regressions. UNRUN. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
@@ -88,22 +88,19 @@ test('ambiguous known URI holds before artifact creation or any new source write
   finally { create.mockRestore(); }
 });
 
-test('failed source publication preserves an unpublished family then cleans only its own original after a genuine clean write', async () => {
+test('failed source publication cleans its unused original from the unchanged empty family', async () => {
   const f = await fixture(), createNative = f.artifactStore.createForPublication.bind(f.artifactStore); let created = '';
   const create = spyOn(f.artifactStore, 'createForPublication').mockImplementation(async () => { const publication = await createNative({ kind: 'document', mimeType: 'text/plain', filename: 'manual.txt', text: 'A reference manual.' }); created = publication.artifact.id; return publication; });
   const write = spyOn(f.store, 'applyPreparedIngest').mockRejectedValue(new Error('Original publication failure'));
-  try { await expect(withDecisionModelPolicy(() => 'Classic - Off', () => f.service.ingestUrl({ installationId: 'house', url }))).rejects.toThrow('Original publication failure'); expect(created).not.toBe(''); expect(f.artifactStore.get(created)).not.toBeNull(); expect(f.store.listSources()).toHaveLength(0);
-    const original = f.artifactStore.captureOriginal(created);
-    expect(await f.store.cleanupUnreferencedArtifact(original)).toBe('held'); expect(f.artifactStore.get(created)).not.toBeNull();
-    await f.store.upsertSource({ id: 'unrelated-clean-publication', connectorId: 'manual', sourceType: 'manual', status: 'indexed' });
-    // The acknowledged publication makes the reference image available. Either
-    // the owned clean-write retry or this maintenance call deletes that original.
-    const deadline = Date.now() + 5_000;
-    while (f.artifactStore.get(created) && Date.now() < deadline) {
-      await f.store.cleanupUnreferencedArtifact(original);
-      if (f.artifactStore.get(created)) await new Promise(resolve => setTimeout(resolve, 10));
-    }
-    expect(f.artifactStore.get(created)).toBeNull(); expect(f.store.getSource('unrelated-clean-publication')).not.toBeNull(); }
+  try {
+    await expect(withDecisionModelPolicy(() => 'Classic - Off', () => f.service.ingestUrl({ installationId: 'house', url }))).rejects.toThrow('Original publication failure');
+    expect(created).not.toBe('');
+    // The writer threw before starting any publication. Read-only initialization
+    // leaves a genuinely empty family, rather than an uncertain pending write.
+    expect(f.artifactStore.get(created)).toBeNull();
+    expect(f.store.listSources()).toHaveLength(0);
+    expect(existsSync(f.dbPath)).toBe(false);
+  }
   finally { create.mockRestore(); write.mockRestore(); }
 });
 

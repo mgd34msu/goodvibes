@@ -28,15 +28,23 @@ test('Home Graph map cannot publish a selected source after an operator replaces
   const { service, store } = createHomeGraphService();
   await service.syncSnapshot({ installationId: 'map-record', devices: [{ id: 'vela', name: 'Vela' }], pageAutomation: { enabled: false } });
   const source = store.listSources().find(row => row.metadata.homeGraphSourceKind === 'snapshot')!;
+  const writer = new KnowledgeStore({ dbPath: store.storagePath });
+  await writer.init();
   const init = store.init.bind(store);
   let starts = 0;
+  let replacementError: unknown;
   const changed = spyOn(store, 'init').mockImplementation(async () => {
     await init();
-    if (++starts === 2) await store.upsertSource({ ...source, summary: 'Operator correction', metadata: { ...source.metadata, correction: 'operator' } });
+    if (++starts === 2) {
+      try { await writer.replaceSourceRecord({ ...source, summary: 'Operator correction' }); }
+      catch (error) { replacementError = error; throw error; }
+    }
   });
   try { await expect(service.map({ installationId: 'map-record' })).rejects.toMatchObject({ reason: 'stale' }); }
-  finally { changed.mockRestore(); }
-  expect(store.getSource(source.id)?.summary).toBe('Operator correction');
+  finally { changed.mockRestore(); await writer.close(); }
+  expect(starts).toBe(2);
+  expect(replacementError).toBeUndefined();
+  expect(store.getSourceSnapshot({ id: source.id }).source?.summary).toBe('Operator correction');
 });
 
 test('Home Graph map keeps the original persisted relation generation through scope preparation', async () => {

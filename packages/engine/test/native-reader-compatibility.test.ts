@@ -229,6 +229,16 @@ for (const profile of ['old-version', 'same-version-unknown', 'same-version-miss
       await expect(apply).rejects.toBeInstanceOf(UpdateTransactionError); expect(checked).toBe(true);
       for (const [path, bytes] of Object.entries(previous.installation(execPath))) expect(memory.files.get(path)).toEqual(bytes);
       expect(memory.mutations.filter(operation => operation.startsWith('rename:'))).toEqual([]);
-    } else { await apply; expect(checked).toBe(hasRequirement); for (const [path, bytes] of Object.entries(candidate.installation(execPath))) expect(memory.files.get(path)).toEqual(bytes); }
+    } else {
+      await apply; expect(checked).toBe(hasRequirement);
+      for (const [path, bytes] of Object.entries(candidate.installation(execPath))) {
+        const actual = memory.files.get(path);
+        if (!actual) throw new Error(`Missing actual installed fixture member: ${path}`);
+        // Installation receipts are rendered locally; payload bytes remain
+        // exact release bytes and the complete parsed receipt must agree.
+        if (path === '/native-reader-fixture/daemon-installation.json') expect(JSON.parse(actual.toString())).toEqual(JSON.parse(bytes.toString()));
+        else expect(actual).toEqual(bytes);
+      }
+    }
   });
 }

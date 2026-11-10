@@ -93,15 +93,18 @@ test('successful contract status does not finish scoped hook before completion-s
   expect(await result).toEqual({ ok: true, additionalContext: 'answer' });
 });
 
-test('abort inside the owner spawn event cancels the correct returned record and joins it', async () => {
+test('abort inside the reserved spawn event cancels that record before contract admission and joins it', async () => {
   const controller = new AbortController();
   const h = setup({ plan: oneUnitPlan(1), scripts: {} });
   const register = h.messageBus.registerAgent.bind(h.messageBus);
-  h.messageBus.registerAgent = (...args) => { controller.abort(); return register(...args); };
+  let reservedId: string | undefined;
+  h.messageBus.registerAgent = (...args) => { reservedId = args[0].agentId; controller.abort(); return register(...args); };
   expect((await run(hook, event, h.manager, { signal: controller.signal })).ok).toBe(false);
-  const owner = h.manager.list().find((record) => record.contractRole === 'owner')!;
-  expect(owner.status).toBe('cancelled');
-  expect(h.store.get(owner.contractId!)?.status).toBe('cancelled');
+  if (!reservedId) throw new Error('The real spawn reservation did not publish its event');
+  const record = h.manager.getStatus(reservedId);
+  expect(record?.status).toBe('cancelled');
+  expect(record?.contractId).toBeUndefined();
+  expect(h.store.list()).toHaveLength(0);
   expect(h.manager.list()).toHaveLength(1);
 });
 

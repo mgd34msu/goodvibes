@@ -22,13 +22,15 @@ async function fixture(persisted = true) {
   const artifact = await artifacts.create({ kind: 'document', text: 'generated body', filename: 'page.md', retentionMs: 0 });
   return { root, artifacts, store, artifact };
 }
-test('an initialized but unpublished family preserves its artifact until a genuine clean publication permits retry', async () => {
+test('a pending unpublished family preserves its artifact until a genuine clean publication permits retry', async () => {
   const f = await fixture(false), record = f.artifacts.getRecord(f.artifact.id)!;
-  expect(existsSync(f.store.storagePath)).toBe(false);
-  expect(await f.store.cleanupUnreferencedArtifact(f.artifacts.captureOriginal(f.artifact.id))).toBe('held');
-  expect(existsSync(record.contentPath)).toBe(true);
-  expect(existsSync(f.store.storagePath)).toBe(false);
-  await f.store.upsertSource({ id: 'first-clean-source', connectorId: 'test', sourceType: 'document', status: 'indexed', title: 'First genuine publication' });
+  await f.store.batch(async () => {
+    await f.store.upsertSource({ id: 'first-clean-source', connectorId: 'test', sourceType: 'document', status: 'indexed', title: 'First genuine publication' });
+    expect(existsSync(f.store.storagePath)).toBe(false);
+    expect(await f.store.cleanupUnreferencedArtifact(f.artifacts.captureOriginal(f.artifact.id))).toBe('held');
+    expect(existsSync(record.contentPath)).toBe(true);
+    expect(existsSync(f.store.storagePath)).toBe(false);
+  });
   const published = readFileSync(f.store.storagePath);
   for (let turn = 0; existsSync(record.contentPath) && turn < 100; turn++) await new Promise<void>(resolve => setImmediate(resolve));
   expect(existsSync(record.contentPath)).toBe(false);

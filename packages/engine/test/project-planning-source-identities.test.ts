@@ -11,6 +11,7 @@ import * as helpers from '../platform/src/platform/knowledge/project-planning/he
 import { projectKnowledgeSpaceId } from '../platform/src/platform/knowledge/spaces.js';
 import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 import { StoreSchemaDowngradeError } from '../platform/src/platform/state/store-versioning.js';
+import type { KnowledgeSourceRecord } from '../platform/src/platform/knowledge/types.js';
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -27,6 +28,12 @@ async function fixture() {
 
 const state = { id: 'current', goal: 'Keep the project plan discoverable' };
 const identity = { spaceId: projectKnowledgeSpaceId('alpha'), kind: 'state' as const, artifactId: 'current' };
+
+function sourceInput(source: KnowledgeSourceRecord) {
+  // Stored host clocks are not caller input to a semantic publication.
+  const { createdAt: _createdAt, updatedAt: _updatedAt, lastCrawledAt: _lastCrawledAt, ...input } = source;
+  return input;
+}
 
 test('fresh source identity is minted once and resolved by its persisted tuple across updates and restart', async () => {
   const f = await fixture();
@@ -66,7 +73,7 @@ test('owned publication refuses a second opaque ID for an already committed plan
   const first = await f.service.upsertState({ projectId: 'alpha', state });
   const source = first.source!;
   await expect(f.store.upsertOwnedCanonicalSources([{
-    input: { ...source, id: 'competing-new-source' }, generation: null,
+    input: { ...sourceInput(source), id: 'competing-new-source' }, generation: null,
   }], () => {}, () => {})).rejects.toMatchObject({ reason: 'state-changed' });
   expect(f.store.getPlanningSourceSnapshot(identity).source?.id).toBe(source.id);
   expect(f.store.getSourceSnapshot({ id: 'competing-new-source' }).source).toBeNull();
@@ -84,7 +91,7 @@ test('a single batch cannot publish duplicate absent tuples or overwrite one sel
   const seeded = await f.service.upsertState({ projectId: 'alpha', state });
   const source = seeded.source!;
   const metadata = { ...source.metadata, planningArtifactId: 'new-state' };
-  const input = { ...source, metadata, canonicalUri: helpers.projectPlanningCanonicalUri(identity.spaceId, 'state', 'new-state') };
+  const input = { ...sourceInput(source), metadata, canonicalUri: helpers.projectPlanningCanonicalUri(identity.spaceId, 'state', 'new-state') };
   await expect(f.store.upsertOwnedCanonicalSources([
     { input: { ...input, id: 'first-new-source' }, generation: null },
     { input: { ...input, id: 'second-new-source' }, generation: null },
@@ -94,8 +101,8 @@ test('a single batch cannot publish duplicate absent tuples or overwrite one sel
   expect(f.store.getSourceSnapshot({ id: 'second-new-source' }).source).toBeNull();
   const original = f.store.getPlanningSourceSnapshot(identity);
   await expect(f.store.upsertOwnedCanonicalSources([
-    { input: source, generation: original.generation },
-    { input: { ...source, summary: 'must not overwrite the first write' }, generation: original.generation },
+    { input: sourceInput(source), generation: original.generation },
+    { input: { ...sourceInput(source), summary: 'must not overwrite the first write' }, generation: original.generation },
   ], () => {}, () => {})).rejects.toMatchObject({ reason: 'state-changed' });
   expect(f.store.getPlanningSourceSnapshot(identity)).toEqual(original);
 });

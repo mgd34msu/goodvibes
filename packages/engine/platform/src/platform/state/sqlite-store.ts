@@ -577,22 +577,26 @@ interface NativeScalarExecutable {
 }
 // Executable plans only. Every invocation still steps fresh native values.
 const nativeFrameComparisons = new WeakMap<NativeProbePlans, NativeFrameComparison>();
+// The scalar equality owns the complete original values, including bigint
+// precision. Its six unconsumed native fields supply original SQLite storage
+// types without calling an overloadable SQL function or decoding row bodies.
+const nativeFrameComparisonTypes = nativeFreeze([1, 1, 1, 3, 3, 1, 1]);
+const nativeFrameComparisonColumns = nativeFreeze(['frame_matches', 'read_uncommitted', 'seq', 'name', 'file', 'data_version', 'schema_version']);
 function nativeFrameComparisonSql(probe: DatabaseProbe): string | undefined {
   if (!probe.main || !probe.signature) return undefined;
   const literal = (value: string) => `'${value.replaceAll("'", "''")}'`;
-  // Unknown replacements for typeof or its introspection table use the
-  // complete original probe; they cannot grant native type authority.
+  // Native column_type checks the actual witness types. No replaceable SQL
+  // typeof call or function-registry enumeration is part of this comparison.
   return `SELECT CASE
  WHEN EXISTS(SELECT 1 FROM main.sqlite_schema WHERE name COLLATE NOCASE IN
- ('pragma_read_uncommitted','pragma_database_list','pragma_data_version','pragma_schema_version','pragma_function_list'))
- OR EXISTS(SELECT 1 FROM main.pragma_function_list() WHERE name COLLATE NOCASE = 'typeof' AND builtin = 0) THEN 2
- WHEN typeof(r.read_uncommitted) = 'integer' AND r.read_uncommitted = 0
- AND typeof(d.seq) = 'integer' AND d.seq = 0
- AND typeof(d.name) = 'text' AND d.name COLLATE BINARY = 'main'
- AND typeof(d.file) = 'text' AND d.file COLLATE BINARY = ${literal(probe.main.file)}
- AND typeof(v.data_version) = 'integer' AND v.data_version = ${probe.main.dataVersion}
- AND typeof(s.schema_version) = 'integer' AND s.schema_version = ${probe.main.schemaVersion}
- THEN 1 ELSE 0 END AS frame_matches
+ ('pragma_read_uncommitted','pragma_database_list','pragma_data_version','pragma_schema_version')) THEN 2
+ WHEN r.read_uncommitted = 0 AND d.seq = 0
+ AND d.name COLLATE BINARY = 'main'
+ AND d.file COLLATE BINARY = ${literal(probe.main.file)}
+ AND v.data_version = ${probe.main.dataVersion}
+ AND s.schema_version = ${probe.main.schemaVersion}
+ THEN 1 ELSE 0 END AS frame_matches,
+ r.read_uncommitted,d.seq,d.name,d.file,v.data_version,s.schema_version
  FROM main.pragma_read_uncommitted() AS r CROSS JOIN main.pragma_database_list() AS d
  CROSS JOIN main.pragma_data_version() AS v CROSS JOIN main.pragma_schema_version() AS s ORDER BY d.seq`;
 }
@@ -618,9 +622,12 @@ function matchesNativeFrameProbe(raw: NativeSqlDatabase, plans: NativeProbePlans
     const result: ReturnType<NativeSqlDatabase['exec']> = nativeApply(comparison.execution.execute, raw, [comparison.sql, undefined, { useBigInt: true }]);
     assertDependencies();
     const packet = result[0], row = packet?.values[0];
-    if (result.length !== 1 || !packet || packet.columns.length !== 1
-      || packet.columns[0] !== 'frame_matches' || packet.values.length !== 1
-      || !row || row.length !== 1) return undefined;
+    if (result.length !== 1 || !packet || packet.columns.length !== nativeFrameComparisonTypes.length
+      || packet.values.length !== 1 || !row || row.length !== nativeFrameComparisonTypes.length) return undefined;
+    for (let index = 0; index < nativeFrameComparisonTypes.length; index++) {
+      if (packet.columns[index] !== nativeFrameComparisonColumns[index]
+        || typeof row[index] !== (nativeFrameComparisonTypes[index] === 1 ? 'bigint' : 'string')) return undefined;
+    }
     const value = row[0];
     if (value !== 1n && value !== 0n) return undefined;
     recognized = true;
@@ -730,6 +737,12 @@ function withPrivateNativeScalarPointer<T>(state: OwnedSqlDatabase, engine: SqlJ
   } catch (error) { dispose(); throw error; }
 }
 
+function nativeFrameWitnessTypesMatch(runtime: NativeScalarRuntime, pointer: number): boolean {
+  for (let index = 0; index < nativeFrameComparisonTypes.length; index++) {
+    if (runtime.type(pointer, index) !== nativeFrameComparisonTypes[index]) return false;
+  }
+  return true;
+}
 function preparePrivateNativeScalar(state: OwnedSqlDatabase, engine: SqlJsStatic, sql: string): NativeScalarExecutable | undefined {
   return withPrivateNativeScalarPointer(state, engine, sql, (pointer, dispose, current, currentNative, runtime, birth) => {
     const binding = nativeScalarTextBinding;
@@ -770,8 +783,9 @@ function preparePrivateNativeScalar(state: OwnedSqlDatabase, engine: SqlJsStatic
         try {
           const first = runtime.step(pointer);
           current(assertDependencies);
-          if (first === 100 && runtime.count(pointer) === 1 && runtime.dataCount(pointer) === 1
-            && runtime.type(pointer, 0) === 1 && runtime.decode(runtime.name(pointer, 0)) === 'frame_matches') {
+          if (first === 100 && runtime.count(pointer) === nativeFrameComparisonTypes.length
+            && runtime.dataCount(pointer) === nativeFrameComparisonTypes.length
+            && nativeFrameWitnessTypesMatch(runtime, pointer) && runtime.decode(runtime.name(pointer, 0)) === 'frame_matches') {
             const value = runtime.value(pointer, 0);
             current(assertDependencies);
             if ((value === 0 || value === 1) && runtime.step(pointer) === 101) result = value === 1;
@@ -799,8 +813,9 @@ function preparePrivateNativeScalar(state: OwnedSqlDatabase, engine: SqlJsStatic
         try {
           const first = runtime.step(pointer);
           currentNative(assertPairDependencies);
-          if (first === 100 && runtime.count(pointer) === 1 && runtime.dataCount(pointer) === 1
-            && runtime.type(pointer, 0) === 1 && alias.matches(runtime.name(pointer, 0)) === true) {
+          if (first === 100 && runtime.count(pointer) === nativeFrameComparisonTypes.length
+            && runtime.dataCount(pointer) === nativeFrameComparisonTypes.length
+            && nativeFrameWitnessTypesMatch(runtime, pointer) && alias.matches(runtime.name(pointer, 0)) === true) {
             const value = runtime.value(pointer, 0);
             currentNative(assertPairDependencies);
             if ((value === 0 || value === 1) && runtime.step(pointer) === 101) result = value === 1;

@@ -142,7 +142,7 @@ test('a native alias commit-and-restore remains held although final row bytes ar
   } finally { alias.close(); }
 });
 
-test('a replaced SQL typeof uses original complete observations without invoking the replacement', async () => {
+test('an unused replaced SQL typeof is never invoked by native equality or complete observations', async () => {
   const { sqlite, currentRaw, read } = await fixture(true); let invoked = 0;
   expect(() => sqlite.assertPersistedReadFrame(() => {
     expect(read()).toEqual([['original', 'Complete original source']]);
@@ -300,7 +300,7 @@ function nativeRegistry(raw: NativeDatabase): object {
 
 test('a genuine scalar preparation error retains complete native fallback and releases its unsuccessful preparation', async () => {
   const { sqlite, filename, liveStatements, read } = await fixture(true);
-  sqlite.run('CREATE TABLE pragma_function_list(unrelated TEXT)');
+  sqlite.run('CREATE TABLE pragma_read_uncommitted(unrelated TEXT)');
   await sqlite.save();
   const before = readFileSync(filename);
   expect(() => sqlite.assertPersistedReadFrame(() => {
@@ -898,7 +898,7 @@ test('a genuine unchanged native descriptor restamp remains eligible for fresh c
 
 
 type AliasNativeExport = '_sqlite3_bind_text' | '_sqlite3_column_name' | '_sqlite3_column_double'
-  | '_sqlite3_prepare_v2' | '_sqlite3_finalize';
+  | '_sqlite3_prepare_v2' | '_sqlite3_finalize' | '_sqlite3_column_type' | '_sqlite3_column_count' | '_sqlite3_data_count' | '_sqlite3_step';
 interface AliasNativeCall {
   readonly module: object;
   readonly args: readonly number[];
@@ -932,7 +932,8 @@ async function aliasNativeFixture(hooks: Partial<Record<AliasNativeExport, Alias
     } });
     for (const key of Object.keys(hooks)) {
       if (key !== '_sqlite3_bind_text' && key !== '_sqlite3_column_name' && key !== '_sqlite3_column_double'
-        && key !== '_sqlite3_prepare_v2' && key !== '_sqlite3_finalize') throw new Error('Unknown native acquisition control');
+        && key !== '_sqlite3_prepare_v2' && key !== '_sqlite3_finalize' && key !== '_sqlite3_column_type'
+        && key !== '_sqlite3_column_count' && key !== '_sqlite3_data_count' && key !== '_sqlite3_step') throw new Error('Unknown native acquisition control');
       const hook = hooks[key];
       if (!hook) throw new Error('Missing native acquisition control');
       const original = own(SQL, key), value: unknown = original?.value;
@@ -963,6 +964,97 @@ async function aliasNativeFixture(hooks: Partial<Record<AliasNativeExport, Alias
     if (!transferred) restoreExports();
   }
 }
+
+test('the original scalar steps seven native type witnesses but reads only its exact scalar value without a SQL function scan', async () => {
+  let armed = false; const types: Array<{ pointer: number; column: number; type: number }> = [], values: Array<{ pointer: number; column: number }> = [];
+  const pointers = new Set<number>(), widths: number[] = [], queries: string[] = [];
+  const { sqlite, read } = await aliasNativeFixture({
+    _sqlite3_prepare_v2(call) {
+      const query = aliasNativeText(call.module, call.args[1] ?? 0);
+      if (query.includes('AS frame_matches')) queries.push(query);
+      return call.invoke();
+    },
+    _sqlite3_column_name(call) {
+      const result = call.invoke();
+      if (aliasNativeText(call.module, result) === 'frame_matches') pointers.add(call.args[0] ?? 0);
+      return result;
+    },
+    _sqlite3_column_type(call) {
+      const result = call.invoke();
+      if (armed) types.push({ pointer: call.args[0] ?? 0, column: call.args[1] ?? -1, type: result });
+      return result;
+    },
+    _sqlite3_column_double(call) {
+      if (armed) values.push({ pointer: call.args[0] ?? 0, column: call.args[1] ?? -1 });
+      return call.invoke();
+    },
+    _sqlite3_column_count(call) { const result = call.invoke(); if (armed && result === 7) widths.push(result); return result; },
+    _sqlite3_data_count(call) { const result = call.invoke(); if (armed && result === 7) widths.push(result); return result; },
+  });
+  sqlite.assertPersistedReadFrame(() => {
+    expect(read()).toEqual([['original', 'Complete original source']]); armed = true;
+    sqlite.assertPersistedReadFrame(() => { expect(read()).toEqual([['original', 'Complete original source']]); });
+    armed = false;
+  });
+  const actualTypes = types.filter(value => pointers.has(value.pointer));
+  expect(actualTypes.length).toBeGreaterThan(0); expect(actualTypes.length % 7).toBe(0);
+  for (let index = 0; index < actualTypes.length; index++) {
+    expect(actualTypes[index]?.column).toBe(index % 7);
+    expect(actualTypes[index]?.type).toBe([1, 1, 1, 3, 3, 1, 1][index % 7]);
+  }
+  const actualValues = values.filter(value => pointers.has(value.pointer));
+  expect(actualValues.length).toBeGreaterThan(0); expect(actualValues.every(value => value.column === 0)).toBe(true);
+  expect(widths.length).toBeGreaterThan(0); expect(queries.length).toBeGreaterThan(0);
+  expect(queries.every(query => !query.includes('typeof(') && !query.includes('pragma_function_list'))).toBe(true);
+});
+
+test.each([1, 2, 3, 4, 5, 6])('an actual changed native type witness at column %s cannot hide a callback mode mutation', async column => {
+  let armed = false, mutated = false; let currentRaw: (() => NativeDatabase) | undefined;
+  const { sqlite, filename, read, heldError, ...native } = await aliasNativeFixture({
+    _sqlite3_column_type(call) {
+      const result = call.invoke();
+      if (armed && !mutated && call.args[1] === column) {
+        mutated = true; currentRaw!().run('PRAGMA read_uncommitted=1');
+        return result === 1 ? 3 : 1;
+      }
+      return result;
+    },
+  });
+  currentRaw = native.currentRaw;
+  const before = readFileSync(filename); let consumed = false;
+  expect(() => sqlite.assertPersistedReadFrame(() => {
+    expect(read()).toEqual([['original', 'Complete original source']]); armed = true;
+    sqlite.assertPersistedReadFrame(() => { read(); consumed = true; });
+  })).toThrow(heldError);
+  expect(mutated).toBe(true); expect(consumed).toBe(false); expect(readFileSync(filename)).toEqual(before);
+});
+
+test('an extra native result row cannot hide a mode mutation or keep its detached pointer alive', async () => {
+  let armed = false, extra = false, main = 0; let currentRaw: (() => NativeDatabase) | undefined;
+  const released: number[] = [];
+  const { sqlite, filename, read, heldError, ...native } = await aliasNativeFixture({
+    _sqlite3_column_name(call) {
+      const result = call.invoke(); if (aliasNativeText(call.module, result) === 'frame_matches') main = call.args[0] ?? 0;
+      return result;
+    },
+    _sqlite3_step(call) {
+      const result = call.invoke();
+      if (armed && !extra && call.args[0] === main && result === 101) {
+        extra = true; currentRaw!().run('PRAGMA read_uncommitted=1'); return 100;
+      }
+      return result;
+    },
+    _sqlite3_finalize(call) { released.push(call.args[0] ?? 0); return call.invoke(); },
+  });
+  currentRaw = native.currentRaw;
+  const before = readFileSync(filename); let consumed = false;
+  expect(() => sqlite.assertPersistedReadFrame(() => {
+    expect(read()).toEqual([['original', 'Complete original source']]); armed = true;
+    sqlite.assertPersistedReadFrame(() => { read(); consumed = true; });
+  })).toThrow(heldError);
+  expect(extra).toBe(true); expect(consumed).toBe(false); expect(released.filter(pointer => pointer === main)).toHaveLength(1);
+  expect(readFileSync(filename)).toEqual(before); expect(native.liveStatements()).toEqual([]);
+});
 
 function aliasNativeNumber(module: object, key: string, args: readonly number[]): number {
   const value: unknown = Object.getOwnPropertyDescriptor(module, key)?.value;

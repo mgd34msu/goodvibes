@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { DecisionModelPolicyChangedError, withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { noul } from '@goodvibes-jev/judgment';
 import { createSettingsJudgmentPort, judgmentConfigFromSettings, type JudgmentSettingsSource } from '../platform/src/platform/runtime/judgment-services.ts';
 
@@ -60,9 +60,11 @@ describe('judgment settings reload captures one configuration per call', () => {
     const controller = new AbortController(); let policy = 'Default - On';
     try {
       await withDecisionModelPolicy(() => policy, async () => {
-        await expect(createSettingsJudgmentPort(source).ask({ ...request, signal: controller.signal, beforeAttempt() {
+        const pending = createSettingsJudgmentPort(source).ask({ ...request, signal: controller.signal, beforeAttempt() {
           if (changed === 'cancellation') controller.abort(); else policy = 'Classic - Off';
-        } })).rejects.toMatchObject({ kind: changed === 'cancellation' ? 'aborted' : 'rejected' });
+        } });
+        if (changed === 'cancellation') await expect(pending).rejects.toMatchObject({ kind: 'aborted' });
+        else await expect(pending).rejects.toBeInstanceOf(DecisionModelPolicyChangedError);
       });
       expect(target.calls).toHaveLength(0);
     } finally { controller.abort(); target.stop(); }

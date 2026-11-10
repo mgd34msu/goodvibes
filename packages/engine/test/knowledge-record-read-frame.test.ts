@@ -1563,7 +1563,7 @@ test('a public borrowed database callback still poisons a warmed equality frame 
       expect(db.exec('SELECT title FROM knowledge_sources WHERE id=?', [source.id])[0]?.values[0]?.[0]).toBe('Callback-only image');
     });
     store.matchesExpectedRecordReadsets(input); consumed = true;
-  })).toThrow(SQLiteObservationRetiredError);
+  })).toThrow(KnowledgeRecordAdmissionHeldError);
   expect(callbacks).toBe(1); expect(consumed).toBe(false);
   expect(readFileSync(store.storagePath)).toEqual(bytes); expect(store.getSource(source.id)).toBe(source);
   expect(store.matchesExpectedRecordReadsets(input)).toEqual([true]);

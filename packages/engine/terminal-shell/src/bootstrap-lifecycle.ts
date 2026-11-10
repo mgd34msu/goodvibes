@@ -89,6 +89,18 @@ export function registerTerminalKnowledgeCleanup(
 ): void {
   registry.add('agent knowledge store', ports.closeAgentStore);
   registry.add('home graph knowledge store', ports.closeHomeGraphStore);
+  registerTerminalKnowledgeDrains(registry, ports);
+}
+
+/** Store creators register their owners immediately, then add these dependent
+ * drains in the same order used by the combined cleanup compatibility helper. */
+export function registerTerminalKnowledgeDrains(
+  registry: { add(label: string, cleanup: () => void | Promise<void>): void },
+  ports: {
+    readonly rewindDrain: () => void | Promise<void>;
+    readonly homeGraphDrain: () => void | Promise<void>;
+  },
+): void {
   registry.add('conversation rewind drain', ports.rewindDrain);
   registry.add('home graph drain', ports.homeGraphDrain);
 }

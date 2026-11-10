@@ -1,4 +1,3 @@
-import { registerTerminalKnowledgeCleanup } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { createTerminalMemoryAdmission } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
 /**
@@ -139,6 +138,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const disposalScope = createAsyncDisposalScope('RuntimeServices');
   let homeGraphClosing: Promise<void> | undefined;
   let conversationRewindClosing: Promise<void> | undefined;
+  try {
   const workingDirectory = options.workingDir;
   const homeDirectory = options.homeDirectory;
   // Built before anything that touches session state, see session-storage-services.ts.
@@ -262,13 +262,6 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   void clientMcpRegistry;
   void clientSandboxRegistry;
   disposalScope.registry.add('client runtime services', () => client.close());
-  disposalScope.registry.add('knowledge store', () => knowledgeStore.close());
-  registerTerminalKnowledgeCleanup(disposalScope.registry, {
-    closeAgentStore: () => agentKnowledgeStore.close(),
-    closeHomeGraphStore: () => homeGraphKnowledgeStore.close(),
-    rewindDrain: () => conversationRewindClosing,
-    homeGraphDrain: () => homeGraphClosing,
-  });
   const contractOperator = createContractOperatorService({ runner: contractRunner, workingDirectory });
   const contractIntake = createContractIntake({ runner: contractRunner, projectRoot: workingDirectory });
 
@@ -467,6 +460,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     workPlanStore,
   } = createKnowledgeServices({
     ownership: disposalScope.registry,
+    rewindDrain: () => conversationRewindClosing,
+    homeGraphDrain: () => homeGraphClosing,
     configManager,
     providerRegistry,
     artifactStore,
@@ -879,4 +874,10 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     { stopConfigWatch },
   );
   return services;
+  } catch (error) {
+    // Synchronous construction starts the same owned drain before propagating
+    // its failure. Registrations capture only resources already constructed.
+    disposalScope.dispose();
+    throw error;
+  }
 }

@@ -36,12 +36,15 @@ import type { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/sta
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
 import type { AsyncDisposalRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
+import { registerTerminalKnowledgeDrains } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 
 const REGULAR_KNOWLEDGE_DB_FILE = 'knowledge-wiki.sqlite';
 const HOME_GRAPH_KNOWLEDGE_DB_FILE = 'knowledge-home-graph.sqlite';
 
 export interface KnowledgeServicesDeps {
   readonly ownership: AsyncDisposalRegistry;
+  readonly rewindDrain: () => void | Promise<void>;
+  readonly homeGraphDrain: () => void | Promise<void>;
   readonly configManager: ConfigManager;
   readonly providerRegistry: ProviderRegistry;
   readonly artifactStore: ArtifactStore;
@@ -74,8 +77,12 @@ export interface KnowledgeServices {
 export function createKnowledgeServices(deps: KnowledgeServicesDeps): KnowledgeServices {
   const { configManager, providerRegistry, artifactStore, memoryRegistry, runtimeBus, isBackgroundPaused, admitExpensiveWork } = deps;
   const knowledgeStore = createConfiguredPlanningStore(configManager, REGULAR_KNOWLEDGE_DB_FILE, { family: 'wiki' });
+  deps.ownership.add('knowledge store', () => knowledgeStore.close());
   const agentKnowledgeStore = new KnowledgeStore({ configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE });
+  deps.ownership.add('agent knowledge store', () => agentKnowledgeStore.close());
   const homeGraphKnowledgeStore = new KnowledgeStore({ configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE });
+  deps.ownership.add('home graph knowledge store', () => homeGraphKnowledgeStore.close());
+  registerTerminalKnowledgeDrains(deps.ownership, deps);
   configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: configManager.getControlPlaneConfigDir(), stores: [knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore] });
   const knowledgeSemanticLlm = createProviderBackedKnowledgeSemanticLlm(providerRegistry, { timeoutMs: 20_000, maxConcurrent: 1 });
   const knowledgeSemanticService = new KnowledgeSemanticService(knowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, isBackgroundPaused, admitExpensiveWork });

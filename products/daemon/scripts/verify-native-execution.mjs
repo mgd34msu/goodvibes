@@ -75,7 +75,9 @@ function nativeRequestShape(body) {
     })) return 'settingFormShape';
   return 'other';
 }
-const startupPhases = ['runtime-base', 'handler-surfaces', 'contract-recovery', 'provider-preload', 'listener-construction',
+const startupPhases = ['runtime-base', 'base-project-context', 'base-credentials', 'base-providers', 'base-knowledge',
+  'base-native-intake-storage', 'base-native-intake-ready', 'runtime-base-failed',
+  'handler-surfaces', 'contract-recovery', 'provider-preload', 'listener-construction',
   'secondary-listener-construction', 'cluster-startup', 'device-recovery', 'device-grant-sweep', 'device-capture-sweep',
   'device-disclosure-read', 'device-disclosure-persist', 'listener-startup', 'secondary-listener-startup',
   'boot-tasks', 'foreground-ready'];

@@ -7,6 +7,13 @@ let stopped = false;
 
 export type NativeStartupPhase =
   | 'runtime-base'
+  | 'base-project-context'
+  | 'base-credentials'
+  | 'base-providers'
+  | 'base-knowledge'
+  | 'base-native-intake-storage'
+  | 'base-native-intake-ready'
+  | 'runtime-base-failed'
   | 'handler-surfaces'
   | 'contract-recovery'
   | 'provider-preload'
@@ -25,7 +32,7 @@ export type NativeStartupPhase =
 
 /** Fixed, best-effort observations for the native execution consumer only. */
 export function observeNativeStartupPhase(phase: NativeStartupPhase): void {
-  if (!OBSERVATION_ENABLED || stopped || observed.has(phase) || observed.size >= 16) return;
+  if (!OBSERVATION_ENABLED || stopped || observed.has(phase) || observed.size >= 23) return;
   observed.add(phase);
   try { writeSync(2, `[goodvibes-daemon:native-startup-phase] ${phase}\n`); }
   catch { stopped = true; }

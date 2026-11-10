@@ -79,6 +79,7 @@ export { startDeviceHousekeeping } from './device-posture-composition.js';
 import { createClusterServices, startClusterServices } from './cluster-group-composition.js';
 import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
+import { observeNativeStartupPhase } from './startup-observation.js';
 import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
 export type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
 
@@ -115,6 +116,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
   try {
     const workingDirectory = options.workingDir;
     const homeDirectory = options.homeDirectory;
+    observeNativeStartupPhase('base-project-context');
     await prepareConfiguredProjectContext(options.configManager, workingDirectory, 'knowledge-wiki.sqlite', { activate: true });
     const shellPaths = createShellPathService({
       workingDirectory,
@@ -156,6 +158,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       featureFlags,
     });
     // The credential/identity seam (credential-composition.ts).
+    observeNativeStartupPhase('base-credentials');
     const { secretsManager, stepUpService, pairingTokens } = composeCredentialServices({
       workingDirectory, homeDirectory, configManager,
       daemonHomeDirectory: options.daemonHomeDirectory,
@@ -181,6 +184,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       cachePath: shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'model-limits.json'),
     });
     // Canonical construction preserves honest unconfigured provider status.
+    observeNativeStartupPhase('base-providers');
     const providerRegistry = createLaunchTolerantProviderRegistry({
       configManager,
       registerDispose: release => { disposalScope.registry.add('provider model configuration', release); },
@@ -362,6 +366,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       },
     });
     // Knowledge/wiki + home-graph stack (governor backpressure wired in), see knowledge-services.ts.
+    observeNativeStartupPhase('base-knowledge');
     const {
       knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore,
       knowledgeSemanticService, homeGraphSemanticService, agentKnowledgeSemanticService,
@@ -740,9 +745,11 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
         nativeContinuationOwner.assertCurrent(context, principalId, source);
       },
     };
+    observeNativeStartupPhase('base-native-intake-storage');
     const nativeIntake = createNativeConversationIntakeHost({ projectRoot: workingDirectory, projectId: projectPlanningProjectId,
       sessionId: `native-work:${projectPlanningProjectId}`, storage: await knowledgeStore.openNativeConversationStorage(projectPlanningProjectId),
       scopes: nativeScopes, port: judgment.port, decisionLog: judgment.decisionLog, proposer: createNativeRequirementProposer(providerRegistry), continuation: continuationOwner });
+    observeNativeStartupPhase('base-native-intake-ready');
     disposalScope.ownUntilRegistered('native conversation intake', nativeIntake.close);
     registerNativeConversationIntakeGatewayMethods(gatewayMethods, nativeIntake);
     const removeHostedOwner = installNativeHostedConversationOwner(gatewayMethods, { projectId: projectPlanningProjectId,
@@ -955,6 +962,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     };
     return { services, handlerOptions, closeWorkLedger: () => { retireContinuationScope(); return fenceWorkLedger!(); }, closeBrowserJudgment: () => { retireContinuationScope(); return fenceBrowserJudgment!(); }, closeAutonomousPermissions, retireContinuationScope };
   } catch (startupError) {
+    observeNativeStartupPhase('runtime-base-failed');
     try { await close(); }
     catch (cleanupError) { throw new AggregateError([startupError, cleanupError], 'Runtime graph construction and cleanup failed'); }
     throw startupError;

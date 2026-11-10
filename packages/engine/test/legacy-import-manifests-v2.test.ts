@@ -56,13 +56,15 @@ function oldManifest(): LegacyMigrationManifest {
   return { ...body, digest: crypto.createHash('sha256').update(JSON.stringify(body)).digest('hex') };
 }
 
-test('fresh preparation hashes only its complete saved review commitment, including duplicate decision fields', () => {
+test('fresh preparation retains complete reviewed data and ordinary revision without SHA, including duplicate decision fields', () => {
   const fresh = input(), hashing = spyOn(crypto, 'createHash');
   try {
     const manifest = prepared({ ...fresh, sources: [...fresh.sources, fresh.sources[0]!] });
-    expect(manifest.version).toBe(2); expect(manifest.sources.every(entry => !Object.hasOwn(entry, 'digest'))).toBe(true);
+    expect(manifest.version).toBe(3); expect(Object.hasOwn(manifest, 'digest')).toBe(false);
+    if (manifest.version !== 3) throw new Error('Expected a fresh preparation');
+    expect(manifest.revision).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/); expect(manifest.sources.every(entry => !Object.hasOwn(entry, 'digest'))).toBe(true);
     expect(manifest.entities.find(entity => entity.kind === 'decision')?.fragments).toHaveLength(2);
-    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
     hashing.mockClear();
     expect(validateLegacyWorkLedgerManifest(manifest)).toBe(manifest);
     const command = workLedgerCommandSchema.parse({ type: 'import_legacy', requestId: 'request', expectedRevision: 0, manifest });
@@ -79,13 +81,17 @@ test('copied manifest receives one complete foreign validation and then owns onl
   try {
     const adopted = validateLegacyWorkLedgerManifest(copied);
     expect(adopted).not.toBe(copied); expect(Object.isFrozen(adopted)).toBe(true); expect(Object.isFrozen(adopted.sources[0]!.source)).toBe(true);
-    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
     hashing.mockClear(); expect(validateLegacyWorkLedgerManifest(adopted)).toBe(adopted);
     expect(matchLegacyWorkLedgerManifest(structuredClone(adopted), adopted)).toBe(adopted);
     expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
     const forged = structuredClone(adopted); Object.assign(forged.sources[0]!.source, { extra: 'Caller substituted source bytes' });
     expect(() => matchLegacyWorkLedgerManifest(forged, adopted)).toThrow();
-    expect(() => validateLegacyWorkLedgerManifest(forged)).toThrow();
+    // Shape validation can accept a different complete proposal; its public
+    // revision grants nothing. The expected original and live source checks
+    // must reject substitution independently.
+    const changed = validateLegacyWorkLedgerManifest(forged);
+    expect(() => assertLegacyWorkLedgerSourcesCurrent(changed, id => original.sources.find(entry => entry.source.id === id)!)).toThrow();
   } finally { hashing.mockRestore(); }
 });
 
@@ -97,7 +103,7 @@ test('source currentness checks complete exact bytes and generation independentl
     { source: { ...source.source, unexpected: 'changed without changing generation' }, generation: source.generation },
     { source: source.source, generation: source.generation + '-new' }, { source: null, generation: null },
   ]) expect(() => assertLegacyWorkLedgerSourcesCurrent(manifest, id => id === source.source.id ? replacement : lookup(id))).toThrow();
-  expect(() => validateLegacyWorkLedgerManifest({ ...manifest, version: 3 })).toThrow('Unsupported');
+  expect(() => validateLegacyWorkLedgerManifest({ ...manifest, version: 99 })).toThrow('Unsupported');
   expect(() => validateLegacyWorkLedgerManifest({ ...manifest, sources: manifest.sources.map(entry => ({ ...entry, digest: 'a'.repeat(64) })) })).toThrow();
 });
 
@@ -113,6 +119,35 @@ test('actual historical format1 retains its exact per-source commitment and prep
   expect(replayLegacyWorkLedgerPreparation(admitted, input())).toEqual({ kind: 'prepared', manifest: admitted });
   const malformed = structuredClone(admitted); delete (malformed.sources[0] as { digest?: string }).digest;
   expect(() => validateLegacyWorkLedgerManifest(malformed)).toThrow();
+});
+
+test('actual historical format2 preserves its complete expected checksum and exact replay', () => {
+  const historical = oldManifest();
+  if (historical.version === 3) throw new Error('Expected an old manifest');
+  const { digest: _digest, ...original } = historical;
+  const body = { ...original, version: 2 as const, sources: original.sources.map(({ digest: _sourceDigest, ...source }) => source) };
+  const old = { ...body, digest: crypto.createHash('sha256').update(JSON.stringify(body)).digest('hex') };
+  const hashing = spyOn(crypto, 'createHash');
+  try {
+    const admitted = validateLegacyWorkLedgerManifest(old);
+    expect(admitted).toEqual(old); expect(admitted.version).toBe(2);
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+    expect(replayLegacyWorkLedgerPreparation(admitted, input())).toEqual({ kind: 'prepared', manifest: admitted });
+    expect(() => validateLegacyWorkLedgerManifest({ ...old, digest: 'b'.repeat(64) })).toThrow();
+  } finally { hashing.mockRestore(); }
+});
+
+test('fresh replay compares the entire original body and preserves its ordinary revision without SHA', () => {
+  const fresh = input(), manifest = prepared(fresh), hashing = spyOn(crypto, 'createHash');
+  try {
+    expect(replayLegacyWorkLedgerPreparation(structuredClone(manifest), { ...fresh, sources: [...fresh.sources].reverse() }))
+      .toEqual({ kind: 'prepared', manifest });
+    for (const changed of [
+      { ...fresh, hostId: 'different' }, { ...fresh, expectedLedgerRevision: 1 },
+      { ...fresh, sources: fresh.sources.map((entry, index) => index === 0 ? { ...entry, source: { ...entry.source, extra: 'different source bytes' } } : entry) },
+    ]) expect(replayLegacyWorkLedgerPreparation(manifest, changed)).toMatchObject({ kind: 'blocked', code: 'stale-preparation' });
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+  } finally { hashing.mockRestore(); }
 });
 
 test('getters and copied public fields cannot acquire private manifest validation provenance', () => {
@@ -142,8 +177,12 @@ test('actual saved JSON event and receipt projections preserve canonical plain d
     expect(await ledger.service.execute({ type: 'import_legacy', requestId: 'request', expectedRevision: 0, manifest }, actor)).toMatchObject({ kind: 'accepted' });
     const saved: unknown = JSON.parse(JSON.stringify(state));
     const cold = readWorkLedgerState(saved, 'project');
-    expect(cold).toEqual(state); expect(cold.history[0]).toMatchObject({ type: 'import_legacy', manifest: { version: 2 } });
+    expect(cold).toEqual(state); expect(cold.history[0]).toMatchObject({ type: 'import_legacy', manifest: { version: 3 } });
     expect(Object.getPrototypeOf(manifest.sources[0]!.source)).toBe(Object.prototype);
+    const changed = structuredClone(manifest);
+    Object.assign(changed.sources[0]!.source, { extra: 'different complete body under the same preparation revision' });
+    expect(await ledger.service.execute({ type: 'import_legacy', requestId: 'request', expectedRevision: 0, manifest: changed }, actor))
+      .toMatchObject({ kind: 'rejected', code: 'request_conflict' });
   } finally { await ledger.service.close(); }
 });
 

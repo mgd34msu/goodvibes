@@ -8,7 +8,8 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { createSchema } from '../platform/src/platform/knowledge/store-schema.js';
-import { loadSqlJsEngine, type SqlDatabase, type SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
+import { loadSqlJsEngine, type SqlDatabase, SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
+import { createKnowledgeNodeOperatorMutation } from '../platform/src/platform/knowledge/store-node-authority.js';
 import { knowledgeNodeContentGenerationFromRows, knowledgeNodeContentRevisionTriggers } from '../platform/src/platform/knowledge/store-node-content-revisions.js';
 import { knowledgeRowGenerationFromRows, knowledgeRawRowForAdmission } from '../platform/src/platform/knowledge/store-row-revisions.js';
 import { sameNativeKnowledgeTableSql } from '../platform/src/platform/knowledge/store-table-definition.js';
@@ -29,6 +30,107 @@ async function fixture() {
 }
 const node = (id: string, subjectId?: string) => ({ id, kind: 'fact' as const, slug: id, title: 'Device inputs',
   summary: 'The device has four inputs.', sourceId: 'manual', metadata: { semanticKind: 'fact', value: 'four inputs', evidence: 'The device has four inputs.', ...(subjectId ? { subjectId } : {}) } });
+
+function publicationSnapshot(store: KnowledgeStore) {
+  const sqlite = (store as unknown as { sqlite: SQLiteStore }).sqlite;
+  return { native: JSON.stringify(['knowledge_nodes','knowledge_node_revisions','knowledge_node_activation_dependencies','knowledge_edges','knowledge_issues'].map(table => sqlite.exec(`SELECT * FROM ${table}`))),
+    cached: JSON.stringify({ nodes: store.listNodes(), edges: store.listEdges(), issues: store.listIssues(),
+      history: store.listNodes().map(node => store.listNodeRevisions(node.id)) }) };
+}
+
+test('an actual activation-cache write failure rolls back a fresh node and history without consuming its original prepared slot', async () => {
+  const { store, path } = await fixture(), sqlite = (store as unknown as { sqlite: SQLiteStore }).sqlite;
+  const fake = fakePort(() => noulAnswer(.99)), previous = installJudgmentPort(fake.port);
+  try {
+    const prepared = await store.prepareNodeWrites([node('cache-refused')]), before = publicationSnapshot(store), bytes = readFileSync(path);
+    const original = SQLiteStore.prototype.run; let writes = 0;
+    const fault = spyOn(SQLiteStore.prototype,'run').mockImplementation(function(this: SQLiteStore, sql, params) {
+      const result = original.call(this,sql,params);
+      if (this === sqlite && sql.includes('INSERT INTO knowledge_node_activation_dependencies')) { writes++; throw new Error('Actual activation cache write refused'); }
+      return result;
+    });
+    try { await expect(store.upsertPreparedNode(prepared,0)).rejects.toThrow('Actual activation cache write refused'); }
+    finally { fault.mockRestore(); }
+    expect(writes).toBe(1); expect(publicationSnapshot(store)).toEqual(before); expect(readFileSync(path)).toEqual(bytes);
+    await store.upsertSource({ id: 'unrelated-save', connectorId: 'fixture', sourceType: 'manual', title: 'Unrelated', status: 'indexed' });
+    const reopened = new KnowledgeStore({ dbPath: path }); stores.push(reopened); await reopened.init();
+    expect(reopened.getNode('cache-refused')).toBeNull(); expect(reopened.listNodeRevisions('cache-refused')).toEqual([]); await reopened.close();
+    expect((await store.upsertPreparedNode(prepared,0)).id).toBe('cache-refused'); expect(fake.requests).toHaveLength(1);
+  } finally { installJudgmentPort(previous); }
+});
+
+test('a refused cache write at an unchanged final slot retains the earlier committed slot and permits exact original retry', async () => {
+  const { store, path } = await fixture(), sqlite = (store as unknown as { sqlite: SQLiteStore }).sqlite;
+  const fake = fakePort(() => noulAnswer(.99)), previous = installJudgmentPort(fake.port);
+  try {
+    const existing = await store.upsertNode(node('unchanged'));
+    const prepared = await store.prepareNodeWrites([node('earlier-slot'),{ ...existing }]);
+    await store.upsertPreparedNode(prepared,0);
+    const before = publicationSnapshot(store), bytes = readFileSync(path), original = SQLiteStore.prototype.run; let writes = 0;
+    const fault = spyOn(SQLiteStore.prototype,'run').mockImplementation(function(this: SQLiteStore, sql, params) {
+      const result = original.call(this,sql,params);
+      if (this === sqlite && sql.includes('INSERT INTO knowledge_node_activation_dependencies')) { writes++; throw new Error('Final dependency write refused'); }
+      return result;
+    });
+    try { await expect(store.upsertPreparedNode(prepared,1)).rejects.toThrow('Final dependency write refused'); }
+    finally { fault.mockRestore(); }
+    expect(writes).toBe(1); expect(publicationSnapshot(store)).toEqual(before); expect(readFileSync(path)).toEqual(bytes);
+    expect(store.getNode('earlier-slot')).not.toBeNull();
+    expect(await store.upsertPreparedNode(prepared,1)).toBe(existing); expect(fake.requests).toHaveLength(2);
+    await store.close(); const reopened = new KnowledgeStore({ dbPath: path }); stores.push(reopened); await reopened.init();
+    await reopened.upsertNode({ ...reopened.getNode('earlier-slot')! }); expect(fake.requests).toHaveLength(2);
+  } finally { installJudgmentPort(previous); }
+});
+
+test('a guarded node and issue batch rolls back native rows, histories, caches and views when cache publication fails', async () => {
+  const { store, path } = await fixture(), sqlite = (store as unknown as { sqlite: SQLiteStore }).sqlite;
+  const fake = fakePort(() => noulAnswer(.99)), previous = installJudgmentPort(fake.port);
+  try {
+    const current = await store.upsertNode(node('guarded-cache'));
+    const issue = await store.upsertIssue({ id: 'guarded-issue', nodeId: current.id, code: 'fixture', severity: 'warning', message: 'Original issue' });
+    const before = publicationSnapshot(store), bytes = readFileSync(path), original = SQLiteStore.prototype.run; let writes = 0;
+    const fault = spyOn(SQLiteStore.prototype,'run').mockImplementation(function(this: SQLiteStore, sql, params) {
+      const result = original.call(this,sql,params);
+      if (this === sqlite && sql.includes('INSERT INTO knowledge_node_activation_dependencies')) { writes++; throw new Error('Guarded dependency write refused'); }
+      return result;
+    });
+    try { await expect(store.applyGuardedNodeIssueWrites({ nodes: [{ ...current, summary: 'Changed current interpretation' }], issues: [{ ...issue, message: 'Must not publish' }] },() => {})).rejects.toThrow('Guarded dependency write refused'); }
+    finally { fault.mockRestore(); }
+    expect(writes).toBe(1); expect(publicationSnapshot(store)).toEqual(before); expect(readFileSync(path)).toEqual(bytes);
+    await store.upsertSource({ id: 'later-save', connectorId: 'fixture', sourceType: 'manual', title: 'Later', status: 'indexed' });
+    const reopened = new KnowledgeStore({ dbPath: path }); stores.push(reopened); await reopened.init();
+    expect(reopened.getNode(current.id)).toEqual(current); expect(reopened.getIssue(issue.id)).toEqual(issue);
+  } finally { installJudgmentPort(previous); }
+});
+
+test.each(['operator-replacement','merge'] as const)('fallible native acknowledgment in %s is staged before SQL/maps become visible', async route => {
+  const { store, path } = await fixture(), sqlite = (store as unknown as { sqlite: SQLiteStore }).sqlite;
+  const fake = fakePort(() => noulAnswer(.99)), previous = installJudgmentPort(fake.port);
+  try {
+    const current = await store.upsertNode(node('acknowledgment-subject')), winner = await store.upsertNode(node('acknowledgment-winner'));
+    await store.upsertEdge({ id: 'original-edge', fromKind: 'node', fromId: current.id, toKind: 'node', toId: winner.id, relation: 'related_to' });
+    const before = publicationSnapshot(store), bytes = readFileSync(path), originalRun = SQLiteStore.prototype.run, originalExec = SQLiteStore.prototype.exec;
+    let candidateWritten = false, failedReads = 0;
+    const written = spyOn(SQLiteStore.prototype,'run').mockImplementation(function(this: SQLiteStore, sql, params) {
+      const result = originalRun.call(this,sql,params);
+      if (this === sqlite && sql.includes('INSERT INTO knowledge_nodes')) candidateWritten = true;
+      return result;
+    });
+    const fault = spyOn(SQLiteStore.prototype,'exec').mockImplementation(function(this: SQLiteStore, sql, params) {
+      if (this === sqlite && candidateWritten && sql === 'SELECT gv_revision FROM knowledge_nodes WHERE id = ? LIMIT 1') { failedReads++; throw new Error('Original native acknowledgment refused'); }
+      return originalExec.call(this,sql,params);
+    });
+    try {
+      const work = route === 'merge' ? store.mergeNodes(current.id,winner.id)
+        : store.replaceNodeRecord({ ...current, summary: 'Must not publish' },createKnowledgeNodeOperatorMutation(current,{ action: 'accept', reviewer: 'owner' }));
+      await expect(work).rejects.toThrow('Original native acknowledgment refused');
+    } finally { fault.mockRestore(); written.mockRestore(); }
+    expect(candidateWritten).toBe(true); expect(failedReads).toBe(1); expect(publicationSnapshot(store)).toEqual(before); expect(readFileSync(path)).toEqual(bytes);
+    await store.upsertSource({ id: 'later-ack-save', connectorId: 'fixture', sourceType: 'manual', title: 'Later', status: 'indexed' });
+    const reopened = new KnowledgeStore({ dbPath: path }); stores.push(reopened); await reopened.init();
+    expect(reopened.getNode(current.id)).toEqual(current); expect(reopened.listEdges()).toEqual(store.listEdges());
+  } finally { installJudgmentPort(previous); }
+});
 
 test('fresh native activation and unchanged restart reuse perform no activation SHA and duplicate no source body', async () => {
   const { store, path } = await fixture(), fake = fakePort(() => noulAnswer(0.99)), previous = installJudgmentPort(fake.port);

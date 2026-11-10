@@ -213,6 +213,7 @@ export async function verifyNativeWorkExecution(options: {
   for (const id of deliverable?.decisionIds ?? []) {
     const entry = options.decisionLog.get(id);
     if (entry?.status !== 'answered' || entry.context.site !== deliverableSite) continue;
+    if (typeof entry.stateHash !== 'string') continue;
     const ids = judgeGroups.get(entry.stateHash) ?? [];
     ids.push(id); judgeGroups.set(entry.stateHash, ids);
   }
@@ -362,7 +363,7 @@ export async function verifyNativeWorkExecution(options: {
       if (!site || (site !== CHECK_SITES.judge && site !== CHECK_SITES.quality)) throw new Error('Unexpected native settlement decision site');
       // Forward the registered runUnitCheck request with detached images. This
       // adapter defines no questions or decision; the generic request type stays intact.
-      const forwarded: typeof request = { ...request, state, questions, ...(context === undefined ? {} : { context }), signal: checkSignal, beforeAttempt: active };
+      const forwarded: typeof request = { ...request, state, questions, inputBinding: 'state', ...(context === undefined ? {} : { context }), signal: checkSignal, beforeAttempt: active };
       active();
       // The shared port lends an object. Snapshot before borrowed guards or a
       // later microtask can change what the battery reads after provenance capture.

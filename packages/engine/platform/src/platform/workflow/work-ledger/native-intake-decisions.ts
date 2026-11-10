@@ -138,7 +138,7 @@ function readSession(input: NativeIntakeReadInput, records: RecordedRead[] = [],
     // a borrowed port cannot merely supply somebody else's recorded id.
     const expected = { context: canonicalJson(request.context as unknown as EntryType), questions: canonicalJson(request.questions as unknown as EntryType) };
     beforeAttempt();
-    const forwarded: typeof request = { ...request, state, beforeAttempt, ...(signal ? { signal } : {}),
+    const forwarded: typeof request = { ...request, state, inputBinding: 'state', beforeAttempt, ...(signal ? { signal } : {}),
       async onRetry(progress) {
         beforeAttempt();
         const observed = await Promise.allSettled([

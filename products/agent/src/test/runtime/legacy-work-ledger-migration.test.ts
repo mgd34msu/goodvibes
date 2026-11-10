@@ -54,7 +54,10 @@ test('stable preparation replay tolerates source ordering and exact duplicate so
   const first = prepared(); const next = input();
   const repeated = { ...next, sources: [...next.sources].reverse().concat(next.sources[0]!) };
   expect(replayLegacyWorkLedgerPreparation(first, repeated)).toEqual({ kind: 'prepared', manifest: first });
-  expect(first.digest).toHaveLength(64);
+  expect(first.version).toBe(3);
+  if (first.version !== 3) throw new Error('Expected a fresh preparation');
+  expect(first.revision).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+  expect(Object.hasOwn(first, 'digest')).toBe(false);
 });
 
 test('captures and freezes detached values without freezing or mutating originals', () => {

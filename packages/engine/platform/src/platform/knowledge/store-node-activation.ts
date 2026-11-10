@@ -281,11 +281,29 @@ export function preparedNodeWrites(store: KnowledgeStore, token: KnowledgePrepar
   }
   return nodes;
 }
-export function markPreparedNodeWritten(token: KnowledgePreparedNodeWrites, index: number, sqlite?: SQLiteStore): boolean {
+/** Perform every fallible native read/cache write inside the writer's existing
+ * SQL savepoint. The returned acknowledgment changes only private pass state. */
+export function stagePreparedNodeWrites(token: KnowledgePreparedNodeWrites, indices: readonly number[], sqlite: SQLiteStore): {
+  readonly cacheChanged: boolean; commit(): void;
+} {
+  const pass = prepared.get(token);
+  if (!pass || new Set(indices).size !== indices.length) throw new Held('malformed');
+  const acknowledgments = indices.map(index => {
+    const draft = pass.nodes[index];
+    if (!Number.isInteger(index) || !draft || pass.written.has(index)) throw new Held('stale');
+    return pass.readset.prepareWritten(draft.record.id, draft.record, sqlite);
+  });
+  const cacheChanged = pass.written.size + indices.length === pass.nodes.length ? writePreparedNodeActivationCache(token, sqlite) : false;
+  return { cacheChanged, commit() {
+    for (const acknowledge of acknowledgments) acknowledge();
+    for (const index of indices) markPreparedNodeWritten(token, index);
+  } };
+}
+
+/** Pure pass acknowledgment; native dependency writes have already succeeded. */
+export function markPreparedNodeWritten(token: KnowledgePreparedNodeWrites, index: number): void {
   const pass = prepared.get(token)!, draft = pass.nodes[index]!;
   pass.written.add(index); pass.committed.set(draft.record.id, draft.record);
-  if (sqlite) pass.readset.written(draft.record.id, draft.record, sqlite);
-  const cacheChanged = sqlite && pass.written.size === pass.nodes.length ? writePreparedNodeActivationCache(token, sqlite) : false;
   // Optional compensation evidence must never introduce a failure after SQL/cache commit.
   try {
     const sources = snapshotNodeInput(evidenceFor(pass.store, draft.record));
@@ -296,7 +314,6 @@ export function markPreparedNodeWritten(token: KnowledgePreparedNodeWrites, inde
       draft.observation?.checkEvidence();
     } });
   } catch { /* This record cannot be used as a prepared compensation capability. */ }
-  return cacheChanged;
 }
 
 /** After every actual native node row is present, freeze the FINAL dependency

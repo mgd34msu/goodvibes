@@ -56,6 +56,30 @@ test('an equal-valued replacement configuration cannot acquire the original jour
   finally { journal.close(); }
 });
 
+test('actual native owner declares manifest3 before publishing the first saved command', () => {
+  for (const nonvoid of [false, true]) {
+    const f = setup(), formats: string[] = [];
+    let permitted = false;
+    const config = { getNativeDataWriter() { return { declare(format: string) {
+      formats.push(format);
+      if (format === 'native-historical-import-revisions-v3' && !permitted) {
+        if (nonvoid) return Promise.reject(new Error('Invalid asynchronous preparation owner'));
+        throw new Error('Preparation reader unavailable');
+      }
+    } }; } };
+    const options = retainLegacyImportJournalOwner(f.selected, config, f.stateDirectory, () => ({ config, stateDirectory: f.stateDirectory }));
+    const journal = new LegacyImportJournal(f.path, undefined, options);
+    try {
+      expect(() => journal.reserve(f.binding, () => f.command)).toThrow();
+      expect(formats).toContain('native-historical-import-revisions-v3');
+      expect(journal.read(f.binding)).toBeNull();
+      permitted = true;
+      expect(journal.reserve(f.binding, () => f.command).command).toEqual(f.command);
+      expect(journal.read(f.binding)?.command.manifest.version).toBe(3);
+    } finally { journal.close(); }
+  }
+});
+
 test('exact workspace/project slots preserve independent bindings, immutable unknown commands and restart recovery', () => {
   const f = setup(); let journal = open(f);
   try {

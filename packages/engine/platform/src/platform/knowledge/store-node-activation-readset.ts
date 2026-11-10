@@ -83,12 +83,15 @@ export class KnowledgeActivationReadset {
   }
   /** Only the actual original native row writer advances its own node. Source
    * and extraction baselines never adopt unrelated changes during a pass. */
-  written(nodeId: string, record: KnowledgeNodeRecord, sqlite: SQLiteStore): void {
+  prepareWritten(nodeId: string, record: KnowledgeNodeRecord, sqlite: SQLiteStore): () => void {
     const row = this.rows.get(this.key('node', nodeId));
     if (!row || !Object.isFrozen(record)) throw new Held('stale');
     const native = sqlite.exec('SELECT gv_revision FROM knowledge_nodes WHERE id = ? LIMIT 1', [nodeId]);
     const generation = knowledgeRowGenerationFromRows(native);
     if (generation === null) throw new Held('stale');
-    if (generation !== row.generation) row.write = { generation, state: captureSQLiteActivationPublication(sqlite, nodeId, generation) };
+    const write = generation !== row.generation ? { generation, state: captureSQLiteActivationPublication(sqlite, nodeId, generation) } : undefined;
+    // Native selection may fail. Its acknowledgment is published only after
+    // the enclosing SQL savepoint succeeds, never while it can still roll back.
+    return () => { if (write) row.write = write; };
   }
 }

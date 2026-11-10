@@ -44,7 +44,7 @@ export async function openLegacyImportOperator(options: LegacyImportOperatorOpti
   const projectId = options.projectId, journalPath = options.journalPath;
   const resolve = options.resolve.bind(options), createClient = options.createClient?.bind(options);
   const journalOwner = options.journalOptions, journalGuard = journalOwner?.assertCurrent?.bind(journalOwner), journalWrite = journalOwner?.beforeWrite?.bind(journalOwner);
-  const journalLayout = journalOwner?.layout;
+  const journalLayout = journalOwner?.layout, manifestWrite = journalOwner?.beforeManifestWrite?.bind(journalOwner);
   const selected = resolve(); if ('reason' in selected) throw new Error(selected.reason);
   const host = { ...selected };
   bindingKey({ endpoint: host.baseUrl, projectId, workspaceId: host.workspace, principalId: 'unresolved', principalKind: 'unresolved' });
@@ -70,7 +70,7 @@ export async function openLegacyImportOperator(options: LegacyImportOperatorOpti
     try { return await operation(); } catch (error) { throw new Error((error instanceof Error ? error.message : String(error)).split(host.token).join('[redacted]')); }
   };
   const journal = <T>(operation: (store: LegacyImportJournal) => T): T => {
-    selection(); const store = new LegacyImportJournal(journalPath, undefined, { ...(journalLayout ? { layout: journalLayout } : {}), beforeWrite: journalWrite, assertCurrent: selection });
+    selection(); const store = new LegacyImportJournal(journalPath, undefined, { ...(journalLayout ? { layout: journalLayout } : {}), beforeWrite: journalWrite, beforeManifestWrite: manifestWrite, assertCurrent: selection });
     try { return operation(store); } finally { store.close(); }
   };
   const status = async () => { await authenticate(); return journal(store => store.read(binding!)); };

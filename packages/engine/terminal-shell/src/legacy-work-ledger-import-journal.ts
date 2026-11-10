@@ -65,6 +65,7 @@ export interface LegacyImportJournalOptions {
   readonly layout?: 'historical-v1' | 'shared-v2';
   /** Real installed native owner declares its format before persistent mutation. */
   readonly beforeWrite?: (() => void) | undefined;
+  readonly beforeManifestWrite?: ((version: 1 | 2 | 3) => void) | undefined;
   readonly assertCurrent?: (() => void) | undefined;
 }
 
@@ -85,9 +86,11 @@ export class LegacyImportJournal {
   private readonly missingParents: string[] = [];
   private readonly layout: 'historical-v1' | 'shared-v2';
   private readonly beforeWrite: (() => void) | undefined;
+  private readonly beforeManifestWrite: ((version: 1 | 2 | 3) => void) | undefined;
   private readonly ownerCurrent: (() => void) | undefined;
   constructor(path: string, private readonly directorySync: (path: string) => void = syncDirectory, options: LegacyImportJournalOptions = {}) {
     this.path = resolve(path); this.layout = options.layout ?? 'historical-v1';
+    this.beforeManifestWrite = options.beforeManifestWrite?.bind(options);
     this.beforeWrite = options.beforeWrite?.bind(options); this.ownerCurrent = options.assertCurrent?.bind(options);
     if (this.layout !== 'historical-v1' && this.layout !== 'shared-v2') throw new Error('Unsupported import journal layout');
     let parent = dirname(this.path);
@@ -288,6 +291,10 @@ export class LegacyImportJournal {
       this.current();
       const command = workLedgerCommandSchema.parse(made); this.current();
       if (command.type !== 'import_legacy' || command.manifest.projectId !== binding.projectId || bindingKey(binding) !== key || this.slot(binding) !== slot) throw new Error('Invalid or changed import target');
+      const declared: unknown = this.beforeManifestWrite?.(command.manifest.version);
+      if (declared !== undefined) { drainOwned(declared); throw new Error('Import preparation publication requires a synchronous native owner'); }
+      this.current();
+      if (bindingKey(binding) !== key || this.slot(binding) !== slot) throw new Error('Import target changed while declaring preparation format');
       if (prior) {
         if (this.layout === 'shared-v2') db.query(`INSERT INTO ${this.archive}(slot,request_id,entry) VALUES (?,?,?)`).run(slot, prior.command.requestId, JSON.stringify(prior));
         else db.query(`INSERT INTO ${this.archive}(request_id,entry) VALUES (?,?)`).run(prior.command.requestId, JSON.stringify(prior));

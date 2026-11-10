@@ -32,8 +32,8 @@ export interface NativeWorkSubmissionHost {
 const REQUIRED_SCOPES = ['read:work-ledger', 'write:work-ledger'] as const;
 /** Historical source-id recipe, used only for existing explicit v1 events. */
 const historicalSourceId = (projectId: string, principalId: string, inputId: string) => createHash('sha256').update(JSON.stringify({ projectId, principalId, inputId })).digest('hex');
-/** The actual saved/client-held source commitment. Receipt lookup checks the
- * exact original input/ordered criteria; this is not an authorization token. */
+/** Existing v1/v3 source protocol only. New receipts retain and compare the
+ * complete original input and use an ordinary native revision. */
 const originalInputCommitment = (version: 1 | 3, inputId: string, goal: string, criteria: readonly string[]) => createHash('sha256').update(JSON.stringify({ version, inputId, goal, criteria })).digest('hex');
 function paired(authority: NativePairedExecutionAuthority): NativePairedExecutionSnapshot {
   const current = authority.current();
@@ -48,15 +48,15 @@ function bounded(value: unknown, limit: number): void {
 }
 function receipt(event: WorkLedgerEvent, projectId: string, sessionId: string, principalId: string,
   issued?: { readonly request: NativeWorkSubmissionRequest; readonly sourceId: string; readonly sourceRevision: string }): NativeWorkSubmissionReceipt {
-  if (event.type !== 'submit_native' || (event.work.source?.version !== 1 && event.work.source?.version !== 3) || !event.attemptId || event.actorId !== principalId) throw new NativeWorkSubmissionError('unavailable');
+  if (event.type !== 'submit_native' || (event.work.source?.version !== 1 && event.work.source?.version !== 3 && event.work.source?.version !== 4) || !event.attemptId || event.actorId !== principalId) throw new NativeWorkSubmissionError('unavailable');
   const attempt = event.attempts.find(value => value.id === event.attemptId && value.workId === event.workId);
   if (!attempt || attempt.ownerId !== principalId || attempt.state !== 'active' || attempt.predecessorId !== null) throw new NativeWorkSubmissionError('unavailable');
   const { inputId, ...source } = event.work.source;
   if (source.sessionId !== sessionId || (source.version === 1 && source.sourceId !== historicalSourceId(projectId, event.actorId, inputId))) throw new NativeWorkSubmissionError('unavailable');
   if (issued) {
-    if (source.version !== 3 || source.sourceId !== issued.sourceId || source.sourceRevision !== issued.sourceRevision
+    if (source.version !== 4 || source.sourceId !== issued.sourceId || source.sourceRevision !== issued.sourceRevision
       || inputId !== issued.request.inputId || event.work.goal !== issued.request.goal || !isDeepStrictEqual(event.work.criteria, issued.request.criteria)) throw new NativeWorkSubmissionError('unavailable');
-  } else if (source.sourceRevision !== originalInputCommitment(source.version, inputId, event.work.goal, event.work.criteria)) throw new NativeWorkSubmissionError('unavailable');
+  } else if (source.version !== 4 && source.sourceRevision !== originalInputCommitment(source.version, inputId, event.work.goal, event.work.criteria)) throw new NativeWorkSubmissionError('unavailable');
   const value = nativeWorkSubmissionReceiptSchema.parse({ projectId, requestId: event.requestId, inputId,
     ledgerRevision: event.sequence, workId: event.workId, attemptId: attempt.id,
     expectedRevision: { work: event.work.revision, criteria: event.work.criteriaRevision, attempt: attempt.revision },
@@ -125,8 +125,8 @@ export function createNativeWorkSubmissionHost(deps: {
         const existing = await deps.service.lookupSubmission(captured.requestId, actor);
         signal.throwIfAborted(); if (!isAuthorized()) throw new NativeWorkSubmissionError('forbidden');
         if (existing) return replay(existing);
-        const source = { version: 3 as const, inputId: captured.inputId, sessionId: deps.sessionId,
-          sourceId: opaqueUuid(), sourceRevision: originalInputCommitment(3, captured.inputId, captured.goal, captured.criteria) };
+        const source = { version: 4 as const, inputId: captured.inputId, sessionId: deps.sessionId,
+          sourceId: opaqueUuid(), sourceRevision: opaqueUuid() };
         const result = await deps.service.execute({ type: 'submit_native', requestId: captured.requestId, expectedRevision: captured.expectedRevision,
           title: captured.goal.trim(), goal: captured.goal, criteria: captured.criteria, source }, actor, { signal, isAuthorized });
         if (result.kind === 'indeterminate') throw new NativeWorkSubmissionError('indeterminate');

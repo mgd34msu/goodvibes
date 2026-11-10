@@ -1,3 +1,4 @@
+import { legacyMigrationPreparationRevision } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { nativeWorkExecutionLines } from '../runtime/native-work-execution.ts';
 import type { NativeWorkLedgerState } from '../runtime/native-work-ledger.ts';
 
@@ -39,7 +40,7 @@ export function nativeWorkLedgerLines(state: NativeWorkLedgerState): string[] {
         `  Actor ${safe(event.actorId)} · request ${safe(event.requestId)}`);
       for (const work of event.works) lines.push(`  Work ${safe(work.id)} r${work.revision} · ${safe(work.title)} · reported ${work.reportedState} · imported unverified`);
       if (!event.manifest) { lines.push('  Protected legacy provenance requires read:knowledge authorization.'); continue; }
-      lines.push(`  Legacy preparation ${safe(event.manifest.digest)} · historical approval is not execution authority`);
+      lines.push(`  Legacy preparation ${safe(legacyMigrationPreparationRevision(event.manifest))} · historical approval is not execution authority`);
       for (const entity of event.manifest.entities) {
         lines.push(`  Legacy ${entity.kind} ${safe(entity.id)} · ${entity.fragments.length} source fragments`);
         for (const fragment of entity.fragments) lines.push(`    Source ${safe(fragment.sourceId)} ${safe(fragment.pointer)}`);

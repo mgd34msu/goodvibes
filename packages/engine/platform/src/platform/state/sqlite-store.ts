@@ -1572,6 +1572,29 @@ export class SQLiteStore {
     } catch (error) { if (frame) frame.poisoned = true; throw error; }
   }
 
+  /** Actual existing history only: indexed first/current/selected rows, never a
+   * retained duplicate of a deleted subject's source text. */
+  readPersistedNodeHistorySelection(nodeId: string, revisionId: string | null): {
+    readonly first: ReturnType<SqlDatabase['exec']>;
+    readonly latest: ReturnType<SqlDatabase['exec']>;
+    readonly selected: ReturnType<SqlDatabase['exec']>;
+  } {
+    try {
+      if (typeof nodeId !== 'string' || (revisionId !== null && typeof revisionId !== 'string')) throw new TypeError('SQLiteStore: invalid node history selector');
+      let result: { first: ReturnType<SqlDatabase['exec']>; latest: ReturnType<SqlDatabase['exec']>; selected: ReturnType<SqlDatabase['exec']> } | undefined;
+      this.assertPersistedReadFrame(() => {
+        result = {
+          first: this.readPrivatePersistedRows('SELECT id FROM knowledge_node_revisions WHERE node_id = ? ORDER BY revision ASC LIMIT 1', [nodeId]),
+          latest: this.readPrivatePersistedRows('SELECT id FROM knowledge_node_revisions WHERE node_id = ? ORDER BY revision DESC LIMIT 1', [nodeId]),
+          selected: revisionId === null ? [] : this.readPrivatePersistedRows('SELECT * FROM knowledge_node_revisions WHERE id = ? AND node_id = ? LIMIT 1', [revisionId, nodeId]),
+        };
+        return undefined;
+      });
+      if (!result) throw new SQLiteObservationRetiredError();
+      return result;
+    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  }
+
   readPersistedNodeActivationCache(nodeId: string): KnowledgeActivationCacheRow | null {
     try {
       if (typeof nodeId !== 'string') throw new TypeError('SQLiteStore: invalid activation selector');

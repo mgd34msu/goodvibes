@@ -68,7 +68,8 @@ test('old source generation previews remain parseable but cannot be rebound to a
 });
 test('actual historical manifest1 commits and replays after restart without adopting fresh source-digest removal', async () => {
   const host = await fixture(), request = await seed(host, ['historical']);
-  const { digest: _digest, ...original } = request.manifest;
+  if (request.manifest.version !== 3) throw new Error('Expected a fresh preparation');
+  const { revision: _revision, ...original } = request.manifest;
   const body = { ...original, version: 1 as const, sources: original.sources.map(entry => ({ source: entry.source, generation: entry.generation,
     digest: createHash('sha256').update(JSON.stringify(entry.source)).digest('hex'),
   })) };
@@ -83,10 +84,10 @@ test('actual historical manifest1 commits and replays after restart without adop
   expect(history[0]).toMatchObject({ manifest: historical.manifest });
 });
 
-for (const malformed of [false, true]) test(`new manifest2 publication requires its actual native-reader floor (nonvoid=${malformed})`, async () => {
+for (const malformed of [false, true]) test(`new manifest3 publication requires its actual native-reader floor (nonvoid=${malformed})`, async () => {
   let allowed = false, declared = 0;
   const host = await fixture(undefined, 'host', { declare(format) {
-    if (format !== 'native-historical-import-manifests-v2') return;
+    if (format !== 'native-historical-import-revisions-v3') return;
     declared++;
     if (!allowed) {
       if (malformed) return Promise.reject(new Error('Synthetic asynchronous format owner'));
@@ -98,7 +99,7 @@ for (const malformed of [false, true]) test(`new manifest2 publication requires 
   expect(declared).toBe(1); expect(fs.readFileSync(host.file)).toEqual(before);
   expect((await host.service.readSnapshot(host.actor)).revision).toBe(0);
   allowed = true;
-  expect(await host.service.execute(request, host.actor)).toMatchObject({ kind: 'accepted', replayed: false, event: { manifest: { version: 2 } } });
+  expect(await host.service.execute(request, host.actor)).toMatchObject({ kind: 'accepted', replayed: false, event: { manifest: { version: 3 } } });
   expect(declared).toBe(2);
   expect(await host.service.execute(request, host.actor)).toMatchObject({ kind: 'accepted', replayed: true });
   expect(declared).toBe(2);
@@ -169,7 +170,7 @@ test('simultaneous requests serialize; malformed manifest, authority fields and 
   expect((await host.service.readSnapshot(host.actor)).revision).toBe(1);
 });
 
-test('forged complete source bytes with genuine generation and recomputed client digest are refused inside transaction', async () => {
+test('forged complete source bytes with genuine generation and a fresh preparation revision are refused inside transaction', async () => {
   const host = await fixture(); await seed(host); const real = host.store.getSourceSnapshot({ id: 'source' });
   const forged = structuredClone(real.source!);
   const metadata = forged.metadata as { value: { tasks: { title: string }[] } };

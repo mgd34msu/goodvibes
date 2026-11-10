@@ -6,14 +6,14 @@ import { captureOwnedJson } from '../../gate/judgment-input.js';
 import type { DurableContractKey, DurableContractRequest } from '../../contract/durable-admission.js';
 import type { NativeExecutionOriginal, NativeWorkExecutionTransaction } from './native-execution-types.js';
 import type { CiWatchSubscription, FixSessionBrief } from '../../ci-watch/types.js';
-import { workLedgerExplicitSourceSchema, workLedgerOpaqueExplicitSourceSchema, workLedgerExtractedSourceSchema, type WorkLedgerSource } from './types.js';
+import { workLedgerExplicitSourceSchema, workLedgerOpaqueExplicitSourceSchema, workLedgerNativeExplicitSourceSchema, workLedgerExtractedSourceSchema, type WorkLedgerSource } from './types.js';
 
 const id = z.string().min(1).max(256), hash = z.string().regex(/^[0-9a-f]{64}$/), revision = z.number().int().nonnegative();
 const key = z.strictObject({ workId: id, criteriaId: id, criteriaRevision: id, attemptId: id });
 const target = z.strictObject({ workId: id, workRevision: revision, criteriaRevision: revision, attemptId: id, attemptRevision: revision });
 const owner = { projectId: id, originalKey: key, originalPayloadRevision: hash, principalId: id, authorityRevision: id, authorityScopes: z.array(id).min(1), scopeId: id, scopeRevision: id };
 const legacyIssue = z.strictObject({ ...owner, ledgerSourceRevision: hash, policyRevision: hash, seedRevision: hash });
-const ledgerSource = z.union([workLedgerExplicitSourceSchema, workLedgerOpaqueExplicitSourceSchema, workLedgerExtractedSourceSchema.omit({ continuation: true })]);
+const ledgerSource = z.union([workLedgerExplicitSourceSchema, workLedgerOpaqueExplicitSourceSchema, workLedgerNativeExplicitSourceSchema, workLedgerExtractedSourceSchema.omit({ continuation: true })]);
 const opaqueAttempt = z.string().regex(/^attempt-ci-[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
 const currentIssue = z.strictObject({ ...owner, ledgerSource, policyRevision: z.string().min(1).max(4096), successorAttemptId: opaqueAttempt, successorSourceBinding: hash });
 const watchSchema = z.strictObject({ id, repo: id, ref: id.optional(), prNumber: z.number().int().positive().optional(), deliveryChannel: id,

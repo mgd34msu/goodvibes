@@ -79,6 +79,7 @@ export function commitKnowledgeNodeIssueWrites(view: {
   sqlite: SQLiteStore; nodes: Map<string, KnowledgeNodeRecord>; issues: Map<string, KnowledgeIssueRecord>;
   nodeRevisions: Map<string, KnowledgeNodeRevisionRecord[]>;
   beforeNodeWrite?: ((record: KnowledgeNodeRecord) => void) | undefined;
+  beforePublication?: (() => void) | undefined;
 }, nodes: readonly PreparedKnowledgeNode[], issues: readonly KnowledgeIssueRecord[]): void {
   const revisions = new Map<string, KnowledgeNodeRevisionRecord[]>();
   for (const { record } of nodes) revisions.set(record.id, [...(view.nodeRevisions.get(record.id) ?? [])]);
@@ -90,6 +91,7 @@ export function commitKnowledgeNodeIssueWrites(view: {
       recordKnowledgeNodeRevisions(view.sqlite, revisions, record, existing, now);
     }
     for (const record of issues) writeKnowledgeIssueRow(view.sqlite, record);
+    view.beforePublication?.();
     view.sqlite.run('RELEASE SAVEPOINT knowledge_guarded_node_issue_write');
   } catch (error) {
     view.sqlite.run('ROLLBACK TO SAVEPOINT knowledge_guarded_node_issue_write');

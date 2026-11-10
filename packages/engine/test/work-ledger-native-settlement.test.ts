@@ -290,12 +290,13 @@ test('native settlement proves every original question across actual deliverable
     expect(f.log.get(id)!.questions).toHaveProperty(`criterion_${index}`);
   }
   const targetId = rootIds.find(id => Object.hasOwn(f.log.get(id)!.questions as object, 'criterion_1'))!;
-  for (const mutation of ['missing-entry', 'missing-question', 'extra-question', 'duplicate-question', 'wrong-state', 'wrong-criterion'] as const) {
+  for (const mutation of ['missing-entry', 'missing-state-hash', 'missing-question', 'extra-question', 'duplicate-question', 'wrong-state', 'wrong-criterion'] as const) {
     await expect(verifyNativeWorkExecution({ execution: f.storage.current(f.key).record!, runner: f.harness.runner,
       port: f.hostOptions.port, decisionLog: { get(id) {
         const entry = f.log.get(id);
         if (id !== targetId || entry?.status !== 'answered') return entry;
         if (mutation === 'missing-entry') return undefined;
+        if (mutation === 'missing-state-hash') { const { stateHash: _stateHash, ...unbound } = entry; return unbound; }
         if (mutation === 'wrong-state') return { ...entry, stateHash: 'different-batch-state' as typeof entry.stateHash };
         const questions = JSON.parse(JSON.stringify(entry.questions)), answers = JSON.parse(JSON.stringify(entry.answers));
         if (mutation === 'missing-question') { delete questions.criterion_1; delete answers.criterion_1; }

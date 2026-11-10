@@ -2,7 +2,7 @@ import { assertHomeGraphNodeIdentityWrite } from './store-homegraph-node-selecto
 import { knowledgeClockIso, knowledgeRawRepresentation, retainKnowledgeRepresentation } from './store-record-representation.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
-import { preparedNodeWrite, markPreparedNodeWritten } from './store-node-activation.js';
+import { preparedNodeWrite, stagePreparedNodeWrites } from './store-node-activation.js';
 import { retainKnowledgeNodeObservation } from './store-node-observation.js';
 import type { SQLiteStore } from '../state/sqlite-store.js';
 import { nowMs } from './store-schema.js';
@@ -105,7 +105,9 @@ function appendNodeRevision(
 ): void {
   const revision = (list[list.length - 1]?.revision ?? 0) + 1;
   const rev: KnowledgeNodeRevisionRecord = {
-    id: `noderev-${snapshot.id}-${revision}`,
+    // The first saved history row also distinguishes this actual incarnation
+    // after hard deletion. Existing IDs remain valid opaque references.
+    id: `noderev-${opaqueUuid()}`,
     nodeId: snapshot.id,
     revision,
     changeKind,
@@ -127,7 +129,7 @@ function appendNodeRevision(
   retainKnowledgeRepresentation(rev, { ...knowledgeRawRepresentation(rev), nodeCreatedAt: original.createdAt, nodeUpdatedAt: original.updatedAt, recordedAt: knowledgeClockIso(now) });
   const raw = knowledgeRawRepresentation(rev);
   sqlite.run(`
-    INSERT OR REPLACE INTO knowledge_node_revisions (
+    INSERT INTO knowledge_node_revisions (
       id, node_id, revision, change_kind, changed_fields, kind, slug, title, summary,
       aliases, status, confidence, source_id, metadata, node_created_at, node_updated_at, recorded_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -173,9 +175,8 @@ function diffKnowledgeNodeFields(prev: KnowledgeNodeRecord, next: KnowledgeNodeR
 }
 
 function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false;
-  const set = new Set(a);
-  return b.every((entry) => set.has(entry));
+  const previous = new Set(a), next = new Set(b);
+  return previous.size === next.size && [...next].every((entry) => previous.has(entry));
 }
 
 // Compare metadata for revision purposes ignoring the volatile review-provenance
@@ -240,6 +241,7 @@ export async function mergeKnowledgeNodes(
   const plan = planMergedEdges(edges, loserId, winnerId, mergedAt);
   const { record, existing, now, observationEvidence } = preparedNodeWrite(store, prepared, 0, view.nodeActivationScope);
   const revisions = new Map([[record.id, [...(view.nodeRevisions.get(record.id) ?? [])]]]);
+  let staged: ReturnType<typeof stagePreparedNodeWrites>;
   if (record !== existing) view.beforeNodeWrite?.(record);
   view.sqlite.run('SAVEPOINT knowledge_node_merge');
   try {
@@ -249,6 +251,7 @@ export async function mergeKnowledgeNodes(
       writeKnowledgeNodeRow(view.sqlite, record);
       recordKnowledgeNodeRevisions(view.sqlite, revisions, record, existing, now);
     }
+    staged = stagePreparedNodeWrites(prepared, [0], view.sqlite);
     view.sqlite.run('RELEASE SAVEPOINT knowledge_node_merge');
   } catch (error) {
     view.sqlite.run('ROLLBACK TO SAVEPOINT knowledge_node_merge');
@@ -260,7 +263,7 @@ export async function mergeKnowledgeNodes(
   view.nodes.set(record.id, record);
   view.nodeRevisions.set(record.id, revisions.get(record.id)!);
   retainKnowledgeNodeObservation(existing, record, observationEvidence);
-  markPreparedNodeWritten(prepared, 0, view.sqlite);
+  staged.commit();
   // save() retains its normal contract, including outer batch-save deferral.
   // It is not a SQL transaction and is never used as rollback protection.
   await view.sqlite.save();

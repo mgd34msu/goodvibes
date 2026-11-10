@@ -27,7 +27,7 @@ export function assertKnowledgeIssueOperatorMutation(
   }
 }
 
-/** A changed content fingerprint starts a new lifecycle, never reuses its review. */
+/** A changed producer subject revision starts a lifecycle without inheriting review. */
 export function prepareKnowledgeIssueUpsert(
   existing: KnowledgeIssueRecord | undefined,
   input: KnowledgeIssueUpsertInput,
@@ -37,16 +37,17 @@ export function prepareKnowledgeIssueUpsert(
   if (mutation) assertKnowledgeIssueOperatorMutation(existing, mutation);
   const lifecycle = readRecord(existing?.metadata.issueLifecycle);
   const incomingLifecycle = readRecord(input.metadata?.issueLifecycle);
-  const previous = readFingerprint(existing?.metadata.subjectFingerprint);
-  const next = readFingerprint(input.metadata?.subjectFingerprint);
+  const previous = readSubjectRevision(existing?.metadata);
+  const next = readSubjectRevision(input.metadata);
   const changed = Boolean(previous && next && previous !== next);
-  const retired = readStrings(lifecycle.retiredFingerprints);
+  const revisionLabels = readLabel(input.metadata?.subjectRevision) !== undefined || readLabel(existing?.metadata.subjectRevision) !== undefined;
+  const retired = [...new Set([...readStrings(lifecycle.retiredSubjectRevisions), ...readStrings(lifecycle.retiredFingerprints)])];
   const observedCurrentLifecycle = typeof lifecycle.id === 'string' && incomingLifecycle.id === lifecycle.id;
   // A captured old record cannot undo a later review/reopen, even when both
   // lifecycles happen to have status open. Sparse producer inputs have no token.
   // Pre-token persisted snapshots cannot prove they observed an operator reopen.
   // Current repair callers carry the token read with the issue; a genuinely new
-  // content fingerprint is still a separate lifecycle rather than a freeze.
+  // subject revision is still a separate lifecycle rather than a freeze.
   const unversionedResolution = !changed && input.status === 'resolved' && existing?.status === 'open'
     && typeof readRecord(existing.metadata.review).action === 'string'
     && typeof lifecycle.id === 'string' && incomingLifecycle.id !== lifecycle.id;
@@ -59,6 +60,10 @@ export function prepareKnowledgeIssueUpsert(
     return { preserve: true, status: existing.status, metadata: existing.metadata };
   }
   const metadata = { ...(replaceMetadata ? {} : existing?.metadata), ...withoutProtectedFields(input.metadata) };
+  if (input.metadata?.homeGraphQualityRevisionVersion === 1) {
+    delete metadata.subjectFingerprint;
+    delete metadata.qualityFingerprintVersion;
+  }
   // Compensation replaces ordinary fields exactly, but cannot supply authority.
   for (const key of protectedFields) {
     if (existing?.metadata[key] !== undefined) metadata[key] = existing.metadata[key];
@@ -74,7 +79,8 @@ export function prepareKnowledgeIssueUpsert(
   }
   metadata.issueLifecycle = {
     id: changed || mutation || typeof lifecycle.id !== 'string' ? randomUUID() : lifecycle.id,
-    retiredFingerprints: changed && previous && existing?.status === 'resolved' ? [...new Set([...retired, previous])] : retired,
+    [revisionLabels ? 'retiredSubjectRevisions' : 'retiredFingerprints']:
+      changed && previous && existing?.status === 'resolved' ? [...new Set([...retired, previous])] : retired,
   };
   return {
     preserve: false,
@@ -89,8 +95,12 @@ function withoutProtectedFields(value: Record<string, unknown> | undefined): Rec
 function readRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
-function readFingerprint(value: unknown): string | undefined {
+function readLabel(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+function readSubjectRevision(metadata: Record<string, unknown> | undefined): string | undefined {
+  // Existing generic producers/rows remain readable without recomputing a digest.
+  return readLabel(metadata?.subjectRevision) ?? readLabel(metadata?.subjectFingerprint);
 }
 function readStrings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];

@@ -1,5 +1,6 @@
 import { SQLiteObservationRetiredError } from '../../state/sqlite-store.js';
 import { SemanticIdentityHeldError } from '../store-semantic-fact-selector.js';
+import { KnowledgeRecordAdmissionHeldError } from '../store-record-snapshot.js';
 import { createHomeGraphQualityIssueIdentities } from './quality/issue-identities.js';
 import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import type { KnowledgeIssueRecord, KnowledgeIssueUpsertInput, KnowledgeNodeRecord } from '../types.js';
@@ -8,7 +9,8 @@ import { isLegacyHomeGraphQualityIssue, KnowledgeIssueReplacementHeldError } fro
 import { buildHomeGraphMetadata, readRecord } from './helpers.js';
 import { readHomeGraphState, sourcesLinkedToNode } from './state.js';
 import { readHomeGraphQuality, HomeGraphQualityHeldError, HOME_GRAPH_QUALITY_LIMITS, type HomeGraphQualityQuestion, type HomeGraphQualityReading, type HomeGraphQualityInput } from './quality/reader.js';
-import { HOME_GRAPH_QUALITY_FINGERPRINT_VERSION, homeGraphQualitySubjectFingerprint, preserveLegacyQualityAuthority } from './quality/fingerprint.js';
+import { preserveLegacyQualityAuthority } from './quality/fingerprint.js';
+import { createQualityRevisionPlans, readQualitySubjectState, type QualityRevisionPlan } from './quality/revision.js';
 import { projectHomeGraphQualityInput, readHomeGraphDeclaredBoolean } from './quality/projection.js';
 
 const QUALITY_NAMESPACE_PREFIX = 'homegraph';
@@ -41,20 +43,30 @@ export async function refreshHomeGraphQualityReport(
   const version = JSON.stringify({ state, issues: allIssues });
   for (const issue of allIssues) if (issue.metadata.namespace === homeGraphQualityNamespace(spaceId)
     && (issue.metadata.homeGraphQualityIdentityVersion !== undefined && issue.metadata.homeGraphQualityIdentityVersion !== 1
-      || issue.metadata.qualityFingerprintVersion !== undefined && ![1,2].includes(issue.metadata.qualityFingerprintVersion as number))) throw new HomeGraphQualityHeldError('malformed');
+      || issue.metadata.qualityFingerprintVersion !== undefined && ![1,2].includes(issue.metadata.qualityFingerprintVersion as number)
+      || issue.metadata.homeGraphQualityRevisionVersion !== undefined && issue.metadata.homeGraphQualityRevisionVersion !== 1)) throw new HomeGraphQualityHeldError('malformed');
   const identities = createHomeGraphQualityIssueIdentities(store, spaceId, homeGraphQualityNamespace(spaceId));
   const legacy = allIssues.filter((issue) => isLegacyHomeGraphQualityIssue(issue, spaceId));
   const tuples = new Set<string>();
+  const previousBySubject = new Map<string, KnowledgeIssueRecord>();
   for (const issue of [...allIssues.filter(issue => issue.metadata.namespace === homeGraphQualityNamespace(spaceId)), ...legacy]) {
     if (!['homegraph.device.missing_manual','homegraph.device.unknown_battery'].includes(issue.code) || !issue.nodeId) continue;
     const tuple = JSON.stringify([issue.code,issue.nodeId]);
     if (tuples.has(tuple) || !['open','resolved'].includes(issue.status)) throw new HomeGraphQualityHeldError('malformed');
     tuples.add(tuple);
+    readQualitySubjectState(issue);
+    previousBySubject.set(tuple, issue);
   }
+  const revisions = createQualityRevisionPlans(store);
   const guard = () => {
     if (options.signal?.aborted) throw new HomeGraphQualityHeldError('aborted');
     if (JSON.stringify({ state: readHomeGraphState(store, spaceId), issues: store.listIssuesInSpace(spaceId) }) !== version) {
       throw new HomeGraphQualityHeldError('stale');
+    }
+    try { store.assertRecordSnapshotFrame(() => { revisions.assertCurrent(); return undefined; }); }
+    catch (error) {
+      if (error instanceof SQLiteObservationRetiredError || error instanceof KnowledgeRecordAdmissionHeldError) throw new HomeGraphQualityHeldError('stale');
+      throw error;
     }
   };
   guard();
@@ -64,8 +76,8 @@ export async function refreshHomeGraphQualityReport(
     const battery = readNonEmptyString(node.metadata.batteryType) ? false : readHomeGraphDeclaredBoolean(node.metadata.batteryPowered);
     const manual = sourcesLinkedToNode(node.id, state).length > 0 ? false : readHomeGraphDeclaredBoolean(node.metadata.manualRequired);
     const questions: HomeGraphQualityQuestion[] = [];
-    if (battery === undefined) questions.push('batteryApplicable');
-    if (manual === undefined) questions.push('manualApplicable');
+    if (battery === undefined && !preserveLegacyQualityAuthority(previousBySubject.get(JSON.stringify(['homegraph.device.unknown_battery',node.id])))) questions.push('batteryApplicable');
+    if (manual === undefined && !preserveLegacyQualityAuthority(previousBySubject.get(JSON.stringify(['homegraph.device.missing_manual',node.id])))) questions.push('manualApplicable');
     const reference = `device-${index + 1}`;
     const entities = relatedEntities(node,state);
     const input: HomeGraphQualityInput = questions.length
@@ -73,18 +85,34 @@ export async function refreshHomeGraphQualityReport(
       : { reference, subject: { kind: 'ha_device', title: 'Declared device' }, entities: [], facts: [], questions: [] };
     return { node, battery, manual, input, original: originals.get(node.id), related: entities.map(entity => originals.get(entity.id)) };
   });
+  const plans = new Map<string, QualityRevisionPlan>();
+  try { store.assertRecordSnapshotFrame(() => {
+    for (const { node, battery, manual, input, original, related } of selected) {
+      if (!original || related.some(member => !member)) throw new HomeGraphQualityHeldError('stale');
+      for (const [code, applicable] of [['homegraph.device.missing_manual', manual], ['homegraph.device.unknown_battery', battery]] as const) {
+        const key = JSON.stringify([code,node.id]), previous = previousBySubject.get(key);
+        if (applicable === false || preserveLegacyQualityAuthority(previous)) continue;
+        plans.set(key,revisions.prepare(code,original,related.filter((member): member is KnowledgeNodeRecord => member !== undefined),input,previous));
+      }
+    }
+    return undefined;
+  }); } catch (error) {
+    if (error instanceof SQLiteObservationRetiredError || error instanceof SemanticIdentityHeldError || error instanceof KnowledgeRecordAdmissionHeldError) throw new HomeGraphQualityHeldError('stale');
+    throw error;
+  }
   const readings = await readHomeGraphQuality(selected.map(({ input }) => input), { ...options, assertCurrent: guard });
   guard();
   const issues: KnowledgeIssueUpsertInput[] = [];
   try { store.assertRecordSnapshotFrame(() => {
-    for (const [index, { node, battery, manual, input, original, related }] of selected.entries()) {
+    for (const [index, { node, battery, manual, input }] of selected.entries()) {
       const reading = readings[index]!;
       const append = (code: string, message: string) => {
         const identity = identities.prepare(code,node.id);
-        // No new digest/publication can establish a content change for this
-        // earlier reviewed format. Keep it exactly, without needless hashing.
+        // Historical digests cannot revoke an operator's reviewed authority.
         if (preserveLegacyQualityAuthority(identity.original)) return;
-        issues.push(qualityIssue(spaceId, installationId, identity.id, code, message, node, reading, input, identity.original, original, related));
+        const plan = plans.get(JSON.stringify([code,node.id]));
+        if (!plan) throw new HomeGraphQualityHeldError('stale');
+        issues.push(qualityIssue(spaceId, installationId, identity.id, code, message, node, reading, input, identity.original, plan));
       };
       if (manual ?? reading.answers.manualApplicable) append('homegraph.device.missing_manual', `${node.title} has no linked manual or source.`);
       if (battery ?? reading.answers.batteryApplicable) append('homegraph.device.unknown_battery', `${node.title} has no known battery type.`);
@@ -116,8 +144,7 @@ function qualityIssue(
   reading: HomeGraphQualityReading,
   input: HomeGraphQualityInput,
   existing: KnowledgeIssueRecord | undefined,
-  original: KnowledgeNodeRecord | undefined,
-  related: readonly (KnowledgeNodeRecord | undefined)[],
+  revision: QualityRevisionPlan,
 ): KnowledgeIssueUpsertInput {
   const issue: KnowledgeIssueUpsertInput = { id, code, severity: 'warning', message, nodeId: node.id,
     metadata: buildHomeGraphMetadata(spaceId,installationId,{ namespace: homeGraphQualityNamespace(spaceId), subjectId: node.id }) };
@@ -132,9 +159,8 @@ function qualityIssue(
       // Current lifecycle observation only. Store-owned protected fields remain
       // authoritative; a delayed old source cannot supply a newer observation.
       ...(typeof observedLifecycle === 'string' ? { issueLifecycle: { id: observedLifecycle } } : {}),
-      subjectFingerprint: memoizedQualityFingerprint(node,code,input,original,related),
+      ...revision.metadata(),
       homeGraphQualityIdentityVersion: 1,
-      qualityFingerprintVersion: HOME_GRAPH_QUALITY_FINGERPRINT_VERSION,
       qualityReading: input.questions.includes(question)
         ? { origin: 'automatic-judgment', question, answer: reading.answers[question], ...reading.provenance[question] }
         : { origin: 'declared-fields' },
@@ -142,46 +168,18 @@ function qualityIssue(
   };
 }
 
-interface QualityCommitmentMemo {
-  readonly semantic: boolean;
-  readonly dependencies: readonly WeakRef<KnowledgeNodeRecord>[];
-  readonly fingerprint: string;
-}
-const memoGet = WeakMap.prototype.get, memoSet = WeakMap.prototype.set, memoApply = Reflect.apply, memoDeref = WeakRef.prototype.deref;
-const qualityCommitments = new WeakMap<KnowledgeNodeRecord, Map<string,QualityCommitmentMemo>>();
-/** Native store nodes are deeply frozen by retainKnowledgeNodeRecord, including
- * hydration. Keep only the digest and WEAK related-object references; hard
- * deletion does not retain a private old body merely to save a hash operation.
- * This is a data memo, never semantic or operator admission evidence. */
-function memoizedQualityFingerprint(node: KnowledgeNodeRecord, code: string, input: HomeGraphQualityInput,
-  original: KnowledgeNodeRecord | undefined, related: readonly (KnowledgeNodeRecord | undefined)[]): string {
-  const semantic = input.questions.includes(code === 'homegraph.device.unknown_battery' ? 'batteryApplicable' : 'manualApplicable');
-  const immutable = (value: KnowledgeNodeRecord | undefined): value is KnowledgeNodeRecord => !!value
-    && Object.isFrozen(value) && Object.isFrozen(value.metadata) && Object.isFrozen(value.aliases);
-  if (!immutable(original) || semantic && related.some(record => !immutable(record))) return homeGraphQualitySubjectFingerprint(node,code,input);
-  const dependencies = semantic ? related.filter(immutable).sort((left,right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0) : [];
-  let memo = memoApply(memoGet,qualityCommitments,[original]) as Map<string,QualityCommitmentMemo> | undefined;
-  const previous = memo?.get(code);
-  if (previous?.semantic === semantic && previous.dependencies.length === dependencies.length
-    && previous.dependencies.every((reference,index) => memoApply(memoDeref,reference,[]) === dependencies[index])) return previous.fingerprint;
-  const fingerprint = homeGraphQualitySubjectFingerprint(node,code,input);
-  if (!memo) { memo = new Map(); memoApply(memoSet,qualityCommitments,[original,memo]); }
-  memo.set(code,Object.freeze({ semantic, dependencies: Object.freeze(dependencies.map(record => new WeakRef(record))), fingerprint }));
-  return fingerprint;
-}
-
 function isSuppressedGeneratedIssue(
   existing: KnowledgeIssueRecord | null,
   input: KnowledgeIssueUpsertInput,
 ): boolean {
   if (!existing || existing.status !== 'resolved') return false;
-  const existingFingerprint = typeof existing.metadata.subjectFingerprint === 'string'
-    ? existing.metadata.subjectFingerprint
+  const existingRevision = typeof existing.metadata.subjectRevision === 'string'
+    ? existing.metadata.subjectRevision
     : undefined;
-  const inputFingerprint = typeof input.metadata?.subjectFingerprint === 'string'
-    ? input.metadata.subjectFingerprint
+  const inputRevision = typeof input.metadata?.subjectRevision === 'string'
+    ? input.metadata.subjectRevision
     : undefined;
-  return existingFingerprint === inputFingerprint;
+  return existingRevision !== undefined && existingRevision === inputRevision;
 }
 
 
@@ -190,12 +188,14 @@ function relatedEntities(
   state: ReturnType<typeof readHomeGraphState>,
 ): KnowledgeNodeRecord[] {
   const byId = new Map(state.nodes.map((entry) => [entry.id, entry]));
-  return state.edges
+  const entities = state.edges
     .filter((edge) => edge.fromKind === 'node' && edge.toKind === 'node' && edge.toId === node.id && edge.relation === 'belongs_to_device')
     .flatMap((edge) => {
       const entry = byId.get(edge.fromId);
       return entry?.kind === 'ha_entity' ? [entry] : [];
     });
+  return [...new Map(entities.map(entity => [entity.id,entity] as const)).values()]
+    .sort((a,b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
 function readNonEmptyString(value: unknown): string | undefined {

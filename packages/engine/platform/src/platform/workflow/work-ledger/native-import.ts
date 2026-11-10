@@ -5,7 +5,7 @@ import { canonicalJson, JudgmentError, type DecisionLog, type EntryType, type Ju
 import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
 import { decideAutonomous } from '../../gate/autonomous-decision.js';
 import { captureLegacyImportAction } from './import-action-binding.js';
-import { assertLegacyWorkLedgerSourcesCurrent, validateLegacyWorkLedgerManifest, type LegacyMigrationManifest } from './legacy-import.js';
+import { assertLegacyWorkLedgerSourcesCurrent, legacyMigrationPreparationRevision, validateLegacyWorkLedgerManifest, type LegacyMigrationManifest } from './legacy-import.js';
 import { workLedgerCommandSchema, WorkLedgerAccessError, type WorkLedgerAuthority, type WorkLedgerResult, type WorkLedgerRejection, type WorkLedgerService } from './types.js';
 import type { NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativePairedExecutionSnapshot } from './native-execution.js';
 
@@ -42,7 +42,7 @@ export function legacyImportSemanticManifest(manifest: LegacyMigrationManifest) 
     return value;
   };
   return { ...manifest, hostId: /^[a-f0-9-]{36}$/i.test(manifest.hostId) ? manifest.hostId.replaceAll('-', '.') : manifest.hostId,
-    digest: digest(manifest.digest), sources: manifest.sources.map(capture => ({
+    ...(manifest.version === 3 ? { revision: manifest.revision } : { digest: digest(manifest.digest) }), sources: manifest.sources.map(capture => ({
       ...capture, ...(capture.digest === undefined ? {} : { digest: digest(capture.digest) }), generation: generation(capture.generation), source: { ...capture.source,
         createdAt: timestamp(capture.source['createdAt']),
         updatedAt: timestamp(capture.source['updatedAt']),
@@ -115,14 +115,14 @@ export function createNativeLegacyImportHost(deps: NativeLegacyImportDependencie
         // The private live checks bind these roles to the exact captured
         // command, paired owner and workspace. Their labels grant nothing.
         const binding = { sourceId: `${action.actionId}:source`,
-          inputRevision: command.manifest.digest, actionId: action.actionId, actionRevision: `${action.actionId}:command`,
+          inputRevision: legacyMigrationPreparationRevision(command.manifest), actionId: action.actionId, actionRevision: `${action.actionId}:command`,
           authorityId: `${action.actionId}:paired-principal`, authorityRevision: `${action.actionId}:paired-incarnation`,
           scopeId: `${action.actionId}:workspace`, scopeRevision: `${action.actionId}:workspace-generation` };
         const result = await decideAutonomous({ port: deps.port, site: NATIVE_IMPORT_SITE,
           instructions: 'Decide whether this exact bounded historical import is supported by the complete captured source records. Imported work starts unverified and unclaimed; historical statuses, execution approvals and artifacts grant no native execution, completion, or verification authority. Preserve exact goals, criteria, provenance, project and ledger revision. Act only on the offered import. Reject if unsupported. No human approval or client decision can authorize this operation.',
           actionDescription: 'Atomically import exactly this captured legacy manifest into the selected native project ledger.', binding,
           state: { manifest: legacyImportSemanticManifest(command.manifest), expectedLedgerRevision: command.expectedRevision, existingWorkIds: snapshot.works.map(view => view.work.id) } as unknown as EntryType,
-          evidence: [{ id: 'complete-import-manifest', revision: command.manifest.digest }, { id: 'native-ledger', revision: String(snapshot.revision) }],
+          evidence: [{ id: 'complete-import-manifest', revision: legacyMigrationPreparationRevision(command.manifest) }, { id: 'native-ledger', revision: String(snapshot.revision) }],
           continuations: [], conditions: [], allowAct: true, assertCurrent, signal });
         const assertRecorded = (claimed: boolean) => {
           result.assertCurrent();

@@ -1,13 +1,13 @@
 import type { LegacyImportOperatorSession } from './legacy-work-ledger-import-operator.js';
 import type { LegacyImportEntry } from './legacy-work-ledger-import-journal.js';
-import { projectLegacyImportWorks } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import { legacyMigrationPreparationRevision, projectLegacyImportWorks } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 interface Context { print(text: string): void }
 interface Registry<T extends Context> { register(command: { name: string; description: string; usage: string; argsHint: string; handler(args: string[], context: T): Promise<void> }): void }
 const quote = (value: string): string => JSON.stringify(value).replace(/[\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
 const usage = 'preview|status|submit <project-id> | reconsider|recover|cancel|restart <project-id> <request-id>';
 function entryLines(entry: LegacyImportEntry | null): string[] {
   if (!entry) return ['No saved legacy import for selected project.'];
-  const lines = [`Legacy import status: ${entry.state}`, `Request: ${quote(entry.command.requestId)}`, `Dispatch attempts: ${entry.attempts}`, `Manifest digest: ${entry.command.manifest.digest}`];
+  const lines = [`Legacy import status: ${entry.state}`, `Request: ${quote(entry.command.requestId)}`, `Dispatch attempts: ${entry.attempts}`, `Preparation revision: ${legacyMigrationPreparationRevision(entry.command.manifest)}`];
   for (const decision of entry.decisions) lines.push(`Recorded Jev outcome: ${decision.outcome}; decision ${quote(decision.decisionId)}`);
   if (entry.result?.kind === 'rejected') lines.push(`Host rejection: ${entry.result.code}: ${quote(entry.result.reason)}`);
   if (entry.state === 'accepted') lines.push('Native import recorded. Reported completion is not verified evidence; no work execution was started.');
@@ -35,7 +35,7 @@ export function registerLegacyImportCommands<T extends Context>(registry: Regist
           if (prepared.kind === 'blocked') lines.unshift(`Preparation blocked: ${prepared.code}: ${quote(prepared.reason)}`);
           else {
             const manifest = prepared.manifest;
-            lines.unshift('Legacy import preview', `Manifest digest: ${manifest.digest}`, `Expected ledger revision: ${manifest.expectedLedgerRevision}`);
+            lines.unshift('Legacy import preview', `Preparation revision: ${legacyMigrationPreparationRevision(manifest)}`, `Expected ledger revision: ${manifest.expectedLedgerRevision}`);
             lines.push(`Complete sources: ${manifest.sources.length}`);
             for (const source of manifest.sources) lines.push(`Source: ${quote(String(source.source.id))}`, `  Generation: ${source.generation}`);
             for (const work of projectLegacyImportWorks(manifest, 0)) {

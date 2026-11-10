@@ -50,7 +50,7 @@ export function readKnowledgeWorkLedger(db: Pick<SqlDatabase, 'exec'>, projectId
 export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId: string, refresh: () => void, hooks?: {
   beforeDecision(db: SqlDatabase): void;
   beforeCommit(db: SqlDatabase, current: WorkLedgerState, next: WorkLedgerState): void;
-}, beforeExplicitSourceWrite?: () => void, beforeHistoricalImportWrite?: () => void): KnowledgeWorkLedgerStorage {
+}, beforeExplicitSourceWrite?: (version?: 3 | 4) => void, beforeHistoricalImportWrite?: (version?: 2 | 3) => void): KnowledgeWorkLedgerStorage {
   createEmptyWorkLedgerState(projectId); // Validate even before the first row exists.
   let closed = false;
   let closePromise: Promise<void> | undefined;
@@ -98,12 +98,21 @@ export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId:
             throw new Error('Extracted conversation sources require atomic capture publication');
           }
           hooks?.beforeCommit(db, current, next);
-          if (next.history.slice(current.history.length).some(event => event.type === 'submit_native' && event.work.source?.version === 3)) {
-            const declared: unknown = beforeExplicitSourceWrite?.();
+          const explicitVersions = new Set<3 | 4>();
+          for (const event of next.history.slice(current.history.length)) {
+            const version = event.type === 'submit_native' ? event.work.source?.version : undefined;
+            if (version === 3 || version === 4) explicitVersions.add(version);
+          }
+          for (const version of explicitVersions) {
+            const declared: unknown = beforeExplicitSourceWrite?.(version);
             if (declared !== undefined) { drainOwned(declared); throw new Error('Explicit source publication requires a synchronous native owner'); }
           }
-          if (next.history.slice(current.history.length).some(event => event.type === 'import_legacy' && event.manifest.version === 2)) {
-            const declared: unknown = beforeHistoricalImportWrite?.();
+          const importVersions = new Set<2 | 3>();
+          for (const event of next.history.slice(current.history.length)) {
+            if (event.type === 'import_legacy' && (event.manifest.version === 2 || event.manifest.version === 3)) importVersions.add(event.manifest.version);
+          }
+          for (const version of importVersions) {
+            const declared: unknown = beforeHistoricalImportWrite?.(version);
             if (declared !== undefined) { drainOwned(declared); throw new Error('Historical import publication requires a synchronous native owner'); }
           }
           db.run('INSERT INTO work_ledgers(project_id, format_version, revision, state_json) VALUES (?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET format_version=excluded.format_version, revision=excluded.revision, state_json=excluded.state_json', [projectId, next.version, next.revision, JSON.stringify(next)]);

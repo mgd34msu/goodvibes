@@ -1,5 +1,7 @@
 /** Regression source UNRUN during the coding-first pass. No providers or executors. */
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -39,7 +41,7 @@ async function fixture(declare?: (format: string) => void) {
   return { root, workspace, file, store, storage, tokens, token, authority, ledger, deps, host, actor, input };
 }
 
-test('real paired explicit source v3 creates one opaque identity; concurrent/restarted replay preserves the full original event', async () => {
+test('real paired explicit source v4 creates opaque identity and revision; concurrent/restarted replay preserves the full original event', async () => {
   const f = await fixture(), other = createNativeWorkSubmissionHost(f.deps); cleanup.push(() => other.close());
   const results = await Promise.allSettled([f.host.submit(f.input, f.authority), other.submit(f.input, f.authority)]);
   const accepted = results.filter(result => result.status === 'fulfilled'), busy = results.filter(result => result.status === 'rejected');
@@ -50,8 +52,9 @@ test('real paired explicit source v3 creates one opaque identity; concurrent/res
   const retry = results[0]!.status === 'rejected' ? f.host : other;
   const second = await retry.submit(f.input, f.authority);
   expect(first.receipt).toEqual(second.receipt); expect([first.replayed, second.replayed]).toEqual([false, true]);
-  expect(first.receipt.source.version).toBe(3); expect(first.receipt.source.sourceId).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+  expect(first.receipt.source.version).toBe(4); expect(first.receipt.source.sourceId).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
   expect(first.receipt.source.sourceId).not.toContain(f.authority.current()!.principalId);
+  expect(first.receipt.source.sourceRevision).toMatch(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
   const before = readFileSync(f.file), originalState = readWorkLedgerState(await f.storage.read(), 'project');
   expect(originalState.works).toHaveLength(1); expect(originalState.attempts).toHaveLength(1);
   expect(JSON.parse(originalState.receipts[0]!.signature).command.source).toEqual(originalState.works[0]!.source);
@@ -66,29 +69,29 @@ test('real paired explicit source v3 creates one opaque identity; concurrent/res
   expect(readFileSync(f.file)).toEqual(before);
 });
 
-test('actual v3 ledger publication declares its native floor before the first event; a denied owner publishes no source or attempt', async () => {
-  let deny = true; const formats: string[] = [], f = await fixture(format => { formats.push(format); if (format === 'native-explicit-sources-v3' && deny) throw new Error('Synthetic unsupported explicit-source reader'); });
-  expect(formats).not.toContain('native-explicit-sources-v3');
+test('actual v4 ledger publication declares its native floor before the first event; a denied owner publishes no source or attempt', async () => {
+  let deny = true; const formats: string[] = [], f = await fixture(format => { formats.push(format); if (format === 'native-explicit-source-revisions-v4' && deny) throw new Error('Synthetic unsupported explicit-source reader'); });
+  expect(formats).not.toContain('native-explicit-source-revisions-v4');
   await expect(f.host.submit(f.input, f.authority)).rejects.toMatchObject({ code: 'indeterminate' });
   expect(readWorkLedgerState(await f.storage.read(), 'project')).toMatchObject({ revision: 0, works: [], attempts: [], history: [] });
   deny = false; const receipt = (await f.host.submit(f.input, f.authority)).receipt;
-  expect(receipt.source.version).toBe(3); expect(formats).toContain('native-explicit-sources-v3');
+  expect(receipt.source.version).toBe(4); expect(formats).toContain('native-explicit-source-revisions-v4');
 });
 
-test('the actual saved source3 floor fences an older reader with the same version number', async () => {
+test('the actual saved source4 floor fences an older reader with the same version number', async () => {
   let owner: ReturnType<typeof createNativeDataWriteOwner> | undefined;
-  const f = await fixture(format => { if (format === 'native-explicit-sources-v3') owner!.declare('native-explicit-sources-v3'); });
+  const f = await fixture(format => { if (format === 'native-explicit-source-revisions-v4') owner!.declare('native-explicit-source-revisions-v4'); });
   const execPath = join(f.root, 'goodvibes'); writeFileSync(execPath, 'Synthetic admitted executable');
   owner = createNativeDataWriteOwner({ execPath, version: '3.1.2', assertCurrent() {} });
   await f.host.submit(f.input, f.authority);
   const capabilities = nativeReaderCapabilities('3.1.2');
-  expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo, { ...capabilities, formats: capabilities.formats.filter(format => format !== 'native-explicit-sources-v3') })).toThrow();
+  expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo, { ...capabilities, formats: capabilities.formats.filter(format => format !== 'native-explicit-source-revisions-v4') })).toThrow();
   expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo, capabilities)).not.toThrow();
 });
 
-test('a failed asynchronous native declaration is drained and cannot publish a source3 event', async () => {
+test('a failed asynchronous native declaration is drained and cannot publish a source4 event', async () => {
   const f = await fixture(format => {
-    if (format === 'native-explicit-sources-v3') return Promise.reject(new Error('Synthetic asynchronous reader declaration'));
+    if (format === 'native-explicit-source-revisions-v4') return Promise.reject(new Error('Synthetic asynchronous reader declaration'));
   });
   await expect(f.host.submit(f.input, f.authority)).rejects.toMatchObject({ code: 'indeterminate' });
   expect(readWorkLedgerState(await f.storage.read(), 'project')).toMatchObject({ revision: 0, works: [], attempts: [], history: [] });
@@ -111,7 +114,7 @@ test('future explicit source records refuse mutation without replacing the origi
   const SQL = await loadSqlJsEngine(), db = new SQL.Database(readFileSync(f.file));
   try {
     const row = db.exec('SELECT state_json FROM work_ledgers WHERE project_id = ?', ['project'])[0]!.values[0]!;
-    const state = JSON.parse(String(row[0])); state.works[0].source.version = 4;
+    const state = JSON.parse(String(row[0])); state.works[0].source.version = 99;
     db.run('UPDATE work_ledgers SET state_json = ? WHERE project_id = ?', [JSON.stringify(state), 'project']); writeFileSync(f.file, db.export());
   } finally { db.close(); }
   const before = readFileSync(f.file), reopened = new KnowledgeStore({ dbPath: f.file }); cleanup.push(() => reopened.close());
@@ -121,7 +124,7 @@ test('future explicit source records refuse mutation without replacing the origi
   expect(readFileSync(f.file)).toEqual(before);
 });
 
-test('the actual operator client accepts fresh source3 and still rejects malformed identity or changed criteria', async () => {
+test('the actual operator client accepts fresh source4 and still rejects malformed identity or changed criteria', async () => {
   const f = await fixture(), submitted = await f.host.submit(f.input, f.authority);
   const invoke: OperatorRemoteClient['invoke'] = async <T>() => structuredClone(submitted) as T;
   const client = createOperatorNativeWorkSubmissionClient({ invoke }, 'project');
@@ -129,4 +132,33 @@ test('the actual operator client accepts fresh source3 and still rejects malform
   expect(nativeWorkSubmissionReceiptSchema.safeParse({ ...submitted.receipt, source: { ...submitted.receipt.source, sourceId: 'private:principal' } }).success).toBe(false);
   const changed = createOperatorNativeWorkSubmissionClient({ invoke: (async <T>() => ({ ...submitted, receipt: { ...submitted.receipt, criteria: ['changed'] } }) as T) }, 'project');
   try { await expect(changed.submit(f.input)).rejects.toMatchObject({ code: 'invalid_response' }); } finally { changed.dispose(); }
+});
+
+
+test('fresh explicit source issuance and repeated lookup never hash the complete original request', async () => {
+  const f = await fixture(), original = JSON.stringify({ version: 3, inputId: f.input.inputId, goal: f.input.goal, criteria: f.input.criteria });
+  const updates = spyOn(crypto.Hash.prototype, 'update');
+  try {
+    const first = await f.host.submit(f.input, f.authority);
+    const replay = await f.host.submit(f.input, f.authority);
+    const found = await f.host.get({ requestId: f.input.requestId }, f.authority);
+    expect(first.receipt.source.version).toBe(4);
+    expect(replay.receipt).toEqual(first.receipt);
+    expect(found).toEqual({ kind: 'found', receipt: first.receipt });
+    expect(updates.mock.calls.filter(([value]) => value === original)).toHaveLength(0);
+  } finally { updates.mockRestore(); }
+});
+
+test('actual saved v3 source receipts remain byte-for-byte readable and replay without issuing a v4 replacement', async () => {
+  const f = await fixture();
+  const source = { version: 3 as const, inputId: f.input.inputId, sessionId: f.deps.sessionId, sourceId: opaqueUuid(),
+    sourceRevision: createHash('sha256').update(JSON.stringify({ version: 3, inputId: f.input.inputId, goal: f.input.goal, criteria: f.input.criteria })).digest('hex') };
+  const submitted = await f.ledger.service.execute({ type: 'submit_native', requestId: f.input.requestId, expectedRevision: f.input.expectedRevision,
+    goal: f.input.goal, criteria: f.input.criteria, title: f.input.goal.trim(), source }, f.actor);
+  if (submitted.kind !== 'accepted' || submitted.event.type !== 'submit_native') throw new Error('Earlier source fixture not saved');
+  const before = readFileSync(f.file), replay = await f.host.submit(f.input, f.authority);
+  expect(replay.replayed).toBe(true);
+  expect(replay.receipt.source).toEqual({ version: 3, sessionId: source.sessionId, sourceId: source.sourceId, sourceRevision: source.sourceRevision });
+  expect(readFileSync(f.file)).toEqual(before);
+  expect((await f.host.get({ requestId: f.input.requestId }, f.authority)).kind).toBe('found');
 });

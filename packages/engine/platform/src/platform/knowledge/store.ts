@@ -32,7 +32,7 @@ import { createKnowledgeEdgeChanges, validateKnowledgeEdgeChanges, knowledgeEdge
 import { snapshotNodeInput } from './activation/projection.js';
 import { KnowledgeNodeActivationHeldError, type KnowledgeNodeActivationOptions } from './activation/types.js';
 import { prepareHomeGraphSnapshotGroupAcknowledgment, resolveKnowledgeNodeObservation, retainKnowledgeNodeObservation } from './store-node-observation.js';
-import { knowledgeNodeRestorationGuard, prepareNodeActivationPass, assertPreparedNodeWrites, preparedNodeWrite, preparedNodeWrites, markPreparedNodeWritten, type NodeMutationDraft, type KnowledgePreparedNodeWrites } from './store-node-activation.js';
+import { knowledgeNodeRestorationGuard, prepareNodeActivationPass, assertPreparedNodeWrites, preparedNodeWrite, preparedNodeWrites, stagePreparedNodeWrites, type NodeMutationDraft, type KnowledgePreparedNodeWrites } from './store-node-activation.js';
 export type { KnowledgePreparedNodeWrites } from './store-node-activation.js';
 import { commitGuardedKnowledgeIssueReplacement } from './store-issue-replacement.js';
 import { prepareKnowledgeIssueRecord, writeKnowledgeIssueRow, commitKnowledgeNodeIssueWrites, type KnowledgeGuardedNodeIssueWrites } from './store-node-issue-writes.js';
@@ -73,6 +73,7 @@ import {
   KNOWLEDGE_SCHEMA_VERSION,
   mapSemanticEnrichmentStateRow,
   mapNodeRow,
+  mapNodeRevisionRow,
   mapIssueRow,
   mapRefinementTaskRow,
   nowMs,
@@ -237,8 +238,8 @@ export class KnowledgeStore {
   private closePromise: Promise<void> | undefined;
   private readonly nativeConversationStorage = new Map<string, NativeConversationStorage>();
   private readonly declareNativeConversationFormat: (() => void) | undefined;
-  private readonly declareNativeExplicitSourceFormat: (() => void) | undefined;
-  private readonly declareHistoricalImportFormat: (() => void) | undefined;
+  private readonly declareNativeExplicitSourceFormat: ((version?: 3 | 4) => void) | undefined;
+  private readonly declareHistoricalImportFormat: ((version?: 2 | 3) => void) | undefined;
   private readonly declareNativeExecutionFormat: (() => void) | undefined;
   private readonly declareNativeCiFormat: (() => void) | undefined;
   private readonly declareNativeSettlementFormat: (() => void) | undefined;
@@ -273,13 +274,14 @@ export class KnowledgeStore {
     const declareNativeData = nativeDataWriter?.declare.bind(nativeDataWriter);
     const beforeInitialRead = config.beforeInitialRead?.bind(config);
     this.declareNativeConversationFormat = declareNativeData ? () => declareNativeData('native-conversation-captures-v2') : undefined;
-    this.declareNativeExplicitSourceFormat = declareNativeData ? () => declareNativeData('native-explicit-sources-v3') : undefined;
-    this.declareHistoricalImportFormat = declareNativeData ? () => declareNativeData('native-historical-import-manifests-v2') : undefined;
+    this.declareNativeExplicitSourceFormat = declareNativeData ? version => declareNativeData(version === 4 ? 'native-explicit-source-revisions-v4' : 'native-explicit-sources-v3') : undefined;
+    this.declareHistoricalImportFormat = declareNativeData ? version => declareNativeData(version === 3 ? 'native-historical-import-revisions-v3' : 'native-historical-import-manifests-v2') : undefined;
     this.declareNativeExecutionFormat = declareNativeData ? () => declareNativeData('native-execution-bindings-v2') : undefined;
     this.declareNativeCiFormat = declareNativeData ? () => declareNativeData('native-ci-continuations-v2') : undefined;
     this.declareNativeSettlementFormat = declareNativeData ? () => declareNativeData('native-settlements-v2') : undefined;
     this.beforeIssueWrite = record => {
       if (record.metadata.homeGraphQualityIdentityVersion === 1) assertKnowledgeWriteCurrent(() => declareNativeData?.('homegraph-quality-identities-v1'));
+      if (record.metadata.homeGraphQualityRevisionVersion === 1) assertKnowledgeWriteCurrent(() => declareNativeData?.('homegraph-quality-revisions-v1'));
     };
     this.beforeSemanticNodeWrite = record => {
       if (record.metadata.semanticIdentityVersion === 1) assertKnowledgeWriteCurrent(() => declareNativeData?.('knowledge-semantic-identities-v1'));
@@ -1178,24 +1180,50 @@ export class KnowledgeStore {
     await this.init();
     const { existing, record, now, observationEvidence } = preparedNodeWrite(this, prepared, index, this.nodeActivationScope);
     if (record === existing) {
+      let staged: ReturnType<typeof stagePreparedNodeWrites>, snapshot: KnowledgeRecordSnapshot;
+      let current: ReturnType<typeof captureSQLiteActivationPublication>;
+      this.sqlite.run('SAVEPOINT knowledge_unchanged_node_activation');
+      try {
+        snapshot = knowledgeRecordSnapshotFromRows('node', this.sqlite.exec('SELECT * FROM knowledge_nodes WHERE id = ? LIMIT 1', [record.id]));
+        if (!snapshot.generation) throw new KnowledgeNodeActivationHeldError('stale');
+        current = captureSQLiteActivationPublication(this.sqlite, record.id, snapshot.generation);
+        staged = stagePreparedNodeWrites(prepared, [index], this.sqlite);
+        this.sqlite.run('RELEASE SAVEPOINT knowledge_unchanged_node_activation');
+      } catch (error) {
+        this.sqlite.run('ROLLBACK TO SAVEPOINT knowledge_unchanged_node_activation');
+        this.sqlite.run('RELEASE SAVEPOINT knowledge_unchanged_node_activation');
+        throw error;
+      }
       retainKnowledgeNodeObservation(existing, record, observationEvidence);
-      const cacheChanged = markPreparedNodeWritten(prepared, index, this.sqlite);
-      const snapshot = knowledgeRecordSnapshotFromRows('node', this.sqlite.exec('SELECT * FROM knowledge_nodes WHERE id = ? LIMIT 1', [record.id]));
-      if (!snapshot.generation) throw new KnowledgeNodeActivationHeldError('stale');
-      const current = captureSQLiteActivationPublication(this.sqlite, record.id, snapshot.generation);
-      if (cacheChanged) await this.sqlite.save();
+      staged.commit();
+      if (staged.cacheChanged) await this.sqlite.save();
       nativePublicationApply(nativePublicationSet, nativeNodePublications, [record, Object.freeze({ store: this, previous: existing ? new WeakRef(existing) : undefined, snapshot, current })]);
       return record;
     }
     // Everything after the final guard and before save is synchronous.
     this.beforeSemanticNodeWrite(record);
-    const snapshot = knowledgeRecordSnapshotFromRows('node', writeKnowledgeNodeRow(this.sqlite, record));
-    recordKnowledgeNodeRevisions(this.sqlite, this.nodeRevisions, record, existing, now);
+    const revisions = new Map([[record.id, [...(this.nodeRevisions.get(record.id) ?? [])]]]);
+    let snapshot: KnowledgeRecordSnapshot, staged: ReturnType<typeof stagePreparedNodeWrites>;
+    let current: ReturnType<typeof captureSQLiteActivationPublication>;
+    // A refused history append must not leave the candidate node in the live
+    // SQL image for a later, unrelated save to persist.
+    this.sqlite.run('SAVEPOINT knowledge_node_with_history');
+    try {
+      snapshot = knowledgeRecordSnapshotFromRows('node', writeKnowledgeNodeRow(this.sqlite, record));
+      recordKnowledgeNodeRevisions(this.sqlite, revisions, record, existing, now);
+      if (!snapshot.generation) throw new KnowledgeNodeActivationHeldError('stale');
+      current = captureSQLiteActivationPublication(this.sqlite, record.id, snapshot.generation);
+      staged = stagePreparedNodeWrites(prepared, [index], this.sqlite);
+      this.sqlite.run('RELEASE SAVEPOINT knowledge_node_with_history');
+    } catch (error) {
+      this.sqlite.run('ROLLBACK TO SAVEPOINT knowledge_node_with_history');
+      this.sqlite.run('RELEASE SAVEPOINT knowledge_node_with_history');
+      throw error;
+    }
+    this.nodeRevisions.set(record.id, revisions.get(record.id)!);
     retainKnowledgeNodeObservation(existing, record, observationEvidence);
     this.nodes.set(record.id, record);
-    markPreparedNodeWritten(prepared, index, this.sqlite);
-    if (!snapshot.generation) throw new KnowledgeNodeActivationHeldError('stale');
-    const current = captureSQLiteActivationPublication(this.sqlite, record.id, snapshot.generation);
+    staged.commit();
     await this.sqlite.save();
     nativePublicationApply(nativePublicationSet, nativeNodePublications, [record, Object.freeze({ store: this, previous: existing ? new WeakRef(existing) : undefined, snapshot, current })]);
     return record;
@@ -1215,6 +1243,40 @@ export class KnowledgeStore {
   /** Read append-only node revisions, oldest first. */
   listNodeRevisions(nodeId: string): KnowledgeNodeRevisionRecord[] {
     return listKnowledgeNodeRevisions(this.nodeRevisions, nodeId);
+  }
+
+  /** Closed native history selectors share the original SQL snapshot frame. */
+  getNodeHistorySnapshot(nodeId: string, revisionId: string | null = null): {
+    readonly firstId: string | null;
+    readonly latestId: string | null;
+    readonly selected: KnowledgeNodeRevisionRecord | null;
+  } {
+    let result: { firstId: string | null; latestId: string | null; selected: KnowledgeNodeRevisionRecord | null } | undefined;
+    this.assertRecordSnapshotFrame(() => {
+      const rows = this.sqlite.readPersistedNodeHistorySelection(nodeId, revisionId);
+      const label = (results: typeof rows.first): string | null => {
+        const value: unknown = results[0]?.values[0]?.[0];
+        if (value === undefined) return null;
+        if (typeof value !== 'string' || value.length === 0) throw new KnowledgeRecordAdmissionHeldError('malformed');
+        return value;
+      };
+      const map = (results: typeof rows.first): KnowledgeNodeRevisionRecord | null => {
+        const row = results[0], values = row?.values[0];
+        if (row && values) for (const key of ['metadata', 'aliases']) {
+          const raw: unknown = values[row.columns.indexOf(key)];
+          if (typeof raw !== 'string') throw new KnowledgeRecordAdmissionHeldError('malformed');
+          let value: unknown;
+          try { value = JSON.parse(raw); } catch { throw new KnowledgeRecordAdmissionHeldError('malformed'); }
+          if (key === 'metadata' ? !value || typeof value !== 'object' || Array.isArray(value)
+            : !Array.isArray(value) || value.some(item => typeof item !== 'string')) throw new KnowledgeRecordAdmissionHeldError('malformed');
+        }
+        return row && values ? mapNodeRevisionRow(row.columns, values) : null;
+      };
+      result = { firstId: label(rows.first), latestId: label(rows.latest), selected: map(rows.selected) };
+      return undefined;
+    });
+    if (!result) throw new KnowledgeRecordAdmissionHeldError('stale');
+    return result;
   }
 
   async deleteNode(id: string): Promise<boolean> {
@@ -1241,11 +1303,23 @@ export class KnowledgeStore {
     const prepared = await prepareNodeActivationPass(this, [{ input: record, existing, record: replacement, now, authority, restoration }], {}, this.nodeActivationConfidenceFloor, this.nodeActivationScope);
     const guarded = preparedNodeWrite(this, prepared, 0, this.nodeActivationScope).record;
     this.beforeSemanticNodeWrite(guarded);
-    writeKnowledgeNodeRow(this.sqlite, guarded);
-    if (mutation) recordKnowledgeNodeRevisions(this.sqlite, this.nodeRevisions, guarded, existing, now);
+    const revisions = new Map([[guarded.id, [...(this.nodeRevisions.get(guarded.id) ?? [])]]]);
+    let staged: ReturnType<typeof stagePreparedNodeWrites>;
+    this.sqlite.run('SAVEPOINT knowledge_node_replacement_with_history');
+    try {
+      writeKnowledgeNodeRow(this.sqlite, guarded);
+      if (mutation) recordKnowledgeNodeRevisions(this.sqlite, revisions, guarded, existing, now);
+      staged = stagePreparedNodeWrites(prepared, [0], this.sqlite);
+      this.sqlite.run('RELEASE SAVEPOINT knowledge_node_replacement_with_history');
+    } catch (error) {
+      this.sqlite.run('ROLLBACK TO SAVEPOINT knowledge_node_replacement_with_history');
+      this.sqlite.run('RELEASE SAVEPOINT knowledge_node_replacement_with_history');
+      throw error;
+    }
+    if (mutation) this.nodeRevisions.set(guarded.id, revisions.get(guarded.id)!);
     retainKnowledgeNodeObservation(existing, guarded);
     this.nodes.set(guarded.id, guarded);
-    markPreparedNodeWritten(prepared, 0, this.sqlite);
+    staged.commit();
     await this.sqlite.save();
   }
 
@@ -1393,9 +1467,12 @@ export class KnowledgeStore {
     for (const issue of issues) if (!issue.preserve) this.beforeIssueWrite(issue.record);
     beforeWrite();
     assertPreparedNodeWrites(this, prepared, this.nodeActivationScope);
-    commitKnowledgeNodeIssueWrites({ sqlite: this.sqlite, nodes: this.nodes, issues: this.issues, nodeRevisions: this.nodeRevisions, beforeNodeWrite: this.beforeSemanticNodeWrite },
+    let staged: ReturnType<typeof stagePreparedNodeWrites> | undefined;
+    commitKnowledgeNodeIssueWrites({ sqlite: this.sqlite, nodes: this.nodes, issues: this.issues, nodeRevisions: this.nodeRevisions, beforeNodeWrite: this.beforeSemanticNodeWrite,
+      beforePublication: () => { staged = stagePreparedNodeWrites(prepared, nodes.map((_, index) => index), this.sqlite); } },
       nodes, issues.filter((issue) => !issue.preserve).map((issue) => issue.record));
-    nodes.forEach(({ existing, record, observationEvidence }, index) => { retainKnowledgeNodeObservation(existing, record, observationEvidence); markPreparedNodeWritten(prepared, index, this.sqlite); });
+    nodes.forEach(({ existing, record, observationEvidence }) => { retainKnowledgeNodeObservation(existing, record, observationEvidence); });
+    staged!.commit();
     await this.sqlite.save();
   }
 

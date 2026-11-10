@@ -51,6 +51,12 @@ export const workLedgerExplicitSourceSchema = strictObject({
 export const workLedgerOpaqueExplicitSourceSchema = workLedgerExplicitSourceSchema.extend({
   version: literal(3), sourceId: string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/), sourceRevision: string().regex(/^[a-f0-9]{64}$/),
 });
+/** Native-issued source identity and revision. The original event and client
+ * receipt retain the full ordered input; ordinary revisions need no digest. */
+export const workLedgerNativeExplicitSourceSchema = workLedgerExplicitSourceSchema.extend({
+  version: literal(4), sourceId: string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/),
+  sourceRevision: string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/),
+});
 export const workLedgerExtractedSourceSchema = strictObject({
   version: literal(2), sourceId: id, sourceRevision: id, inputId: id, sessionId: id,
   continuation: nativeConversationContinuationSchema.optional(),
@@ -60,7 +66,7 @@ export const workLedgerExtractedSourceSchema = strictObject({
     proposalRevision: id, admissionDecisionId: id, judgmentDecisionIds: array(id).min(1).max(128),
   }),
 });
-export const workLedgerSourceSchema = union([workLedgerExplicitSourceSchema, workLedgerExtractedSourceSchema, workLedgerOpaqueExplicitSourceSchema]);
+export const workLedgerSourceSchema = union([workLedgerExplicitSourceSchema, workLedgerExtractedSourceSchema, workLedgerOpaqueExplicitSourceSchema, workLedgerNativeExplicitSourceSchema]);
 export type WorkLedgerSource = z.infer<typeof workLedgerSourceSchema>;
 
 export const ledgerWorkSchema = strictObject({

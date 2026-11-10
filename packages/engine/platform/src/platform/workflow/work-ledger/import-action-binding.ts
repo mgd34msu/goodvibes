@@ -18,5 +18,5 @@ export function captureLegacyImportAction(input: {
   // Complete command bytes remain separate for exact conflict detection.
   return Object.freeze({ requestKey: JSON.stringify([...identity, command.requestId]), actionId: `import-action-${importActionSequence}`, commandJson,
     storeId: input.storeId, projectId: input.projectId, principalKind: input.principalKind, principalId: input.principalId,
-    requestId: command.requestId, manifestDigest: command.manifest.digest, expectedRevision: command.expectedRevision });
+    requestId: command.requestId, expectedRevision: command.expectedRevision });
 }

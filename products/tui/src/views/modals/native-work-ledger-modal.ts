@@ -1,3 +1,4 @@
+import { legacyMigrationPreparationRevision } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { nativeWorkExecutionLines, type NativeWorkExecutionAction } from '../../runtime/native-work-execution.ts';
 import { nativeWorkIntegrationView } from '../../runtime/native-work-integration.ts';
 import { NativeWorkLedgerModel, type NativeWorkLedgerSelectionReader } from '../../runtime/native-work-ledger.ts';
@@ -66,7 +67,7 @@ export function createNativeWorkLedgerModalSurface(select: NativeWorkLedgerSelec
         imports.push(row(key('imports', eventId, 'authority'), 'Historical approval and completion are source claims, not execution authority or verified evidence.'));
         event.works.forEach((work, index) => imports.push(row(key('imports', eventId, 'work', index), `${work.id} · ${work.title} · reported ${work.reportedState} · imported unverified`)));
         if (!event.manifest) { imports.push(row(key('imports', eventId, 'protected'), 'Protected legacy provenance requires read:knowledge authorization.')); continue; }
-        imports.push(row(key('imports', eventId, 'digest'), `Preparation ${event.manifest.digest}`));
+        imports.push(row(key('imports', eventId, 'revision'), `Preparation ${legacyMigrationPreparationRevision(event.manifest)}`));
         event.manifest.sources.forEach((source, index) => imports.push(row(key('imports', eventId, 'source', index), `Preserved source ${String(source.source.id)} · generation ${source.generation} · ${JSON.stringify(source.source)}`)));
         event.manifest.links.forEach((link, index) => imports.push(row(key('imports', eventId, 'link', index), `Link ${link.from} · ${link.relation} · ${link.to} · source ${link.sourceId} ${link.pointer}`)));
       }

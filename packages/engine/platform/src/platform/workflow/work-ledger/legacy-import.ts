@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
 import type { LedgerWork, WorkReportedState } from './types.js';
 
@@ -30,19 +31,24 @@ export interface LegacyMigrationLink {
   readonly relation: string;
   readonly to: string;
 }
-export interface LegacyMigrationManifest {
-  readonly version: 1 | 2;
+interface LegacyMigrationManifestBody {
   readonly hostId: string;
   readonly projectId: string;
   readonly expectedLedgerRevision: number;
-  /** Stable preparation identity; NOT a receipt, permission or import request. */
-  readonly digest: string;
   /** Only historical format1 carries its redundant individual-source digest. */
   readonly sources: readonly { readonly source: RecordValue; readonly generation: string; readonly digest?: string }[];
   readonly entities: readonly LegacyMigrationEntity[];
   readonly links: readonly LegacyMigrationLink[];
   readonly executionAuthority: 'none';
   readonly persistence: 'not-imported';
+}
+export type LegacyMigrationManifest = LegacyMigrationManifestBody & (
+  | { readonly version: 1 | 2; readonly digest: string }
+  | { readonly version: 3; readonly revision: string }
+);
+/** Display/reference metadata only. Full captured data decides replay equality. */
+export function legacyMigrationPreparationRevision(manifest: LegacyMigrationManifest): string {
+  return manifest.version === 3 ? manifest.revision : manifest.digest;
 }
 export type LegacyMigrationPreparation =
   | { readonly kind: 'prepared'; readonly manifest: LegacyMigrationManifest }
@@ -113,12 +119,11 @@ function capture(value: unknown): Json {
   }
   return visit(value, 0);
 }
-// One complete preparation commitment survives client review, saved journal and
-// ledger receipt replay. It binds the exact reviewed sources/projection across
-// those boundaries; it is neither authentication nor a secrecy mechanism.
-function manifestCommitment(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
+// Saved formats1/2 carry an independently expected digest. Fresh preparations
+// persist and compare their complete captured command, so need no checksum.
+function historicalManifestCommitment(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
 // Format1 persisted one additional digest for each source. Its exact old recipe
-// remains readable; fresh format2 compares captured source data directly.
+// remains readable; formats2/3 compare captured source data directly.
 function historicalSourceCommitment(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
 const applyOwned = Reflect.apply, hasOwned = WeakSet.prototype.has, addOwned = WeakSet.prototype.add, freezeOwned = Object.freeze;
 const ownedManifests = new WeakSet<object>();
@@ -143,9 +148,9 @@ function reported(status: Json | undefined, planning: boolean): WorkReportedStat
 }
 
 export function prepareLegacyWorkLedgerMigration(input: LegacyMigrationInput, signal?: AbortSignal): LegacyMigrationPreparation {
-  return prepare(input, signal, 2);
+  return prepare(input, signal, 3);
 }
-function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, version: 1 | 2): LegacyMigrationPreparation {
+function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, version: 1 | 2 | 3, originalRevision?: string): LegacyMigrationPreparation {
   try {
     if (signal?.aborted) fail('cancelled', 'Preparation cancelled; no source or ledger was changed.');
     if (input.pendingLocalChanges !== false) fail('pending-local-changes', 'Save or discard local edits explicitly before capturing persisted sources.');
@@ -254,7 +259,10 @@ function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, v
     const body = { version, hostId, projectId, expectedLedgerRevision: input.expectedLedgerRevision,
       sources: [...sources.values()].sort((a, b) => String(a.source.id) < String(b.source.id) ? -1 : String(a.source.id) > String(b.source.id) ? 1 : 0),
       entities: [...entities.values()], links, executionAuthority: 'none' as const, persistence: 'not-imported' as const };
-    const manifest = freeze({ ...body, digest: manifestCommitment(body) });
+    if (version === 3 && originalRevision !== undefined && !/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(originalRevision)) fail('invalid-source', 'Invalid preparation revision.');
+    const manifest: LegacyMigrationManifest = freeze(version === 3
+      ? { ...body, version: 3 as const, revision: originalRevision ?? opaqueUuid() }
+      : { ...body, version: version as 1 | 2, digest: historicalManifestCommitment(body) });
     if (Buffer.byteLength(JSON.stringify(manifest)) > LEGACY_IMPORT_MAX_BYTES - 1024) fail('limit', 'Complete manifest exceeds 256 KiB; nothing was truncated.');
     capture(manifest); // Check complete-envelope nesting, including retained fragments.
     // A prepared manifest must already be representable by the native work schema.
@@ -272,9 +280,9 @@ export function replayLegacyWorkLedgerPreparation(previous: LegacyMigrationManif
   let original: LegacyMigrationManifest;
   try { original = validateLegacyWorkLedgerManifest(previous); }
   catch { return { kind: 'blocked', code: 'invalid-source', reason: 'Original preparation is invalid; capture and review complete sources again.' }; }
-  const next = prepare(fresh, signal, original.version);
+  const next = prepare(fresh, signal, original.version, original.version === 3 ? original.revision : undefined);
   if (next.kind === 'blocked') return next;
-  if (original.digest !== next.manifest.digest) return { kind: 'blocked', code: 'stale-preparation', reason: 'Selected host, ledger revision or complete source images changed. Capture and review a new preparation.' };
+  if (JSON.stringify(capture(original)) !== JSON.stringify(capture(next.manifest))) return { kind: 'blocked', code: 'stale-preparation', reason: 'Selected host, ledger revision or complete source images changed. Capture and review a new preparation.' };
   return next;
 }
 
@@ -282,12 +290,13 @@ export function replayLegacyWorkLedgerPreparation(previous: LegacyMigrationManif
 export function validateLegacyWorkLedgerManifest(input: unknown): LegacyMigrationManifest {
   if (input !== null && typeof input === 'object' && applyOwned(hasOwned, ownedManifests, [input])) return input as LegacyMigrationManifest;
   const value = object(capture(input), 'manifest');
-  if (value.version !== 1 && value.version !== 2) throw new Error('Unsupported historical import manifest version');
+  if (value.version !== 1 && value.version !== 2 && value.version !== 3) throw new Error('Unsupported historical import manifest version');
+  if (value.version === 3 && typeof value.revision !== 'string') throw new Error('Missing preparation revision');
   const prepared = prepare({
     hostId: value.hostId as string, projectId: value.projectId as string,
     expectedLedgerRevision: value.expectedLedgerRevision as number,
     pendingLocalChanges: false, sources: value.sources as unknown as LegacyMigrationInput['sources'], occupiedWorkIds: [],
-  }, undefined, value.version);
+  }, undefined, value.version, value.version === 3 ? value.revision as string : undefined);
   if (prepared.kind !== 'prepared' || JSON.stringify(capture(prepared.manifest)) !== JSON.stringify(value)) {
     throw new Error('Manifest does not match canonical complete-source preparation');
   }

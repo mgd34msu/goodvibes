@@ -113,11 +113,9 @@ async function fixture(options: {
   const admitHooks: (() => void | Promise<void>)[] = [];
   const readSource = (inputId: string): NativeConversationIntakeResult => {
     const original = additionalSources.get(inputId) ?? current;
-    const detached = structuredClone(original);
-    // Preserve only the actual manager-issued immutable snapshot. A JSON
-    // copy deliberately has no native continuation owner (covered below).
-    return original.kind === 'turn' && detached.kind === 'turn' && original.continuation
-      ? { ...detached, continuation: original.continuation } : detached;
+    // Real native intake projects a schema-captured result after saved-source
+    // validation. Public continuation data has no in-process issuer marker.
+    return structuredClone(original);
   };
   const deps = { projectId, projectRoot: workspace, journalPath, journal, broker,
     intake: {
@@ -928,6 +926,27 @@ describe('native-owned session continuations', () => {
     expect(f.manager.get(initial.sessionId!)?.originSurface).toBe(surface);
     expect(await f.host.session(initial.sessionId!, f.authority, f.access)).toMatchObject({ kind: 'native' });
     expect(f.counts).toMatchObject({ creates: 1, admits: 2, deliveries: 2 });
+  });
+
+  test('projected continuation permits retain exact principal, scopes and source during admission', async () => {
+    for (const change of ['principal', 'scope', 'source'] as const) {
+      const f = await fixture();
+      const first = snapshot(await f.host.startAgent(f.request, f.authority, f.access));
+      await f.settled();
+      const next = await continuation(f, first.sessionId!, `guard-${change}`);
+      const count = f.requests.length;
+      const original = f.authority.current()!;
+      f.admitHooks.push(() => {
+        if (change === 'principal') f.setAuthority({ ...original, principalId: 'other-principal', authorityId: 'other-principal' });
+        else if (change === 'scope') f.setAuthority({ ...original, scopes: original.scopes.filter(scope => scope !== 'write:sessions') });
+        else f.addSource({ ...next.source, continuation: captureNativeConversationContinuation({ ...next.context,
+          messages: [...next.context.messages, { role: 'assistant', content: 'Changed saved continuation' }] }) });
+      });
+      await expect(f.host.startAgent(next.request, f.authority, f.access)).rejects.toThrow();
+      expect(f.requests).toHaveLength(count);
+      expect(f.counts.deliveries).toBe(1);
+      expect(f.manager.historyOf(first.sessionId!)).not.toContainEqual({ role: 'user', content: next.source.text });
+    }
   });
 
   test('an unclaimed common cancellation cannot change Agent session ownership', async () => {

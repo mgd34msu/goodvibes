@@ -213,12 +213,12 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
   }
   async function prepare(source: NativeConversationTurnSource, identity: NativeHostedTurnIdentity, originSurface: NativeHostedTurnOriginSurface, authority: NativePairedExecutionAuthority, binding: NativePairedExecutionSnapshot, options: NativeHostedTurnOptions, permissionMode?: GatePresetName): Promise<NativeHostedTurnLookup> {
     const key = keyOf(identity);
-    let contextReady = false;
+    let continuationPermit: NativeConversationTurnPermit | undefined;
     const assertCurrent = () => {
       if (!sameAuthority(binding, authorize(authority, options))) throw new NativeHostedTurnError('stale');
-      if (contextReady && source.continuation) {
+      if (continuationPermit && source.continuation) {
         assertSession(source.continuation.sessionId, identity.principalId, originSurface);
-        continuation.assertCurrent(source.continuation, identity.principalId);
+        deps.manager.assertNativeContinuation(source.continuation, continuationPermit);
       }
     };
     options.signal?.throwIfAborted(); assertCurrent();
@@ -255,12 +255,16 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
     const client = createOperatorNativeConversationIntakeClient({ invoke }, deps.projectId);
     let createdNewSession = false;
     try {
-      if (source.continuation) { await proveSession(source.continuation.sessionId, identity.principalId, false, originSurface); contextReady = true; assertCurrent(); }
+      if (source.continuation) { await proveSession(source.continuation.sessionId, identity.principalId, false, originSurface); assertCurrent(); }
       // Terminal admission replay neither rerolls Jev nor changes source evidence.
       const eligible = await client.admit({ inputId: identity.inputId, sourceRevision: identity.sourceRevision });
       if (eligible.kind !== 'turn' || JSON.stringify(eligible) !== JSON.stringify(source)) throw new NativeHostedTurnError('stale');
       const permit = client.bindTurn(eligible);
       owned.permit = permit;
+      // Intake's public projection crosses schema/JSON capture. Its v2 context
+      // therefore carries saved-source provenance through this exact issued
+      // permit, rather than an in-process snapshot issuer marker.
+      continuationPermit = permit;
       assertCurrent(); options.signal?.throwIfAborted();
       if (owned.cancelled) throw new NativeHostedTurnError('closed');
       const session = source.continuation
@@ -273,7 +277,7 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
       if (owned.cancelled) throw new NativeHostedTurnError('closed');
       if (!slot) reserve(session.id);
       const queued = source.continuation !== undefined && (previous !== undefined || session.status === 'running');
-      if (source.continuation) continuation.assertCurrent(source.continuation, identity.principalId);
+      if (source.continuation) deps.manager.assertNativeContinuation(source.continuation, permit);
       const input = await deps.broker.reserveNativeTurnInput(session.id, permit);
       owned.brokerInputId = input.id;
       const dispatch = { state: queued ? 'queued' as const : 'dispatching' as const, sessionId: session.id, brokerInputId: input.id, correlationId: input.correlationId };
@@ -288,7 +292,7 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
         await deps.manager.waitForNativeAvailability(session.id, owned.controller.signal);
         if (source.continuation) await proveSession(session.id, identity.principalId, false, originSurface);
         assertCurrent();
-        if (source.continuation) continuation.assertCurrent(source.continuation, identity.principalId);
+        if (source.continuation) deps.manager.assertNativeContinuation(source.continuation, permit);
         if (queued) await journal.transition(identity, 'queued', { ...dispatch, state: 'dispatching' });
         assertCurrent();
         if (owned.cancelled || closed) throw new NativeHostedTurnError('closed');

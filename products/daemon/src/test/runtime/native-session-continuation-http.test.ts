@@ -111,7 +111,8 @@ test('native continuation HTTP reuses the real session, snapshots completed cont
     const secondSource = nativeConversationIntakeLookupResultSchema.parse(JSON.parse(second.admit.body));
     if (secondSource.kind !== 'turn' || !secondSource.continuation) throw new Error(second.admit.body);
     expect(secondSource.continuation?.messages).toEqual(initialAttachment.history);
-    expect(secondSource.sourceRef.continuation).toEqual({ sessionId, revision: secondSource.continuation.revision });
+    expect(secondSource.continuation.version).toBe(2);
+    expect(secondSource.sourceRef.continuation).toEqual({ version: 2, sessionId, revision: secondSource.continuation.revision });
     const secondStart = await wire('workLedger.turn.start', second.identity);
     expect(snapshot(secondStart).sessionId).toBe(sessionId);
     expect(snapshot(secondStart).brokerInputId).not.toBe(snapshot(initialStart).brokerInputId);

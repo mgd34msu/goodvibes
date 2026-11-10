@@ -765,6 +765,24 @@ original failure if cleanup also fails. A short test deadline against a held pol
 must kill/reap without pretending it drained successfully. These fixture bounds
 do not change production shutdown deadlines.
 
+The portable Darwin native execution consumer treats foreground startup as live
+while it makes strictly forward progress through the daemon's finite, fixed
+startup phases. Its monotonic controller clock refuses 20 seconds without such
+progress; this is a CI stall watchdog, not a 20-second product cold-start SLA.
+Only the first forward occurrence of a known phase advances it. Repeated,
+backward or unknown markers, arbitrary output and model requests do not extend
+the wait, and a failed phase or exited process refuses immediately. A late phase
+cannot revive an already stalled observation. The existing 10-minute CI job bound
+remains in force and the receipt reports absolute startup elapsed time separately.
+
+Phase observations and a reachable port do not establish readiness. The consumer
+still requires the actual spawned owner, exact bound-before-ready banners,
+authenticated running status, a real native vector-memory add/search round trip,
+and owned shutdown with no listener or process group left behind. This fixed,
+unconfigured boot must make zero semantic requests before those checks; its later
+explicit diagnostic reading uses the synthetic endpoint. One-shot command and
+cleanup bounds remain unchanged.
+
 Compiler/declaration/public import checks, actual workspace gates, native
 artifact execution, platform service tests and live providers are distinct
 validation layers. A source-test or synthetic transport pass cannot establish

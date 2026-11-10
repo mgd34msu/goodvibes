@@ -11,6 +11,7 @@ import { readNativeAddonEvidence, proveNativeMemoryRoundTrip } from './boot-smok
 import { syntheticSystemOneAnswers } from './hosted-session-protocol.mjs';
 import { nativeExecutionSource, retainNativeExecutionFiles, verifyNativeExecutionArtifact } from './native-execution-artifact.mjs';
 import { assertNativeProcessGroupDrained, boundedNativeProcessClose, drainNativeProcessGroup, signalNativeProcessGroup } from './native-execution-process.mjs';
+import { assertNativeStartupActive, assertNativeStartupBanners, hasNativeStartupReadyBanner, retainNativeStartupProgress } from './native-startup-liveness.mjs';
 
 // Portable original Darwin boot/vector obligation. Linux keeps the stronger
 // namespace + hosted consumer; this script makes no isolation/install claim.
@@ -30,7 +31,6 @@ const token = 'synthetic-native-memory-token';
 let judgment, judgmentError, host, hostStopped, hostExited = false, hostPid;
 const requests = [];
 const requestShapes = { modelFactShape: 0, fieldNameShape: 0, settingFormShape: 0, other: 0 };
-const phaseObservations = retainStartupPhases();
 let cleanupRefused = false;
 const childEnv = { PATH: '/usr/bin:/bin', HOME: home, TMPDIR: join(root, 'tmp'), XDG_CONFIG_HOME: join(root, 'xdg'),
   GOODVIBES_HOME: tree, GOODVIBES_DAEMON_HOME: daemon, GOODVIBES_WORKING_DIR: work, NO_COLOR: '1',
@@ -75,39 +75,9 @@ function nativeRequestShape(body) {
     })) return 'settingFormShape';
   return 'other';
 }
-const startupPhases = ['runtime-base', 'base-project-context', 'base-credentials', 'base-providers', 'base-knowledge',
-  'base-native-intake-storage', 'base-native-intake-ready', 'runtime-base-failed',
-  'handler-surfaces', 'contract-recovery', 'provider-preload', 'listener-construction',
-  'secondary-listener-construction', 'cluster-startup', 'device-recovery', 'device-grant-sweep', 'device-capture-sweep',
-  'device-disclosure-read', 'device-disclosure-persist', 'listener-startup', 'secondary-listener-startup',
-  'boot-tasks', 'foreground-ready'];
-function retainStartupPhases() {
-  const history = [], seen = new Set();
-  let line = '', discard = false;
-  return {
-    append(chunk, delayMs, requestCount) {
-      for (const character of String(chunk)) {
-        if (character !== '\n') {
-          if (!discard) { line += character; if (line.length > 128) { line = ''; discard = true; } }
-          continue;
-        }
-        if (!discard && history.length < startupPhases.length) {
-          const prefix = '[goodvibes-daemon:native-startup-phase] ';
-          const phase = line.startsWith(prefix) ? line.slice(prefix.length) : '';
-          if (startupPhases.includes(phase) && !seen.has(phase)) {
-            seen.add(phase); history.push(Object.freeze({ phase, delayMs, requestCount }));
-          }
-        }
-        line = ''; discard = false;
-      }
-    },
-    snapshot() { return Object.freeze([...history]); },
-  };
-}
-
 // Advisory reachability only: a connection never proves listener ownership.
 // This runs after qualification already failed, sends no bytes, and cannot
-// turn a late startup into a pass or extend the original readiness budget.
+// turn a stalled startup into a pass or revive its expired liveness clock.
 async function observeDeadlinePort(port) {
   const socket = createConnection({ host: '127.0.0.1', port });
   let timer;
@@ -206,51 +176,54 @@ try {
   const lease = createServer(); await new Promise((yes, no) => { lease.once('error', no); lease.listen(0, '127.0.0.1', yes); });
   const port = lease.address().port; await closeServer(lease);
   original.retained.assertCurrent(); relocated.assertCurrent();
+  const startupProgress = retainNativeStartupProgress();
   host = spawn(binary, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
     cwd: work, env: { ...childEnv, ...judgmentEnv, GOODVIBES_DAEMON_TOKEN: token, GOODVIBES_NATIVE_STARTUP_OBSERVATION: '1' }, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
   hostPid = host.pid; let output = '', errors = '', startupBannerObservedAt;
   host.stdout.on('data', chunk => {
     output += chunk;
-    if (startupBannerObservedAt === undefined && output.includes(' starting:')) startupBannerObservedAt = Date.now();
+    if (startupBannerObservedAt === undefined && output.includes(' starting:')) startupBannerObservedAt = startupProgress.snapshot().elapsedMs;
     if (output.length + errors.length > 1_048_576) signalNativeProcessGroup(host);
   });
   host.stderr.on('data', chunk => {
     errors += chunk;
     if (output.length + errors.length > 1_048_576) { signalNativeProcessGroup(host); return; }
-    phaseObservations.append(chunk, Date.now() - started, requests.length);
+    startupProgress.append(chunk, requests.length);
   });
   hostStopped = new Promise((yes, no) => {
     host.once('error', no); host.once('close', (code, signal) => { hostExited = true; yes({ code, signal }); });
   }); void hostStopped.catch(() => {});
-  const started = Date.now();
-  while (!output.includes('host started')) {
-    assert(!hostExited, `Native host exited before readiness: ${output} ${errors}`); assert.ifError(judgmentError);
-    const elapsedMs = Date.now() - started;
-    if (elapsedMs >= 20_000) {
+  while (!hasNativeStartupReadyBanner(output, version)) {
+    assert.ifError(judgmentError);
+    const progress = startupProgress.snapshot();
+    if (hostExited || requests.length !== 0 || progress.failed) {
+      assertNativeStartupActive(progress, { processClosed: hostExited, requestCount: requests.length });
+    }
+    if (progress.stalled) {
       // Capture the failing boundary before the diagnostic yields. These are
       // fixed booleans/counts; no settings, paths, request text or errors enter it.
       const failureOutput = output, failureErrors = errors;
-      const observation = { elapsedMs, processClosed: hostExited, requestCount: requests.length,
-        requestShapes: Object.freeze({ ...requestShapes }), phases: phaseObservations.snapshot(),
-        startupBannerDelayMs: startupBannerObservedAt === undefined ? null : startupBannerObservedAt - started,
+      const observation = { elapsedMs: progress.elapsedMs, noProgressMs: progress.noProgressMs,
+        processClosed: hostExited, requestCount: requests.length,
+        requestShapes: Object.freeze({ ...requestShapes }), phases: progress.phases,
+        startupBannerDelayMs: startupBannerObservedAt ?? null,
         startupBannerObserved: output.includes(' starting:'), boundBannerObserved: output.includes(' bound:'),
-        readyBannerObserved: output.includes('host started') };
+        readyBannerObserved: hasNativeStartupReadyBanner(output, version) };
       const portObservation = await observeDeadlinePort(port).catch(() => ({ portConnection: 'unobserved', probeClosed: false }));
       console.error(JSON.stringify({ proof: 'native-startup-deadline-observation', ...observation, ...portObservation }));
-      assert.fail(`Native host startup deadline: ${failureOutput} ${failureErrors}`);
+      assert.fail(`Native host startup liveness deadline: ${failureOutput} ${failureErrors}`);
     }
+    assertNativeStartupActive(progress, { processClosed: hostExited, requestCount: requests.length });
     await wait(25);
   }
-  assert(Number.isSafeInteger(hostPid) && hostPid > 0, 'Retain the actual spawned daemon PID');
-  const lines = output.trim().split('\n');
-  assert(lines[0].startsWith(`goodvibes-daemon ${version} starting:`));
-  assert(lines[0].includes(`intended-host="127.0.0.1" intended-port=${port}`));
-  const bound = `goodvibes-daemon ${version} bound: host="127.0.0.1" port=${port}`;
-  assert(lines.includes(bound)); assert(output.indexOf(bound) < output.indexOf('host started'));
+  assertNativeStartupActive(startupProgress.snapshot(), { processClosed: hostExited, requestCount: requests.length });
+  assertNativeStartupBanners({ pid: hostPid, output, version, port });
   const headers = { Authorization: `Bearer ${token}` };
   const status = await fetch(`http://127.0.0.1:${port}/status`, { headers, signal: AbortSignal.timeout(5_000) });
   assert.equal(status.status, 200); assert.equal((await status.json()).status, 'running');
+  assertNativeStartupActive(startupProgress.snapshot(), { processClosed: hostExited, requestCount: requests.length });
+  const startupElapsedMs = startupProgress.snapshot().elapsedMs;
   const invoke = async (method, body = {}) => {
     const response = await fetch(`http://127.0.0.1:${port}/api/control-plane/methods/${method}/invoke`, {
       method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ body }), signal: AbortSignal.timeout(10_000),
@@ -275,7 +248,8 @@ try {
   console.log(JSON.stringify({ proof: 'compiled-daemon-native-execution', target: source.target, sourceCommit, headCommit,
     runId: source.runId, runAttempt: source.runAttempt, producerRunAttempt: original.artifact.runAttempt,
     semanticQualification: 'synthetic-only', modelAcquisition: 'disabled',
-    status: 'running', malformedSettingsExit: malformed.code, nativeVectorAvailable: vector.vector.available, cleanShutdown: true, diagnostic }));
+    status: 'running', startupElapsedMs, bootSemanticRequests: 0,
+    malformedSettingsExit: malformed.code, nativeVectorAvailable: vector.vector.available, cleanShutdown: true, diagnostic }));
 } finally {
   try {
     try { if (host && hostStopped) await drainNativeProcessGroup(host, hostStopped); }

@@ -167,7 +167,7 @@ test('retained SQLite guards check each original physical ancestor once without 
 });
 
 test('an ancestor symlink cannot admit a native SQLite image even when it reaches the exact original files', () => {
-  const f = fixture(), original = f.cohort + '.original';
+  const f = fixture('arm64', { pinBytes: false }), original = f.cohort + '.original';
   renameSync(f.cohort, original); symlinkSync(original, f.cohort);
   let selected = 0;
   const hash = spyOn(crypto, 'createHash');

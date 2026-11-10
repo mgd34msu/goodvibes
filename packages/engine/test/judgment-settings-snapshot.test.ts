@@ -36,6 +36,38 @@ describe('judgment settings reload captures one configuration per call', () => {
     expect(reads).toBe(0);
   }, 1000);
 
+  test.each(['scalar', 'pending', 'rejected', 'thenable'] as const)('the settings adapter preserves refusal and drains a nonvoid %s attempt guard before any target dispatch', async kind => {
+    const target = endpoint(), { settings, source } = fixture('env');
+    settings['judgment.endpoint'] = target.url;
+    settings['judgment.fallbacks'] = [{ endpoint: target.url, model: 'jev-1.13.0', keySource: 'none', keyName: '' }];
+    const controller = new AbortController(), late = Promise.withResolvers<void>();
+    let checks = 0, thenReads = 0;
+    const value = (): unknown => kind === 'scalar' ? true : kind === 'pending' ? late.promise
+      : kind === 'rejected' ? Promise.reject(new Error('Synthetic asynchronous guard refusal'))
+      : { get then() { thenReads++; throw new Error('Borrowed then must not execute'); } };
+    try {
+      await expect(createSettingsJudgmentPort(source).ask({ ...request, signal: controller.signal,
+        beforeAttempt() { checks++; return value(); },
+      })).rejects.toMatchObject({ kind: 'invalid-request' });
+      if (kind === 'pending') late.reject(new Error('Synthetic late guard rejection'));
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(checks).toBe(1); expect(thenReads).toBe(0); expect(target.calls).toHaveLength(0);
+    } finally { controller.abort(); target.stop(); }
+  });
+
+  test.each(['cancellation', 'policy'] as const)('a synchronous settings attempt guard cannot conceal its own %s change before dispatch', async changed => {
+    const target = endpoint(), { settings, source } = fixture('env'); settings['judgment.endpoint'] = target.url;
+    const controller = new AbortController(); let policy = 'Default - On';
+    try {
+      await withDecisionModelPolicy(() => policy, async () => {
+        await expect(createSettingsJudgmentPort(source).ask({ ...request, signal: controller.signal, beforeAttempt() {
+          if (changed === 'cancellation') controller.abort(); else policy = 'Classic - Off';
+        } })).rejects.toMatchObject({ kind: changed === 'cancellation' ? 'aborted' : 'rejected' });
+      });
+      expect(target.calls).toHaveLength(0);
+    } finally { controller.abort(); target.stop(); }
+  });
+
   test('a pending secret read cannot pair its old key with a new endpoint or model', async () => {
     const { settings, env, key, source } = fixture();
     const pending = judgmentConfigFromSettings(source);

@@ -34,7 +34,7 @@ function oldManifest(): LegacyMigrationManifest {
   // An independent writer of this fixed historical fixture. Do not call the
   // modern preparer only to discard its complete v2 commitment immediately.
   const original = input();
-  const canonical = <T>(value: T): T => JSON.parse(canonicalJson(toJson(value))) as T;
+  const canonical = <T extends object>(value: T): T => JSON.parse(canonicalJson(toJson(value))) as T;
   const stateSource = canonical(original.sources[0].source), decisionSource = canonical(original.sources[1].source);
   const state = stateSource.metadata.value, decision = decisionSource.metadata.value;
   const fragment = (sourceId: string, pointer: string, value: typeof decision | typeof state | typeof state.tasks[number]) =>

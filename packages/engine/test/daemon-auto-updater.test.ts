@@ -121,7 +121,7 @@ function releaseFetch(overrides: { latestTag?: string; assetName?: string; reade
     return {
       ok: true, status: 200, url, headers: { get: () => null },
       text: async () => body.toString('utf-8'),
-      arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+      arrayBuffer: async () => Uint8Array.from(body).buffer,
     };
   };
   return { fetchImpl, requests };

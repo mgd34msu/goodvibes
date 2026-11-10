@@ -216,7 +216,7 @@ describe('withDecisionLog + SqliteDecisionLog', () => {
     expect(entry.model).toBe('jev-1.13.0');
     // Independent pin of the canonical JSON above; the recorder produces the
     // real commitment without recomputing its expected value in this fixture.
-    expect(entry.stateHash).toBe('f4c8dfe18fb3814ce2c19b8ca80bc7d6ec6a979d770cafae346e532aa66b6bcf');
+    expect(entry.stateHash === 'f4c8dfe18fb3814ce2c19b8ca80bc7d6ec6a979d770cafae346e532aa66b6bcf').toBe(true);
     expect(entry.answers).toEqual({ urgent: { type: 'noul', noul: 0.93 } });
     expect(readingsOf(entry)).toEqual({ urgent: { kind: 'yes-no', probability: 0.93, verdict: 'yes', outcome: 'act' } });
     expect(actionOf(entry)).toBe('page-owner');

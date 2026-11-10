@@ -518,6 +518,7 @@ test('a final-content receipt resolves its own pending requirement through a gen
           const output = context.state['output'];
           if (typeof output !== 'string') throw new Error('Expected the exact final answer');
           if (output !== expectedOutput) { expectedOutputDigest = hashState(output); expectedOutput = output; }
+          if (expectedOutputDigest === undefined) throw new Error('Expected the original final-answer commitment');
           expect(evidence.finalAnswerReview.outputDigest).toBe(expectedOutputDigest);
           expect(log.get(evidence.finalAnswerReview.decisionIds[0]!)?.context.site).toBe('contract.check.final-answer-review');
           expect(evidence).toMatchObject({ orchestration: { currentValidation: { stage: 'original-requirements-after-content-review',

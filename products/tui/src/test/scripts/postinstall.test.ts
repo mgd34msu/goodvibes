@@ -139,7 +139,9 @@ describe('the actual postinstall download-verify operation', () => {
     const destination = join(root, 'goodvibes-linux-x64');
     const bytes = Buffer.from('actual owned synthetic binary bytes');
     const pin = sha256(bytes);
-    const fetch = spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(Uint8Array.from(bytes)));
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(
+      async () => new Response(Uint8Array.from(bytes)), { preconnect() {} },
+    ));
     const hash = spyOn(crypto, 'createHash');
     try {
       await postinstall.installVerifiedReleaseBinary('goodvibes-linux-x64', new Map([['goodvibes-linux-x64', pin]]), 'https://owned.test', destination);

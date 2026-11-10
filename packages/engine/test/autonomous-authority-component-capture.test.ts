@@ -347,3 +347,33 @@ test.each(['unselected', 'condition'] as const)('authentic execution refuses a l
   await expect(f.registry.executePrepared(call, admission)).rejects.toThrow();
   expect(f.effects).toBe(0); expect(transmissions).toBe(originalTransmissions);
 });
+
+
+test('only the exact native action-revision checksum is projected in protocol references', () => {
+  const context = captureAutonomousCatalogContext([], []);
+  for (const operation of ['routing', 'publish-work', 'ordinary-turn']) {
+    const revision = `${operation}:g2:p1:${protocolIdentity}`;
+    const original = { ...context, binding: { ...context.binding, actionRevision: revision },
+      evidence: [{ id: 'native-intake-requirements', revision }] };
+    expect(() => inspectDecisionProtocolReferences(original)).not.toThrow();
+    expect(original.binding.actionRevision).toBe(revision);
+    expect(original.evidence[0]?.revision).toBe(revision);
+  }
+  for (const [index, revision] of [
+    `unknown:g2:p1:${protocolIdentity}`, `publish-work:g2:p4:${protocolIdentity}`,
+    `publish-work:g2:p1:${protocolIdentity}a`, `publish-work:g2:p1:${protocolIdentity}` + String.fromCharCode(10),
+    'password=synthetic-private-ref',
+  ].entries()) expect(() => inspectDecisionProtocolReferences({ ...context, binding: { ...context.binding, actionRevision: revision } }), `malformed reference ${index}`).toThrow();
+});
+
+
+test('standalone canonical protocol identities cannot hide trailing line terminators', () => {
+  const context = captureAutonomousCatalogContext([], []);
+  const uuid = '01a10407-1f79-7006-8320-47790069cb8a';
+  for (const identity of [protocolIdentity, uuid]) {
+    expect(() => inspectDecisionProtocolReferences({ ...context, evidence: [{ id: 'original', revision: identity }] })).not.toThrow();
+    for (const character of [10, 13, 0x2028, 0x2029]) {
+      expect(() => inspectDecisionProtocolReferences({ ...context, evidence: [{ id: 'original', revision: identity + String.fromCharCode(character) }] })).toThrow();
+    }
+  }
+});

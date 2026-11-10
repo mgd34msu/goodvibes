@@ -307,12 +307,13 @@ describe('verified native lifecycle admission', () => {
         const f = installedFixture('9.9.8-test');
         const localHashCount = hash.mock.calls.length;
         expect(f).not.toHaveProperty('checksumManifest');
+        expect(localHashCount).toBe(f.receipt.artifact.files.length);
         const next = writeNativeInstallationReleaseFixture(makeOwnedTempDir('daemon-lifecycle-release'), '9.9.9-test');
-        expect(hash.mock.calls.length).toBe(localHashCount * 2 + Object.keys(next.assets).length);
+        expect(hash.mock.calls.length).toBe(localHashCount * 2 + 1);
         const manifest = next.checksumManifest;
         expect(next.checksumManifest).toBe(manifest);
         expect(Object.getOwnPropertyDescriptor(next, 'checksumManifest')?.value).toBe(manifest);
-        expect(hash.mock.calls.length).toBe(localHashCount * 2 + Object.keys(next.assets).length);
+        expect(hash.mock.calls.length).toBe(localHashCount * 2 + 1);
         return { f, next };
       } finally { hash.mockRestore(); }
     })();

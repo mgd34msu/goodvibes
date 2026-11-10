@@ -530,3 +530,24 @@ test.each(['recover', 'revoke', 'abort'] as const)('shared transport failover re
   }
   expect(progress).toBe(1);
 });
+
+
+test('native intake keeps its exact composite proposal revision without screening its checksum as source text', async () => {
+  const revision = 'publish-work:g2:p1:' + '4111111111111111' + 'a'.repeat(48);
+  using log = new SqliteDecisionLog(':memory:');
+  const fake = answers(), read = input(withDecisionLog(fake.port, log), log);
+  const routeEvidence = await readNativeIntakeRoute(read);
+  const result = await decideNativeIntake({ ...read, binding: { ...binding, actionRevision: revision },
+    routeEvidence, requirements: requirements(), allowAct: true, continuations: [repair], conditions: [] });
+  expect(result.autonomous.decision.outcome).toBe('act');
+  expect(result.autonomous.decision.binding.actionRevision).toBe(revision);
+  expect(result.autonomous.decision.evidence).toContainEqual({ id: 'native-intake-requirements', revision });
+  expect(fake.requests).toHaveLength(4);
+  result.autonomous.recordClaim();
+  for (const id of result.decisionIds) expect(log.get(id)?.status).toBe('answered');
+  // The identical bytes are still rejected when supplied as semantic source.
+  using rawLog = new SqliteDecisionLog(':memory:');
+  const raw = answers();
+  await expect(readNativeIntakeRoute({ ...input(withDecisionLog(raw.port, rawLog), rawLog), text: revision })).rejects.toMatchObject({ problem: 'card-material' });
+  expect(raw.requests).toHaveLength(0); expect(rawLog.query()).toHaveLength(0);
+});

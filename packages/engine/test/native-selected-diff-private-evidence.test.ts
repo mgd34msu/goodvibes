@@ -46,7 +46,7 @@ const text = '  Fix this hunk. 🌻\r\n';
 const privateLine = 'private selected hunk evidence';
 const numericProtocolDigest = '4111111111111111' + 'a'.repeat(48);
 const diff = `diff --git a/src/private.ts b/src/private.ts\nindex abcdef0..abcdef1 100644\n--- a/src/private.ts\n+++ b/src/private.ts\n@@ -1 +1 @@\n-old\n+${privateLine}\n`;
-function selectedDiff(): NativeSelectedDiffContext {
+function selectedDiff(): Extract<NativeSelectedDiffContext, { kind: 'session' }> {
   return { kind: 'session', revision: numericProtocolDigest, fileIndex: 2, hunkIndex: 3, unifiedDiff: diff,
     provenance: { kind: 'session', sessionId: 'hosted-owned', baselineCheckpointId: 'checkpoint-before', latestCheckpointId: 'checkpoint-after' } };
 }
@@ -77,7 +77,7 @@ test('native source binds every selected diff byte and provenance field while pr
     { ...selectedDiff(), unifiedDiff: diff.replace(privateLine, 'changed evidence') },
     { ...selectedDiff(), fileIndex: 7 },
     { ...selectedDiff(), revision: 'b'.repeat(64) },
-    { ...selectedDiff(), provenance: { kind: 'session', sessionId: 'hosted-owned', baselineCheckpointId: 'other-baseline', latestCheckpointId: 'checkpoint-after' } },
+    { ...selectedDiff(), provenance: { kind: 'session' as const, sessionId: 'hosted-owned', baselineCheckpointId: 'other-baseline', latestCheckpointId: 'checkpoint-after' } },
   ]) expect(() => captureNativeContractSource(source({ ...captured.continuation!, selectedDiff: changed }))).toThrow('Invalid native continuation revision');
 });
 

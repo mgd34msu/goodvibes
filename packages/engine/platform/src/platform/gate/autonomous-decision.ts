@@ -43,8 +43,16 @@ export interface AutonomousDecision {
  * naming a field as metadata does not exempt secret-shaped content.
  */
 function protocolIdentity(value: string): string {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
-    || /^[0-9a-f]{64}$/i.test(value) ? '[host-protocol-identity]' : value;
+  if ((value.length === 36 && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))
+    || (value.length === 64 && /^[0-9a-f]{64}$/i.test(value))) return '[host-protocol-identity]';
+  // Native intake's saved action revision embeds its exact proposal commitment.
+  // Inspect the known operation/counters, while keeping the canonical checksum
+  // in its protocol role. Semantic state never passes through this projection.
+  const nativeAction = /^(?:routing|publish-work|ordinary-turn):g[a-z0-9]{1,11}:p[0-3]:[a-f0-9]{64}$/.exec(value);
+  if (nativeAction?.[0] === value) {
+    return value.slice(0, -64) + '[host-protocol-identity]';
+  }
+  return value;
 }
 
 function protocolReference(value: JevVersionRef) {

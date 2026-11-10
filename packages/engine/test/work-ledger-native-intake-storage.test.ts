@@ -1,14 +1,13 @@
 /** Owned synthetic fixtures only: no settings, real tokens, providers or executors. */
 import * as fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
 import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 import { loadSqlJsEngine, SQLiteStore, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';
-import type { SQLitePublicationIO } from '../platform/src/platform/state/sqlite-store-persistence.js';
 import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
 import {
   nativeConversationSourceId, nativeConversationSourceRevision, nativeConversationProposalRevision, nativeConversationDecisionBinding,
@@ -158,11 +157,25 @@ test('concurrent exact duplicates publish one source association and one immutab
 
 for (const phase of ['before', 'after'] as const) test(`${phase}-publication I/O ambiguity keeps source association and ledger indivisible`, async () => {
   const f = await open(), source = await ready(f.storage), p = publisher(f.storage, source), before = fs.readFileSync(f.file);
-  const persistence = (f.store as unknown as { sqlite: { persistence: { io: SQLitePublicationIO } } }).sqlite.persistence;
-  let fail = true;
-  persistence.io = { ...fs, renameSync(from, to) { if (phase === 'before' && fail) { fail = false; throw new Error('owned write failure'); } fs.renameSync(from, to); },
-    fsyncSync(fd) { if (phase === 'after' && fail && fs.fstatSync(fd).isDirectory()) { fail = false; throw new Error('owned durability ambiguity'); } fs.fsyncSync(fd); } };
-  expect(await p.service.execute(command(source), p.actor)).toMatchObject({ kind: 'indeterminate' });
+  const parent = fs.statSync(dirname(f.file), { bigint: true });
+  const actualRename = fs.renameSync, actualSync = fs.fsyncSync;
+  let published = false, failed = false;
+  const rename = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+    const originalPublication = String(to) === f.file && String(from).startsWith(`${f.file}.tmp-`);
+    if (originalPublication && phase === 'before' && !failed) { failed = true; throw new Error('owned write failure'); }
+    actualRename(from, to);
+    if (originalPublication) published = true;
+  });
+  const sync = spyOn(fs, 'fsyncSync').mockImplementation(fd => {
+    const current = fs.fstatSync(fd, { bigint: true });
+    if (phase === 'after' && published && !failed && current.isDirectory() && current.dev === parent.dev && current.ino === parent.ino) {
+      failed = true; throw new Error('owned durability ambiguity');
+    }
+    actualSync(fd);
+  });
+  try { expect(await p.service.execute(command(source), p.actor)).toMatchObject({ kind: 'indeterminate' }); }
+  finally { sync.mockRestore(); rename.mockRestore(); }
+  expect(failed).toBe(true); expect(published).toBe(phase === 'after');
   const visible = f.storage.current(key)!; expect(visible.state).toBe(phase === 'before' ? 'processing' : 'associated');
   if (phase === 'before') expect(fs.readFileSync(f.file)).toEqual(before);
   expect(await p.service.execute(command(source), p.actor)).toMatchObject({ kind: 'accepted', replayed: phase === 'after' });
@@ -237,7 +250,11 @@ test('retained semantic lineage and proposal budgets cannot be erased or rewritt
 test('asynchronous mutations, callback mutation, or a false association cannot evade the source transaction', async () => {
   const f = await open(), source = await ready(f.storage), before = fs.readFileSync(f.file);
   await expect(f.storage.transaction(key, (async () => ({ next: null, value: undefined })) as never)).rejects.toThrow();
-  await expect(f.storage.transaction(key, current => { (current!.owner as { authorityRevision: string }).authorityRevision = 'forged'; return { next: current, value: undefined }; })).rejects.toMatchObject({ code: 'invalid' });
+  await expect(f.storage.transaction(key, current => {
+    expect(Object.isFrozen(current!.owner)).toBe(true);
+    (current!.owner as { authorityRevision: string }).authorityRevision = 'forged';
+    return { next: current, value: undefined };
+  })).rejects.toThrow(TypeError);
   await expect(f.storage.transaction(key, () => ({ next: { ...source, state: 'associated', stage: null, association: { workId: 'invented-work', attemptId: 'invented-attempt', ledgerRevision: 1 } }, value: undefined }))).rejects.toMatchObject({ code: 'conflict' });
   expect(fs.readFileSync(f.file)).toEqual(before);
 });

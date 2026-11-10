@@ -22,8 +22,12 @@ export function daemonTestManifest(daemonRoot: string) {
     { id: 'server-parity', files: files.filter(file => file === SERVER_PARITY) },
     { id: 'other-1', files: [] as string[] },
     { id: 'other-2', files: [] as string[] },
+    { id: 'other-3', files: [] as string[] },
   ];
-  files.filter(file => file !== SERVER_PARITY).forEach((file, index) => groups[1 + index % 2]!.files.push(file));
+  // The complete suite outgrew two ordinary children on CI while still making
+  // progress. Keep parity isolated and distribute every other file over three
+  // children, retaining the runner's single original absolute deadline.
+  files.filter(file => file !== SERVER_PARITY).forEach((file, index) => groups[1 + index % 3]!.files.push(file));
   const nonempty = groups.filter(group => group.files.length > 0);
   const census = nonempty.flatMap(group => group.files).sort();
   if (new Set(census).size !== files.length || census.some((file, index) => file !== files[index])) {

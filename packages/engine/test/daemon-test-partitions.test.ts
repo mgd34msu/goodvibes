@@ -48,7 +48,7 @@ test('real daemon entrypoint runs all children, preserves isolation and propagat
   }
   cpSync(resolve(import.meta.dir, '../toolchain/src/test-runner'), join(root, 'packages/engine/toolchain/src/test-runner'), { recursive: true });
   const daemon = join(root, 'products/daemon');
-  const files = [parity, 'src/test/a.test.ts', 'src/test/future/deep/b.spec.ts'];
+  const files = [parity, 'src/test/a.test.ts', 'src/test/future/deep/b.spec.ts', 'src/test/future/deep/c.spec.ts'];
   const receipts = join(root, 'executed.jsonl');
   write(daemon, 'bunfig.toml', '[test]\npreload = ["./preload.ts"]\n');
   write(daemon, 'preload.ts', "process.env.DAEMON_FIXTURE_PRELOADED = 'yes';");

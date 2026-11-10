@@ -195,7 +195,7 @@ describe('retained canonical scope consumers', () => {
       await store.upsertSource({ ...rows.allowed, title: 'Replaced source content' });
       return publication;
     };
-    await expect(projection.materialize({ kind: 'source', id: rows.allowed.id })).rejects.toThrow('Knowledge scope selection held');
+    await expect(projection.materialize({ kind: 'source', id: rows.allowed.id })).rejects.toMatchObject({ name: 'KnowledgeProjectionIdentityHeldError', reason: 'concurrent-update' });
     expect(store.listSources()).toHaveLength(2); expect(artifactStore.list()).toEqual([]);
   });
 
@@ -207,7 +207,7 @@ describe('retained canonical scope consumers', () => {
       await store.upsertExtraction({ sourceId: rows.allowed.id, extractorId: 'synthetic', format: 'text', excerpt: 'Replacement body.' });
       return publication;
     };
-    await expect(projection.materialize({ kind: 'source', id: rows.allowed.id })).rejects.toThrow('Knowledge scope selection held');
+    await expect(projection.materialize({ kind: 'source', id: rows.allowed.id })).rejects.toMatchObject({ name: 'KnowledgeProjectionIdentityHeldError', reason: 'concurrent-update' });
     expect(store.listSources()).toHaveLength(2); expect(artifactStore.list()).toEqual([]);
   });
 
@@ -261,7 +261,7 @@ describe('retained canonical scope consumers', () => {
       return publication;
     };
     try {
-      await expect(projection.materialize({ kind: 'source', id: rows.allowed.id })).rejects.toThrow('Knowledge scope selection held');
+      await expect(projection.materialize({ kind: 'source', id: rows.allowed.id })).rejects.toMatchObject({ name: 'KnowledgeProjectionIdentityHeldError', reason: 'concurrent-update' });
       expect(store.listSources()).toHaveLength(2); expect(artifactStore.list()).toEqual([]);
     } finally { await writer.close(); }
   });

@@ -149,13 +149,18 @@ test('a rejected artifact read holds without exposing private failure details or
   const ctx = context(), fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port);
   const artifact = await ctx.artifactStore.create({ kind: 'document', filename: 'manual.txt', text: 'Original document.' });
   const source = await ctx.store.upsertSource({ connectorId: 'manual', sourceType: 'document', title: 'Retained source', status: 'indexed' });
-  const uris = createKnowledgeIngestUriCanonicalizer(ctx); uris.reserveSource(source.id); uris.attachArtifact(artifact.id);
   const before = ctx.store.status(), calls = fake.requests.length;
   const read = spyOn(ctx.artifactStore, 'readContent').mockRejectedValue(new Error('PRIVATE_ORIGINAL_ARTIFACT_PATH'));
-  let error: unknown;
-  try { await prepareKnowledgeExtraction(ctx, source.id, artifact.id, uris); } catch (caught) { error = caught; }
-  finally { read.mockRestore(); }
+  let error: unknown, readCalls = 0;
+  try {
+    // Admit the actual failing transport before retaining its method identity.
+    // Replacing it afterward tests owner retirement, not an operational failure.
+    const uris = createKnowledgeIngestUriCanonicalizer(ctx); uris.reserveSource(source.id); uris.attachArtifact(artifact.id);
+    await prepareKnowledgeExtraction(ctx, source.id, artifact.id, uris);
+  } catch (caught) { error = caught; }
+  finally { readCalls = read.mock.calls.length; read.mockRestore(); }
   expect(error).toBeInstanceOf(KnowledgeExtractionJudgmentHoldError);
+  expect(readCalls).toBe(1);
   expect(String(error)).not.toContain('PRIVATE_ORIGINAL_ARTIFACT_PATH');
   expect(ctx.store.status()).toEqual(before); expect(ctx.store.getExtractionBySourceId(source.id)).toBeNull();
   expect(ctx.store.getSource(source.id)).toEqual(source); expect(fake.requests).toHaveLength(calls);

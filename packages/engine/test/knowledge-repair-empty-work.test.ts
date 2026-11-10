@@ -6,7 +6,6 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import type { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 import { KnowledgeScopeSelectionHeldError } from '../platform/src/platform/knowledge/scope-selection.js';
-import { KnowledgeRepairSubjectSelectionHeldError } from '../platform/src/platform/knowledge/semantic/repair-subject-selection/types.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { upsertObservedKnowledgeNode } from '../platform/src/platform/knowledge/store-node-observation.js';
 import { promoteRepairSources } from '../platform/src/platform/knowledge/semantic/self-improvement-promotion.js';
@@ -64,13 +63,12 @@ describe('mechanically empty repair work', () => {
     expect(item.store.getSource(item.source.id)).toEqual(item.source);
     expect(item.store.getSource(item.source.id)).not.toBe(item.source);
   });
-  test('normalized legacy source membership cannot be miscounted as mechanically empty', async () => {
+  test('whitespace in a saved source ID cannot alias the admitted source or claim repair completion', async () => {
     const item = await fixture();
     const draft = await item.store.upsertNode({ id: 'legacy-fact', kind: 'fact', slug: 'legacy-fact', title: 'Display input', status: 'draft',
       metadata: { knowledgeSpaceId: spaceId, semanticKind: 'fact', factKind: 'specification', subjectIds: ['device'] } });
-    // Historical persisted rows may carry whitespace in the raw source_id. The
-    // existing count collector normalizes that field even though link collection
-    // uses exact IDs. Keep both memberships; do not silently return zero.
+    // Saved identifiers are exact keys. A different raw source_id remains
+    // readable, but cannot acquire the admitted source's fact membership.
     const sql = (item.store as unknown as { sqlite: SQLiteStore }).sqlite;
     sql.run("UPDATE knowledge_nodes SET source_id = ?, status = 'active' WHERE id = ?", [`  ${item.source.id}  `, draft.id]);
     await sql.save(); await item.store.close();
@@ -80,10 +78,11 @@ describe('mechanically empty repair work', () => {
     installJudgmentPort({ model: 'hold-subject-selection', async ask(request) {
       expect(Object.keys(request.questions)).toEqual(['repairSubjectSelected']); requests++; throw new Error('Canonical subject unavailable');
     } });
-    const task = store.getRefinementTask(item.task.id)!, gap = store.getNode(item.gap.id)!;
-    await expect(promoteRepairSources({ store }, spaceId, gap, [item.source.id], task, Date.now() + 5_000))
-      .rejects.toBeInstanceOf(KnowledgeRepairSubjectSelectionHeldError);
-    expect(requests).toBe(1); expect(store.listEdges()).toEqual([]); expect(store.getRefinementTask(task.id)).toEqual(task);
+    const task = store.getRefinementTask(item.task.id)!, gap = store.getNode(item.gap.id)!, original = store.getNode(draft.id);
+    const result = await promoteRepairSources({ store }, spaceId, gap, [item.source.id], task, Date.now() + 5_000);
+    expect(result).toEqual({ promotedFactCount: 0, repairComplete: false, promotedSourceIds: [item.source.id] });
+    expect(requests).toBe(0); expect(store.listEdges()).toEqual([]); expect(store.getNode(draft.id)).toEqual(original);
+    expect(store.getRefinementTask(task.id)).toMatchObject({ state: 'applying', promotedFactCount: 0 });
   });
   test('zero-work observation cannot survive source replacement before final task bookkeeping', async () => {
     const item = await fixture(); let requests = 0;

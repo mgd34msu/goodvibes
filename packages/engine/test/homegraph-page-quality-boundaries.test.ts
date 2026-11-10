@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { createSystemOnePort, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
 import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
 import { refreshDevicePagesForHomeGraphAsk } from '../platform/src/platform/knowledge/home-graph/ask-page-refresh.js';
@@ -285,12 +285,12 @@ async function addAskFact(context: Fixture, source: KnowledgeSourceRecord) {
 }
 
 function refreshAsk(context: Fixture, sources: readonly KnowledgeSourceRecord[], facts: readonly KnowledgeNodeRecord[] = [],
-  linkedObjects: readonly KnowledgeNodeRecord[] = [context.device]) {
+  linkedObjects: readonly KnowledgeNodeRecord[] = [context.device], signal?: AbortSignal) {
   const answer: HomeGraphAskResult = {
     ok: true, spaceId, query: 'What features does the reference device have?', results: [],
     answer: { text: 'A source-backed reference answer.', mode: 'standard', confidence: 95, sources, facts, linkedObjects },
   };
-  return refreshDevicePagesForHomeGraphAsk({ ...context, answer });
+  return refreshDevicePagesForHomeGraphAsk({ ...context, answer, signal });
 }
 
 /** Compare records, not just counts: a held pass must not overwrite existing content. */
@@ -306,6 +306,45 @@ function persisted(context: Fixture, options: { readonly includeArtifacts?: bool
 }
 
 describe('Home Graph page quality persistence boundaries', () => {
+  test.each(['source', 'fact'] as const)('ask refresh forwards its owner cancellation to an actually held %s quality request without writes', async phase => {
+    const context = await fixture(), source = await addSource(context, `held-${phase}-quality`, { linked: false });
+    const fact = phase === 'fact' ? await addAskFact(context, source) : undefined;
+    const fake = readings(), controller = new AbortController();
+    const entered = Promise.withResolvers<void>(), delayed = Promise.withResolvers<Response>();
+    let wireSignal: AbortSignal | undefined, readingSignal: AbortSignal | undefined, heldCalls = 0;
+    const held = createSystemOnePort({ endpoint: { kind: 'local', baseURL: 'http://127.0.0.1:1', apiKey: 'synthetic-held-quality' },
+      model: fake.port.model, timeoutMs: 0, retry: {}, fetch: async (_request, options) => {
+        wireSignal = options?.signal ?? undefined; heldCalls++; entered.resolve();
+        // Deliberately await the owned response even after abort. The actual
+        // port must cancel its reader before this fixture releases that response.
+        return delayed.promise;
+      },
+    });
+    const port: JudgmentPort = { model: fake.port.model, ask(request) {
+      const names = Object.keys(request.questions).map(name => name.split('__').at(-1));
+      const selected = phase === 'source' ? names.includes('useful') : names.includes('repairUseful');
+      if (!selected) return fake.port.ask(request);
+      readingSignal = request.signal; return held.ask(request);
+    } };
+    installJudgmentPort(port);
+    const before = persisted(context), bytes = readFileSync(context.store.storagePath);
+    const outcome = refreshAsk(context, [source], fact ? [fact] : [], [context.device], controller.signal)
+      .then(() => undefined, (error: unknown) => error);
+    try {
+      await withTestTimeout(entered.promise);
+      expect(heldCalls).toBe(1); expect(readingSignal?.aborted).toBe(false); expect(wireSignal?.aborted).toBe(false);
+      controller.abort();
+      expect(readingSignal?.aborted).toBe(true); expect(wireSignal?.aborted).toBe(true);
+      const error = await withTestTimeout(outcome);
+      expect(error).toBeInstanceOf(Error);
+      expect(persisted(context)).toBe(before); expect(readFileSync(context.store.storagePath)).toEqual(bytes);
+      expect(heldCalls).toBe(1);
+    } finally {
+      controller.abort(); delayed.resolve(Response.json({ model: fake.port.model, answers: {} }));
+      await outcome;
+    }
+  });
+
   for (const kind of ['room', 'passport'] as const) {
     test(`${kind} scopes sources before the 50-candidate cap and protected-input checks`, async () => {
       const context = await fixture();

@@ -62,6 +62,7 @@ export async function refreshDevicePagesForHomeGraphAsk(input: {
       spaceId: input.spaceId,
       installationId: input.installationId,
       devices,
+      signal,
       assertSelectedDevicesCurrent: recovery.assertCurrent,
       sourceWritten: recovery.acknowledgeSourceWritten,
       facts: input.answer.answer.facts ?? [],
@@ -116,6 +117,7 @@ async function persistAnswerFactSubjectLinks(input: {
   readonly spaceId: string;
   readonly installationId: string;
   readonly devices: readonly KnowledgeNodeRecord[];
+  readonly signal?: AbortSignal | undefined;
   readonly assertSelectedDevicesCurrent: () => void;
   readonly sourceWritten: (source: KnowledgeSourceRecord) => void;
   readonly facts: readonly KnowledgeNodeRecord[];
@@ -123,7 +125,7 @@ async function persistAnswerFactSubjectLinks(input: {
 }): Promise<void> {
   if (input.devices.length === 0) return;
   input.assertSelectedDevicesCurrent();
-  const reader = createHomeGraphPageSourceReader();
+  const reader = createHomeGraphPageSourceReader(input.signal);
   const guard = createSemanticWriteGuard(input.store);
   for (const device of input.devices) guard.node(device.id);
   const facts = input.facts.filter((fact) => getKnowledgeSpaceId(fact) === input.spaceId);
@@ -149,7 +151,7 @@ async function persistAnswerFactSubjectLinks(input: {
     .slice(0, MAX_ASK_PAGE_SOURCES_TO_LINK);
   const acceptedSourceIds = new Set(pageSources.map((reading) => reading.source.id));
   const factReader = createHomeGraphPageFactReader(input.store, {
-    spaceId: input.spaceId, query: 'Useful device reference facts selected by a Home Graph answer', subjects: input.devices,
+    spaceId: input.spaceId, query: 'Useful device reference facts selected by a Home Graph answer', subjects: input.devices, signal: input.signal,
   });
   const selectedFacts = facts.filter((fact) => Boolean(fact.sourceId && acceptedSourceIds.has(fact.sourceId)));
   const responsesById = new Map(selectedFacts.map((fact) => [fact.id, fact]));

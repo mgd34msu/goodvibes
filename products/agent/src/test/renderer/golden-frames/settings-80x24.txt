@@ -9,7 +9,7 @@
 |   ✦ agent experience                                                           |
 |     Display         10      display.lineNumbers · default off · enum           |
 |     UI               4      with 3 possible value(s) · source default          |
-|     Behavior        10      10 more ↓ · pgdn                                   |
+|     Behavior        10      13 more ↓ · pgdn                                   |
 |     Your Profile    10                                                         |
 |     Dates and       11      stream                                  true       |
 |     Plans                   lineNumbers                              off       |

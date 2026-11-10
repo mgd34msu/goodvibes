@@ -186,3 +186,49 @@ test('malformed plain and proxy proof-binding thenables are never assimilated', 
     expect(stateHashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
   } finally { stateHashes.mockRestore(); }
 });
+
+
+test('malformed fulfilled capture result is drained without re-assimilating its already fulfilled object', async () => {
+  using log = new SqliteDecisionLog(':memory:');
+  let reads = 0;
+  const payload = {};
+  // Resolve before installing the accessor: only an unnecessary derived
+  // identity promise would try to assimilate this already admitted value.
+  const fulfilled = Promise.resolve(payload);
+  Object.defineProperty(payload, 'then', { get() { reads++; throw new Error('Borrowed fulfilled-object accessor'); } });
+  const malformed = { state: 'private', questions, inputBinding: 'state', captureResult: () => fulfilled } as unknown as JudgmentRequest<typeof questions>;
+  const stateHashes = spyOn(Bun.CryptoHasher, 'hash');
+  try {
+    await expect(withDecisionLog(borrowed, log).ask(malformed)).rejects.toMatchObject({ kind: 'invalid-response' });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(reads).toBe(0);
+    expect(log.query({ status: 'answered' })).toHaveLength(0);
+    expect(log.query({ status: 'failed' })).toHaveLength(1);
+    expect(log.query()[0]).not.toHaveProperty('stateHash');
+    expect(stateHashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+  } finally { stateHashes.mockRestore(); }
+});
+
+test('a result-capture callback throwing owned rejected work preserves its value-free failure and drains the late rejection', async () => {
+  using log = new SqliteDecisionLog(':memory:');
+  const work = Promise.withResolvers<void>();
+  let reads = 0;
+  Object.defineProperty(work.promise, 'then', { get() { reads++; throw new Error('Do not assimilate borrowed then'); } });
+  const stateHashes = spyOn(Bun.CryptoHasher, 'hash');
+  try {
+    const error = await withDecisionLog(borrowed, log).ask({ state: 'private', questions, inputBinding: 'state',
+      captureResult() { throw work.promise; },
+    }).catch(error => error);
+    expect(error).toBeInstanceOf(JudgmentError);
+    expect(error.kind).toBe('internal');
+    expect(error.message).toBe('The decision client failed internally. The operation has stopped.');
+    expect(error.cause).toBeUndefined();
+    expect(log.query({ status: 'answered' })).toHaveLength(0);
+    expect(log.query({ status: 'failed' })).toHaveLength(1);
+    expect(log.query()[0]).not.toHaveProperty('stateHash');
+    expect(stateHashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    work.reject(new Error('PRIVATE late capture failure'));
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(reads).toBe(0);
+  } finally { stateHashes.mockRestore(); }
+});

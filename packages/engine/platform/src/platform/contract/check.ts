@@ -252,9 +252,11 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
   const nativeBinding = input.native !== undefined && input.native.contract.nativeSource !== undefined;
   const checkedPort = (site: string): JudgmentPort => {
     const original = input.checkPort ?? judgmentPort(site);
-    // Native execution later verifies these recorded inputs. Ordinary checks
-    // have no persisted cryptographic-input consumer and do not request one.
-    const proof: JudgmentPort = !nativeBinding ? original : { ...original, async ask(request) {
+    // Native execution groups the saved judge batches by their exact input.
+    // Unit quality is read by answers only; the independent settlement adapter
+    // explicitly requests both bindings when it compares its captured inputs.
+    // Preserve any such caller-owned binding without adding an unused one.
+    const proof: JudgmentPort = !nativeBinding || site !== CHECK_SITES.judge ? original : { ...original, async ask(request) {
       return original.ask({ ...request, inputBinding: 'state' });
     } };
     return meteredPort(input.checkPort !== undefined || input.native === undefined ? proof

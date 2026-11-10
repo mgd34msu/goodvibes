@@ -9,7 +9,7 @@ import { nativeContractPort } from '../../platform/src/platform/contract/native-
  * missing port failing loudly.
  */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { canonicalJson, hashState, readYesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { canonicalJson, hashState, readYesNo, SqliteDecisionLog, STAKES_BANDS, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { DELIVERABLE_JUDGES, deliverableVerdict } from '../../platform/src/platform/contract/batteries/deliverable-judge.js';
@@ -577,7 +577,7 @@ test('fresh nonpass checks omit cache digests while historical fields remain rea
   expect(replayed.check.result).toBe('native-decision'); expect(replayed.verdicts).toEqual(outcome.verdicts);
 });
 
-test('only native unshown holds retain a restart commitment; both native proof requests opt in to recorded input binding', async () => {
+test('only native unshown holds retain a restart commitment; only the native judge opts in to its saved input binding', async () => {
   const unit = twoCriterionUnit(), current = evidence({ gates: [{ gate: 'tests', passed: false, required: true,
     outcome: 'unverified', skipped: false, output: 'No supported assertion result', durationMs: 1 }] });
   const native = makeContract({ nativeSource: { sourceId: 'source', sourceRevision: '1', inputRevision: 'input', criteriaId: 'criteria',
@@ -597,7 +597,9 @@ test('only native unshown holds retain a restart commitment; both native proof r
     if (actual.discarded) throw new Error('Synthetic native check unexpectedly discarded');
     expect(actual.check.problems).toContain('unshown'); expect(actual.check.evidenceDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(hashing.mock.calls.filter(([algorithm, value]) => algorithm === 'sha256' && value === serialized)).toHaveLength(1);
-    expect(port.requests).toHaveLength(2); expect(port.requests.every(request => request.inputBinding === 'state')).toBe(true);
+    expect(port.requests).toHaveLength(2);
+    expect(port.requests.find(request => request.context?.site === 'contract.check.unit-judge')?.inputBinding).toBe('state');
+    expect(port.requests.find(request => request.context?.site === 'contract.check.unit-quality')?.inputBinding).toBeUndefined();
     const text = serializeContract(makeContract({ units: [{ ...unit, checks: [actual.check] }] }), 1);
     if (!text) throw new Error('Actual refusal checkpoint serialization failed');
     const restored = deserializeContract(text);
@@ -608,5 +610,43 @@ test('only native unshown holds retain a restart commitment; both native proof r
     expect(hashState(judgeState(restored.units[0]!, current))).toBe(actual.check.evidenceDigest);
     expect(nativeRecordedCheck(restored.units[0]!, restored.units[0]!.checks[0]!).check.result).not.toBe('pass');
     expect(port.requests).toHaveLength(2);
+  } finally { hashing.mockRestore(); }
+});
+
+
+test('native unit quality omits an unused digest while an independent explicit adapter retains both actual input commitments', async () => {
+  const unit = twoCriterionUnit(), current = evidence();
+  const native = makeContract({ nativeSource: { sourceId: 'source', sourceRevision: '1', inputRevision: 'input', criteriaId: 'criteria',
+    criteriaRevision: '1', goal: 'Preserve original work', criteria: ['Show the actual checks'] } });
+  using log = new SqliteDecisionLog(':memory:');
+  const fake = checkPort({ criteria: [MET, MET] });
+  const recorded = withDecisionLog(fake.port, log);
+  const input = { native: { contract: native, services: undefined }, contract: native, unit,
+    trigger: 'completion' as const, evidence: current, settings: SETTINGS, now: 1 };
+  const hashing = spyOn(Bun.CryptoHasher, 'hash');
+  try {
+    const ordinary = await runUnitCheck({ ...input, checkPort: recorded });
+    if (ordinary.discarded) throw new Error('Original native unit check was discarded');
+    expect(ordinary.check.result).toBe('pass');
+    const judge = log.get(ordinary.check.decisionIds[0]!);
+    const quality = log.get(ordinary.check.decisionIds[1]!);
+    expect(judge?.stateHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(quality?.status).toBe('answered'); expect(quality?.context.site).toBe('contract.check.unit-quality');
+    expect(quality).not.toHaveProperty('stateHash');
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+
+    // The real settlement adapter owns this same explicit request at its
+    // independent capture seam. The generic unit checker must preserve it.
+    const explicit: typeof recorded = { ...recorded, async ask(request) {
+      return recorded.ask({ ...request, inputBinding: 'state' });
+    } };
+    const settled = await runUnitCheck({ ...input, now: 2, checkPort: explicit });
+    if (settled.discarded) throw new Error('Explicitly bound native settlement check was discarded');
+    expect(settled.check.result).toBe('pass');
+    const saved = settled.check.decisionIds.map(id => log.get(id));
+    expect(saved).toHaveLength(2);
+    expect(saved.every(entry => entry?.status === 'answered' && typeof entry.stateHash === 'string')).toBe(true);
+    expect(saved[0]?.stateHash).not.toBe(saved[1]?.stateHash);
+    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(3);
   } finally { hashing.mockRestore(); }
 });

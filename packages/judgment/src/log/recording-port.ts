@@ -282,9 +282,12 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
         const response = (() => {
           if (!resultCapture) return original;
           assertLogCurrent(logAssertion);
-          const admitted = resultCapture(original);
+          const admitted = (() => {
+            try { return resultCapture(original); }
+            catch (error) { drainOwned(error); throw error; }
+          })();
           if (nodeTypes.isPromise(admitted)) {
-            void Promise.prototype.then.call(admitted, undefined, () => {});
+            drainOwned(admitted);
             throw invalidResponse();
           }
           checkCancellation(signal);

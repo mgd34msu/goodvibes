@@ -1,5 +1,4 @@
 import { assertScreeningOperation, captureScreeningOperation as captureOperation } from './operation.js';
-import { createHash } from 'node:crypto';
 import { createClassicProtectedSourceOwner, classicScreeningParts } from './classic-owner.js';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { DecisionModelsDisabledError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
@@ -21,7 +20,6 @@ type Result = { readonly status: 'settled'; readonly receipt: Receipt } | Extrac
 
 interface OwnedSource {
   readonly source: ScreeningSource;
-  refusalKey?: string;
   readonly reference?: CapturedResearchReference;
   readonly lifetime: AbortController;
   released: boolean;
@@ -30,17 +28,6 @@ interface OwnedSource {
   result?: Result;
 }
 interface OwnedProjection { readonly source: OwnedSource; readonly parts: readonly string[]; }
-/** Retain only a one-way commitment after raw source release. Exact retained
- * text would violate that lifetime; fresh handle IDs cannot recognize a repeat
- * of an already unsettled input. This never grants permission or supplies a
- * proposal ID. Compute once only when recording or matching an actual unsettled
- * input, over at most LIMITS.characters; ordinary successful work needs none.
- */
-function refusalKey(source: OwnedSource): string {
-  return source.refusalKey ??= createHash('sha256').update(JSON.stringify([
-    source.reference ? 'research-reference' : 'display-preview', source.source.parts,
-  ])).digest('hex');
-}
 /** Cheap pending-work bucket, retaining no source text beyond its live owner. */
 function pendingSourceBucket(source: OwnedSource): string {
   return JSON.stringify([source.reference !== undefined, source.source.parts.map(part => part.length)]);
@@ -117,13 +104,20 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
   const sources = new Map<Handle, OwnedSource>();
   const projections = new Map<Receipt, OwnedProjection>();
   const referenceReader = createResearchReferenceReader(credentialLiterals);
-  // Refusal-only fingerprints survive mapper-handle release, without raw text.
-  const unsettled = new Set<string>();
+  // Live original owners already retain their text. Once an unsettled original
+  // is released, retain only an owner-wide hold, never its text or fingerprint.
+  // A fresh owner is required before unrelated work can be screened again.
+  const unsettled = new Set<OwnedSource>();
+  let releasedUnsettled = false;
   // Only already-owned pending sources, removed when their original work ends.
   // Kind/part lengths avoid full-text comparisons across unrelated requests.
   const screening = new Map<string, Set<OwnedSource>>();
   let screeningCount = 0;
-  const wasUnsettled = (source: OwnedSource): boolean => unsettled.size > 0 && unsettled.has(refusalKey(source));
+  const wasUnsettled = (source: OwnedSource): boolean => {
+    if (releasedUnsettled) return true;
+    for (const original of unsettled) if (samePendingSource(original, source)) return true;
+    return false;
+  };
   const work = new Set<Promise<unknown>>();
   let closing: Promise<void> | undefined;
   const active = () => {
@@ -169,6 +163,7 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
     };
     const classicResult = (): Result => {
       operationCurrent(source, operation);
+      if (wasUnsettled(source)) return held('unsettled');
       const parts = classicScreeningParts(source.source, source.reference);
       operationCurrent(source, operation);
       const receipt = Object.freeze({ provenance: 'classic' }) as Receipt;
@@ -191,17 +186,18 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
       if (source.reference) {
         const result = await referenceReader.read(source.reference, { port, signal: requestSignal, assertCurrent: assertRoute, onRetry });
         if (result.status === 'held') {
-          if (result.reason === 'unsettled') unsettled.add(refusalKey(source));
+          if (result.reason === 'unsettled') unsettled.add(source);
           return result.reason === 'unsettled' ? source.result = held(result.reason) : held(result.reason);
         }
         parts = Object.freeze([result.value]);
       } else {
         const spans = await proposeScreeningSpans(source.source, { ...proposal, fetch: transport.fetch, signal: requestSignal, assertCurrent });
         const settled = await verifyScreeningSpans(source.source, spans, { port, signal: requestSignal, assertCurrent: assertRoute, onRetry });
-        if (!settled) { unsettled.add(refusalKey(source)); return source.result = held('unsettled'); }
+        if (!settled) { unsettled.add(source); return source.result = held('unsettled'); }
         parts = project(source.source, spans);
       }
       assertCurrent();
+      if (wasUnsettled(source)) return held('unsettled');
       const receipt = Object.freeze({}) as Receipt;
       projections.set(receipt, { source, parts });
       return source.result = Object.freeze({ status: 'settled', receipt });
@@ -231,7 +227,7 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
     if (bucket) for (const pending of bucket) {
       if (samePendingSource(pending, source)) return Promise.resolve(held('busy'));
     }
-    // Reserve future refusal slots before admitting any asynchronous work.
+    // Bound live refusals and pending work before asynchronous admission.
     if (unsettled.size + screeningCount >= LIMITS.unsettledRevisions) return Promise.resolve(held('capacity'));
     const pendingSources = bucket ?? new Set<OwnedSource>();
     pendingSources.add(source); screening.set(bucketKey, pendingSources); screeningCount++;
@@ -255,7 +251,7 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
     },
     captureResearchReference(value) {
       active();
-      // Capture the complete actual original before parsing, bounds or hashing.
+      // Capture the complete actual original before parsing or bounds checks.
       const captured = captureScreeningSource([value], credentialLiterals);
       const reference = captureResearchReference(captured.parts[0]!, credentialLiterals);
       active();
@@ -295,6 +291,7 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
       const source = sources.get(handle); if (!source) return Promise.resolve();
       source.released = true; source.lifetime.abort();
       return own(Promise.resolve(source.pending).then(() => {
+        if (unsettled.delete(source)) releasedUnsettled = true;
         sources.delete(handle);
         for (const [receipt, entry] of projections) if (entry.source === source) projections.delete(receipt);
       }));

@@ -37,7 +37,6 @@
  *   - resolveAtRestPolicy: read the honest-default config keys (redaction on by
  *     default; retention generous but bounded) into a resolved policy.
  */
-import { createHash } from 'node:crypto';
 import { isClassicOperation } from './decision-policy.js';
 import { lstatSync, unlinkSync, readdirSync, type BigIntStats } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -110,14 +109,12 @@ export function resolveAtRestPolicy(get?: (key: string) => unknown): AtRestPolic
 const CANDIDATE_CONTEXT_CHARS = 160;
 /** How many span readings run at once; each span is its own request. */
 const CANDIDATE_READ_CONCURRENCY = 4;
-/** How many span readings are remembered for the life of the process. */
-const REMEMBERED_SPAN_LIMIT = 2048;
-
 /** Immutable original and its current local profile/issuer projection. Never logged. */
 interface AdmittedLine {
   readonly text: string;
-  readonly cacheRevision: () => string;
   readonly redaction: ReturnType<typeof captureRedactionSource>;
+  readonly readings: Map<string, SpanReading>;
+  readonly pending: Map<string, PendingSpan>;
 }
 interface SpanReading {
   readonly clear: boolean;
@@ -129,24 +126,10 @@ interface PendingSpan {
   readonly promise: Promise<void>;
 }
 
-// Context and source identity are part of a reading, not just the token value.
-// Store digests and bounded authority records, never a plaintext credential map.
-const spanReadings = new Map<string, SpanReading>();
-const spanReadsInFlight = new Map<string, PendingSpan>();
 let readingGeneration = 0;
-const spanKey = (line: AdmittedLine, candidate: CredentialCandidate): string =>
-  `${line.cacheRevision()}:${candidate.start}:${candidate.end}`;
-
-/** Only the bounded cross-write candidate cache needs a content commitment:
- * retaining its complete source would retain possible credentials after the
- * write ends. This private digest cannot clear a span without the same live
- * port and redaction authority. Ordinary records and currentness checks never
- * hash. One admitted immutable source computes this lazily, at most once.
- */
-function candidateCacheRevision(original: string, text: string): () => string {
-  let revision: string | undefined;
-  return () => revision ??= createHash('sha256').update(JSON.stringify([original, text])).digest('hex');
-}
+// Offsets are meaningful only inside this original admitted write. Its maps
+// expire with that write; a later write receives no exemption or pending work.
+const spanKey = (candidate: CredentialCandidate): string => `${candidate.start}:${candidate.end}`;
 const unavailable = (): Error => new Error('At-rest credential reading is unavailable; unread spans remain masked');
 
 /** Match issuer formats in strings/keys and nested JSON-string envelopes. */
@@ -203,7 +186,7 @@ function admitLine(original: string): AdmittedLine | undefined {
     }
     const text = redactIssuerCredentials(original);
     redaction.assertCurrent();
-    return Object.freeze({ text, cacheRevision: candidateCacheRevision(original, text), redaction });
+    return Object.freeze({ text, redaction, readings: new Map<string, SpanReading>(), pending: new Map<string, PendingSpan>() });
   } catch {
     // Never retain or inspect an upstream rejection, which may carry source text.
     return undefined;
@@ -222,8 +205,8 @@ function captureReadingAuthority(site: string, redactions: readonly ReturnType<t
 }
 
 function remembered(line: AdmittedLine, candidate: CredentialCandidate, authority: JudgmentPortCapture): boolean | undefined {
-  const key = spanKey(line, candidate);
-  const reading = spanReadings.get(key);
+  const key = spanKey(candidate);
+  const reading = line.readings.get(key);
   if (!reading) return undefined;
   try {
     authority.assertCurrent();
@@ -234,14 +217,11 @@ function remembered(line: AdmittedLine, candidate: CredentialCandidate, authorit
     authority.assertCurrent();
     return reading.clear;
   }
-  catch { spanReadings.delete(key); return undefined; }
+  catch { line.readings.delete(key); return undefined; }
 }
 
-function rememberSpan(key: string, clear: boolean, authority: JudgmentPortCapture, redaction: ReturnType<typeof captureRedactionSource>): void {
-  if (spanReadings.size >= REMEMBERED_SPAN_LIMIT && !spanReadings.has(key)) {
-    spanReadings.delete(spanReadings.keys().next().value!);
-  }
-  spanReadings.set(key, { clear, authority, redaction });
+function rememberSpan(line: AdmittedLine, key: string, clear: boolean, authority: JudgmentPortCapture): void {
+  line.readings.set(key, { clear, authority, redaction: line.redaction });
 }
 
 function unreadCandidates(line: AdmittedLine, authority: JudgmentPortCapture): CredentialCandidate[] {
@@ -249,8 +229,8 @@ function unreadCandidates(line: AdmittedLine, authority: JudgmentPortCapture): C
 }
 
 function readSpan(candidate: CredentialCandidate, line: AdmittedLine, site: string, authority: JudgmentPortCapture): Promise<void> {
-  const key = spanKey(line, candidate);
-  const inFlight = spanReadsInFlight.get(key);
+  const key = spanKey(candidate);
+  const inFlight = line.pending.get(key);
   if (inFlight?.authority.identity === authority.identity) return inFlight.promise;
   const generation = readingGeneration;
   const assertCurrent = () => {
@@ -276,24 +256,23 @@ function readSpan(candidate: CredentialCandidate, line: AdmittedLine, site: stri
       const clear = run.readings.credential.verdict === 'no';
       run.recordAction(clear ? 'keep' : 'mask');
       assertCurrent();
-      rememberSpan(key, clear, authority, line.redaction);
+      rememberSpan(line, key, clear, authority);
     } catch { throw unavailable(); }
   })();
   const pending = { authority, promise: read };
-  spanReadsInFlight.set(key, pending);
-  const release = () => { if (spanReadsInFlight.get(key) === pending) spanReadsInFlight.delete(key); };
+  line.pending.set(key, pending);
+  const release = () => { if (line.pending.get(key) === pending) line.pending.delete(key); };
   void read.then(release, release);
   return read;
 }
 
 async function readAdmittedLines(lines: readonly AdmittedLine[], site: string, authority: JudgmentPortCapture): Promise<void> {
   const work: Array<{ candidate: CredentialCandidate; line: AdmittedLine }> = [];
-  const keys = new Set<string>();
+  const originals = new Set<AdmittedLine>();
   for (const line of lines) {
+    if (originals.has(line)) continue;
+    originals.add(line);
     for (const candidate of unreadCandidates(line, authority)) {
-      const key = spanKey(line, candidate);
-      if (keys.has(key)) continue;
-      keys.add(key);
       work.push({ candidate, line });
     }
   }
@@ -304,24 +283,35 @@ async function readAdmittedLines(lines: readonly AdmittedLine[], site: string, a
  * Protected or unsupported originals are never sent to the judgment port.
  * Admissible records retain the semantic reading; missing/failed ports reject
  * with a fixed error and leave unread spans masked. No source is truncated to
- * make it pass admission. This does not certify arbitrary unknown tokens safe.
+ * make it pass admission. Returns projections from this exact call; it never
+ * primes a later write or retains possible credentials after the call ends.
+ * This does not certify arbitrary unknown tokens safe.
  */
-export async function readAtRestCredentialSpans(lines: readonly string[], site: string): Promise<void> {
-  // Classic keeps issuer and candidate masking; it never asks for a semantic exemption.
-  if (isClassicOperation()) return;
+export async function readAtRestCredentialSpans(lines: readonly string[], site: string): Promise<readonly string[]> {
   try {
     // Capture the complete array structurally. Its elements are independent
     // complete sources; each JSONL payload is admitted intact, never per window.
     let originals: readonly string[];
     try {
       const captured = captureOwnedJson(lines);
-      if (!Array.isArray(captured) || captured.some((line) => typeof line !== 'string')) return;
+      if (!Array.isArray(captured) || captured.some((line) => typeof line !== 'string')) return Object.freeze([]);
       originals = captured as readonly string[];
-    } catch { return; }
-    const admitted = originals.map(admitLine).filter((line): line is AdmittedLine => line !== undefined);
-    if (!admitted.some((line) => findCredentialCandidates(line.text).length > 0)) return;
-    const authority = captureReadingAuthority(site, admitted.map((line) => line.redaction));
-    await readAdmittedLines(admitted, site, authority);
+    } catch { return Object.freeze([]); }
+    // Classic keeps issuer and candidate masking without any semantic read.
+    if (isClassicOperation()) return Object.freeze(originals.map(line => projectAtRestLine(line)));
+    const owned = new Map<string, AdmittedLine | undefined>();
+    const admitted = originals.map(original => {
+      if (!owned.has(original)) owned.set(original, admitLine(original));
+      return owned.get(original);
+    });
+    const readable = [...new Set(admitted.filter((line): line is AdmittedLine => line !== undefined))];
+    let authority: JudgmentPortCapture | undefined;
+    if (readable.some(line => findCredentialCandidates(line.text).length > 0)) {
+      authority = captureReadingAuthority(site, readable.map(line => line.redaction));
+      await readAdmittedLines(readable, site, authority);
+    }
+    return Object.freeze(originals.map((original, index) =>
+      projectAtRestLine(original, admitted[index] ? authority : undefined, admitted[index])));
   } catch { throw unavailable(); }
 }
 
@@ -334,7 +324,7 @@ function projectAtRestLine(line: string, authority?: JudgmentPortCapture, source
   let currentAuthority = authority;
   try { source?.redaction.assertCurrent(); } catch { currentAuthority = undefined; }
   // With no live semantic authority every candidate stays masked. In
-  // particular, crash capture and Classic need no cache digest at all.
+  // particular, crash capture and Classic never borrow a completed reading.
   const admitted = currentAuthority ? source ?? admitLine(line) : undefined;
   let out = '';
   let cursor = 0;
@@ -348,17 +338,12 @@ function projectAtRestLine(line: string, authority?: JudgmentPortCapture, source
 
 /** Local issuer/profile protection plus candidate masking, retaining the JSONL schema. */
 export function redactAtRestLine(line: string): string {
-  if (isClassicOperation()) return projectAtRestLine(line);
-  let authority: JudgmentPortCapture | undefined;
-  try { authority = captureJudgmentPort('runtime.at-rest.cached-projection'); } catch { /* No live proof: mask. */ }
-  return projectAtRestLine(line, authority);
+  return projectAtRestLine(line);
 }
 
-/** Forgets readings and prevents an older in-flight result from repopulating them. */
+/** Retire all admitted reading generations; no completed cross-write cache exists. */
 export function clearAtRestCredentialReadings(): void {
   readingGeneration += 1;
-  spanReadings.clear();
-  spanReadsInFlight.clear();
 }
 
 /** Ordered writer: capture source and reading authority when the line is queued. */

@@ -30,6 +30,12 @@ afterEach(() => {
 });
 
 function safePort() { return fakePort(() => noulAnswer(0.01)); }
+async function readProjectedLine(line: string): Promise<string> {
+  const projected = await readAtRestCredentialSpans([line], 'test.at-rest-admission');
+  expect(projected).toHaveLength(1);
+  if (typeof projected[0] !== 'string') throw new Error('Expected the original same-call projection');
+  return projected[0];
+}
 
 const protectedInputs = [
   ['declared value outside the candidate context', JSON.stringify({ body: `${DOCUMENT} ${'ordinary '.repeat(100)}`, password: PRIVATE })],
@@ -52,8 +58,9 @@ describe('complete at-rest source admission before any provider request', () => 
     test(`${label}: zero requests and candidate stays masked`, async () => {
       const fake = safePort();
       installJudgmentPort(fake.port);
-      await readAtRestCredentialSpans([input], 'test.at-rest-admission');
+      const projected = await readAtRestCredentialSpans([input], 'test.at-rest-admission');
       expect(fake.requests).toHaveLength(0);
+      expect(projected[0]).not.toContain(DOCUMENT);
       expect(redactAtRestLine(input)).not.toContain(DOCUMENT);
       if (input.includes(ISSUER)) expect(redactAtRestLine(input)).not.toContain(ISSUER);
       // This patch preserves the persisted record schema; it does not claim
@@ -84,25 +91,27 @@ describe('complete at-rest source admission before any provider request', () => 
     installJudgmentPort(fake.port);
     const safe = JSON.stringify({ body: DOCUMENT });
     const refused = JSON.stringify({ body: DOCUMENT, password: PRIVATE });
-    await readAtRestCredentialSpans([safe, refused], 'test.at-rest-admission');
+    const projected = await readAtRestCredentialSpans([safe, refused], 'test.at-rest-admission');
     expect(fake.requests).toHaveLength(1);
     expect(JSON.stringify(fake.requests)).not.toContain(PRIVATE);
-    expect(redactAtRestLine(safe)).toContain(DOCUMENT);
+    expect(projected[0]).toContain(DOCUMENT);
+    expect(projected[1]).not.toContain(DOCUMENT);
+    expect(redactAtRestLine(safe)).not.toContain(DOCUMENT);
     expect(redactAtRestLine(refused)).not.toContain(DOCUMENT);
   });
 
-  test('profile registration A to B to A cannot resurrect a cached clear reading', async () => {
+  test('completed projections cannot grant later exemptions across profile registration A to B to A', async () => {
     const fake = safePort();
     installJudgmentPort(fake.port);
     const reader = () => ({ guarded: [], absolute: [] });
     registerProfileRedactionValues(reader);
     const line = JSON.stringify({ body: DOCUMENT });
-    await readAtRestCredentialSpans([line], 'test.at-rest-admission');
-    expect(redactAtRestLine(line)).toContain(DOCUMENT);
+    expect(await readProjectedLine(line)).toContain(DOCUMENT);
+    expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
     registerProfileRedactionValues(() => ({ guarded: [], absolute: [DOCUMENT] }));
     registerProfileRedactionValues(reader);
     expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
-    await readAtRestCredentialSpans([line], 'test.at-rest-admission');
+    expect(await readProjectedLine(line)).toContain(DOCUMENT);
     expect(fake.requests).toHaveLength(2);
   });
 
@@ -112,10 +121,11 @@ describe('complete at-rest source admission before any provider request', () => 
     const disposeA = registerProfileRedactionValues(() => ({ guarded: [], absolute: [] }));
     const disposeB = registerProfileRedactionValues(() => ({ guarded: [], absolute: [PRIVATE] }));
     const line = JSON.stringify({ body: DOCUMENT });
-    await readAtRestCredentialSpans([line], 'test.at-rest-admission');
+    expect(await readProjectedLine(line)).toContain(DOCUMENT);
     disposeA();
     expect(redactSensitiveData(PRIVATE)).not.toContain(PRIVATE);
-    expect(redactAtRestLine(line)).toContain(DOCUMENT);
+    expect(await readProjectedLine(line)).toContain(DOCUMENT);
+    expect(fake.requests).toHaveLength(2);
     disposeB();
     expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
     const afterDispose = captureRedactionSource();
@@ -130,10 +140,11 @@ describe('complete at-rest source admission before any provider request', () => 
     const disposeA = registerAccountIdentityRedaction(() => identity);
     const disposeB = registerAccountIdentityRedaction(() => identity);
     const line = JSON.stringify({ body: DOCUMENT });
-    await readAtRestCredentialSpans([line], 'test.at-rest-admission');
+    expect(await readProjectedLine(line)).toContain(DOCUMENT);
     disposeA();
     expect(redactSensitiveData(identity.homeDirectory)).not.toContain(identity.userName);
-    expect(redactAtRestLine(line)).toContain(DOCUMENT);
+    expect(await readProjectedLine(line)).toContain(DOCUMENT);
+    expect(fake.requests).toHaveLength(2);
     disposeB();
     expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
     const afterDispose = captureRedactionSource();
@@ -156,28 +167,29 @@ describe('complete at-rest source admission before any provider request', () => 
   });
 
   test('equal profile reloads retire a reading through the host load-generation identity', async () => {
-    const fake = safePort();
-    installJudgmentPort(fake.port);
     let generation: object = {};
+    const fake = fakePort(() => { generation = {}; return noulAnswer(0.01); });
+    installJudgmentPort(fake.port);
     registerProfileRedactionValues(() => ({ guarded: [], absolute: [] }), () => generation);
     const line = JSON.stringify({ body: DOCUMENT });
-    await readAtRestCredentialSpans([line], 'test.at-rest-admission');
-    expect(redactAtRestLine(line)).toContain(DOCUMENT);
-    generation = {}; // Actual store.status() replaces its object on every load.
+    // Actual store.status() replaces its object even for equal loaded values.
+    await expect(readProjectedLine(line)).rejects.toThrow('unavailable');
+    expect(fake.requests).toHaveLength(1);
     expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
   });
 
-  test('same-reader registration and identity clear each retire a cached reading', async () => {
-    const fake = safePort();
-    installJudgmentPort(fake.port);
+  test.each(['registration', 'identity'] as const)('%s change during a reading cannot publish its clear answer', async change => {
     const reader = () => ({ guarded: [], absolute: [] });
     registerProfileRedactionValues(reader);
+    const fake = fakePort(() => {
+      if (change === 'registration') registerProfileRedactionValues(reader);
+      else registerAccountIdentityRedaction(null);
+      return noulAnswer(0.01);
+    });
+    installJudgmentPort(fake.port);
     const line = JSON.stringify({ body: DOCUMENT });
-    await readAtRestCredentialSpans([line], 'test.at-rest-admission');
-    registerProfileRedactionValues(reader);
-    expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
-    await readAtRestCredentialSpans([line], 'test.at-rest-admission');
-    registerAccountIdentityRedaction(null);
+    await expect(readProjectedLine(line)).rejects.toThrow('unavailable');
+    expect(fake.requests).toHaveLength(1);
     expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
   });
 
@@ -187,11 +199,11 @@ describe('complete at-rest source admission before any provider request', () => 
     bindJudgmentPortAuthority(fake.port, () => ({ identity, assertCurrent: () => {} }));
     installJudgmentPort(fake.port);
     const line = JSON.stringify({ body: DOCUMENT });
-    await readAtRestCredentialSpans([line], 'test.at-rest-admission');
-    expect(redactAtRestLine(line)).toContain(DOCUMENT);
+    expect(await readProjectedLine(line)).toContain(DOCUMENT);
+    expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
     identity = {};
     expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
-    await readAtRestCredentialSpans([line], 'test.at-rest-admission');
+    expect(await readProjectedLine(line)).toContain(DOCUMENT);
     expect(fake.requests).toHaveLength(2);
   });
 
@@ -200,21 +212,22 @@ describe('complete at-rest source admission before any provider request', () => 
     installJudgmentPort(fake.port);
     const first = JSON.stringify({ body: `read docs/${DOCUMENT}.md` });
     const second = JSON.stringify({ body: `a different use of ${DOCUMENT}` });
-    await readAtRestCredentialSpans([first, first], 'test.at-rest-admission');
+    const projected = await readAtRestCredentialSpans([first, first], 'test.at-rest-admission');
     expect(fake.requests).toHaveLength(1);
-    expect(redactAtRestLine(first)).toContain(DOCUMENT);
+    expect(projected).toEqual([first, first]);
+    expect(redactAtRestLine(first)).not.toContain(DOCUMENT);
     expect(redactAtRestLine(second)).not.toContain(DOCUMENT);
-    await readAtRestCredentialSpans([second], 'test.at-rest-admission');
+    expect(await readProjectedLine(second)).toContain(DOCUMENT);
     expect(fake.requests).toHaveLength(2);
-    expect(redactAtRestLine(second)).toContain(DOCUMENT);
+    expect(fake.requests[0]?.state).not.toEqual(fake.requests[1]?.state);
   });
 
   test('port replacement and restoring the same port cannot resurrect a prior clear reading', async () => {
     const fake = safePort();
     installJudgmentPort(fake.port);
     const line = JSON.stringify({ body: DOCUMENT });
-    await readAtRestCredentialSpans([line], 'test.at-rest-admission');
-    expect(redactAtRestLine(line)).toContain(DOCUMENT);
+    expect(await readProjectedLine(line)).toContain(DOCUMENT);
+    expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
     installJudgmentPort(undefined);
     expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
     installJudgmentPort(fake.port);
@@ -337,7 +350,7 @@ describe('complete at-rest source admission before any provider request', () => 
     expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
   });
 
-  test('a same-key read joining a retired flight can recover on the next fresh call', async () => {
+  test('an independent fresh call cannot borrow a retired original flight', async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     const fake = safePort();
@@ -360,21 +373,19 @@ describe('complete at-rest source admission before any provider request', () => 
     try {
       await entered.promise;
       registerProfileRedactionValues(reader); // Same text, a new registration lifetime.
-      const joined = readAtRestCredentialSpans([line], 'test.at-rest-admission').catch((error: unknown) => error);
+      const fresh = readAtRestCredentialSpans([line], 'test.at-rest-admission');
       release.resolve();
-      const failures = await Promise.all([original, joined]);
-      for (const failure of failures) {
-        expect(failure).toBeInstanceOf(Error);
-        expect((failure as Error).message).toBe('At-rest credential reading is unavailable; unread spans remain masked');
-      }
-      expect(calls).toBe(1);
-      expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
-      // Both consumers settled and the rejected flight was removed. A fresh
-      // call under the current owner must not be poisoned by that old promise.
-      await readAtRestCredentialSpans([line], 'test.at-rest-admission');
+      const [failure, projected] = await Promise.all([original, fresh]);
+      expect(failure).toBeInstanceOf(Error);
+      if (!(failure instanceof Error)) throw new Error('Expected the retired original failure');
+      expect(failure.message).toBe('At-rest credential reading is unavailable; unread spans remain masked');
+      expect(projected).toEqual([line]);
       expect(calls).toBe(2);
-      expect(fake.requests).toHaveLength(2);
-      expect(redactAtRestLine(line)).toContain(DOCUMENT);
+      expect(redactAtRestLine(line)).not.toContain(DOCUMENT);
+      // Neither completed call grants an exemption to this third original.
+      expect(await readProjectedLine(line)).toContain(DOCUMENT);
+      expect(calls).toBe(3);
+      expect(fake.requests).toHaveLength(3);
     } finally { release.resolve(); }
   });
 

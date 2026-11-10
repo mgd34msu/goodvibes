@@ -11,7 +11,8 @@
  * be made. Also pins retention caps, config keys with honest defaults, and the
  * replay path reading redacted records.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -26,6 +27,7 @@ import {
   enforceFileRetention,
   DEFAULT_AT_REST_POLICY,
   AT_REST_CONFIG_KEYS,
+  AtRestLineWriter,
 } from '../platform/src/platform/runtime/at-rest-persistence.ts';
 import { AgentSession } from '../platform/src/platform/agents/session.ts';
 import { LocalLedgerExporter } from '../platform/src/platform/runtime/telemetry/exporters/local-ledger.ts';
@@ -86,23 +88,27 @@ describe('redactAtRestLine: masks credentials, preserves content, stays valid JS
     const { port, requests } = spanPort(KEY_YES_DOC_NO);
     installJudgmentPort(port);
     const line = JSON.stringify({ body: `see ${DOC_NAME}; key ${API_KEY}; the bearer of bad news` });
-    await readAtRestCredentialSpans([line, line], 'test.at-rest');
+    const projected = await readAtRestCredentialSpans([line, line], 'test.at-rest');
     // One request per candidate in this complete source, deduplicating identical lines.
     expect(requests).toHaveLength(3);
-    const out = redactAtRestLine(line);
+    expect(projected).toHaveLength(2);
+    expect(projected[0]).toBe(projected[1]);
+    const out = projected[0]!;
     expect(out).toContain(DOC_NAME);
     expect(out).not.toContain(API_KEY);
     expect(out).toContain('the bearer [REDACTED_TOKEN] bad news');
 
-    await readAtRestCredentialSpans([line], 'test.at-rest');
-    expect(requests).toHaveLength(3);
+    expect(redactAtRestLine(line)).not.toContain(DOC_NAME);
+    const later = await readAtRestCredentialSpans([line], 'test.at-rest');
+    expect(later[0]).toContain(DOC_NAME);
+    expect(requests).toHaveLength(6);
   });
 
   test('a no that falls short of the critical band still masks', async () => {
     installJudgmentPort(spanPort(() => 0.2).port);
     const line = JSON.stringify({ body: `see ${DOC_NAME}` });
-    await readAtRestCredentialSpans([line], 'test.at-rest');
-    expect(redactAtRestLine(line)).not.toContain(DOC_NAME);
+    const projected = await readAtRestCredentialSpans([line], 'test.at-rest');
+    expect(projected[0]).not.toContain(DOC_NAME);
   });
 
   test('issuer formats are never asked about', async () => {
@@ -118,6 +124,25 @@ describe('redactAtRestLine: masks credentials, preserves content, stays valid JS
     const line = JSON.stringify({ body: `see ${DOC_NAME}` });
     await expect(readAtRestCredentialSpans([line], 'test.at-rest')).rejects.toThrow();
     expect(redactAtRestLine(line)).not.toContain(DOC_NAME);
+  });
+
+  test('separate actual writes reread their original source without retaining a content fingerprint', async () => {
+    const fake = spanPort(KEY_YES_DOC_NO);
+    installJudgmentPort(fake.port);
+    const hashes = spyOn(crypto, 'createHash');
+    const line = JSON.stringify({ body: `read ${DOC_NAME}` });
+    const output: string[] = [];
+    const writer = new AtRestLineWriter('test.at-rest-owned-write');
+    try {
+      writer.write(line, value => output.push(value));
+      await writer.flush();
+      writer.write(line, value => output.push(value));
+      await writer.flush();
+      expect(output).toEqual([line, line]);
+      expect(fake.requests).toHaveLength(2);
+      expect(redactAtRestLine(line)).not.toContain(DOC_NAME);
+      expect(hashes).not.toHaveBeenCalled();
+    } finally { await writer.flush(); hashes.mockRestore(); }
   });
 });
 

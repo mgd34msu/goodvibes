@@ -435,30 +435,38 @@ test('same-length pending sources compare exact original parts without hashing o
   } finally { gate.resolve(); await Promise.allSettled([first, second]); hashes.mockRestore(); }
 });
 
-test('an actual unsettled commitment survives raw handle release and is computed only once per original', async () => {
-  const f = fixture({ judge: body => reading(body, 0.5, 1) });
+test('live unsettled originals compare exactly and release leaves only an owner-wide hold without hashing', async () => {
+  const f = fixture({ judge: (body, count) => reading(body, count === 1 ? 0.5 : 1, 1) });
   const hashes = spyOn(crypto, 'createHash');
   try {
     const source = f.owner.capture(['The same uncertain original.']);
     expect(await f.owner.screen(source)).toEqual({ status: 'held', reason: 'unsettled' });
-    expect(hashes).toHaveBeenCalledTimes(1);
     for (let attempt = 0; attempt < 10; attempt++) expect(await f.owner.screen(source)).toEqual({ status: 'held', reason: 'unsettled' });
-    expect(hashes).toHaveBeenCalledTimes(1);
+    expect(await f.owner.screen(f.owner.capture(['The same uncertain original.']))).toEqual({ status: 'held', reason: 'unsettled' });
+    expect(f.calls).toHaveLength(2);
+    const different = await projected(f.owner, ['Different live source.']);
+    expect(different.parts).toEqual(['Different live source.']);
+    expect(f.calls).toHaveLength(4);
     await f.owner.release(source);
     const calls = f.calls.length;
     const recaptured = f.owner.capture(['The same uncertain original.']);
     expect(await f.owner.screen(recaptured)).toEqual({ status: 'held', reason: 'unsettled' });
-    expect(f.calls).toHaveLength(calls); expect(hashes).toHaveBeenCalledTimes(2);
+    expect(await f.owner.screen(f.owner.capture(['Another different source.']))).toEqual({ status: 'held', reason: 'unsettled' });
+    expect(() => f.owner.project(different.receipt)).toThrow();
+    expect(f.calls).toHaveLength(calls); expect(hashes).not.toHaveBeenCalled();
   } finally { hashes.mockRestore(); }
 });
 
 test('released refused input cannot borrow Preferred Classic fallback established by a different source', async () => {
   await withDecisionModelPolicy(() => 'Preferred', async () => {
     const f = fixture({ judge: (body, count) => count === 1 ? reading(body, 0.5, 1) : new Response('', { status: 503 }) });
+    const fresh = fixture({ judge: () => new Response('', { status: 503 }) });
     const original = f.owner.capture(['Originally unsettled input.']);
     expect(await f.owner.screen(original)).toEqual({ status: 'held', reason: 'unsettled' });
     await f.owner.release(original);
-    expect((await f.owner.screen(f.owner.capture(['Different ordinary source.']))).status).toBe('settled');
+    expect(await f.owner.screen(f.owner.capture(['Different ordinary source.']))).toEqual({ status: 'held', reason: 'unsettled' });
+    expect(decisionModelPolicyState().operation).toBe('decision');
+    expect((await fresh.owner.screen(fresh.owner.capture(['A genuinely new owner source.']))).status).toBe('settled');
     expect(decisionModelPolicyState().operation).toBe('classic');
     const calls = f.calls.length;
     expect(await f.owner.screen(f.owner.capture(['Originally unsettled input.']))).toEqual({ status: 'held', reason: 'unsettled' });
@@ -466,8 +474,11 @@ test('released refused input cannot borrow Preferred Classic fallback establishe
   });
 });
 
-test('unsettled capacity never evicts an earlier hold or sends overflowing work', async () => {
+test('a released unsettled original keeps its owner-wide hold without retaining a growing refusal catalog', async () => {
   const f = fixture({ judge: (body) => reading(body, 0.5, 1) });
+  const original = f.owner.capture(['Ordinary held source 0.']);
+  expect(await f.owner.screen(original)).toEqual({ status: 'held', reason: 'unsettled' });
+  await f.owner.release(original);
   for (let index = 0; index < 1_024; index++) {
     const source = f.owner.capture([`Ordinary held source ${index}.`]);
     const result = await f.owner.screen(source);
@@ -475,8 +486,8 @@ test('unsettled capacity never evicts an earlier hold or sends overflowing work'
     await f.owner.release(source);
   }
   const calls = f.calls.length;
-  expect(calls).toBe(2_048);
-  expect(await f.owner.screen(f.owner.capture(['New source exceeds hold capacity.']))).toEqual({ status: 'held', reason: 'capacity' });
+  expect(calls).toBe(2);
+  expect(await f.owner.screen(f.owner.capture(['New source remains held.']))).toEqual({ status: 'held', reason: 'unsettled' });
   expect(await f.owner.screen(f.owner.capture(['Ordinary held source 0.']))).toEqual({ status: 'held', reason: 'unsettled' });
   expect(f.calls).toHaveLength(calls);
 }, 60_000);

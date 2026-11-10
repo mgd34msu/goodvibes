@@ -35,6 +35,7 @@ import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import * as findFiles from '../platform/src/platform/tools/find/shared.js';
+import * as codeFiles from '../platform/src/platform/state/code-file-observation.js';
 
 const roots: string[] = [];
 
@@ -352,10 +353,10 @@ test('an old empty file read cannot delete same-path chunks after reroot', async
   await store.init();
   const started = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
-  const original = findFiles.readTextFile;
-  const reading = spyOn(findFiles, 'readTextFile').mockImplementation(async (...args) => {
+  const original = codeFiles.readCodeIndexFile;
+  const reading = spyOn(codeFiles, 'readCodeIndexFile').mockImplementation(async (...args) => {
     const text = await original(...args);
-    if (args[0] === pathA) { started.resolve(); await release.promise; }
+    if (args[1] === pathA) { started.resolve(); await release.promise; }
     return text;
   });
   let pending: ReturnType<CodeIndexStore['reindexFile']> | undefined;
@@ -434,16 +435,41 @@ for (const forced of [false, true]) for (const ending of ['close', 'reroot'] as 
   });
 }
 
-test('valid cold and current cached code each compute exactly one original revision', async () => {
+test('valid cold and current cached code reuse exact file observations without SHA', async () => {
   const root = makeRoot('gv-code-index-ready-valid-'), path = join(root, 'original.ts');
   const content = 'export const readyOriginal = 1;\n'; writeFileSync(path, content);
   const registry = makeRegistry(root); registry.register(makeProvider('readiness-valid').provider, { makeDefault: true });
   const store = new CodeIndexStore(root, ':memory:', registry); await store.init();
   const hashes = observeOriginalCodeRevision(content);
   try {
-    expect((await store.reindexFile(path)).indexed).toBe(true); expect(hashes.count()).toBe(1);
+    expect((await store.reindexFile(path)).indexed).toBe(true); expect(hashes.count()).toBe(0);
     const chunks = store.stats().indexedChunks; expect(chunks).toBeGreaterThan(0);
     expect(await store.reindexFile(path)).toEqual({ indexed: true, mode: 'unchanged' });
-    expect(hashes.count()).toBe(2); expect(store.stats().indexedChunks).toBe(chunks);
+    expect(hashes.count()).toBe(0); expect(store.stats().indexedChunks).toBe(chunks);
   } finally { hashes.restore(); store.close(); }
+});
+
+for (const phase of ['parser', 'embedding'] as const) test(`source retirement during ${phase} cannot publish captured old code`, async () => {
+  const root = makeRoot('gv-code-index-native-await-'), path = join(root, 'owned.ts');
+  writeFileSync(path, 'export const originalOwnedSource = 1;\n');
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const registry = makeRegistry(root);
+  registry.register(makeProvider('native-source-await', phase === 'embedding' ? async () => { entered.resolve(); await release.promise; } : undefined).provider, { makeDefault: true });
+  const store = new CodeIndexStore(root, ':memory:', registry); await store.init();
+  const initialize = CodeIntelligence.prototype.initialize;
+  const parser = phase === 'parser' ? spyOn(CodeIntelligence.prototype, 'initialize').mockImplementation(async function (this: CodeIntelligence) {
+    entered.resolve(); await release.promise; await initialize.call(this);
+  }) : undefined;
+  let pending: ReturnType<CodeIndexStore['reindexFile']> | undefined;
+  try {
+    pending = store.reindexFile(path);
+    await Promise.race([entered.promise, pending.then(() => { throw new Error('Index settled before the held source boundary'); })]);
+    writeFileSync(path, 'export const modifiedOwnedSource = 2;\n');
+    release.resolve();
+    await expect(pending).rejects.toThrow('Code source changed');
+    expect(store.stats().indexedChunks).toBe(0);
+    expect(store.stats().lastBuild).toBeNull();
+  } finally {
+    release.resolve(); await pending?.catch(() => undefined); parser?.mockRestore(); store.close();
+  }
 });

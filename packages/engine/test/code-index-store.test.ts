@@ -246,7 +246,7 @@ describe('CodeIndexStore: chunk shape', () => {
     expect(fooChunk).not.toHaveProperty('contentHash');
   });
 
-  test('upgrades stored chunk metadata without losing vector associations or embedding unchanged files again', async () => {
+  test('old digest-based vector cache rows are retired and rebuilt from actual file observations', async () => {
     const root = makeRoot(), path = join(root, '.goodvibes', 'code-index.sqlite');
     writeFileSync(join(root, 'a.ts'), TS_FIXTURE);
     const { registry, callCount } = makeCountingRegistry(root);
@@ -256,7 +256,7 @@ describe('CodeIndexStore: chunk shape', () => {
     const before = (await initial.search('foo')).map(result => result.chunk.chunkId).sort();
     initial.close();
     // Recreate the supported version-1 metadata layout on a real populated
-    // index. The persisted vectors and their native row IDs stay in place.
+    // index. Its derived cache rows must not be adopted under the new revision recipe.
     const previous = new Database(path);
     await loadSqliteVecExtension(previous);
     try {
@@ -268,10 +268,12 @@ describe('CodeIndexStore: chunk shape', () => {
     try {
       await reopened.init();
       expect(reopened.stats().available).toBe(true);
+      expect(reopened.stats().indexedChunks).toBe(0);
       const calls = callCount();
       const build = await reopened.buildFull();
-      expect(build.filesUnchanged).toBe(1);
-      expect(callCount()).toBe(calls);
+      expect(build.filesIndexed).toBe(1);
+      expect(build.filesUnchanged).toBe(0);
+      expect(callCount()).toBeGreaterThan(calls);
       expect((await reopened.search('foo')).map(result => result.chunk.chunkId).sort()).toEqual(before);
     } finally { reopened.close(); }
     const upgraded = new Database(path);
@@ -280,7 +282,7 @@ describe('CodeIndexStore: chunk shape', () => {
       expect(columns).toContain('file_revision');
       expect(columns).not.toContain('content_hash');
       expect(columns).not.toContain('file_hash');
-      expect(upgraded.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version).toBe(2);
+      expect(upgraded.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version).toBe(3);
     } finally { upgraded.close(); }
   });
 });

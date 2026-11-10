@@ -47,7 +47,7 @@ export const CHUNK_ROW_COLUMNS =
   'rowid, chunk_id, path, lang, symbol, kind, start_line, end_line, mtime, file_revision';
 
 /** Target `PRAGMA user_version` for the code index store. */
-export const CODE_INDEX_SCHEMA_VERSION = 2;
+export const CODE_INDEX_SCHEMA_VERSION = 3;
 
 export function createCodeIndexSchema(db: Database): void {
   db.run(`
@@ -79,14 +79,16 @@ export function createCodeIndexSchema(db: Database): void {
   `);
 }
 
-/** Remove redundant chunk digests while retaining existing chunk IDs and
- * vector row associations. Unchanged files do not need to be re-embedded.
- */
+/** Retire reconstructible old cache rows rather than adopting their digests.
+ * Only vector/chunk cache data and its provider provenance are discarded. */
 export function migrateCodeIndexSchema(db: Database): void {
   createCodeIndexSchema(db);
   const columns = db.query<{ name: string }, []>('PRAGMA table_info(code_chunks)').all();
   if (columns.some(column => column.name === 'content_hash')) db.run('ALTER TABLE code_chunks DROP COLUMN content_hash');
   if (columns.some(column => column.name === 'file_hash')) db.run('ALTER TABLE code_chunks RENAME COLUMN file_hash TO file_revision');
+  db.run('DELETE FROM code_vectors');
+  db.run('DELETE FROM code_chunks');
+  db.run('DELETE FROM code_index_meta');
 }
 
 export function getCodeIndexMeta(db: Database, key: string): string | null {

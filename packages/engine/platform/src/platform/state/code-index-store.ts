@@ -55,7 +55,6 @@ import { DirectoryWalk } from '../utils/walk-dir.js';
  * in-flight build.
  */
 import { dirname, join, relative, sep } from 'node:path';
-import { createHash } from 'node:crypto';
 import { mkdirSync, statSync } from 'node:fs';
 import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import { createRequire } from 'node:module';
@@ -98,10 +97,10 @@ import {
   createFindDiagnostics,
   findNestedGitignoreFiles,
   isBinary,
-  readTextFile,
   type FindDiagnostics,
 } from '../tools/find/shared.js';
 import { openVersionedBunSqliteStore } from './store-versioning.js';
+import { readCodeIndexFile, type CodeFileObservation } from './code-file-observation.js';
 import { rankLiveCodeInjection } from './code-injection-live.js';
 import type { CodeInjectionAuthorityOptions } from './code-injection-ranking.js';
 import { rankLexicalChunks } from './code-index-lexical.js';
@@ -565,11 +564,12 @@ export class CodeIndexStore {
     const maxFileBytes = this.options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
     if (stat.size > maxFileBytes) return { indexed: false, mode: 'empty' };
     if (await isBinary(absPath, diagnostics)) return { indexed: false, mode: 'empty' };
+    if (this.epoch !== callEpoch) return { indexed: false, mode: 'empty' };
 
-    const text = await readTextFile(absPath, diagnostics);
-    if (text === null) return { indexed: false, mode: 'empty' };
+    const source = await readCodeIndexFile(this.rootDir, absPath, diagnostics, maxFileBytes);
+    if (source === null) return { indexed: false, mode: 'empty' };
 
-    const outcome = await this.indexFileContent(rel, absPath, text, stat.mtimeMs, callEpoch, false);
+    const outcome = await this.indexFileContent(rel, absPath, source, callEpoch, false);
     if (outcome === null) return { indexed: false, mode: 'empty' };
     return { indexed: outcome.indexed, mode: outcome.mode };
   }
@@ -653,18 +653,18 @@ export class CodeIndexStore {
         continue;
       }
 
-      const text = await readTextFile(absPath, diagnostics);
+      const source = await readCodeIndexFile(this.rootDir, absPath, diagnostics, Math.min(maxFileBytes, maxTotalBytes - totalBytes));
       if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, candidateFiles.length, skip);
-      if (text === null) {
+      if (source === null) {
         skip.readErrors++;
         continue;
       }
 
       acceptedCount++;
-      totalBytes += stat.size;
+      totalBytes += source.size;
       keepPaths.add(rel);
 
-      const outcome = await this.indexFileContent(rel, absPath, text, stat.mtimeMs, buildEpoch, forceReembed);
+      const outcome = await this.indexFileContent(rel, absPath, source, buildEpoch, forceReembed);
       if (outcome === null) return abortedBuildStats(startedAt, candidateFiles.length, skip);
       if (outcome.mode === 'window') skip.chunkedByWindow++;
       if (outcome.mode === 'unchanged') {
@@ -753,37 +753,32 @@ export class CodeIndexStore {
   private async indexFileContent(
     relPath: string,
     absPath: string,
-    content: string,
-    mtimeMs: number,
+    source: CodeFileObservation,
     callEpoch: number,
     forceReembed: boolean,
   ): Promise<{ indexed: boolean; mode: CodeChunkMode; chunkCount: number } | null> {
     const db = this.db;
     if (!db || this.epoch !== callEpoch) return null;
+    source.assertCurrent();
+    const { content, revision: fileRevision, mtimeMs } = source;
     // Empty files have no chunk row in which to retain a revision. Remove any
-    // previous chunks directly, without hashing or initializing the parser.
+    // previous chunks directly, without initializing the parser.
     if (!content.trim()) {
       if (this.epoch !== callEpoch || this.db !== db) return null;
       deleteChunksForPath(db, relPath);
       return { indexed: true, mode: 'empty', chunkCount: 0 };
     }
-    // Compare only an actual prior row before parser readiness. A cold or
-    // forced rebuild has no candidate consuming this commitment yet.
-    let fileRevision: string | undefined;
-    const revisionForContent = () => createHash('sha256').update(content).digest('hex');
-    const existingHash = forceReembed ? null : getFileRevision(db, relPath);
-    if (existingHash !== null) {
-      fileRevision = revisionForContent();
-      if (existingHash === fileRevision) {
-        return { indexed: true, mode: 'unchanged', chunkCount: countChunksForPath(db, relPath) };
-      }
+    // Old digest-only rows are retired by the cache migration. Reuse only
+    // the same original physical source observation, never a content hash.
+    const existingRevision = forceReembed ? null : getFileRevision(db, relPath);
+    if (existingRevision === fileRevision) {
+      source.assertCurrent();
+      return { indexed: true, mode: 'unchanged', chunkCount: countChunksForPath(db, relPath) };
     }
 
     await this.ensureIntelligenceReady();
     if (this.epoch !== callEpoch || this.db !== db) return null;
-    // The captured string is immutable across readiness. The actual chunk IDs
-    // and persisted file revision now require exactly one content commitment.
-    fileRevision ??= revisionForContent();
+    source.assertCurrent();
     const { drafts, mode } = await chunkFileContent({
       intelligence: this.intelligence,
       absPath,
@@ -794,18 +789,21 @@ export class CodeIndexStore {
       windowLines: this.options.windowLines,
       windowOverlapLines: this.options.windowOverlapLines,
     });
-    if (this.epoch !== callEpoch) return null;
+    if (this.epoch !== callEpoch || this.db !== db) return null;
+    source.assertCurrent();
 
     const embeddings: Float32Array[] = [];
     for (const draft of drafts) {
       const embedding = await this.embedChunkAsync(draft.embedText);
-      if (this.epoch !== callEpoch) return null;
+      if (this.epoch !== callEpoch || this.db !== db) return null;
+      source.assertCurrent();
       embeddings.push(embedding);
     }
 
     // All awaits are done, the delete+write below is synchronous, so the
     // whole file lands atomically with respect to reroot()/close().
-    if (!this.db) return null;
+    if (this.epoch !== callEpoch || this.db !== db) return null;
+    source.assertCurrent();
     deleteChunksForPath(this.db, relPath);
     for (let i = 0; i < drafts.length; i++) {
       writeChunk(this.db, drafts[i]!.chunk, embeddings[i]!);

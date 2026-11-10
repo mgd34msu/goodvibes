@@ -1,8 +1,8 @@
 /** Per-invocation live-source adapter. Captured sources never enter this filesystem path. */
-import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync, type Stats } from 'node:fs';
+import { lstatSync, realpathSync, type Stats } from 'node:fs';
 import { join, relative, isAbsolute, dirname } from 'node:path';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
-import { createHash } from 'node:crypto';
+import { captureCodeFileObservation, type CodeFileObservation } from './code-file-observation.js';
 import { rankCodeInjectionSnapshots, type CodeInjectionAuthorityOptions } from './code-injection-ranking.js';
 import type { CodeContextResult } from './code-index-types.js';
 
@@ -14,8 +14,7 @@ export async function rankLiveCodeInjection(root: string, query: string, hits: r
   const sourceRoot = realpathSync(root);
   const identity = (stat: Stats) => `${stat.dev}:${stat.ino}:${stat.mode}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
   const directories = new Map<string, string>([[sourceRoot, identity(lstatSync(sourceRoot))]]);
-  const files = new Map<string, string>();
-  const observed = new Map<string, { readonly revision: string; readonly code: string }>();
+  const observed = new Map<string, CodeFileObservation>();
   const check = (): void => { signal.throwIfAborted(); assertSource(); if (realpathSync(root) !== sourceRoot) throw new Error('Code injection root is stale');
     for (const [path, expected] of directories) if (identity(lstatSync(path)) !== expected) throw new Error('Code injection directory is stale'); };
   const authorize = async (path: string): Promise<void> => {
@@ -30,31 +29,17 @@ export async function rankLiveCodeInjection(root: string, query: string, hits: r
   };
   const read = (hit: CodeContextResult): string => {
     check();
-    const path = sourcePath(hit), before = lstatSync(path, { bigint: true });
-    const currentIdentity = identity(lstatSync(path));
-    if (files.has(path) && files.get(path) !== currentIdentity) throw new Error('Code injection file identity is stale');
-    files.set(path, currentIdentity);
-    if (!before.isFile() || before.nlink !== 1n || before.size > 128n * 1024n) throw new Error('Code injection source is unsupported');
-    const byteIdentity = (stat: typeof before) => `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
-    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    try {
-      if (byteIdentity(fstatSync(fd, { bigint: true })) !== byteIdentity(before)) throw new Error('Code injection source is stale');
-      const buffer = Buffer.alloc(Number(before.size) + 1); let offset = 0;
-      while (offset < buffer.length) { check(); const count = readSync(fd, buffer, offset, buffer.length - offset, offset); if (!count) break; offset += count; }
-      if (offset !== Number(before.size) || byteIdentity(fstatSync(fd, { bigint: true })) !== byteIdentity(before)
-        || byteIdentity(lstatSync(path, { bigint: true })) !== byteIdentity(before)) throw new Error('Code injection source is stale');
-      const code = buffer.subarray(0, offset).toString('utf8');
-      const previous = observed.get(path);
-      if (previous) {
-        if (hit.chunk.fileRevision !== previous.revision || code !== previous.code) throw new Error('Code injection source is stale');
-        return previous.code;
-      }
-      // Validate the persisted vector cache's file commitment once per file.
-      // Later awaits compare exact private original text, without hashing again.
-      if (createHash('sha256').update(code).digest('hex') !== hit.chunk.fileRevision) throw new Error('Code injection source is stale');
-      observed.set(path, { revision: hit.chunk.fileRevision, code });
-      return code;
-    } finally { closeSync(fd); }
+    const path = sourcePath(hit);
+    const source = captureCodeFileObservation(sourceRoot, path, 128 * 1024);
+    if (source.revision !== hit.chunk.fileRevision) throw new Error('Code injection source is stale');
+    const previous = observed.get(path);
+    if (previous) {
+      previous.assertCurrent();
+      if (source.revision !== previous.revision || source.content !== previous.content) throw new Error('Code injection source is stale');
+      return previous.content;
+    }
+    observed.set(path, source);
+    return source.content;
   };
   const timer = setTimeout(() => controller.abort(new Error('Code injection read budget exceeded')), 15_000);
   try {
@@ -75,7 +60,7 @@ export async function rankLiveCodeInjection(root: string, query: string, hits: r
       for (const path of directories.keys()) if (path !== sourceRoot) await authorize(path);
       for (const snapshot of snapshots) { await authorize(sourcePath(snapshot.hit)); if (read(snapshot.hit) !== snapshot.code) throw new Error('Code injection source is stale'); }
       check();
-      for (const [path, expected] of files) if (identity(lstatSync(path)) !== expected) throw new Error('Code injection file identity is stale');
+      for (const original of observed.values()) original.assertCurrent();
       } finally { clearTimeout(assertionTimer); }
     };
     const reading = await rankCodeInjectionSnapshots(query, snapshots, { signal, assertCurrent });

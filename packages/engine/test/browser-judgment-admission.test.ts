@@ -409,7 +409,7 @@ describe('closed-schema primitives and safe refusals', () => {
 
   test('does not expose arbitrary error messages, stacks, or lookalike error payloads', () => {
     const marker = 'synthetic-private-detail';
-    const expected = browserJudgmentRefusal(new BrowserJudgmentError('JUDGMENT_UNAVAILABLE'));
+    const expected = browserJudgmentRefusal(new BrowserJudgmentError('JUDGMENT_INTERNAL'));
     for (const error of [new Error(marker), marker, null, { code: 'JUDGMENT_INVALID_INPUT', status: 400, message: marker }]) {
       const refusal = browserJudgmentRefusal(error);
       expect(refusal).toEqual(expected);

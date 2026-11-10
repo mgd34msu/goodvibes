@@ -315,7 +315,7 @@ describe('browser judgment HTTP borrowed execution and cancellation', () => {
   test('preserves known service refusals and scrubs arbitrary service error details', async () => {
     for (const thrown of [new BrowserJudgmentError('JUDGMENT_REFERENCE_HELD'), new Error('synthetic-private-detail')]) {
       const { handler } = fixture({ service: { async execute() { throw thrown; } } });
-      await expectHeld(await handler(request()), thrown instanceof BrowserJudgmentError ? thrown.code : 'JUDGMENT_UNAVAILABLE');
+      await expectHeld(await handler(request()), thrown instanceof BrowserJudgmentError ? thrown.code : 'JUDGMENT_INTERNAL');
     }
   });
 

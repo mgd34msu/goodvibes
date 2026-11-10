@@ -37,7 +37,7 @@ test('a durable interrupted subset tree resumes only its missing call', async ()
           readings[staticInputKey(source)] = receipt;
           journal.append({ ...current, readings: { [staticInputKey(source)]: receipt } }, source);
         },
-      })).rejects.toThrow('No decision models are currently available. Check API keys, endpoint addresses, model names and local model services, then retry. The operation has stopped.');
+      })).rejects.toMatchObject({ kind: 'internal', message: 'The decision client failed internally. The operation has stopped.' });
       expect(log.query({ status: 'answered' })).toHaveLength(2);
       expect(log.query({ status: 'failed' })).toHaveLength(1);
     }
@@ -84,7 +84,7 @@ test('an interrupted exact selector resumes without repeating its admitted prese
   const progress = { previous: current, onReceipt(source: Parameters<typeof staticInputKey>[0], receipt: Awaited<ReturnType<typeof readStaticInput>>) {
     readings[staticInputKey(source)] = receipt;
   } };
-  await expect(readStaticInput(withDecisionLog(interrupted, log), log, captured, undefined, progress)).rejects.toThrow('No decision models are currently available. Check API keys, endpoint addresses, model names and local model services, then retry. The operation has stopped.');
+  await expect(readStaticInput(withDecisionLog(interrupted, log), log, captured, undefined, progress)).rejects.toMatchObject({ kind: 'internal', message: 'The decision client failed internally. The operation has stopped.' });
   expect(staticInputCaptureComplete(captured, current)).toBe(false);
   expect(staticInputStanding(captured, current).kind).toBe('held');
   const original = readings[staticInputKey(captured)];

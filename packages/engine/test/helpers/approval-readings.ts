@@ -1,7 +1,7 @@
 /** Explicit test answers for the daemon approval patterns, never production heuristics. */
 import { afterEach, beforeEach } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { JudgmentError, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { decisionPort } from './decision-port.ts';
 import { securityPort } from './security-readings.ts';
@@ -42,7 +42,7 @@ export function useApprovalReadings() {
         const battery = request.context?.battery;
         if (battery !== REPLY_BATTERY && battery !== TARGET_BATTERY) return security.port.ask(request);
         if ((battery === REPLY_BATTERY && answers.unavailable === 'reply')
-          || (battery === TARGET_BATTERY && answers.unavailable === 'target')) throw new Error('judgment unavailable');
+          || (battery === TARGET_BATTERY && answers.unavailable === 'target')) throw new JudgmentError('unavailable', 'judgment unavailable');
         if (battery === REPLY_BATTERY) await answers.beforeReply?.();
         return own.port.ask(request);
       },

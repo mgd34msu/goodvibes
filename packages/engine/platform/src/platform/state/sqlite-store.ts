@@ -128,6 +128,21 @@ function captureRecordSelectors(value: unknown): PersistedKnowledgeRecordSelecto
   return captured;
 }
 
+function captureEdgeGenerationIds(value: unknown): string[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) throw new TypeError('SQLiteStore: invalid edge generation IDs');
+  const array: object = value, descriptors = Object.getOwnPropertyDescriptors(array);
+  const length: unknown = descriptors.length?.value;
+  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0
+    || Reflect.ownKeys(descriptors).length !== length + 1) throw new TypeError('SQLiteStore: invalid edge generation IDs');
+  const captured: string[] = [];
+  for (let index = 0; index < length; index++) {
+    const descriptor = descriptors[String(index)];
+    if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'string') throw new TypeError('SQLiteStore: invalid edge generation ID');
+    captured.push(descriptor.value);
+  }
+  return captured;
+}
+
 function captureRecordSelectorGroups(value: readonly (readonly PersistedKnowledgeRecordSelector[])[]): PersistedKnowledgeRecordSelector[][] {
   if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) throw new TypeError('SQLiteStore: invalid record generation groups');
   const array: object = value;
@@ -1647,6 +1662,39 @@ export class SQLiteStore {
             continue;
           }
           const rows = this.readPrivatePersistedRows(`SELECT gv_revision FROM ${table} WHERE id = ? LIMIT 1`, [selector.id], frame?.localState !== undefined);
+          const row = rows[0];
+          if (row && (!row.columns.every(column => typeof column === 'string')
+            || row.values.some(cells => cells.some(cell => cell !== null && typeof cell !== 'string' && typeof cell !== 'number')))) {
+            throw new SQLiteObservationRetiredError();
+          }
+          const generation = knowledgeRowGenerationFromRows(rows);
+          if (frame?.localState) frame.generations.set(key, generation);
+          values.push(generation);
+        }
+        frame?.assertCurrent();
+        generations = Object.freeze(values);
+      };
+      if (this.persistedReadFrame?.localState) read(); else this.assertPersistedReadFrame(read);
+      return generations;
+    } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  }
+
+  /** Exact ordered edge revisions under one closed native pre/post read fence. */
+  readPersistedEdgeGenerations(ids: readonly string[]): readonly (string | null)[] {
+    let generations: readonly (string | null)[] = [];
+    try {
+      const captured = captureEdgeGenerationIds(ids);
+      const read = (): undefined => {
+        const frame = this.persistedReadFrame;
+        frame?.assertCurrent();
+        const values: (string | null)[] = [];
+        for (const id of captured) {
+          const key = JSON.stringify(['knowledge_edges', 'id', id]);
+          if (frame?.localState && frame.generations.has(key)) {
+            values.push(frame.generations.get(key)!);
+            continue;
+          }
+          const rows = this.readPrivatePersistedRows('SELECT gv_revision FROM knowledge_edges WHERE id = ? LIMIT 1', [id], frame?.localState !== undefined);
           const row = rows[0];
           if (row && (!row.columns.every(column => typeof column === 'string')
             || row.values.some(cells => cells.some(cell => cell !== null && typeof cell !== 'string' && typeof cell !== 'number')))) {

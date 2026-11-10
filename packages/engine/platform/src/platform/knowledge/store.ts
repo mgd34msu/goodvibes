@@ -886,6 +886,10 @@ export class KnowledgeStore {
     return this.sqlite.readPersistedRecordGenerations(selectors);
   }
 
+  getEdgeGenerations(ids: readonly string[]): readonly (string | null)[] {
+    return this.sqlite.readPersistedEdgeGenerations(ids);
+  }
+
   getNodeActivationCache(nodeId: string) {
     return this.sqlite.readPersistedNodeActivationCache(nodeId);
   }

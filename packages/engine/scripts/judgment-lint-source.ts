@@ -2,6 +2,7 @@
 // to a private decision factory. Unknown names or escaping factories fail
 // closed; a function's spelling alone never proves its instances registered.
 import ts from 'typescript';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import type { LintFinding } from './judgment-lint-rules.ts';
 
 const DEFINER = /^define[A-Z]\w*$/;
@@ -306,6 +307,113 @@ export function sourceFindings(path: string, text: string, registered: ReadonlyS
     }
   }
 
+  /** A recorder may detach the incoming request, not author another decision.
+   * This recognizes only the existing strict-copy dependency and complete
+   * state/questions/context forwarding shape; arbitrary clone names/spreads
+   * cannot establish the provenance of newly constructed questions. */
+  function strictRequestForward(call: ts.CallExpression, payload: ts.ObjectLiteralExpression): boolean {
+    if (dynamicBindings) return false;
+    let method: ts.Node | undefined = call.parent;
+    while (method && !ts.isFunctionLike(method)) method = method.parent;
+    if (!method || !ts.isMethodDeclaration(method) || !method.name || method.name.getText(file) !== 'ask'
+      || method.parameters.length !== 1 || !ts.isIdentifier(method.parameters[0]!.name)) return false;
+    const parameter = method.parameters[0]!.name;
+    const incoming = symbolOf(parameter);
+    const same = (node: ts.Expression, symbol: ts.Symbol | undefined): boolean => ts.isIdentifier(unwrap(node))
+      && symbol !== undefined && symbolOf(unwrap(node) as ts.Identifier) === symbol;
+    const field = (node: ts.Expression, symbol: ts.Symbol | undefined, key: string): boolean => {
+      node = unwrap(node);
+      return ts.isPropertyAccessExpression(node) && node.name.text === key && same(node.expression, symbol);
+    };
+    const objectArgument = (node: ts.Expression, name: string): ts.Expression | undefined => {
+      node = unwrap(node);
+      if (!ts.isCallExpression(node) || node.arguments.length !== 1) return undefined;
+      const callee = unwrap(node.expression);
+      return ts.isPropertyAccessExpression(callee) && callee.name.text === name && ts.isIdentifier(callee.expression)
+        && callee.expression.text === 'Object' && symbolOf(callee.expression) === undefined ? node.arguments[0] : undefined;
+    };
+    const cloneEnvelope = (node: ts.Expression): boolean => {
+      const frozen = objectArgument(node, 'freeze'), entries = frozen && objectArgument(frozen, 'fromEntries');
+      if (!entries || !ts.isCallExpression(unwrap(entries))) return false;
+      const mapped = unwrap(entries) as ts.CallExpression, map = unwrap(mapped.expression);
+      if (!ts.isPropertyAccessExpression(map) || map.name.text !== 'map' || mapped.arguments.length !== 1) return false;
+      const source = objectArgument(map.expression, 'entries'), callback = mapped.arguments[0];
+      if (!source || !ts.isIdentifier(unwrap(source)) || !callback || !ts.isArrowFunction(callback)
+        || callback.parameters.length !== 1 || !ts.isArrayBindingPattern(callback.parameters[0]!.name)) return false;
+      const names = callback.parameters[0]!.name.elements;
+      if (names.length !== 2 || !names.every(element => ts.isBindingElement(element) && ts.isIdentifier(element.name)
+        && !element.dotDotDotToken && !element.initializer)) return false;
+      const output = unwrap(callback.body as ts.Expression);
+      if (!ts.isArrayLiteralExpression(output) || output.elements.length !== 2) return false;
+      const key = (names[0] as ts.BindingElement).name as ts.Identifier;
+      const descriptor = (names[1] as ts.BindingElement).name as ts.Identifier;
+      if (!same(output.elements[0]!, symbolOf(key)) || !field(output.elements[1]!, symbolOf(descriptor), 'value')) return false;
+      const declaration = declarationOf(unwrap(source) as ts.Identifier), initializer = declaration && constInitializer(declaration);
+      const original = initializer && objectArgument(initializer, 'getOwnPropertyDescriptors');
+      return original !== undefined && same(original, incoming);
+    };
+    if (payload.properties.length !== 4 || !ts.isSpreadAssignment(payload.properties[0]!)
+      || !same((payload.properties[0] as ts.SpreadAssignment).expression, incoming)) return false;
+    const forwarded = new Map<string, ts.Expression>();
+    let snapshot: ts.Symbol | undefined;
+    for (const property of payload.properties.slice(1)) {
+      if (!ts.isPropertyAssignment(property)) return false;
+      const name = named(property), value = unwrap(property.initializer);
+      if (!name || !['state', 'questions', 'context'].includes(name) || forwarded.has(name)
+        || !ts.isPropertyAccessExpression(value) || value.name.text !== name || !ts.isIdentifier(value.expression)) return false;
+      const owner = symbolOf(value.expression);
+      if (!owner || snapshot && owner !== snapshot) return false;
+      snapshot = owner; forwarded.set(name, property.initializer);
+    }
+    const declaration = snapshot?.valueDeclaration, captured = declaration && constInitializer(declaration);
+    if (!captured || !ts.isCallExpression(unwrap(captured))) return false;
+    const capture = unwrap(captured) as ts.CallExpression, callee = unwrap(capture.expression);
+    if (!ts.isIdentifier(callee) || capture.arguments.length !== 1) return false;
+    const imported = symbolOf(callee)?.declarations?.[0];
+    if (!imported || !ts.isImportSpecifier(imported) || (imported.propertyName ?? imported.name).text !== 'captureStrictJudgmentJson') return false;
+    const dependency = imported.parent.parent.parent;
+    if (!ts.isImportDeclaration(dependency) || !ts.isStringLiteral(dependency.moduleSpecifier)
+      || !dependency.moduleSpecifier.text.startsWith('.')) return false;
+    const sourcePath = isAbsolute(path) ? path : resolve(import.meta.dir, '../../..', path);
+    if (resolve(dirname(sourcePath), dependency.moduleSpecifier.text).replace(/\.js$/, '.ts')
+      !== resolve(import.meta.dir, '../platform/src/platform/gate/judgment-result.ts')) return false;
+    const original = unwrap(capture.arguments[0]!);
+    if (!ts.isObjectLiteralExpression(original) || original.properties.length !== 3) return false;
+    const fields = new Set<string>();
+    for (const property of original.properties) {
+      const name = named(property), value = valueOf(property);
+      if (!name || fields.has(name) || !value) return false;
+      fields.add(name);
+      if (name === 'state' || name === 'questions') { if (!field(value, incoming, name)) return false; }
+      else if (name === 'context') {
+        if (field(value, incoming, name)) continue;
+        const local = ts.isIdentifier(unwrap(value)) ? declarationOf(unwrap(value) as ts.Identifier) : undefined;
+        const fallback = local && constInitializer(local), expression = fallback && unwrap(fallback);
+        if (!expression || !ts.isBinaryExpression(expression) || expression.operatorToken.kind !== ts.SyntaxKind.QuestionQuestionToken
+          || !field(expression.left, incoming, 'context') || !ts.isObjectLiteralExpression(unwrap(expression.right))
+          || (unwrap(expression.right) as ts.ObjectLiteralExpression).properties.length !== 0) return false;
+      } else return false;
+    }
+    // Before this actual wire call, the detached snapshot must not escape,
+    // acquire another alias, or be changed into newly authored questions.
+    for (const reference of snapshot ? references.get(snapshot) ?? [] : []) {
+      if (reference === (declaration as ts.VariableDeclaration).name || reference.getStart(file) > call.end) continue;
+      if (reference.getStart(file) < payload.pos || reference.end > payload.end) return false;
+    }
+    for (const reference of incoming ? references.get(incoming) ?? [] : []) {
+      if (reference.getStart(file) > call.end) continue;
+      let target: ts.Node = reference;
+      while (ts.isPropertyAccessExpression(target.parent) || ts.isElementAccessExpression(target.parent)) target = target.parent;
+      const parent = target.parent;
+      if (ts.isDeleteExpression(parent) || (ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent))
+        && (parent.operator === ts.SyntaxKind.PlusPlusToken || parent.operator === ts.SyntaxKind.MinusMinusToken)) return false;
+      if (ts.isBinaryExpression(parent) && parent.left === target
+        && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+        && (target !== reference || parent.operatorToken.kind !== ts.SyntaxKind.EqualsToken || !cloneEnvelope(parent.right))) return false;
+    }
+    return true;
+  }
+
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const [first] = node.arguments;
@@ -315,7 +423,8 @@ export function sourceFindings(path: string, text: string, registered: ReadonlyS
         checkDecision(node, first, name);
       }
       if (ts.isPropertyAccessExpression(callee) && callee.name.text === 'ask' && first !== undefined
-        && ts.isObjectLiteralExpression(first) && first.properties.some((property) => named(property) === 'questions')) {
+        && ts.isObjectLiteralExpression(first) && first.properties.some((property) => named(property) === 'questions')
+        && !strictRequestForward(node, first)) {
         report(node, 'asks Jev with a request built inline, outside a registered decision');
       }
       if (name === 'askAs' && !insideDefiner(node) && !insideCustomDecision(node)) {

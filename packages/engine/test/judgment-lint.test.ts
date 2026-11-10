@@ -139,6 +139,44 @@ describe('registered use', () => {
     ]);
   });
 
+  test('the actual raw recorder forwards one strict incoming request without defining another decision', () => {
+    const path = resolve(import.meta.dir, '../scripts/static-source-call-recording.ts');
+    expect(sourceFindings(path, readFileSync(path, 'utf8'), registered)).toEqual([]);
+  });
+
+  const strictForwarder = `
+    import { captureStrictJudgmentJson as capture } from '../platform/src/platform/gate/judgment-result.js';
+    function decorate(inner) { return { ask(request) {
+      const context = request.context ?? {};
+      const snapshot = capture({ state: request.state, questions: request.questions, context });
+      return inner.ask({ ...request, state: snapshot.state, questions: snapshot.questions, context: snapshot.context });
+    } }; }
+  `;
+  test('strict forwarding is binding-aware and requires unchanged original copied questions', () => {
+    const path = 'packages/engine/scripts/strict-copy-example.ts';
+    expect(sourceFindings(path, strictForwarder, registered)).toEqual([]);
+    for (const [reason, source] of [
+      ['authored questions', strictForwarder.replace('questions: request.questions', "questions: { invented: noul('new question') }")],
+      ['replaced forwarded questions', strictForwarder.replace('questions: snapshot.questions', "questions: { invented: noul('new question') }")],
+      ['another snapshot', strictForwarder.replace('state: snapshot.state', 'state: unrelated.state')],
+      ['another incoming payload', strictForwarder.replace('questions: request.questions', 'questions: another.questions')],
+      ['extra override', strictForwarder.replace('context: snapshot.context', 'context: snapshot.context, questions: otherQuestions')],
+      ['unknown spread', strictForwarder.replace('...request, state:', '...request, ...unknown, state:')],
+      ['local spoofed capture', strictForwarder.replace(/import[^;]+;/, 'const capture = value => value;')],
+      ['unrelated capture import', strictForwarder.replace('../platform/src/platform/gate/judgment-result.js', './untrusted-copy.js')],
+      ['not an incoming ask method', strictForwarder.replace('ask(request)', 'classify(request)')],
+      ['snapshot escapes before wire', strictForwarder.replace('return inner.ask', 'mutate(snapshot); return inner.ask')],
+      ['snapshot questions replaced', strictForwarder.replace('return inner.ask', "snapshot.questions = { invented: noul('new') }; return inner.ask")],
+      ['incoming questions replaced', strictForwarder.replace('const context', "request.questions = { invented: noul('new') }; const context")],
+      ['incoming request replaced', strictForwarder.replace('const context', "request = { state: 'new', questions: { invented: noul('new') } }; const context")],
+      ['incoming question deleted', strictForwarder.replace('const context', 'delete request.questions.original; const context')],
+      ['dynamic scope mutation', strictForwarder.replace('const context', "eval('mutate'); const context")],
+    ]) {
+      const findings = sourceFindings(path, source, registered);
+      expect(findings.some(finding => finding.message.includes('request built inline')), reason).toBe(true);
+    }
+  });
+
   test('every fixed-name instance of a private factory is checked, including critical variants', () => {
     const source = `
       function judge(name, band) { return defineJudge({ name, band, fixtures: [] }); }

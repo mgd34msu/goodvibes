@@ -7,7 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { nativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { recordDaemonCiArtifact, retainVerifiedDaemonCiArtifact, readVerifiedDaemonCiArtifact, verifyDaemonCiArtifact, type DaemonArtifactSource } from '../../../scripts/ci-artifact.ts';
-import { nativeReaderProbeScript, nativeRuntimeProvenance, writeV1NativeArtifactFixture } from '../helpers/native-runtime-provenance.ts';
+import { nativeReaderProbeScript, writeV1NativeArtifactFixture } from '../helpers/native-runtime-provenance.ts';
 
 const source: DaemonArtifactSource = { sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40) };
 async function fixture(run: (root: string) => Promise<void>) {
@@ -16,7 +16,9 @@ async function fixture(run: (root: string) => Promise<void>) {
   writeFileSync(join(root, 'native/goodvibes-daemon-linux-x64'), nativeReaderProbeScript('3.1.2', 'exit 2'), { mode: 0o755 });
   writeFileSync(join(root, 'native/goodvibes-daemon-linux-x64.bun'), 'synthetic ordinary runtime', { mode: 0o755 });
   writeFileSync(join(root, 'native/goodvibes-daemon-linux-x64.bun.LICENSE.md'), 'synthetic runtime notices', { mode: 0o644 });
-  writeFileSync(join(root, 'native/goodvibes-daemon-linux-x64.bun.json'), nativeRuntimeProvenance('synthetic ordinary runtime'), { mode: 0o644 });
+  // This layer records opaque CI member bytes; Bun runtime provenance is
+  // verified by the separate native installation/release consumers.
+  writeFileSync(join(root, 'native/goodvibes-daemon-linux-x64.bun.json'), '{"fixture":"opaque CI runtime metadata"}', { mode: 0o644 });
   writeFileSync(join(root, 'native/lib/sqlite-vec-linux-x64/vec0.so'), 'synthetic native library\n', { mode: 0o644 });
   try { await run(root); } finally { rmSync(root, { recursive: true, force: true }); }
 }

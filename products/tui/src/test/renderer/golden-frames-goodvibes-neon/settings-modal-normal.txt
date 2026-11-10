@@ -19,7 +19,7 @@
 |           Provider         8      collapseThreshold                                 30             |
 |           Pricing          1      theme                                      goodvibes             |
 |           Subscriptions    1      themeMode                                       auto             |
-|           Judgment         8      treeGlyphs                                   rounded             |
+|           Judgment         9      treeGlyphs                                   rounded             |
 |           Helper           3      showThinking                                   false             |
 |           Tools            9      showReasoningSummary                           false             |
 |           TTS              6      showTokenSpeed                                 false             |

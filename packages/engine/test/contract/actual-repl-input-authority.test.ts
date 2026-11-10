@@ -20,6 +20,7 @@ import { createClientRuntimeServices } from '../../platform/src/platform/runtime
 import { resumeContracts } from '../../platform/src/platform/runtime/contract-composition.js';
 import { RuntimeEventBus, createRuntimeStore } from '../../platform/src/platform/runtime/state.js';
 import { probeCapturedExecAvailability } from '../../platform/src/platform/tools/exec/captured-exec.js';
+import { RetainedFileBytes } from '../../platform/src/platform/utils/retained-file-bytes.js';
 import { makeRepo, oneUnitPlan, runnerPort, waitFor } from './runner-support.js';
 import { plannerOutput } from './plan-support.js';
 
@@ -98,6 +99,14 @@ for (const scenario of ['allowed', 'allowed-node-runtime', 'revoke-after-eval', 
       opened.push(String(args[0]));
       return read(...args);
     }) as typeof read);
+    // Observe the real tool projection's retained reads. The contract's local
+    // Git snapshot also opens files, but is not the REPL's authorized read view.
+    const capture = RetainedFileBytes.capture;
+    const captureTap = spyOn(RetainedFileBytes, 'capture').mockImplementation((async (collect, signal) =>
+      capture(writer => collect(Object.freeze({ capture(path: string, current?: AbortSignal) {
+        opened.push(path);
+        return writer.capture(path, current);
+      } })), signal)) as typeof capture);
     const copy = asyncFs.copyFile;
     const copyTap = spyOn(asyncFs, 'copyFile').mockImplementation((...args) => {
       opened.push(String(args[0]));
@@ -309,13 +318,13 @@ for (const scenario of ['allowed', 'allowed-node-runtime', 'revoke-after-eval', 
       expect(memberHistoryPath).toBeDefined();
       expect(memberHistoryAfterRepl).toEqual(replExecutions.map(() => hostHistory));
     } finally {
-      tap.mockRestore(); copyTap.mockRestore();
+      tap.mockRestore(); captureTap.mockRestore(); copyTap.mockRestore();
       writes.mockRestore();
       processes.mockRestore();
       if (id) runner.cancel(id, 'fixture cleanup');
       runner.dispose();
       if (id) await runner.join(id);
-      store.dispose(); runtime.dispose(); installJudgmentPort(previous);
+      store.dispose(); await runtime.close(); installJudgmentPort(previous);
       rmSync(root, { recursive: true, force: true });
     }
   }, 150_000);

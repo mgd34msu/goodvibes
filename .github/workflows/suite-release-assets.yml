@@ -43,7 +43,9 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Retain packaging tooling
-        run: cp .github/scripts/package-suite-release.mjs "$RUNNER_TEMP/package-suite-release.mjs"
+        run: |
+          cp .github/scripts/package-suite-release.mjs "$RUNNER_TEMP/package-suite-release.mjs"
+          cp products/daemon/scripts/build-native-ci.ts "$RUNNER_TEMP/build-native-ci.ts"
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ inputs.tag }}

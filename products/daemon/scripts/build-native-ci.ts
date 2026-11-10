@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { spawnSync } from 'node:child_process';
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +11,15 @@ interface GrammarBuildEffects {
   readonly probe: () => Promise<void>;
   readonly install: () => Promise<void>;
   readonly report: (message: string) => void;
+}
+
+/** Acquire the locked build assets before compilation, with at most one repair. */
+export async function prepareNativeBuildAssets(effects: Pick<GrammarBuildEffects, 'probe' | 'install' | 'report'>): Promise<void> {
+  try { await effects.probe(); return; }
+  catch { effects.report('Installed native build assets are incomplete; performing one forced frozen-lockfile install.'); }
+  await effects.install();
+  // A failed repair is terminal. Do not compile with missing or invalid assets.
+  await effects.probe();
 }
 
 function onlyGrammarResolutionFailed(output: string): boolean {
@@ -38,13 +48,44 @@ export async function buildWithGrammarRecovery(effects: GrammarBuildEffects): Pr
 
 /** Exercise every embedded language; the presence of a file alone is insufficient. */
 export async function probeInstalledNativeGrammars(repository: string): Promise<void> {
+  probeInFreshProcess(repository, '--probe');
+}
+
+/** Validate required binary/glue assets as well as parsing every embedded language. */
+export async function probeInstalledNativeBuildAssets(repository: string): Promise<void> {
+  probeInFreshProcess(repository, '--probe-build-assets');
+}
+
+function probeInFreshProcess(repository: string, mode: '--probe' | '--probe-build-assets'): void {
   // A failed lookup can remain cached in Bun after a package is repaired.
   // Each probe must observe the actual current installation in a fresh process.
-  const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--probe', repository], {
+  const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), mode, repository], {
     encoding: 'utf8', timeout: 15_000, maxBuffer: 1024 * 1024,
   });
   if (child.error) throw child.error;
-  if (child.signal || child.status !== 0) throw new Error(`Installed grammar validation failed: ${child.stderr.trim()}`);
+  if (child.signal || child.status !== 0) throw new Error(`Installed ${mode === '--probe' ? 'grammar' : 'native build asset'} validation failed: ${child.stderr.trim()}`);
+}
+
+function inspectRequiredBuildAssets(repository: string): void {
+  const require = createRequire(resolve(repository, 'packages/engine/package.json'));
+  for (const file of [
+    'onnxruntime-web/ort-wasm-simd-threaded.mjs',
+    'onnxruntime-web/ort-wasm-simd-threaded.wasm',
+    'sql.js/dist/sql-wasm.wasm',
+  ]) {
+    const descriptor = openSync(require.resolve(file), 'r');
+    try {
+      const stat = fstatSync(descriptor);
+      if (!stat.isFile() || stat.size === 0) throw new Error(`Installed ${file} is not a nonempty file`);
+      if (file.endsWith('.wasm')) {
+        const header = Buffer.alloc(8);
+        if (readSync(descriptor, header, 0, header.length, 0) !== header.length
+          || !header.equals(Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]))) {
+          throw new Error(`Installed ${file} has no WebAssembly header`);
+        }
+      }
+    } finally { closeSync(descriptor); }
+  }
 }
 
 async function parseInstalledNativeGrammars(repository: string): Promise<void> {
@@ -83,7 +124,8 @@ if (import.meta.main) {
     return { exitCode: child.status, output: `${child.stdout}\n${child.stderr}` };
   };
   try {
-    if (target === '--probe' && extra.length === 1) {
+    if ((target === '--probe' || target === '--probe-build-assets') && extra.length === 1) {
+      if (target === '--probe-build-assets') inspectRequiredBuildAssets(resolve(extra[0]!));
       await parseInstalledNativeGrammars(resolve(extra[0]!));
       process.exit(0);
     }

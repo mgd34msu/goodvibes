@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { buildWithGrammarRecovery, probeInstalledNativeGrammars } from '../../../scripts/build-native-ci.ts';
+import { buildWithGrammarRecovery, prepareNativeBuildAssets, probeInstalledNativeBuildAssets, probeInstalledNativeGrammars } from '../../../scripts/build-native-ci.ts';
 
 const require = createRequire(resolve(import.meta.dir, '../../../../../packages/engine/package.json'));
 const grammars = ['tree-sitter-typescript/tree-sitter-typescript.wasm', 'tree-sitter-typescript/tree-sitter-tsx.wasm',
@@ -23,6 +23,8 @@ function fixture() {
   }
   writeFileSync(join(engine, 'package.json'), '{"name":"owned-grammar-fixture","type":"module"}');
   symlinkSync(dirname(require.resolve('web-tree-sitter/web-tree-sitter.wasm')), join(modules, 'web-tree-sitter'), 'dir');
+  symlinkSync(dirname(dirname(require.resolve('onnxruntime-web/ort-wasm-simd-threaded.wasm'))), join(modules, 'onnxruntime-web'), 'dir');
+  symlinkSync(dirname(dirname(require.resolve('sql.js/dist/sql-wasm.wasm'))), join(modules, 'sql.js'), 'dir');
   const entry = join(engine, 'entry.ts');
   const program = grammars.map((file, index) => `import grammar${index} from '${file}' with { type: 'file' };`).join('\n')
     + `\nexport const embedded = [${grammars.map((_, index) => `grammar${index}`).join(', ')}];`;
@@ -48,6 +50,91 @@ test('a successful real grammar bundle needs no reinstall or second build', asyn
   await buildWithGrammarRecovery(f.effects);
   await probeInstalledNativeGrammars(f.root);
   expect(f.counts()).toEqual({ builds: 1, installs: 0 });
+});
+
+function preparation(f: ReturnType<typeof fixture>, install = f.effects.install) {
+  let probes = 0;
+  return {
+    effects: { probe: async () => { probes++; await probeInstalledNativeBuildAssets(f.root); }, install, report: f.effects.report },
+    probes: () => probes,
+  };
+}
+
+test('native preflight leaves a complete actual installation untouched and does not compile', async () => {
+  const f = fixture(); f.restore(); const ready = preparation(f);
+  await prepareNativeBuildAssets(ready.effects);
+  expect(ready.probes()).toBe(1); expect(f.counts()).toEqual({ builds: 0, installs: 0 });
+});
+
+test('native preflight repairs missing JSON once, then parses every real language before compilation', async () => {
+  const f = fixture(); f.restore(); const ready = preparation(f);
+  rmSync(join(f.grammar, 'tree-sitter-json/tree-sitter-json.wasm'));
+  await prepareNativeBuildAssets(ready.effects);
+  expect(ready.probes()).toBe(2); expect(f.counts()).toEqual({ builds: 0, installs: 1 });
+  expect((await f.build()).exitCode).toBe(0); expect(f.counts()).toEqual({ builds: 1, installs: 1 });
+});
+
+test('native preflight detects readable corrupt grammar content and validates its one repair', async () => {
+  const f = fixture(); f.restore(); const ready = preparation(f);
+  writeFileSync(join(f.grammar, 'tree-sitter-json/tree-sitter-json.wasm'), 'not a grammar');
+  await prepareNativeBuildAssets(ready.effects);
+  expect(ready.probes()).toBe(2); expect(f.counts()).toEqual({ builds: 0, installs: 1 });
+});
+
+test('a failed native dependency install stops before a second probe or compilation', async () => {
+  const f = fixture(); let installs = 0;
+  const ready = preparation(f, async () => { installs++; throw new Error('frozen install refused'); });
+  await expect(prepareNativeBuildAssets(ready.effects)).rejects.toThrow('frozen install refused');
+  expect(installs).toBe(1); expect(ready.probes()).toBe(1); expect(f.counts().builds).toBe(0);
+});
+
+test('a native repair that leaves missing assets fails closed without repeated repair or compilation', async () => {
+  const f = fixture(); let installs = 0;
+  const ready = preparation(f, async () => { installs++; });
+  await expect(prepareNativeBuildAssets(ready.effects)).rejects.toThrow('Installed native build asset validation failed');
+  expect(installs).toBe(1); expect(ready.probes()).toBe(2); expect(f.counts().builds).toBe(0);
+});
+
+for (const missing of ['onnxruntime-web/ort-wasm-simd-threaded.mjs', 'onnxruntime-web/ort-wasm-simd-threaded.wasm', 'sql.js/dist/sql-wasm.wasm']) {
+  test(`native preflight refuses the exact missing required asset ${missing}`, async () => {
+    const f = fixture(); f.restore();
+    const packageName = missing.split('/')[0]!;
+    const packageDirectory = join(f.grammar, packageName);
+    rmSync(packageDirectory); mkdirSync(packageDirectory);
+    writeFileSync(join(packageDirectory, 'package.json'), JSON.stringify({ name: packageName }));
+    for (const file of ['onnxruntime-web/ort-wasm-simd-threaded.mjs', 'onnxruntime-web/ort-wasm-simd-threaded.wasm', 'sql.js/dist/sql-wasm.wasm']) {
+      if (!file.startsWith(`${packageName}/`) || file === missing) continue;
+      const path = join(f.grammar, file); mkdirSync(dirname(path), { recursive: true }); copyFileSync(require.resolve(file), path);
+    }
+    const ready = preparation(f);
+    await expect(prepareNativeBuildAssets(ready.effects)).rejects.toThrow('Installed native build asset validation failed');
+    expect(ready.probes()).toBe(2); expect(f.counts()).toEqual({ builds: 0, installs: 1 });
+  });
+}
+
+test('suite release retains its helper before tag checkout and awaits preflight before its first TUI build', () => {
+  const root = resolve(import.meta.dir, '../../../../..');
+  const workflow = readFileSync(join(root, '.github/workflows/suite-release-assets.yml'), 'utf8');
+  const retained = workflow.indexOf('cp products/daemon/scripts/build-native-ci.ts "$RUNNER_TEMP/build-native-ci.ts"');
+  expect(retained).toBeGreaterThan(0); expect(retained).toBeLessThan(workflow.indexOf('ref: ${{ inputs.tag }}'));
+  const coordinator = readFileSync(join(root, '.github/scripts/package-suite-release.mjs'), 'utf8');
+  const preflight = coordinator.indexOf('await prepareNativeBuildAssets(');
+  expect(preflight).toBeGreaterThan(0); expect(preflight).toBeLessThan(coordinator.indexOf("[['tui', 'goodvibes', 'dist']"));
+  expect(coordinator).toContain("['install', '--frozen-lockfile', '--force']");
+});
+
+test('a retained helper probes the selected checkout even outside that checkout', async () => {
+  const f = fixture(); f.restore();
+  const retained = join(f.root, 'retained-tooling'); mkdirSync(retained);
+  const helper = join(retained, 'build-native-ci.ts');
+  copyFileSync(resolve(import.meta.dir, '../../../scripts/build-native-ci.ts'), helper);
+  const retainedModule = await import(helper);
+  await retainedModule.prepareNativeBuildAssets({
+    probe: () => retainedModule.probeInstalledNativeBuildAssets(f.root),
+    install: async () => { throw new Error('A complete selected checkout must not be reinstalled'); },
+    report: (_message: string) => {},
+  });
+  expect(f.counts()).toEqual({ builds: 0, installs: 0 });
 });
 
 test('missing grammar assets receive one repair, actual TS/TSX parsing, and a successful fresh bundle', async () => {

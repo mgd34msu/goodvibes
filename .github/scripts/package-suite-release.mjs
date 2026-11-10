@@ -5,12 +5,18 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, lstatSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const [target, destination, tag] = process.argv.slice(2);
 assert(['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'].includes(target));
 assert(typeof tag === 'string' && tag.length <= 129 && /^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag));
 const root = process.cwd();
+// A retained coordinator must use its retained helper, while a direct checkout
+// invocation uses the helper in that same checkout. Never fall back across refs.
+const nativeBuildHelper = fileURLToPath(import.meta.url) === join(root, '.github/scripts/package-suite-release.mjs')
+  ? pathToFileURL(join(root, 'products/daemon/scripts/build-native-ci.ts'))
+  : new URL('./build-native-ci.ts', import.meta.url);
+const { prepareNativeBuildAssets, probeInstalledNativeBuildAssets } = await import(nativeBuildHelper.href);
 // This coordinator may itself be retained outside the checkout by the workflow.
 // Reader evidence must come from the exact selected release source, not that
 // coordinator's former relative directory or a nearby installed engine.
@@ -66,6 +72,11 @@ try {
   const [platform, arch] = target.split('-');
   assert.equal(process.platform, platform); assert.equal(process.arch, arch);
   const suffix = `${platform === 'darwin' ? 'macos' : platform}-${arch}`;
+  await prepareNativeBuildAssets({
+    probe: () => probeInstalledNativeBuildAssets(root),
+    install: async () => { run('bun', ['install', '--frozen-lockfile', '--force']); },
+    report: message => console.error(message),
+  });
   for (const [product, command, output] of [['tui', 'goodvibes', 'dist'], ['agent', 'goodvibes-agent', 'dist'], ['daemon', 'goodvibes-daemon', 'native']]) {
     run('bun', ['run', product === 'tui' ? 'build' : 'build:binary', '--target', target], join(root, 'products', product));
     const directory = join(root, 'products', product, output);

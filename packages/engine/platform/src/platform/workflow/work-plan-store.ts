@@ -45,7 +45,7 @@ import { resolveWorkPlanLocation } from './work-plan-location.js';
 
 const nativeWorkPlanStores = new WeakSet<object>();
 const nativeApply = Reflect.apply, nativeStoreAdd = WeakSet.prototype.add, nativeStoreHas = WeakSet.prototype.has;
-const ownDescriptor = Object.getOwnPropertyDescriptor, prototypeOf = Object.getPrototypeOf;
+const ownDescriptor = Object.getOwnPropertyDescriptor, prototypeOf = Object.getPrototypeOf, ownKeys = Reflect.ownKeys;
 
 export type WorkPlanEffectOptions = Pick<AtomicWriteOptions, 'assertCurrent' | 'onEffect'>;
 function retainEffects(effects: WorkPlanEffectOptions | undefined): WorkPlanEffectOptions | undefined {
@@ -776,6 +776,7 @@ const workPlanPrototype = WorkPlanStore.prototype;
 const nativeReadActivePlan = workPlanPrototype.getActivePlan;
 const nativePathDescriptor = ownDescriptor(workPlanPrototype, 'filePath');
 const nativePlanDescriptors = Object.getOwnPropertyDescriptors(workPlanPrototype);
+const nativePlanKeys = Object.freeze(ownKeys(nativePlanDescriptors));
 
 export interface WorkPlanItemsObservation {
   readonly items: readonly WorkPlanItem[];
@@ -788,9 +789,16 @@ export interface WorkPlanItemsObservation {
  * ordinary read path; a copied object cannot mint a native observation. */
 export function captureWorkPlanItems(store: object): WorkPlanItemsObservation | undefined {
   if (!nativeApply(nativeStoreHas, nativeWorkPlanStores, [store]) || prototypeOf(store) !== workPlanPrototype) return undefined;
-  const methodsMatch = () => Reflect.ownKeys(workPlanPrototype).length === Reflect.ownKeys(nativePlanDescriptors).length
-    && Reflect.ownKeys(nativePlanDescriptors).every(key => key === 'constructor'
-      || !ownDescriptor(store, key) && sameDescriptor(ownDescriptor(workPlanPrototype, key), nativePlanDescriptors[key as keyof typeof nativePlanDescriptors]));
+  const methodsMatch = () => {
+    if (ownKeys(workPlanPrototype).length !== nativePlanKeys.length) return false;
+    for (let index = 0; index < nativePlanKeys.length; index++) {
+      const key = nativePlanKeys[index];
+      if (key === undefined) return false;
+      if (key !== 'constructor' && (ownDescriptor(store, key)
+        || !sameDescriptor(ownDescriptor(workPlanPrototype, key), nativePlanDescriptors[key as keyof typeof nativePlanDescriptors]))) return false;
+    }
+    return true;
+  };
   if (!methodsMatch()) return undefined;
   const plan = nativeApply(nativeReadActivePlan, store, [{ readOnly: true }]) as WorkPlan;
   const location = captureWorkPlanLocation(store);

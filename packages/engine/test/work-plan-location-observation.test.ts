@@ -133,3 +133,21 @@ test('copied stores and changed native methods cannot mint or retain native item
   Object.defineProperty(store, 'listItems', { value: () => [] });
   expect(captureWorkPlanItems(store)).toBeUndefined(); expect(() => observed.assertCurrent()).toThrow();
 });
+
+test('borrowed reflection and array helpers cannot hide a changed native item reader', () => {
+  const store = fixture(), observed = captureWorkPlanItems(store);
+  if (!observed) throw new Error('Expected the genuine native item observation.');
+  const keys = Object.getOwnPropertyDescriptor(Reflect, 'ownKeys'), every = Object.getOwnPropertyDescriptor(Array.prototype, 'every');
+  if (!keys || !every) throw new Error('Missing original native helper descriptors.');
+  let captured: ReturnType<typeof captureWorkPlanItems>, retired: unknown;
+  try {
+    Object.defineProperty(Reflect, 'ownKeys', { ...keys, value: () => [] });
+    Object.defineProperty(Array.prototype, 'every', { ...every, value: () => true });
+    Object.defineProperty(store, 'listItems', { value: () => [] });
+    captured = captureWorkPlanItems(store);
+    try { observed.assertCurrent(); } catch (error) { retired = error; }
+  } finally {
+    Object.defineProperty(Reflect, 'ownKeys', keys); Object.defineProperty(Array.prototype, 'every', every);
+  }
+  expect(captured).toBeUndefined(); expect(retired).toBeInstanceOf(ToolInputProjectionError);
+});

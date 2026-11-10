@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { repairScoringFixtureReading } from './_helpers/repair-scoring-fixture-readings.js';
 import { repairSubjectFixtureReading } from './_helpers/repair-subject-fixture-readings.js';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
@@ -112,7 +113,7 @@ describe('repair source authority canonical reader', () => {
   });
   test('unconfigured, unavailable and uncertain results hold without a tier fallback', async () => {
     await held(createRepairSourceAuthorityReader().read([input()]), 'unconfigured');
-    const fake = readings(); installJudgmentPort({ ...fake.port, async ask() { throw new Error('offline'); } });
+    const fake = readings(); installJudgmentPort({ ...fake.port, async ask() { throw new JudgmentError('unavailable', 'offline'); } });
     await held(createRepairSourceAuthorityReader().read([input()]), 'unavailable');
     readings('secondary', 0.5); const reader = createRepairSourceAuthorityReader();
     await held(reader.read([input()]), 'uncertain'); heldNow(reader.assertCurrent, 'uncertain');

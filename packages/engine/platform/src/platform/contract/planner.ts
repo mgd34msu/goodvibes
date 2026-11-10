@@ -373,7 +373,7 @@ class PlanningContext {
 /** A Jev read that could not happen: no port, or an endpoint that could not answer after the failover chain. */
 function judgmentFailureReason(error: unknown): string | undefined {
   if (error instanceof JudgmentPortMissingError) return error.message;
-  if (error instanceof JudgmentError && error.kind !== 'aborted') return `Jev could not answer: ${error.message}`;
+  if (error instanceof JudgmentError && error.kind !== 'aborted' && error.kind !== 'internal') return `Jev could not answer: ${error.message}`;
   return undefined;
 }
 

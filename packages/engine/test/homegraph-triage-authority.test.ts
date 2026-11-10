@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -49,7 +50,7 @@ describe('automatic triage respects operator authority and frozen state', () => 
     for (const mode of ['uncertain', 'failure', 'unsupported', 'protected', 'cancelled'] as const) {
       const { store, node, run, snapshot } = await fixture(); const fake = readings(); const controller = new AbortController();
       if (mode === 'uncertain') readings('reject', 0.8);
-      if (mode === 'failure') installJudgmentPort({ ...fake.port, ask: async () => { throw new Error('offline'); } });
+      if (mode === 'failure') installJudgmentPort({ ...fake.port, ask: async () => { throw new JudgmentError('unavailable', 'offline'); } });
       if (mode === 'unsupported') installJudgmentPort(fakePort((name, q) => name === 'action' ? choiceAnswer(q, 'reject', 0.99) : noulAnswer(0.01)).port);
       if (mode === 'protected') await store.upsertNode({ ...node, summary: 'Authorization: Bearer synthetic' });
       if (mode === 'cancelled') installJudgmentPort({ ...fake.port, async ask(request) { const answer = await fake.port.ask(request); controller.abort(); return answer; } });

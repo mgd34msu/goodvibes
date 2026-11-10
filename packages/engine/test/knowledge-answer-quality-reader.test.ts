@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
@@ -71,7 +72,7 @@ describe('answer fidelity, sufficiency and confidence readings', () => {
   });
   test('absent and failed ports report unavailable distinctly', async () => {
     await held(verifyKnowledgeAnswer(input()), 'unavailable');
-    const fake = readings(); installJudgmentPort({ ...fake.port, async ask() { throw new Error('offline'); } });
+    const fake = readings(); installJudgmentPort({ ...fake.port, async ask() { throw new JudgmentError('unavailable', 'offline'); } });
     await held(verifyKnowledgeAnswer(input()), 'unavailable');
   });
   test('no extracted evidence never authorizes a candidate or spends on a port', async () => {

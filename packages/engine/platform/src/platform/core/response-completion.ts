@@ -27,7 +27,7 @@ import { nativeWorkCheckpoint } from './response-completion-checkpoint.js';
 import { retainedDelegationSources } from './verification/delegated-history.js';
 
 export class ResponseCompletionError extends Error {
-  constructor(readonly problem: 'rejected' | 'unavailable' | 'stale-evidence' | 'invalid-evidence' | 'rejected-request' | 'invalid-response' | 'capacity' | 'access-blocked' = 'rejected', options?: ErrorOptions) {
+  constructor(readonly problem: 'rejected' | 'unavailable' | 'stale-evidence' | 'invalid-evidence' | 'rejected-request' | 'invalid-response' | 'internal' | 'capacity' | 'access-blocked' = 'rejected', options?: ErrorOptions) {
     super(problem === 'rejected'
       ? 'The response has not established completion of the authorized work.'
       : problem === 'unavailable' ? 'Completion verification is unavailable. Check decision model keys, endpoints and local services. The operation has stopped; completion remains held.'
@@ -36,6 +36,7 @@ export class ResponseCompletionError extends Error {
       : problem === 'rejected-request' ? 'The completion service rejected the request. Repair the request before retrying.'
       : problem === 'capacity' ? 'Completion validation cannot fit the required evidence. The operation has stopped; the draft remains private.'
       : problem === 'access-blocked' ? 'Decision model access is blocked. Completion remains held; account access must be restored before retrying.'
+      : problem === 'internal' ? 'The decision client failed internally. The operation has stopped; completion remains held.'
       : 'The completion service returned an unusable result. Completion remains held and requires recovery.', options);
     this.name = 'ResponseCompletionError';
   }
@@ -470,10 +471,11 @@ export class ResponseCompletionGuard {
       }
       const transient = error instanceof JudgmentPortMissingError || error instanceof JudgmentAuthorityRetiredError
         || (error instanceof JudgmentError && error.kind === 'unavailable');
-      const problem = error instanceof CompletionEvidenceBudgetError || error instanceof VerificationSubdivisionError ? 'capacity' : error instanceof VerificationHeldError ? 'unavailable' : transient ? 'unavailable' : error instanceof JudgmentInputError ? this.sourceAdmitted ? 'invalid-response' : 'invalid-evidence'
+      const problem = error instanceof JudgmentError && error.kind === 'internal' ? 'internal'
+        : error instanceof CompletionEvidenceBudgetError || error instanceof VerificationSubdivisionError ? 'capacity' : error instanceof VerificationHeldError ? 'unavailable' : transient ? 'unavailable' : error instanceof JudgmentInputError ? this.sourceAdmitted ? 'invalid-response' : 'invalid-evidence'
         : error instanceof JudgmentError && (error.kind === 'rejected' || error.kind === 'invalid-request') ? 'rejected-request'
         : error instanceof JudgmentError || this.sourceAdmitted ? 'invalid-response' : 'invalid-evidence';
-      throw new ResponseCompletionError(problem, { cause: error });
+      throw new ResponseCompletionError(problem, problem === 'internal' ? undefined : { cause: error });
     }
   }
 

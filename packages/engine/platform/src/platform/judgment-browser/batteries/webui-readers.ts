@@ -37,9 +37,10 @@ function failure(error: unknown, options: WebuiReaderOptions): NotReady {
   if (error instanceof Hold) return { status: 'held', reason: error.reason };
   if (error instanceof JudgmentError) {
     if (error.kind === 'aborted') return aborted();
+    if (error.kind === 'internal') return { status: 'unavailable', reason: 'internal' };
     if (error.kind === 'invalid-response' || error.kind === 'invalid-request') return { status: 'unavailable', reason: 'invalid-response' };
   }
-  return { status: 'unavailable', reason: 'offline' };
+  return { status: 'unavailable', reason: error instanceof JudgmentError ? 'offline' : 'internal' };
 }
 function unresolved(outcomes: readonly Outcome[]): NotReady | undefined {
   if (outcomes.includes('escalate')) return { status: 'uncertain', reason: 'unsettled', outcome: 'escalate' };

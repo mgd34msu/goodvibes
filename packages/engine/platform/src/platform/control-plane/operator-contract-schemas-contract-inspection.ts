@@ -21,7 +21,7 @@ const REFERENCE = { type: 'string', minLength: 1, maxLength: 256, pattern: '^[!-
 const COUNTER = { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER };
 const VERSION_REF = objectSchema({ id: REFERENCE, revision: REFERENCE }, ['id', 'revision']);
 const STAGES = ['shape', 'plan', 'evidence', 'stall', 'fix-plan', 'attempts'] as const satisfies readonly NativeContractStage[];
-const ATTEMPT_OUTCOMES = ['answered', 'invalid-request', 'rejected', 'unavailable', 'aborted', 'invalid-response', 'unrecorded'] as const satisfies readonly JudgmentAttempt['outcome'][];
+const ATTEMPT_OUTCOMES = ['answered', 'invalid-request', 'rejected', 'unavailable', 'aborted', 'invalid-response', 'internal', 'unrecorded'] as const satisfies readonly JudgmentAttempt['outcome'][];
 
 export const CONTRACT_NATIVE_SOURCE_SCHEMA = objectSchema({
   sourceId: REFERENCE,

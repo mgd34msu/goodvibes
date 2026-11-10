@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -19,7 +20,7 @@ function bus() {
 function installSetupReader(wait?: Promise<void>, reject = false) {
   const fake = fakePort((name, _q, state) => noulAnswer((name === 'api_key' && String(state).includes('Direct provider API key')) || (name === 'subscription' && String(state).includes('Stored subscription session')) ? 0.99 : 0.01));
   const signals: AbortSignal[] = [];
-  installJudgmentPort({ ...fake.port, async ask(request) { if (request.signal) signals.push(request.signal); await wait; if (reject) throw new Error('unavailable'); return fake.port.ask(request); } });
+  installJudgmentPort({ ...fake.port, async ask(request) { if (request.signal) signals.push(request.signal); await wait; if (reject) throw new JudgmentError('unavailable', 'unavailable'); return fake.port.ask(request); } });
   return { ...fake, signals };
 }
 function fixture(options: { timeout?: number; metadataWait?: Promise<void>; noIdentity?: boolean } = {}) {

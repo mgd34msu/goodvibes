@@ -217,6 +217,7 @@ describe('authenticated palette reader', () => {
       ['JUDGMENT_PERMISSION_HELD', { status: 'held', reason: 'permission' }],
       ['JUDGMENT_REFERENCE_HELD', { status: 'held', reason: 'source' }],
       ['JUDGMENT_UNAVAILABLE', { status: 'unavailable', reason: 'unavailable' }],
+      ['JUDGMENT_INTERNAL', { status: 'unavailable', reason: 'internal' }],
     ] as const) {
       globalThis.fetch = (async (_input: RequestInfo | URL, _init?: RequestInit) => response({ protocolVersion: 1, status: 'held', error: { code, message: 'Fixed daemon refusal.' } }, 503)) as typeof fetch;
       expect(await rankCommandSnapshot('chat', snapshot(), new AbortController().signal)).toEqual(expected);

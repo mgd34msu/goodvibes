@@ -16,7 +16,7 @@ export type CommandSearchResult =
   | { readonly status: 'ready'; readonly provenance: 'classic'; readonly commands: readonly CommandDef[]; readonly isCurrent: () => boolean }
   | { readonly status: 'held'; readonly reason: 'uncertain'; readonly reading: Held }
   | { readonly status: 'held'; readonly reason: 'permission' | 'source' | 'unsupported' }
-  | { readonly status: 'unavailable'; readonly reason: 'unavailable' | 'invalid-response' | 'aborted' | 'stale' };
+  | { readonly status: 'unavailable'; readonly reason: 'unavailable' | 'invalid-response' | 'internal' | 'aborted' | 'stale' };
 export interface CommandSearchSnapshot {
   readonly revision: number;
   readonly commands: readonly CommandDef[];
@@ -154,6 +154,7 @@ export async function rankCommandSnapshot(query: string, snapshot: CommandSearch
     if (error instanceof DecisionModelsDisabledError) return classic();
     const code = object(object(object(error)?.body)?.error)?.code;
     if (typeof code === 'string' && ['JUDGMENT_PERMISSION_HELD', 'JUDGMENT_AUTH_REQUIRED', 'JUDGMENT_ACCESS_DENIED', 'JUDGMENT_ORIGIN_DENIED'].includes(code)) return { status: 'held', reason: 'permission' };
+    if (code === 'JUDGMENT_INTERNAL') return unavailable('internal');
     if (code === 'JUDGMENT_REFERENCE_HELD') return { status: 'held', reason: 'source' };
     if (typeof code === 'string' && ['JUDGMENT_INPUT_HELD', 'JUDGMENT_INVALID_INPUT', 'JUDGMENT_INPUT_TOO_LARGE'].includes(code)) return { status: 'held', reason: 'unsupported' };
     return unavailable('unavailable');

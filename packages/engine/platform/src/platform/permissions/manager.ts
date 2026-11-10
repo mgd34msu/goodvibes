@@ -1023,7 +1023,9 @@ export class PermissionManager {
     const analysis = analyzePermissionRequest(toolName, args, category);
     const callId = crypto.randomUUID();
     const mode = this.getMode();
-    if (duplicate) return this.result(true, false, 'runtime_mode', 'mode_allow_all', analysis);
+    // isInvocationAdmitted already revalidates the exact private invocation's
+    // source, policy, mode owner and lifetime; this is not a new mode approval.
+    if (duplicate) return this.result(true, false, 'invocation_admission', 'invocation_already_admitted', analysis);
     const owner = currentExecutionModeOwner();
     const ownerRevision = owner?.getRevision();
     const surface = this.gate.surfaceOf?.();

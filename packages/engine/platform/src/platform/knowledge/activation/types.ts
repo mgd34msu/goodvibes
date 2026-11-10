@@ -7,7 +7,7 @@ export interface KnowledgeNodeActivationOptions {
   /** A composed serving pass cannot consume a pending draft as a successful claim. */
   readonly requireAccepted?: boolean | undefined;
 }
-export type NodeActivationReason = 'no' | 'uncertain' | 'unavailable' | 'unconfigured' | 'missing-evidence' | 'foreign-space' | 'budget' | 'aborted' | 'stale' | 'malformed' | 'rejected' | 'invalid-request' | 'unrecorded' | 'decision-model-disabled' | 'observation-revalidation' | 'owner-confidence-floor' | 'replacement-requires-review';
+export type NodeActivationReason = 'no' | 'uncertain' | 'unavailable' | 'unconfigured' | 'missing-evidence' | 'foreign-space' | 'budget' | 'aborted' | 'stale' | 'malformed' | 'rejected' | 'invalid-request' | 'internal' | 'unrecorded' | 'decision-model-disabled' | 'observation-revalidation' | 'owner-confidence-floor' | 'replacement-requires-review';
 export class KnowledgeNodeActivationHeldError extends Error {
   override readonly name = 'KnowledgeNodeActivationHeldError';
   constructor(readonly reason: NodeActivationReason) {

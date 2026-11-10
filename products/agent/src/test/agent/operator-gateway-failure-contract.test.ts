@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -181,7 +182,7 @@ describe('operator gateway uses the shared engine failure contract through the r
     expect(original.message).toBe('auth 404 fetch');
     expectOneMutation();
     requests = [];
-    installJudgmentPort({ model: 'offline-fixture', ask: async () => { throw new Error('offline'); } });
+    installJudgmentPort({ model: 'offline-fixture', ask: async () => { throw new JudgmentError('unavailable', 'offline'); } });
     const offline = new Error('not found');
     rejectBody(offline);
     expect(await invoke()).toMatchObject({ kind: 'connected_host_error', error: 'not found' });

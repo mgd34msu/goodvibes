@@ -5,7 +5,16 @@ import { recordingRequestIds } from './request-id.ts';
 import { interruptible, transientStatus } from './retry.ts';
 
 export function toJudgmentError(error: unknown): JudgmentError {
-  if (error instanceof JudgmentError) return error;
+  // Thrown values can trap prototype inspection or known-error property reads.
+  // A classifier failure is itself local, never evidence of a provider outage.
+  try { return classifyJudgmentError(error); }
+  catch { return new JudgmentError('internal', 'The decision client failed internally. The operation has stopped.'); }
+}
+
+function classifyJudgmentError(error: unknown): JudgmentError {
+  if (error instanceof JudgmentError) return error.kind === 'internal'
+    ? new JudgmentError('internal', 'The decision client failed internally. The operation has stopped.',
+      error.lineage === undefined ? {} : { lineage: error.lineage }) : error;
   if (error instanceof APIUserAbortError) {
     return new JudgmentError('aborted', 'the judgment call was cancelled');
   }
@@ -28,7 +37,7 @@ export function toJudgmentError(error: unknown): JudgmentError {
   if (error instanceof TypeSafeError) {
     return new JudgmentError('invalid-request', 'System One rejected the client request configuration');
   }
-  return new JudgmentError('invalid-response', 'System One did not return a usable response');
+  return new JudgmentError('internal', 'The decision client failed internally. The operation has stopped.');
 }
 
 /** One wire request, owned by the caller's cancellation/deadline signal. */
@@ -37,15 +46,20 @@ export async function requestWithoutDeadline(
   body?: unknown, extraHeaders?: Readonly<Record<string, string>>,
 ): Promise<unknown> {
   const base: Fetch = config.fetch ?? ((input, init) => fetch(input, init));
+  if (signal.aborted) throw new APIUserAbortError();
+  // Local request construction is not a network failure. Only the actual
+  // fetch/body-read boundary below may produce a connection error.
+  const url = `${config.endpoint.baseURL.replace(/\/$/, '')}${path}`;
+  const init = {
+    method, redirect: 'error' as const, signal,
+    headers: { ...extraHeaders, ...(config.endpoint.apiKey ? { Authorization: `Bearer ${config.endpoint.apiKey}` } : {}), Accept: 'application/json', 'Content-Type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  };
   let response: Response;
   let text: string;
   try {
     signal.throwIfAborted();
-    response = await interruptible(recordingRequestIds(base)(`${config.endpoint.baseURL.replace(/\/$/, '')}${path}`, {
-      method, redirect: 'error', signal,
-      headers: { ...extraHeaders, ...(config.endpoint.apiKey ? { Authorization: `Bearer ${config.endpoint.apiKey}` } : {}), Accept: 'application/json', 'Content-Type': 'application/json' },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    }), signal);
+    response = await interruptible(recordingRequestIds(base)(url, init), signal);
     text = await interruptible(response.text(), signal);
   } catch (error) {
     if (signal.aborted) throw new APIUserAbortError(undefined, { cause: error });

@@ -82,9 +82,14 @@ there is no schema change or privacy-screening exemption. Sort by the entry's
 cross-format chronology.
 
 Calibration attributes truth only to newly observed, answered calibration rows
-whose IDs were returned through that fixture execution's port. It compares the
-same newest 100,000-row window before and after, keeping fixture matching and
-preferring the named decision's own calls over delegated calls. Custom logs
+whose IDs were returned through that fixture execution's port and whose battery
+name, version and fixture match the decision being checked. Final checks on a
+composed result are not recorded as truth about a helper's different question;
+the report retains those checks and reports zero truth rows when no matching
+own call exists. It compares the same newest 100,000-ID window before and after.
+SQLite's optional `queryIds` projection reads no unrelated question, answer or
+note payloads; older/custom logs retain their full-query fallback. Only returned
+IDs present in the current window and absent before are fetched. Custom logs
 must retain append-only immutable entries and stable query ordering. Calls
 outside the window or without a returned recorded ID receive no fixture truth;
 concurrent calls and previously returned IDs are not a fallback source.

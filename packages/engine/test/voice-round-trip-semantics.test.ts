@@ -63,6 +63,19 @@ describe('Classic physical voice test has native provenance, never a fabricated 
     expect(engines).toBe(2); expect(fake.requests).toHaveLength(1);
   });
 
+  test('Preferred internal client failure stops without publishing an unavailable proof or replaying engines', async () => {
+    const fake = fakePort(() => { throw new JudgmentError('internal', 'Private comparison client fault'); });
+    previous = installJudgmentPort(fake.port); installed = true;
+    let engines = 0;
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      await expect(proveVoiceRoundTrip({ ...engine, runner: async input => {
+        engines++; return runner('The quick brown fox jumps over the lazy dog.')(input);
+      } })).rejects.toMatchObject({ kind: 'internal' });
+      expect(decisionModelPolicyState().operation).toBe('decision');
+    });
+    expect(engines).toBe(2); expect(fake.requests).toHaveLength(1);
+  });
+
   test.each(['rejected', 'invalid-request', 'invalid-response', 'aborted'] as const)('Preferred %s cannot become a native positive result', async kind => {
     const fake = fakePort(() => { throw new JudgmentError(kind, 'Synthetic terminal failure'); });
     previous = installJudgmentPort(fake.port); installed = true;

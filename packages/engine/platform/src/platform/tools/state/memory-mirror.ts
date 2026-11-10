@@ -50,7 +50,7 @@ export type MemoryMirrorPlan = {
  * Plan the mirror of a `mode=memory action=set` write before the flat file is written: find the
  * key's existing record, or read the class a new record is filed under with
  * `engine.tools.memory-class` (tools/batteries/memory-class.ts). An acted reading files it under that class; an unavailable classification preserves
- * the complete record as fresh with a classification-pending tag. Updates are reclassified from their complete replacement content. Undefined when there is no registry or it cannot be read (mirroring is best-effort). Classification failures never veto the requested memory write.
+ * the complete record as fresh with a classification-pending tag. Updates are reclassified from their complete replacement content. Undefined when there is no registry or it cannot be read (mirroring is best-effort). Expected classification unavailability does not veto the requested memory write; cancellation and internal client faults stop the operation.
  */
 export async function planMemoryMirror(memoryRegistry: MemoryRegistry | undefined, safeKey: string, value: string, options: JudgmentReadingOptions = {}): Promise<MemoryMirrorPlan | undefined> {
   return withConfiguredDecisionModelPolicy(async () => {
@@ -91,7 +91,7 @@ export async function planMemoryMirror(memoryRegistry: MemoryRegistry | undefine
       // Keep private/untransmittable values in the local source of truth only.
       // Mirroring may embed content, so it must not bypass its transmission check.
       if (error instanceof JudgmentInputError) return undefined;
-      if (error instanceof JudgmentError && error.kind === 'aborted') throw error;
+      if (error instanceof JudgmentError && (error.kind === 'aborted' || error.kind === 'internal')) throw error;
       classificationPending = true;
       logger.debug('state tool: classification unavailable; preserving complete memory for review', { error: summarizeError(error) });
     }

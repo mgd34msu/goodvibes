@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
@@ -78,7 +79,7 @@ describe('knowledge extraction refresh policy', () => {
       answer(p);
       await expect(knowledgeExtractionNeedsRefresh(extraction({ summary: 'Readable-looking text' }))).rejects.toBeInstanceOf(KnowledgeExtractionJudgmentHoldError);
     }
-    const unavailable = fakePort(() => { throw new Error('offline fixture'); });
+    const unavailable = fakePort(() => { throw new JudgmentError('unavailable', 'offline fixture'); });
     installJudgmentPort(unavailable.port);
     await expect(hasUsefulKnowledgeExtractionText('Text')).rejects.toBeInstanceOf(KnowledgeExtractionJudgmentHoldError);
     installJudgmentPort(undefined);

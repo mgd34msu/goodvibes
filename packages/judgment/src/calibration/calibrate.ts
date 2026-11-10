@@ -20,9 +20,14 @@ export interface CalibrateOptions {
 /** How far back to look for one decision's calibration calls; one decision's fixtures never come near it. */
 const RECENT_CALLS = 100_000;
 
-/** The same bounded, deterministic window on both sides of fixture execution. */
-const recentCalls = (log: DecisionLog): readonly DecisionEntry[] =>
-  log.query({ site: CALIBRATION_SITE, status: 'answered', limit: RECENT_CALLS });
+/** The same bounded, deterministic window on both sides of fixture execution.
+ * Native logs need no unrelated questions, answers or notes for this membership
+ * check. Older/custom logs preserve their existing full-query semantics. */
+const recentCallIds = (log: DecisionLog): readonly string[] => {
+  const query = { site: CALIBRATION_SITE, status: 'answered', limit: RECENT_CALLS } as const;
+  const queryIds = log.queryIds;
+  return queryIds ? queryIds.call(log, query) : log.query(query).map(entry => entry.id);
+};
 
 /** Capture only IDs returned by this execution, even when other calibrations share the log. */
 function fixturePort(port: JudgmentPort, returned: Set<string>, models: Set<string>): JudgmentPort {
@@ -41,8 +46,9 @@ function fixturePort(port: JudgmentPort, returned: Set<string>, models: Set<stri
 
 /**
  * Attaches each fixture's checks to the newest calibration call recorded for
- * it during this execution, preferring the decision's own calls over any it
- * delegated to. Opaque IDs carry no chronology, including mixed legacy keys.
+ * it during this execution with this exact decision name and version. Checks
+ * on a composed result are not truth about a helper's different question.
+ * Opaque IDs carry no chronology, including mixed legacy keys.
  * Requires append-only immutable entries and stable query ordering, so entries
  * outside the prior window cannot enter the later window. Calls displaced by
  * its cap receive no truth rather than an unscoped fallback. Returns how many fixtures had a call to attach to.
@@ -50,13 +56,20 @@ function fixturePort(port: JudgmentPort, returned: Set<string>, models: Set<stri
 function recordFixtureTruth(
   log: DecisionLog, decision: NamedDecision, checks: readonly FixtureCheck[], before: ReadonlySet<string>, returned: ReadonlySet<string>,
 ): number {
-  const calls = recentCalls(log)
-    .filter((entry) => !before.has(entry.id) && returned.has(entry.id) && entry.context.fixture !== undefined);
+  const calls: DecisionEntry[] = [];
+  for (const id of recentCallIds(log)) {
+    if (before.has(id) || !returned.has(id)) continue;
+    // A lookup is eligible only after the current bounded-window and run-ID
+    // intersection. It never rescues an old, missing or displaced call.
+    const entry = log.get(id);
+    if (entry?.id === id && entry.status === 'answered' && entry.context.site === CALIBRATION_SITE
+      && entry.context.battery === decision.name && entry.context.batteryVersion === decision.version
+      && entry.context.fixture !== undefined) calls.push(entry);
+  }
   const fixtures = [...new Set(checks.map((check) => check.fixture))];
   let recorded = 0;
   for (const fixture of fixtures) {
-    const forFixture = calls.filter((entry) => entry.context.fixture === fixture);
-    const call: DecisionEntry | undefined = forFixture.find((entry) => entry.context.battery === decision.name) ?? forFixture[0];
+    const call = calls.find(entry => entry.context.fixture === fixture);
     if (call === undefined) continue;
     log.attach(call.id, { kind: 'truth', truth: { source: 'fixture', checks: checks.filter((check) => check.fixture === fixture) } });
     recorded++;
@@ -84,7 +97,7 @@ export async function calibrate(
   const reports: DecisionReport[] = [];
   for (const decision of selected) {
     const model = decision.model ?? port.model;
-    const before = new Set(log === undefined ? [] : recentCalls(log).map((entry) => entry.id));
+    const before = new Set(log === undefined ? [] : recentCallIds(log));
     const returned = new Set<string>();
     const models = new Set<string>();
     let checks: readonly FixtureCheck[] = [];

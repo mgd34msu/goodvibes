@@ -41,6 +41,20 @@ function source(response = unfinished) {
 }
 const answered = (failure?: string, probability = .99) => fakePort(name => noulAnswer(name === failure ? probability : .01));
 
+test('an internal decision client fault stops actual completion without blaming a provider response', async () => {
+  let calls = 0;
+  installJudgmentPort({ model: 'jev-latest', async ask() {
+    calls++; throw new JudgmentError('internal', 'Private local completion detail');
+  } });
+  const input = source(), before = input.conversation.getMessageSnapshot();
+  const error: unknown = await new ResponseCompletionGuard().check(input).catch((error: unknown) => error);
+  expect(error).toMatchObject({ problem: 'internal',
+    message: 'The decision client failed internally. The operation has stopped; completion remains held.' });
+  if (!(error instanceof Error)) throw new Error('Missing original completion failure');
+  expect(error.cause).toBeUndefined(); expect(JSON.stringify(error)).not.toContain('Private local completion detail');
+  expect(calls).toBe(1); expect(input.conversation.getMessageSnapshot()).toEqual(before);
+});
+
 test('the completion battery is registered', () => {
   expect(registry.get('engine.core.response-completion')).toBeDefined();
 });

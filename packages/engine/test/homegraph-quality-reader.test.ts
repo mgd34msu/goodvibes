@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort, JudgmentResult } from '@goodvibes-jev/judgment';
@@ -81,7 +82,7 @@ describe('Home Graph registered applicability and completeness', () => {
     await held(readHomeGraphQuality([input()]), 'unconfigured');
     for (const probability of [0.5, 0.8]) { good(probability); await held(readHomeGraphQuality([input()]), 'unsettled'); }
     good(99); await held(readHomeGraphQuality([input()]), 'malformed');
-    const fake = good(); installJudgmentPort({ ...fake.port, ask: async () => { throw new Error('offline'); } }); await held(readHomeGraphQuality([input()]), 'unavailable');
+    const fake = good(); installJudgmentPort({ ...fake.port, ask: async () => { throw new JudgmentError('unavailable', 'offline'); } }); await held(readHomeGraphQuality([input()]), 'unavailable');
     installJudgmentPort(fakePort((name) => noulAnswer(name === 'manualApplicable__manualApplicable' ? 0.5 : 0.99)).port); await held(readHomeGraphQuality([input()]), 'unsettled');
     installJudgmentPort({ ...fake.port, async ask(request) { return { ...await fake.port.ask(request), model: '' } as JudgmentResult<typeof request.questions>; } }); await held(readHomeGraphQuality([input()]), 'malformed');
   });

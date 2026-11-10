@@ -104,6 +104,7 @@ function reasonExplanation(result: PermissionCheckResult, mode: string, autoAppr
         ? `The ${result.preset.preset} preset returned "${result.preset.action}" for this call's ${result.reading.stakes} stakes reading.`
         : `The stakes preset ${result.approved ? 'allowed' : 'denied'} this call.`;
     case 'mode_allow_all': return 'The configured permission mode allowed this call.';
+    case 'invocation_already_admitted': return 'This exact executing invocation already has a current admission; no new permission decision was needed.';
     case 'mode_denied': return 'The active permission mode denies this tool class.';
     case 'plan_mode': return 'The plan preset refused this call because it changes state or reaches outside the machine.';
     case 'mode_accept_edits': return 'The accept-edits preset allowed this call.';

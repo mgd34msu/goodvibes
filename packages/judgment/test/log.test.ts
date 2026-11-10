@@ -15,6 +15,7 @@ import {
   withDecisionLog,
   yesNo,
   type DecisionLog,
+  type DecisionQuery,
   type JudgmentPort,
 } from '../src/index.ts';
 
@@ -282,6 +283,29 @@ describe('withDecisionLog + SqliteDecisionLog', () => {
     expect(log.query({ since: '2026-09-26T00:02:00.000Z', until: '2026-09-26T00:04:00.000Z' })).toHaveLength(2);
     expect(log.query({ status: 'answered' })).toHaveLength(3);
     expect(log.query({ limit: 1 })).toHaveLength(1);
+    const filters: readonly DecisionQuery[] = [{}, { battery: 'test.urgency' }, { outcome: 'act' }, { outcome: 'escalate' },
+      { status: 'answered' }, { status: 'failed' }, { limit: 1 }, { limit: 0 },
+      { since: '2026-09-26T00:02:00.000Z', until: '2026-09-26T00:04:00.000Z' }];
+    for (const query of filters) expect(log.queryIds(query)).toEqual(log.query(query).map(entry => entry.id));
+  });
+
+  test('ID-only windows keep exact site, historical outcomes and equal-time ordering', async () => {
+    using log = new SqliteDecisionLog(':memory:');
+    const at = () => new Date('2026-09-26T00:00:00.000Z');
+    const port = withDecisionLog(answering(0.93), log, at);
+    const first = await battery.run(port, 'first', { site: 'calibration', fixture: 'one' });
+    await battery.run(port, 'second', { site: 'calibration', fixture: 'two' });
+    await battery.run(port, 'elsewhere', { site: 'outside-calibration' });
+    if (!first.result.decisionId) throw new Error('Expected the original recorded fixture call.');
+    // Both historical outcomes remain queryable, not only the latest note.
+    log.attach(first.result.decisionId, { kind: 'readings', readings: { outcome: 'escalate' } });
+    log.attach(first.result.decisionId, { kind: 'readings', readings: { outcome: 'act' } });
+    for (const query of [{ site: 'calibration' }, { site: 'calibration', outcome: 'escalate' },
+      { site: 'calibration', limit: 1 }, { battery: battery.name, since: at().toISOString(), limit: 2 }] satisfies readonly DecisionQuery[]) {
+      expect(log.queryIds(query)).toEqual(log.query(query).map(entry => entry.id));
+    }
+    expect(log.queryIds({ site: 'calibration' })).toHaveLength(2);
+    expect(log.queryIds({ site: 'calibration' })).toEqual([...log.queryIds({ site: 'calibration' })].sort().reverse());
   });
 
   test('a log file persists across reopen', async () => {

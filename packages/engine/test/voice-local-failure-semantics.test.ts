@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -119,7 +120,7 @@ describe('unavailable readings preserve the original failure and never trip', ()
     if (mode === 'weak') reading('fatal-crash', 0.5);
     if (mode === 'malformed') installJudgmentPort(fakePort(() => ({ type: 'choice', choice: 'fatal-crash', confidence: 1,
       probabilities: { 'fatal-crash': Number.NaN } })).port);
-    if (mode === 'throwing') { const port = reading('fatal-crash'); port.port.ask = async () => { throw new Error('offline reader'); }; }
+    if (mode === 'throwing') { const port = reading('fatal-crash'); port.port.ask = async () => { throw new JudgmentError('unavailable', 'offline reader'); }; }
     const error = new Error('Ort::Exception Unsupported model IR version');
     const { provider, inputs } = fixture(async () => { throw error; });
     await expect(invoke(provider)).rejects.toBe(error); await expect(invoke(provider)).rejects.toBe(error);

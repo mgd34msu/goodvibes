@@ -16,6 +16,8 @@ export type JudgmentErrorKind =
   | 'aborted'
   /** The endpoint answered with a body that does not match the questions asked. */
   | 'invalid-response'
+  /** The local client failed unexpectedly; retrying another provider cannot repair it. */
+  | 'internal'
   /** The decision log could not record the call, so its answer must not be used. */
   | 'unrecorded';
 

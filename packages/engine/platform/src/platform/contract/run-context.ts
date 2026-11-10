@@ -109,6 +109,7 @@ export interface SessionTurnState {
 /** What a contract failure reads as, from the error that caused it. */
 export function failureFromError(error: unknown): { readonly kind: ContractFailureKind; readonly reason: string } {
   if (error instanceof JudgmentPortMissingError) return { kind: 'judgment-unavailable', reason: error.message };
+  if (error instanceof JudgmentError && error.kind === 'internal') return { kind: 'other', reason: 'The decision client failed internally. The operation has stopped.' };
   if (error instanceof JudgmentError && error.kind !== 'aborted') return { kind: 'judgment-unavailable', reason: `Jev could not answer: ${error.message}` };
   return { kind: 'other', reason: summarizeError(error) };
 }

@@ -284,7 +284,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       if (runtime.check === check) runtime.check = null;
       if (check.superseded || isAbortError(error, signal) || run.terminal) return;
       const failure = failureFromError(error);
-      if (error instanceof JudgmentError || failure.kind === 'judgment-unavailable') {
+      if ((error instanceof JudgmentError && error.kind !== 'internal') || failure.kind === 'judgment-unavailable') {
         // A verifier request failure says nothing about work correctness. Keep
         // this candidate held and let unrelated units continue to completion.
         run.moveUnit(unit, trigger === 'turn-end' ? 'running' : 'held');

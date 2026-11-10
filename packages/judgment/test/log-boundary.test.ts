@@ -135,7 +135,7 @@ describe('recording port trust boundary', () => {
   ])('replaces all upstream failure text without retaining causes or coercing thrown values', async (upstream) => {
     using log = new SqliteDecisionLog(':memory:');
     const error = exposedError(await withDecisionLog(rejecting(upstream), log).ask(request).catch((e: unknown) => e));
-    expect(error.kind).toBe(upstream instanceof JudgmentError ? 'rejected' : 'unavailable');
+    expect(error.kind).toBe(upstream instanceof JudgmentError ? 'rejected' : 'internal');
     if (upstream instanceof JudgmentError) {
       expect(error.status).toBe(403);
       expect(error.requestId).toBe('req-rejected');
@@ -189,7 +189,7 @@ describe('recording port trust boundary', () => {
     expect(log.query()[0]?.lineage).toEqual(lineage);
   });
 
-  test.each(['invalid-request', 'rejected', 'unavailable', 'aborted', 'invalid-response', 'unrecorded'] as const)('preserves the genuine %s failure kind', async (kind) => {
+  test.each(['invalid-request', 'rejected', 'unavailable', 'aborted', 'invalid-response', 'internal', 'unrecorded'] as const)('preserves the genuine %s failure kind', async (kind) => {
     using log = new SqliteDecisionLog(':memory:');
     const error = exposedError(await withDecisionLog(rejecting(new JudgmentError(kind, SECRET)), log).ask(request).catch((e: unknown) => e));
     expect(error.kind).toBe(kind);

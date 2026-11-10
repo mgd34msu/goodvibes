@@ -34,13 +34,15 @@ function normalizedError(error: unknown, signal: AbortSignal): BrowserJudgmentEr
   if (signal.aborted && signal.reason instanceof BrowserJudgmentError) return signal.reason;
   if (error instanceof BrowserJudgmentError) return error;
   if (error instanceof JudgmentError) {
+    if (error.kind === 'internal') return new BrowserJudgmentError('JUDGMENT_INTERNAL');
     if (error.kind === 'unrecorded') return new BrowserJudgmentError('JUDGMENT_UNRECORDED');
     if (error.kind === 'invalid-response') return new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE');
     if (error.kind === 'aborted') return new BrowserJudgmentError('JUDGMENT_ABORTED');
     if (error.kind === 'unavailable') return new BrowserJudgmentError('JUDGMENT_UNAVAILABLE');
+    // Preserve the existing known request/protocol refusal boundary.
+    return new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE');
   }
-  // Missing key is currently an internal invalid-request: it is NOT a client input error.
-  return new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE');
+  return new BrowserJudgmentError('JUDGMENT_INTERNAL');
 }
 
 /** Owns admitted runs, references, cancellation, and drain; borrows the configured port/log. */
@@ -215,7 +217,8 @@ export class BrowserJudgmentService {
       authorized();
       if (!evidence.length) throw new BrowserJudgmentError('JUDGMENT_UNRECORDED');
       let projected: BrowserJudgmentProjection<unknown>;
-      try { projected = captureBrowserJudgmentJson(battery.project(result)) as BrowserJudgmentProjection<unknown>; }
+      const projection = battery.project(result);
+      try { projected = captureBrowserJudgmentJson(projection) as BrowserJudgmentProjection<unknown>; }
       catch { throw new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE'); }
       finally { open = false; }
       authorized();

@@ -1,8 +1,9 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { ContractRun } from '../platform/src/platform/contract/run-context.js';
 import { createGroupRunner } from '../platform/src/platform/contract/group-runner.js';
 import { makeContract, makeGroup, makeUnit } from './contract/fixtures.js';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -19,31 +20,48 @@ import { createOrchestrationHarness, makeFakeConfigManager, engineerReportOutput
 
 const roots: string[] = [];
 const engines: ReturnType<typeof createOrchestrationEngine>[] = [];
+const pendingReadings: Array<() => void> = [];
 const oldPort = installJudgmentPort(undefined);
-afterEach(() => { installJudgmentPort(oldPort); for (const engine of engines.splice(0)) engine.dispose(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => {
+  const owned = engines.splice(0);
+  for (const engine of owned) engine.dispose();
+  for (const release of pendingReadings.splice(0)) release();
+  await Promise.all(owned.map(engine => engine.join()));
+  installJudgmentPort(oldPort);
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 const phase: PhaseSpec = { id: 'phase', kind: 'engineer', role: 'engineer', capacity: 1, gate: { gates: [], scope: 'scoped' } };
 function setup(error: unknown, mode: 'commit' | 'merge' = 'commit') {
   const root = mkdtempSync(join(tmpdir(), 'repository-reading-')); roots.push(root);
+  // The real scoped-commit residue guard needs an original Git baseline even
+  // though the eventual commit/merge failure is injected below.
+  const initialized = Bun.spawnSync(['git', 'init', '-q'], { cwd: root });
+  if (initialized.exitCode !== 0) throw new Error('Could not initialize the owned repository-reading fixture');
   const h = createOrchestrationHarness();
-  if (mode === 'commit') h.worktree.commitWorkingTree = async () => { throw error; };
-  else h.worktree.merge = async () => { throw error; };
+  let failureAttempts = 0;
+  const fail = async () => { failureAttempts++; throw error; };
+  if (mode === 'commit') h.worktree.commitWorkingTree = fail;
+  else h.worktree.merge = fail;
   const config = makeFakeConfigManager();
   const engine = createOrchestrationEngine({ agentManager: h.agentManager, runtimeBus: h.bus, configManager: config,
     projectRoot: root, createWorktree: () => h.worktree, skipClaimVerification: true });
   engines.push(engine);
   const ws = engine.createWorkstream({ title: 'fixture', phases: [phase], items: [{ id: 'item', title: 'item', task: 'work' }] });
-  return { h, engine, ws, config, root, item: ws.items[0]! };
+  return { h, engine, ws, config, root, item: ws.items[0]!, failureAttempts: () => failureAttempts };
 }
 function answer(value: number | 'malformed' | 'unavailable') {
   const fake = fakePort(() => value === 'malformed' ? {} : noulAnswer(typeof value === 'number' ? value : .01));
-  if (value === 'unavailable') fake.port.ask = async () => { throw new Error('provider unavailable'); };
+  if (value === 'unavailable') fake.port.ask = async () => { throw new JudgmentError('unavailable', 'provider unavailable'); };
   installJudgmentPort(fake.port);
   return fake;
 }
 async function finish(f: ReturnType<typeof setup>) {
   f.engine.start(f.ws.id); await flushMicrotasks(80);
+  writeFileSync(join(f.root, 'file.ts'), 'export const originalFixture = true;\n');
   f.h.completeAgent(f.item.agentId!, engineerReportOutput({ filesCreated: ['file.ts'] }));
   await flushMicrotasks(150);
+  expect(f.failureAttempts()).toBe(1);
+  expect(f.engine.getPhaseResults(f.ws.id)).toHaveLength(1);
 }
 
 test('registered complete-message reading, with no automatic EACCES corruption', async () => {
@@ -108,6 +126,7 @@ function deferredPort() {
   const ask = fake.port.ask;
   let release!: () => void;
   const wait = new Promise<void>(resolve => { release = resolve; });
+  pendingReadings.push(() => release());
   let entered = false;
   const port: JudgmentPort = { ...fake.port, async ask(request) { entered = true; await wait; return ask(request); } };
   installJudgmentPort(port);
@@ -256,7 +275,8 @@ test('Classic final phase publication preserves failed git effect and Classic pr
   await withDecisionModelPolicy(() => 'Classic - Off', async () => {
     const f = setup(new Error('The pre-commit hook rejected this change.'));
     let attempts = 0;
-    f.h.worktree.commitWorkingTree = async () => { attempts++; throw new Error('The pre-commit hook rejected this change.'); };
+    const failCommit = f.h.worktree.commitWorkingTree;
+    f.h.worktree.commitWorkingTree = async (...args) => { attempts++; return failCommit(...args); };
     await finish(f);
     expect(attempts).toBe(1);
     expect(f.engine.getPhaseResults(f.ws.id)[0]?.commit).toMatchObject({

@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -68,7 +69,7 @@ test('a replaced history cancels asynchronous export redaction before disk or st
 test('failed reading uploads nothing, preserves local export, and a later retry recovers', async () => {
   const f = fixture(); let uploads = 0;
   globalThis.fetch = (async () => { uploads++; return Response.json({ html_url: 'https://gist.github.com/synthetic' }); }) as unknown as typeof fetch;
-  previous = installJudgmentPort(fakePort(() => { throw new Error('unavailable'); }).port);
+  previous = installJudgmentPort(fakePort(() => { throw new JudgmentError('unavailable', 'unavailable'); }).port);
   await f.run();
   expect(uploads).toBe(0);
   expect(f.lines).toContain('Upload failed: credential-header reading unavailable. Local export saved.');

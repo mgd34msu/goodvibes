@@ -11,6 +11,7 @@ import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions
 import { ToolRegistry, assertCurrentToolEffect, type ToolExecutionEffect } from '../platform/src/platform/tools/registry.ts';
 import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
 import type { GatePresetName } from '../platform/src/platform/gate/presets.ts';
+import { withExecutionModeOwner, type ExecutionModeOwner } from '../platform/src/platform/gate/execution-context.ts';
 import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
@@ -185,3 +186,63 @@ test.each(['ordinary-outward-fixture', 'ordinary-beyond-project-fixture'])('safe
   const [result] = await f.run('exec', command);
   expect(result?.success).toBe(true); expect(f.prompts()).toBe(0); expect(f.bodies).toEqual(['exec']);
 });
+
+
+for (const mode of modes) {
+  test(`${mode} reports exact reentrant admission without a second judgment or prompt`, async () => {
+    const f = fixture(mode);
+    let checks = 0;
+    f.registry.unregister('read');
+    f.registry.register({ definition: { name: 'read', description: 'Read admission diagnostic fixture.', parameters: { type: 'object' } },
+      async execute(args) {
+        const before = { judgments: requests.length, prompts: f.prompts() };
+        expect(await f.manager.checkDetailed('read', args)).toMatchObject({
+          approved: true, persisted: false, sourceLayer: 'invocation_admission', reasonCode: 'invocation_already_admitted',
+        });
+        expect({ judgments: requests.length, prompts: f.prompts() }).toEqual(before);
+        checks++;
+        return { success: true, output: 'checked the original admission' };
+      },
+    });
+    expect((await f.run('read'))[0]?.success).toBe(true);
+    expect(checks).toBe(1);
+  });
+
+  for (const retirement of ['surface', 'source', 'mode', 'owner', 'policy'] as const) {
+    test(`${mode} rejects a reentrant check after ${retirement} authority retires`, async () => {
+      const permissions = { ...cloneDefaultConfig().permissions, mode };
+      let surface = 'terminal', goal = 'Read the original synthetic source', revision = 0;
+      let selectedMode: GatePresetName = mode;
+      const reader: PermissionConfigReader = {
+        getAutonomousSnapshot: () => ({ permissions, autoApprove: false, directory: '/synthetic/host-constraints' }),
+        getSnapshot: () => ({ permissions }), getWorkingDirectory: () => '/synthetic/host-constraints', isAutoApproveEnabled: () => false,
+      };
+      const owner: ExecutionModeOwner = { getMode: () => selectedMode, getRevision: () => revision };
+      const f = fixture(mode, { reader, gate: { surfaceOf: () => surface } });
+      f.deps.autonomousSource = () => ({ goal, criteria: ['Retain the original source'] });
+      let entered = 0, afterCheck = 0, judgmentsAtCheck = -1, promptsAtCheck = -1;
+      f.registry.unregister('read');
+      f.registry.register({ definition: { name: 'read', description: 'Retired admission diagnostic fixture.', parameters: { type: 'object' } },
+        async execute(args) {
+          entered++;
+          if (retirement === 'surface') surface = 'email';
+          else if (retirement === 'source') goal = 'A different source';
+          else if (retirement === 'mode') { selectedMode = mode === 'yolo' ? 'safe-owner' : 'yolo'; permissions.mode = selectedMode; }
+          else if (retirement === 'policy') permissions.tools.read = 'deny';
+          else revision++;
+          judgmentsAtCheck = requests.length; promptsAtCheck = f.prompts();
+          // A stale invocation must not proceed to a tool effect after the check.
+          await f.manager.checkDetailed('read', args);
+          afterCheck++;
+          return { success: true, output: 'must not execute' };
+        },
+      });
+      const result = await withExecutionModeOwner(owner, () => f.run('read'));
+      expect(result[0]?.success).toBe(false);
+      expect(entered).toBe(1);
+      expect(afterCheck).toBe(0);
+      expect(requests).toHaveLength(judgmentsAtCheck);
+      expect(f.prompts()).toBe(promptsAtCheck);
+    });
+  }
+}

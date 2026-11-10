@@ -6,8 +6,10 @@
  */
 import { describe, expect, test } from 'bun:test';
 import {
+  calibrate,
   defineBattery,
   defineDispatch,
+  JudgmentError,
   readingsOf,
   SqliteDecisionLog,
   STAKES_BANDS,
@@ -16,6 +18,7 @@ import {
   type DecisionEntry,
   type DecisionTruth,
   type JudgmentPort,
+  type NamedDecision,
 } from '@goodvibes-jev/judgment';
 import {
   analyzeDecisionLog,
@@ -59,7 +62,7 @@ function scriptedPort() {
       return state.model;
     },
     async ask(request) {
-      if (state.fail) throw new Error('endpoint down');
+      if (state.fail) throw new JudgmentError('unavailable', 'endpoint down');
       const answers = Object.fromEntries(
         Object.entries(request.questions).map(([name, question]) => [
           name,
@@ -117,6 +120,36 @@ async function seededLog(): Promise<SqliteDecisionLog> {
 const registered = [{ name: urgency.name, accuracyFloor: urgency.accuracyFloor }];
 
 describe('observe analyses over a decision log', () => {
+  test('composed fixture checks do not become accuracy or floor truth about a helper question', async () => {
+    using log = new SqliteDecisionLog(':memory:');
+    const helper = defineBattery({ name: 'test.observe.calibration-helper', version: 1, description: 'A helper fragment question',
+      accuracyFloor: 1, items: { urgent: yesNo('Does this helper fragment contain a complete section?', STAKES_BANDS.medium.yesNo) },
+      fixtures: [{ name: 'composed', state: 'complete helper fragment', expect: { urgent: 'yes' } }] });
+    const composed: NamedDecision = {
+      name: 'test.observe.calibration-composed', version: 3, description: 'An assembled result checked after its helper', accuracyFloor: 1, fixtureCount: 1,
+      async checkFixtures(port, options) {
+        const result = await helper.run(port, 'complete helper fragment', { site: 'calibration', fixture: 'composed',
+          ...(options?.signal === undefined ? {} : { signal: options.signal }) });
+        const got = result.readings.urgent.verdict === 'yes' ? 'assembled-result' : 'missing-result';
+        return [{ fixture: 'composed', aspect: 'assembled-document', expected: 'assembled-result', got,
+          correct: got === 'assembled-result', signal: result.readings.urgent.probability, outcome: result.readings.urgent.outcome }];
+      },
+    };
+    const own = defineBattery({ name: 'test.observe.calibration-own', version: 3, description: 'An exact owning battery/version',
+      accuracyFloor: 1, items: { urgent: yesNo('Does this own fixture contain an urgent event?', STAKES_BANDS.medium.yesNo) },
+      fixtures: [{ name: 'own', state: 'urgent event', expect: { urgent: 'yes' } }] });
+    const port = withDecisionLog(scriptedPort().port, log);
+    const calibration = await calibrate(port, [composed, own], { endpoint: { kind: 'fixture', baseURL: 'http://calibration.invalid' }, log });
+    expect(calibration.decisions[0]).toMatchObject({ name: composed.name, passed: true, accuracy: 1, truthRecorded: 0,
+      checks: [{ aspect: 'assembled-document', correct: true }] });
+    expect(calibration.decisions[1]).toMatchObject({ name: own.name, passed: true, accuracy: 1, truthRecorded: 1 });
+    const report = analyzeDecisionLog(log, { registered: [helper, composed, own] });
+    expect(report.withTruth).toBe(1);
+    expect(report.accuracy).toHaveLength(1);
+    expect(report.accuracy[0]).toMatchObject({ battery: own.name, checks: 1, correct: 1, accuracy: 1, belowFloor: false });
+    expect(report.accuracy.some(row => row.battery === helper.name || row.battery === composed.name)).toBe(false);
+  });
+
   test('flattened readings carry the question, signal, outcome, answer and action', async () => {
     using log = await seededLog();
     const entry = log.query({ site: 'intake', status: 'answered' }).find((candidate) => readingsOf(candidate) !== undefined)!;

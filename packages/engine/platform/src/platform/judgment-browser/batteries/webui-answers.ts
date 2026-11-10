@@ -5,7 +5,7 @@ import {
 } from '@goodvibes-jev/judgment';
 
 const INVALID = (): never => { throw new JudgmentError('invalid-response', 'Invalid WebUI judgment response.'); };
-const ERROR_KINDS: readonly JudgmentErrorKind[] = ['invalid-request', 'rejected', 'unavailable', 'aborted', 'invalid-response', 'unrecorded'];
+const ERROR_KINDS: readonly JudgmentErrorKind[] = ['invalid-request', 'rejected', 'unavailable', 'aborted', 'invalid-response', 'internal', 'unrecorded'];
 
 /** Descriptor inspection avoids executing provider-supplied getters or hooks. */
 function record(value: unknown): Record<string, unknown> {
@@ -163,11 +163,12 @@ export function withWebuiAnswerBoundary(inner: JudgmentPort, options: WebuiAnswe
       } catch (error) {
         const descriptors: Record<string, PropertyDescriptor> = error instanceof JudgmentError ? Object.getOwnPropertyDescriptors(error) : {};
         const rawKind: unknown = descriptors['kind']?.value;
-        const kind = ERROR_KINDS.includes(rawKind as JudgmentErrorKind) ? rawKind as JudgmentErrorKind : 'unavailable';
+        const kind = ERROR_KINDS.includes(rawKind as JudgmentErrorKind) ? rawKind as JudgmentErrorKind : 'internal';
         // Do not keep cause, original message, response body or provider request ID.
         let lineage: JudgmentLineage | undefined;
         try { lineage = safeLineage(descriptors['lineage']?.value, allowedModels); } catch { /* discard invalid metadata */ }
-        throw new JudgmentError(kind, 'WebUI judgment could not be completed.', lineage === undefined ? {} : { lineage });
+        throw new JudgmentError(kind, kind === 'internal' ? 'The decision client failed internally. The operation has stopped.'
+          : 'WebUI judgment could not be completed.', lineage === undefined ? {} : { lineage });
       }
     },
   };

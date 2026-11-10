@@ -87,6 +87,7 @@ export async function readVoiceRoundTrip(phrase: string, transcript: string, lif
     return reading.verdict;
   } catch (error) {
     assertVoiceProofCurrent(lifetime);
+    if (error instanceof JudgmentError && error.kind === 'internal') throw error;
     // Preserve the actual exhaustion for the owning pure comparison phase.
     // Other failures remain unproven and cannot authorize a Classic downgrade.
     if (decisionModelPolicyState().policy === 'Preferred'

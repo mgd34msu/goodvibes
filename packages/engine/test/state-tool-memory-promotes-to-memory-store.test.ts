@@ -1,3 +1,4 @@
+import { planMemoryMirror } from '../platform/src/platform/tools/state/memory-mirror.js';
 /**
  * memory ingest/retrieval gap.
  *
@@ -309,4 +310,20 @@ test('Preferred cancellation during a failed class reading cannot activate Class
       expect(existsSync(join(h.memoryDir, 'cancelled.json'))).toBe(false); expect(h.memoryRegistry.getAll()).toEqual([]);
     } finally { h.memoryStore.close(); }
   });
+});
+
+
+test('an internal memory classifier fault stops before a mirror plan or flat-file publication', async () => {
+  const h = await makeHarness({ withRegistry: true });
+  const fake = fakePort(() => { throw new JudgmentError('internal', 'Private classifier client fault'); });
+  installJudgmentPort(fake.port);
+  try {
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      await expect(planMemoryMirror(h.memoryRegistry, 'synthetic_key', 'Synthetic remembered preference'))
+        .rejects.toMatchObject({ kind: 'internal' });
+    });
+    expect(fake.requests).toHaveLength(1);
+    expect(h.memoryRegistry.getAll()).toHaveLength(0);
+    expect(existsSync(join(h.memoryDir, 'synthetic_key.json'))).toBe(false);
+  } finally { h.memoryStore.close(); }
 });

@@ -16,7 +16,7 @@ function failureReason(error: unknown): NodeActivationReason {
   if (error instanceof Held) return error.reason;
   if (error instanceof JudgmentPortMissingError) return 'unconfigured';
   if (error instanceof JudgmentError) return error.kind === 'invalid-response' ? 'malformed' : error.kind;
-  return 'malformed';
+  return 'internal';
 }
 function checkedPort(port: JudgmentPort, current: () => void): JudgmentPort {
   const model = port.model, ask = port.ask, recorder = port.recorder;

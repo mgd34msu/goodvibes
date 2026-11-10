@@ -44,6 +44,9 @@ function toEntry(row: Row): DecisionEntry {
 const param = (column: keyof typeof COLUMNS): string => `$${column}`;
 const equals = (column: keyof typeof COLUMNS): string => `${column} = ${param(column)}`;
 const ID_IS = equals('id');
+/** Entry and ID projections must retain exactly the same window semantics. */
+const matchingWindow = (conditions: readonly string[]) =>
+  `FROM ${TABLE} WHERE ${['TRUE', ...conditions].join(' AND ')} ORDER BY at DESC, id DESC LIMIT $limit`;
 /** Every statement the log runs. */
 const SQL = {
   insert: `INSERT INTO ${TABLE} (${INSERT_COLUMNS.join(', ')}) VALUES (${INSERT_COLUMNS.map(param).join(', ')})`,
@@ -54,7 +57,8 @@ const SQL = {
     `SELECT ${TABLE}.id, ${TABLE}.entry,
        (SELECT json_group_array(json_object('kind', kind, 'payload', payload)) FROM
          (SELECT kind, payload FROM ${NOTES_TABLE} WHERE decision_id = ${TABLE}.id ORDER BY seq)) AS notes
-     FROM ${TABLE} WHERE ${['TRUE', ...conditions].join(' AND ')} ORDER BY at DESC, id DESC LIMIT $limit`,
+     ${matchingWindow(conditions)}`,
+  matchingIds: (conditions: readonly string[]) => `SELECT ${TABLE}.id ${matchingWindow(conditions)}`,
   /** Limit the indexed entry window before expanding only its lineage.
    * No question, answer or note payload is returned. */
   volume: (conditions: readonly string[]) => `WITH selected AS (
@@ -149,6 +153,12 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
   query(query: DecisionQuery = {}): readonly DecisionEntry[] {
     const { where, params } = filterFor(query);
     return this.#entries(SQL.matching(where), { ...params, limit: query.limit ?? 1000 });
+  }
+
+  queryIds(query: DecisionQuery = {}): readonly DecisionId[] {
+    const { where, params } = filterFor(query);
+    return rowsOf<{ readonly id: DecisionId }>(this.#db, SQL.matchingIds(where), { ...params, limit: query.limit ?? 1000 })
+      .map(row => row.id);
   }
 
   /** Native local monitoring never materializes full entries or their notes. */

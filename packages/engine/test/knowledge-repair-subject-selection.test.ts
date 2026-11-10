@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -167,7 +168,7 @@ describe('canonical repair subject selection through real consumers', () => {
     readings('none'); expect((await select(item)).nodes).toEqual([]);
     readings('Living room display', 0.5);
     await held(linkRepairSources(item.store, spaceId, item.gap, [item.source.id], item.gap.title, []), 'uncertain');
-    installJudgmentPort({ model: 'offline', async ask() { throw new Error('offline'); } });
+    installJudgmentPort({ model: 'offline', async ask() { throw new JudgmentError('unavailable', 'offline'); } });
     await held(buildGapContext(item.store, spaceId, item.gap, []), 'unavailable');
     expect(state(item.store)).toBe(before);
   });

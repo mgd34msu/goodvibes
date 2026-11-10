@@ -102,7 +102,8 @@ async function readOwnedPlanningSemanticFacts(input: Record<string, JsonValue>, 
     }, () => { current(); return { semantic: 'not-evaluated', assertCurrent: current }; }, () => { current(); return true; });
   } catch (error) {
     current();
-    if (error instanceof JudgmentInputError || error instanceof JudgmentAuthorityRetiredError || error instanceof JudgmentError && error.kind === 'aborted') throw error;
+    if (error instanceof JudgmentInputError || error instanceof JudgmentAuthorityRetiredError
+      || error instanceof JudgmentError && (error.kind === 'aborted' || error.kind === 'internal')) throw error;
     // Genuine refusals and malformed replies remain blocking, never a Classic fallback.
     return { semantic: 'unavailable', assertCurrent: current };
   }

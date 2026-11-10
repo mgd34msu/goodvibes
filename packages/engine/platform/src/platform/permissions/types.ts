@@ -23,6 +23,8 @@ export type PermissionDecisionSource =
   | 'managed_policy'
   | 'safety_check'
   | 'runtime_mode'
+  // The exact executing invocation already holds a current private admission
+  | 'invocation_admission'
   | 'session_override'
   // A durable user-origin rule written by a remembered approval decision
   | 'user_rule'
@@ -47,6 +49,7 @@ export type PermissionDecisionReasonCode =
   | 'managed_policy_deny'
   | 'safety_guardrail'
   | 'mode_allow_all'
+  | 'invocation_already_admitted'
   | 'mode_denied'
   // Mode, plan mode refused a mutating/exec tool (structured plan-mode denial)
   | 'plan_mode'

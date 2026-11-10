@@ -92,6 +92,7 @@ const REFUSALS = {
   JUDGMENT_CLASSIC: [503, 'Classic operation is active. This semantic reading is disabled; use the feature\'s Classic path.'],
   JUDGMENT_SHUTTING_DOWN: [503, 'The judgment service is shutting down.'],
   JUDGMENT_INVALID_RESPONSE: [502, 'The judgment result did not match its registered contract.'],
+  JUDGMENT_INTERNAL: [500, 'The decision client failed internally. The operation has stopped.'],
   JUDGMENT_UNRECORDED: [500, 'The judgment could not be recorded and must not be used.'],
   JUDGMENT_ABORTED: [499, 'The judgment request was cancelled.'],
   JUDGMENT_DEADLINE: [504, 'The judgment request exceeded its deadline.'],
@@ -106,7 +107,7 @@ export class BrowserJudgmentError extends Error {
   }
 }
 export function browserJudgmentRefusal(error: unknown): { readonly status: number; readonly body: object } {
-  let code: BrowserJudgmentErrorCode = 'JUDGMENT_UNAVAILABLE';
+  let code: BrowserJudgmentErrorCode = 'JUDGMENT_INTERNAL';
   if (error instanceof BrowserJudgmentError) {
     const descriptor = Object.getOwnPropertyDescriptor(error, 'code');
     const candidate: unknown = descriptor?.value;

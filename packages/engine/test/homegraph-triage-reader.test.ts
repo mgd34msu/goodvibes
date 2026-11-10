@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort, JudgmentResult } from '@goodvibes-jev/judgment';
@@ -60,7 +61,7 @@ describe('registered Home Graph triage readings', () => {
   });
   test('missing and failed providers differ from uncertainty; malformed readings hold', async () => {
     await held(prepareHomeGraphTriageReadings([input()]), 'unconfigured');
-    const fake = good(); installJudgmentPort({ ...fake.port, ask: async () => { throw new Error('offline'); } });
+    const fake = good(); installJudgmentPort({ ...fake.port, ask: async () => { throw new JudgmentError('unavailable', 'offline'); } });
     await held(prepareHomeGraphTriageReadings([input()]), 'unavailable');
     installJudgmentPort({ ...fake.port, async ask(request) { const result = await fake.port.ask(request); return { ...result, answers: { action: { type: 'choice', choice: 'reject', confidence: 0.99, probabilities: { reject: 0.01, review: 0.99 } } } } as unknown as JudgmentResult<typeof request.questions>; } });
     await held(prepareHomeGraphTriageReadings([input()]), 'malformed');

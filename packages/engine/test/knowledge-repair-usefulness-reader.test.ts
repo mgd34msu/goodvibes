@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, bindJudgmentPortAuthority } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
@@ -100,7 +101,7 @@ describe('repair fact usefulness complete-pass reader', () => {
 
   test('missing and unavailable ports are distinct holds', async () => {
     await held(prepareRepairFactUsefulness([input()]), 'unconfigured');
-    const fake = readings(); installJudgmentPort({ ...fake.port, async ask() { throw new Error('offline'); } });
+    const fake = readings(); installJudgmentPort({ ...fake.port, async ask() { throw new JudgmentError('unavailable', 'offline'); } });
     await held(prepareRepairFactUsefulness([input()]), 'unavailable');
   });
 

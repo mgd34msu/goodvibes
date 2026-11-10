@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,7 +35,7 @@ const endpoint = { kind: 'test', baseURL: 'http://calibration.test' };
 const fixedNow = () => new Date('2026-10-01T00:00:00.000Z');
 const name = 'test.attribution';
 const questions = { q: noul('Is it urgent?') };
-const context = { site: 'calibration', battery: name, fixture: 'shared' };
+const context = { site: 'calibration', battery: name, batteryVersion: 1, fixture: 'shared' };
 const boundedQuery = { site: 'calibration', status: 'answered', limit: 100_000 } as const;
 const answering = () => fakePort(() => noulAnswer(0.95)).port;
 // Attribution uses recorded IDs/context/truth, never this synthetic field's
@@ -113,6 +113,35 @@ class OpaqueDecisionLog implements DecisionLog {
 }
 
 describe('calibration truth belongs to the returned calls of this run', () => {
+  test('native bounded ID windows do not parse unrelated question, answer or note blobs', async () => {
+    using log = new SqliteDecisionLog(':memory:');
+    const marker = 'unrelated-calibration-blob-fixture';
+    const blob = marker.repeat(256);
+    for (let index = 0; index < 24; index++) {
+      const id = log.record({ ...answered({ ...context, battery: 'test.unrelated' }),
+        questions: { payload: blob }, answers: { payload: blob } });
+      log.attach(id, { kind: 'action', action: blob });
+      log.attach(id, { kind: 'readings', readings: { payload: blob } });
+    }
+    const parse = JSON.parse;
+    let unrelatedParses = 0;
+    const parsing = spyOn(JSON, 'parse').mockImplementation((text, reviver) => {
+      if (text.includes(marker)) unrelatedParses++;
+      return parse(text, reviver);
+    });
+    const gets = spyOn(log, 'get'), fullQueries = spyOn(log, 'query'), ids = spyOn(log, 'queryIds');
+    try {
+      const report = await calibrate(withDecisionLog(answering(), log, fixedNow), [battery], { endpoint, log });
+      expect(report.decisions[0]).toMatchObject({ passed: true, truthRecorded: 1 });
+      expect(ids.mock.calls).toEqual([[boundedQuery], [boundedQuery]]);
+      expect(fullQueries).toHaveBeenCalledTimes(0);
+      expect(gets).toHaveBeenCalledTimes(1);
+      expect(unrelatedParses).toBe(0);
+    } finally { parsing.mockRestore(); gets.mockRestore(); fullQueries.mockRestore(); ids.mockRestore(); }
+    expect(log.query()).toHaveLength(25);
+    expect(log.query({ battery: 'test.unrelated' }).every(entry => truthOf(entry) === undefined)).toBe(true);
+  });
+
   test('a current-only SQLite log retains prior truth and records a fresh call at the same timestamp', async () => {
     using log = new SqliteDecisionLog(':memory:');
     const oldId = log.record(answered());
@@ -167,7 +196,7 @@ describe('calibration truth belongs to the returned calls of this run', () => {
 
     expect(report.decisions[0]).toMatchObject({ passed: true, truthRecorded: 2 });
     expect(log.queries).toEqual([boundedQuery, boundedQuery]);
-    expect(log.gets).toEqual([]);
+    expect(log.gets).toEqual(['m-current', 'a-current']);
     expect(truthOf(log.get('z-before')!)).toBeUndefined();
     expect(truthOf(log.get('a-current')!)).toEqual({ source: 'fixture', checks: checks.slice(0, 2) });
     expect(truthOf(log.get('m-current')!)).toEqual({ source: 'fixture', checks: checks.slice(2) });
@@ -273,17 +302,32 @@ describe('calibration truth belongs to the returned calls of this run', () => {
     expect(truthOf(log.query()[0]!)).toBeUndefined();
   });
 
-  test.each([true, false])('prefers an own battery call when present (%s), otherwise uses the returned delegated call', async (includeOwn) => {
+  test.each([true, false])('only an exact own battery call receives truth when present = %s', async (includeOwn) => {
     const log = new OpaqueDecisionLog(includeOwn ? ['own-call', 'helper-call'] : ['helper-call']);
     const run = decision(async (port) => {
       if (includeOwn) await port.ask({ state: 'own', questions, context });
-      await port.ask({ state: 'helper', questions, context: { ...context, battery: 'test.helper' } });
+      await port.ask({ state: 'helper', questions: { helper: noul('A different helper question?') }, context: { ...context, battery: 'test.helper' } });
       return [check()];
     });
     const report = await calibrate(withDecisionLog(answering(), log, fixedNow), [run], { endpoint, log });
-    expect(report.decisions[0]).toMatchObject({ passed: true, truthRecorded: 1 });
-    expect(truthOf(log.get(includeOwn ? 'own-call' : 'helper-call')!)).toEqual({ source: 'fixture', checks: [check()] });
-    if (includeOwn) expect(truthOf(log.get('helper-call')!)).toBeUndefined();
+    expect(report.decisions[0]).toMatchObject({ passed: true, truthRecorded: includeOwn ? 1 : 0, checks: [check()] });
+    if (includeOwn) expect(truthOf(log.get('own-call')!)).toEqual({ source: 'fixture', checks: [check()] });
+    expect(truthOf(log.get('helper-call')!)).toBeUndefined();
+  });
+
+  test.each([undefined, 2])('a same-name returned call with battery version %s does not receive current fixture truth', async version => {
+    using log = new SqliteDecisionLog(':memory:');
+    const { batteryVersion: _version, ...base } = context;
+    let id = '';
+    const run = decision(async port => {
+      const result = await port.ask({ state: 'own question under a different version', questions,
+        context: { ...base, ...(version === undefined ? {} : { batteryVersion: version }) } });
+      id = result.decisionId!;
+      return [check()];
+    });
+    const report = await calibrate(withDecisionLog(answering(), log, fixedNow), [run], { endpoint, log });
+    expect(report.decisions[0]).toMatchObject({ passed: true, accuracy: 1, truthRecorded: 0, checks: [check()] });
+    expect(truthOf(log.get(id)!)).toBeUndefined();
   });
 
   test('repeated calls for one fixture use query recency rather than lexical id order', async () => {

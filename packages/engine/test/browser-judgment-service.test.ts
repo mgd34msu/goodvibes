@@ -1,4 +1,6 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { createSystemOnePort, SqliteDecisionLog, withDecisionLog, noul, readYesNo, STAKES_BANDS, type JudgmentPort, type YesNoReading } from '@goodvibes-jev/judgment';
 import { BrowserJudgmentError, type AuthenticatedPrincipal } from '../daemon-api/src/index.ts';
 import { BrowserJudgmentRegistry, BrowserJudgmentReferences, BrowserJudgmentService, type BrowserJudgmentAuthorization, type BrowserJudgmentRoute, type BrowserJudgmentResolvedInput } from '../platform/src/platform/judgment-browser/index.ts';
@@ -64,6 +66,21 @@ function fixture(options: { probability?: number; authorized?: boolean; state?: 
 }
 
 describe('browser judgment service (synthetic port only)', () => {
+  test.each(['resolver', 'port'] as const)('an unknown local %s failure reports internal without claiming a provider outage or activating Classic', async stage => {
+    const fail = async () => { throw new TypeError('Private local browser client detail'); };
+    const f = fixture(stage === 'resolver' ? { resolveBarrier: fail } : { beforeAnswer: fail });
+    try {
+      await withDecisionModelPolicy(() => 'Preferred', async () => {
+        await expect(f.service.execute(body(), owner, new AbortController().signal, () => owner))
+          .rejects.toMatchObject({ code: 'JUDGMENT_INTERNAL', status: 500,
+            message: 'The decision client failed internally. The operation has stopped.' });
+        expect(decisionModelPolicyState()).toMatchObject({ operation: 'decision', reason: null });
+      });
+      expect(f.calls()).toBe(stage === 'resolver' ? 0 : 1);
+      expect(f.log.query()).toMatchObject(stage === 'resolver' ? [] : [{ status: 'failed', error: { kind: 'internal' } }]);
+      expect(JSON.stringify(f.log.query())).not.toContain('Private local browser client detail');
+    } finally { await f.service.close(); f.log[Symbol.dispose](); }
+  });
   test('a local-only grant refuses a hosted fallback before transmission or logging', async () => {
     const destinations: string[] = [];
     const f = fixture({ endpointKinds: ['local', 'hosted', 'hosted'], authorize({ route }) {

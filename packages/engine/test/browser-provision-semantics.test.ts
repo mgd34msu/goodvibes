@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { createBrowserProvisionIo } from '../platform/src/platform/browser/browser-provision-io.js';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -85,7 +86,7 @@ describe('browser provisioning semantic decisions', () => {
   });
   test('unavailable judgment preserves a recoverable failure without deletion', async () => {
     const { io, removed } = fakeIo();
-    const port: JudgmentPort = { model: 'jev-1.13.0', ask: async () => { throw new Error('unavailable'); } };
+    const port: JudgmentPort = { model: 'jev-1.13.0', ask: async () => { throw new JudgmentError('unavailable', 'unavailable'); } };
     installJudgmentPort(port);
     await expect(ensureBrowserBinary(io, { port })).rejects.toMatchObject({ recoverable: true });
     expect(removed).toEqual([]);

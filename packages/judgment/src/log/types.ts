@@ -148,6 +148,9 @@ export interface DecisionLog {
   attach(id: string, note: DecisionNote): void;
   get(id: string): DecisionEntry | undefined;
   query(query?: DecisionQuery): readonly DecisionEntry[];
+  /** Optional on older/custom logs. Same filters, ordering and limit as query,
+   * returning only IDs without materializing entry or note payloads. */
+  queryIds?(query?: DecisionQuery): readonly DecisionId[];
   /** Optional on older/custom logs. Native SQLite reads only bounded counters. */
   queryVolume?(query?: DecisionQuery): readonly DecisionVolumeEntry[];
 }

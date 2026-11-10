@@ -148,7 +148,10 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
                 throw new JudgmentError('invalid-response', 'System One returned an invalid result envelope');
               }
               try { checkAnswers(questions, result.answers, requestId); }
-              catch { throw new JudgmentError('invalid-response', 'System One returned answers that do not match the requested questions'); }
+              catch (error) {
+                if (!(error instanceof JudgmentError) || error.kind !== 'invalid-response') throw error;
+                throw new JudgmentError('invalid-response', 'System One returned answers that do not match the requested questions');
+              }
               if (!acceptsBackendModel(target.endpoint, targetModel, result.model)) throw new JudgmentError('invalid-response', 'the decision model does not match this configured target or its declared alias');
               const attempt: JudgmentAttempt = {
                 attempt: attemptCount, endpointIndex, endpointKind: target.endpoint.kind, requestedModel: targetModel, dispatched,
@@ -166,7 +169,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               const last = toJudgmentError(failure);
               lastFailure = last;
               if (last.kind === 'invalid-response') malformedFailure = last;
-              requestId = safeId(last.requestId) ?? requestId;
+              requestId = last.kind === 'internal' ? undefined : safeId(last.requestId) ?? requestId;
               remember({
                 attempt: attemptCount, endpointIndex, endpointKind: target.endpoint.kind, requestedModel: targetModel, dispatched,
                 latencyMs: performance.now() - attemptStarted, outcome: last.kind,
@@ -176,7 +179,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               // Exact server tokenization can exceed the character estimate.
               // Retry the complete input on the same endpoint in long-context
               // mode, retaining this refusal and rechecking owner authority.
-              if (!contextUpgrade && headers === undefined && judgmentAdapter(target.endpoint) === 'system-one' && needsContextUpgrade(failure)) {
+              if (last.kind !== 'internal' && !contextUpgrade && headers === undefined && judgmentAdapter(target.endpoint) === 'system-one' && needsContextUpgrade(failure)) {
                 headers = { 'TypeSafe-Danger-Zone-Long-Context': 'true' };
                 contextUpgrade = true;
                 continue;
@@ -184,7 +187,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               // Host admission failures run outside this catch. A valid semantic
               // refusal or abstention is final; HTTP/config/response failures
               // belong to this target and may advance to another configured model.
-              if (last.kind === 'aborted' || failure instanceof JudgmentError && last.kind === 'rejected') throw last;
+              if (last.kind === 'internal' || last.kind === 'aborted' || failure instanceof JudgmentError && last.kind === 'rejected') throw last;
               if (failure instanceof APIError && (failure.headers.has('retry-after') || failure.headers.has('retry-after-ms'))) {
                 cooldowns[endpointIndex] = Date.now() + retryDelay(failure, 0, policy);
               }
@@ -232,7 +235,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
       } catch (error) {
         const failure = toJudgmentError(error);
         // Do not retain upstream causes, bodies, headers, URLs or API keys in a public error/log.
-        const requestId = safeId(failure.requestId) ?? attempts.at(-1)?.requestId;
+        const requestId = failure.kind === 'internal' ? undefined : safeId(failure.requestId) ?? attempts.at(-1)?.requestId;
         if (failure instanceof JudgmentContextLimitError) throw new JudgmentContextLimitError({
           ...(requestId ? { requestId } : {}), lineage: lineage(),
         });

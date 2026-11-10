@@ -67,6 +67,7 @@ const FAILURE_MESSAGES: Readonly<Record<JudgmentErrorKind, string>> = {
   unavailable: 'No decision models are currently available. Check API keys, endpoint addresses, model names and local model services, then retry. The operation has stopped.',
   aborted: 'the judgment call was cancelled',
   'invalid-response': 'the judgment provider returned an invalid response',
+  internal: 'The decision client failed internally. The operation has stopped.',
   unrecorded: 'the decision log could not record this judgment',
 };
 const failureKind = (value: unknown): value is JudgmentErrorKind =>
@@ -130,10 +131,10 @@ function optional<T>(read: () => T): T | undefined {
 function asFailure(error: unknown, overrideKind?: JudgmentErrorKind): JudgmentError {
   const source = optional(() => error instanceof JudgmentError ? error : undefined);
   const rawKind = optional(() => source?.kind);
-  const kind = overrideKind ?? (failureKind(rawKind) ? rawKind : 'unavailable');
-  const rawStatus = optional(() => source?.status);
-  const status = statusCode(rawStatus) ? rawStatus : undefined;
-  const requestId = optional(() => identifier(source?.requestId));
+  const kind = overrideKind ?? (failureKind(rawKind) ? rawKind : 'internal');
+  const rawStatus = kind === 'internal' ? undefined : optional(() => source?.status);
+  const status = kind !== 'internal' && statusCode(rawStatus) ? rawStatus : undefined;
+  const requestId = kind === 'internal' ? undefined : optional(() => identifier(source?.requestId));
   const lineage = optional(() => projectLineage(source?.lineage));
   if (kind === 'rejected' && status === 400 && optional(() => source instanceof JudgmentContextLimitError)) {
     return new JudgmentContextLimitError({

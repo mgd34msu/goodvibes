@@ -5,7 +5,7 @@ export type WebuiReadResult<T> =
   | { readonly status: 'ready'; readonly value: T; readonly basis: 'structured' | 'judgment'; readonly decisionIds?: readonly string[] }
   | { readonly status: 'uncertain'; readonly reason: 'unsettled' | 'conflicting-evidence'; readonly outcome: Exclude<Outcome, 'act'> }
   | { readonly status: 'held'; readonly reason: 'private-input' | 'unsafe-input' | 'unsupported-input' | 'budget' }
-  | { readonly status: 'unavailable'; readonly reason: 'unconfigured' | 'offline' | 'timeout' | 'aborted' | 'stale' | 'invalid-response' };
+  | { readonly status: 'unavailable'; readonly reason: 'unconfigured' | 'offline' | 'timeout' | 'aborted' | 'stale' | 'invalid-response' | 'internal' };
 
 export interface WebuiReaderOptions { readonly signal?: AbortSignal }
 

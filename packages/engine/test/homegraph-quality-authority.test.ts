@@ -1,3 +1,4 @@
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import * as qualityFingerprint from '../platform/src/platform/knowledge/home-graph/quality/fingerprint.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
@@ -68,7 +69,7 @@ describe('Home Graph whole-pass quality authority', () => {
   test('later uncertainty, unavailable, protected input or cancellation leaves every old issue byte-identical', async () => {
     for (const mode of ['uncertain', 'unavailable', 'protected', 'cancelled', 'missing'] as const) {
       const { store, node, run, snapshot } = await fixture(); readings(); await run(); const fake = readings(0.01, 0.5); const controller = new AbortController();
-      if (mode === 'unavailable') installJudgmentPort({ ...fake.port, ask: async () => { throw new Error('offline'); } });
+      if (mode === 'unavailable') installJudgmentPort({ ...fake.port, ask: async () => { throw new JudgmentError('unavailable', 'offline'); } });
       if (mode === 'missing') installJudgmentPort(undefined);
       if (mode === 'protected') await seedHomeAssistantObservation(store, { ...node, summary: 'Authorization: Bearer synthetic' });
       if (mode === 'cancelled') installJudgmentPort({ ...fake.port, async ask(request) { const result = await fake.port.ask(request); controller.abort(); return result; } });

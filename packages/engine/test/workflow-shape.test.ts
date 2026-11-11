@@ -66,7 +66,7 @@ type JobResult = 'success' | 'failure' | 'cancelled' | 'skipped';
 
 /** Evaluate the boolean/comparison subset used by the publication guards. */
 function permitsPublication(job: Job, results: Record<string, JobResult>, event: string, mode = 'release', publishNpm = true,
-  release = { ref: 'refs/heads/main', armed: false }): boolean {
+  release: { ref: string; armed: boolean; toolingSha?: string; payloadSha?: string } = { ref: 'refs/heads/main', armed: false }): boolean {
   const condition = String(job.if ?? 'true');
   const status = {
     always: true,
@@ -77,6 +77,10 @@ function permitsPublication(job: Job, results: Record<string, JobResult>, event:
   const hasStatus = /\b(?:always|success|failure|cancelled)\s*\(\)/.test(condition);
   const expression = condition
     .replace(/\b(always|success|failure|cancelled)\s*\(\)/g, (_, name: keyof typeof status) => String(status[name]))
+    .replace(/\bgithub\.sha\s*(==|!=)\s*needs\.verify-tag-version\.outputs\.sha\b/g, (_, operator: string) => {
+      const equal = (release.toolingSha ?? 'same-source') === (release.payloadSha ?? 'same-source');
+      return String(operator === '==' ? equal : !equal);
+    })
     .replace(/\b(github\.event_name|github\.ref|github\.event\.inputs\.mode|vars\.PUBLISH_NPM|vars\.RELEASE_ARMED|needs\.([\w-]+)\.result)\s*(==|!=)\s*'([^']*)'/g,
       (_, field: string, dependency: string | undefined, operator: string, expected: string) => {
         const values: Record<string, string> = { 'github.event_name': event, 'github.ref': release.ref,
@@ -975,6 +979,7 @@ describe('release.yml: by-reference release', () => {
     for (const [target, prerequisite] of [
       ['publish-npm', 'verify-tag-version'],
       ['publish-npm', 'release-verify'],
+      ['publish-npm', 'staged-install-acceptance'],
       ['prepare-native-assets', 'verify-tag-version'],
       ['prepare-native-assets', 'release-verify'],
       ['prepare-native-assets', 'complete-suite-assets'],
@@ -1002,7 +1007,7 @@ describe('release.yml: by-reference release', () => {
     for (const event of ['push', 'workflow_dispatch']) {
       expect(permitsPublication(npm, { 'verify-tag-version': 'success', 'release-verify': 'success' }, event, 'release', false)).toBe(false);
       expect(permitsPublication(preparation, { 'verify-tag-version': 'success', 'release-verify': 'success', 'complete-suite-assets': 'success' }, event, 'release', false)).toBe(true);
-      const results: Record<string, JobResult> = { 'verify-tag-version': 'success', 'publish-npm': 'skipped', 'prepare-native-assets': 'success', 'staged-install-acceptance': 'success' };
+      const results: Record<string, JobResult> = { 'verify-tag-version': 'success', 'release-verify-tooling': 'skipped', 'publish-npm': 'skipped', 'prepare-native-assets': 'success', 'staged-install-acceptance': 'success' };
       expect(permitsPublication(release, results, event, 'release', false)).toBe(true);
       expect(permitsPublication(release, results, event, 'release', true)).toBe(false);
       results['publish-npm'] = 'failure';
@@ -1032,8 +1037,54 @@ describe('release.yml: by-reference release', () => {
     for (const result of ['failure', 'cancelled', 'skipped'] as const) {
       expect(permitsPublication(release, { ...ready, 'staged-install-acceptance': result }, 'push', 'release', false)).toBe(false);
     }
-    expect(prerequisites(rel, 'published-install-acceptance').has('github-release')).toBe(true);
-    expect(prerequisites(rel, 'github-release').has('published-install-acceptance')).toBe(false);
+    expect(rel.jobs!['published-install-acceptance']).toBeUndefined();
+    for (const [, job] of jobs(rel)) expect(needsOf(job)).not.toContain('github-release');
+    expect(prerequisites(rel, 'github-release').has('staged-install-acceptance')).toBe(true);
+  });
+
+  test('distinct tooling needs its own exact successful push CI before either publication job', () => {
+    const verify = rel.jobs!['release-verify-tooling']!;
+    expect(verify.uses).toBe('./.github/workflows/reusable-release-verify.yml');
+    expect(needsOf(verify)).toEqual(['verify-tag-version']);
+    expect(verify.with).toEqual({ sha: '${{ github.sha }}', workflow: 'ci.yml', event: 'push', 'toolchain-source': 'workspace' });
+    expect(verify.permissions).toEqual({ contents: 'read', actions: 'read', checks: 'read' });
+    const same = { ref: 'refs/tags/v3.1.3', armed: false, toolingSha: 'a', payloadSha: 'a' };
+    const distinct = { ...same, ref: 'refs/heads/main', toolingSha: 'b' };
+    for (const event of ['push', 'workflow_dispatch']) {
+      expect(permitsPublication(verify, { 'verify-tag-version': 'success' }, event, 'release', true, same)).toBe(false);
+      expect(permitsPublication(verify, { 'verify-tag-version': 'success' }, event, 'release', true, distinct)).toBe(true);
+      for (const result of ['failure', 'cancelled', 'skipped'] as const) {
+        expect(permitsPublication(verify, { 'verify-tag-version': result }, event, 'release', true, distinct)).toBe(false);
+      }
+      for (const name of ['publish-npm', 'github-release']) {
+        const job = rel.jobs![name]!;
+        expect(needsOf(job)).toContain('release-verify-tooling');
+        expect(needsOf(job)).toContain('staged-install-acceptance');
+        const ready: Record<string, JobResult> = Object.fromEntries(needsOf(job).map(dependency => [dependency, 'success']));
+        expect(permitsPublication(job, ready, event, 'release', true, distinct), name).toBe(true);
+        for (const result of ['failure', 'cancelled', 'skipped'] as const) {
+          expect(permitsPublication(job, { ...ready, 'release-verify-tooling': result }, event, 'release', true, distinct), `${name}:${result}`).toBe(false);
+        }
+        expect(permitsPublication(job, { ...ready, 'release-verify-tooling': 'skipped' }, event, 'release', true, same), name).toBe(true);
+        for (const result of ['failure', 'cancelled'] as const) {
+          expect(permitsPublication(job, { ...ready, 'release-verify-tooling': result }, event, 'release', true, same), `${name}:same:${result}`).toBe(false);
+        }
+        if (name === 'github-release') {
+          expect(permitsPublication(job, { ...ready, 'publish-npm': 'skipped' }, event, 'release', false, distinct)).toBe(true);
+        }
+      }
+    }
+    expect(permitsPublication(verify, { 'verify-tag-version': 'success' }, 'workflow_dispatch', 'dry-run', true, distinct)).toBe(false);
+  });
+
+  test('publication is terminal and standalone public acceptance remains explicitly available', () => {
+    expect(Object.keys(rel.jobs!).at(-1)).toBe('github-release');
+    expect(jobs(rel).filter(([, job]) => job.uses === './.github/workflows/reusable-published-install-acceptance.yml')).toEqual([]);
+    for (const [, job] of jobs(rel)) expect(needsOf(job)).not.toContain('github-release');
+    expect(prerequisites(rel, 'github-release').has('release-verify')).toBe(true);
+    expect(prerequisites(rel, 'github-release').has('release-verify-tooling')).toBe(true);
+    expect(prerequisites(rel, 'github-release').has('staged-install-acceptance')).toBe(true);
+    expect(load('reusable-published-install-acceptance.yml').on).toHaveProperty('workflow_dispatch');
   });
 
   test('concurrency never cancels an in-progress release', () => {

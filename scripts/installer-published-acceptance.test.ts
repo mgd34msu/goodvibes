@@ -658,7 +658,7 @@ test('public producer proof reads only real program sidecars, never archive-only
   }
 });
 
-test('both actual publication workflows await one shared four-native-target acceptance matrix', () => {
+test('release publication is last while explicitly requested public acceptance retains its native matrix', () => {
   const object = (value: unknown): Record<string, unknown> => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected workflow mapping.');
     return value as Record<string, unknown>;
@@ -666,18 +666,21 @@ test('both actual publication workflows await one shared four-native-target acce
   const workflow = (name: string) => object(Bun.YAML.parse(readFileSync(resolve(import.meta.dir, '../.github/workflows', name), 'utf8')));
   const release = object(workflow('release.yml').jobs), suite = object(workflow('suite-release-assets.yml').jobs);
   const reusable = './.github/workflows/reusable-published-install-acceptance.yml';
-  const fresh = object(release['published-install-acceptance']), existing = object(suite['published-install-acceptance']);
-  expect(fresh.uses).toBe(reusable); expect(existing.uses).toBe(reusable);
-  expect(fresh.needs).toEqual(['verify-tag-version', 'github-release']); expect(existing.needs).toBe('collect');
-  // An explicit status check avoids implicit success() propagating a skipped
-  // publish-npm ancestor; both required direct jobs must still have succeeded.
-  expect(String(fresh.if).split(/\s*&&\s*/)).toEqual([
-    '!cancelled()', "needs.verify-tag-version.result == 'success'", "needs.github-release.result == 'success'",
-  ]);
+  const staged = object(release['staged-install-acceptance']), publisher = object(release['github-release']);
+  const existing = object(suite['published-install-acceptance']);
+  expect(staged.uses).toBe('./.github/workflows/reusable-staged-install-acceptance.yml');
+  expect(existing.uses).toBe(reusable); expect(existing.needs).toBe('collect');
+  expect(release['published-install-acceptance']).toBeUndefined();
+  expect(publisher.needs).toContain('staged-install-acceptance');
+  expect(publisher.needs).toContain('release-verify-tooling');
+  expect(String(publisher.if)).toContain("needs.staged-install-acceptance.result == 'success'");
+  for (const job of Object.values(release).map(object)) {
+    expect(Array.isArray(job.needs) ? job.needs : [job.needs]).not.toContain('github-release');
+  }
   expect(existing.if).toBe("inputs.publish_existing && inputs.candidate-source == '' && needs.collect.result == 'success'");
   expect(object(existing.with).source).toBe('${{ needs.collect.outputs.source }}');
   expect(object(object(suite.collect).outputs).source).toBe('${{ steps.admit.outputs.source }}');
-  for (const caller of [fresh, existing]) expect(object(caller.with)['tooling-sha']).toBe('${{ github.sha }}');
+  for (const caller of [staged, existing]) expect(object(caller.with)['tooling-sha']).toBe('${{ github.sha }}');
   const definition = workflow('reusable-published-install-acceptance.yml');
   for (const trigger of ['workflow_call', 'workflow_dispatch']) {
     const inputs = object(object(object(definition.on)[trigger]).inputs);

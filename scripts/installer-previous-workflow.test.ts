@@ -37,7 +37,8 @@ for (const mode of ['staged', 'published'] as const) {
     expect(steps.find(step => String(step.uses).startsWith('oven-sh/setup-bun@'))?.with).toEqual({ 'bun-version': '1.3.14' });
     const invoke = steps.find(step => step.name === 'Observe previous-suite automatic upgrade and complete-cohort rollback')!;
     expect(invoke.env).toEqual({ RELEASE_TAG: '${{ inputs.tag }}', RELEASE_SOURCE: '${{ inputs.source }}', RELEASE_TARGET: '${{ matrix.target }}',
-      PREVIOUS_TAG: '${{ inputs.previous-tag }}', PREVIOUS_SOURCE: '${{ inputs.previous-source }}', CANDIDATE_SOURCE_ROOT: '${{ github.workspace }}/candidate-source' });
+      PREVIOUS_TAG: '${{ inputs.previous-tag }}', PREVIOUS_SOURCE: '${{ inputs.previous-source }}', CANDIDATE_SOURCE_ROOT: '${{ github.workspace }}/candidate-source',
+      GOODVIBES_ACCEPTANCE_METADATA_TOKEN: '${{ secrets.GITHUB_TOKEN }}' });
     expect(invoke.run).toBe(`node scripts/accept-${mode}-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET"${mode === 'staged' ? ' "$RUNNER_TEMP/staged-release-assets"' : ''} upgrade-previous "$PREVIOUS_TAG" "$PREVIOUS_SOURCE"`);
     const commands = steps.map(step => step.run ?? '').join('\n');
     expect(commands).not.toMatch(/scripts\/build\.ts|build:binary|GOODVIBES_HOME/);
@@ -73,9 +74,9 @@ for (const mode of ['staged', 'published'] as const) {
   });
 }
 
-test('new patch release pins the actual previous public suite for both required acceptance stages', () => {
+test('new patch release pins the previous public suite for required prepublication qualification', () => {
   const release = load('release.yml');
-  for (const job of ['staged-install-acceptance', 'published-install-acceptance']) {
+  for (const job of ['staged-install-acceptance']) {
     expect(release.jobs[job]?.with).toMatchObject({
       'previous-tag': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'v3.1.2' || '' }}",
       'previous-source': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.3' && '" + previousSource + "' || '' }}",
@@ -83,7 +84,9 @@ test('new patch release pins the actual previous public suite for both required 
   }
   expect(release.jobs['github-release']!.needs).toContain('staged-install-acceptance');
   expect(release.jobs['github-release']!.if).toContain("needs.staged-install-acceptance.result == 'success'");
-  expect(release.jobs['published-install-acceptance']!.needs).toContain('github-release');
+  expect(release.jobs['published-install-acceptance']).toBeUndefined();
+  for (const job of Object.values(release.jobs)) expect(job.needs ?? []).not.toContain('github-release');
+  expect(release.jobs['github-release']!.needs).toContain('release-verify-tooling');
 });
 
 test('manual suite preparation requires an explicit tag and defaults to no public mutation', () => {

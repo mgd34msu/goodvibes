@@ -625,15 +625,19 @@ function matchesNativeFrameProbe(raw: NativeSqlDatabase, plans: NativeProbePlans
   };
   let recognized = false;
   try {
-    assertDependencies();
     if (comparison.execution.kind === 'native') {
+      // Both private executables check these same dependencies at entry and
+      // after their final reset before returning a boolean. Do not repeat a
+      // complete descriptor walk with no intervening callback or native call.
       const value = comparison.execution.executable.read(assertDependencies);
-      assertDependencies();
+      // Early clear/reset refusals can bypass that final inner fence.
+      if (value === undefined) assertDependencies();
       recognized = value !== undefined;
       return value;
     }
     // Unknown birth/registry/decoder shapes retain the genuine lexical native
     // implementation, which creates and frees its statement before returning.
+    assertDependencies();
     const result: ReturnType<NativeSqlDatabase['exec']> = nativeApply(comparison.execution.execute, raw, [comparison.sql, undefined, { useBigInt: true }]);
     assertDependencies();
     const packet = result[0], row = packet?.values[0];

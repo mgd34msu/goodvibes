@@ -444,6 +444,7 @@ jobs:
       artifact-name: staged-release-assets
       use-existing-checksums: true
       assets-glob: dist/*
+      notes-file: docs/releases/{version}.md
       changelog-path: packages/engine/CHANGELOG.md
       toolchain-source: workspace
 

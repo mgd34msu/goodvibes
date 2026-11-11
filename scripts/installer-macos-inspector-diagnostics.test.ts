@@ -42,6 +42,20 @@ test('module markers choose the actual preceding compiled owner without claiming
   });
 });
 
+test('real Bun compile entrypoint URLs and literal local file URLs admit only known virtual programs', () => {
+  for (const url of ['/$bunfs/root/entrypoint.js', 'file:///$bunfs/root/entrypoint.js',
+    'file:///$bunfs/root/goodvibes-daemon-macos-arm64', '/$bunfs/root/native/goodvibes-daemon-macos-x64',
+    'file:///$bunfs/root/products/daemon/native/goodvibes-daemon-macos-arm64']) {
+    expect(compiledDiagnosticFrame(frame(), { url }, source)).toMatchObject({ source: 'compiled', function: 'retainedFile',
+      module: 'src/cli/native-sqlite-runtime.ts', staticThrow: 'Native SQLite companion changed before database construction' });
+  }
+  for (const url of ['file:///tmp/entrypoint.js', 'file://foreign/$bunfs/root/entrypoint.js',
+    '/$bunfs/root/other/entrypoint.js', '/$bunfs/root/native/../entrypoint.js',
+    'file:///$bunfs/root/entrypoint.js?private=value', 'file:///$bunfs/root/%65ntrypoint.js']) {
+    expect(compiledDiagnosticFrame(frame(), { url }, source)).toEqual({ function: 'withheld', source: 'other', line: 3, column: 42 });
+  }
+});
+
 test('runtime URLs, locals, unknown names and source text remain absent from public frame records', () => {
   const untrusted = compiledDiagnosticFrame(frame(3, secret), { url: `/Users/${secret}/runtime.ts` }, source);
   expect(untrusted).toEqual({ function: 'withheld', source: 'other', line: 3, column: 42 });
@@ -88,10 +102,10 @@ test('ordinary Node drives the actual compiled inspector through rolling caught 
 if (process.env.FIXTURE_MODE === 'abort') {
   setInterval(() => {}, 1_000);
 } else {
-  for (let index = 0; index < 160; index++) {
+  for (let index = 0; index < (process.env.FIXTURE_MODE === 'zero' ? 1 : 160); index++) {
     try { retainedFile(); } catch {}
   }
-  process.exitCode = 17;
+  process.exitCode = process.env.FIXTURE_MODE === 'zero' ? 0 : 17;
 }
 `);
     const daemon = join(root, 'goodvibes-daemon');
@@ -101,7 +115,7 @@ if (process.env.FIXTURE_MODE === 'abort') {
     const controllerUrl = pathToFileURL(resolve(import.meta.dir, 'diagnose-macos-native.mjs')).href;
     const driver = join(root, 'driver.mjs');
     writeFileSync(driver, `import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { inspectCompiledNativeDiagnosticAttempt } from ${JSON.stringify(controllerUrl)};
 assert.equal(process.versions.bun, undefined);
 assert.equal(typeof WebSocket, 'function');
@@ -134,6 +148,16 @@ assert(exceptions.some(record => record.frames.some(frame => frame.module === 's
   && frame.function === 'retainedFile' && frame.staticThrow === 'Original native SQLite source changed')));
 assert(!records.some(record => record.event === 'window-ended' || record.event === 'protocol-failed'));
 groupDrained(normalPid);
+// An explicit successful completion must detach as well, without mistaking a
+// live application's initial exitCode for completion (checked below).
+unlinkSync(normalPid); records.length = 0;
+await inspectCompiledNativeDiagnosticAttempt(daemon, home,
+  { ...process.env, FIXTURE_MODE: 'zero' }, 'version', record => { retainStarted(record, normalPid); records.push(record); });
+const zero = records.find(record => record.event === 'finished');
+assert.equal(zero.exitCode, 0); assert.equal(zero.signal, null); assert.equal(zero.termination, 'observed-exit');
+assert(records.some(record => record.event === 'exit-intent' && record.exitCode === 0));
+assert(!records.some(record => record.event === 'window-ended' || record.event === 'protocol-failed'));
+groupDrained(normalPid);
 const aborted = new AbortController(), reason = new Error('Original inert inspector cancellation');
 let abortTimer;
 records.length = 0;
@@ -142,13 +166,14 @@ try {
     { ...process.env, FIXTURE_MODE: 'abort' }, 'default', record => {
       retainStarted(record, abortPid);
       records.push(record);
-      if (record.event === 'attached') abortTimer = setTimeout(() => aborted.abort(reason), 100);
+      if (record.event === 'attached') abortTimer = setTimeout(() => aborted.abort(reason), 800);
     }, aborted.signal), error => error === reason);
 } finally { clearTimeout(abortTimer); }
 assert(records.some(record => record.event === 'finished' && record.termination === 'cancelled'));
+assert(!records.some(record => record.event === 'exit-intent'));
 assert.equal(records.find(record => record.event === 'finished').pid, Number(readFileSync(abortPid, 'utf8')));
 groupDrained(abortPid);
-console.log(JSON.stringify({ naturalExit: 17, retainedExceptions: 128, observedExceptions: finished.pause, cancellation: 'original-reason', groups: 'drained' }));
+console.log(JSON.stringify({ naturalExit: 17, naturalZero: true, retainedExceptions: 128, observedExceptions: finished.pause, cancellation: 'original-reason', groups: 'drained' }));
 `);
     // This is deliberately ordinary Node, matching the controller's production
     // WebSocket implementation. A leaked client socket prevents natural exit.
@@ -157,7 +182,7 @@ console.log(JSON.stringify({ naturalExit: 17, retainedExceptions: 128, observedE
     expect(observed.status, observed.stderr).toBe(0);
     expect(observed.signal).toBe(null);
     const proof = JSON.parse(observed.stdout.trim());
-    expect(proof).toMatchObject({ naturalExit: 17, retainedExceptions: 128, cancellation: 'original-reason', groups: 'drained' });
+    expect(proof).toMatchObject({ naturalExit: 17, naturalZero: true, retainedExceptions: 128, cancellation: 'original-reason', groups: 'drained' });
     expect(proof.observedExceptions).toBeGreaterThanOrEqual(160);
   } finally {
     const retired = await Promise.allSettled([retireFixture(normalPid), retireFixture(abortPid)]);

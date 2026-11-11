@@ -12,7 +12,8 @@ import { join, resolve } from 'node:path';
 import { boundedNativeProcessClose, drainNativeProcessGroup } from '../products/daemon/scripts/native-execution-process.mjs';
 
 const retainedExceptions = 128, retainedFrames = 12;
-const compiledUrl = /^\/\$bunfs\/root\/goodvibes-daemon(?:-(?:macos|darwin)-(?:x64|arm64))?$/;
+const compiledPath = /^\/\$bunfs\/root\/(?:entrypoint\.js|(?:(?:native|products\/daemon\/native)\/)?goodvibes-daemon(?:-(?:macos|darwin)-(?:x64|arm64))?)$/;
+const maxSourceLength = 64 * 1024 * 1024, maxProtocolLength = 128 * 1024 * 1024;
 const publicModule = /^(?:packages|products|node_modules|src)\/[A-Za-z0-9_@.+/-]+\.(?:[cm]?[jt]sx?)$/;
 const publicFunction = /^[A-Za-z_$][A-Za-z0-9_$]*(?:[ .][A-Za-z_$][A-Za-z0-9_$]*)*$/;
 const sourceIndexBrand = Symbol('private compiled source index');
@@ -54,16 +55,42 @@ const appendFailure = (failures, error) => {
   for (const value of error instanceof AggregateError ? error.errors : [error]) if (!failures.includes(value)) failures.push(value);
 };
 
+function compiledScriptKind(url) {
+  if (typeof url !== 'string') return 'other';
+  // Accept only literal local compiler URLs. Never normalize traversal, URL
+  // authorities, escapes, query strings or arbitrary filesystem paths into one.
+  if (compiledPath.test(url)) return 'compiled-path';
+  if (url.startsWith('file:///') && compiledPath.test(url.slice('file://'.length))) return 'compiled-file-url';
+  return 'other';
+}
+function scriptKind(url) {
+  const compiled = compiledScriptKind(url);
+  if (compiled !== 'other') return compiled;
+  if (typeof url !== 'string') return 'other';
+  if (url.startsWith('file:///$bunfs/')) return 'unrecognized-file-virtual';
+  if (url.startsWith('/$bunfs/')) return 'unrecognized-virtual';
+  if (url.startsWith('bun:') || url.startsWith('node:')) return 'builtin';
+  return 'other';
+}
+
 function indexCompiledSource(text) {
-  if (typeof text !== 'string' || text.length > 64 * 1024 * 1024) return undefined;
-  const lines = text.split('\n'), markers = [];
-  for (let index = 0; index < lines.length; index++) {
-    const marker = /^\/\/ ((?:\.\.\/)*(?:packages|products|node_modules|src)\/[^\r\n]+)$/.exec(lines[index]);
-    if (!marker) continue;
-    const module = marker[1].replace(/^(?:\.\.\/)+/, '');
-    if (module.length <= 240 && publicModule.test(module) && !module.split('/').includes('..')) markers.push({ line: index, module });
+  if (typeof text !== 'string' || text.length > maxSourceLength) return undefined;
+  // A real bundle has over a million lines. Keep compact offsets rather than
+  // allocating a second array of a million source strings on every script.
+  const starts = [], markers = [];
+  let start = 0, line = 0;
+  while (start <= text.length) {
+    starts.push(start);
+    const newline = text.indexOf('\n', start), end = newline < 0 ? text.length : newline;
+    const marker = /^\/\/ ((?:\.\.\/)*(?:packages|products|node_modules|src)\/[^\r\n]+)$/.exec(text.slice(start, end));
+    if (marker) {
+      const module = marker[1].replace(/^(?:\.\.\/)+/, '');
+      if (module.length <= 240 && publicModule.test(module) && !module.split('/').includes('..')) markers.push({ line, module });
+    }
+    if (newline < 0) break;
+    start = newline + 1; line++;
   }
-  return { [sourceIndexBrand]: true, text, lines, markers, names: new Map() };
+  return { [sourceIndexBrand]: true, text, starts: Uint32Array.from(starts), markers, names: new Map() };
 }
 
 /** Inspect only static compiler module comments and the current source line.
@@ -72,7 +99,7 @@ function indexCompiledSource(text) {
 export function compiledDiagnosticFrame(frame, script, source) {
   const line = coordinate(frame?.location?.lineNumber), column = coordinate(frame?.location?.columnNumber);
   const index = source?.[sourceIndexBrand] ? source : indexCompiledSource(source);
-  if (!compiledUrl.test(script?.url ?? '') || !index) {
+  if (compiledScriptKind(script?.url) === 'other' || !index) {
     return { function: 'withheld', source: 'other', line, column };
   }
   const name = frame?.functionName;
@@ -82,15 +109,16 @@ export function compiledDiagnosticFrame(frame, script, source) {
   const functionName = name === 'module code' || name === 'global code' ? name
     : index.names.get(name) === true ? name : 'withheld';
   const result = { function: functionName, source: 'compiled', line, column };
-  const { lines, markers } = index;
-  if (line >= lines.length) return result;
+  const { starts, markers } = index;
+  if (line >= starts.length) return result;
   let low = 0, high = markers.length - 1, selected = -1;
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
     if (markers[middle].line <= line) { selected = middle; low = middle + 1; } else high = middle - 1;
   }
   if (selected >= 0) { result.module = markers[selected].module; result.moduleOffset = line - markers[selected].line; }
-  const literals = [...lines[line].matchAll(/\bthrow new (?:Error|TypeError|RangeError)\((['"])([^'"\\\r\n]*)\1\)/g)];
+  const sourceLine = index.text.slice(starts[line], line + 1 < starts.length ? starts[line + 1] - 1 : index.text.length);
+  const literals = [...sourceLine.matchAll(/\bthrow new (?:Error|TypeError|RangeError)\((['"])([^'"\\\r\n]*)\1\)/g)];
   if (literals.length === 1 && staticThrows.has(literals[0][2])) result.staticThrow = literals[0][2];
   return result;
 }
@@ -118,7 +146,7 @@ async function inspectAttempt(daemon, home, env, attempt, emit, signal) {
   interrupted.catch(() => {});
   const scripts = new Map(), sources = new Map(), exceptions = [];
   let socket, nextId = 0, outputBytes = 0, stderrPrefix = '', lineRemainder = '', pauseCount = 0, attached = false, ended = false, detachRequested = false;
-  let exitPoll, observedRepair = false, socketClosed = Promise.resolve();
+  let exitPoll, observedRepair = false, socketClosed = Promise.resolve(), describedScripts = 0;
   const observedPhases = new Set();
   let tasks = Promise.resolve();
   const pending = new Map();
@@ -144,17 +172,23 @@ async function inspectAttempt(daemon, home, env, attempt, emit, signal) {
       const observation = await request('Runtime.evaluate', { expression: 'process.exitCode', returnByValue: true,
         doNotPauseOnExceptionsAndMuteConsole: true, generatePreview: false });
       const value = observation?.result;
-      if (!observation.wasThrown && value?.type === 'number' && Number.isSafeInteger(value.value) && value.value > 0 && value.value <= 255) {
+      if (!observation.wasThrown && value?.type === 'number' && Number.isSafeInteger(value.value) && value.value >= 0 && value.value <= 255) {
         emit({ phase: 'inspector', event: 'exit-intent', attempt, exitCode: value.value }); detach(); return;
       }
     } catch { if (!ended && !detachRequested) fail(); return; }
     if (!ended && !detachRequested) exitPoll = setTimeout(pollExit, 250);
   };
   const sourceFor = async scriptId => {
-    if (!compiledUrl.test(scripts.get(scriptId)?.url ?? '')) return undefined;
+    const script = scripts.get(scriptId);
+    if (compiledScriptKind(script?.url) === 'other') return undefined;
     if (!sources.has(scriptId)) {
       if (sources.size >= 8) return undefined;
-      sources.set(scriptId, request('Debugger.getScriptSource', { scriptId }).then(result => indexCompiledSource(result.scriptSource)));
+      sources.set(scriptId, request('Debugger.getScriptSource', { scriptId }).then(result => {
+        const source = result.scriptSource, indexed = indexCompiledSource(source);
+        emit({ phase: 'inspector', event: 'source-index', attempt, scriptKind: compiledScriptKind(script.url),
+          sourceLength: typeof source === 'string' ? source.length : 0, indexed: indexed !== undefined });
+        return indexed;
+      }));
     }
     return sources.get(scriptId);
   };
@@ -181,8 +215,9 @@ async function inspectAttempt(daemon, home, env, attempt, emit, signal) {
     socketClosed = new Promise(resolveClose => { socket.addEventListener('close', resolveClose, { once: true }); });
     socket.addEventListener('error', () => { if (!ended && !detachRequested) fail(); });
     socket.addEventListener('message', event => {
+      try {
       if (ended) return;
-      if (typeof event.data !== 'string' || event.data.length > 128 * 1024 * 1024) { fail(); return; }
+      if (typeof event.data !== 'string' || event.data.length > maxProtocolLength) { fail(); return; }
       let message;
       try { message = JSON.parse(event.data); } catch { fail(); return; }
       if (Number.isSafeInteger(message.id)) {
@@ -192,7 +227,14 @@ async function inspectAttempt(daemon, home, env, attempt, emit, signal) {
         else waiter.yes(message.result ?? {});
       } else if (message.method === 'Debugger.scriptParsed') {
         const script = message.params;
-        if (typeof script?.scriptId === 'string' && scripts.size < 4096) scripts.set(script.scriptId, { url: script.url });
+        if (typeof script?.scriptId === 'string' && scripts.size < 4096) {
+          const url = compiledScriptKind(script.url) !== 'other' ? script.url
+            : compiledScriptKind(script.sourceURL) !== 'other' ? script.sourceURL : script.url;
+          scripts.set(script.scriptId, { url });
+          if (describedScripts < 16) {
+            describedScripts++; emit({ phase: 'inspector', event: 'script-observed', attempt, scriptKind: scriptKind(url) });
+          }
+        }
       } else if (message.method === 'Debugger.paused') {
         // Never retain the protocol's exception data, scopes, this values or
         // asynchronous runtime objects; only static call-frame coordinates.
@@ -201,6 +243,7 @@ async function inspectAttempt(daemon, home, env, attempt, emit, signal) {
             .map(frame => ({ functionName: frame.functionName, location: frame.location })) };
         tasks = tasks.then(() => paused(parameters)).catch(fail);
       }
+      } catch { fail(); }
     });
     socket.addEventListener('open', () => {
       tasks = tasks.then(async () => {
@@ -313,26 +356,40 @@ export async function diagnoseMacosNative({ daemon, home, env, stopService, onSa
   const homeOwner = lstatSync(home, { bigint: true });
   const fd = openSync(daemon, constants.O_RDONLY | constants.O_NOFOLLOW);
   let original;
-  const assertCurrent = () => {
+  const assertCurrent = checkpoint => {
+    onSafeEvidence({ phase: 'inspector', event: 'retained-file-recheck', checkpoint });
     const currentHome = lstatSync(home, { bigint: true }), current = lstatSync(daemon, { bigint: true });
+    const descriptor = fstatSync(fd, { bigint: true }), changed = [];
+    if (!currentHome.isDirectory() || currentHome.isSymbolicLink()) changed.push('home-type');
+    for (const field of ['dev', 'ino', 'uid']) if (currentHome[field] !== homeOwner[field]) changed.push(`home-${field}`);
+    if (!original.isFile() || !current.isFile() || current.isSymbolicLink()) changed.push('payload-type');
+    for (const field of ['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs', 'mode', 'uid', 'gid']) {
+      if (descriptor[field] !== original[field]) changed.push(`retained-${field}`);
+      if (current[field] !== original[field]) changed.push(`selected-${field}`);
+    }
+    if (changed.length) onSafeEvidence({ phase: 'inspector', event: 'owner-retired', checkpoint, changed });
     assert.ok(currentHome.isDirectory() && !currentHome.isSymbolicLink()
       && currentHome.dev === homeOwner.dev && currentHome.ino === homeOwner.ino && currentHome.uid === homeOwner.uid);
     assert.ok(original.isFile() && current.isFile() && !current.isSymbolicLink()
-      && revision(fstatSync(fd, { bigint: true })) === revision(original) && revision(current) === revision(original));
-    assert.equal(realpathSync(daemon), daemon);
+      && revision(descriptor) === revision(original) && revision(current) === revision(original));
+    onSafeEvidence({ phase: 'inspector', event: 'retained-path-recheck', checkpoint });
+    const selectedPath = realpathSync(daemon);
+    if (selectedPath !== daemon) onSafeEvidence({ phase: 'inspector', event: 'owner-retired', checkpoint, changed: ['selected-path'] });
+    assert.equal(selectedPath, daemon);
   };
   const failures = [];
   try {
     original = fstatSync(fd, { bigint: true });
-    assertCurrent();
+    assertCurrent('before-version');
     try { await inspectAttempt(daemon, home, env, 'version', onSafeEvidence, signal); } catch (error) { appendFailure(failures, error); }
     signal?.throwIfAborted();
-    assertCurrent();
-    await stopService(signal); signal?.throwIfAborted(); assertCurrent();
+    assertCurrent('after-version');
+    onSafeEvidence({ phase: 'inspector', event: 'service-stop-requested' });
+    await stopService(signal); signal?.throwIfAborted(); assertCurrent('after-service-stop');
     onSafeEvidence({ phase: 'inspector', event: 'service-stopped' });
     try { await inspectAttempt(daemon, home, env, 'default', onSafeEvidence, signal); } catch (error) { appendFailure(failures, error); }
     signal?.throwIfAborted();
-    assertCurrent(); onSafeEvidence({ phase: 'inspector', event: 'payload-retained' });
+    assertCurrent('after-default'); onSafeEvidence({ phase: 'inspector', event: 'payload-retained' });
   } catch (error) { appendFailure(failures, error); }
   finally { try { closeSync(fd); } catch (error) { failures.push(error); } }
   if (failures.length === 1) throw failures[0];

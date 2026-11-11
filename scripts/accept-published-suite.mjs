@@ -620,12 +620,30 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       const records = []; let diagnosticFailure;
       try {
         const { diagnoseMacosNative } = await import('./diagnose-macos-native.mjs');
-        await diagnoseMacosNative({ daemon, home, env, signal, onSafeEvidence: record => { records.push(record); }, stopService: async () => {
-          assertServiceOwned();
-          await runOwnedCommand('launchctl', ['bootout', `gui/${account.uid}/${label}`], { cwd: home, env, timeoutMs: 300_000, signal });
-          assertHome();
-          const stopped = await runOwnedCommand('launchctl', ['print', `gui/${account.uid}/${label}`], { cwd: home, env, timeoutMs: 300_000, signal });
-          assert.notEqual(stopped.code, 0, 'The original native service must retire before foreground diagnosis.');
+        await diagnoseMacosNative({ daemon, home, env, signal, onSafeEvidence: record => { records.push(record); }, stopService: async stopSignal => {
+          const activeSignal = stopSignal ?? signal;
+          let stopCheckpoint = 'ownership';
+          const observeStop = () => { records.push({ phase: 'inspector', event: 'service-stop-checkpoint', checkpoint: stopCheckpoint }); };
+          try {
+            activeSignal?.throwIfAborted(); observeStop(); assertServiceOwned();
+            stopCheckpoint = 'bootout'; observeStop();
+            const bootout = await runOwnedCommand('launchctl', ['bootout', `gui/${account.uid}/${label}`], { cwd: home, env, timeoutMs: 300_000, signal: activeSignal });
+            records.push({ phase: 'inspector', event: 'service-stop-result', checkpoint: stopCheckpoint,
+              exitCode: bootout.code, signal: bootout.exitSignal ?? null });
+            stopCheckpoint = 'home-after-bootout'; observeStop(); assertHome();
+            stopCheckpoint = 'print'; observeStop();
+            const stopped = await runOwnedCommand('launchctl', ['print', `gui/${account.uid}/${label}`], { cwd: home, env, timeoutMs: 300_000, signal: activeSignal });
+            records.push({ phase: 'inspector', event: 'service-stop-result', checkpoint: stopCheckpoint,
+              exitCode: stopped.code, signal: stopped.exitSignal ?? null });
+            stopCheckpoint = 'retirement'; observeStop();
+            assert.notEqual(stopped.code, 0, 'The original native service must retire before foreground diagnosis.');
+            stopCheckpoint = 'retired'; observeStop();
+          } catch (error) {
+            const safe = safeError(error);
+            records.push({ phase: 'inspector', event: 'service-stop-failed', checkpoint: stopCheckpoint,
+              errorName: safe.name, errorCode: safe.code ?? 'unknown' });
+            throw error;
+          }
         } });
       } catch (error) { diagnosticFailure = error; }
       try {

@@ -18,6 +18,9 @@ export interface NativeDiagnosticRecord {
   pause?: number;
   /** Actual owned child PID, for process/crash correlation and bounded cleanup. */
   pid?: number;
+  state?: 'running' | 'notrunning' | 'spawn-scheduled' | 'other';
+  runs?: number;
+  lastExitCode?: number;
   frames?: NativeDiagnosticFrame[];
   exitCode?: number | null;
   signal?: string | null;

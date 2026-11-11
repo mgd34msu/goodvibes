@@ -109,8 +109,16 @@ function buildDefaultDefinition(
   };
 }
 
-function resolveServiceName(configManager: ConfigManager, defaultServiceName = 'daemon'): string {
-  return String(configManager.get('service.serviceName') ?? defaultServiceName).trim() || defaultServiceName;
+function resolveServiceName(configManager: ConfigManager, defaultServiceName?: string): string {
+  const fallback = defaultServiceName ?? 'daemon';
+  // A consumer's platform default may replace the shared schema default, while
+  // every persisted choice and invocation overlay remains the owner's choice.
+  // Minimal embedded config readers without provenance retain prior behavior.
+  if (defaultServiceName !== undefined && typeof configManager.describeConfigKeySource === 'function') {
+    const source = configManager.describeConfigKeySource('service.serviceName');
+    if (source.tier === 'default' && (source.effectiveOrigin === undefined || source.effectiveOrigin === 'default')) return fallback;
+  }
+  return String(configManager.get('service.serviceName') ?? fallback).trim() || fallback;
 }
 
 function resolveLogPath(

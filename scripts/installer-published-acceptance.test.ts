@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { acceptanceFailureRecord, finishAcceptance, waitForAcceptanceReadiness, assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, runHistoricalUpgradeSteps, assertHistoricalRollbackRefusal, type HistoricalUpgradeSteps, type AcceptanceSteps } from './accept-published-suite.mjs';
+import { acceptanceFailureRecord, finishAcceptance, waitForAcceptanceReadiness, waitForNativeServiceRetirement, assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, runHistoricalUpgradeSteps, assertHistoricalRollbackRefusal, type HistoricalUpgradeSteps, type AcceptanceSteps, type NativeServiceRetirementObservation } from './accept-published-suite.mjs';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -181,6 +181,40 @@ test('readiness retries the actual service observation before accepting a cohere
     if (!httpReady) { httpReady = true; throw new Error('HTTP still starting'); }
   }, { timeoutMs: 1000, intervalMs: 1 });
   expect(events).toEqual(['service', 'service', 'status-and-http', 'service', 'status-and-http']);
+});
+
+test('native service retirement waits through actual print exits zero zero then113 and retains only first and final safe observations', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-service-retirement-')); roots.push(root);
+  const command = join(root, 'launchctl'), counter = join(root, 'count'), secret = 'acceptance-private-launchctl-state-401c';
+  writeFileSync(counter, '0');
+  writeFileSync(command, `#!/bin/sh
+n=$(cat "$COUNTER"); n=$((n+1)); printf '%s' "$n" > "$COUNTER"
+case "$n" in
+  1) printf 'state = running\\npid = 41\\nruns = 2\\nlast exit code = 0\\nAuthorization: %s\\n' "$PRIVATE_STATE"; exit 0 ;;
+  2) printf 'state = spawn scheduled\\nruns = 3\\n'; exit 0 ;;
+  *) exit 113 ;;
+esac
+`, { mode: 0o700 });
+  const observations: NativeServiceRetirementObservation[] = [];
+  await waitForNativeServiceRetirement(() => runOwnedCommand(command, ['print', 'owned-label'], {
+    env: { ...process.env, COUNTER: counter, PRIVATE_STATE: secret },
+  }), { intervalMs: 1, onObservation: record => { observations.push(record); } });
+  expect(readFileSync(counter, 'utf8')).toBe('3'); expect(observations).toHaveLength(2);
+  expect(observations[0]).toEqual({ exitCode: 0, signal: null, state: 'running', pid: 41, runs: 2, lastExitCode: 0 });
+  expect(observations[1]).toEqual({ exitCode: 113, signal: null, state: 'other' });
+  expect(JSON.stringify(observations)).not.toContain(secret); expect(JSON.stringify(observations)).not.toContain('Authorization');
+});
+
+test('native service retirement cancellation interrupts its retry without replacing the original reason or probing again', async () => {
+  const controller = new AbortController(), entered = Promise.withResolvers<void>(), reason = new Error('Original retirement owner stopped');
+  let probes = 0;
+  const running = waitForNativeServiceRetirement(async () => {
+    probes++; return { code: 0, stdout: 'state = not running\nruns = 4\nlast exit code = -15\n' };
+  }, { signal: controller.signal, onObservation: () => { entered.resolve(); } });
+  try {
+    await entered.promise; await new Promise<void>(done => setImmediate(done)); controller.abort(reason);
+    await expect(running).rejects.toBe(reason); expect(probes).toBe(1);
+  } finally { controller.abort(reason); await Promise.allSettled([running]); }
 });
 
 test('readiness timeout keeps its last proof and safe filesystem cause without recording the private path', async () => {

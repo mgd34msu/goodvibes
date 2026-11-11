@@ -39,6 +39,12 @@ export function acceptanceFailureRecord(evidence: {
 }, error: unknown): AcceptanceFailureRecord;
 export function waitForAcceptanceReadiness(serviceReady: () => Promise<void>, verifyReady: () => Promise<void>,
   options?: { signal?: AbortSignal; timeoutMs?: number; intervalMs?: number }): Promise<void>;
+export interface NativeServiceRetirementObservation {
+  exitCode: number; signal: NodeJS.Signals | null; state: 'running' | 'notrunning' | 'spawn-scheduled' | 'other';
+  pid?: number; runs?: number; lastExitCode?: number;
+}
+export function waitForNativeServiceRetirement(probe: () => Promise<{ code: number; stdout: string; exitSignal?: NodeJS.Signals }>,
+  options?: { signal?: AbortSignal; intervalMs?: number; onObservation?: (record: NativeServiceRetirementObservation) => void }): Promise<void>;
 export function finishAcceptance(options: {
   signal?: AbortSignal; finish?: () => Promise<void>; assertCurrent?: () => void; writeReceipt(): void;
 }): Promise<void>;

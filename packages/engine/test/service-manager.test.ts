@@ -67,6 +67,49 @@ function definition(overrides: Partial<ManagedServiceDefinition> & { workingDire
   };
 }
 
+describe('consumer service default respects configuration provenance', () => {
+  test('pure schema default recognizes the installer label while leaving shared configuration unchanged', () => withTempDir(dir => {
+    const config = testConfigManager(join(dir, 'config'));
+    config.set('service.platform', 'launchd');
+    const manager = new PlatformServiceManager(config, { workingDirectory: dir, homeDirectory: dir,
+      defaultServiceName: 'sh.goodvibes.daemon', actionRunner: () => ({ status: 0, stdout: '4242\t0\tsh.goodvibes.daemon\n', stderr: '' }) });
+    const installed = manager.install();
+    expect(installed.serviceName).toBe('sh.goodvibes.daemon');
+    expect(installed.path).toBe(join(dir, 'Library/LaunchAgents/sh.goodvibes.daemon.plist'));
+    expect(installed.contents).toContain('<key>Label</key>\n  <string>sh.goodvibes.daemon</string>');
+    expect(installed.running).toBe(true);
+    expect(config.get('service.serviceName')).toBe('goodvibes');
+    expect(config.describeConfigKeySource('service.serviceName').effectiveOrigin).toBe('default');
+  }));
+
+  test('stored default, custom name, invocation override and frontend default retain their actual names', () => withTempDir(dir => {
+    const cases = [
+      { expected: 'goodvibes', apply: (config: ConfigManager) => config.set('service.serviceName', 'goodvibes') },
+      { expected: 'owner-agent', apply: (config: ConfigManager) => config.set('service.serviceName', 'owner-agent') },
+      { expected: 'owner-invocation', apply: (config: ConfigManager) => config.setRuntimeOverride('service.serviceName', 'owner-invocation') },
+      { expected: 'frontend-default', apply: (config: ConfigManager) => config.setRuntimeDefault('service.serviceName', 'frontend-default') },
+      { expected: 'sh.goodvibes.daemon', apply: (config: ConfigManager) => config.set('service.serviceName', '   ') },
+    ];
+    for (const [index, entry] of cases.entries()) {
+      const config = testConfigManager(join(dir, String(index)));
+      config.set('service.platform', 'launchd'); entry.apply(config);
+      const manager = new PlatformServiceManager(config, { workingDirectory: dir, homeDirectory: dir,
+        defaultServiceName: 'sh.goodvibes.daemon', actionRunner: () => ({ status: 0, stdout: '', stderr: '' }) });
+      const installed = manager.install();
+      expect(installed.serviceName).toBe(entry.expected);
+      expect(installed.path).toBe(join(dir, 'Library/LaunchAgents', entry.expected + '.plist'));
+      expect(installed.contents).toContain(`<key>Label</key>\n  <string>${entry.expected}</string>`);
+    }
+  }));
+
+  test('a manager without a consumer default keeps the shared schema name', () => withTempDir(dir => {
+    const config = testConfigManager(join(dir, 'config')); config.set('service.platform', 'launchd');
+    const manager = new PlatformServiceManager(config, { workingDirectory: dir, homeDirectory: dir,
+      actionRunner: () => ({ status: 0, stdout: '', stderr: '' }) });
+    expect(manager.status().serviceName).toBe('goodvibes');
+  }));
+});
+
 describe('launchd plist rendering (install): platform faked via service.platform=launchd', () => {
   test('install() writes a plist to <home>/Library/LaunchAgents/<name>.plist with the correct structure', () => withTempDir((dir) => {
     const configManager = launchdConfig(dir, 'goodvibes-launchd-test');

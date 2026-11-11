@@ -64,16 +64,10 @@ type ManagedServiceDefinition = NonNullable<ManagedServiceManagerOptions['defini
 export type ManagedServiceActionRunner = NonNullable<ManagedServiceManagerOptions['actionRunner']>;
 type ManagedServiceActionResult = ReturnType<ManagedServiceActionRunner>;
 
-// The one unit name/description this tool manages, used by the daemon CLI
-// (`goodvibes-daemon install-service|uninstall-service|service-status|migrate-service`).
-// The terminal app's own onboarding UX builds the exact same service
-// definition independently, so a migration triggered from either surface
-// installs an identical unit.
-// `service.serviceName`/nothing-set config default is 'goodvibes'
-// (schema-domain-runtime.ts), which is what PlatformServiceManager actually
-// resolves to in the common case via `resolveServiceName()`'s `config.get(...)
-// ?? defaultServiceName`.
-export const MANAGED_SERVICE_NAME = 'goodvibes';
+// Product defaults match the released installer's systemd name and Darwin
+// LaunchAgent label. The shared schema stays unchanged: any explicit stored
+// name (including 'goodvibes') or invocation overlay outranks this fallback.
+export const MANAGED_SERVICE_NAME = process.platform === 'darwin' ? 'sh.goodvibes.daemon' : 'goodvibes';
 export const MANAGED_SERVICE_DESCRIPTION = 'GoodVibes daemon (shared session broker + companion host)';
 
 /**
@@ -83,14 +77,18 @@ export const MANAGED_SERVICE_DESCRIPTION = 'GoodVibes daemon (shared session bro
  * wizard's detection banner resolves this at snapshot-collection time and
  * carries it on `OnboardingLegacyDaemonSnapshot.trackedServiceName`).
  * Mirrors the platform's own internal `resolveServiceName()` precedence exactly:
- * the `service.serviceName` config key first, trimmed, falling back to the
- * default (`MANAGED_SERVICE_NAME`, which `buildManagedDaemonServiceManager`
- * passes as `defaultServiceName`) when the key is unset or blank. Takes a
- * minimal `{ get }` shape rather than the full ConfigManager class so
+ * the product default replaces only the shared schema's pure default origin;
+ * configured names and overlays remain first, with the product fallback when
+ * unset or blank. Takes a minimal accessor/provenance shape rather than the full ConfigManager class so
  * snapshot code and tests can pass whatever config accessor they already
  * hold.
  */
-export function resolveConfiguredServiceName(config: { get(key: string): unknown }): string {
+export function resolveConfiguredServiceName(config: {
+  get(key: string): unknown;
+  describeConfigKeySource?(key: 'service.serviceName'): { readonly tier: string; readonly effectiveOrigin?: string };
+}): string {
+  const source = config.describeConfigKeySource?.('service.serviceName');
+  if (source?.tier === 'default' && (source.effectiveOrigin === undefined || source.effectiveOrigin === 'default')) return MANAGED_SERVICE_NAME;
   const raw = config.get('service.serviceName');
   const configured = raw === undefined || raw === null ? '' : String(raw).trim();
   return configured || MANAGED_SERVICE_NAME;
@@ -159,7 +157,7 @@ export function buildManagedDaemonServiceManager(params: BuildManagedDaemonServi
   // `params.host`/`params.port` remain inputs because the migration engine
   // still needs them for its read-only port-liveness probe.
   const definition: ManagedServiceDefinition = {
-    name: MANAGED_SERVICE_NAME,
+    name: resolveConfiguredServiceName(configManager),
     description: MANAGED_SERVICE_DESCRIPTION,
     workingDirectory,
     command: params.binaryPath,

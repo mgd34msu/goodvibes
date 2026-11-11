@@ -89,6 +89,33 @@ export async function waitForAcceptanceReadiness(serviceReady, verifyReady, { si
   error.code = 'ERR_ACCEPTANCE_READINESS_TIMEOUT'; throw error;
 }
 
+/** launchctl bootout can return before print stops finding the original job.
+ * Keep only the first and final fixed/numeric observations, never its output. */
+export async function waitForNativeServiceRetirement(probe, { signal, onObservation, intervalMs = 500 } = {}) {
+  let first, last;
+  const observe = result => {
+    const state = /^\s*state = (running|not running|spawn scheduled)\s*$/m.exec(result.stdout)?.[1];
+    const number = (key, signed = false) => {
+      const found = new RegExp(`^\\s*${key} = (${signed ? '-?' : ''}\\d+)\\s*$`, 'm').exec(result.stdout)?.[1];
+      const value = found === undefined ? undefined : Number(found);
+      return Number.isSafeInteger(value) && (!signed || value >= -2147483648 && value <= 2147483647) ? value : undefined;
+    };
+    const pid = number('pid'), runs = number('runs'), lastExitCode = number('last exit code', true);
+    return { exitCode: result.code, signal: safeExitSignal(result.exitSignal) ?? null,
+      state: state === 'running' ? 'running' : state === 'not running' ? 'notrunning' : state === 'spawn scheduled' ? 'spawn-scheduled' : 'other',
+      ...(pid !== undefined && pid > 0 && pid <= 2147483647 ? { pid } : {}),
+      ...(runs === undefined ? {} : { runs }), ...(lastExitCode === undefined ? {} : { lastExitCode }) };
+  };
+  try {
+    await waitForAcceptanceReadiness(async () => {
+      const result = await probe(); signal?.throwIfAborted(); last = observe(result);
+      if (!first) { first = last; onObservation?.(first); }
+      assert.equal(result.exitSignal, undefined, 'A terminated print probe cannot prove native service retirement.');
+      assert.notEqual(result.code, 0, 'The original native service must retire before foreground diagnosis.');
+    }, async () => {}, { signal, intervalMs });
+  } finally { if (last && last !== first) onObservation?.(last); }
+}
+
 /** Cleanup intentionally survives cancellation. A receipt may be written only
  * after the owned delivery has drained and the original owner is still active. */
 export async function finishAcceptance({ signal, finish, assertCurrent, writeReceipt }) {
@@ -632,11 +659,12 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
               exitCode: bootout.code, signal: bootout.exitSignal ?? null });
             stopCheckpoint = 'home-after-bootout'; observeStop(); assertHome();
             stopCheckpoint = 'print'; observeStop();
-            const stopped = await runOwnedCommand('launchctl', ['print', `gui/${account.uid}/${label}`], { cwd: home, env, timeoutMs: 300_000, signal: activeSignal });
-            records.push({ phase: 'inspector', event: 'service-stop-result', checkpoint: stopCheckpoint,
-              exitCode: stopped.code, signal: stopped.exitSignal ?? null });
-            stopCheckpoint = 'retirement'; observeStop();
-            assert.notEqual(stopped.code, 0, 'The original native service must retire before foreground diagnosis.');
+            await waitForNativeServiceRetirement(() => runOwnedCommand('launchctl', ['print', `gui/${account.uid}/${label}`],
+              { cwd: home, env, timeoutMs: 300_000, signal: activeSignal }), {
+              signal: activeSignal, onObservation: result => {
+                records.push({ phase: 'inspector', event: 'service-stop-result', checkpoint: stopCheckpoint, ...result });
+              },
+            });
             stopCheckpoint = 'retired'; observeStop();
           } catch (error) {
             const safe = safeError(error);

@@ -44,9 +44,21 @@ describe('resolveConfiguredServiceName: config-honest name for pre-manager calle
   });
 
   test('falls back to the managed default when unset, null, or blank', () => {
-    expect(resolveConfiguredServiceName(config(undefined))).toBe('goodvibes');
-    expect(resolveConfiguredServiceName(config(null))).toBe('goodvibes');
-    expect(resolveConfiguredServiceName(config('   '))).toBe('goodvibes');
+    expect(resolveConfiguredServiceName(config(undefined))).toBe(MANAGED_SERVICE_NAME);
+    expect(resolveConfiguredServiceName(config(null))).toBe(MANAGED_SERVICE_NAME);
+    expect(resolveConfiguredServiceName(config('   '))).toBe(MANAGED_SERVICE_NAME);
+  });
+
+  test('only pure schema origin selects the product platform default', () => {
+    const from = (value: string, tier: string, effectiveOrigin = tier) => ({
+      get: () => value,
+      describeConfigKeySource: () => ({ tier, effectiveOrigin }),
+    });
+    expect(resolveConfiguredServiceName(from('goodvibes', 'default'))).toBe(MANAGED_SERVICE_NAME);
+    expect(resolveConfiguredServiceName(from('goodvibes', 'global'))).toBe('goodvibes');
+    expect(resolveConfiguredServiceName(from('owner-agent', 'global'))).toBe('owner-agent');
+    expect(resolveConfiguredServiceName(from('owner-invocation', 'default', 'runtime'))).toBe('owner-invocation');
+    expect(resolveConfiguredServiceName(from('frontend-default', 'default', 'runtime-default'))).toBe('frontend-default');
   });
 });
 

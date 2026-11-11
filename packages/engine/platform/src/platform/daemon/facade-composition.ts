@@ -466,7 +466,7 @@ export function resolveDaemonFacadeRuntime(
       homeDirectory: runtimeServices.homeDirectory,
       surfaceRoot: 'goodvibes',
       binaryBaseName: 'goodvibes',
-      defaultServiceName: 'goodvibes',
+      defaultServiceName: process.platform === 'darwin' ? 'sh.goodvibes.daemon' : 'goodvibes',
       defaultServiceDescription: 'goodvibes omnichannel daemon host',
       featureFlags: runtimeServices.featureFlags,
     }),

@@ -48,6 +48,7 @@ function lifecycleWith(
     readonly promotionRetryMs?: number | undefined;
     readonly isCompiledBinary?: (() => boolean) | undefined;
     readonly stopGracefully?: DaemonLifecycleRuntimeOptions['stopGracefully'];
+    readonly hasOverriddenHome?: boolean | undefined;
   } = {},
 ): LifecycleHarness {
   const scratch = mkdtempSync(join(tmpdir(), 'update-artifact-'));
@@ -84,6 +85,7 @@ function lifecycleWith(
     // test flip it to false.
     isCompiledBinary: overrides.isCompiledBinary ?? (() => true),
     ...(overrides.stopGracefully ? { stopGracefully: overrides.stopGracefully } : {}),
+    ...(overrides.hasOverriddenHome === undefined ? {} : { hasOverriddenHome: overrides.hasOverriddenHome }),
     ...(overrides.promotionRetryMs !== undefined ? { promotionRetryMs: overrides.promotionRetryMs } : {}),
     ...(updateArtifact !== undefined ? { updateArtifact } : {}),
   });
@@ -200,6 +202,36 @@ describe('boot-edge service promotion (independent of updates)', () => {
       expect(exits).toHaveLength(0);
     } finally {
       await runtime.onStopping(false);
+    }
+  });
+
+  test.each(['darwin', 'win32'] as const)('unsupported %s promotion preserves the live native runtime before any cleanup', async platform => {
+    const listener = Bun.serve({ hostname: '127.0.0.1', port: 0,
+      fetch: () => Response.json({ ok: true, version: '3.1.2' }),
+    });
+    const stops: number[] = [], commands: string[][] = [];
+    const h = lifecycleWith({ version: '3.1.2', execPath: '/opt/goodvibes/goodvibes-daemon', suite: true }, {
+      platform, hasOverriddenHome: false, isCompiledBinary: () => true,
+      configOverrides: { 'service.enabled': true },
+      status: () => ({ installed: false, running: false }),
+      stopGracefully: async () => { stops.push(1); await listener.stop(true); },
+      runner: async argv => { commands.push([...argv]); return { status: 'accepted' }; },
+    });
+    try {
+      h.runtime.onStarted(true);
+      expect(h.runtime.activateNativeLifecycle()).toBeUndefined();
+      await h.runtime.drainHandovers();
+      expect(stops).toEqual([]); expect(h.installs).toEqual([]);
+      expect(commands).toEqual([]); expect(h.exits).toEqual([]);
+      const response = await fetch(`http://127.0.0.1:${listener.port}/status`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, version: '3.1.2' });
+      expect(h.runtime.activateNativeLifecycle()).toBeUndefined();
+      await h.runtime.drainHandovers();
+      expect(stops).toEqual([]); expect(h.installs).toEqual([]); expect(h.exits).toEqual([]);
+    } finally {
+      await h.runtime.onStopping(false);
+      await listener.stop(true);
     }
   });
 

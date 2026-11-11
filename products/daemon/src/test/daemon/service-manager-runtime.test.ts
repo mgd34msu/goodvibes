@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
-import { buildManagedDaemonServiceManager } from '../../runtime/legacy-daemon-migration.js';
+import { buildManagedDaemonServiceManager, MANAGED_SERVICE_NAME } from '../../runtime/legacy-daemon-migration.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 const surfaceRoot = GOODVIBES_DAEMON_SURFACE_ROOT;
@@ -64,6 +64,27 @@ describe('canonical service lifecycle and product command composition', () => {
     expect(installed.contents).not.toContain('--hostname');
     expect(installed.contents).not.toContain('--port');
     expect(service.uninstall().installed).toBe(false);
+  });
+
+  test('product launchd definition label, selected path and operations use the same default or explicit name', () => {
+    for (const [index, configured] of [undefined, 'goodvibes', 'owner.goodvibes.daemon'].entries()) {
+      const value = new ConfigManager({ configDir: join(root, String(index)), surfaceRoot });
+      value.set('service.platform', 'launchd');
+      if (configured !== undefined) value.set('service.serviceName', configured);
+      const expected = configured ?? MANAGED_SERVICE_NAME, calls: Call[] = [];
+      const service = buildManagedDaemonServiceManager({ configManager: value,
+        binaryPath: join(root, 'goodvibes-daemon'), homeDir: root, unitHomeDir: root, workingDirectory: root,
+        host: '127.0.0.1', port: 3421,
+        actionRunner: (command, args) => { calls.push({ command, args }); return { status: 0, stdout: `4242\t0\t${expected}\n`, stderr: '' }; } });
+      const installed = service.install(), path = join(root, 'Library/LaunchAgents', expected + '.plist');
+      expect(installed.serviceName).toBe(expected); expect(installed.path).toBe(path);
+      expect(installed.contents).toContain(`<key>Label</key>\n  <string>${expected}</string>`);
+      expect(installed.running).toBe(true);
+      service.restart();
+      expect(calls.filter(call => call.args[0] !== 'list')).toEqual([
+        { command: 'launchctl', args: ['unload', path] }, { command: 'launchctl', args: ['load', path] },
+      ]);
+    }
   });
 
   test('real manual child install/start/status/restart/stop preserves pid and log path', () => {

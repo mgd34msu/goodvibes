@@ -928,6 +928,10 @@ export class DaemonLifecycleRuntime {
   private promoteToServiceAtBoot(): void {
     if (this.hasTransactionRecovery() || this.appliedUpdater || this.rollbackApplied) return;
     if (!this.options.updateArtifact) return;
+    // Adoption currently has an acknowledged enqueue path only on systemd.
+    // Check before creating a handover or stopping the live runtime: discovering
+    // an unsupported platform after cleanup leaves a running process offline.
+    if ((this.options.servicePlatform ?? process.platform) !== 'linux') return;
     // A daemon running out of an overridden home is a throwaway by definition,
     // and a throwaway must not become the machine's daemon. See
     // `hasOverriddenHome`, this exact promotion put a scratchpad daemon in

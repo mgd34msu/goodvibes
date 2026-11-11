@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { acceptanceFailureRecord, assertPreviousReleaseInputs, markAcceptanceCheckpoint, readPreviousReleaseCohort,
   runPreviousReleaseUpgradeSteps, verifyCompiledSuiteRollback, type NativeLifecycleHost, type PreviousReleaseUpgradeSteps } from './accept-published-suite.mjs';
+import { recordDaemonAutoRollback, recordDaemonCleanShutdown, recordDaemonStart, recordDaemonStartAttempt } from '../packages/engine/platform/src/platform/daemon/lifecycle-marker.ts';
+import { describeLocalDaemonState } from '../products/daemon/src/daemon/local-daemon-state.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -107,6 +109,10 @@ function rollbackFixture(target: string) {
   }));
   for (const directory of [join(bin, 'playwright-core'), webui]) put(join(directory + '.previous', '.goodvibes-release.json'), { schema: 1, version: '3.1.2' });
   const events: string[] = []; let stopped = false, started = false;
+  const controlPlaneConfigDir = join(data, 'tui'), marker = join(controlPlaneConfigDir, 'control-plane', 'daemon-lifecycle.json');
+  mkdirSync(dirname(marker), { recursive: true }); let clock = 1_000_000;
+  const now = () => clock++;
+  recordDaemonStart(marker, { version: '3.1.3', pid: 101, now });
   const host: NativeLifecycleHost = { root, bin, data, daemon: join(bin, 'goodvibes-daemon'),
     checkpoint(check) { events.push(check); }, async setting() { return 3; },
     async invoke(command, args) {
@@ -114,12 +120,23 @@ function rollbackFixture(target: string) {
       if (command === 'bun') {
         expect(stopped).toBe(true); expect(started).toBe(false); const writer = readFileSync(args[0]!, 'utf8');
         expect(writer).toContain('recordDaemonStartAttempt'); expect(writer).toContain('for(let i=0;i<3;i++)');
-        expect(writer).toContain('"3.1.3"'); events.push('seed'); return '';
+        expect(writer).toContain('"3.1.3"');
+        for (let i = 0; i < 3; i++) recordDaemonStartAttempt(marker, { version: '3.1.3', now });
+        events.push('seed'); return '';
       }
       if (args[0] === '--version') return `${command.split('/').at(-1)} 3.1.2`;
-      return JSON.stringify({ ok: true, data: { identity: { version: '3.1.2' }, local: { marker: { version: '3.1.2', rejectedVersion: '3.1.3', autoRollbackAt: 1 } } } });
-    }, async servicePid() { return started ? 102 : 101; }, async stopService() { stopped = true; events.push('stop'); },
-    async startService() { expect(events).toContain('seed'); started = true; events.push('start-native'); }, async restartService() { throw new Error('Unowned restart'); },
+      return JSON.stringify({ ok: true, data: { identity: { version: '3.1.2' },
+        local: describeLocalDaemonState({ isLocal: true, controlPlaneConfigDir, now }) } });
+    }, async servicePid() { return started ? 102 : 101; }, async stopService() {
+      recordDaemonCleanShutdown(marker, { version: '3.1.3', now }); stopped = true; events.push('stop');
+    },
+    async startService() {
+      expect(events).toContain('seed'); expect(recordDaemonStartAttempt(marker, { version: '3.1.3', now }).failedStarts).toBe(3);
+      recordDaemonAutoRollback(marker, { rejectedVersion: '3.1.3', now });
+      recordDaemonStartAttempt(marker, { version: '3.1.2', now });
+      recordDaemonStart(marker, { version: '3.1.2', pid: 102, now });
+      started = true; events.push('start-native');
+    }, async restartService() { throw new Error('Unowned restart'); },
     async verifyCohort(version, selected) { expect(started).toBe(true); expect(version).toBe('3.1.2'); expect(selected).toBe(readers); events.push('cohort'); },
   };
   const input = { host, target, source: nextSource, sourceRoot: root, previousVersion: '3.1.2', currentVersion: '3.1.3', previousReaders: readers,
@@ -133,6 +150,24 @@ for (const target of targets) test(`shared ${target} rollback coordinator requir
   expect(fixture.events.indexOf('seed')).toBeLessThan(fixture.events.indexOf('start-native'));
   expect(fixture.events.indexOf('start-native')).toBeLessThan(fixture.events.indexOf('cohort'));
   expect(fixture.events).toContain('preserved');
+});
+for (const [field, value, check] of [
+  ['version', '3.1.3', 'rollback.marker-version'], ['rejectedVersion', undefined, 'rollback.rejected-version'],
+  ['state', 'clean-shutdown', 'rollback.marker-state'], ['pid', 101, 'rollback.marker-pid'],
+  ['failedStarts', 1, 'rollback.failed-starts'], ['autoRollbackAt', 1_000_000, 'rollback.rollback-guard'],
+] as const) test(`restored rollback marker ${field} mismatch identifies its exact field without exposing values`, async () => {
+  const fixture = rollbackFixture('linux-arm64'), invoke = fixture.input.host.invoke;
+  fixture.input.host.invoke = async (command, args) => {
+    const result = await invoke(command, args);
+    if (args[0] !== 'status') return result;
+    const status = JSON.parse(result); status.data.local.marker[field] = value; return JSON.stringify(status);
+  };
+  let failure: unknown;
+  try { await verifyCompiledSuiteRollback(fixture.input); } catch (error) { failure = error; }
+  expect(failure).toBeDefined(); expect(fixture.events.at(-1)).toBe(check);
+  const record = acceptanceFailureRecord({ stage: 'verifyCompleteRollback', check }, failure);
+  expect(record).toMatchObject({ check, error: { name: 'AssertionError', code: 'ERR_ASSERTION' } });
+  expect(JSON.stringify(record)).not.toContain('clean-shutdown');
 });
 test('missing companion or substituted previous reader refuses before service stop and failed-start mutation', async () => {
   for (const violation of ['missing', 'reader']) {

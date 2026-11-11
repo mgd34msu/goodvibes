@@ -416,11 +416,19 @@ export async function verifyCompiledSuiteRollback({ host, target, source, source
   }, () => host.verifyCohort(previousVersion, previousReaders), { signal, timeoutMs: 10 * 60_000, intervalMs: 1000 });
   await verifyPreserved();
   const rolledBackPid = await host.servicePid(); assert.notEqual(rolledBackPid, updatedPid);
-  checkpoint('rollback.rejected-version');
+  checkpoint('rollback.status');
   const status = JSON.parse(await invoke(daemon, ['status', '--json']));
-  assert.equal(status.ok, true); assert.equal(status.data.identity.version, previousVersion);
-  assert.equal(status.data.local.marker.version, previousVersion); assert.equal(status.data.local.marker.rejectedVersion, currentVersion);
-  assert.ok(Number.isFinite(status.data.local.marker.autoRollbackAt));
+  checkpoint('rollback.status-ok'); assert.equal(status.ok, true);
+  checkpoint('rollback.status-version'); assert.equal(status.data.identity.version, previousVersion);
+  checkpoint('rollback.marker-version'); assert.equal(status.data.local.marker.version, previousVersion);
+  checkpoint('rollback.rejected-version'); assert.equal(status.data.local.marker.rejectedVersion, currentVersion);
+  checkpoint('rollback.marker-state'); assert.equal(status.data.local.marker.state, 'running');
+  checkpoint('rollback.marker-pid'); assert.equal(status.data.local.marker.pid, rolledBackPid);
+  checkpoint('rollback.failed-starts'); assert.equal(status.data.local.marker.failedStarts, 0);
+  // The healthy restored boot clears the temporary anti-ping-pong guard while
+  // retaining the rejected version that blocks downloading the same bad build.
+  checkpoint('rollback.rollback-guard'); assert.equal(status.data.local.marker.autoRollbackAt, undefined);
+  checkpoint('rollback.seed-source');
   assert.equal(seedRevision(), originalSeed);
   return { updatedPid, rolledBackPid };
 }

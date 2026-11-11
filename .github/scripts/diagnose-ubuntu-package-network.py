@@ -9,73 +9,20 @@ import json
 import math
 import os
 import re
-import subprocess
 import sys
-import tempfile
-import time
 from pathlib import Path
 
-CANONICAL_HOSTS = ("azure.archive.ubuntu.com", "archive.ubuntu.com", "security.ubuntu.com",
-                   "ports.ubuntu.com", "packages.microsoft.com", "github.com")
-HOSTS = CANONICAL_HOSTS + ("mirrors.edge.kernel.org", "mirrors.mit.edu")
-SOURCES = {"canonical": {"amd64": "https://archive.ubuntu.com/ubuntu", "arm64": "https://ports.ubuntu.com/ubuntu-ports"},
-           "independent": {"amd64": "https://mirrors.edge.kernel.org/ubuntu", "arm64": "https://mirrors.mit.edu/ubuntu-ports"}}
+from ubuntu22_sandbox_prerequisites import CANONICAL_HOSTS, archive_source, command, install_signed_packages, ubuntu22_architecture
+
 PROXY_NAMES = ("http_proxy", "https_proxy", "all_proxy", "no_proxy",
                "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "APT_CONFIG")
 ROLES = ("runner", "root", "apt")
 
 
-def archive_source(arch, mode):
-    if mode not in SOURCES or arch not in SOURCES[mode]:
-        raise ValueError()
-    return SOURCES[mode][arch]
-
-
-def command(args, seconds=6, role="runner"):
-    prefix = [] if role == "runner" else ["sudo", "-n"] + (["-u", "_apt"] if role == "apt" else [])
-    # Run the timeout as the same user as its child, including privileged APT.
-    # It owns and kills its complete command group, not just the sudo parent.
-    argv = prefix + ["timeout", "--signal=KILL", str(seconds) + "s"] + args
-    started = time.monotonic()
-    with tempfile.TemporaryFile() as output:
-        result = subprocess.run(argv, stdout=output, stderr=subprocess.STDOUT, check=False)
-        size = output.tell()
-        output.seek(0)
-        text = output.read(65_536).decode("utf-8", errors="replace")
-    return {"exitCode": result.returncode, "seconds": round(time.monotonic() - started, 3),
-            "outputTruncated": size > 65_536}, text
-
-
-def apt_kind(code, output):
-    if code == 0:
-        return "success"
-    if code in (124, 137, -9):
-        return "timeout"
-    if "Temporary failure resolving" in output or "Could not resolve" in output:
-        return "name-resolution-failed"
-    if any(value in output for value in ("NO_PUBKEY", "not signed", "couldn't be verified", "GPG error")):
-        return "signature-refused"
-    if "Hash Sum mismatch" in output or "File has unexpected size" in output:
-        return "integrity-refused"
-    if "Certificate verification failed" in output:
-        return "tls-verification-failed"
-    if "404  Not Found" in output or "404 Not Found" in output:
-        return "archive-path-not-found"
-    if "Unable to locate package" in output:
-        return "package-unavailable"
-    if any(value in output for value in ("Could not connect", "Connection timed out", "Connection failed")):
-        return "connection-failed"
-    return "unclassified-failure"
-
-
 def main(report):
-    release = dict(line.split("=", 1) for line in Path("/etc/os-release").read_text().splitlines() if "=" in line)
-    if release.get("ID", "").strip('"') != "ubuntu" or release.get("VERSION_CODENAME", "").strip('"') != "jammy":
-        raise ValueError()
     report["stage"] = "runner-admission"
-    status, arch = command(["dpkg", "--print-architecture"])
-    arch = arch.strip()
-    if status["exitCode"] != 0 or arch not in ("amd64", "arm64") or arch != os.environ.get("DIAGNOSTIC_ARCH"):
+    arch = ubuntu22_architecture()
+    if arch != os.environ.get("DIAGNOSTIC_ARCH"):
         raise ValueError()
     report["architecture"] = arch
     mode = os.environ.get("DIAGNOSTIC_MIRROR_MODE") or "canonical"
@@ -146,35 +93,7 @@ def main(report):
                     observation["timings"] = dict(zip(("dns", "connect", "tls", "total"), times))
             report["http"].append(observation)
     report["stage"] = "signed-ubuntu-apt"
-    keyring = "/usr/share/keyrings/ubuntu-archive-keyring.gpg"
-    if not Path(keyring).is_file():
-        raise ValueError()
-    report["apt"] = {"source": uri, "suites": ["jammy", "jammy-updates", "jammy-security"],
-                     "component": "main", "signedBy": "installed-ubuntu-archive-keyring", "observations": []}
-    with tempfile.TemporaryDirectory(prefix="goodvibes-apt-diagnostic-", dir=os.environ["RUNNER_TEMP"]) as root:
-        # _apt must be able to traverse this isolated, nonsecret source/list root.
-        os.chmod(root, 0o755)
-        source = Path(root) / "ubuntu.list"
-        source.write_text("".join("deb [signed-by=" + keyring + "] " + uri + " " + suite + " main\n" for suite in report["apt"]["suites"]))
-        lists = Path(root) / "lists"
-        lists.mkdir(mode=0o755)
-        options = ["-o", "Dir::Etc::sourcelist=" + str(source), "-o", "Dir::Etc::sourceparts=-",
-                   "-o", "Dir::State::lists=" + str(lists), "-o", "APT::Get::List-Cleanup=0",
-                   "-o", "Acquire::Retries=0", "-o", "Acquire::http::Timeout=8", "-o", "Acquire::https::Timeout=8",
-                   "-o", "Acquire::AllowInsecureRepositories=false", "-o", "Acquire::AllowDowngradeToInsecureRepositories=false",
-                   "-o", "APT::Get::AllowUnauthenticated=false"]
-        for phase, args, bound in (("signed-index", ["--error-on=any", "update"], 60),
-                                    ("official-install", ["install", "--yes", "--no-install-recommends", "bubblewrap", "util-linux"], 90)):
-            status, output = command(["apt-get"] + options + args, bound, "root")
-            report["apt"]["observations"].append({"phase": phase, **status, "kind": apt_kind(status["exitCode"], output),
-                                                   "mentionedHosts": [host for host in HOSTS if host in output]})
-            if status["exitCode"] != 0:
-                break
-        # APT creates root-owned list children; clean only this exact private root.
-        status, _ = command(["rm", "-rf", "--", str(lists)], role="root")
-        if status["exitCode"] != 0:
-            raise RuntimeError()
-    report["aptVerified"] = len(report["apt"]["observations"]) == 2 and all(item["exitCode"] == 0 for item in report["apt"]["observations"])
+    report.update(install_signed_packages(arch, mode))
     report["stage"] = "real-sandbox"
     probes = [("containment-namespaces", ["bwrap", "--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev", "--unshare-net", "/bin/true"]),
               ("daemon-namespaces", ["bwrap", "--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts",

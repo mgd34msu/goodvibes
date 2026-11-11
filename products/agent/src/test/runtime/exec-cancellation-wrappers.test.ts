@@ -194,12 +194,15 @@ test('Agent wrappers preserve supported background, parallel and file operations
     const source = join(root, 'source'); writeFileSync(source, 'copy contents');
     for (const [index, mode] of ['background', 'parallel', 'file_ops'].entries()) {
       const marker = join(root, `completed-${index}`); const copy = join(root, 'copy');
-      const command = { cmd: `printf completed > ${quote(marker)}`, timeout_ms: 2_000 };
+      // File creation is not completion: background shell redirection opens the
+      // marker before printf writes it. Keep that interval observable.
+      const command = { cmd: `: > ${quote(marker)}; sleep 0.05; printf completed > ${quote(marker)}`, timeout_ms: 2_000 };
       const args = mode === 'background' ? { commands: [{ ...command, background: true }] }
         : mode === 'parallel' ? { commands: [command], parallel: true }
         : { commands: [command], file_ops: [{ op: 'copy', source, destination: copy }] };
       const result = await registry.execute(`mode-${mode}`, 'exec', args);
-      expect(result.success).toBe(true); await waitFor(() => existsSync(marker), `${mode} completion`);
+      expect(result.success).toBe(true);
+      await waitFor(() => existsSync(marker) && readFileSync(marker, 'utf8') === 'completed', `${mode} completion`);
       expect(readFileSync(marker, 'utf8')).toBe('completed');
       if (mode === 'file_ops') expect(readFileSync(copy, 'utf8')).toBe('copy contents');
     }

@@ -35,6 +35,8 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Setup Bun + deps (cached)
         uses: ./.github/actions/setup # composite, no SHA needed
+      - name: Test signed sandbox package fallback
+        run: bun packages/engine/scripts/test.ts --cwd ../.. scripts/ubuntu22-sandbox-prerequisites.test.ts
       - name: Validate workspace
         run: bun run validate
       - name: Test release asset consistency
@@ -404,8 +406,7 @@ jobs:
           fi
           apt_options=(-o Acquire::Retries=1 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15)
           if ! sudo -n timeout --signal=KILL 90s apt-get "${apt_options[@]}" install --no-install-recommends -y bubblewrap; then
-            sudo -n timeout --signal=KILL 60s apt-get "${apt_options[@]}" --error-on=any update
-            sudo -n timeout --signal=KILL 90s apt-get "${apt_options[@]}" install --no-install-recommends -y bubblewrap
+            python3 .github/scripts/ubuntu22_sandbox_prerequisites.py bubblewrap
           fi
           verify_host
       - name: Download workspace package output
@@ -544,8 +545,7 @@ jobs:
           fi
           apt_options=(-o Acquire::Retries=1 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15)
           if ! sudo -n timeout --signal=KILL 90s apt-get "${apt_options[@]}" install --no-install-recommends -y bubblewrap; then
-            sudo -n timeout --signal=KILL 60s apt-get "${apt_options[@]}" --error-on=any update
-            sudo -n timeout --signal=KILL 90s apt-get "${apt_options[@]}" install --no-install-recommends -y bubblewrap
+            python3 .github/scripts/ubuntu22_sandbox_prerequisites.py bubblewrap
           fi
           verify_host
       - name: Download workspace package output
@@ -918,8 +918,7 @@ jobs:
           # Hosted images retain signed package indexes. Use them first instead
           # of refreshing every unrelated repository on each fresh runner.
           if ! sudo -n timeout --signal=KILL 90s apt-get "${apt_options[@]}" install --yes --no-install-recommends bubblewrap util-linux; then
-            sudo -n timeout --signal=KILL 60s apt-get "${apt_options[@]}" --error-on=any update
-            sudo -n timeout --signal=KILL 90s apt-get "${apt_options[@]}" install --yes --no-install-recommends bubblewrap util-linux
+            python3 .github/scripts/ubuntu22_sandbox_prerequisites.py bubblewrap util-linux
           fi
           verify_host
       - name: Setup Node

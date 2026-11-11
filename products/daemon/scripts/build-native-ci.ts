@@ -4,6 +4,7 @@ import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runNativeBuildCommand } from './native-execution-process.mjs';
 
 interface BuildResult { readonly exitCode: number; readonly output: string; }
 interface GrammarBuildEffects {
@@ -115,14 +116,13 @@ async function parseInstalledNativeGrammars(repository: string): Promise<void> {
 if (import.meta.main) {
   const repository = resolve(import.meta.dir, '../../..');
   const [target, ...extra] = process.argv.slice(2);
-  const execute = (args: string[], timeout = 300_000): BuildResult => {
-    const child = spawnSync(process.execPath, args, { cwd: repository, encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024 });
-    if (child.stdout) process.stdout.write(child.stdout);
-    if (child.stderr) process.stderr.write(child.stderr);
-    if (child.error) throw child.error;
-    if (child.signal || child.status === null) throw new Error(`Native build command interrupted: ${child.signal ?? 'unknown'}`);
-    return { exitCode: child.status, output: `${child.stdout}\n${child.stderr}` };
-  };
+  const controller = new AbortController();
+  const stop = (signal: NodeJS.Signals): void => { controller.abort(new Error(`Native build cancelled: ${signal}`)); };
+  const interrupt = (): void => stop('SIGINT'), terminate = (): void => stop('SIGTERM');
+  process.on('SIGINT', interrupt); process.on('SIGTERM', terminate);
+  const execute = (args: string[], timeoutMs = 300_000): Promise<BuildResult> => runNativeBuildCommand(process.execPath, args, {
+    cwd: repository, timeoutMs, signal: controller.signal,
+  });
   try {
     if ((target === '--probe' || target === '--probe-build-assets') && extra.length === 1) {
       if (target === '--probe-build-assets') inspectRequiredBuildAssets(resolve(extra[0]!));
@@ -133,8 +133,9 @@ if (import.meta.main) {
     await buildWithGrammarRecovery({
       build: async () => execute(['run', '--cwd', 'products/daemon', 'build:binary', '--target', target]),
       probe: () => probeInstalledNativeGrammars(repository),
-      install: async () => { if (execute(['install', '--frozen-lockfile', '--force'], 120_000).exitCode !== 0) throw new Error('Frozen dependency repair failed'); },
+      install: async () => { if ((await execute(['install', '--frozen-lockfile', '--force'], 120_000)).exitCode !== 0) throw new Error('Frozen dependency repair failed'); },
       report: message => console.error(message),
     });
   } catch (error) { console.error(error); process.exitCode = 1; }
+  finally { process.off('SIGINT', interrupt); process.off('SIGTERM', terminate); }
 }

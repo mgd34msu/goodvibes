@@ -842,6 +842,12 @@ describe('release.yml: by-reference release', () => {
       expect(result.status === 0, result.stderr).toBe(allowed);
     }
     expect(steps(packaging).filter(step => String(step.uses).startsWith('actions/checkout@'))[1]).toHaveProperty('with.ref', '${{ inputs.candidate-source || inputs.tag }}');
+    const retained = steps(packaging).findIndex(step => step.name === 'Retain packaging tooling');
+    const sourceCheckout = steps(packaging).findIndex(step => (step.with as { ref?: string } | undefined)?.ref === '${{ inputs.candidate-source || inputs.tag }}');
+    expect(retained).toBeGreaterThanOrEqual(0); expect(retained).toBeLessThan(sourceCheckout);
+    for (const name of ['build-native-ci.ts', 'native-execution-process.mjs']) {
+      expect(steps(packaging)[retained]?.run).toContain(`cp products/daemon/scripts/${name} "$RUNNER_TEMP/${name}"`);
+    }
     const verification = steps(packaging).findIndex(step => step.name === 'Require exact-source successful push CI');
     const build = steps(packaging).findIndex(step => step.name === 'Build publisher tooling and engine');
     expect(verification).toBeGreaterThan(0); expect(build).toBeGreaterThan(verification);

@@ -112,12 +112,15 @@ for (const missing of ['onnxruntime-web/ort-wasm-simd-threaded.mjs', 'onnxruntim
   });
 }
 
-test('suite release retains its helper before payload checkout and awaits preflight before its first TUI build', () => {
+test('suite release retains its helper closure before payload checkout and awaits preflight before its first TUI build', () => {
   const root = resolve(import.meta.dir, '../../../../..');
   const workflow = readFileSync(join(root, '.github/workflows/suite-release-assets.yml'), 'utf8');
   const retained = workflow.indexOf('cp products/daemon/scripts/build-native-ci.ts "$RUNNER_TEMP/build-native-ci.ts"');
   expect(retained).toBeGreaterThan(0);
   expect(retained).toBeLessThan(workflow.indexOf('ref: ${{ inputs.candidate-source || inputs.tag }}'));
+  const processModule = workflow.indexOf('cp products/daemon/scripts/native-execution-process.mjs "$RUNNER_TEMP/native-execution-process.mjs"');
+  expect(processModule).toBeGreaterThan(0);
+  expect(processModule).toBeLessThan(workflow.indexOf('ref: ${{ inputs.candidate-source || inputs.tag }}'));
   const coordinator = readFileSync(join(root, '.github/scripts/package-suite-release.mjs'), 'utf8');
   const preflight = coordinator.indexOf('await prepareNativeBuildAssets(');
   expect(preflight).toBeGreaterThan(0); expect(preflight).toBeLessThan(coordinator.indexOf("[['tui', 'goodvibes', 'dist']"));
@@ -129,6 +132,7 @@ test('a retained helper probes the selected checkout even outside that checkout'
   const retained = join(f.root, 'retained-tooling'); mkdirSync(retained);
   const helper = join(retained, 'build-native-ci.ts');
   copyFileSync(resolve(import.meta.dir, '../../../scripts/build-native-ci.ts'), helper);
+  copyFileSync(resolve(import.meta.dir, '../../../scripts/native-execution-process.mjs'), join(retained, 'native-execution-process.mjs'));
   const retainedModule = await import(helper);
   await retainedModule.prepareNativeBuildAssets({
     probe: () => retainedModule.probeInstalledNativeBuildAssets(f.root),

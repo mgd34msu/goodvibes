@@ -190,7 +190,7 @@ test.each(['symlink', 'replacement'] as const)('an admitted SQLite owner refuses
 });
 
 
-test.each(['x64', 'arm64'] as const)('Darwin SQLite compiler keeps Apple --sdk selection for %s', arch => {
+test.each(['x64', 'arm64'] as const)('Darwin SQLite compiler keeps Apple --sdk selection and the enclosing build deadline for %s', arch => {
   const compile = spyOn(childProcess, 'execFileSync').mockReturnValue(Buffer.alloc(0));
   try {
     const source = '/owned native source/sqlite3.c', library = '/owned native output/libsqlite3.dylib';
@@ -201,7 +201,22 @@ test.each(['x64', 'arm64'] as const)('Darwin SQLite compiler keeps Apple --sdk s
       '-dynamiclib', '-O2', '-DSQLITE_THREADSAFE=1', '-DSQLITE_ENABLE_COLUMN_METADATA', '-DSQLITE_ENABLE_FTS5',
       '-DSQLITE_ENABLE_RTREE', '-DSQLITE_ENABLE_DBSTAT_VTAB', '-DSQLITE_ENABLE_LOAD_EXTENSION',
       '-Wl,-install_name,@rpath/libsqlite3.dylib', source, '-o', library,
-    ], { cwd: dirname(source), stdio: 'inherit', timeout: 120_000 });
+    ], { cwd: dirname(source), stdio: 'inherit' });
+  } finally { compile.mockRestore(); }
+});
+
+test.each(['source error', 'signal'] as const)('Darwin SQLite compiler propagates a %s synchronously', kind => {
+  const failure = Object.assign(new Error(kind === 'source error' ? 'sqlite3.c:1: error: invalid source' : 'Compilation interrupted'), {
+    status: kind === 'source error' ? 1 : null,
+    signal: kind === 'source error' ? null : 'SIGTERM',
+  });
+  const compile = spyOn(childProcess, 'execFileSync').mockImplementation(() => { throw failure; });
+  try {
+    let caught: unknown;
+    try { compileDaemonSqliteLibrary('x64', '/owned native source/sqlite3.c', '/owned native output/libsqlite3.dylib'); }
+    catch (error) { caught = error; }
+    expect(caught).toBe(failure);
+    expect(compile).toHaveBeenCalledTimes(1);
   } finally { compile.mockRestore(); }
 });
 

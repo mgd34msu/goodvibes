@@ -1,7 +1,9 @@
 /** Real DaemonServer source2 admission -> native graph HTTP proof and unchanged browser replay captures. */
 import { operationJudgmentRequests } from '../helpers/field-name-privacy-requests.js';
 import { expect, spyOn, test } from 'bun:test';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import * as ledger from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import { assertJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -118,6 +120,85 @@ test('stable work-derived criterion reference executes without regenerating the 
     expect(plans[0]!.decision.evidence).toContainEqual({ id: criteriaId, revision: '1' });
     expect(plans[0]!.decision.judgmentDecisionIds.length).toBeGreaterThan(0);
     expect(operationJudgmentRequests(f.judgmentRequests).some(request => request.context?.site === 'contract.native.plan')).toBe(true);
+  } finally { try { await f?.stop(); } finally { generated.mockRestore(); } }
+}, 30_000);
+
+test('a card-shaped generated UUID retains its complete opaque work identity through source2 admission and explicit execution resume', async () => {
+  const uuid = '4f37563f-3c17-4153-8535-10637e98306d' as const;
+  const rawWorkId = `work-${uuid}`, workId = `work-${opaqueUuid(uuid)}`;
+  expect(() => assertJudgmentInput({ criteriaId: `criteria-v2:${rawWorkId}` })).toThrow('Refused before judgment: payment card material');
+  expect(() => assertJudgmentInput({ goal: '4111111111111111' })).toThrow('Refused before judgment: payment card material');
+  const create = ledger.createWorkLedger;
+  // Inject entropy only while the real intake factory allocates its work ID.
+  // Its producer, complete source, durable owner and privacy guard stay real.
+  const generated = spyOn(ledger, 'createWorkLedger').mockImplementation(options => create({ ...options,
+    clock: { ...options.clock, newId: kind => {
+      if (kind !== 'work') return options.clock.newId(kind);
+      const random = spyOn(crypto, 'randomUUID').mockReturnValueOnce(uuid);
+      try { return options.clock.newId(kind); } finally { random.mockRestore(); }
+    } },
+  }));
+  let f: Fixture | undefined, first = true;
+  try {
+    f = await createNativeIntakeExecutionHttpFixture({ beforeJudgment: async request => {
+      if (request.context?.site === 'work-ledger.native-start' && first) {
+        first = false; throw new Error('Owned synthetic initial execution interruption');
+      }
+    } });
+    const base = await admitted(f, 'opaque-generated-work');
+    expect(base.identity.workId).toBe(workId);
+    expect(base.identity.attemptId).toMatch(/^attempt-[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+    expect(() => assertJudgmentInput({ criteriaId: `criteria-v2:${workId}` })).not.toThrow();
+    const start = await f.wire('workLedger.execution.start', base.identity);
+    expect(start.status).toBe(503);
+    expect(execution(await f.wire('workLedger.execution.status', base.identity))).toMatchObject({ kind: 'pending-intent', recovery: 'required' });
+    expect(unitRequests(f)).toHaveLength(0);
+    expect((await f.wire('workLedger.execution.resume', { ...base.identity, expectedRevision: { ...base.identity.expectedRevision, criteria: 2 } })).status).toBe(409);
+    expect(execution(await f.wire('workLedger.execution.resume', base.identity)).kind).toBe('execution');
+    const terminal = await waitStatus(f, base.identity, value => value.kind === 'execution'
+      && value.progress?.status === 'passed' && value.settlement?.state === 'published');
+    expect(execution(terminal)).toMatchObject({ workId, progress: { status: 'passed' }, settlement: { state: 'published' } });
+    expect(unitRequests(f)).toHaveLength(1);
+    expect(f.contracts()[0]!.durableAdmission!.key.workId).toBe(workId);
+    expect(f.contracts()[0]!.nativeSource).toMatchObject({ goal: TEXT, criteria: [TEXT], criteriaId: `criteria-v2:${workId}` });
+  } finally { try { await f?.stop(); } finally { generated.mockRestore(); } }
+}, 30_000);
+
+test('an earlier persisted card-shaped work identity resumes through its proven opaque evidence reference without rewriting storage', async () => {
+  const uuid = '4f37563f-3c17-4153-8535-10637e98306d' as const, workId = `work-${uuid}`;
+  const criteriaId = `criteria-v2:${workId}`, evidenceId = `criteria-v2:work-${opaqueUuid(uuid)}`;
+  expect(() => assertJudgmentInput({ arbitraryReference: criteriaId })).toThrow('Refused before judgment: payment card material');
+  expect(() => assertJudgmentInput({ goal: '4111111111111111' })).toThrow('Refused before judgment: payment card material');
+  const create = ledger.createWorkLedger;
+  // Supply an earlier ledger identity, rather than replacing its persisted
+  // source, execution owner, full request or the normal resumed native graph.
+  const generated = spyOn(ledger, 'createWorkLedger').mockImplementation(options => create({ ...options,
+    clock: { ...options.clock, newId: kind => kind === 'work' ? workId : options.clock.newId(kind) },
+  }));
+  let f: Fixture | undefined, first = true;
+  try {
+    f = await createNativeIntakeExecutionHttpFixture({ beforeJudgment: async request => {
+      if (request.context?.site === 'work-ledger.native-start' && first) {
+        first = false; throw new Error('Owned synthetic initial execution interruption');
+      }
+    } });
+    const base = await admitted(f, 'earlier-card-shaped-work');
+    expect(base.identity.workId).toBe(workId);
+    expect((await f.wire('workLedger.execution.start', base.identity)).status).toBe(503);
+    expect(execution(await f.wire('workLedger.execution.status', base.identity))).toMatchObject({ kind: 'pending-intent', recovery: 'required' });
+    expect(unitRequests(f)).toHaveLength(0);
+    expect(execution(await f.wire('workLedger.execution.resume', base.identity)).kind).toBe('execution');
+    const terminal = await waitStatus(f, base.identity, value => value.kind === 'execution'
+      && value.progress?.status === 'passed' && value.settlement?.state === 'published');
+    expect(execution(terminal)).toMatchObject({ workId, progress: { status: 'passed' }, settlement: { state: 'published' } });
+    expect(unitRequests(f)).toHaveLength(1);
+    const contract = f.contracts()[0]!;
+    expect(contract.durableAdmission!.key).toMatchObject({ workId, criteriaId });
+    expect(contract.nativeSource).toMatchObject({ goal: TEXT, criteria: [TEXT], criteriaId });
+    const plans = contract.nativeDecisions!.history.filter(record => record.stage === 'plan');
+    expect(plans).toHaveLength(1);
+    expect(plans[0]!.decision.evidence).toContainEqual({ id: evidenceId, revision: '1' });
+    expect(() => assertJudgmentInput({ arbitraryReference: criteriaId })).toThrow('Refused before judgment: payment card material');
   } finally { try { await f?.stop(); } finally { generated.mockRestore(); } }
 }, 30_000);
 

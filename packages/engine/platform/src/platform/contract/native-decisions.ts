@@ -6,7 +6,7 @@ import type { ExternalOperationSource } from '../permissions/external-request.js
 /** Native semantic ownership. Registered continuations never run through an owner reply or a fake tool. */
 import { hashState, JudgmentError, type EntryType, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { captureJevDecisionContext, parseJevDecision, type JevDecision, type JevDecisionBinding, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
+import { captureJevDecisionContext, opaqueUuid, parseJevDecision, type JevDecision, type JevDecisionBinding, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
 import { decideAutonomous, type AutonomousDecision } from '../gate/autonomous-decision.js';
 import { autonomousSourceEvidence } from '../permissions/autonomous.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
@@ -226,7 +226,7 @@ function nativeSemanticPort(contract: Contract, owner: NativeContractServices, s
 
 /**
  * The durable owner binds its namespaced criteria identity to the exact work.
- * Only that proven identity uses the shared evaluator's canonical SHA encoding;
+ * Only that proven identity uses its corresponding protocol representation;
  * arbitrary source/reference strings still cross the unmodified privacy guard.
  * The original namespaced ID remains in the source and durable admission.
  */
@@ -237,8 +237,19 @@ function nativeCriteriaEvidence(contract: Contract): JevVersionRef {
   const admission = contract.durableAdmission;
   if (admission !== undefined) {
     assertDurableCheckpoint(contract, admission);
-    // Fresh native requests store this exact opaque reference once. It needs
-    // no derived work-id checksum or special privacy exemption.
+    // Native requests retain the exact ledger work identity in their criteria
+    // key. An earlier canonical raw UUID changes spelling only in this model
+    // reference; the saved source, durable key and their revisions stay exact.
+    if (source.criteriaId === `criteria-v2:${admission.key.workId}` && admission.key.criteriaId === source.criteriaId
+      && source.criteriaRevision === admission.key.criteriaRevision) {
+      const previous = /^work-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/.exec(admission.key.workId);
+      if (previous) return { id: `criteria-v2:work-${opaqueUuid(previous[1]!)}`, revision: source.criteriaRevision };
+      if (/^work-[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(admission.key.workId)) {
+        return { id: source.criteriaId, revision: source.criteriaRevision };
+      }
+    }
+    // Earlier freestanding opaque criteria labels already contain no decimal
+    // runs. Retain them without deriving a work-ID checksum.
     if (/^criteria-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(source.criteriaId)
       && admission.key.criteriaId === source.criteriaId && source.criteriaRevision === admission.key.criteriaRevision) {
       return { id: source.criteriaId, revision: source.criteriaRevision };

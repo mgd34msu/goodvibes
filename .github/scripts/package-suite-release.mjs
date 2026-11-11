@@ -11,12 +11,22 @@ const [target, destination, tag] = process.argv.slice(2);
 assert(['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'].includes(target));
 assert(typeof tag === 'string' && tag.length <= 129 && /^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag));
 const root = process.cwd();
+const controller = new AbortController();
+const stop = () => controller.abort(new Error('Suite packaging owner stopped.'));
+process.on('SIGINT', stop); process.on('SIGTERM', stop);
+try {
 // A retained coordinator must use its retained helper, while a direct checkout
 // invocation uses the helper in that same checkout. Never fall back across refs.
 const nativeBuildHelper = fileURLToPath(import.meta.url) === join(root, '.github/scripts/package-suite-release.mjs')
   ? pathToFileURL(join(root, 'products/daemon/scripts/build-native-ci.ts'))
   : new URL('./build-native-ci.ts', import.meta.url);
 const { prepareNativeBuildAssets, probeInstalledNativeBuildAssets } = await import(nativeBuildHelper.href);
+const { runNativeBuildCommand } = await import(new URL('./native-execution-process.mjs', nativeBuildHelper).href);
+const runBuild = async (command, args, cwd = root) => {
+  const result = await runNativeBuildCommand(command, args, { cwd, timeoutMs: 300_000, signal: controller.signal });
+  assert.equal(result.exitCode, 0, 'Suite native build command failed');
+  controller.signal.throwIfAborted();
+};
 // This coordinator may itself be retained outside the checkout by the workflow.
 // Reader evidence must come from the exact selected release source, not that
 // coordinator's former relative directory or a nearby installed engine.
@@ -26,7 +36,10 @@ const { clientReaderPayloadPaths, clientReaderMemberAsset } = await import(pathT
 const { resolveDaemonNativePayloads, retainDaemonNativeFiles, parseDaemonCiArtifact, assertDaemonNativePayloadPins } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/daemon-native-cohort.ts')).href);
 const { realUpdateFileIo } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/update-file-io.ts')).href);
 const { parseNativeReaderCapabilities } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/native-reader-compatibility.ts')).href);
-const run = (command, args, cwd = root) => execFileSync(command, args, { cwd, stdio: ['ignore', 'pipe', 'inherit'], timeout: 300_000 }).toString().trim();
+const run = (command, args, cwd = root) => {
+  controller.signal.throwIfAborted();
+  return execFileSync(command, args, { cwd, stdio: ['ignore', 'pipe', 'inherit'], timeout: 300_000 }).toString().trim();
+};
 const source = run('git', ['rev-parse', 'HEAD']);
 const sourceTree = run('git', ['rev-parse', 'HEAD^{tree}']);
 assert.equal(JSON.parse(readFileSync('package.json')).version, tag.slice(1));
@@ -74,11 +87,11 @@ try {
   const suffix = `${platform === 'darwin' ? 'macos' : platform}-${arch}`;
   await prepareNativeBuildAssets({
     probe: () => probeInstalledNativeBuildAssets(root),
-    install: async () => { run('bun', ['install', '--frozen-lockfile', '--force']); },
+    install: async () => { await runBuild('bun', ['install', '--frozen-lockfile', '--force']); },
     report: message => console.error(message),
   });
   for (const [product, command, output] of [['tui', 'goodvibes', 'dist'], ['agent', 'goodvibes-agent', 'dist'], ['daemon', 'goodvibes-daemon', 'native']]) {
-    run('bun', ['run', product === 'tui' ? 'build' : 'build:binary', '--target', target], join(root, 'products', product));
+    await runBuild('bun', ['run', product === 'tui' ? 'build' : 'build:binary', '--target', target], join(root, 'products', product));
     const directory = join(root, 'products', product, output);
     const binary = join(directory, `${command}-${suffix}`);
     const extension = platform === 'linux' ? 'so' : 'dylib';
@@ -144,7 +157,7 @@ try {
     publishArchive(archive);
   }
   if (target === 'linux-x64') {
-    run('bun', ['run', 'build'], join(root, 'products/webui'));
+    await runBuild('bun', ['run', 'build'], join(root, 'products/webui'));
     const { packBundle } = await import(pathToFileURL(join(root, 'products/webui/scripts/pack-bundle.ts')).href);
     const packed = packBundle({ distDir: join(root, 'products/webui/dist'), outDir: resolve(destination), version: tag.slice(1) });
     ownedOutputs.push({ removeOwned: packed.removeOwnedArchive });
@@ -174,4 +187,7 @@ try {
   for (const original of ownedOutputs.reverse()) { try { original.removeOwned(); } catch { /* never remove later foreign outputs */ } }
   try { releaseStage.cleanup(); } catch { /* preserve a replaced staging directory */ }
   throw error;
+}
+} finally {
+  process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop);
 }

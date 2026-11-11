@@ -68,6 +68,32 @@ test('fresh stored opaque criteria references reach actual native decisions with
   });
 });
 
+test('an exact persisted raw UUID work reference changes only its model spelling after durable owner validation', async () => {
+  const uuid = '4f37563f-3c17-4153-8535-10637e98306d', rawWorkId = `work-${uuid}`, id = `criteria-v2:${rawWorkId}`;
+  expect(judgmentInputProblem(id)).toBe('card-material');
+  await recorded(async (fake, log) => {
+    const value = contract({ criteriaId: id }, rawWorkId);
+    const originalSource = structuredClone(value.nativeSource), originalAdmission = structuredClone(value.durableAdmission);
+    const result = await decide(value);
+    expect(result.decision.outcome).toBe('act'); expect(fake.requests).toHaveLength(1); expect(log.query()).toHaveLength(1);
+    expect(result.decision.evidence).toContainEqual({ id: `criteria-v2:work-${opaqueUuid(uuid)}`, revision: '1' });
+    expect(value.nativeSource).toEqual(originalSource); expect(value.durableAdmission).toEqual(originalAdmission);
+    result.assertCurrent();
+  });
+});
+
+test.each(['unbound', 'different-work', 'suffix', 'semantic-state'] as const)(
+  'a persisted raw work reference remains guarded when %s', async mode => {
+    const rawWorkId = 'work-4f37563f-3c17-4153-8535-10637e98306d', id = `criteria-v2:${rawWorkId}`;
+    const value = contract({ criteriaId: mode === 'suffix' ? id + ':suffix' : id },
+      mode === 'unbound' ? null : mode === 'different-work' ? 'different-owned-work' : rawWorkId);
+    await recorded(async (fake, log) => {
+      await expect(decide(value, mode === 'semantic-state' ? { input: id } : {})).rejects.toMatchObject({ problem: 'card-material' });
+      expect(fake.requests).toHaveLength(0); expect(log.query()).toHaveLength(0);
+    });
+  },
+);
+
 test('fresh native decisions retain distinct action incarnations while exact live evidence still governs claims', async () => {
   await recorded(async () => {
     const value = contract(), evidence = { plan: 'Keep every original requirement.' };

@@ -3,7 +3,7 @@ import { nativeSelectedDiffSelector, type NativeSelectedDiffSelector } from './n
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { captureNativeConversationContinuation, nativeConversationContinuationSchema, type NativeConversationContinuation } from './native-continuation-context.js';
-import { randomUUID } from 'node:crypto';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { realpathSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { canonicalJson, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -341,7 +341,7 @@ export function createNativeConversationIntakeHost(deps: {
         association: { workId: event.workId, attemptId: event.attemptId, ledgerRevision: event.sequence } }, record);
       prepareTerminalUpdate(next); return next;
     });
-    const ledger = createWorkLedger({ projectId: deps.projectId, storage, clock: { now: Date.now, newId: kind => `${kind}-${randomUUID()}` } });
+    const ledger = createWorkLedger({ projectId: deps.projectId, storage, clock: { now: Date.now, newId: kind => `${kind}-${opaqueUuid()}` } });
     const actor = ledger.authority.issueActor({ actorId: record.principalId, projectId: deps.projectId, role: 'coordinator' });
     try {
       for (let attempt = 0; attempt < 3; attempt++) {

@@ -56,6 +56,7 @@ jobs:
         run: |
           cp .github/scripts/package-suite-release.mjs "$RUNNER_TEMP/package-suite-release.mjs"
           cp products/daemon/scripts/build-native-ci.ts "$RUNNER_TEMP/build-native-ci.ts"
+          cp products/daemon/scripts/native-execution-process.mjs "$RUNNER_TEMP/native-execution-process.mjs"
       - name: Require a nonpublishing immutable candidate
         env:
           CANDIDATE_SOURCE: ${{ inputs.candidate-source }}

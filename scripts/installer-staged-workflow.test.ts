@@ -2,8 +2,8 @@
  * Native service behavior belongs to the six original hosted runner accounts.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -140,3 +140,47 @@ test('other callers retain default checksum generation through the existing sour
   const verified = run(checksums, f.root, existingEnv(f.names));
   expect(verified.status, verified.stderr).toBe(0);
 });
+
+
+test.each(['nonzero', 'cancel'] as const)('retained suite packaging handles %s before staging cleanup and never emits source metadata', async scenario => {
+  const root = mkdtempSync(join(tmpdir(), 'retained-suite-build-')); roots.push(root);
+  const source = join(root, 'source'), retained = join(root, 'retained'), bin = join(root, 'bin'), destination = join(root, 'assets');
+  for (const directory of [source, retained, bin]) mkdirSync(directory);
+  symlinkSync(join(repo, 'packages'), join(source, 'packages'), 'dir');
+  writeFileSync(join(source, 'package.json'), '{"version":"3.1.2"}');
+  cpSync(join(repo, '.github/scripts/package-suite-release.mjs'), join(retained, 'package-suite-release.mjs'));
+  cpSync(join(repo, 'products/daemon/scripts/native-execution-process.mjs'), join(retained, 'native-execution-process.mjs'));
+  // Only dependency acquisition is a fixture port. The coordinator, owned
+  // build runner, source modules and release stage are their actual code.
+  writeFileSync(join(retained, 'build-native-ci.ts'), 'export async function probeInstalledNativeBuildAssets() {}\nexport async function prepareNativeBuildAssets({install}) { await install(); }\n');
+  writeFileSync(join(bin, 'git'), '#!/bin/sh\ncase "$1" in rev-parse) printf "%s\\n" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;; diff) exit 0 ;; *) exit 91 ;; esac\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'bun'), '#!/bin/sh\nexec "$BUILD_RUNTIME" "$BUILD_FIXTURE"\n', { mode: 0o755 });
+  const marker = join(root, 'compiler-started'), compiler = join(root, 'compiler.mjs');
+  writeFileSync(compiler, 'import {writeFileSync} from "node:fs"; process.on("SIGTERM",()=>{}); writeFileSync(process.env.BUILD_MARKER,String(process.pid)); ' + (scenario === 'cancel' ? 'setInterval(()=>{},1000);' : 'process.exit(23);'));
+  const child = spawn(process.execPath, [join(retained, 'package-suite-release.mjs'), `${process.platform}-${process.arch}`, destination, 'v3.1.2'], {
+    cwd: source, env: { ...process.env, PATH: bin + ':' + process.env.PATH, BUILD_RUNTIME: process.execPath, BUILD_FIXTURE: compiler, BUILD_MARKER: marker },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
+  const closed = new Promise<number | null>((yes, no) => { child.once('error', no); child.once('close', yes); });
+  let compilerPid: number | undefined, closeTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(marker) && Date.now() < deadline) await Bun.sleep(10);
+    expect(existsSync(marker), output).toBe(true);
+    compilerPid = Number(readFileSync(marker, 'utf8')); expect(compilerPid).toBeGreaterThan(1);
+    if (scenario === 'cancel') child.kill('SIGTERM');
+    const exited = await Promise.race([closed, new Promise<never>((_yes, no) => { closeTimer = setTimeout(() => no(new Error('Interrupted suite packaging did not drain')), 8_000); })]);
+    clearTimeout(closeTimer);
+    expect(exited, output).not.toBe(0);
+    if (scenario === 'nonzero') expect(output).toContain('Suite native build command failed');
+    expect(() => process.kill(compilerPid!, 0)).toThrow();
+    expect(readdirSync(destination)).toEqual([]);
+    expect(output).not.toContain('"sourceCommit"');
+  } finally {
+    clearTimeout(closeTimer);
+    if (compilerPid !== undefined) { try { process.kill(compilerPid, 'SIGKILL'); } catch { /* actual fixture already drained */ } }
+    child.kill('SIGKILL'); await closed;
+  }
+}, 25_000);

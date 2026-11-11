@@ -239,9 +239,24 @@ function captureNativeObjectFacts(object: object): NativeObjectFacts {
     })) });
 }
 function nativeDescriptorMatches(current: PropertyDescriptor | undefined, original: Readonly<PropertyDescriptor>): boolean {
-  return !!current && current.configurable === original.configurable && current.enumerable === original.enumerable
-    && ('value' in current) === ('value' in original) && current.value === original.value
-    && current.writable === original.writable && current.get === original.get && current.set === original.set;
+  if (!current || !nativeHasOwn(current, 'configurable') || !nativeHasOwn(original, 'configurable')
+    || !nativeHasOwn(current, 'enumerable') || !nativeHasOwn(original, 'enumerable')) return false;
+  const data = nativeHasOwn(original, 'value');
+  if (nativeHasOwn(current, 'value') !== data) return false;
+  // Missing descriptor fields are not dependencies on Object.prototype. Check
+  // the complete own kind before reading values, including borrowed mixed shapes.
+  if (data) {
+    if (!nativeHasOwn(current, 'writable') || !nativeHasOwn(original, 'writable')
+      || nativeHasOwn(current, 'get') || nativeHasOwn(original, 'get')
+      || nativeHasOwn(current, 'set') || nativeHasOwn(original, 'set')) return false;
+    return current.configurable === original.configurable && current.enumerable === original.enumerable
+      && current.value === original.value && current.writable === original.writable;
+  }
+  if (nativeHasOwn(current, 'writable') || nativeHasOwn(original, 'writable')
+    || !nativeHasOwn(current, 'get') || !nativeHasOwn(original, 'get')
+    || !nativeHasOwn(current, 'set') || !nativeHasOwn(original, 'set')) return false;
+  return current.configurable === original.configurable && current.enumerable === original.enumerable
+    && current.get === original.get && current.set === original.set;
 }
 function nativeObjectFactsMatch(facts: NativeObjectFacts): boolean {
   if (nativeGetPrototypeOf(facts.object) !== facts.prototype || nativeOwnKeys(facts.object).length !== facts.slots.length) return false;

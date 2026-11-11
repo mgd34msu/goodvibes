@@ -1283,7 +1283,7 @@ test('a failing helper finalization still releases both genuine detached allocat
   expect(liveStatements()).toEqual([]); expect(readFileSync(filename)).toEqual(before);
 });
 
-test('a binding observation cannot change the Unicode decoder before the original row boundary', async () => {
+test('a mixed binding descriptor is refused without invoking its Unicode decoder mutation', async () => {
   const own = Object.getOwnPropertyDescriptor, define = Object.defineProperty;
   const decoder = own(String.prototype, 'charCodeAt');
   if (!decoder || !decoder.configurable) throw new Error('No genuine mutable Unicode decoder');
@@ -1312,7 +1312,7 @@ test('a binding observation cannot change the Unicode decoder before the origina
       finally { armed = false; define(String.prototype, 'charCodeAt', decoder); }
     })).toThrow(heldError);
   } finally { armed = false; define(String.prototype, 'charCodeAt', decoder); }
-  expect(callbacks).toBeGreaterThan(0); expect(invoked).toBe(0); expect(consumed).toBe(false);
+  expect(callbacks).toBe(0); expect(invoked).toBe(0); expect(consumed).toBe(false);
   expect(readFileSync(filename)).toEqual(before);
 });
 
@@ -1458,9 +1458,9 @@ test('a retained original comparator retains equivalent native own-slot reorderi
   expect(readFileSync(filename)).toEqual(before);
 });
 
-test('the original expected-side inherited descriptor read retains its mutation-before-restoration boundary', async () => {
+test('native descriptor comparisons never invoke inherited getters and refuse prototype pollution before consumption', async () => {
   const own = Object.getOwnPropertyDescriptor, define = Object.defineProperty, remove = Reflect.deleteProperty;
-  const parent = Object.getPrototypeOf, setParent = Object.setPrototypeOf, freeze = Object.freeze;
+  const parent = Object.getPrototypeOf, freeze = Object.freeze;
   // The preceding legal reorder changes live keys. Acquire this control's
   // genuine expected slot order after that change rather than reusing an older loader.
   const SQL = await loadSqlJsEngine(), scratch = new SQL.Database(), sample = scratch.prepare('SELECT 1');
@@ -1475,8 +1475,8 @@ test('the original expected-side inherited descriptor read retains its mutation-
     return descriptor?.configurable && 'value' in descriptor && typeof descriptor.value === 'function' && key !== 'constructor'
       ? [{ key, descriptor }] : [];
   });
-  const first = candidates[0], later = candidates.at(-1);
-  if (!first || !later || first.key === later.key || first.descriptor.value === later.descriptor.value) throw new Error('No actual ordered native data pair');
+  const first = candidates[0];
+  if (!first) throw new Error('No actual native data slot');
   const descriptorParent: unknown = parent(first.descriptor);
   if (!descriptorParent || typeof descriptorParent !== 'object' || parent(descriptorParent) !== null || own(descriptorParent, 'get')) {
     throw new Error('No actual ordinary descriptor parent');
@@ -1505,49 +1505,34 @@ test('the original expected-side inherited descriptor read retains its mutation-
   if (!retainedDescriptor) throw new Error('No actual retained native descriptor was observed');
   const { sqlite, filename, read, statementPrototype: actualPrototype } = await fixture(true, false, native);
   if (actualPrototype !== statementPrototype) throw new Error('The fixture changed the original native prototype');
-  const receiver = globalThis, self = own(receiver, 'globalThis');
-  if (!self || !self.configurable) throw new Error('No replaceable original native global receiver');
-  const replacement = setParent({ ...later.descriptor, value: () => undefined }, null);
-  let armed = 0, inheritedCalls = 0, selectedReads = 0, freshReads = 0, expectedReads = 0;
-  let restored = 0, consumed = false, reachedMutation = false, nestedAttempt = false, caught: unknown;
-  const observing = new Proxy(receiver, { getOwnPropertyDescriptor(target, key) {
-    if (key === 'BigInt' && armed) { restored++; define(statementPrototype, later.key, later.descriptor); }
-    return own(target, key);
-  } });
+  let inheritedCalls = 0, expectedReads = 0;
+  let consumed = false, nestedAttempt = false, caught: unknown;
   const expectedDescriptor = retainedDescriptor;
   const before = readFileSync(filename);
   try {
     sqlite.assertPersistedReadFrame(() => {
       expect(read()).toEqual([['original', 'Complete original source']]);
       requireNativePrefixFrame(sqlite);
-      define(receiver, 'globalThis', { configurable: self.configurable ?? false, enumerable: self.enumerable ?? false, writable: true, value: observing });
       define(descriptorParent, 'get', { configurable: true, get(this: object) {
         inheritedCalls++;
-        if (!armed && own(this, 'value')?.value === first.descriptor.value) {
-          selectedReads++;
-          if (this === expectedDescriptor) {
-            expectedReads++;
-            armed++; remove(descriptorParent, 'get'); define(statementPrototype, later.key, replacement);
-            reachedMutation = true;
-          } else freshReads++;
-        }
+        if (this === expectedDescriptor) expectedReads++;
         return undefined;
       } });
       try {
         nestedAttempt = true;
         sqlite.assertPersistedReadFrame(() => { read(); consumed = true; });
       } finally {
-        remove(descriptorParent, 'get'); define(statementPrototype, later.key, later.descriptor); define(receiver, 'globalThis', self);
+        remove(descriptorParent, 'get');
       }
     });
   } catch (error) { caught = error; }
   finally {
-    remove(descriptorParent, 'get'); define(statementPrototype, later.key, later.descriptor); define(receiver, 'globalThis', self);
+    remove(descriptorParent, 'get');
   }
-  expect(captured).toBe(1); expect(reachedMutation).toBe(true); expect(nestedAttempt).toBe(true);
-  expect(freshReads).toBe(1); expect(expectedReads).toBe(1); expect(selectedReads).toBe(2);
+  expect(captured).toBe(1); expect(nestedAttempt).toBe(true); expect(expectedReads).toBe(0);
   expect(caught).toBeInstanceOf(native.SQLiteObservationRetiredError);
-  expect(inheritedCalls).toBeGreaterThan(0); expect(armed).toBe(1); expect(restored).toBe(0); expect(consumed).toBe(false);
+  expect(inheritedCalls).toBe(0); expect(consumed).toBe(false);
+  expect(own(statementPrototype, first.key)).toEqual(first.descriptor);
   expect(readFileSync(filename)).toEqual(before);
 });
 

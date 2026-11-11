@@ -78,8 +78,8 @@ test('new patch release pins the previous public suite for required prepublicati
   const release = load('release.yml');
   for (const job of ['staged-install-acceptance']) {
     expect(release.jobs[job]?.with).toMatchObject({
-      'previous-tag': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'v3.1.2' || '' }}",
-      'previous-source': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.3' && '" + previousSource + "' || '' }}",
+      'previous-tag': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.4' && 'v3.1.3' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'v3.1.2' || '' }}",
+      'previous-source': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.4' && '0065d6726d4d9fe3f800e255711b6cf8d78d0d72' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && '" + previousSource + "' || '' }}",
     });
   }
   expect(release.jobs['github-release']!.needs).toContain('staged-install-acceptance');

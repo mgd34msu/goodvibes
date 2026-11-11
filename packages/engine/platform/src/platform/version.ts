@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-let version = '3.1.3';
+let version = '3.1.4';
 try {
   // The engine manifest: packages/engine/package.json, three levels above platform/src/platform (and platform/dist/platform).
   const pkg = JSON.parse(readFileSync(join(import.meta.dir, '..', '..', '..', 'package.json'), 'utf-8'));

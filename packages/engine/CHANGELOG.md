@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.1.4] - 2026-11-11
+
+### Fixed
+
+- Restore Shift-uppercase input across terminal text fields and balance keyboard
+  mode ownership during startup, external editing and shutdown.
+- Keep contract execution mode and owner context valid until the actual work
+  drains, preventing delayed planner and worker tools from being refused after
+  their admitting invocation finishes.
+- Keep terminal input responsive during large contract reviews by yielding
+  between file observations and avoiding repeated parsing of owned checkpoints.
+- Preserve complete review evidence in a smaller decision request and halt
+  verification after decision-model failure instead of repeatedly retrying it.
+
 ## [3.1.3] - 2026-11-11
 
 ### Fixed

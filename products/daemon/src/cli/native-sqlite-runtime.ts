@@ -2,9 +2,9 @@ import type { DarwinDaemonSqliteOwner } from '@goodvibes-jev/engine/platform/pla
 import { isCompiledBunModuleUrl } from '@goodvibes-jev/engine/platform/platform/runtime/compiled-native-startup';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, type BigIntStats } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { COMPILED_VERSION } from '../version.js';
 
 export interface DaemonSqliteRuntime {
@@ -38,41 +38,45 @@ export interface DaemonSqliteOwner extends DarwinDaemonSqliteOwner {}
 // actual native output. Adjacent provenance never grants byte authority.
 declare const __DAEMON_NATIVE_SQLITE_OWNER__: DaemonSqliteOwner | null;
 
-function retainedFile(path: string, cohortRoot: string, strictClocks = false): string {
+function fileRevision(stat: BigIntStats): string {
+  return `${stat.dev}:${stat.ino}:${stat.mode}:${stat.ctimeNs}:${stat.mtimeNs}:${stat.size}:${stat.uid}:${stat.gid}`;
+}
+
+function retainedFile(path: string): { readonly identity: string; readonly file: string } {
   const parents: string[] = [];
   for (let current = dirname(path);;) {
     const stat = lstatSync(current, { bigint: true });
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Native SQLite parent is not a regular directory');
-    const within = relative(cohortRoot, current);
-    const selectedParent = within === '' || (!within.startsWith(`..${sep}`) && within !== '..' && !within.startsWith(sep));
-    const revision = strictClocks && selectedParent ? `:${stat.ctimeNs}:${stat.mtimeNs}` : '';
     // Keep the original ancestor walk and reject each named symlink before
     // forming its absolute identity. A recursive realpath at every hop repeats
     // traversal without adding another physical identity constraint.
-    parents.push(`${resolve(current)}:${stat.dev}:${stat.ino}:${stat.mode}:${stat.uid}:${stat.gid}:${stat.birthtimeNs}${revision}`);
+    parents.push(`${resolve(current)}:${stat.dev}:${stat.ino}:${stat.mode}:${stat.uid}:${stat.gid}:${stat.birthtimeNs}`);
     const parent = dirname(current); if (parent === current) break; current = parent;
   }
   const stat = lstatSync(path, { bigint: true });
   if (!stat.isFile() || stat.isSymbolicLink() || Number(stat.mode & 0o7777n) !== 0o644) throw new Error('Native SQLite companion must be a regular file with mode 0644');
-  return `${parents.join('|')}:${stat.dev}:${stat.ino}:${stat.ctimeNs}:${stat.mtimeNs}:${stat.size}:${stat.uid}:${stat.gid}`;
+  const file = fileRevision(stat);
+  return { identity: `${parents.join('|')}:${file}`, file };
 }
 
-function readRetainedBytes(path: string, limit: number, exact = false): Buffer {
+function readRetainedDescriptor(fd: number, limit: number, exact = false): Buffer {
+  const stat = fstatSync(fd);
+  if (!stat.isFile() || stat.size > limit || (exact && stat.size !== limit)) throw new Error('Native SQLite companion exceeds its compiled size bound');
+  const bytes = Buffer.alloc(stat.size);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
+    if (count === 0) throw new Error('Native SQLite companion changed during bounded read');
+    offset += count;
+  }
+  const extra = Buffer.alloc(1);
+  if (readSync(fd, extra, 0, 1, offset) !== 0 || fstatSync(fd).size !== stat.size) throw new Error('Native SQLite companion changed during bounded read');
+  return bytes;
+}
+
+function readRetainedBytes(path: string, limit: number): Buffer {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.size > limit || (exact && stat.size !== limit)) throw new Error('Native SQLite companion exceeds its compiled size bound');
-    const bytes = Buffer.alloc(stat.size);
-    let offset = 0;
-    while (offset < bytes.length) {
-      const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
-      if (count === 0) throw new Error('Native SQLite companion changed during bounded read');
-      offset += count;
-    }
-    const extra = Buffer.alloc(1);
-    if (readSync(fd, extra, 0, 1, offset) !== 0 || fstatSync(fd).size !== stat.size) throw new Error('Native SQLite companion changed during bounded read');
-    return bytes;
-  } finally { closeSync(fd); }
+  try { return readRetainedDescriptor(fd, limit); } finally { closeSync(fd); }
 }
 
 export interface DaemonSqliteOptions {
@@ -123,35 +127,47 @@ export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}):
   const cohortRoot = dirname(execPath);
   const libraryPath = join(cohortRoot, runtime.libraryPath);
   const provenancePath = join(cohortRoot, runtime.provenancePath);
-  const libraryOwner = retainedFile(libraryPath, cohortRoot, true), provenanceOwner = retainedFile(provenancePath, cohortRoot, true);
-  const bytes = readRetainedBytes(libraryPath, expected.size, true);
-  const provenance: unknown = JSON.parse(readRetainedBytes(provenancePath, 16_384).toString('utf8'));
-  if (bytes.length !== expected.size || createHash('sha256').update(bytes).digest('hex') !== expected.sha256) {
-    throw new Error('Native SQLite library differs from the compiled producer bytes');
-  }
-  if (!provenance || typeof provenance !== 'object' || Array.isArray(provenance)
-    || Object.keys(provenance).length !== Object.keys(expected).length
-    || !Object.entries(expected).every(([key, value]) => Reflect.get(provenance, key) === value)) {
-    throw new Error('Native SQLite companion owner or bytes differ from the declared runtime');
-  }
-  assertDaemonSqliteArchitecture(bytes, runtime.target);
-  const current = () => {
-    signal?.throwIfAborted();
-    assertSqliteLifetime(assertCurrent);
-    if (retainedFile(libraryPath, cohortRoot, true) !== libraryOwner || retainedFile(provenancePath, cohortRoot, true) !== provenanceOwner) throw new Error('Native SQLite companion changed before database construction');
-  };
-  current();
-  let selected: unknown;
-  try { selected = setCustomSQLite(libraryPath); } catch (error) { drainOwned(error); throw error; }
-  if (selected !== true) { drainOwned(selected); throw new Error('Bun refused the retained native SQLite runtime before database construction'); }
-  current();
-  // The synchronous loader selection above retains strict directory clocks
-  // across native admission. Later sibling publication is legitimate; keep the
-  // actual original files/physical ancestors rather than their child clocks.
-  const librarySource = retainedFile(libraryPath, cohortRoot), provenanceSource = retainedFile(provenancePath, cohortRoot);
-  return Object.freeze({ owner: expected, execPath, libraryPath, provenancePath, assertCurrent() {
-    signal?.throwIfAborted(); assertSqliteLifetime(assertCurrent);
-    if (retainedFile(libraryPath, cohortRoot) !== librarySource || retainedFile(provenancePath, cohortRoot) !== provenanceSource) throw new Error('Original native SQLite source changed');
-    signal?.throwIfAborted();
-  } });
+  const libraryOwner = retainedFile(libraryPath), provenanceOwner = retainedFile(provenancePath);
+  const libraryFd = openSync(libraryPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const descriptorCurrent = () => {
+      if (fileRevision(fstatSync(libraryFd, { bigint: true })) !== libraryOwner.file) throw new Error('Native SQLite companion changed before database construction');
+    };
+    descriptorCurrent();
+    const bytes = readRetainedDescriptor(libraryFd, expected.size, true);
+    descriptorCurrent();
+    const provenance: unknown = JSON.parse(readRetainedBytes(provenancePath, 16_384).toString('utf8'));
+    if (bytes.length !== expected.size || createHash('sha256').update(bytes).digest('hex') !== expected.sha256) {
+      throw new Error('Native SQLite library differs from the compiled producer bytes');
+    }
+    if (!provenance || typeof provenance !== 'object' || Array.isArray(provenance)
+      || Object.keys(provenance).length !== Object.keys(expected).length
+      || !Object.entries(expected).every(([key, value]) => Reflect.get(provenance, key) === value)) {
+      throw new Error('Native SQLite companion owner or bytes differ from the declared runtime');
+    }
+    assertDaemonSqliteArchitecture(bytes, runtime.target);
+    const current = () => {
+      signal?.throwIfAborted();
+      assertSqliteLifetime(assertCurrent);
+      descriptorCurrent();
+      if (retainedFile(libraryPath).identity !== libraryOwner.identity || retainedFile(provenancePath).identity !== provenanceOwner.identity) throw new Error('Native SQLite companion changed before database construction');
+    };
+    current();
+    // Bun 1.3.14 synchronously dlopens and initializes SQLite before returning
+    // true. Keep the exact descriptor whose bytes were pinned until then. The
+    // original @ prefix prevents dyld from retrying a canonical named path if
+    // this descriptor load fails; executable-path expansion reaches /dev/fd.
+    const loaderPath = `@executable_path/${relative(cohortRoot, `/dev/fd/${libraryFd}`)}`;
+    let selected: unknown;
+    try { selected = setCustomSQLite(loaderPath); } catch (error) { drainOwned(error); throw error; }
+    if (selected !== true) { drainOwned(selected); throw new Error('Bun refused the retained native SQLite runtime before database construction'); }
+    current();
+    // Sibling reader-floor publication changes directory clocks without
+    // replacing an ancestor. Retain physical ancestors and exact leaf revisions.
+    return Object.freeze({ owner: expected, execPath, libraryPath, provenancePath, assertCurrent() {
+      signal?.throwIfAborted(); assertSqliteLifetime(assertCurrent);
+      if (retainedFile(libraryPath).identity !== libraryOwner.identity || retainedFile(provenancePath).identity !== provenanceOwner.identity) throw new Error('Original native SQLite source changed');
+      signal?.throwIfAborted();
+    } });
+  } finally { closeSync(libraryFd); }
 }

@@ -6,7 +6,7 @@ import * as crypto from 'node:crypto';
 import * as nativeFs from 'node:fs';
 import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { daemonSqliteRuntime, initializeDaemonNativeSqlite, type DaemonSqliteOwner } from '../../cli/native-sqlite-runtime.ts';
 
 const roots: string[] = [];
@@ -27,11 +27,26 @@ function fixture(arch: 'x64' | 'arm64' = 'arm64', { pinBytes = true } = {}) {
   return { root, cohort, library, provenance, bytes, owner, options };
 }
 
+function selectedDescriptor(path: string, execPath: string): number {
+  const match = /\/dev\/fd\/(\d+)$/.exec(path);
+  if (!match) throw new Error('Expected a retained descriptor loader path');
+  const fd = Number(match[1]);
+  expect(path).toBe(`@executable_path/${relative(dirname(execPath), `/dev/fd/${fd}`)}`);
+  return fd;
+}
+
 test('selects each declared architecture after captured owner, bytes and metadata match', () => {
   for (const arch of ['x64', 'arm64'] as const) {
     const f = fixture(arch); const events: string[] = [];
-    initializeDaemonNativeSqlite({ ...f.options, assertCurrent: () => { events.push('current'); }, setCustomSQLite: path => { expect(path).toBe(f.library); events.push('select'); return true; } });
+    let fd = -1;
+    const admitted = initializeDaemonNativeSqlite({ ...f.options, assertCurrent: () => { events.push('current'); }, setCustomSQLite: path => {
+      fd = selectedDescriptor(path, f.options.execPath);
+      expect(nativeFs.readFileSync(fd)).toEqual(f.bytes);
+      events.push('select'); return true;
+    } });
     expect(events).toEqual(['current', 'current', 'select', 'current']);
+    expect(admitted?.libraryPath).toBe(f.library);
+    expect(() => nativeFs.fstatSync(fd)).toThrow();
   }
 });
 
@@ -108,18 +123,81 @@ test('oversized library and provenance refuse before reading or selecting', () =
   }
 });
 
-test('selected parent rename and restore during selection is detected', () => {
+test('transient parent replacement can only select the retained original descriptor', () => {
+  const f = fixture(), foreign = Buffer.from(f.bytes); foreign[40] = 1;
+  const admitted = initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: path => {
+    const fd = selectedDescriptor(path, f.options.execPath), retired = f.cohort + '.retired';
+    renameSync(f.cohort, retired);
+    try {
+      mkdirSync(dirname(f.library), { recursive: true }); writeFileSync(f.library, foreign, { mode: 0o644 });
+      expect(nativeFs.readFileSync(f.library)).toEqual(foreign);
+      expect(nativeFs.readFileSync(fd)).toEqual(f.bytes);
+    } finally { rmSync(f.cohort, { recursive: true, force: true }); renameSync(retired, f.cohort); }
+    return true;
+  } });
+  expect(admitted?.libraryPath).toBe(f.library);
+  expect(() => admitted?.assertCurrent()).not.toThrow();
+});
+
+test('an independent reader-floor lease during native selection preserves the original SQLite admission', () => {
+  const f = fixture(), lease = join(f.cohort, '.goodvibes-reader-requirements.json.lock');
+  const revision = (path: string) => {
+    const stat = nativeFs.lstatSync(path, { bigint: true });
+    return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.size, stat.ctimeNs, stat.mtimeNs];
+  };
+  const originalLibrary = revision(f.library), originalProvenance = revision(f.provenance);
+  let selected = 0;
+  const admitted = initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => {
+    // A live daemon acquires this sibling lease even when its existing reader
+    // floor needs no replacement. Neither selected native file changes.
+    writeFileSync(lease, 'independent reader-floor lease', { flag: 'wx', mode: 0o600 });
+    rmSync(lease);
+    selected++;
+    return true;
+  } });
+  expect(selected).toBe(1);
+  expect(revision(f.library)).toEqual(originalLibrary);
+  expect(revision(f.provenance)).toEqual(originalProvenance);
+  expect(admitted).toBeDefined();
+  expect(() => admitted?.assertCurrent()).not.toThrow();
+});
+
+test('equal-byte foreign inode substitution during selection refuses after loading only the original descriptor', () => {
   const f = fixture();
-  expect(() => initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => {
-    const retired = f.cohort + '.retired'; renameSync(f.cohort, retired); renameSync(retired, f.cohort); return true;
+  expect(() => initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: path => {
+    const fd = selectedDescriptor(path, f.options.execPath);
+    const replacement = f.library + '.foreign'; writeFileSync(replacement, f.bytes, { mode: 0o644 }); renameSync(replacement, f.library);
+    expect(nativeFs.fstatSync(fd).ino).not.toBe(nativeFs.lstatSync(f.library).ino);
+    expect(nativeFs.readFileSync(fd)).toEqual(f.bytes);
+    return true;
   } })).toThrow('changed before database construction');
 });
 
-test('equal-byte foreign inode substitution during selection refuses', () => {
+test.each(['symlink', 'replacement'] as const)('native selection refuses persistent ancestor %s while its descriptor still reads original bytes', change => {
   const f = fixture();
-  expect(() => initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => {
-    const replacement = f.library + '.foreign'; writeFileSync(replacement, f.bytes, { mode: 0o644 }); renameSync(replacement, f.library); return true;
-  } })).toThrow('changed before database construction');
+  expect(() => initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: path => {
+    const fd = selectedDescriptor(path, f.options.execPath), original = f.cohort + '.original';
+    renameSync(f.cohort, original);
+    if (change === 'symlink') symlinkSync(original, f.cohort);
+    else { mkdirSync(f.cohort); renameSync(join(original, 'lib'), join(f.cohort, 'lib')); }
+    expect(nativeFs.readFileSync(fd)).toEqual(f.bytes);
+    return true;
+  } })).toThrow();
+});
+
+test.each(['refused', 'thrown', 'aborted', 'changed'] as const)('native descriptor closes after selection is %s', kind => {
+  const f = fixture(), controller = new AbortController(), failure = new Error('selection boundary ended');
+  let fd = -1;
+  expect(() => initializeDaemonNativeSqlite({ ...f.options, signal: controller.signal, setCustomSQLite: path => {
+    fd = selectedDescriptor(path, f.options.execPath);
+    if (kind === 'refused') return false;
+    if (kind === 'thrown') throw failure;
+    if (kind === 'aborted') controller.abort(failure);
+    if (kind === 'changed') writeFileSync(f.library, Buffer.alloc(f.bytes.length));
+    return true;
+  } })).toThrow();
+  expect(fd).toBeGreaterThanOrEqual(0);
+  expect(() => nativeFs.fstatSync(fd)).toThrow();
 });
 
 test('prior-constructor selection refusal and cancellation never admit startup', () => {
@@ -250,7 +328,9 @@ test('the actual native selection boundary requires true and drains rejected ret
   try {
     for (const kind of ['returned', 'thrown'] as const) {
       let failure: unknown, rejected: Promise<never> | undefined;
-      const select = (): boolean => {
+      let fd = -1;
+      const select = (path: string): boolean => {
+        fd = selectedDescriptor(path, f.options.execPath);
         rejected = Promise.reject(new Error('borrowed native selection rejected'));
         if (kind === 'thrown') throw rejected;
         return rejected as unknown as boolean;
@@ -258,6 +338,7 @@ test('the actual native selection boundary requires true and drains rejected ret
       try { initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: select }); } catch (error) { failure = error; }
       if (kind === 'thrown') expect(failure).toBe(rejected);
       else expect(failure).toBeInstanceOf(Error);
+      expect(() => nativeFs.fstatSync(fd)).toThrow();
     }
     let calls = 0;
     expect(initializeDaemonNativeSqlite({ ...f.options, setCustomSQLite: () => { calls++; return true; } })).toBeDefined();

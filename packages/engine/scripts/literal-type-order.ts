@@ -1,8 +1,8 @@
 import ts from 'typescript';
 
-/** Canonicalize literal alternatives and inferred enum maps; keep other declaration bytes exact. */
+/** Canonicalize literal alternatives and unordered property-only type shapes. */
 export function normalizeLiteralTypeOrder(text: string): string {
-  if (!text.includes('|') && !text.includes('ZodEnum')) return text;
+  if (!text.includes('|') && !text.includes('{')) return text;
   let invalid = false;
   const scanner = ts.createScanner(ts.ScriptTarget.Latest, true, ts.LanguageVariant.Standard, text, () => { invalid = true; });
   const masks: Array<{ start: number; end: number }> = [];
@@ -45,31 +45,46 @@ export function normalizeLiteralTypeOrder(text: string): string {
   }).diagnostics ?? [];
   if (diagnostics.some(item => item.category === ts.DiagnosticCategory.Error)) return text;
   const source = ts.createSourceFile('surface.ts', parsed, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const edits: Array<{ start: number; end: number; value: string }> = [];
-  const visit = (node: ts.Node): void => {
+  type Edit = { start: number; end: number; value: string };
+  const rewrite = (start: number, end: number, edits: readonly Edit[]): string => {
+    let result = text.slice(start, end);
+    for (const edit of [...edits].sort((a, b) => b.start - a.start)) {
+      if (edit.start < start || edit.end > end) continue;
+      result = result.slice(0, edit.start - start) + edit.value + result.slice(edit.end - start);
+    }
+    return result;
+  };
+  const visit = (node: ts.Node): Edit[] => {
+    const children: Edit[] = [];
+    ts.forEachChild(node, child => { children.push(...visit(child)); });
+    const start = node.getStart(source) - prefix.length, end = node.end - prefix.length;
     if (ts.isUnionTypeNode(node) && node.types.every(ts.isLiteralTypeNode)) {
       const original = node.types.map(member => member.getText(source));
       const sorted = [...original].sort();
       if (original.some((member, index) => member !== sorted[index])) {
-        edits.push({ start: node.getStart(source) - prefix.length, end: node.end - prefix.length, value: sorted.join(' | ') });
+        return [{ start, end, value: sorted.join(' | ') }];
       }
     }
-    if (ts.isTypeLiteralNode(node) && ts.isTypeReferenceNode(node.parent)
-      && (ts.isQualifiedName(node.parent.typeName) ? node.parent.typeName.right.text : node.parent.typeName.text) === 'ZodEnum'
-      && node.members.every(member => ts.isPropertySignature(member) && member.type && ts.isLiteralTypeNode(member.type)
-        && member.name && (ts.isIdentifier(member.name) || ts.isStringLiteral(member.name)))) {
+    // Unique ordinary properties describe an unordered shape. In particular,
+    // inferred return objects and Zod maps may be emitted in compiler-dependent
+    // order. Keep overloads and every other member kind in their original order.
+    if (ts.isTypeLiteralNode(node) && node.members.every(member => ts.isPropertySignature(member)
+      && (ts.isIdentifier(member.name) || ts.isStringLiteral(member.name) || ts.isNumericLiteral(member.name)))) {
       const members = node.members as ts.NodeArray<ts.PropertySignature>;
-      const names = members.map(member => (member.name as ts.Identifier | ts.StringLiteral).text);
+      const names = members.map(member => ts.isNumericLiteral(member.name)
+        ? String(Number(member.name.text)) : (member.name as ts.Identifier | ts.StringLiteral).text);
       if (new Set(names).size === names.length) {
-        const sorted = members.map((member, index) => ({ name: names[index]!, text: member.getText(source) }))
+        const sorted = members.map((member, index) => ({ name: names[index]!,
+          text: rewrite(member.getStart(source) - prefix.length, member.end - prefix.length, children) }))
           .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-        edits.push({ start: node.getStart(source) - prefix.length, end: node.end - prefix.length,
-          value: '{ ' + sorted.map(member => member.text).join(' ') + ' }' });
+        // Child edits are rendered into each member before replacing this whole
+        // container, so a reordered parent cannot erase a nested normalization.
+        return [{ start, end, value: '{ ' + sorted.map(member => member.text).join(' ') + ' }' }];
       }
     }
-    ts.forEachChild(node, visit);
+    return children;
   };
-  visit(source);
+  const edits = visit(source);
   let result = text;
   for (const edit of edits.sort((a, b) => b.start - a.start)) {
     if (edit.start < 0 || edit.end > text.length) return text;

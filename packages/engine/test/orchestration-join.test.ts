@@ -262,10 +262,20 @@ describe('OrchestrationEngine.join', () => {
       removed.push(this.path);
     });
     cleanups.push(() => { integrate.mockRestore(); remove.mockRestore(); });
-    const { engine, h } = fixture({ runWorktreeSetup: async () => undefined });
+    const loserSpawned = deferred();
+    const { engine, h } = fixture({ runWorktreeSetup: async path => {
+      // Complete native setup in the opposite order from the item array. Agent
+      // ordinals follow spawn order, not the winner/loser identities.
+      if (path === ws.items[0]!.worktreePath) await loserSpawned.promise;
+    } });
     const bothSpawned = deferred(), originalSpawn = h.agentManager.spawn; let spawns = 0;
-    h.agentManager.spawn = (input, binding) => { const result = originalSpawn(input, binding); if (++spawns === 2) bothSpawned.resolve(); return result; };
-    h.agentManager.join = (id) => id === 'agent-2' ? execution.promise : Promise.resolve();
+    h.agentManager.spawn = (input, binding) => {
+      const result = originalSpawn(input, binding);
+      if (++spawns === 1) loserSpawned.resolve();
+      if (spawns === 2) bothSpawned.resolve();
+      return result;
+    };
+    cleanups.push(() => { loserSpawned.resolve(); execution.resolve(); });
     const ws = engine.createWorkstream({
       title: 'Attempts', isolation: 'worktree',
       items: [{ id: 'item', title: 'Try', task: 'Work', attempts: 2 }],
@@ -275,6 +285,9 @@ describe('OrchestrationEngine.join', () => {
     await bothSpawned.promise;
     const winner = ws.items[0]!;
     const loser = ws.items[1]!;
+    expect(winner.agentId).toBe('agent-2');
+    expect(loser.agentId).toBe('agent-1');
+    h.agentManager.join = id => id === loser.agentId ? execution.promise : Promise.resolve();
     const loserPath = loser.worktreePath!;
     const held = deferred();
     const unlisten = engine.on(event => {

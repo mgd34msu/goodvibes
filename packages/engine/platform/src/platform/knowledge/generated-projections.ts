@@ -2,6 +2,7 @@ import { observeKnowledgeValue } from './local-value-observation.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { knowledgeClockIso, knowledgeClockNumber, knowledgeRawRepresentation, retainKnowledgeRepresentation, sameKnowledgeRecord } from './store-record-representation.js';
 import { KnowledgeSourceQualityHeldError } from './source-quality.js';
+import { KnowledgeRecordAdmissionHeldError } from './store-record-snapshot.js';
 import { sanitizeArtifactFilename, type ArtifactDescriptor } from '../artifacts/types.js';
 import { acquireArtifactPublication, type ArtifactOriginalObservation, type ArtifactPublicationLease, type ArtifactStore } from '../artifacts/index.js';
 import type { KnowledgeStore } from './store.js';
@@ -142,9 +143,17 @@ async function materializeProjectionOwned(
     if (authority && (readTarget() !== originalTarget || !targetObservation.matches(readTarget()))) stale();
   };
   const check = () => {
-    checkOwner();
-    if (authority && (input.store.getSource(input.sourceId) !== existing || !originalSource.matches(input.store.getSource(input.sourceId))
-      || readLinked() !== originalLinked || !linkedObservation.matches(readLinked()))) stale();
+    // Authority, graph and source-identity guards often consume the same rows.
+    // Keep every original assertion, sharing one fresh native read image only
+    // for this synchronous boundary. The next await or write gets a new frame.
+    try { store.assertRecordSnapshotFrame(() => {
+      checkOwner();
+      if (authority && (input.store.getSource(input.sourceId) !== existing || !originalSource.matches(input.store.getSource(input.sourceId))
+        || readLinked() !== originalLinked || !linkedObservation.matches(readLinked()))) stale();
+    }); } catch (error) {
+      if (error instanceof KnowledgeRecordAdmissionHeldError) stale();
+      throw error;
+    }
   };
   check();
   const stagedTarget = target?.kind === 'node' && graph?.nodes.some(node => node.id === target.id);

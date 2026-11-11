@@ -195,10 +195,10 @@ test.each([false, true])('passport complete synchronous checks share original na
       if (!ownership?.assertCurrent) throw new Error('Actual artifact admission must retain its original page owner.');
       ownership.assertCurrent();
       expect(callbacks).toBeGreaterThan(beforeCallbacks);
-      // The generic materializer calls both original authority and graph
-      // checks. Each complete synchronous check keeps all nested reads in one
-      // original native image, without sharing it across this await or write.
-      expect(frameImages.slice(before)).toEqual([1, 1]);
+      // Both original authority and graph callbacks still run, with all their
+      // nested checks sharing one fresh native image for this complete boundary.
+      // The frame ends before the artifact publisher can await or write.
+      expect(frameImages.slice(before)).toEqual([1]);
     } finally { if (mutateSource) expect(callbacks).toBeGreaterThan(beforeCallbacks); }
     return originalCreate(input, ownership);
   });

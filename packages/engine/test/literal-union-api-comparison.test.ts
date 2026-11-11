@@ -62,3 +62,46 @@ test('compiler-reordered enum maps compare equally while actual schema and overl
   expect(same('schema: z.ZodEnum<{ f(x: string): 1; f(x: number): 2; }>',
     'schema: z.ZodEnum<{ f(x: number): 2; f(x: string): 1; }>')).toBe(false);
 });
+
+test('compiler-reordered property-only return shapes compare equally without hiding contract edits', () => {
+  const before = 'export declare function capture(): { readonly phase: "pending" | "complete"; value?: string; count: number; };';
+  const after = 'export declare function capture(): { count: number; value?: string; readonly phase: "complete" | "pending"; };';
+  expect(same(before, after)).toBe(true);
+  expect(diffSnapshots(snapshot(entry(before)), snapshot(entry(after)))).toEqual([]);
+  for (const changed of [after.replace('count: number', 'count: string'), after.replace('value?: string;', ''),
+    after.replace('value?: string', 'value: string'), after.replace('readonly phase:', 'phase:'),
+    after.replace('count: number;', 'count: number; added: boolean;')]) {
+    expect(same(before, changed)).toBe(false);
+    expect(diffSnapshots(snapshot(entry(before)), snapshot(entry(changed))).length).toBeGreaterThan(0);
+  }
+  // Import types are how declaration emit spells Zod schema members; they are
+  // not ordinary TypeReference nodes and used to miss the enum-only exception.
+  expect(same('schema: import("zod").ZodObject<{ value: import("zod").ZodEnum<{ a: "a"; b: "b"; }>; count: number; }>;',
+    'schema: import("zod").ZodObject<{ count: number; value: import("zod").ZodEnum<{ b: "b"; a: "a"; }>; }>;')).toBe(true);
+});
+
+test('nested property normalization survives a parent reorder and referenced declaration labels', () => {
+  const before = 'catalog: { z: { y: { last: number; first: "z" | "a"; }; x: string; }; a: boolean; } ;; via Extra = export type Extra = { two: number; one: string; };';
+  const after = 'catalog: { a: boolean; z: { x: string; y: { first: "a" | "z"; last: number; }; }; } ;; via Extra = export type Extra = { one: string; two: number; };';
+  expect(same(before, after)).toBe(true);
+  expect(normalizeLiteralTypeOrder(before)).toBe(normalizeLiteralTypeOrder(after));
+  expect(same(before, after.replace('last: number', 'last: boolean'))).toBe(false);
+  expect(normalizeLiteralTypeOrder(normalizeLiteralTypeOrder(before))).toBe(normalizeLiteralTypeOrder(before));
+});
+
+test('ambiguous keys and ordered member or type sequences remain observable', () => {
+  const ordered = [
+    ['export type Example = { x: string; x: number; };', 'export type Example = { x: number; x: string; };'],
+    ['export type Example = { 1: string; "1": number; };', 'export type Example = { "1": number; 1: string; };'],
+    ['export type Example = { f(x: string): 1; f(x: number): 2; };', 'export type Example = { f(x: number): 2; f(x: string): 1; };'],
+    ['export type Example = { (x: string): 1; (x: number): 2; };', 'export type Example = { (x: number): 2; (x: string): 1; };'],
+    ['export type Example = { new(x: string): A; new(x: number): B; };', 'export type Example = { new(x: number): B; new(x: string): A; };'],
+    ['export type Example = { [key: string]: number; fixed: number; };', 'export type Example = { fixed: number; [key: string]: number; };'],
+    ['export type Example = { get value(): string; set value(next: string); };', 'export type Example = { set value(next: string); get value(): string; };'],
+    ['export type Example = { [Symbol.iterator]: A; value: string; };', 'export type Example = { value: string; [Symbol.iterator]: A; };'],
+    ['export type Example = [first: string, second: number];', 'export type Example = [second: number, first: string];'],
+    ['export type Example = A & B;', 'export type Example = B & A;'],
+  ];
+  for (const [before, after] of ordered) expect(same(before!, after!), before).toBe(false);
+  expect(same('export type Example = { 2: string; "first": number; };', 'export type Example = { "first": number; 2: string; };')).toBe(true);
+});

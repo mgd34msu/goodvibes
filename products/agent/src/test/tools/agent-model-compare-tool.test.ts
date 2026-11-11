@@ -1,11 +1,15 @@
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';
 import { effectAdmissionFixture } from '../helpers/effect-admission.ts';
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { inflateRawSync } from 'node:zlib';
 import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { ChatRequest, ChatResponse, LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { assertJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { saveComparisonJudgmentArtifact } from '../../tools/agent-model-compare-judgment.ts';
+import { loadComparisonFromArtifact } from '../../tools/agent-model-compare-run.ts';
 import {
   createAgentModelCompareTool as rawModelCompareTool,
   registerAgentModelCompareTool,
@@ -165,6 +169,47 @@ function fixture(options: {
 }
 
 describe('agent_model_compare tool', () => {
+  test('generated judgment IDs retain digit-heavy UUID entropy through complete-source synthesis while actual card material stays held', async () => {
+    const uuid = 'aaaaaaaa-bbbb-4abc-8111-111111111112' as const;
+    expect(() => assertJudgmentInput({ judgmentId: `jdg_${uuid}` })).toThrow('Refused before judgment: payment card material');
+    const artifacts = artifactStore(), runner = fixture({ artifactStore: artifacts.store });
+    const run = await runner.tool.execute({ mode: 'run', prompt: 'Write a concise product update.',
+      modelRefs: ['openai:gpt-4.1', 'anthropic:claude-sonnet'], confirm: true, explicitUserRequest: 'Compare product update drafts.' });
+    expect(run.success, run.error).toBe(true);
+    const comparison = await loadComparisonFromArtifact(artifacts.store, 'artifact-1');
+    if (!comparison) throw new Error('Original saved comparison was not readable');
+    const winner = comparison.candidates.find(candidate => candidate.blindId === 'B');
+    if (!winner) throw new Error('Original blind winner was missing');
+    // Inject entropy at the actual save producer only; source ownership,
+    // artifact contents, privacy screening and registered theme reader stay real.
+    const random = spyOn(crypto, 'randomUUID').mockReturnValueOnce(uuid);
+    try {
+      await saveComparisonJudgmentArtifact({ artifactStore: artifacts.store, comparison, winner,
+        reasons: 'Candidate B was more concrete.', notes: '', reveal: true });
+    } finally { random.mockRestore(); }
+    const saved = artifacts.inputs[1]!;
+    const payload = JSON.parse(saved.text!) as { judgmentId: string };
+    expect(payload.judgmentId).toMatch(/^jdg_[a-p]{32}$/);
+    const restoredEntropy = [...payload.judgmentId.slice(4)].map(letter => (letter.charCodeAt(0) - 97).toString(16)).join('');
+    expect(restoredEntropy).toBe(uuid.replaceAll('-', ''));
+    expect(saved.filename).toBe(`blind-model-comparison-judgment-${payload.judgmentId}.json`);
+    expect(saved.metadata?.judgmentId).toBe(payload.judgmentId);
+    expect(JSON.stringify(saved)).not.toContain(uuid);
+    const reviewer = fixture({ artifactStore: artifacts.store });
+    const synthesis = await reviewer.tool.execute({ mode: 'synthesis', includeReasons: true });
+    expect(synthesis.success, synthesis.error).toBe(true);
+    expect(synthesis.output).toContain('Concrete/actionable output: 1 judgment');
+    expect(synthesis.output).toContain('example artifact-2: Candidate B was more concrete.');
+    expect(synthesis.output).not.toContain('Unresolved preference signal');
+    await saveComparisonJudgmentArtifact({ artifactStore: artifacts.store, comparison, winner,
+      reasons: '4111111111111111', notes: '', reveal: true });
+    const protectedSynthesis = await reviewer.tool.execute({ mode: 'synthesis' });
+    expect(protectedSynthesis.success, protectedSynthesis.error).toBe(true);
+    expect(protectedSynthesis.output).toContain('Concrete/actionable output: 1 judgment');
+    expect(protectedSynthesis.output).toContain('Unresolved preference signal: 1 judgment');
+    expect(protectedSynthesis.output).not.toContain('Uncategorized preference signal');
+  });
+
   test('previews without calling providers when recorded admission is absent', async () => {
     const item = fixture();
 

@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
-test('the real API command accepts a literal permutation without rewriting its baseline and rejects contract edits', async () => {
+test('the real API command accepts literal and inferred-property permutations without rewriting its baseline and rejects contract edits', async () => {
   const engine = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const fixture = makeProjectTempDir('literal-api-command');
   for (const directory of ['scripts', 'etc', 'platform/dist', 'terminal-shell/dist', 'node_modules']) mkdirSync(join(fixture, directory), { recursive: true });
@@ -16,7 +16,7 @@ test('the real API command accepts a literal permutation without rewriting its b
     './platform': { types: './platform/dist/index.d.ts' }, './terminal-shell': { types: './terminal-shell/dist/index.d.ts' },
   } }));
   const source = join(fixture, 'platform/dist/index.d.ts');
-  const baseline = 'export type Choice = "a" | "b"; export interface Options { required: boolean; }';
+  const baseline = 'export type Choice = "a" | "b"; export interface Options { required: boolean; } export declare function capture(): { left: string; right: { before: boolean; after: number; }; }; export declare function choose(value: string): 1; export declare function choose(value: number): 2;';
   writeFileSync(source, baseline);
   writeFileSync(join(fixture, 'terminal-shell/dist/index.d.ts'), 'export interface Terminal { write(text: string): void; }');
   const run = async (check: boolean) => {
@@ -30,12 +30,16 @@ test('the real API command accepts a literal permutation without rewriting its b
   expect((await run(false)).exit).toBe(0);
   const report = join(fixture, 'etc/subpath-api-surface.json');
   const recorded = readFileSync(report, 'utf8');
-  writeFileSync(source, baseline.replace('"a" | "b"', '"b" | "a"'));
+  writeFileSync(source, baseline.replace('"a" | "b"', '"b" | "a"')
+    .replace('left: string; right: { before: boolean; after: number; };', 'right: { after: number; before: boolean; }; left: string;'));
   expect(await run(true)).toMatchObject({ exit: 0 });
   expect(readFileSync(report, 'utf8')).toBe(recorded);
   for (const changed of [
     baseline.replace('"a" | "b"', '"a" | "b" | "c"'),
     baseline.replace('required: boolean;', 'required: boolean; added: string;'),
+    baseline.replace('left: string;', 'left: number;'),
+    baseline.replace('export declare function choose(value: string): 1; export declare function choose(value: number): 2;',
+      'export declare function choose(value: number): 2; export declare function choose(value: string): 1;'),
     'export interface Options { required: boolean; }',
   ]) {
     writeFileSync(source, changed);

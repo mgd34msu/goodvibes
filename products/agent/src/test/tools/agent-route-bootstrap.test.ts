@@ -22,6 +22,7 @@ test.each(['route', 'agent_harness'] as const)('actual Agent bootstrap registers
   const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir: root, homeDir: root, configDir: join(root, '.goodvibes', 'agent') });
   seedProviderMetadataCacheFixture({ configManager, homeDirectory: root, workingDirectory: root });
   const services = (await createPreparedAgentRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), workingDir: root, homeDirectory: root, modelDiscovery: 'skip' }));
+  let screening: ReturnType<typeof researchScreeningFixture> | undefined;
   try {
     await services.providerRegistry.ready();
     await services.providerRegistry.modelDiscoverySettled();
@@ -42,7 +43,8 @@ test.each(['route', 'agent_harness'] as const)('actual Agent bootstrap registers
     } as unknown as CommandContext;
     registerAgentTools({ toolRegistry, commandRegistry: new CommandRegistry(), commandContext, configManager, services, getSessionId: () => 'fixture-session' });
     // Registered dispatch fences the complete bootstrapped registry during I/O.
-    bindAgentResearchSourceOwner(toolRegistry, researchScreeningFixture({ timeoutMs: 10_000 }).owner);
+    screening = researchScreeningFixture({ timeoutMs: 10_000 });
+    bindAgentResearchSourceOwner(toolRegistry, screening.owner);
     {
       const tool = toolRegistry.list().find(tool => tool.definition.name === name);
       expect(tool).toBeDefined();
@@ -82,6 +84,20 @@ test.each(['route', 'agent_harness'] as const)('actual Agent bootstrap registers
     expect(judgmentPort('routing.task-route.plan')).toBe(services.judgment.port);
     expect(fake.requests.filter(request => (request.state as { context?: { kind?: string } }).context?.kind === 'model provider')).toHaveLength(1);
     expect(fake.requests.filter(request => (request.state as { context?: { kind?: string } }).context?.kind === 'messaging channel or notification target')).toHaveLength(1);
+  } catch (error) {
+    const cause: unknown = error && typeof error === 'object' ? Object.getOwnPropertyDescriptor(error, 'cause')?.value : undefined;
+    const code: unknown = cause && typeof cause === 'object' ? Object.getOwnPropertyDescriptor(cause, 'code')?.value : undefined;
+    const reason: unknown = cause && typeof cause === 'object' ? Object.getOwnPropertyDescriptor(cause, 'reason')?.value : undefined;
+    const heldReasons = ['route-unavailable', 'protected-input', 'malformed', 'unsettled', 'cancelled', 'stale', 'capacity', 'busy'];
+    const hold = code === 'source-screening-held' && typeof reason === 'string' && heldReasons.includes(reason)
+      ? { code: 'source-screening-held', reason } : undefined;
+    console.error('AGENT_BOOTSTRAP_SCREENING_FAILURE', JSON.stringify({
+      ...(hold ? { cause: hold } : {}),
+      requestCount: screening?.calls.length ?? 0,
+      proposalRequests: screening?.calls.filter(call => call.path === '/v1/chat/completions').length ?? 0,
+      judgmentRequests: screening?.calls.filter(call => call.path === '/v1/systemone').length ?? 0,
+    }));
+    throw error;
   } finally {
     const failures: unknown[] = [];
     try { await services.close(); } catch (error) { failures.push(error); }

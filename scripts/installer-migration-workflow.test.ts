@@ -54,8 +54,9 @@ test('the actual migration guard refuses mutable refs, mismatched tooling and an
   const run = (changes: Record<string, string> = {}) => spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', guard.run!],
     { cwd: root, env: { ...valid, ...changes }, encoding: 'utf8', timeout: 5_000 });
   const accepted = run(); expect(accepted.status, accepted.stderr).toBe(0);
-  for (const changes of [{ RELEASE_TAG: 'v3.1.3' }, { RELEASE_TAG: 'v3.1.2;exit 0' }, { RELEASE_SOURCE: 'main' }, { RELEASE_SOURCE: '' },
-    { TOOLING_SHA: 'refs/heads/main' }, { FIXTURE_HEAD: 'c'.repeat(40) }]) {
+  const invalidInputs: Record<string, string>[] = [{ RELEASE_TAG: 'v3.1.3' }, { RELEASE_TAG: 'v3.1.2;exit 0' }, { RELEASE_SOURCE: 'main' }, { RELEASE_SOURCE: '' },
+    { TOOLING_SHA: 'refs/heads/main' }, { FIXTURE_HEAD: 'c'.repeat(40) }];
+  for (const changes of invalidInputs) {
     const refused = run(changes); expect(refused.error).toBeUndefined(); expect(refused.status, JSON.stringify(changes)).not.toBe(0);
   }
 });

@@ -1715,14 +1715,16 @@ test('an accidental asynchronous preflight is owned and refuses before download 
 test('a preserved private suite stage retains a handover refusal without a recovery or generic-failure path', async () => {
   const f = suiteReleaseFixture(), effects: string[] = [];
   const receipts = new DaemonReceiptStore(join(f.root, 'handover-refusals.json'));
+  const execPath = join(f.root, 'goodvibes-daemon');
+  const installed = JSON.parse(readFileSync(execPath + '.readers.json', 'utf8')) as { version: string };
   let foreign: string | undefined;
   const updater = new DaemonAutoUpdater({
-    execPath: join(f.root, 'goodvibes-daemon'), currentVersion: '3.1.2', platform: 'darwin', arch: 'x64',
+    execPath, currentVersion: installed.version, platform: f.options.platform, arch: f.options.arch,
     releasesLatestUrl: LATEST_URL, downloadBaseUrl: () => f.options.downloadBaseUrl,
     suite: { configManager: { get: key => key === 'controlPlane.webui.bundleDir' ? f.webui : undefined } },
     isIdle: () => true, receipts,
     fetchImpl: async url => url === LATEST_URL ? {
-      ok: false, status: 302, url, headers: { get: name => name.toLowerCase() === 'location' ? 'https://example.test/releases/tag/v3.1.3' : null },
+      ok: false, status: 302, url, headers: { get: name => name.toLowerCase() === 'location' ? new URL(`tag/v${f.options.version}`, LATEST_URL).href : null },
       text: async () => '', arrayBuffer: async () => new ArrayBuffer(0),
     } : f.fetchImpl(url),
     serviceActions: {

@@ -55,6 +55,28 @@ test('manual and reusable staged acceptance require immutable source/tooling and
   expect(upload.with).toMatchObject({ name: 'staged-release-assets', 'if-no-files-found': 'error' });
 });
 
+test('reusable acceptance supplies read-only metadata credentials only to its observing parent steps', () => {
+  for (const name of ['reusable-staged-install-acceptance.yml', 'reusable-published-install-acceptance.yml']) {
+    const workflow = load(name);
+    expect(workflow.permissions.contents).toBe('read');
+    const observing = Object.values(workflow.jobs).flatMap(job => job.steps).filter(step => /^node scripts\/accept-(?:published|staged)-suite\.mjs /.test(step.run ?? ''));
+    expect(observing).toHaveLength(3);
+    const scoped = observing.filter(step => !(name === 'reusable-published-install-acceptance.yml' && step.run?.endsWith(' upgrade-v3.1.1')));
+    for (const step of scoped) {
+      expect(step.env?.GOODVIBES_ACCEPTANCE_METADATA_TOKEN).toBe('${{ secrets.GITHUB_TOKEN }}');
+      expect(step.env?.GITHUB_TOKEN).toBeUndefined();
+    }
+    if (name === 'reusable-published-install-acceptance.yml') {
+      const legacy = observing.find(step => step.run?.endsWith(' upgrade-v3.1.1'))!;
+      expect(legacy.env?.GOODVIBES_ACCEPTANCE_METADATA_TOKEN).toBeUndefined();
+      expect(legacy.env?.GITHUB_TOKEN).toBeUndefined();
+    }
+    const owners = Object.values(workflow.jobs).flatMap(job => job.steps).filter(step => step.env?.GOODVIBES_ACCEPTANCE_METADATA_TOKEN !== undefined);
+    expect(owners).toEqual(scoped);
+    expect(readFileSync(join(repo, '.github/workflows', name), 'utf8').match(/GOODVIBES_ACCEPTANCE_METADATA_TOKEN/g)).toHaveLength(scoped.length);
+  }
+});
+
 test('manual macOS diagnostics reuse the existing staged artifact without staging or qualifying publication', () => {
   const diagnostic = load('diagnose-staged-macos.yml');
   expect(Object.keys(diagnostic.on)).toEqual(['workflow_dispatch']);

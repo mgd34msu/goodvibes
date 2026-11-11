@@ -1,10 +1,11 @@
 /** Owned tooling regressions; they do not claim published native/service proof. */
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { acceptanceFailureRecord, markAcceptanceCheckpoint, readPublicAcceptanceDelivery, finishAcceptance, waitForAcceptanceReadiness, waitForNativeServiceRetirement, assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, runHistoricalUpgradeSteps, runInstallerMigrationSteps, assertHistoricalRollbackRefusal, type InstallerMigrationSteps, type HistoricalUpgradeSteps, type AcceptanceSteps, type NativeServiceRetirementObservation } from './accept-published-suite.mjs';
+import { createServer } from 'node:http';
+import { acceptPublishedSuite, consumeAcceptanceMetadataFetch, acceptanceFailureRecord, markAcceptanceCheckpoint, readPublicAcceptanceDelivery, finishAcceptance, waitForAcceptanceReadiness, waitForNativeServiceRetirement, assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, runHistoricalUpgradeSteps, runInstallerMigrationSteps, assertHistoricalRollbackRefusal, type InstallerMigrationSteps, type HistoricalUpgradeSteps, type AcceptanceSteps, type NativeServiceRetirementObservation, type AcceptanceFetch } from './accept-published-suite.mjs';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -22,7 +23,7 @@ function nativeDaemonChild(root: string) {
   });
 }
 
-function publicDeliveryFixture() {
+function publicDeliveryFixture(metadataToken?: string) {
   const source = 'a'.repeat(40), tag = 'v3.1.2', target = 'darwin-arm64';
   const api = 'https://api.github.com/repos/mgd34msu/goodvibes', download = `https://github.com/mgd34msu/goodvibes/releases/download/${tag}/`;
   const releaseUrl = `${api}/releases/tags/${tag}`, latestUrl = `${api}/releases/latest`;
@@ -39,17 +40,92 @@ function publicDeliveryFixture() {
     ...descriptors.map((name, i) => [download + name, { body: readers[i] }] as const),
   ]);
   const evidence: Parameters<typeof acceptanceFailureRecord>[0] = { stage: 'published-catalog' }, requests: string[] = [];
-  const deliver = () => readPublicAcceptanceDelivery({ tag, source, target,
-    checkpoint(check) { markAcceptanceCheckpoint(evidence, check); }, onHttpStatus(status) { evidence.httpStatus = status; },
-  }, async (url, options) => {
-    expect(options.headers).toBeUndefined(); requests.push(url);
+  const fixtureFetch: AcceptanceFetch = async (url, options) => {
+    if (metadataToken && url.startsWith(api + '/')) {
+      expect(new Headers(options.headers).get('authorization')).toBe(`Bearer ${metadataToken}`);
+      expect(options.redirect).toBe('error');
+    } else expect(options.headers).toBeUndefined();
+    requests.push(url);
     const fixture = responses.get(url); if (!fixture) throw new Error('Unowned public fixture request');
     const body = typeof fixture.body === 'string' ? fixture.body : JSON.stringify(fixture.body);
     const response = new Response(body, { status: fixture.status ?? 200, headers: { 'x-private-fixture': 'private-http-header-sentinel' } });
     Object.defineProperty(response, 'url', { value: fixture.url ?? url }); return response;
-  });
+  };
+  const deliveryFetch = metadataToken ? consumeAcceptanceMetadataFetch({ GOODVIBES_ACCEPTANCE_METADATA_TOKEN: metadataToken }, fixtureFetch).fetch : fixtureFetch;
+  const deliver = () => readPublicAcceptanceDelivery({ tag, source, target,
+    checkpoint(check) { markAcceptanceCheckpoint(evidence, check); }, onHttpStatus(status) { evidence.httpStatus = status; },
+  }, deliveryFetch);
   return { evidence, requests, responses, release, latest, readers, releaseUrl, latestUrl, publicUrl, immutableUrl, descriptors, download, deliver };
 }
+
+test('metadata inspection authenticates only the exact canonical repository GET routes', async () => {
+  const token = 'metadata-only-sentinel', env: NodeJS.ProcessEnv = { GOODVIBES_ACCEPTANCE_METADATA_TOKEN: token };
+  const requests: Array<{ url: string; options: RequestInit }> = [];
+  const metadata = consumeAcceptanceMetadataFetch(env, async (url, options) => { requests.push({ url, options }); return new Response('{}'); });
+  expect(env).toEqual({}); expect(metadata.authentication).toBe('read-only-ci-token');
+  const api = 'https://api.github.com/repos/mgd34msu/goodvibes';
+  const known = ['/releases/tags/v3.1.2', '/releases/tags/v3.1.3-rc.1', '/releases/latest', '/git/ref/tags/v3.1.2', '/git/tags/' + 'a'.repeat(40)];
+  for (const path of known) await metadata.fetch(api + path, { redirect: 'follow' });
+  for (const request of requests) {
+    expect(new Headers(request.options.headers).get('authorization')).toBe(`Bearer ${token}`);
+    expect(request.options.redirect).toBe('error');
+  }
+  requests.length = 0;
+  const unknown = [api + '/releases', api + '/releases/assets/123', api + '/git/ref/heads/main', api + '/releases/latest?private=1',
+    api + '/releases/latest#fragment', api + '/releases/latest\n', api + '/releases/tags/v3.1.2/../latest',
+    api.replace('mgd34msu/goodvibes', 'someone/else') + '/releases/latest', api.replace('api.github.com', 'api.github.com.evil.invalid') + '/releases/latest',
+    api.replace('https:', 'http:') + '/releases/latest', api.replace('api.github.com', 'api.github.com:443') + '/releases/latest',
+    api.replace('api.github.com', 'user@api.github.com') + '/releases/latest',
+    'https://github.com/mgd34msu/goodvibes/releases/download/v3.1.2/SHA256SUMS.txt',
+    'https://raw.githubusercontent.com/mgd34msu/goodvibes/main/scripts/install.sh', 'https://goodvibes.sh/install.sh'];
+  for (const url of unknown) await metadata.fetch(url, {});
+  await metadata.fetch(api + '/releases/latest', { method: 'POST' });
+  expect(requests).toHaveLength(unknown.length + 1);
+  for (const request of requests) { expect(request.options.headers).toBeUndefined(); expect(request.options.redirect).toBeUndefined(); }
+  expect(JSON.stringify(metadata)).not.toContain(token);
+});
+
+test('metadata inspection actually refuses redirects before credentials reach the destination', async () => {
+  let originRequests = 0, redirectedRequests = 0;
+  const server = createServer((request, response) => {
+    if (request.url === '/destination') { redirectedRequests++; response.end('{}'); }
+    else { originRequests++; response.writeHead(302, { Location: '/destination' }); response.end(); }
+  });
+  try {
+    await new Promise<void>(yes => server.listen(0, '127.0.0.1', yes));
+    const address = server.address(); assert.ok(address && typeof address === 'object');
+    // Only this owned fixture rewrites the fixed API destination to localhost.
+    const metadata = consumeAcceptanceMetadataFetch({ GOODVIBES_ACCEPTANCE_METADATA_TOKEN: 'owned-fixture-token' },
+      (_url, options) => fetch(`http://127.0.0.1:${address.port}/origin`, options));
+    await expect(metadata.fetch('https://api.github.com/repos/mgd34msu/goodvibes/releases/latest', {})).rejects.toThrow();
+    expect(originRequests).toBe(1); expect(redirectedRequests).toBe(0);
+  } finally { await new Promise<void>((yes, no) => { server.close(error => error ? no(error) : yes()); server.closeAllConnections(); }); }
+});
+
+test('acceptance consumes the dedicated token before failure or an owned installer/product child', async () => {
+  const name = 'GOODVIBES_ACCEPTANCE_METADATA_TOKEN', previous = process.env[name], token = 'private-metadata-credential-sentinel';
+  const output = spyOn(console, 'error').mockImplementation(() => {});
+  process.env[name] = token;
+  try {
+    await expect(acceptPublishedSuite({ tag: 'v3.1.2', source: 'a'.repeat(40), target: 'linux-x64', scenario: 'invalid' as never })).rejects.toThrow('Unknown published acceptance scenario');
+    expect(process.env[name]).toBeUndefined();
+    const child = await runOwnedCommand(process.execPath, ['-e', 'process.stdout.write(process.env.GOODVIBES_ACCEPTANCE_METADATA_TOKEN === undefined ? "absent" : "present")']);
+    expect(child.code).toBe(0); expect(child.stdout).toBe('absent');
+    const explicit = await runOwnedCommand(process.execPath, ['-e', 'process.stdout.write(process.env.GOODVIBES_ACCEPTANCE_METADATA_TOKEN === undefined ? "absent" : "present")'], { env: { ...process.env } });
+    expect(explicit.code).toBe(0); expect(explicit.stdout).toBe('absent');
+    expect(JSON.stringify(output.mock.calls)).not.toContain(token);
+    expect(output.mock.calls[0]?.[0]).toContain('canonical-repository-metadata-get-only');
+  } finally { output.mockRestore(); if (previous === undefined) delete process.env[name]; else process.env[name] = previous; }
+});
+
+test('authenticated catalog inspection preserves complete anonymous public readers and installer delivery', async () => {
+  const fixture = publicDeliveryFixture('private-metadata-sentinel');
+  const result = await fixture.deliver();
+  expect(result.readers.size).toBe(3);
+  expect(result.published.bytes.equals(result.immutable.bytes)).toBe(true);
+  expect(fixture.requests).toEqual([fixture.releaseUrl, ...fixture.descriptors.map(name => fixture.download + name), fixture.latestUrl, fixture.immutableUrl, fixture.publicUrl]);
+  expect(JSON.stringify(result)).not.toContain('private-metadata-sentinel');
+});
 
 async function publicDeliveryFailure(fixture: ReturnType<typeof publicDeliveryFixture>) {
   let failure: unknown;
@@ -625,6 +701,7 @@ test('both actual publication workflows await one shared four-native-target acce
     .toEqual({ ref: '${{ inputs.tooling-sha }}' });
   const install = steps.map(object).find(step => step.name === 'Download, install, serve and uninstall the published suite');
   expect(install?.env).toEqual({
+    GOODVIBES_ACCEPTANCE_METADATA_TOKEN: '${{ secrets.GITHUB_TOKEN }}',
     RELEASE_TAG: '${{ inputs.tag }}', RELEASE_SOURCE: '${{ inputs.source }}', RELEASE_TARGET: '${{ matrix.target }}',
   });
   expect(install?.run)

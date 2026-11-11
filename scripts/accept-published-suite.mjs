@@ -14,6 +14,25 @@ const repository = 'mgd34msu/goodvibes';
 const products = ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent'];
 const unit = 'goodvibes.service', label = 'sh.goodvibes.daemon';
 
+/** Harness inspection only. Consume the dedicated credential before any child
+ * environment is captured; the installer, assets and updater stay anonymous. */
+export function consumeAcceptanceMetadataFetch(env = process.env, fetchImpl = fetch) {
+  const token = env.GOODVIBES_ACCEPTANCE_METADATA_TOKEN;
+  delete env.GOODVIBES_ACCEPTANCE_METADATA_TOKEN;
+  const tag = 'v[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?';
+  const route = new RegExp(`^https://api\\.github\\.com/repos/mgd34msu/goodvibes/(?:releases/(?:latest|tags/${tag})|git/ref/tags/${tag}|git/tags/[a-f0-9]{40})$`);
+  return {
+    authentication: token ? 'read-only-ci-token' : 'anonymous',
+    fetch(url, options) {
+      if (typeof url !== 'string' || url.trim() !== url || !route.test(url) || options?.method !== undefined && options.method !== 'GET') return fetchImpl(url, options);
+      const headers = token ? new Headers(options?.headers) : undefined;
+      if (headers) headers.set('authorization', `Bearer ${token}`);
+      // No credential can follow a redirect, even to another GitHub endpoint.
+      return fetchImpl(url, { ...options, redirect: 'error', ...(headers ? { headers } : {}) });
+    },
+  };
+}
+
 const safeErrorNames = new Set(['Error', 'AssertionError', 'TypeError', 'SyntaxError', 'RangeError', 'AggregateError', 'AbortError', 'TimeoutError']);
 const safeErrorCodes = new Set(['ERR_ASSERTION', 'ENOENT', 'ENOTDIR', 'EISDIR', 'EACCES', 'EPERM', 'EBADF', 'EIO', 'EINVAL',
   'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ABORT_ERR', 'ERR_ACCEPTANCE_READINESS_TIMEOUT']);
@@ -599,11 +618,14 @@ export async function readPreviousReleaseCohort({ tag, source, target, signal, c
 }
 
 export async function acceptPublishedSuite(input) {
-  const evidence = { stage: 'account-admission', failures: [] };
-  try { await performPublishedAcceptance(input, evidence); }
+  const metadata = consumeAcceptanceMetadataFetch();
+  const evidence = { stage: 'account-admission', failures: [], metadataInspection: {
+    authentication: metadata.authentication, scope: 'canonical-repository-metadata-get-only', publicDownloads: 'anonymous',
+  } };
+  try { await performPublishedAcceptance(input, evidence, metadata.fetch); }
   catch (error) {
     error = preserveAcceptanceCancellation(error, input.signal);
-    const diagnostic = { tag: input.tag, source: input.source, target: input.target, accepted: false,
+    const diagnostic = { tag: input.tag, source: input.source, target: input.target, accepted: false, metadataInspection: evidence.metadataInspection,
       failures: evidence.failures.length ? evidence.failures : [acceptanceFailureRecord(evidence, error)],
       diagnostic: input.delivery ? 'Staged native install/service/cleanup acceptance failed.' : 'Published native install/service/cleanup acceptance failed.' };
     if (evidence.root) writeFileSync(join(evidence.root, 'acceptance-result.json'), JSON.stringify(diagnostic) + '\n', { flag: 'wx', mode: 0o600 });
@@ -612,7 +634,7 @@ export async function acceptPublishedSuite(input) {
   }
 }
 
-async function performPublishedAcceptance({ tag, source, target, signal, scenario = 'fresh', delivery, previousTag, previousSource: selectedPreviousSource }, evidence) {
+async function performPublishedAcceptance({ tag, source, target, signal, scenario = 'fresh', delivery, previousTag, previousSource: selectedPreviousSource }, evidence, metadataFetch) {
   assert.ok(scenario === 'fresh' || scenario === 'upgrade-v3.1.1' || scenario === 'installer-migrate-v3.1.1' || scenario === 'upgrade-previous', 'Unknown published acceptance scenario.');
   const historical = scenario === 'upgrade-v3.1.1';
   const migration = scenario === 'installer-migrate-v3.1.1';
@@ -690,7 +712,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     ({ readers, published, immutable } = await readPublicAcceptanceDelivery({ tag, source, target, signal,
       checkpoint(check) { evidence.stage = check.startsWith('installer.') ? 'public-installer' : 'published-catalog'; checkpoint(check); },
       onHttpStatus(status) { evidence.httpStatus = status; },
-    }));
+    }, metadataFetch));
     installer = join(root, 'install.sh'); writeFileSync(installer, published.bytes, { flag: 'wx', mode: 0o600 });
     writeFileSync(join(root, 'immutable-install.sh'), immutable.bytes, { flag: 'wx', mode: 0o600 });
   }
@@ -699,13 +721,13 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   if (previousRelease) {
     evidence.stage = 'previous-release-source';
     const cohort = await readPreviousReleaseCohort({ tag: previousTag, source: selectedPreviousSource, target, signal,
-      checkpoint, onHttpStatus(status) { evidence.httpStatus = status; } });
+      checkpoint, onHttpStatus(status) { evidence.httpStatus = status; } }, metadataFetch);
     previousSource = selectedPreviousSource; previousReaders = cohort.readers;
     previousInstaller = join(root, 'install-previous.sh'); writeFileSync(previousInstaller, cohort.installer, { flag: 'wx', mode: 0o600 });
   }
   if (historical || migration) {
     evidence.stage = 'historical-source';
-    const oldRelease = JSON.parse((await fetchBytes(`${api}/releases/tags/v3.1.1`, undefined, signal)).bytes);
+    const oldRelease = JSON.parse((await fetchBytes(`${api}/releases/tags/v3.1.1`, undefined, signal, undefined, metadataFetch)).bytes);
     assert.equal(oldRelease.tag_name, 'v3.1.1'); assert.equal(oldRelease.draft, false);
     const oldNames = new Set(oldRelease.assets.map(asset => asset.name));
     const suffix = target;
@@ -713,11 +735,11 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       `goodvibes-daemon-${suffix}.ci-artifact.json`, `sqlite-vec-${target}.so`, 'browser-driver.tar.gz', 'goodvibes-webui-bundle-3.1.1.tar.gz', 'SHA256SUMS.txt']) {
       assert.ok(oldNames.has(name), 'The actual old Linux release cohort is incomplete.');
     }
-    const reference = JSON.parse((await fetchBytes(`${api}/git/ref/tags/v3.1.1`, 131_072, signal)).bytes);
+    const reference = JSON.parse((await fetchBytes(`${api}/git/ref/tags/v3.1.1`, 131_072, signal, undefined, metadataFetch)).bytes);
     assert.equal(reference.ref, 'refs/tags/v3.1.1');
     let object = reference.object; assert.match(object.sha, /^[a-f0-9]{40}$/);
     if (object.type === 'tag') {
-      const annotated = JSON.parse((await fetchBytes(`${api}/git/tags/${object.sha}`, 131_072, signal)).bytes);
+      const annotated = JSON.parse((await fetchBytes(`${api}/git/tags/${object.sha}`, 131_072, signal, undefined, metadataFetch)).bytes);
       assert.equal(annotated.sha, object.sha); assert.equal(annotated.tag, 'v3.1.1'); object = annotated.object;
     }
     assert.equal(object.type, 'commit'); previousSource = object.sha; assert.match(previousSource, /^[a-f0-9]{40}$/);
@@ -1101,7 +1123,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   await finishAcceptance({ signal, finish: delivery?.finish ? async () => {
     evidence.stage = 'staged-delivery-drain'; checkpoint('delivery.finish'); await delivery.finish();
   } : undefined, assertCurrent: () => delivery?.assertCurrent(), writeReceipt: () => {
-    writeFileSync(join(root, 'acceptance-result.json'), JSON.stringify({ tag, source, target, scenario,
+    writeFileSync(join(root, 'acceptance-result.json'), JSON.stringify({ tag, source, target, scenario, metadataInspection: evidence.metadataInspection,
     ...(historical || migration ? { previousTag: 'v3.1.1', previousSource } : previousRelease ? { previousTag, previousSource } : {}),
     ...(delivery ? { delivery: historical || previousRelease ? 'exact staged candidate; installer fetch adapter and owned loopback update feed'
       : 'exact staged candidate; installer fetch adapter', candidateInstaller: published.url, publicDelivery: 'not claimed' } : { publicInstaller: published.url }),

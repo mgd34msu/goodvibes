@@ -87,6 +87,7 @@ jobs:
           test -f scripts/accept-published-suite.mjs
       - name: Download, install, serve and uninstall the published suite
         env:
+          GOODVIBES_ACCEPTANCE_METADATA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_SOURCE: ${{ inputs.source }}
           RELEASE_TARGET: ${{ matrix.target }}
@@ -138,6 +139,8 @@ jobs:
           bun packages/engine/scripts/build.ts
       - name: Observe actual old unattended upgrade and unsupported rollback refusal
         env:
+          # This lane runs its original payload-source harness, which does not
+          # consume the dedicated metadata credential. Keep it anonymous.
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_SOURCE: ${{ inputs.source }}
           RELEASE_TARGET: ${{ matrix.target }}
@@ -214,6 +217,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Observe previous-suite automatic upgrade and complete-cohort rollback
         env:
+          GOODVIBES_ACCEPTANCE_METADATA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_SOURCE: ${{ inputs.source }}
           RELEASE_TARGET: ${{ matrix.target }}

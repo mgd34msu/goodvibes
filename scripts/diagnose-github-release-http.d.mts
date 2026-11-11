@@ -10,6 +10,6 @@ export interface GithubHttpObservation {
   body?: 'exceeds-bound';
 }
 export function classifyGithubReleaseResponse(status: number, headers: Record<string, number>, body: string): GithubHttpKind;
-export function diagnoseGithubReleaseHttp(input?: { token?: string; fetchImpl?: typeof fetch }): Promise<{
+export function diagnoseGithubReleaseHttp(input?: { token?: string; fetchImpl?: (...args: Parameters<typeof fetch>) => ReturnType<typeof fetch> }): Promise<{
   schema: 1; diagnosticOnly: true; endpoint: 'public-release-v3.1.2'; results: GithubHttpObservation[];
 }>;

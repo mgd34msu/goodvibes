@@ -30,7 +30,7 @@ test('one fixed anonymous request and optional authenticated comparison retain o
         'x-ratelimit-used': '60', 'x-ratelimit-reset': '1794400000', 'retry-after': '27',
         'x-ratelimit-resource': secret, 'set-cookie': secret, 'x-private': secret },
     });
-  }) as typeof fetch });
+  }) });
   expect(requests).toHaveLength(2);
   for (const request of requests) { expect(request.url).toBe(releaseMetadataUrl); expect(request.options?.redirect).toBe('error'); }
   expect(requests[0]!.options?.headers).toBeUndefined();
@@ -51,12 +51,12 @@ test('malformed numeric headers and network causes never escape or cause retries
       'x-ratelimit-limit': '9999999999999999', 'x-ratelimit-remaining': '-1', 'x-ratelimit-used': 'private',
       'x-ratelimit-reset': '1.5', 'retry-after': 'Thu, 01 Jan 2026 00:00:00 GMT',
     } });
-  }) as typeof fetch });
+  }) });
   expect(calls).toBe(1); expect(result.results[0]!.rateLimit).toEqual({});
   expect(result.results[0]!.kind).toBe('unclassified-http-error');
   const failed = await diagnoseGithubReleaseHttp({ fetchImpl: (async () => {
     calls++; throw new Error('private target', { cause: { token: 'private-token' } });
-  }) as typeof fetch });
+  }) });
   expect(calls).toBe(2);
   expect(failed.results).toEqual([{ mode: 'unauthenticated', status: null, rateLimit: {}, kind: 'request-failed' }]);
   expect(JSON.stringify([result, failed])).not.toContain('private');
@@ -66,7 +66,7 @@ test.each([200, 403])('cancels the owned body after success or the private error
   let cancelled = 0;
   const stream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode('private'.repeat(3000))); },
     cancel() { cancelled++; } });
-  const result = await diagnoseGithubReleaseHttp({ fetchImpl: (async () => new Response(stream, { status })) as typeof fetch });
+  const result = await diagnoseGithubReleaseHttp({ fetchImpl: async () => new Response(stream, { status }) });
   expect(cancelled).toBe(1);
   expect(result.results[0]).toMatchObject({ status, kind: status === 200 ? 'http-success' : 'unclassified-http-error' });
   if (status === 403) expect(result.results[0]!.body).toBe('exceeds-bound');

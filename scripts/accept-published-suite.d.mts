@@ -1,4 +1,8 @@
 import type { SpawnOptionsWithoutStdio } from 'node:child_process';
+export type AcceptanceFetch = (url: string, options: RequestInit) => Promise<Response>;
+export function consumeAcceptanceMetadataFetch(env?: NodeJS.ProcessEnv, fetchImpl?: AcceptanceFetch): {
+  authentication: 'read-only-ci-token' | 'anonymous'; fetch: AcceptanceFetch;
+};
 export interface HostedContext {
   env: NodeJS.ProcessEnv; platform: string; arch: string; home: string; accountHome: string;
   uid: number; tag: string; source: string; target: string;

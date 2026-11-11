@@ -160,6 +160,7 @@ jobs:
           path: ${{ runner.temp }}/staged-release-assets
       - name: Install, serve and uninstall the staged suite
         env:
+          GOODVIBES_ACCEPTANCE_METADATA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_SOURCE: ${{ inputs.source }}
           RELEASE_TARGET: ${{ matrix.target }}
@@ -228,6 +229,7 @@ jobs:
           path: ${{ runner.temp }}/staged-release-assets
       - name: Observe actual old unattended upgrade and unsupported rollback refusal
         env:
+          GOODVIBES_ACCEPTANCE_METADATA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_SOURCE: ${{ inputs.source }}
           RELEASE_TARGET: ${{ matrix.target }}
@@ -312,6 +314,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Observe previous-suite automatic upgrade and complete-cohort rollback
         env:
+          GOODVIBES_ACCEPTANCE_METADATA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_SOURCE: ${{ inputs.source }}
           RELEASE_TARGET: ${{ matrix.target }}

@@ -178,7 +178,7 @@ describe('CI prerequisite acquisition', () => {
               printf 'helper-result %s\\n' "$phase_result" >> "$LOG"
               [[ "$phase_result" == 0 ]] || exit 1
             }
-            helper_phase --error-on=any update
+            helper_phase '--error-on=any' update
             helper_phase install --yes --no-install-recommends bubblewrap util-linux
           `);
           for (const command of ['cat', 'rm', 'mktemp', 'env']) executable(command, `exec /usr/bin/${command} "$@"`);

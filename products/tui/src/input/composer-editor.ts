@@ -17,11 +17,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { tokenizeCommand } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import {
-  ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, CLEAR_SCREEN, CURSOR_HIDE, CURSOR_SHOW,
-  MOUSE_ENABLE, MOUSE_DISABLE, KEYBOARD_EXT_ENABLE, KEYBOARD_EXT_DISABLE,
-  PASTE_ENABLE, PASTE_DISABLE, FOCUS_ENABLE, FOCUS_DISABLE,
-} from '../renderer/terminal-escapes.ts';
+import type { TerminalLifecycle } from '@goodvibes-jev/engine/terminal-shell';
 
 export interface EditorSpawnResult {
   readonly status: number | null;
@@ -101,16 +97,20 @@ export function openComposerInEditor(deps: ComposerEditorDeps): void {
   }
 }
 
-const LEAVE_TUI = PASTE_DISABLE + KEYBOARD_EXT_DISABLE + MOUSE_DISABLE + FOCUS_DISABLE + ALT_SCREEN_EXIT + CURSOR_SHOW;
-const ENTER_TUI = ALT_SCREEN_ENTER + CLEAR_SCREEN + CURSOR_HIDE + MOUSE_ENABLE + KEYBOARD_EXT_ENABLE + PASTE_ENABLE + FOCUS_ENABLE;
+type EditorTerminal = Pick<TerminalLifecycle, 'suspendTerminal' | 'enterTerminal' | 'isTerminalRestored'>;
+
+function resumeAfterEditor(deps: { terminal: EditorTerminal; stdin: { setRawMode(on: boolean): unknown }; repaint: () => void }): void {
+  if (deps.terminal.isTerminalRestored()) return;
+  deps.terminal.enterTerminal();
+  try { deps.stdin.setRawMode(true); } catch { /* stdin may not be a TTY */ }
+  deps.repaint();
+}
 
 export interface ComposerEditorOpenerDeps {
   /** The live composer buffer (InputHandler exposes public `prompt`/`cursorPos`). */
   readonly buffer: { prompt: string; cursorPos: number };
   readonly stdin: { setRawMode(on: boolean): unknown };
-  readonly stdout: { write(seq: string): unknown };
-  /** Terminal-output guard wrapper (allowTerminalWrite). */
-  readonly writeGuard: (fn: () => void) => void;
+  readonly terminal: EditorTerminal;
   readonly repaint: () => void;
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
@@ -129,12 +129,10 @@ export function makeComposerEditorOpener(deps: ComposerEditorOpenerDeps): () => 
     spawn: deps.spawn,
     suspend: () => {
       try { deps.stdin.setRawMode(false); } catch { /* stdin may not be a TTY */ }
-      deps.writeGuard(() => deps.stdout.write(LEAVE_TUI));
+      deps.terminal.suspendTerminal();
     },
     resume: () => {
-      deps.writeGuard(() => deps.stdout.write(ENTER_TUI));
-      try { deps.stdin.setRawMode(true); } catch { /* stdin may not be a TTY */ }
-      deps.repaint();
+      resumeAfterEditor(deps);
     },
   });
 }
@@ -144,8 +142,7 @@ const LINE_ARG_EDITORS = new Set(['vi', 'vim', 'nvim', 'nano', 'emacs', 'micro',
 
 export interface FileEditorOpenerDeps {
   readonly stdin: { setRawMode(on: boolean): unknown };
-  readonly stdout: { write(seq: string): unknown };
-  readonly writeGuard: (fn: () => void) => void;
+  readonly terminal: EditorTerminal;
   readonly repaint: () => void;
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
@@ -169,14 +166,12 @@ export function makeFileEditorOpener(deps: FileEditorOpenerDeps): (path: string,
     const lineArgs = line !== undefined && line > 0 && LINE_ARG_EDITORS.has(base) ? [`+${line}`] : [];
     const spawn = deps.spawn ?? defaultSpawn;
     try { deps.stdin.setRawMode(false); } catch { /* stdin may not be a TTY */ }
-    deps.writeGuard(() => deps.stdout.write(LEAVE_TUI));
+    deps.terminal.suspendTerminal();
     let result: EditorSpawnResult;
     try {
       result = spawn(editor.cmd, [...editor.args, ...lineArgs, path], { cwd: deps.cwd, env: deps.env });
     } finally {
-      deps.writeGuard(() => deps.stdout.write(ENTER_TUI));
-      try { deps.stdin.setRawMode(true); } catch { /* stdin may not be a TTY */ }
-      deps.repaint();
+      resumeAfterEditor(deps);
     }
     if (result.error) deps.notify(`[Editor] Failed to launch ${editor.cmd}: ${result.error.message}`);
     else if (result.status !== 0 && result.status !== null) deps.notify(`[Editor] ${editor.cmd} exited with code ${result.status}.`);

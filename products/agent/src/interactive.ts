@@ -62,7 +62,7 @@ import { deriveComposerState } from './core/composer-state.ts';
 import { describePowerStatus } from './renderer/power-status.ts';
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { installFocusModeExitGuard, markFocusModeEnabled, wrapRequestPermissionWithApprovalAlert } from './shell/terminal-focus-mode.ts';
-import { buildEnterSequence, buildExitSequence } from './renderer/terminal-escapes.ts';
+import { createTerminalLifecycle } from '@goodvibes-jev/engine/terminal-shell';
 import { prepareShellCliRuntime } from './cli/entrypoint.ts';
 import { reachabilityAtLaunch } from './runtime/path-shadow-startup.ts';
 import { selfUpdateAtLaunch } from './cli/launch-auto-update.ts';
@@ -366,12 +366,19 @@ async function main() {
   let recoveryPending: string | null = null,
     daemonRepairPrompt: DaemonRepairPrompt | null = null;
   // The window in which this app owns the screen: opened by the enter sequence below, closed by exitApp before the terminal-restore write. render() paints only inside it, see shell/terminal-paint-window.ts for what the early frames did to the boot surface and to the shell's screen.
+  let terminalOutputGuard: ReturnType<typeof installFullScreenTerminalOutputGuard> | undefined;
+  const terminalLifecycle = createTerminalLifecycle({
+    write: (data) => { stdout.write(data); },
+    noAltScreen: cli.flags.noAltScreen,
+    guardedWrite: allowTerminalWrite,
+    disposeOutputGuard: () => terminalOutputGuard?.dispose(),
+    setRawMode: (enabled) => stdin.setRawMode(enabled),
+  });
   const paintWindow = createTerminalPaintWindow({
-    enter: () =>
-      allowTerminalWrite(() => {
-        markFocusModeEnabled();
-        return stdout.write(buildEnterSequence(cli.flags.noAltScreen));
-      }),
+    enter: () => {
+      terminalLifecycle.enterTerminal();
+      markFocusModeEnabled();
+    },
     discardCompositorState: () => compositor.resetDiff(),
   });
 
@@ -433,11 +440,12 @@ async function main() {
       stdin.removeListener('end', terminalClosed);
       stdin.removeListener('close', terminalClosed);
       processFaults.dispose();
-      allowTerminalWrite(() => stdout.write(buildExitSequence(cli.flags.noAltScreen)));
-      terminalOutputGuard.dispose();
-      stdin.setRawMode(false);
     } catch (error) {
       exitCompletion = exitCompletion.then((failures) => [...failures, error]);
+    } finally {
+      try { terminalLifecycle.restoreTerminal(); } catch (error) {
+        exitCompletion = exitCompletion.then((failures) => [...failures, error]);
+      }
     }
     // The terminal is restored immediately. Process exit and executable
     // handover wait for runtime ownership release and the bounded audio drain.
@@ -1004,7 +1012,7 @@ async function main() {
   unsubs.push(configManager.subscribeIngestionNotices((notice) => {
     if (!exiting) systemMessageRouter.high(describeIngestionNotice(notice));
   }));
-  const terminalOutputGuard = installFullScreenTerminalOutputGuard({
+  terminalOutputGuard = installFullScreenTerminalOutputGuard({
     stdout,
     stderr: process.stderr,
 

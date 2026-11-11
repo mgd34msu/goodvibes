@@ -113,18 +113,12 @@ import { wireSessionAmbience } from './runtime/session-ambience-wiring.ts';
 import { createSpokenTurnInputOptions } from './audio/spoken-turn-model-routing.ts';
 
 import {
-  ALT_SCREEN_ENTER,
   ALT_SCREEN_EXIT,
-  MOUSE_ENABLE,
   MOUSE_DISABLE,
-  CURSOR_HIDE,
   CURSOR_SHOW,
   CLEAR_SCREEN,
-  KEYBOARD_EXT_ENABLE,
   KEYBOARD_EXT_DISABLE,
-  PASTE_ENABLE,
   PASTE_DISABLE,
-  FOCUS_ENABLE,
   FOCUS_DISABLE,
 } from './renderer/terminal-escapes.ts';
 import { installBackgroundThemeProbe } from './renderer/terminal-bg-probe.ts';
@@ -713,8 +707,7 @@ async function main() {
   commandContext.openComposerEditor = makeComposerEditorOpener({
     buffer: input,
     stdin,
-    stdout,
-    writeGuard: allowTerminalWrite,
+    terminal: lifecycle,
     repaint: () => {
       compositor.resetDiff();
       render();
@@ -725,8 +718,7 @@ async function main() {
   });
   commandContext.openFileInEditor = makeFileEditorOpener({
     stdin,
-    stdout,
-    writeGuard: allowTerminalWrite,
+    terminal: lifecycle,
     repaint: () => {
       compositor.resetDiff();
       render();
@@ -1279,17 +1271,7 @@ async function main() {
   stdin.setRawMode(true);
   stdin.resume();
   stdin.setEncoding('utf8');
-  allowTerminalWrite(() =>
-    stdout.write(
-      (cli.flags.noAltScreen ? '' : ALT_SCREEN_ENTER) +
-        CLEAR_SCREEN +
-        CURSOR_HIDE +
-        MOUSE_ENABLE +
-        KEYBOARD_EXT_ENABLE +
-        PASTE_ENABLE +
-        FOCUS_ENABLE,
-    ),
-  );
+  lifecycle.enterTerminal();
   // forced dark/light applies before first paint; auto (TTY only) repaints once if the OSC 11 probe says light. probePalette adds OSC 10 + OSC 4;0..15
   // and retries until the terminal answers (terminal-palette-reader.ts); the `system` theme re-themes when it arrives. filterInput strips replies from stdin.
   registerThemeRefresh(() => conversation.clearLineCache()); // theme/mode change: cached transcript lines re-render in the new colours

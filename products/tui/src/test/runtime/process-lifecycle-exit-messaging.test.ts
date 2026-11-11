@@ -93,12 +93,14 @@ function makeHarness(opts: {
   } as unknown as ProcessLifecycleDeps;
 
   const handlers = installProcessLifecycle(deps);
+  handlers.enterTerminal();
+  chunks.length = 0;
   void deletedRecoveryFor;
   // restoreTerminal() (called synchronously at the top of exitApp, before any
   // of this test's own assertions matter) writes its own ANSI escape
   // sequences to the same stdout, strip those so assertions here only see
   // the plain-text progress/receipt lines this item actually adds.
-  const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;?>]*[a-zA-Z]/g, '');
+  const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;?<>]*[a-zA-Z]/g, '');
   return { exitApp: handlers.exitApp, written: () => stripAnsi(chunks.join('')) };
 }
 

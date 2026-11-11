@@ -56,6 +56,46 @@ function findPathToken(ih: InputHandler): { start: number; prefix: string } | nu
 
 // ── saveUndoState ──────────────────────────────────────────────────────────
 
+
+describe('encoded keyboard input through the full handler', () => {
+  test.each([
+    ['modifyOtherKeys', '\x1b[27;2;65~\x1b[27;2;66~\x1b[27;2;33~'],
+    ['CSI-u', '\x1b[97;2u\x1b[98:66;2u\x1b[49:33;2u'],
+  ])('%s inserts uppercase text and punctuation in the composer', async (_label, raw) => {
+    const input = await makeInput();
+    input.prompt = 'before after';
+    input.cursorPos = 7;
+    input.feed(raw);
+    expect(input.prompt).toBe('before AB!after');
+    expect(input.cursorPos).toBe(10);
+    input.feed('\x1b[13;2u');
+    expect(input.prompt).toBe('before AB!\nafter');
+  });
+
+  test('encoded shifted letters search a modal without firing lowercase actions', async () => {
+    const input = await makeInput();
+    let actions = 0;
+    input.openSelection('Choose', [{ id: 'alpha', label: 'Alpha' }], {
+      customActions: new Map([['a', 'delete']]),
+    }, () => { actions++; });
+    input.feed('\x1b[27;2;65~\x1b[108;1u');
+    expect(input.selectionModal.query).toBe('Al');
+    expect(input.selectionModal.active).toBe(true);
+    expect(actions).toBe(0);
+    expect(input.prompt).toBe('');
+  });
+
+  test('Ctrl+Shift+Z remains redo after encoded text insertion', async () => {
+    const input = await makeInput();
+    input.feed('\x1b[97;2u');
+    expect(input.prompt).toBe('A');
+    input.feed('\x1b[122;5u');
+    expect(input.prompt).toBe('');
+    input.feed('\x1b[122:90;6u');
+    expect(input.prompt).toBe('A');
+  });
+});
+
 describe('saveUndoState', () => {
   test('captures current prompt and cursor onto the undo stack', async () => {
     const ih = (await makeInput());

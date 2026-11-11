@@ -48,7 +48,26 @@ export function currentExecutionMode(): GatePresetName | undefined {
 export function withRetainedExecutionMode<T>(run: () => Promise<T>): Promise<T> {
   const mode = currentExecutionMode();
   if (mode === undefined) return run();
-  return withExecutionMode(mode, run, executionMode.getStore()?.retainedCurrent);
+  const owner = currentExecutionModeOwner();
+  const ownerRevision = owner?.getRevision();
+  const ownerMode = owner?.getMode();
+  const assertCurrent = executionMode.getStore()?.retainedCurrent ?? (owner ? () => {
+    if (currentExecutionModeOwner() !== owner || owner.getRevision() !== ownerRevision || owner.getMode() !== ownerMode) {
+      throw new Error('Execution mode owner changed during retained execution');
+    }
+  } : undefined);
+  return withExecutionMode(mode, run, assertCurrent);
+}
+
+/** Bind only mode/owner context; source and exact tool authority remain with each callback's caller. */
+export function bindExecutionModeContext(): <T>(run: () => T) => T {
+  currentExecutionMode();
+  const scope = executionMode.getStore();
+  const owner = currentExecutionModeOwner();
+  return <T>(run: () => T): T => {
+    const enterMode = () => scope ? executionMode.run(scope, run) : executionMode.exit(run);
+    return owner ? executionOwner.run(owner, enterMode) : executionOwner.exit(enterMode);
+  };
 }
 
 export function isYoloExecution(): boolean {

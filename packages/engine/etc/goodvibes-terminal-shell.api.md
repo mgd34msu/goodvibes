@@ -1509,8 +1509,8 @@ export const TERMINAL_ESCAPES: {
     readonly MOUSE_DISABLE: "\u001B[?1006l\u001B[?1002l\u001B[?1000l";
     readonly CURSOR_HIDE: "\u001B[?25l";
     readonly CURSOR_SHOW: "\u001B[?25h";
-    readonly KEYBOARD_EXT_ENABLE: "\u001B[>4;2m\u001B[?1u";
-    readonly KEYBOARD_EXT_DISABLE: "\u001B[>4;0m\u001B[?1l";
+    readonly KEYBOARD_EXT_ENABLE: "\u001B[>4;2m\u001B[>1u";
+    readonly KEYBOARD_EXT_DISABLE: "\u001B[>4;0m\u001B[<u";
     readonly PASTE_ENABLE: "\u001B[?2004h";
     readonly PASTE_DISABLE: "\u001B[?2004l";
     readonly FOCUS_ENABLE: "\u001B[?1004h";
@@ -1526,6 +1526,7 @@ export interface TerminalLifecycle {
     readonly enterTerminal: () => void;
     readonly isTerminalRestored: () => boolean;
     readonly restoreTerminal: () => void;
+    readonly suspendTerminal: () => void;
 }
 
 // @public (undocumented)

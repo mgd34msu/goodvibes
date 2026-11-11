@@ -6,7 +6,7 @@ import { captureJudgmentPort, judgmentPort, type JudgmentPortCapture } from '@go
 import { selectSourceCitationEvidence } from './source-citation-selection.js';
 import { getContractActionSource } from '../tools/agent/contract-binding.js';
 import { assertOwnedContractSource } from './owned-source.js';
-import { hashState, JudgmentError } from '@goodvibes-jev/judgment';
+import { hashState } from '@goodvibes-jev/judgment';
 import { judgeState } from './evidence.js';
 import { captureUnitCheckEvidence, createUnitCheckEvidenceCache, type UnitCheckEvidence } from './unit-check-evidence.js';
 import { nativeRecordedCheck } from './check.js';
@@ -235,7 +235,6 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
   async function checkUnit(run: ContractRun, unit: ContractUnit, trigger: CheckTrigger, given?: string): Promise<void> {
     requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
     const runtime = run.runtime(unit);
-    runtime.verificationRetryCancel?.();
     const config = run.env.config();
     const check: InFlightCheck = { trigger, abort: new AbortController(), superseded: false };
     runtime.check = check;
@@ -315,19 +314,9 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       if (runtime.check === check) runtime.check = null;
       if (check.superseded || isAbortError(error, signal) || run.terminal) return;
       const failure = failureFromError(error);
-      if ((error instanceof JudgmentError && error.kind !== 'internal') || failure.kind === 'judgment-unavailable') {
-        // A verifier request failure says nothing about work correctness. Keep
-        // this candidate held and let unrelated units continue to completion.
-        run.moveUnit(unit, trigger === 'turn-end' ? 'running' : 'held');
-        run.decide('resumed', unit.id, `verification pending: ${failure.reason}; candidate retained, retry in 30 seconds, no acceptance verdict`);
-        const cancel = () => { clearTimeout(timer); runtime.abort.signal.removeEventListener('abort', cancel); delete runtime.verificationRetryCancel; };
-        const timer = setTimeout(() => { cancel(); if (!run.terminal && !isTerminalUnitStatus(unit.status)) void runCheck(run, unit, trigger === 'turn-end' ? 'turn-end' : 'resume', output); }, 30_000);
-        timer.unref?.();
-        runtime.verificationRetryCancel = cancel;
-        runtime.abort.signal.addEventListener('abort', cancel, { once: true });
-        logger.warn('contract verifier request failed; work retained', { contractId: run.id, unitId: unit.id, reason: failure.reason });
-        return;
-      }
+      // The judgment port already tried its configured fallbacks. Stop this
+      // operation without resubmitting the candidate or judging it incorrect;
+      // the failed contract retains its output and files for explicit recovery.
       deps.failContract(run, failure.kind, `the check of unit ${unit.id} could not run: ${failure.reason}`);
       return;
     }

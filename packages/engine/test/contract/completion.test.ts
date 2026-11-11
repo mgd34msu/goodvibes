@@ -355,7 +355,7 @@ test('group and final checks receive actual plan-validation and unit-acceptance 
   await h.runner.join(id);
 });
 
-test.each(['group', 'final-answer', 'fulfillment'])('a %s verifier request failure retries its check without rerunning accepted work', async stage => {
+test.each(['group', 'final-answer', 'fulfillment'])('a %s exhausted verifier failure halts without rerunning accepted work', async stage => {
   const plan = oneUnitPlan(1);
   plan.groups[0]!.criteria = [{ id: 'g1.c1', text: 'The parser is coherent', serves: ['c1'] }];
   let failures = 0;
@@ -364,28 +364,28 @@ test.each(['group', 'final-answer', 'fulfillment'])('a %s verifier request failu
     port: context => {
       const target = stage === 'final-answer' ? context.name === 'unfinished'
         : context.name === 'goal' && judgeOf(context) === (stage === 'group' ? 'group' : 'deliverable');
-      if (target && failures === 0) { failures++; throw new JudgmentError('rejected', 'fixture request rejection', { status: 400 }); }
+      if (target && failures === 0) { failures++; throw new JudgmentError('unavailable', 'fixture outage', { status: 503 }); }
       return undefined;
     },
   }));
   const { contract } = (await startContract(h));
-  await waitFor(() => contractOf(h, contract.id).decisions.some(decision => decision.reason.includes('verification pending:')), 'a retained verification candidate');
-  const waiting = contractOf(h, contract.id);
-  expect(waiting.status).not.toBe('failed');
-  expect(waiting.status).not.toBe('passed');
-  expect(waiting.units[0]!.status).toBe('passed');
-  expect(waiting.commit).toBeUndefined();
-  await waitFor(() => terminal(h, contract.id), 'the fresh verifier check');
+  await waitFor(() => terminal(h, contract.id), 'the exhausted verifier failure');
+  await h.runner.join(contract.id);
   const done = contractOf(h, contract.id);
-  expect(done.status).toBe('passed');
-  expect(done.answer).toBe('The exact parser answer.');
+  expect(done.status).toBe('failed');
+  expect(done.error).toContain('No decision models are currently available. Check API keys');
+  expect(done.answer).toBeUndefined();
+  expect(done.commit).toBeUndefined();
+  expect(done.units[0]!.status).toBe('passed');
+  expect(done.units[0]!.answer).toBe('The exact parser answer.');
+  expect(done.decisions.some(decision => decision.reason.includes('verification pending:'))).toBe(false);
   expect(done.units).toHaveLength(1);
   expect(workers).toBe(1);
   expect(failures).toBe(1);
-  expect(h.events.filter(event => event.type === 'CONTRACT_FAILED')).toEqual([]);
+  expect(h.events.filter(event => event.type === 'CONTRACT_FAILED')).toHaveLength(1);
 });
 
-test('stopping a contract cancels its owned verifier retry without a verdict', async () => {
+test('an exhausted verifier failure stops without a verdict or saved content commitment', async () => {
   let failures = 0;
   const commitment = spyOn(completionBinding, 'completionEvidenceCommitment');
   try {
@@ -393,10 +393,9 @@ test('stopping a contract cancels its owned verifier retry without a verdict', a
     port: context => { if (context.name === 'unfinished') { failures++; throw new JudgmentError('unavailable', 'fixture outage'); } return undefined; },
   }));
   const { contract } = (await startContract(h));
-  await waitFor(() => contractOf(h, contract.id).decisions.some(decision => decision.reason.includes('verification pending:')), 'the retry wait');
-  h.runner.cancel(contract.id, 'operator stopped the check');
+  await waitFor(() => terminal(h, contract.id), 'the exhausted verifier failure');
   await h.runner.join(contract.id);
-  expect(contractOf(h, contract.id).status).toBe('cancelled');
+  expect(contractOf(h, contract.id).status).toBe('failed');
   expect(contractOf(h, contract.id).checks).toEqual([]);
   expect(failures).toBe(1);
   // A failed provider read produced no saved content receipt. Its input never
@@ -405,7 +404,7 @@ test('stopping a contract cancels its owned verifier retry without a verdict', a
   } finally { commitment.mockRestore(); }
 });
 
-test('a fulfillment request failure retries before content review and a later content rejection still blocks publication', async () => {
+test('an exhausted fulfillment request stops before content review and publication', async () => {
   let answerReviews = 0, fulfillmentRequests = 0, workers = 0;
   const h = use(makeHarness({ plan: oneUnitPlan(1),
     scripts: { u1: (record, context) => { workers++; return finishes('The retained parser answer.')(record, context); } },
@@ -413,25 +412,21 @@ test('a fulfillment request failure retries before content review and a later co
       if (context.name === 'unfinished') { answerReviews++; return noulAnswer(0.98); }
       if (context.name === 'goal' && judgeOf(context) === 'deliverable' && fulfillmentRequests++ === 0) {
         expect(answerReviews).toBe(0);
-        throw new JudgmentError('rejected', 'fixture fulfillment request rejection', { status: 400 });
+        throw new JudgmentError('unavailable', 'fixture fulfillment outage', { status: 503 });
       }
       return undefined;
     },
   }));
   const { contract } = (await startContract(h));
-  await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'fulfillment to retain the rejected answer verdict');
+  await waitFor(() => terminal(h, contract.id), 'fulfillment failure');
   const current = contractOf(h, contract.id);
-  expect(fulfillmentRequests).toBe(2);
-  expect(answerReviews).toBe(1);
+  expect(fulfillmentRequests).toBe(1);
+  expect(answerReviews).toBe(0);
   expect(workers).toBe(1);
-  expect(current.checks[0]!.goal.verdict).toBe('met');
-  expect(current.checks[0]!.result).toBe('stall');
+  expect(current.checks).toEqual([]);
   expect(current.commit).toBeUndefined();
-  expect(current.status).not.toBe('passed');
-  const review = JSON.parse(current.decisions.find(decision => decision.targetId === `${contract.id}.final-answer-review`)!.reason);
-  expect(review.passed).toBe(false);
-  expect(review.readings.unfinished.probability).toBe(0.98);
-  h.runner.cancel(contract.id, 'test completed');
+  expect(current.status).toBe('failed');
+  expect(current.decisions.find(decision => decision.targetId === `${contract.id}.final-answer-review`)).toBeUndefined();
   await h.runner.join(contract.id);
 });
 
@@ -469,7 +464,7 @@ test('a rejected native answer review holds publication even when fulfillment re
   expect(review.readings.unfinished.probability).toBe(0.98);
 });
 
-test.each([false, true])('a long finding uses complete shared evidence and retries a lookup failure without another draft (failure=%s)', async retry => {
+test.each([false, true])('a long finding uses complete shared evidence and halts on an exhausted lookup failure (failure=%s)', async unavailable => {
   const output = 'A complete factual claim and its necessary qualification '.repeat(400).trim();
   const plan = oneUnitPlan(1);
   plan.groups[0]!.units[0]!.role = 'research';
@@ -489,7 +484,7 @@ test.each([false, true])('a long finding uses complete shared evidence and retri
         expect(selection.evidence.output.slice(candidates[0]!.content.start, candidates[0]!.content.end).trim()).toBe(output);
         if (context.name === 'pick') {
           lookups++;
-          if (retry && lookups === 1) throw new JudgmentError('unavailable', 'fixture lookup transport failure', { status: 503 });
+          if (unavailable) throw new JudgmentError('unavailable', 'fixture lookup transport failure', { status: 503 });
           return choiceAnswer(context.question, candidates[0]!.id, 0.99);
         }
         if (context.name.startsWith('fits_')) return noulAnswer(0.99);
@@ -498,15 +493,22 @@ test.each([false, true])('a long finding uses complete shared evidence and retri
     },
   }));
   const { contract } = (await startContract(h));
-  await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'successful finding lookup before correction');
+  await waitFor(() => unavailable ? terminal(h, contract.id) : (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'finding lookup outcome');
   const current = contractOf(h, contract.id);
-  const receipt = JSON.parse(current.decisions.findLast(decision => decision.targetId === `${contract.id}.final-answer-review`)!.reason);
-  expect(receipt.passed).toBe(false);
-  expect(receipt.findings[0]).toMatchObject({ localization: 'established', passage: { quote: output } });
-  expect(lookups).toBe(retry ? 2 : 1);
-  expect(reviews).toBe(retry ? 2 : 1);
+  const decision = current.decisions.findLast(decision => decision.targetId === `${contract.id}.final-answer-review`);
+  if (unavailable) {
+    expect(current.status).toBe('failed');
+    expect(decision).toBeUndefined();
+    expect(current.error).toContain('No decision models are currently available.');
+  } else {
+    const receipt = JSON.parse(decision!.reason);
+    expect(receipt.passed).toBe(false);
+    expect(receipt.findings[0]).toMatchObject({ localization: 'established', passage: { quote: output } });
+  }
+  expect(lookups).toBe(1);
+  expect(reviews).toBe(1);
   expect(workers).toBe(1);
-  expect(current.checks).toHaveLength(1);
+  expect(current.checks).toHaveLength(unavailable ? 0 : 1);
   expect(current.commit).toBeUndefined();
 });
 

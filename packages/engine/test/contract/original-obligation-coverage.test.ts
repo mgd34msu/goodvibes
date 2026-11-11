@@ -51,9 +51,11 @@ test('an unrecorded original-obligation answer retains completed work and cannot
   const previous = installJudgmentPort(runnerPort().port);
   try {
     const { contract, owner } = (await startContract(harness));
-    await waitFor(() => contractOf(harness!, contract.id).decisions.some(decision => decision.reason.startsWith('verification pending:')), 'missing recorded coverage held');
+    await waitFor(() => terminal(harness!, contract.id), 'missing recorded coverage fails verification');
     const current = contractOf(harness, contract.id);
-    expect(current.status).not.toBe('passed');
+    expect(current.status).toBe('failed');
+    expect(current.failureKind).toBe('judgment-unavailable');
+    expect(current.decisions.some(decision => decision.reason.startsWith('verification pending:'))).toBe(false);
     expect(current.commit).toBeUndefined();
     expect(current.units[0]?.status).toBe('passed');
     expect(current.decisions.some(decision => decision.targetId === `${contract.id}.original-obligations`)).toBe(false);

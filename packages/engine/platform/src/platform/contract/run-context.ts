@@ -62,7 +62,6 @@ export interface UnitRuntime {
   /** A turn end arrived while a check ran: one more turn-end check follows it. */
   recheckPending: boolean;
   /** Request failures wait on verification without changing the candidate. */
-  verificationRetryCancel?: () => void;
   /** The phase runner waiting for the runner to settle the unit's current agent. */
   settlement: { readonly agentId: string; readonly resolve: (outcome: ContractUnitOutcome) => void } | null;
   /** Agents the runner itself cancelled; their cancel events are not operator stops. */
@@ -143,8 +142,6 @@ export interface RunControl {
 }
 
 export class ContractRun {
-  /** Real planning, checking, routing and completion work, including cleanup. */
-  readonly work = new OwnedWork();
   /** An owned invocation cannot accept an engine without real work drainage. */
   requireSettlement = false;
   /** The contract's orchestration engine, once its plan is accepted. */
@@ -169,6 +166,8 @@ export class ContractRun {
     readonly control: RunControl,
     /** Units an agent-tool batch or AgentInput.proposedUnits proposed, for the planner. */
     readonly proposedUnits?: readonly { readonly task: string; readonly template?: string | undefined }[] | undefined,
+    /** Real planning, checking, routing and completion work, including cleanup. */
+    readonly work: OwnedWork = new OwnedWork(),
   ) {
     if (contract.inputSnapshot) pinContractInputAdmission(contract, this.abort.signal);
   }

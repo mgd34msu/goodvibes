@@ -63,6 +63,7 @@ import { planContract, shapeContract, type ContractPlannerDeps, type PlanningOut
 import type { NativeContractDecisionHost, NativeContractServices } from './native-decisions.js';
 import { bindNativeContractSource, captureNativeContractSource, nativeSourceCriteria } from './native-source.js';
 import { createContractPlanSync, type ExecutionPlans, type WorkPlanService } from './plan-sync.js';
+import { ContractExecutionWork } from './owned-execution-work.js';
 import { createContractResume, findZombieCause, type ResumeReport } from './resume.js';
 import { numberDraft } from './draft-plan.js';
 import { createContractFleetControls, type ContractFleetControls } from './fleet-controls.js';
@@ -1016,7 +1017,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       finishPassed: (result) => finishPassed(run, result),
       fail: (kind, reason) => fail(run, kind, reason),
       cancel: (reason) => cancelRun(run, reason),
-    }, contract.proposedUnits);
+    }, contract.proposedUnits, new ContractExecutionWork(reserveSettlement(contract.id).promise));
     reserveSettlement(contract.id);
     runs.set(contract.id, run);
     const sourceSignal = getContractActionSignal(contract);

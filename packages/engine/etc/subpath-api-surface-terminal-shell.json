@@ -746,7 +746,7 @@
     {
       "name": "TERMINAL_ESCAPES",
       "kind": "const",
-      "text": "TERMINAL_ESCAPES: { readonly ALT_SCREEN_ENTER: \"\\u001B[?1049h\"; readonly ALT_SCREEN_EXIT: \"\\u001B[?1049l\"; readonly MOUSE_ENABLE: \"\\u001B[?1000h\\u001B[?1002h\\u001B[?1006h\"; readonly MOUSE_DISABLE: \"\\u001B[?1006l\\u001B[?1002l\\u001B[?1000l\"; readonly CURSOR_HIDE: \"\\u001B[?25l\"; readonly CURSOR_SHOW: \"\\u001B[?25h\"; readonly KEYBOARD_EXT_ENABLE: \"\\u001B[>4;2m\\u001B[?1u\"; readonly KEYBOARD_EXT_DISABLE: \"\\u001B[>4;0m\\u001B[?1l\"; readonly PASTE_ENABLE: \"\\u001B[?2004h\"; readonly PASTE_DISABLE: \"\\u001B[?2004l\"; readonly FOCUS_ENABLE: \"\\u001B[?1004h\"; readonly FOCUS_DISABLE: \"\\u001B[?1004l\"; readonly CLEAR_VIEWPORT_HOME: \"\\u001B[2J\\u001B[H\"; }"
+      "text": "TERMINAL_ESCAPES: { readonly ALT_SCREEN_ENTER: \"\\u001B[?1049h\"; readonly ALT_SCREEN_EXIT: \"\\u001B[?1049l\"; readonly MOUSE_ENABLE: \"\\u001B[?1000h\\u001B[?1002h\\u001B[?1006h\"; readonly MOUSE_DISABLE: \"\\u001B[?1006l\\u001B[?1002l\\u001B[?1000l\"; readonly CURSOR_HIDE: \"\\u001B[?25l\"; readonly CURSOR_SHOW: \"\\u001B[?25h\"; readonly KEYBOARD_EXT_ENABLE: \"\\u001B[>4;2m\\u001B[>1u\"; readonly KEYBOARD_EXT_DISABLE: \"\\u001B[>4;0m\\u001B[<u\"; readonly PASTE_ENABLE: \"\\u001B[?2004h\"; readonly PASTE_DISABLE: \"\\u001B[?2004l\"; readonly FOCUS_ENABLE: \"\\u001B[?1004h\"; readonly FOCUS_DISABLE: \"\\u001B[?1004l\"; readonly CLEAR_VIEWPORT_HOME: \"\\u001B[2J\\u001B[H\"; }"
     },
     {
       "name": "TRANSCRIPT_LAYOUT",
@@ -773,9 +773,10 @@
       "required": [
         "enterTerminal",
         "isTerminalRestored",
-        "restoreTerminal"
+        "restoreTerminal",
+        "suspendTerminal"
       ],
-      "text": "export interface TerminalLifecycle { readonly enterTerminal: () => void; readonly restoreTerminal: () => void; readonly isTerminalRestored: () => boolean; }"
+      "text": "export interface TerminalLifecycle { readonly enterTerminal: () => void; readonly suspendTerminal: () => void; readonly restoreTerminal: () => void; readonly isTerminalRestored: () => boolean; }"
     },
     {
       "name": "TerminalLifecycleDeps",
@@ -12215,12 +12216,12 @@
     {
       "name": "KEYBOARD_EXT_DISABLE",
       "kind": "const",
-      "text": "KEYBOARD_EXT_DISABLE: \"\\u001B[>4;0m\\u001B[?1l\""
+      "text": "KEYBOARD_EXT_DISABLE: \"\\u001B[>4;0m\\u001B[<u\""
     },
     {
       "name": "KEYBOARD_EXT_ENABLE",
       "kind": "const",
-      "text": "KEYBOARD_EXT_ENABLE: \"\\u001B[>4;2m\\u001B[?1u\""
+      "text": "KEYBOARD_EXT_ENABLE: \"\\u001B[>4;2m\\u001B[>1u\""
     },
     {
       "name": "MOUSE_DISABLE",

@@ -100,6 +100,8 @@ export interface ProcessLifecycleDeps {
 
 export interface ProcessLifecycleHandlers {
   readonly exitApp: () => Promise<void>;
+  readonly enterTerminal: () => void;
+  readonly suspendTerminal: () => void;
   readonly restoreTerminal: () => void;
   /**
    * True once restoreTerminal has run. The compositor must never write another
@@ -209,8 +211,8 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
 
   // Terminal enter/restore sequencing is the byte-identical seam both daemon
   // front-ends share, so it lives in @goodvibes-jev/engine/terminal-shell and this
-  // wiring delegates to it. Only the restore path is used here (the TUI's
-  // startup enter sequence stays in main.ts); the graceful shutdown below
+  // wiring delegates startup, editor suspension and final restore to it, so
+  // every keyboard-mode push has exactly one pop. The graceful shutdown below
   // (draining services, persisting sessions, exit codes) is TUI-specific and
   // stays local, calling restoreTerminal() for the synchronous hand-back.
   //
@@ -219,7 +221,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
   // exit deliberately uses the package's CLEAR_VIEWPORT_HOME ('\x1b[2J\x1b[H',
   // no ESC[3J), never ansi.CLEAR_SCREEN, which carries the scrollback-wiping 3J.
   const terminalLifecycle = createTerminalLifecycle({
-    write: (data) => bestEffort('terminal restore write', () => { stdout.write(data); }),
+    write: (data) => { stdout.write(data); },
     noAltScreen,
     guardedWrite: allowTerminalWrite,
     disposeOutputGuard: () => bestEffort('terminal output guard disposal', () => getTerminalOutputGuard().dispose()),
@@ -241,7 +243,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
     noticesClosed = true;
     rejectionNotices.dispose();
     bestEffort('host pairing cancellation', () => getInput().hostPairing?.dispose());
-    terminalLifecycle.restoreTerminal();
+    bestEffort('terminal restore write', () => terminalLifecycle.restoreTerminal());
   };
 
   let sessionRelease: Promise<void> | undefined;
@@ -373,6 +375,8 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
 
   return {
     exitApp,
+    enterTerminal: terminalLifecycle.enterTerminal,
+    suspendTerminal: terminalLifecycle.suspendTerminal,
     restoreTerminal,
     isTerminalRestored: terminalLifecycle.isTerminalRestored,
     resizeHandler,

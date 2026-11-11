@@ -5,7 +5,7 @@ import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { livenessMarkerPathFor, writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { installProcessLifecycle, type ProcessLifecycleDeps } from '../../runtime/process-lifecycle.ts';
 import type { BootstrapContext } from '../../runtime/bootstrap.ts';
-import { ALT_SCREEN_EXIT, CLEAR_SCREEN, CURSOR_SHOW, FOCUS_DISABLE, KEYBOARD_EXT_DISABLE, MOUSE_DISABLE, PASTE_DISABLE } from '../../renderer/terminal-escapes.ts';
+import { ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, CLEAR_SCREEN, CURSOR_SHOW, FOCUS_DISABLE, KEYBOARD_EXT_DISABLE, MOUSE_DISABLE, PASTE_DISABLE } from '../../renderer/terminal-escapes.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 
@@ -97,7 +97,7 @@ function makeHarness(options: {
     },
     stdout: {
       write: (text: string) => {
-        phase(text.includes(ALT_SCREEN_EXIT) ? 'terminal write' : 'receipt');
+        phase(text.includes(ALT_SCREEN_ENTER) ? 'terminal enter' : text.includes(ALT_SCREEN_EXIT) ? 'terminal write' : 'receipt');
         chunks.push(text);
         return true;
       },
@@ -121,6 +121,9 @@ function makeHarness(options: {
     recoverySnapshotExists: () => { phase('recovery exists'); return true; },
   } as unknown as ProcessLifecycleDeps;
   const handlers = installProcessLifecycle(deps);
+  handlers.enterTerminal();
+  events.length = 0;
+  chunks.length = 0;
   return { handlers, events, chunks, saved, snapshot, exitSpy, recoveryFile, markerFile };
 }
 

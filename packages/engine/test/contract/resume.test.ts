@@ -330,7 +330,7 @@ test.each(['changed-passes', 'changed-fails', 'unchanged'])(
 );
 
 test.each(['interrupted', 'privacy-refused', 'verifier-refused'])(
-  'an %s final-answer repair resumes the same round with its rejected draft and findings',
+  'a %s final-answer repair retains its draft and resumes only when verification has not failed',
   async (condition) => {
     const plan = oneUnitPlan(1);
     plan.groups[0]!.units[0]!.role = 'research';
@@ -438,17 +438,13 @@ test.each(['interrupted', 'privacy-refused', 'verifier-refused'])(
   };
     const second = restart(root, recoveryOptions);
   await second.runner.resumeAll();
-    let done = await ended(second, id!);
+    const done = await ended(second, id!);
     if (condition === 'verifier-refused') {
       expect(done.status).toBe('failed');
-      expect(requestFailures).toBe(1);
-      // A fresh explicit resume retries the retained proposal; provider failure
-      // never schedules an unbounded retry inside the interrupted operation.
-      second.dispose();
-      await second.runner.join(id!);
-      const fresh = restart(root, recoveryOptions);
-      await fresh.runner.resumeAll();
-      done = await ended(fresh, id!);
+      expect(requestFailures).toBe(0);
+      expect(plannerRuns).toBe(0);
+      expect(done.units[0]!.answer).toBe('Original draft with an unsupported archive claim.');
+      return;
     }
     expect(done.status).toBe('passed');
   expect(done.fixRounds).toBe(1);
@@ -472,11 +468,7 @@ test.each(['interrupted', 'privacy-refused', 'verifier-refused'])(
     for (const candidate of done.decisions.filter(decision => decision.action === 'planned' && decision.targetId === `${id}.f1.candidate`)) {
       expect(JSON.parse(candidate.reason)).not.toHaveProperty('binding');
     }
-    expect(plannerRuns).toBe(condition === 'verifier-refused' ? 2 : 1);
-    if (condition === 'verifier-refused') {
-      expect(requestFailures).toBe(1);
-      expect(done.decisions.some((decision) => decision.action === 'planned' && decision.targetId === `${id}.f1.candidate`)).toBe(true);
-    }
+    expect(plannerRuns).toBe(1);
     if (condition === 'privacy-refused') {
       expect(prompt).not.toContain('4111111111111111');
       expect(prompt).toContain('[WITHHELD:card-shaped-number]');
@@ -505,7 +497,7 @@ test.each(['interrupted', 'privacy-refused', 'verifier-refused'])(
   },
 );
 
-test('an interrupted fix-plan request reuses its bound proposal and obtains a fresh check after restart', async () => {
+test('a failed fix-plan request retains its bound proposal without restarting verification', async () => {
   const plan = oneUnitPlan(1);
   plan.groups[0]!.units[0]!.role = 'research';
   const repair = fixPlan([{ serves: ['c1'] }]);
@@ -575,17 +567,17 @@ test('an interrupted fix-plan request reuses its bound proposal and obtains a fr
   });
   await h.runner.resumeAll();
   const done = await ended(h, id!);
-  expect(done.status).toBe('passed');
-  expect(done.answer).toBe('Corrected complete answer.');
-  expect(done.units).toHaveLength(2);
+  expect(done.status).toBe('failed');
+  expect(done.units[0]!.answer).toBe('Original answer.');
+  expect(done.units).toHaveLength(1);
   expect(done.fixRounds).toBe(1);
   expect(plannerRuns).toBe(1);
-  expect(freshChecks).toBe(1);
+  expect(freshChecks).toBe(0);
 });
 
-test.each([false, true])(
-  'a rejected verifier request cannot cancel a sibling or pass unchecked work (persistent=%s)',
-  async (persistent) => {
+test.each([400, 429, 503])(
+  'an exhausted HTTP %s verifier stops while retaining accepted peers and cannot restart automatically',
+  async (status) => {
     const root = makeRepo();
     roots.push(root);
     const plan = twoUnitPlan();
@@ -600,12 +592,12 @@ test.each([false, true])(
     });
     plan.groups[1]!.units[0]!.title = 'Integration fixture';
     let failures = 0;
-    const h = makeHarness({
+    const h: Harness = makeHarness({
       root,
       plan,
       contract: { isolation: 'worktree', maxParallelUnits: 2 },
       scripts: {
-        u1: () => [{ text: 'First private report.' }, { text: 'Repaired private report.' }, { text: 'Bounded private report.' }],
+        u1: record => [{ before: () => waitFor(() => unitIn(h, record.contractId!, 'u3')?.status === 'passed', 'accepted independent peer'), text: 'First private report.' }],
         u3: () => [{ text: 'Independent source assessment.' }],
         u2: () => [{ files: { 'src/convert.ts': 'export const convert = () => true;\n' }, text: 'Integrated the parser.' }],
       },
@@ -619,11 +611,10 @@ test.each([false, true])(
         if (
           judgeOf(context) === 'unit' &&
           String(context.state['output']).includes('private report') &&
-          context.name === 'goal' &&
-          (persistent || failures === 0)
+          context.name === 'goal'
         ) {
           failures++;
-          throw new JudgmentError('rejected', 'fixture request rejection', { status: 400 });
+          throw new JudgmentError(status === 400 ? 'rejected' : 'unavailable', 'fixture exhausted request', { status });
         }
         return undefined;
       },
@@ -633,47 +624,28 @@ test.each([false, true])(
     writeFileSync(join(h.root, 'src/csv.ts'), 'export const parser = true;\n');
     writeFileSync(join(h.root, 'src/independent.ts'), 'export const independent = true;\n');
     const { contract } = (await startContract(h));
-    await waitFor(
-      () => unitIn(h, contract.id, 'u3')?.status === 'passed' && failures === 1 && unitIn(h, contract.id, 'u1')?.status === 'held',
-      'only verifier-failing unit to wait',
-    );
+    await waitFor(() => terminal(h, contract.id), 'exhausted verifier stops');
+    await h.runner.join(contract.id);
+    expect(contractIn(h, contract.id).status).toBe('failed');
     expect(unitIn(h, contract.id, 'u1').lastOutput).toBe('First private report.');
-    expect(contractIn(h, contract.id).decisions.some((decision) => decision.reason.includes('bounded report repair'))).toBe(false);
-    if (persistent) {
-      expect(contractIn(h, contract.id).status).toBe('running');
-      expect(unitIn(h, contract.id, 'u1').checks).toEqual([]);
-      expect(unitIn(h, contract.id, 'u1').criteria[0]!.status).toBe('unread');
-    } else {
-      await sleep(300);
-      h.dispose();
-      await h.runner.join(contract.id);
-      const resumed = restart(h.root, {
-        plan,
-        contract: { isolation: 'worktree', maxParallelUnits: 2 },
-        scripts: {
-          u1: mustNotRun,
-          u3: mustNotRun,
-          u2: () => [{ files: { 'src/convert.ts': 'export const convert = () => true;\n' }, text: 'Integrated the parser.' }],
-        },
-        port: (context) =>
-          context.name === 'role'
-            ? choiceAnswer(
-                context.question,
-                (context.state['unit'] as { title?: string })?.title === 'Integration fixture' ? 'implement' : 'research',
-                0.98,
-              )
-            : undefined,
-      });
-      await resumed.runner.resumeAll();
-      const done = await ended(resumed, contract.id);
-      expect(done.status, JSON.stringify({ error: done.error, decisions: done.decisions.slice(-6),
-        units: done.units.map(unit => ({ id: unit.id, status: unit.status })) })).toBe('passed');
-      expect(failures).toBe(1);
-      expect(unitIn(resumed, contract.id, 'u1').checks).toHaveLength(1);
-      expect(unitIn(resumed, contract.id, 'u1').lastOutput).toBe('First private report.');
-      expect(resumed.agentsOf('u1')).toEqual([]);
-    }
-    expect(eventsOf(h, 'CONTRACT_FAILED')).toEqual([]);
+    expect(unitIn(h, contract.id, 'u1').checks).toEqual([]);
+    expect(unitIn(h, contract.id, 'u1').criteria[0]!.status).toBe('unread');
+    expect(contractIn(h, contract.id).decisions.some(decision => decision.reason.includes('verification pending:'))).toBe(false);
+    expect(eventsOf(h, 'CONTRACT_FAILED')).toHaveLength(1);
+    h.dispose();
+    let restartedRequests = 0;
+    const resumed = restart(h.root, {
+      plan, contract: { isolation: 'worktree', maxParallelUnits: 2 },
+      scripts: { u1: mustNotRun, u3: mustNotRun, u2: mustNotRun },
+      port: () => { restartedRequests++; return undefined; },
+    });
+    await resumed.runner.resumeAll();
+    expect(contractIn(resumed, contract.id).status).toBe('failed');
+    expect(unitIn(resumed, contract.id, 'u1').lastOutput).toBe('First private report.');
+    expect(unitIn(resumed, contract.id, 'u3').status).toBe('passed');
+    expect(resumed.agentsOf('u1')).toEqual([]);
+    expect(restartedRequests).toBe(0);
+    expect(failures).toBe(1);
     expect(unitIn(h, contract.id, 'u3').status).toBe('passed');
   },
 );
@@ -1181,7 +1153,7 @@ describe('the deliverable steps run again', () => {
     contract.commit = undefined;
   }
 
-  test('historical final-verifier request failures resume only verification and retain all accepted work', async () => {
+  test('terminal final-verifier failures retain accepted work without startup verification', async () => {
     const {
       root,
       ids: [id],
@@ -1195,18 +1167,16 @@ describe('the deliverable steps run again', () => {
       contract.completedAt = Date.now();
       retainedUnits = structuredClone(contract.units.map(({ usage: _usage, ...unit }) => unit));
     });
-    const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
+    let requests = 0;
+    const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun }, port: () => { requests++; return undefined; } });
     const report = await h.runner.resumeAll();
-    expect(report.resumed).toEqual([{ contractId: id!, step: 'judge' }]);
+    expect(report.resumed).toEqual([]);
     const done = await ended(h, id!);
-    expect(done.status).toBe('passed');
-    expect(done.failureKind).toBeUndefined();
-    expect(done.error).toBeUndefined();
+    expect(done.status).toBe('failed');
+    expect(done.failureKind).toBe('judgment-unavailable');
+    expect(done.error).toContain('request rejected (HTTP 400)');
     expect(done.units.map(({ usage: _usage, ...unit }) => unit)).toEqual(retainedUnits);
-    expect(done.checks.at(-1)!.trigger).toBe('resume');
-    expect(done.decisions.some((decision) => decision.reason.startsWith('Recovered a historical final-verifier request failure'))).toBe(
-      true,
-    );
+    expect(requests).toBe(0);
   });
 
   test.each(['actual-failure', 'already-published', 'unfinished-unit'])(

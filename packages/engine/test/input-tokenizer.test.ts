@@ -13,6 +13,61 @@
 import { describe, expect, test } from 'bun:test';
 import { InputTokenizer, type InputToken } from '../platform/src/platform/core/tokenizer.js';
 
+describe('InputTokenizer: encoded printable input', () => {
+  test.each([
+    ['modifyOtherKeys uppercase', '\x1b[27;2;65~', 'A'],
+    ['modifyOtherKeys punctuation', '\x1b[27;2;33~', '!'],
+    ['CSI-u uppercase codepoint', '\x1b[65;2u', 'A'],
+    ['Kitty shifted letter', '\x1b[97;2u', 'A'],
+    ['Kitty alternate shifted letter', '\x1b[97:65;2u', 'A'],
+    ['Kitty layout-specific punctuation', '\x1b[49:33;2u', '!'],
+    ['Kitty associated text', '\x1b[97;2;65u', 'A'],
+    ['Kitty multiple associated codepoints', '\x1b[0;;101:769u', 'e\u0301'],
+    ['Kitty Unicode shifted letter', '\x1b[233:201;2u', 'É'],
+    ['Kitty supplementary Unicode', '\x1b[128512u', '😀'],
+    ['Kitty Caps Lock', '\x1b[97;65u', 'A'],
+    ['Kitty Caps Lock and Shift', '\x1b[97;66u', 'a'],
+    ['Kitty unmodified letter', '\x1b[97u', 'a'],
+    ['Kitty shifted space', '\x1b[32;2u', ' '],
+  ])('%s reaches every text consumer as text', (_label, raw, value) => {
+    expect(new InputTokenizer().feed(raw)).toEqual([{ type: 'text', value }]);
+  });
+
+  test('held Shift produces one insertion per press/repeat, none on release', () => {
+    const tokenizer = new InputTokenizer();
+    expect(tokenizer.feed('\x1b[97:65;2:1u\x1b[97:65;2:2u\x1b[97:65;2:3u'))
+      .toEqual([{ type: 'text', value: 'A' }, { type: 'text', value: 'A' }]);
+  });
+
+  test('split encoded input preserves text and surrounding plain input', () => {
+    const tokenizer = new InputTokenizer();
+    expect(tokenizer.feed('x\x1b[97:')).toEqual([{ type: 'text', value: 'x' }]);
+    expect(tokenizer.feed('65;2')).toEqual([]);
+    expect(tokenizer.feed('uy')).toEqual([{ type: 'text', value: 'A' }, { type: 'text', value: 'y' }]);
+  });
+
+  test.each([
+    ['\x1b[99:67;6u', 'c', true, true, false],
+    ['\x1b[27;6;90~', 'z', true, true, false],
+    ['\x1b[97:65;4u', 'a', false, true, true],
+    ['\x1b[13;2u', 'enter', false, true, false],
+    ['\x1b[9;2u', 'tab', false, true, false],
+    ['\x1b[1;2D', 'left', false, true, false],
+    ['\x1b[57350;2u', 'left', false, true, false],
+  ])('%s preserves shortcuts and navigation', (raw, logicalName, ctrl, shift, meta) => {
+    expect(new InputTokenizer().feed(raw)).toEqual([{ type: 'key', name: raw, logicalName, ctrl, shift, meta }]);
+  });
+
+  test('shortcut release does not fire an action', () => {
+    expect(new InputTokenizer().feed('\x1b[99:67;6:3u')).toEqual([]);
+  });
+
+  test.each(['\x1b[97;9u', '\x1b[97;17u', '\x1b[97;33u', '\x1b[55296u', '\x1b[1114112u', '\x1b[57358u', '\x1b[0;;27u'])
+    ('%s cannot become printable text', (raw) => {
+      expect(new InputTokenizer().feed(raw).every(token => token.type === 'key')).toBe(true);
+    });
+});
+
 describe('InputTokenizer: focus-reporting sequences (CSI ?1004h)', () => {
   test('\\x1b[I parses to a focus-in token', () => {
     const tokenizer = new InputTokenizer();

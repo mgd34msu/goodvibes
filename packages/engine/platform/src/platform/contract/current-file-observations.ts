@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, type BigIntStats } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -198,4 +199,18 @@ export function currentFileObservations(cwd: string, paths: readonly string[], o
         error: summarizeError(error), meaning: 'Current file identity could not be established.' }];
     }
   });
+}
+
+/** Large review scopes must leave input, cancellation and other agents runnable.
+ * Each original read still performs all of its physical ownership checks; no
+ * cached observation or truncated path list substitutes for the actual files. */
+export async function currentFileObservationsAsync(cwd: string, paths: readonly string[],
+  options: Parameters<typeof currentFileObservations>[2] = {}, signal?: AbortSignal): Promise<JsonValue[]> {
+  signal?.throwIfAborted();
+  const observations: JsonValue[] = [];
+  for (const path of new Set(paths)) {
+    await yieldToEventLoop(undefined, { signal });
+    observations.push(...currentFileObservations(cwd, [path], options));
+  }
+  return observations;
 }

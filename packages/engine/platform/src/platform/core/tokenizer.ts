@@ -6,6 +6,14 @@ export type InputToken =
   | { type: 'mouse', button: number, col: number, row: number, action: 'press' | 'release' }
   | { type: 'focus', action: 'in' | 'out' };
 
+function isPrintableCodePoint(code: number): boolean {
+  return Number.isInteger(code) && code >= 32 && code <= 0x10ffff
+    && !(code >= 0x7f && code <= 0x9f)
+    && !(code >= 0xd800 && code <= 0xdfff)
+    // Kitty reserves this private-use range for functional keys.
+    && !(code >= 57344 && code <= 63743);
+}
+
 /**
  * InputTokenizer - Optimized for Tmux and CSI-u input modes.
  */
@@ -85,16 +93,53 @@ export class InputTokenizer {
           const full = seqMatch[0]!;
           const params = seqMatch[1]!;
           const suffix = seqMatch[2]!;
-          const parts = params.split(/[;:]/);
-          let charCode = parseInt(parts[0]! || '0', 10);
-          let modValue = parseInt(parts[1]! || '1', 10);
-          if (params.startsWith('27;') && suffix === '~') {
-            modValue = parseInt(parts[1]! || '1', 10);
+          // Kitty fields use semicolons; colons introduce alternate key codes
+          // or event types within a field, never another modifier field.
+          const parts = params.split(';');
+          const keyCodes = parts[0]!.split(':');
+          const modifiers = (parts[1] || '1').split(':');
+          let charCode = parseInt(keyCodes[0]! || '0', 10);
+          const modValue = parseInt(modifiers[0]! || '1', 10);
+          const modifyOtherKeys = params.startsWith('27;') && suffix === '~';
+          if (modifyOtherKeys) {
             charCode = parseInt(parts[2]! || '0', 10);
+          }
+          // A release is not another insertion or shortcut activation. Repeat
+          // events, in contrast, follow the same path as a key press.
+          if (!modifyOtherKeys && modifiers[1] === '3') {
+            this.buffer = this.buffer.slice(full.length);
+            continue;
           }
           const shift = (modValue - 1 & 1) !== 0;
           const meta  = (modValue - 1 & 2) !== 0;
           const ctrl  = (modValue - 1 & 4) !== 0;
+          // Normalize encoded printable input to the same text tokens as plain
+          // UTF-8, before any composer, modal or shortcut consumer sees it.
+          // Shift and lock keys can produce text; Ctrl/Alt/Super/Hyper/Meta
+          // chords must remain keys. Do not infer text from navigation codes.
+          if ((suffix === 'u' || modifyOtherKeys) && ((modValue - 1) & 0b111110) === 0) {
+            let text: string | undefined;
+            const associatedText = suffix === 'u' ? parts[2] : undefined;
+            if (associatedText) {
+              const codePoints = associatedText.split(':').map(Number);
+              if (codePoints.every(isPrintableCodePoint)) text = String.fromCodePoint(...codePoints);
+            } else if (isPrintableCodePoint(charCode)) {
+              text = String.fromCodePoint(charCode);
+              if (suffix === 'u') {
+                const shiftedCode = Number(keyCodes[1]);
+                const capsLock = ((modValue - 1) & 64) !== 0;
+                // Prefer the terminal's layout-aware shifted character. With
+                // no alternate code, letter case is recoverable from modifiers.
+                if (shift && isPrintableCodePoint(shiftedCode)) text = String.fromCodePoint(shiftedCode);
+                else if (shift !== capsLock) text = text.toUpperCase();
+              }
+            }
+            if (text !== undefined) {
+              tokens.push({ type: 'text', value: text });
+              this.buffer = this.buffer.slice(full.length);
+              continue;
+            }
+          }
           let logicalName = full;
           if (charCode === 13 || charCode === 10) logicalName = 'enter';
           if (charCode === 99 || charCode === 67 || charCode === 3) logicalName = 'c';

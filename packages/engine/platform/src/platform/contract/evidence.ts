@@ -27,8 +27,9 @@ import { readNativePrivateReceiptArchives, verifyPrivateReceiptPreservation } fr
 import { compareJsonReadReferences, compareReadReferences } from './read-reference-comparison.js';
 import { commandObservation } from './command-observation.js';
 import { acceptedResearchIds } from './accepted-research.js';
-import { currentFileObservations } from './current-file-observations.js';
-import { assignedReviewPaths, reviewInventoryObservation } from './review-inventory.js';
+import { currentFileObservationsAsync } from './current-file-observations.js';
+import { reviewProjectPath, reviewInventoryObservationAsync } from './review-inventory.js';
+import { projectCheckEvidence } from './check-evidence-projection.js';
 export { currentFileObservations } from './current-file-observations.js';
 import { parseCompletionReport } from '../agents/completion-report.js';
 import { returnedReadRows } from '../tools/read/observation.js';
@@ -431,10 +432,16 @@ export async function collectUnitEvidence(
   const currentReads = sourceReadsFromTurns(sources.turns, sources.mustWrite ? [] : unit.files, sources.output);
   const observedReads = sources.mustWrite ? currentReads : mergeSourceReads(unit.readEvidence ?? [], currentReads);
   const currentUnit = contract.units?.find(planned => planned.id === unit.id);
-  const currentFiles = planChecks.length ? currentFileObservations(sources.cwd, [...unit.files,
-    ...(contract.reviewInventory ? assignedReviewPaths(contract.reviewInventory, unit.files) : []), ...changes.map(change => change.path),
+  // Assignment is not inspection. Unread assigned files remain in the complete
+  // review inventory, but cannot enter check.reviewedFiles without an actual
+  // returned read. Capture versions needed by those reads and existing proofs.
+  const currentFiles = planChecks.length ? await currentFileObservationsAsync(sources.cwd, [...unit.files,
+    ...observedReads.filter(read => read.returnedLines > 0).flatMap(read => {
+      const path = reviewProjectPath(sources.cwd, read.path);
+      return path === undefined ? [] : [path];
+    }), ...changes.map(change => change.path),
     ...(contract.units ?? []).flatMap(planned => planned.checks.at(-1)?.reviewedFiles?.map(file => file.path) ?? []),
-    ...(contract.units ?? []).filter(planned => planned.status === 'passed').flatMap(planned => planned.touchedPaths ?? [])], { owner: contract }) : [];
+    ...(contract.units ?? []).filter(planned => planned.status === 'passed').flatMap(planned => planned.touchedPaths ?? [])], { owner: contract }, sources.signal) : [];
   const owner = sources.ownerEvidence;
   const ownerReads = owner && typeof owner === 'object' && !Array.isArray(owner) && Array.isArray(owner['sourceReads'])
     ? owner['sourceReads'].flatMap(read => read && typeof read === 'object' && !Array.isArray(read) && typeof read['path'] === 'string'
@@ -482,7 +489,7 @@ export async function collectUnitEvidence(
       requirements,
       ...(sources.ownerEvidence === undefined ? {} : { ownerPriorReads: sources.ownerEvidence }),
       currentFiles,
-      ...(contract.reviewInventory && contract.projectRoot && contract.units ? { reviewInventory: reviewInventoryObservation({ ...contract, projectRoot: contract.projectRoot, units: contract.units }, currentFiles) as unknown as JsonValue } : {}),
+      ...(contract.reviewInventory && contract.projectRoot && contract.units ? { reviewInventory: await reviewInventoryObservationAsync({ ...contract, projectRoot: contract.projectRoot, units: contract.units }, currentFiles, sources.signal) as unknown as JsonValue } : {}),
       ...(privateArtifacts.length ? { privateArtifacts } : {}),
       ...(contract.createdAt === undefined ? {} : { createdAt: contract.createdAt }),
       ...(contract.origin === undefined ? {} : { origin: contract.origin }),
@@ -568,18 +575,21 @@ export type CheckState = { [key: string]: JsonValue };
 /** The judge's whole state, as the judge pattern builds it: `{ goal, output, evidence }`. */
 export function judgeState(unit: Pick<ContractUnit, 'goal'>, evidence: UnitEvidence): CheckState {
   const report = parseCompletionReport(evidence.output);
+  // Downstream native artifact checks consume raw judgeEvidence observations;
+  // only this final model-facing state receives the lossless table view.
+  const projected = projectCheckEvidence(judgeEvidence(evidence) as CheckState);
   if (typeof report?.finalAnswer === 'string') return { goal: unit.goal, output: report.finalAnswer,
-    evidence: { ...(judgeEvidence(evidence) as CheckState), completionReport: report as unknown as JsonValue,
+    evidence: { ...projected, completionReport: report as unknown as JsonValue,
       deliverySource: { field: 'finalAnswer',
         meaning: 'output is the exact proposed user-facing finalAnswer from the current completion report. The complete parsed report remains supplied for criteria about its fields, supporting work and attribution. Report text is a proposal, never proof of execution or approval.' } } };
-  return { goal: unit.goal, output: evidence.output, evidence: judgeEvidence(evidence) };
+  return { goal: unit.goal, output: evidence.output, evidence: projected };
 }
 
 /** The quality battery's state (design 4.4). */
 export function qualityState(unit: Pick<ContractUnit, 'goal' | 'brief'>, evidence: UnitEvidence): CheckState {
   const hostOperations = actualHostOperations(evidence);
   const report = parseCompletionReport(evidence.output);
-  return {
+  return projectCheckEvidence({
     ...(hostOperations.length ? { hostOperations } : {}),
     ...(evidence.orchestration === undefined ? {} : { orchestration: evidence.orchestration }),
     ...sourceReadState(evidence),
@@ -597,7 +607,7 @@ export function qualityState(unit: Pick<ContractUnit, 'goal' | 'brief'>, evidenc
       deliverySource: { field: 'finalAnswer',
         phase: 'candidate-before-native-acceptance-and-publication',
         meaning: 'The exact parsed finalAnswer is proposed release text, not an already published response or proof of performed work. The complete raw and parsed completion report remain supplied. The host releases this text only after separate native checks and successful owner publication; the current unit need not perform those future host steps. Every claimed substantive result, read, test or other execution still needs its actual relevant evidence. Internal pending-check metadata is not a claim that task work was omitted; explicit premature claims of native approval remain unsupported. No approval is granted by this state.' } } : {}),
-  };
+  });
 }
 
 function actualHostOperations(evidence: UnitEvidence): JsonValue[] {

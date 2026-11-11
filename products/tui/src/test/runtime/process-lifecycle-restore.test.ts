@@ -20,7 +20,7 @@ import {
   PASTE_DISABLE,
 } from '../../renderer/terminal-escapes.ts';
 
-function makeHarness(noAltScreen: boolean, disposePairing?: () => void): {
+function makeHarness(noAltScreen: boolean, disposePairing?: () => void, enter = true): {
   handlers: ReturnType<typeof installProcessLifecycle>;
   written: () => string;
   rawModeCalls: boolean[];
@@ -56,10 +56,21 @@ function makeHarness(noAltScreen: boolean, disposePairing?: () => void): {
     getStopSpokenOutputForExit: () => null,
   } as unknown as ProcessLifecycleDeps;
   const handlers = installProcessLifecycle(deps);
+  if (enter) handlers.enterTerminal();
+  chunks.length = 0;
+  events.length = 0;
   return { handlers, written: () => chunks.join(''), rawModeCalls, guardDisposed: () => disposed, events };
 }
 
 describe('restoreTerminal', () => {
+  test('failure before terminal entry does not pop the calling application keyboard mode', () => {
+    const h = makeHarness(false, undefined, false);
+    h.handlers.restoreTerminal();
+    expect(h.written()).toBe('');
+    expect(h.handlers.isTerminalRestored()).toBe(true);
+    expect(h.guardDisposed()).toBe(true);
+  });
+
   test('alt-screen path: leaves the alt screen, shows the cursor AFTER the switch, never touches scrollback', () => {
     const h = makeHarness(false);
     expect(h.handlers.isTerminalRestored()).toBe(false);

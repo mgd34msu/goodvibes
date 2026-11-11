@@ -1,6 +1,7 @@
+import { currentFileObservationsAsync } from './current-file-observations.js';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { nativeContractSourceData } from './native-source.js';
-import { reviewInventoryObservation, compactReviewInventory } from './review-inventory.js';
+import { reviewInventoryObservationAsync, compactReviewInventory } from './review-inventory.js';
 import { assertOwnedContractSource, hasDerivedAcceptanceChecks } from './owned-source.js';
 /**
  * Groups, the deliverable, and finishing (docs/design/contract-runner.md
@@ -60,7 +61,7 @@ import { readContractConfig } from './config.js';
 import type { Correction } from './correction.js';
 import { nativeContractPort } from './native-decisions.js';
 import { assertNativeContractSource } from './native-source.js';
-import { collectChanges, commandsFromTurns, currentFileObservations, judgeEvidence, trimEvidence, type ContractTurnRecord, type EvidenceCommand } from './evidence.js';
+import { collectChanges, commandsFromTurns, judgeEvidence, trimEvidence, type ContractTurnRecord, type EvidenceCommand } from './evidence.js';
 import { failedGates, gateEventSummary, refreshGateResults, runContractGates, unverifiedGates } from './gates.js';
 import { captureGateInput, type GateSourceInputIdentity } from './gate-input.js';
 import { failureFromError, isAbortError, type ContractRun } from './run-context.js';
@@ -174,8 +175,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   const publicationAssessments = new WeakMap<ContractRun, { evidence: JsonValue; decisionIds: readonly string[] }>();
   const acceptedSources = new WeakMap<ContractRun, { checkId: string; tree: string; source: GateSourceInputIdentity }>();
 
-  /** Retain work on an unavailable check or unpublished result. Retries validate
-   * the current evidence; the owned wait ends immediately when stopped. */
+  /** A verifier failure stops after the port's configured fallback chain.
+   * Only unpublished checked work retries; that wait remains owned and abortable. */
   function verify(run: ContractRun, targetId: string, what: string, step: () => Promise<void>): Promise<void> {
     let pending = pendingVerifications.get(run);
     if (pending === undefined) { pending = new Map(); pendingVerifications.set(run, pending); }
@@ -189,16 +190,15 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
           if (run.terminal || isAbortError(error, run.abort.signal)) return;
           const publicationPending = error instanceof PublicationPending;
           const failure = failureFromError(error);
-          if (!publicationPending && failure.kind !== 'judgment-unavailable') {
+          if (!publicationPending) {
             run.control.fail(failure.kind, `${what}: ${failure.reason}`);
             return;
           }
           const delay = Math.min(30_000, 1_000 * 2 ** Math.min(failures++, 5));
-          run.decide('resumed', targetId, publicationPending
-            ? `publication pending: ${run.contract.commit?.note ?? failure.reason}; checked work retained, revalidate before retry in ${delay / 1_000} seconds; no answer delivered`
-            : `verification pending: ${failure.reason}; accepted work and candidate retained, retry in ${delay / 1_000} seconds, no acceptance verdict`);
-          logger.warn(publicationPending ? 'contract publication pending; work retained' : 'contract verifier request failed; work retained',
-            { contractId: run.id, targetId, reason: publicationPending ? run.contract.commit?.note : failure.reason });
+          run.decide('resumed', targetId,
+            `publication pending: ${run.contract.commit?.note ?? failure.reason}; checked work retained, revalidate before retry in ${delay / 1_000} seconds; no answer delivered`);
+          logger.warn('contract publication pending; work retained',
+            { contractId: run.id, targetId, reason: run.contract.commit?.note });
           await new Promise<void>(resolve => {
             const done = (): void => { clearTimeout(timer); run.abort.signal.removeEventListener('abort', done); resolve(); };
             const timer = setTimeout(done, delay);
@@ -291,9 +291,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       repairPlanAdmissions: contract.decisions.filter(decision => decision.action === 'fix-planned' && decision.decisionIds.length > 0)
         .map(decision => ({ id: decision.id, targetId: decision.targetId, at: decision.at, reason: decision.reason, decisionIds: [...decision.decisionIds],
           meaning: 'Actual host admission of this repair plan with its validation decision identities; this is not approval of the repaired result or final answer.' })),
-      currentFiles: currentFileObservations(tree, changes.map(change => change.path), { includeText: input.scope === 'deliverable', owner: contract }),
-      ...(contract.reviewInventory ? { reviewInventory: compactReviewInventory(reviewInventoryObservation(contract,
-        currentFileObservations(tree, contract.units.flatMap(unit => unit.checks.at(-1)?.reviewedFiles?.map(file => file.path) ?? []), { owner: contract }))!) as unknown as JsonValue } : {}),
+      currentFiles: await currentFileObservationsAsync(tree, changes.map(change => change.path), { includeText: input.scope === 'deliverable', owner: contract }, run.abort.signal),
+      ...(contract.reviewInventory ? { reviewInventory: compactReviewInventory((await reviewInventoryObservationAsync(contract,
+        await currentFileObservationsAsync(tree, contract.units.flatMap(unit => unit.checks.at(-1)?.reviewedFiles?.map(file => file.path) ?? []), { owner: contract }, run.abort.signal), run.abort.signal))!) as unknown as JsonValue } : {}),
       privateArtifacts: readPrivateReceiptArchives(contract),
       currentValidation: {
         scope: input.scope, targetId: input.targetId, status: 'in-progress',
@@ -330,6 +330,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       })),
       meaning: 'Actual host records for this contract, the checked units and their dependency groups. Declared reference contents are actual retained reads, allowing the assigned scope to be compared with observed ranges. For the deliverable only, reference text already checked by a passed native unit check is represented by its native storage reference, byte length, observed ranges and actual check/decision identifiers; the full original text remains retained in that unit. These earlier checks establish only their checked scope, never approval of this answer or changed artifacts. Complete accepted answers, latest checks, current artifact changes and command receipts remain supplied here. Continuation evidence supplies context, never extra requirements or authority. Observed returned ranges are read receipts, not proof of review quality or complete requested scope. Plan, unit and earlier-group acceptance remain separate from approval of the group or deliverable now being checked.',
     } }, { goal: input.goal, brief: '', files: [] });
+    if (run.terminal) return null;
+    assertOwnedContractSource(contract);
     const rawEvidence = judgeEvidence(evidence) as Record<string, JsonValue>;
     const primary = input.scope === 'deliverable' ? finalAnswerEvidence(contract, rawEvidence, input.summaries, changes, input.output) : undefined;
     // The saved final/claim/goal/original receipts bind one immutable output.

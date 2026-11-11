@@ -1,6 +1,60 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { resolveEditorCommand, openComposerInEditor, type EditorSpawn } from '@/input/composer-editor.ts';
+import { resolveEditorCommand, openComposerInEditor, makeComposerEditorOpener, makeFileEditorOpener, type EditorSpawn } from '@/input/composer-editor.ts';
+import { createTerminalLifecycle } from '@goodvibes-jev/engine/terminal-shell';
+
+describe('external-editor keyboard mode ownership', () => {
+  for (const kind of ['composer', 'file'] as const) {
+    test(`${kind} editor balances keyboard modes and respects no-alt-screen`, () => {
+      const writes: string[] = [];
+      const terminal = createTerminalLifecycle({ noAltScreen: true, write: (s) => { writes.push(s); } });
+      const raw: boolean[] = [];
+      let repaints = 0;
+      terminal.enterTerminal();
+      const deps = {
+        buffer: { prompt: 'ABC', cursorPos: 3 },
+        terminal,
+        stdin: { setRawMode: (on: boolean) => { raw.push(on); } },
+        repaint: () => { repaints++; },
+        cwd: '/tmp', env: { EDITOR: 'fake' }, notify: () => {},
+        spawn: () => {
+          expect(writes).toHaveLength(2);
+          expect(writes[1]).toContain('\x1b[<u');
+          return { status: 0 };
+        },
+      };
+      if (kind === 'composer') makeComposerEditorOpener(deps)();
+      else makeFileEditorOpener(deps)('/tmp/example');
+      expect(writes).toHaveLength(3);
+      expect(writes[2]).toContain('\x1b[>1u');
+      terminal.restoreTerminal();
+      expect(writes).toHaveLength(4);
+      expect(writes[3]).toContain('\x1b[<u');
+      expect(writes.join('')).not.toContain('\x1b[?1049');
+      expect(raw).toEqual([false, true]);
+      expect(repaints).toBe(1);
+    });
+
+    test(`${kind} editor cannot reenter raw mode after shutdown while suspended`, () => {
+      const writes: string[] = [];
+      const terminal = createTerminalLifecycle({ noAltScreen: false, write: (s) => { writes.push(s); } });
+      const raw: boolean[] = [];
+      terminal.enterTerminal();
+      const deps = {
+        buffer: { prompt: '', cursorPos: 0 },
+        terminal,
+        stdin: { setRawMode: (on: boolean) => { raw.push(on); } },
+        repaint: () => { throw new Error('must not repaint after shutdown'); },
+        cwd: '/tmp', env: { EDITOR: 'fake' }, notify: () => {},
+        spawn: () => { terminal.restoreTerminal(); return { status: 0 }; },
+      };
+      if (kind === 'composer') makeComposerEditorOpener(deps)();
+      else makeFileEditorOpener(deps)('/tmp/example');
+      expect(writes).toHaveLength(2);
+      expect(raw).toEqual([false]);
+    });
+  }
+});
 
 describe('resolveEditorCommand', () => {
   test('prefers $VISUAL over $EDITOR', () => {

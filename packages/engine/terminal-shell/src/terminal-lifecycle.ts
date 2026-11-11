@@ -28,8 +28,10 @@ export const TERMINAL_ESCAPES = {
   MOUSE_DISABLE: '\x1b[?1006l\x1b[?1002l\x1b[?1000l',
   CURSOR_HIDE: '\x1b[?25l',
   CURSOR_SHOW: '\x1b[?25h',
-  KEYBOARD_EXT_ENABLE: '\x1b[>4;2m\x1b[?1u',
-  KEYBOARD_EXT_DISABLE: '\x1b[>4;0m\x1b[?1l',
+  // Retain xterm modifyOtherKeys support, and push/pop Kitty flags so a
+  // calling terminal application gets its own keyboard mode back on exit.
+  KEYBOARD_EXT_ENABLE: '\x1b[>4;2m\x1b[>1u',
+  KEYBOARD_EXT_DISABLE: '\x1b[>4;0m\x1b[<u',
   PASTE_ENABLE: '\x1b[?2004h',
   PASTE_DISABLE: '\x1b[?2004l',
   FOCUS_ENABLE: '\x1b[?1004h',
@@ -98,9 +100,12 @@ export interface TerminalLifecycle {
   /**
    * Compose and write the enter sequence: alt-screen (unless noAltScreen),
    * clear + home, hide cursor, then enable mouse / keyboard-extension / paste /
-   * focus reporting. Idempotent-safe to call once at startup.
+   * focus reporting. Repeated calls are ignored until suspendTerminal; calls
+   * after the final restore are ignored permanently.
    */
   readonly enterTerminal: () => void;
+  /** Temporarily hand back the screen and keyboard modes to an external editor. */
+  readonly suspendTerminal: () => void;
   /**
    * Idempotent, synchronous-only terminal restore. Safe to call from
    * process 'exit', signal handlers, uncaughtException, and the graceful exit
@@ -131,7 +136,10 @@ export function createTerminalLifecycle(deps: TerminalLifecycleDeps): TerminalLi
   const disposeOutputGuard = deps.disposeOutputGuard ?? ((): void => {});
   const setRawMode = deps.setRawMode ?? ((): void => {});
 
+  let terminalActive = false;
+  let terminalRestored = false;
   const enterTerminal = (): void => {
+    if (terminalActive || terminalRestored) return;
     guardedWrite(() =>
       deps.write(
         (deps.noAltScreen ? '' : escapes.ALT_SCREEN_ENTER)
@@ -143,12 +151,14 @@ export function createTerminalLifecycle(deps: TerminalLifecycleDeps): TerminalLi
         + escapes.FOCUS_ENABLE,
       ),
     );
+    terminalActive = true;
   };
 
-  let terminalRestored = false;
-  const restoreTerminal = (): void => {
-    if (terminalRestored) return;
-    terminalRestored = true;
+  const suspendTerminal = (): void => {
+    // In particular, never pop the caller's Kitty stack before we pushed a
+    // mode, or pop it a second time if shutdown happens in an external editor.
+    if (!terminalActive) return;
+    terminalActive = false;
     // Alt-screen path: just leave the alt screen, 1049l restores the primary
     // screen and cursor exactly as they were at launch. Clearing first is
     // pointless (the alt screen is discarded) and actively harmful: a clear
@@ -165,14 +175,25 @@ export function createTerminalLifecycle(deps: TerminalLifecycleDeps): TerminalLi
         + exitScreen + escapes.CURSOR_SHOW,
       ),
     );
-    // Dispose the guard AFTER the restore write so a crash stack reaches the
-    // real stderr instead of being suppressed by the guard.
-    disposeOutputGuard();
-    try { setRawMode(false); } catch { /* input stream may not be a TTY */ }
+  };
+
+  const restoreTerminal = (): void => {
+    if (terminalRestored) return;
+    terminalRestored = true;
+    try {
+      suspendTerminal();
+    } finally {
+      // Dispose the guard AFTER the restore write so a crash stack reaches the
+      // real stderr instead of being suppressed by the guard.
+      try { disposeOutputGuard(); } finally {
+        try { setRawMode(false); } catch { /* input stream may not be a TTY */ }
+      }
+    }
   };
 
   return {
     enterTerminal,
+    suspendTerminal,
     restoreTerminal,
     isTerminalRestored: () => terminalRestored,
   };

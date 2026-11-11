@@ -401,7 +401,15 @@ export class ContractStore {
       this.assertStoredVersion(contract.id);
       this.prepareCheckpointWrite(contract);
       if (contract.durableAdmission !== undefined) new DurableContractAdmissions(this.projectRoot).update(contract.durableAdmission, json);
-      writeFileAtomic(path, json);
+      let publishedIdentity: string | undefined;
+      writeFileAtomic(path, json, { onEffect: published => {
+        // The atomic writer fences this callback with the original staged
+        // descriptor and published pathname, including nanosecond clocks.
+        if (published) publishedIdentity = fileObservationIdentity(path);
+      } });
+      // Reuse only our successfully published schema, never a replacement
+      // observed after the write. The next version check still stats the leaf.
+      if (publishedIdentity !== undefined) this.supportedStoredVersions.set(path, publishedIdentity);
       if (contract.durableAdmission !== undefined) {
         syncContractDirectory(contractCheckpointsDir(this.projectRoot));
         syncContractDirectory(contractsDir(this.projectRoot));

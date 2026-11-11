@@ -189,25 +189,19 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       if ((deps.nativeOnly === true) !== (contract.nativeSource !== undefined)) { deps.store.hold(contract); skipped.push(contractId); continue; }
       // Native authority is never reconstructed from disk. Only resumeDurable may adopt this binding.
       if (contract.durableAdmission !== undefined) { deps.store.hold(contract); skipped.push(contractId); continue; }
-      // Older runners incorrectly ended completed legacy work when the final
-      // verifier request failed. Resume only that check, never an actual work
-      // failure, cancellation, owner wait, or already published contract.
+      // A terminal verifier failure has already exhausted its operation. Never
+      // restart it during startup; recovery requires explicit owner action.
+      // Keep the independent migration for a historical planner privacy refusal.
       const acceptedWork = contract.nativeSource === undefined && contract.status === 'failed' && contract.commit === undefined
         && contract.units.length > 0 && contract.units.every(unit => unit.status === 'passed')
         && contract.groups.length > 0 && contract.groups.every(group => group.status === 'passed')
         && contract.escalations.every(item => item.resolvedAt !== undefined);
-      const pendingFixVerification = acceptedWork && contract.failureKind === 'judgment-unavailable' && contract.fixRounds > 0
-        && !hasScheduledFix(contract, contract.id, contract.fixRounds)
-        && (contract.error?.startsWith('interrupted correction could not resume:') === true
-          || contract.decisions.some(decision => decision.action === 'planned'
-            && decision.targetId === `${contract.id}.f${contract.fixRounds}.candidate`));
-      const pendingVerification = acceptedWork && contract.failureKind === 'judgment-unavailable' && !pendingFixVerification;
       const pendingRepair = acceptedWork && contract.failureKind === 'planning' && contract.fixRounds > 0
         && !hasScheduledFix(contract, contract.id, contract.fixRounds)
         && contract.error?.startsWith(`the fix for deliverable ${contract.id} could not be planned:`) === true
         && contract.error.includes('Refused before judgment:')
         && contract.units.some(unit => unit.commandEvidence?.some(command => findCardNumberShapes(command.head, 1).length > 0));
-      if (isTerminalContractStatus(contract.status) && !pendingVerification && !pendingRepair && !pendingFixVerification) {
+      if (isTerminalContractStatus(contract.status) && !pendingRepair) {
         deps.store.hold(contract);
         continue;
       }
@@ -223,18 +217,16 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
           continue;
         }
       }
-      if (pendingVerification || pendingRepair || pendingFixVerification) {
-        contract.status = pendingRepair || pendingFixVerification ? 'fixing' : 'judging';
+      if (pendingRepair) {
+        contract.status = 'fixing';
         contract.failureKind = undefined;
         contract.error = undefined;
         contract.completedAt = undefined;
         contract.statusLine = undefined;
       }
       const run = deps.adopt(contract);
-      if (pendingVerification) run.decide('resumed', contract.id, 'Recovered a historical final-verifier request failure; all accepted units and groups retained. A fresh final-answer and fulfillment check is required before publication; no approval is inferred.');
       if (pendingRepair) run.decide('resumed', contract.id, 'Recovered a historical repair-planner input refusal with card-shaped observational output. Resume the same unstarted repair round with projected command observations; original request screening and fresh plan, unit and final checks remain required.');
-      if (pendingFixVerification) run.decide('resumed', contract.id, 'Recovered an interrupted fix-plan verification request; resume the same unstarted repair round, preserving the checked work and any bound proposal. Fresh plan and final checks remain required.');
-      if (pendingVerification || pendingRepair || pendingFixVerification) deps.store.put(contract);
+      if (pendingRepair) deps.store.put(contract);
       prepareResume(run);
       const zombie = findZombieCause(contract);
       if (zombie !== null) {
@@ -265,7 +257,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       }
       deps.takeSlot(run);
       resumed.push({ contractId: run.id, step });
-      if (run.contract.nativeSource === undefined) await continueResumed(run);
+      if (run.contract.nativeSource === undefined) await run.work.run(() => continueResumed(run));
       else void run.work.run(() => continueResumed(run));
     }
     logger.info('contract runner: resumed contracts from disk', { resumed: resumed.length, queued: queued.length, reaped: reaped.length, skipped: skipped.length });

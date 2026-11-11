@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { readdir, lstat } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -101,7 +102,7 @@ export function assignedReviewPaths(inventory: ReviewInventory, patterns: readon
 
 /** Reads and native accepted assessments are separate facts. A prior check
  * applies only to the exact file version it received, never a changed file. */
-export function reviewInventoryObservation(contract: Pick<ContractView, 'projectRoot' | 'units' | 'reviewInventory'> & Partial<Pick<ContractView, 'reviewExclusions'>>,
+function* observeReviewInventory(contract: Pick<ContractView, 'projectRoot' | 'units' | 'reviewInventory'> & Partial<Pick<ContractView, 'reviewExclusions'>>,
   currentFiles: readonly JsonValue[] = []) {
   const inventory = contract.reviewInventory;
   if (!inventory) return undefined;
@@ -109,6 +110,7 @@ export function reviewInventoryObservation(contract: Pick<ContractView, 'project
   for (const value of currentFiles) if (value && typeof value === 'object' && !Array.isArray(value)
     && value['operation'] === 'read-current-file' && value['source'] === 'native-host-filesystem' && typeof value['path'] === 'string') {
     versions.set(value['path'], value['success'] === true && isCurrentNativeFileObservation(value) ? value : null);
+    yield;
   }
   const excluded = new Map<string, string[]>();
   for (const exclusion of contract.reviewExclusions ?? []) for (const path of assignedReviewPaths(inventory, exclusion.files)) {
@@ -124,6 +126,7 @@ export function reviewInventoryObservation(contract: Pick<ContractView, 'project
       records.push({ ...file, unitId: unit.id, checkId: check.id, criteria: unit.criteria.map(criterion => criterion.id), provenance: reviewedFileProvenance(file),
         state: !hasNativeReviewedFileReference(file) ? 'unverified' : current ? reviewedFileVersionState(current, file) : versions.has(file.path) ? 'changed' : 'version-unchecked' });
       accepted.set(file.path, records);
+      yield;
     }
   }
   const inspections = new Map<string, { unit: ContractUnitView; ranges: readonly string[] }[]>();
@@ -148,6 +151,28 @@ export function reviewInventoryObservation(contract: Pick<ContractView, 'project
     remainingFiles: files.filter(file => file.scope === 'included' && ['unreviewed', 'changed'].includes(file.assessment)).map(file => file.path),
     versionChecksPending: files.filter(file => file.scope === 'included' && file.assessment === 'version-unchecked').map(file => file.path), files,
     meaning: 'Native project inventory compared with actual read observations and accepted scoped research checks. Inspected never means reviewed. A reviewed entry requires a passed native assessment and the matching original physical file observation. Actual owned older saved SHA256 records verify their independently recorded reviewed bytes; original physical ownership was not recorded, as provenance states. Changed, copied, imported or unknown versions remain open. File inventory is not an instruction to review unrelated files: the original requested scope and any explicitly justified exclusions remain controlling. These facts never approve the final response.' };
+}
+
+/** Synchronous projection for existing callers with small local evidence. */
+export function reviewInventoryObservation(contract: Pick<ContractView, 'projectRoot' | 'units' | 'reviewInventory'> & Partial<Pick<ContractView, 'reviewExclusions'>>,
+  currentFiles: readonly JsonValue[] = []) {
+  const observations = observeReviewInventory(contract, currentFiles);
+  let next = observations.next();
+  while (!next.done) next = observations.next();
+  return next.value;
+}
+
+/** Retain every file and assessment while yielding between physical checks. */
+export async function reviewInventoryObservationAsync(contract: Parameters<typeof observeReviewInventory>[0],
+  currentFiles: readonly JsonValue[] = [], signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const observations = observeReviewInventory(contract, currentFiles);
+  let next = observations.next();
+  while (!next.done) {
+    await yieldToEventLoop(undefined, { signal });
+    next = observations.next();
+  }
+  return next.value;
 }
 
 /** Counting and matching identities are host bookkeeping. Keep the exact gap

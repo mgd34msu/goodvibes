@@ -228,6 +228,25 @@ describe('what each trigger collects', () => {
   const contract = makeContract();
   const sources = () => ({ output: 'Done.', report: null, mustWrite: true, turns: TURNS, cwd: dir, configManager: noGates(), runtimeBus: new RuntimeEventBus() });
 
+  test('assigned uninspected files stay open without native reads, while actual reads and changes retain versions', async () => {
+    const paths = ['unread.ts', 'read.ts', 'changed.ts', 'prior.ts'];
+    for (const path of paths) writeFileSync(join(dir, path), 'source\n');
+    const current = makeUnit({ role: 'research', files: ['.'], readEvidence: [
+      { path: join(dir, 'read.ts'), returnedRanges: ['1'], returnedLines: 1 },
+      { path: join(dir, '..', 'outside.ts'), returnedRanges: ['1'], returnedLines: 1 },
+    ] });
+    const peer = makeUnit({ id: 'peer', status: 'passed', touchedPaths: ['prior.ts'] });
+    const planned = makeContract({ projectRoot: dir, units: [current, peer], reviewInventory: { source: 'git', errors: [], paths },
+      decisions: [{ id: 'plan', at: 1, action: 'plan-accepted', targetId: contract.id, reason: 'Accepted plan', decisionIds: ['plan-receipt'] }], id: contract.id });
+    const turns: ContractTurnRecord[] = [{ turn: 1, assistantText: '', results: [],
+      toolCalls: [{ name: 'write', arguments: { files: [{ path: 'changed.ts' }] } }] }];
+    const evidence = await collectUnitEvidence(planned, current, 'turn-end', { ...sources(), turns, mustWrite: false });
+    const host = evidence.orchestration as { currentFiles: { path: string }[]; reviewInventory: { files: { path: string; assessment: string }[] } };
+    expect(host.currentFiles.map(file => file.path).sort()).toEqual(['changed.ts', 'prior.ts', 'read.ts']);
+    expect(host.reviewInventory.files.map(file => file.path)).toEqual(paths);
+    expect(host.reviewInventory.files.every(file => file.assessment === 'unreviewed')).toBe(true);
+  });
+
   test('a read-only delivery exposes fresh binary identity without claiming a worker execution', async () => {
     const current = makeUnit({ role: 'research', files: ['artifact.zip'] });
     const planned = makeContract({ units: [current], decisions: [{ id: 'plan', at: 1, action: 'plan-accepted',

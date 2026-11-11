@@ -105,3 +105,28 @@ test('ambiguous keys and ordered member or type sequences remain observable', ()
   for (const [before, after] of ordered) expect(same(before!, after!), before).toBe(false);
   expect(same('export type Example = { 2: string; "first": number; };', 'export type Example = { "first": number; 2: string; };')).toBe(true);
 });
+
+
+test('newline-only property shapes remain valid and idempotent after normalization', () => {
+  const before = 'export type Example = {\n  last: number\n  first: {\n    two: string\n    one: boolean\n  }\n};';
+  const after = 'export type Example = { first: { one: boolean; two: string; }; last: number; };';
+  expect(same(before, after)).toBe(true);
+  const normalized = normalizeLiteralTypeOrder(before);
+  expect(normalized).toBe(after);
+  expect(normalizeLiteralTypeOrder(normalized)).toBe(normalized);
+  expect(same(before, after.replace('last: number;', 'last: boolean;'))).toBe(false);
+  expect(normalizeLiteralTypeOrder('export type Example = { last: number, first: string, };'))
+    .toBe('export type Example = { first: string; last: number; };');
+});
+
+test('member-gap documentation stays intact and documentation changes remain visible', () => {
+  for (const documented of [
+    'export type Example = { /** first meaning */ last: number; first: string; };',
+    'export type Example = { last: number; /** first meaning */ first: string; };',
+    'export type Example = { last: number; first: string; /** first meaning */ };',
+    'export type Example = { last: number; // first meaning\n first: string; };',
+  ]) {
+    expect(normalizeLiteralTypeOrder(documented)).toBe(documented);
+    expect(same(documented, documented.replace('first meaning', 'different meaning'))).toBe(false);
+  }
+});

@@ -71,14 +71,25 @@ export function normalizeLiteralTypeOrder(text: string): string {
     if (ts.isTypeLiteralNode(node) && node.members.every(member => ts.isPropertySignature(member)
       && (ts.isIdentifier(member.name) || ts.isStringLiteral(member.name) || ts.isNumericLiteral(member.name)))) {
       const members = node.members as ts.NodeArray<ts.PropertySignature>;
+      let previous = start + 1;
+      for (const member of members) {
+        const gap = text.slice(previous, member.getStart(source) - prefix.length);
+        // getStart skips leading JSDoc. Preserve a documented container rather
+        // than dropping or moving comments when its members are reordered.
+        if (gap.includes('/*') || gap.includes('//')) return children;
+        previous = member.end - prefix.length;
+      }
+      const tail = text.slice(previous, end - 1);
+      if (tail.includes('/*') || tail.includes('//')) return children;
       const names = members.map(member => ts.isNumericLiteral(member.name)
         ? String(Number(member.name.text)) : (member.name as ts.Identifier | ts.StringLiteral).text);
       if (new Set(names).size === names.length) {
         const sorted = members.map((member, index) => ({ name: names[index]!,
-          text: rewrite(member.getStart(source) - prefix.length, member.end - prefix.length, children) }))
+          text: rewrite(member.getStart(source) - prefix.length, member.end - prefix.length, children).replace(/[;,]$/, '') + ';' }))
           .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
         // Child edits are rendered into each member before replacing this whole
-        // container, so a reordered parent cannot erase a nested normalization.
+        // container. Explicit separators keep newline-only shapes valid after
+        // joining members and make a second normalization identical.
         return [{ start, end, value: '{ ' + sorted.map(member => member.text).join(' ') + ' }' }];
       }
     }

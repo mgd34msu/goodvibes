@@ -2,12 +2,15 @@ import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings
 import { intrinsicAssessmentFixture } from './_helpers/knowledge-self-improvement-readings.js';
 const answerReadings = useKnowledgeAnswerReadings();
 import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import type { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 import { prepareKnowledgeRecordAdmission } from '../platform/src/platform/knowledge/store-record-snapshot.js';
+import { assertJudgmentInput } from '../platform/src/platform/gate/judgment-input.js';
 import { createKnowledgeNodeOperatorMutation } from '../platform/src/platform/knowledge/store-node-authority.js';
 import { upsertObservedKnowledgeNode } from '../platform/src/platform/knowledge/store-node-observation.js';
 import { markGapRepairAttempt, suppressGap, SELF_IMPROVEMENT_RETRY_DELAY_MS } from '../platform/src/platform/knowledge/semantic/self-improvement-gap-state.js';
@@ -114,17 +117,49 @@ test('repair clock encoding never hides unknown private tails, stale raw generat
 
 test('operator review and no-op writes compare the public clock view without losing canonical originals', async () => {
   clock = spyOn(Date, 'now').mockReturnValue(collision);
-  const { store, gap } = await fixture();
+  const { store, gap, root } = await fixture();
   const repaired = await markGapRepairAttempt(store, gap, 'repair-clock', { status: 'repaired' });
   const input = { id: repaired.id, kind: repaired.kind, slug: repaired.slug, title: repaired.title,
     status: repaired.status, confidence: repaired.confidence };
-  const reviewed = await store.upsertNode(input, createKnowledgeNodeOperatorMutation(repaired, { action: 'accept', reviewer: 'clock-test' }));
+  // A valid native UUID whose final separator-joined digits pass Luhn. The
+  // producer must encode its identity; the privacy check still refuses the raw spelling.
+  const uuid = 'aaaaaaaa-aaaa-4aaa-aaa4-222222222222' as const;
+  expect(() => assertJudgmentInput(uuid)).toThrow('payment card material');
+  const generate = spyOn(crypto, 'randomUUID').mockReturnValue(uuid);
+  let reviewed: KnowledgeNodeRecord;
+  try {
+    reviewed = await store.upsertNode(input, createKnowledgeNodeOperatorMutation(repaired, { action: 'accept', reviewer: 'clock-test' }));
+  } finally { generate.mockRestore(); }
+  expect(reviewed.metadata.review).toMatchObject({ id: opaqueUuid(uuid) });
   expect(reviewed.metadata.lastRepairAttemptAt).toBe(collision);
   expect(() => prepareKnowledgeRecordAdmission(store, 'node', reviewed).assertCurrent()).not.toThrow();
   const unchanged = await store.upsertNode(input);
+  expect(unchanged.metadata.review).toEqual(reviewed.metadata.review);
   expect(unchanged.metadata.lastRepairAttemptAt).toBe(collision);
   expect(rawMetadata(store, unchanged).lastRepairAttemptAt).toBe(new Date(collision).toISOString());
   expect(() => prepareKnowledgeRecordAdmission(store, 'node', unchanged).assertCurrent()).not.toThrow();
+  await store.close();
+  const reopened = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(reopened); await reopened.init();
+  const loaded = reopened.getNode(gap.id)!;
+  expect(loaded.metadata.review).toEqual(reviewed.metadata.review);
+  expect(loaded.metadata.lastRepairAttemptAt).toBe(collision);
+  expect(() => prepareKnowledgeRecordAdmission(reopened, 'node', loaded).assertCurrent()).not.toThrow();
+});
+
+test('operator review identity encoding never exempts a supplied reviewer or private metadata tail', async () => {
+  clock = spyOn(Date, 'now').mockReturnValue(collision);
+  for (const privateTail of [false, true]) {
+    const { store, gap } = await fixture(privateTail ? { unselectedTail: { payment: collision } } : {});
+    const repaired = await markGapRepairAttempt(store, gap, 'repair-clock', { status: 'repaired' });
+    const input = { id: repaired.id, kind: repaired.kind, slug: repaired.slug, title: repaired.title,
+      status: repaired.status, confidence: repaired.confidence };
+    const reviewed = await store.upsertNode(input, createKnowledgeNodeOperatorMutation(repaired, {
+      action: 'accept', reviewer: privateTail ? 'clock-test' : String(collision),
+    }));
+    if (privateTail) expect(rawMetadata(store, reviewed).unselectedTail).toEqual({ payment: collision });
+    else expect(reviewed.metadata.review).toMatchObject({ reviewer: String(collision) });
+    expect(() => prepareKnowledgeRecordAdmission(store, 'node', reviewed)).toThrow('payment card material');
+  }
 });
 
 

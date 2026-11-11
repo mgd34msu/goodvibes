@@ -1,5 +1,6 @@
 import { knowledgeNodeMetadataView, carryKnowledgeRecordClocks, knowledgeRawRepresentation, normalizeKnowledgeStoredView, retainKnowledgeRepresentation, knowledgeDecisionStamp, knowledgeReviewStamp, prepareKnowledgeOwnedClocks } from './store-record-representation.js';
 import { randomUUID } from 'node:crypto';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeNodeRecord } from './types.js';
 
 /** An in-process capability, never inferred from producer metadata or a name. */
@@ -131,7 +132,7 @@ export function resolveKnowledgeNodeOperatorMutation(
       metadata: {
         ...metadata,
         ...(mutation.facts ? { reviewedFacts: mutation.facts } : {}),
-        review: knowledgeReviewStamp(now, { id: randomUUID(), action: mutation.action, reviewer: mutation.reviewer, authority: 'operator',
+        review: knowledgeReviewStamp(now, { id: opaqueUuid(randomUUID()), action: mutation.action, reviewer: mutation.reviewer, authority: 'operator',
           ...(fields ? { scope: 'fields', fields } : { scope: 'node' }),
         }),
         reviewProvenance: knowledgeDecisionStamp(now, {

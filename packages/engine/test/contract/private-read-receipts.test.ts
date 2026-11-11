@@ -6,6 +6,11 @@ import { newContractId, type ContractView } from '../../platform/src/platform/co
 import { makeRepo } from './runner-support.js';
 import { git } from './steps-support.js';
 import { judgeEvidence, qualityState } from '../../platform/src/platform/contract/evidence.js';
+import { assertJudgmentInput } from '../../platform/src/platform/gate/judgment-input.js';
+import { findCardNumberShapes } from '../../platform/src/platform/security/card-shapes.js';
+import { buildUnitBrief } from '../../platform/src/platform/contract/brief.js';
+import { makeContract, makeCriterion, makeUnit } from './fixtures.js';
+import { shapeOf } from './plan-support.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -115,12 +120,49 @@ test('a preservation gate compares actual private records and the exact original
   preserveDeclaredReadReceipts(f.contract);
   const gate = verifyPrivateReceiptPreservation(f.contract, task, f.root)!;
   expect(gate.passed).toBe(true);
-  expect(JSON.parse(gate.output)).toMatchObject({ originalReadRecordsIdentical: true,
+  const output = JSON.parse(gate.output);
+  expect(output).toMatchObject({ originalReadRecordsIdentical: true,
+    baseline: { encoding: 'git-object-id-hex-nibbles-a-p' },
     referenceChecks: [{ path: reference, identical: true, sourceUnitId: 'u1' }] });
+  expect(output.baseline.value.replace(/[a-p]/g, (letter: string) => (letter.charCodeAt(0) - 97).toString(16))).toBe(task.baseline.head);
+  expect(task.baseline.head).toBe(git(f.root, 'rev-parse', 'HEAD').trim());
   const archive = JSON.parse(readFileSync(f.path, 'utf8'));
   archive.units[0].observations[0].returnedRanges = ['99-100'];
   writeFileSync(f.path, JSON.stringify(archive));
   expect(verifyPrivateReceiptPreservation(f.contract, task, f.root)).toMatchObject({ passed: false, output: 'Archived observations differ from their original accepted host records' });
+});
+
+test('a card-shaped native Git identity survives the actual repair brief without exempting semantic card material', () => {
+  const f = fixture();
+  // An adversarial canonical object-ID spelling, not a claim this Git object
+  // exists. This storage-only obligation has no public Git reference to read.
+  const head = 'a'.repeat(12) + '4111111111111111' + 'b'.repeat(12);
+  expect(head).toMatch(/^[0-9a-f]{40}$/);
+  expect(findCardNumberShapes(head)).toHaveLength(1);
+  const source = makeUnit({ ...f.contract.units[0]!, role: 'research',
+    checks: f.contract.units[0]!.checks.map(check => ({ ...check, decisionIds: [] })) });
+  const archived = makeUnit({ id: 'u2', status: 'passed', files: [f.relativePath], baseline: { head, dirty: {} } });
+  const repair = makeUnit({ id: 'u3', role: 'research', dependsOn: ['u2'],
+    criteria: [makeCriterion({ id: 'u3.c1', origin: 'fix', serves: ['c1'] })] });
+  const contract = makeContract({ id: f.contract.id, projectRoot: f.root, shape: shapeOf(), units: [source, archived, repair] });
+  preserveDeclaredReadReceipts(contract);
+  const task = buildUnitBrief(contract, contract.groups[0]!, repair);
+  const marker = 'Actual host orchestration records (evidence, not approval of this unit):\n';
+  const records = JSON.parse(task.split(marker)[1]!);
+  expect(records.privateArchiveChecks).toHaveLength(1);
+  const checked = JSON.parse(records.privateArchiveChecks[0].output);
+  expect(records.privateArchiveChecks[0].passed).toBe(true);
+  expect(checked.baseline).toMatchObject({ encoding: 'git-object-id-hex-nibbles-a-p' });
+  expect(checked.baseline.value.replace(/[a-p]/g, (letter: string) => (letter.charCodeAt(0) - 97).toString(16))).toBe(head);
+  expect(archived.baseline!.head).toBe(head);
+  assertJudgmentInput({ task });
+  // Reconstruct the previous producer's exact raw-baseline field in the same
+  // complete task, demonstrating the refusal rather than bypassing screening.
+  records.privateArchiveChecks[0].output = JSON.stringify({ ...checked, baseline: head });
+  const previousTask = task.slice(0, task.indexOf(marker) + marker.length) + JSON.stringify(records);
+  expect(() => assertJudgmentInput({ task: previousTask })).toThrow('payment card material');
+  const semanticTask = buildUnitBrief(contract, contract.groups[0]!, { ...repair, brief: 'Use card 4111111111111111.' });
+  expect(() => assertJudgmentInput({ task: semanticTask })).toThrow('payment card material');
 });
 
 test('an old private reference cannot establish preservation of a different current baseline', () => {

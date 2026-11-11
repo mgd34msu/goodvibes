@@ -8,6 +8,9 @@
   preserving original query and evidence values, input limits and lifetime checks.
 - Apply the same descriptor-only screening result validation to structured
   readings and catalog readings, retaining bounded refusal causes and cleanup.
+- Prevent generated knowledge review IDs and Git revision evidence from causing
+  accidental payment-card refusals during knowledge review and contract repair.
+  Preserve stored revisions and screening of user-supplied card material.
 
 ## [3.1.2] - 2026-11-10
 

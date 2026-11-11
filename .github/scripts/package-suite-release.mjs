@@ -7,9 +7,11 @@ import { createRequire } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const [target, destination, tag] = process.argv.slice(2);
+const [target, destination, tag, ...options] = process.argv.slice(2);
 assert(['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'].includes(target));
 assert(typeof tag === 'string' && tag.length <= 129 && /^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag));
+assert(options.length === 0 || (options.length === 1 && options[0] === '--native-members-only'), 'Expected optional --native-members-only');
+const nativeMembersOnly = options.length === 1;
 const root = process.cwd();
 const controller = new AbortController();
 const stop = () => controller.abort(new Error('Suite packaging owner stopped.'));
@@ -145,10 +147,12 @@ try {
       readerCurrent(); emitReader(`${basename(binary)}.reader-ci-artifact.json`, artifact);
     }
   }
-  const addonStage = join(releaseStage.path, 'addon');
-  const addonRelative = `lib/sqlite-vec-${target}/vec0.${platform === 'linux' ? 'so' : 'dylib'}`;
-  releaseStage.assertCurrent(); mkdirSync(dirname(join(addonStage, addonRelative)), { recursive: true });
-  {
+  // Focused native consumers select the flat companion member and its original
+  // pin, so they do not produce a release archive with no checksum consumer.
+  if (!nativeMembersOnly) {
+    const addonStage = join(releaseStage.path, 'addon');
+    const addonRelative = `lib/sqlite-vec-${target}/vec0.${platform === 'linux' ? 'so' : 'dylib'}`;
+    releaseStage.assertCurrent(); mkdirSync(dirname(join(addonStage, addonRelative)), { recursive: true });
     releaseStage.assertCurrent();
     cpSync(join(destination, `sqlite-vec-${target}.${platform === 'linux' ? 'so' : 'dylib'}`), join(addonStage, addonRelative));
     const archive = `sqlite-vec-${target}.tar.gz`;
@@ -156,7 +160,7 @@ try {
     run('tar', ['-czf', join(releaseStage.path, archive), '-C', addonStage, addonRelative]);
     publishArchive(archive);
   }
-  if (target === 'linux-x64') {
+  if (!nativeMembersOnly && target === 'linux-x64') {
     await runBuild('bun', ['run', 'build'], join(root, 'products/webui'));
     const { packBundle } = await import(pathToFileURL(join(root, 'products/webui/scripts/pack-bundle.ts')).href);
     const packed = packBundle({ distDir: join(root, 'products/webui/dist'), outDir: resolve(destination), version: tag.slice(1) });

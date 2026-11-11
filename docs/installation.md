@@ -79,6 +79,12 @@ the configured release WebUI. Programs already running continue their original
 build until restarted. Source and package-managed runs keep their own update
 mechanism.
 
+The macOS daemon currently cannot acknowledge an unattended launchd handover.
+It refuses its own automatic update or crash-loop rollback before replacing files
+or stopping the running service, and reports the required manual action. Run the
+released installer to update the complete installation and restart its service.
+Terminal launch updates use their separate restart path.
+
 To disable all unattended updates, set both `update.auto` and
 `update.autoUpdateAtLaunch` to `false` in settings. Setting only
 `update.autoUpdateAtLaunch` to `false` disables terminal launch updates and their

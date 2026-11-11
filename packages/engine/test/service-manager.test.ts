@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +9,7 @@ import {
   type ManagedServiceActionResult,
   type ManagedServiceDefinition,
 } from '../platform/src/platform/daemon/service-manager.js';
+import { resolveDaemonServiceDefault } from '../platform/src/platform/daemon/daemon-service-default.js';
 
 /**
  * Coverage for the WIRED launchd path in service-manager.ts (reached by the
@@ -68,6 +69,41 @@ function definition(overrides: Partial<ManagedServiceDefinition> & { workingDire
 }
 
 describe('consumer service default respects configuration provenance', () => {
+  test('Darwin preserves only an ordinary previous default when the canonical slot is absent', () => withTempDir(dir => {
+    const directory = join(dir, 'Library', 'LaunchAgents'), legacy = join(directory, 'goodvibes.plist');
+    const canonical = join(directory, 'sh.goodvibes.daemon.plist'); mkdirSync(directory, { recursive: true });
+    expect(resolveDaemonServiceDefault(dir, 'darwin')).toBe('sh.goodvibes.daemon');
+    writeFileSync(legacy, 'Historical product definition');
+    expect(resolveDaemonServiceDefault(dir, 'darwin')).toBe('goodvibes');
+    writeFileSync(canonical, 'Canonical installer definition');
+    expect(resolveDaemonServiceDefault(dir, 'darwin')).toBe('sh.goodvibes.daemon');
+    rmSync(canonical); rmSync(legacy); mkdirSync(legacy);
+    expect(resolveDaemonServiceDefault(dir, 'darwin')).toBe('sh.goodvibes.daemon');
+    rmSync(legacy, { recursive: true }); symlinkSync(join(dir, 'missing'), legacy);
+    expect(resolveDaemonServiceDefault(dir, 'darwin')).toBe('sh.goodvibes.daemon');
+    rmSync(legacy); writeFileSync(legacy, 'Historical product definition'); symlinkSync(join(dir, 'missing'), canonical);
+    expect(resolveDaemonServiceDefault(dir, 'darwin')).toBe('sh.goodvibes.daemon');
+    expect(resolveDaemonServiceDefault(dir, 'linux')).toBe('goodvibes');
+  }));
+
+  test('default selection observes the prior loaded unit without migrating it, and canonical wins when both exist', () => withTempDir(dir => {
+    const directory = join(dir, 'Library/LaunchAgents'), legacy = join(directory, 'goodvibes.plist');
+    const canonical = join(directory, 'sh.goodvibes.daemon.plist'); mkdirSync(directory, { recursive: true });
+    writeFileSync(legacy, 'Original prior definition');
+    const config = testConfigManager(join(dir, 'config')); config.set('service.platform', 'launchd');
+    const manager = () => new PlatformServiceManager(config, { workingDirectory: dir, homeDirectory: dir,
+      defaultServiceName: resolveDaemonServiceDefault(dir, 'darwin'),
+      actionRunner: () => ({ status: 0, stdout: '4242\t0\tgoodvibes\n4243\t0\tsh.goodvibes.daemon\n', stderr: '' }) });
+    expect(manager().status()).toMatchObject({ serviceName: 'goodvibes', path: legacy, installed: true, running: true, pid: 4242 });
+    expect(readFileSync(legacy, 'utf8')).toBe('Original prior definition'); expect(existsSync(canonical)).toBe(false);
+    writeFileSync(canonical, 'Original canonical definition');
+    expect(manager().status()).toMatchObject({ serviceName: 'sh.goodvibes.daemon', path: canonical, installed: true, running: true, pid: 4243 });
+    config.set('service.serviceName', 'owner.service');
+    expect(manager().status().serviceName).toBe('owner.service');
+    expect(readFileSync(legacy, 'utf8')).toBe('Original prior definition');
+    expect(readFileSync(canonical, 'utf8')).toBe('Original canonical definition');
+  }));
+
   test('pure schema default recognizes the installer label while leaving shared configuration unchanged', () => withTempDir(dir => {
     const config = testConfigManager(join(dir, 'config'));
     config.set('service.platform', 'launchd');

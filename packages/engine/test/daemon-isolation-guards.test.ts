@@ -111,7 +111,7 @@ function makePromotionHarness(options: { readonly hasOverriddenHome?: boolean | 
         : key === 'update.releasesUrl' ? 'https://native-fixture.test/releases/latest'
           : key === 'update.rollbackAfterFailedStarts' ? options.rollbackThreshold : undefined } as never,
     platformServiceManager: {
-      status: () => ({ installed: false, running: false }),
+      status: () => ({ installed: false, running: false, platform: 'systemd' }),
       install: () => { adopted += 1; return {}; },
       uninstall: () => undefined,
       restart: () => undefined,

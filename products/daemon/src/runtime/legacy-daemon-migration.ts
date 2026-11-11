@@ -51,7 +51,7 @@ import net from 'node:net';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { PlatformServiceManager, type ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { PlatformServiceManager, resolveDaemonServiceDefault, type ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 
 /** Structurally derived from `PlatformServiceManager`'s own constructor, the
@@ -86,12 +86,12 @@ export const MANAGED_SERVICE_DESCRIPTION = 'GoodVibes daemon (shared session bro
 export function resolveConfiguredServiceName(config: {
   get(key: string): unknown;
   describeConfigKeySource?(key: 'service.serviceName'): { readonly tier: string; readonly effectiveOrigin?: string };
-}): string {
+}, defaultServiceName: string = MANAGED_SERVICE_NAME): string {
   const source = config.describeConfigKeySource?.('service.serviceName');
-  if (source?.tier === 'default' && (source.effectiveOrigin === undefined || source.effectiveOrigin === 'default')) return MANAGED_SERVICE_NAME;
+  if (source?.tier === 'default' && (source.effectiveOrigin === undefined || source.effectiveOrigin === 'default')) return defaultServiceName;
   const raw = config.get('service.serviceName');
   const configured = raw === undefined || raw === null ? '' : String(raw).trim();
-  return configured || MANAGED_SERVICE_NAME;
+  return configured || defaultServiceName;
 }
 
 export interface BuildManagedDaemonServiceManagerParams {
@@ -146,6 +146,7 @@ export function buildManagedDaemonServiceManager(params: BuildManagedDaemonServi
     surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT,
     readOnly: true,
   });
+  const defaultServiceName = resolveDaemonServiceDefault(params.unitHomeDir);
   // The unit's ExecStart deliberately carries NO endpoint flags
   // (--hostname/--port): the daemon resolves controlPlane.hostMode/host/port
   // from the user's settings at boot, so a later config change (or a host
@@ -157,7 +158,7 @@ export function buildManagedDaemonServiceManager(params: BuildManagedDaemonServi
   // `params.host`/`params.port` remain inputs because the migration engine
   // still needs them for its read-only port-liveness probe.
   const definition: ManagedServiceDefinition = {
-    name: resolveConfiguredServiceName(configManager),
+    name: resolveConfiguredServiceName(configManager, defaultServiceName),
     description: MANAGED_SERVICE_DESCRIPTION,
     workingDirectory,
     command: params.binaryPath,
@@ -183,7 +184,7 @@ export function buildManagedDaemonServiceManager(params: BuildManagedDaemonServi
     // GOODVIBES_HOME-relocated) tree home above, see `unitHomeDir`'s doc.
     homeDirectory: params.unitHomeDir,
     definitionOverride: definition,
-    defaultServiceName: MANAGED_SERVICE_NAME,
+    defaultServiceName,
     defaultServiceDescription: MANAGED_SERVICE_DESCRIPTION,
     actionRunner: params.actionRunner,
     assertCurrent: params.assertCurrent,

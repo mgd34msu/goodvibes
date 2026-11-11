@@ -21,6 +21,7 @@ export type {
   HostedSessionCompositionInput,
 } from './hosted-sessions-composition.js';
 export { PlatformServiceManager } from './service-manager.js';
+export { resolveDaemonServiceDefault } from './daemon-service-default.js';
 
 export type { ManagedServiceActionResult, ManagedServiceStatus } from './service-manager.js';
 export { isPortAvailable, requirePortAvailable } from './port-check.js';

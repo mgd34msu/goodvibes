@@ -43,7 +43,7 @@ function lifecycleWith(
     readonly platform?: NodeJS.Platform | undefined;
     readonly timeoutMs?: number | undefined;
     readonly configOverrides?: Record<string, unknown>;
-    readonly status?: (() => { installed: boolean; running: boolean }) | undefined;
+    readonly status?: (() => { installed: boolean; running: boolean; platform?: string }) | undefined;
     readonly isIdle?: (() => boolean) | undefined;
     readonly promotionRetryMs?: number | undefined;
     readonly isCompiledBinary?: (() => boolean) | undefined;
@@ -67,7 +67,7 @@ function lifecycleWith(
   const installs: number[] = [];
   const exits: number[] = [];
   const platformServiceManager = {
-    status: overrides.status ?? (() => ({ installed: false, running: false })),
+    status: () => ({ platform: 'systemd', ...(overrides.status?.() ?? { installed: false, running: false }) }),
     install: () => { installs.push(Date.now()); return overrides.install?.() ?? {}; },
   } as unknown as DaemonLifecycleRuntimeOptions['platformServiceManager'];
   const runtime = new DaemonLifecycleRuntime({
@@ -205,7 +205,8 @@ describe('boot-edge service promotion (independent of updates)', () => {
     }
   });
 
-  test.each(['darwin', 'win32'] as const)('unsupported %s promotion preserves the live native runtime before any cleanup', async platform => {
+  test.each([['darwin', 'launchd'], ['win32', 'windows'], ['linux', 'manual'], ['linux', 'launchd']] as const)(
+    'unsupported %s/%s promotion preserves the live native runtime before any cleanup', async (platform, managerPlatform) => {
     const listener = Bun.serve({ hostname: '127.0.0.1', port: 0,
       fetch: () => Response.json({ ok: true, version: '3.1.2' }),
     });
@@ -213,7 +214,7 @@ describe('boot-edge service promotion (independent of updates)', () => {
     const h = lifecycleWith({ version: '3.1.2', execPath: '/opt/goodvibes/goodvibes-daemon', suite: true }, {
       platform, hasOverriddenHome: false, isCompiledBinary: () => true,
       configOverrides: { 'service.enabled': true },
-      status: () => ({ installed: false, running: false }),
+      status: () => ({ installed: false, running: false, platform: managerPlatform }),
       stopGracefully: async () => { stops.push(1); await listener.stop(true); },
       runner: async argv => { commands.push([...argv]); return { status: 'accepted' }; },
     });

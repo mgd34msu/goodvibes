@@ -183,6 +183,7 @@ describe('crash-loop decision', () => {
 interface RollbackHarness {
   readonly runtime: DaemonLifecycleRuntime;
   readonly files: Map<string, Buffer>;
+  readonly mutations: string[];
   readonly rollbackIo: UpdateFileIo;
   readonly exits: number[];
   readonly stops: number[];
@@ -232,11 +233,11 @@ function rollbackHarness(overrides: {
   } as unknown as DaemonLifecycleRuntimeOptions['configManager'];
   const platformServiceManager = {
     // A failed install must preserve the completed disk rollback, without exiting.
-    status: () => ({ installed: overrides.supervised ?? false, running: overrides.supervised ?? false, platform: overrides.managerPlatform, contents: overrides.managerContents }),
+    status: () => ({ installed: overrides.supervised ?? false, running: overrides.supervised ?? false, platform: overrides.managerPlatform ?? 'systemd', contents: overrides.managerContents }),
     install: overrides.install ?? (() => { throw new Error('no service manager in this test'); }),
   } as unknown as DaemonLifecycleRuntimeOptions['platformServiceManager'];
   const { io: markerIo, files: markerFiles } = overrides.marker ?? memoryMarkerIo();
-  const { io: rollbackIo, files } = memoryUpdateIo(
+  const { io: rollbackIo, files, mutations } = memoryUpdateIo(
     overrides.installed ?? fixtureStrings({ ...badCohort.installation(EXEC_PATH), ...goodCohort.installation(EXEC_PATH, PREVIOUS_FILE_SUFFIX) }),
   );
   const exits: number[] = [];
@@ -263,6 +264,7 @@ function rollbackHarness(overrides: {
   return {
     runtime,
     files,
+    mutations,
     rollbackIo,
     exits,
     stops,
@@ -707,10 +709,16 @@ test('receipt write failure cannot undo a completed rollback on duplicate start'
 for (const managerPlatform of ['manual', 'launchd'] as const) {
   test(`darwin ${managerPlatform} cannot infer restart acceptance from supervision identity`, async () => {
     const h = rollbackHarness({ artifact: ARTIFACT, supervised: true, platform: 'darwin', managerPlatform });
+    const original = new Map(h.files);
     for (let i = 0; i < 4; i++) h.runtime.onStarting();
-    await Bun.sleep(10);
-    expect(h.exits).toEqual([]);
-    expect(h.receipts()[1]!.text).toContain(managerPlatform === 'manual' ? 'incomplete (unsupported)' : 'incomplete (unknown)');
+    await h.runtime.drainHandovers();
+    expect(h.files).toEqual(original); expect(h.mutations).toEqual([]);
+    expect(h.exits).toEqual([]); expect(h.stops).toEqual([]);
+    expect(h.receipts().some(row => row.text.includes('Automatic rollback refused before publication'))).toBe(true);
+    h.runtime.onStarting(); h.runtime.onStarting();
+    expect(h.files).toEqual(original); expect(h.mutations).toEqual([]); expect(h.stops).toEqual([]);
+    expect(h.receipts().filter(row => row.text.includes('Automatic rollback refused before publication'))).toHaveLength(1);
+    expect(h.alerts.filter(text => text.includes('Automatic rollback refused before publication'))).toHaveLength(1);
   });
 }
 
@@ -819,9 +827,11 @@ for (const managerPlatform of ['manual', 'systemd'] as const) {
     await Bun.sleep(10);
     expect(commands).toBe(managerPlatform === 'systemd' ? 1 : 0);
     expect(h.exits).toEqual([]);
-    expect(h.files.get(EXEC_PATH)?.toString()).toBe('good-build');
-    if (managerPlatform === 'manual') expect(h.receipts()[1]!.text).toContain('incomplete (unsupported)');
-    else expect(h.receipts()).toHaveLength(1);
+    expect(h.files.get(EXEC_PATH)?.toString()).toBe(managerPlatform === 'systemd' ? 'good-build' : 'bad-build');
+    if (managerPlatform === 'manual') {
+      expect(h.mutations).toEqual([]); expect(h.stops).toEqual([]);
+      expect(h.receipts().some(row => row.text.includes('Automatic rollback refused before publication'))).toBe(true);
+    } else expect(h.receipts()).toHaveLength(1);
   });
 }
 
@@ -835,15 +845,14 @@ for (const restartOnFailure of [false, true]) {
         managerContents: `<plist><dict><key>KeepAlive</key><${diskKeepAlive}/></dict></plist>`,
         runner: async () => { commands++; return { status: 'accepted' }; },
       });
+      const original = new Map(h.files);
       for (let i = 0; i < 4; i++) h.runtime.onStarting();
-      await Bun.sleep(10);
+      await h.runtime.drainHandovers();
       expect(commands).toBe(0);
-      expect(h.exits).toEqual([]);
-      expect(h.files.get(EXEC_PATH)?.toString()).toBe('good-build');
-      expect(h.files.get(PREVIOUS_PATH)?.toString()).toBe('bad-build');
-      expect(h.receipts()[0]!.text).toContain('rolled back to the previously installed version');
-      expect(h.receipts()[1]!.text).toContain('incomplete (unknown)');
-      expect(h.marker()?.rejectedVersion).toBe('2.0.0');
+      expect(h.exits).toEqual([]); expect(h.stops).toEqual([]);
+      expect(h.files).toEqual(original); expect(h.mutations).toEqual([]);
+      expect(h.receipts().some(row => row.text.includes('Automatic rollback refused before publication'))).toBe(true);
+      expect(h.marker()?.rejectedVersion).toBeUndefined();
     });
   }
 }

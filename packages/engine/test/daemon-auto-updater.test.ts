@@ -5,7 +5,7 @@
  * network, filesystem, activity, service actions, and exit all mocked.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -15,6 +15,7 @@ import {
 } from '../platform/src/platform/daemon/auto-updater.js';
 import { DaemonLifecycleRuntime, type DaemonLifecycleRuntimeOptions } from '../platform/src/platform/daemon/facade-lifecycle.js';
 import { DaemonReceiptStore } from '../platform/src/platform/daemon/receipts.js';
+import { suiteReleaseFixture } from './_helpers/suite-release-fixture.js';
 import type { ServiceHandoverOutcome } from '../platform/src/platform/daemon/service-handover.js';
 import {
   BOOT_SETTLE_CHECK_DELAY_MS,
@@ -176,6 +177,7 @@ function makeHarness(options: {
   const actions = { supervised: options.supervised ?? true, adopted: 0, restarted: 0 };
   const sequence: string[] = [];
   const serviceActions: AutoUpdateServiceActions = {
+    ...(options.serviceActions?.preflight ? { preflight: options.serviceActions.preflight.bind(options.serviceActions) } : {}),
     isSupervised: options.serviceActions?.isSupervised ?? (() => actions.supervised),
     adoptIntoService: (signal) => {
       actions.adopted += 1;
@@ -1582,7 +1584,9 @@ for (const restartOnFailure of [false, true]) {
       });
       // Construct the shared action adapter only: do not arm the lifecycle.
       const actions = (lifecycle as unknown as { buildServiceActions(): AutoUpdateServiceActions }).buildServiceActions();
-      const h = makeHarness({ idle: () => true, platform: 'darwin', serviceActions: actions });
+      // Use the retained native transaction fixture with the production Darwin
+      // action adapter. No replacement assets may be fetched or published.
+      const h = makeHarness({ idle: () => true, serviceActions: actions });
       try {
         await h.updater.tick();
         expect(commands).toBe(0);
@@ -1591,15 +1595,162 @@ for (const restartOnFailure of [false, true]) {
         expect(h.files).toEqual(new Map(Object.entries(h.originalFiles)));
         expect(h.files.has(`${EXEC_PATH}${PREVIOUS_FILE_SUFFIX}`)).toBe(false);
         expect(h.updater.snapshot().appliedVersion).toBeNull();
-        expect(h.updater.snapshot().handover).toBeNull();
-        expect(h.receipts.list()).toEqual([]);
+        expect(h.updater.snapshot().handover?.status).toBe('unsupported');
+        expect(h.receipts.list()).toHaveLength(1);
+        expect(h.receipts.list()[0]!.text).toContain('Automatic update refused before publication');
+        expect(h.receipts.list()[0]!.text).toContain('restart the daemon manually');
+        expect(h.sequence).toEqual([]);
         await h.updater.tick();
-        expect(h.requests).toEqual([]);
+        expect(h.requests).toEqual([LATEST_URL, LATEST_URL]);
         expect(h.mutations).toEqual([]);
+        expect(h.receipts.list()).toHaveLength(1);
       } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
     });
   }
 }
+
+for (const managerPlatform of ['manual', 'launchd', 'systemd'] as const) {
+  test(`Linux ${managerPlatform} update admits only its supported service handover`, async () => {
+    const commands: string[][] = [];
+    const lifecycle = new DaemonLifecycleRuntime({
+      configManager: { get: () => undefined } as unknown as DaemonLifecycleRuntimeOptions['configManager'],
+      platformServiceManager: { status: () => ({ installed: true, running: true, platform: managerPlatform }) } as unknown as DaemonLifecycleRuntimeOptions['platformServiceManager'],
+      isIdle: () => true, servicePlatform: 'linux',
+      serviceCommandRunner: async argv => { commands.push([...argv]); return { status: 'accepted' }; },
+    });
+    const actions = (lifecycle as unknown as { buildServiceActions(): AutoUpdateServiceActions }).buildServiceActions();
+    const h = makeHarness({ idle: () => true, serviceActions: actions });
+    try {
+      await h.updater.tick();
+      if (managerPlatform === 'systemd') {
+        expect(h.files.get(EXEC_PATH)?.toString()).toBe('daemon-v2');
+        expect(h.sequence).toEqual(['stop', 'restart']);
+        expect(commands).toEqual([['systemctl', '--user', '--no-block', 'restart', 'goodvibes.service']]);
+        expect(h.updater.snapshot().appliedVersion).toBe('2.0.0');
+        expect(h.updater.snapshot().handover?.status).toBe('accepted');
+      } else {
+        expect(h.files).toEqual(new Map(Object.entries(h.originalFiles)));
+        expect(h.requests).toEqual([LATEST_URL]); expect(h.mutations).toEqual([]); expect(h.sequence).toEqual([]);
+        expect(h.updater.snapshot().appliedVersion).toBeNull(); expect(commands).toEqual([]);
+        expect(h.receipts.list()[0]!.text).toContain('requires the systemd service manager');
+      }
+      expect(h.exits).toEqual([]);
+    } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
+  });
+}
+
+test('a current release does not need a handover capability or emit a refusal', async () => {
+  let preflights = 0;
+  const h = makeHarness({ idle: () => true, latestTag: 'v1.0.0',
+    serviceActions: { preflight: () => { preflights++; return { supported: false }; } },
+  });
+  try {
+    await h.updater.tick();
+    expect(preflights).toBe(0); expect(h.receipts.list()).toEqual([]);
+    expect(h.mutations).toEqual([]); expect(h.sequence).toEqual([]);
+  } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
+});
+
+for (const change of ['support', 'supervision'] as const) test(`changed ${change} during download refuses before commit and runtime stop`, async () => {
+  let supported = true, supervised = true;
+  const release = releaseFetch();
+  const h = makeHarness({ idle: () => true,
+    serviceActions: { isSupervised: () => supervised, preflight: () => ({ supported }) },
+    fetchOverride: async (url, init) => {
+      const response = await release.fetchImpl(url, init);
+      if (url.endsWith('/SHA256SUMS.txt')) {
+        if (change === 'support') supported = false; else supervised = false;
+      }
+      return response;
+    },
+  });
+  try {
+    await h.updater.tick();
+    expect(h.files).toEqual(new Map(Object.entries(h.originalFiles)));
+    expect(h.sequence).toEqual([]); expect(h.exits).toEqual([]);
+    expect(h.updater.snapshot().appliedVersion).toBeNull();
+    expect(h.receipts.list().some(row => row.text.includes('refused before publication'))).toBe(true);
+    supported = true; supervised = true;
+    await h.updater.tick();
+    expect(h.files).toEqual(new Map(Object.entries(h.originalFiles)));
+    expect(h.sequence).toEqual([]); expect(h.exits).toEqual([]);
+    expect(h.receipts.list().filter(row => row.text.includes('refused before publication'))).toHaveLength(1);
+    expect(h.alerts.filter(text => text.includes('refused before publication'))).toHaveLength(1);
+  } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
+});
+
+test('a preflight callback changing supervision at staged admission cannot authorize publication', async () => {
+  let supervised = true;
+  let h!: Harness;
+  h = makeHarness({ idle: () => true, serviceActions: {
+    isSupervised: () => supervised,
+    preflight: () => {
+      if ([...h.files.keys()].some(path => path.endsWith('.update-download'))) supervised = false;
+      return { supported: true };
+    },
+  } });
+  try {
+    await h.updater.tick();
+    expect(supervised).toBe(false);
+    expect(h.files).toEqual(new Map(Object.entries(h.originalFiles)));
+    expect(h.sequence).toEqual([]); expect(h.exits).toEqual([]);
+    expect(h.updater.snapshot().appliedVersion).toBeNull();
+    expect(h.receipts.list()[0]!.text).toContain('changed during unattended handover preflight');
+  } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
+});
+
+test('an accidental asynchronous preflight is owned and refuses before download or cleanup', async () => {
+  const h = makeHarness({ idle: () => true, serviceActions: {
+    preflight: (() => Promise.reject(new Error('private preflight failure')))
+      as unknown as NonNullable<AutoUpdateServiceActions['preflight']>,
+  } });
+  try {
+    await h.updater.tick(); await Promise.resolve();
+    expect(h.files).toEqual(new Map(Object.entries(h.originalFiles)));
+    expect(h.requests).toEqual([LATEST_URL]); expect(h.mutations).toEqual([]); expect(h.sequence).toEqual([]);
+    expect(h.receipts.list()[0]!.text).toContain('preflight must complete synchronously');
+    expect(h.receipts.list()[0]!.text).not.toContain('private preflight failure');
+  } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
+});
+
+test('a preserved private suite stage retains a handover refusal without a recovery or generic-failure path', async () => {
+  const f = suiteReleaseFixture(), effects: string[] = [];
+  const receipts = new DaemonReceiptStore(join(f.root, 'handover-refusals.json'));
+  let foreign: string | undefined;
+  const updater = new DaemonAutoUpdater({
+    execPath: join(f.root, 'goodvibes-daemon'), currentVersion: '3.1.2', platform: 'darwin', arch: 'x64',
+    releasesLatestUrl: LATEST_URL, downloadBaseUrl: () => f.options.downloadBaseUrl,
+    suite: { configManager: { get: key => key === 'controlPlane.webui.bundleDir' ? f.webui : undefined } },
+    isIdle: () => true, receipts,
+    fetchImpl: async url => url === LATEST_URL ? {
+      ok: false, status: 302, url, headers: { get: name => name.toLowerCase() === 'location' ? 'https://fixture.invalid/releases/tag/v3.1.3' : null },
+      text: async () => '', arrayBuffer: async () => new ArrayBuffer(0),
+    } : f.fetchImpl(url),
+    serviceActions: {
+      isSupervised: () => true,
+      preflight: () => {
+        const work = readdirSync(f.root).find(name => name.startsWith('.playwright-core.update-'));
+        if (!work) return { supported: true };
+        foreign = join(f.root, work, 'incoming', 'foreign.txt');
+        writeFileSync(foreign, 'Retain unknown private staging bytes');
+        return { supported: false, detail: 'Service handover is no longer supported.' };
+      },
+      restartService: () => { effects.push('restart'); return { status: 'accepted' }; },
+      adoptIntoService: () => { effects.push('adopt'); return { status: 'accepted' }; },
+    },
+    stopGracefully: () => { effects.push('stop'); }, exitProcess: () => { effects.push('exit'); },
+  });
+  try {
+    await updater.tick();
+    expect(foreign).toBeDefined(); expect(readFileSync(foreign!, 'utf8')).toBe('Retain unknown private staging bytes');
+    for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+    expect(readFileSync(join(f.driver, 'original.txt'), 'utf8')).toBe('Retained original directory');
+    expect(effects).toEqual([]); expect(updater.snapshot().appliedVersion).toBeNull(); expect(updater.snapshot().recoveryRequired).toBe(false);
+    expect(receipts.list()).toHaveLength(1);
+    expect(receipts.list()[0]!.text).toContain('Automatic update refused before publication');
+    expect(receipts.list()[0]!.text).toContain(join(foreign!, '..', '..'));
+  } finally { updater.stop(); f.cleanup(); }
+});
 
 describe('updater-owned effect references', () => {
   test('same-byte runtime replacement during release lookup refuses the stale physical installation', async () => {

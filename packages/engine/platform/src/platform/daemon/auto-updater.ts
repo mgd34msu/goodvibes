@@ -76,9 +76,13 @@ import { inspectDaemonUpdateInstallation, resolveDaemonUpdateTargets } from '../
 import { assertStagedClientReaderCompatible } from '../runtime/client-reader-update.js';
 import { hasNativeUpdateObservations } from '../runtime/update-file-io.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { applySuiteUpdate, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '../runtime/suite-update.js';
+import { applySuiteUpdate, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, SuiteUpdatePreparationError, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '../runtime/suite-update.js';
+import { prepareServiceHandover, ServiceHandoverPreflightError, type PreparedServiceHandover } from './service-handover-preflight.js';
 
 export interface AutoUpdateServiceActions {
+  /** Side-effect-free capability check; production checks before publication and cleanup.
+   * Optional for existing embedders. Support does not acknowledge a manager request. */
+  preflight?(supervised: boolean): import('./service-handover-preflight.js').ServiceHandoverSupport;
   /** Whether the daemon currently runs under the platform service manager. */
   isSupervised(): boolean;
   /** Install + enable the service unit. Legacy void carries no acknowledgement. */
@@ -226,6 +230,7 @@ export class DaemonAutoUpdater {
   private transactionRecovery: UpdateTransactionReceipt | null = null;
   private readonly updateTimeoutMs: number;
   private handover: ServiceHandoverOutcome | null = null;
+  private lastHandoverPreflightRefusal: string | null = null;
   private handoverCancelled = false;
   private handoverTask: Promise<void> | null = null;
   private handoverAbort: AbortController | null = null;
@@ -258,6 +263,7 @@ export class DaemonAutoUpdater {
         isSupervised: actions.isSupervised.bind(actions),
         adoptIntoService: actions.adoptIntoService.bind(actions),
         restartService: actions.restartService.bind(actions),
+        ...(actions.preflight ? { preflight: actions.preflight.bind(actions) } : {}),
       },
     };
     this.writeReceipt = options.receipts.record.bind(options.receipts);
@@ -529,6 +535,17 @@ export class DaemonAutoUpdater {
       });
     }
 
+    // A handover is needed only for an actual replacement or suite repair.
+    // Check support before downloading assets or publishing any install files.
+    let handover: PreparedServiceHandover | undefined;
+    try { handover = prepareServiceHandover(this.options.serviceActions); }
+    catch (error) {
+      this.pendingSwap = null;
+      this.reportHandoverPreflightRefusal(error);
+      return;
+    }
+    this.handover = null;
+
     // Avoid downloading while already busy. The authoritative snapshot is
     // repeated below after every asynchronous download and synchronous stage.
     assertCurrent();
@@ -549,6 +566,7 @@ export class DaemonAutoUpdater {
     let suiteResult: SuiteUpdateResult | undefined;
     const admitIdle = () => {
       assertCurrent();
+      handover?.assertCurrent();
       const idle = this.options.isIdle();
       assertCurrent();
       if (!idle) throw busyBeforeCommit;
@@ -585,16 +603,32 @@ export class DaemonAutoUpdater {
           recoveryErrors: error.problems.map(problem => summarizeError(problem)) }, error));
         return;
       }
-      if (error instanceof UpdateTransactionError) {
-        if (error.receipt.recoveryRequired) {
-          this.pauseForTransactionRecovery(tag, error);
+      const preparation = error instanceof SuiteUpdatePreparationError ? error : undefined;
+      // A safely discarded private stage can be preserved without making the
+      // live installation uncertain. Only that typed, non-recovery wrapper
+      // may expose its original admission failure; recovery fences stay above.
+      const failure = preparation && (preparation.cause instanceof ServiceHandoverPreflightError
+        || preparation.cause instanceof UpdateTransactionError && !preparation.cause.receipt.committed && !preparation.cause.receipt.recoveryRequired)
+        ? preparation.cause : error;
+      if (failure instanceof UpdateTransactionError) {
+        if (failure.receipt.recoveryRequired) {
+          this.pauseForTransactionRecovery(tag, failure);
           return;
         }
-        if (error.receipt.phase === 'admission' && !error.receipt.committed && error.cause === busyBeforeCommit) {
+        if (failure.receipt.phase === 'admission' && !failure.receipt.committed && failure.cause === busyBeforeCommit) {
           assertCurrent();
           logger.info('DaemonAutoUpdater: daemon became busy before commit; deferring the update', { tag });
+          if (preparation?.preservedPaths.length) this.recordReceipt(`Update deferred before publication because the daemon became busy. Discarded staging was preserved at: ${preparation.preservedPaths.join(', ')}`);
           return;
         }
+        if (!failure.receipt.committed && failure.cause instanceof ServiceHandoverPreflightError) {
+          this.reportHandoverPreflightRefusal(failure.cause, preparation?.preservedPaths);
+          return;
+        }
+      }
+      if (failure instanceof ServiceHandoverPreflightError) {
+        this.reportHandoverPreflightRefusal(failure, preparation?.preservedPaths);
+        return;
       }
       throw error;
     }
@@ -626,7 +660,7 @@ export class DaemonAutoUpdater {
       this.reportIncompleteHandover({ status: 'unknown', detail: 'updater stopped while applying the disk update; process handover was cancelled' });
       return;
     }
-    await this.restartIntoNewBinary();
+    await this.restartIntoNewBinary(handover);
   }
 
   /** Filesystem recovery is an observed outcome, never an automatic retry decision. */
@@ -711,7 +745,7 @@ export class DaemonAutoUpdater {
     return targets.some((target) => target.path === this.options.execPath) ? targets : null;
   }
 
-  private async restartIntoNewBinary(): Promise<void> {
+  private async restartIntoNewBinary(handover?: PreparedServiceHandover): Promise<void> {
     // Install ownership before graceful stop begins. An external close must
     // cancel and drain this entire sequence, even while a stop hook is pending.
     // The explicitly updater-owned stop uses stop(true)/drainHandover(true).
@@ -722,8 +756,14 @@ export class DaemonAutoUpdater {
         this.reportIncompleteHandover({ status: 'unknown', detail: 'process handover was cancelled before graceful stop started' });
         return;
       }
+      try { handover?.assertCurrent(); }
+      catch (error) {
+        this.reportIncompleteHandover(error instanceof ServiceHandoverPreflightError ? error.outcome
+          : { status: 'unknown', detail: 'Service handover support could not be confirmed before cleanup.' });
+        return;
+      }
       if (!await this.stopGracefully()) return;
-      await this.requestServiceHandover(abort.signal);
+      await this.requestServiceHandover(abort.signal, handover);
     });
     this.handoverTask = task;
     try {
@@ -734,7 +774,7 @@ export class DaemonAutoUpdater {
     }
   }
 
-  private async requestServiceHandover(signal: AbortSignal): Promise<void> {
+  private async requestServiceHandover(signal: AbortSignal, prepared?: PreparedServiceHandover): Promise<void> {
     if (this.handoverCancelled) {
       this.reportIncompleteHandover({ status: 'unknown', detail: 'process handover was cancelled before the service action started' });
       return;
@@ -743,11 +783,11 @@ export class DaemonAutoUpdater {
     let supervised: boolean;
     let outcome: void | ServiceHandoverOutcome;
     try {
-      supervised = actions.isSupervised();
+      supervised = prepared?.supervised ?? actions.isSupervised();
       logger.info(supervised
         ? 'DaemonAutoUpdater: requesting restart via the service manager'
         : 'DaemonAutoUpdater: unsupervised daemon; requesting adoption into the service manager');
-      outcome = await (supervised ? actions.restartService(signal) : actions.adoptIntoService(signal));
+      outcome = await (prepared ? prepared.request(signal) : supervised ? actions.restartService(signal) : actions.adoptIntoService(signal));
     } catch (error) {
       // Includes rejected promises and even `throw undefined`: an exception
       // cannot be confused with a legacy action that returned no evidence.
@@ -790,6 +830,19 @@ export class DaemonAutoUpdater {
     this.recordReceipt(detail);
     this.alertOwner(detail);
     flushActivityLogSync();
+  }
+
+  private reportHandoverPreflightRefusal(error: unknown, preservedPaths: readonly string[] = []): void {
+    const outcome: ServiceHandoverOutcome = error instanceof ServiceHandoverPreflightError ? error.outcome
+      : { status: 'unknown', detail: 'Service handover support could not be confirmed.' };
+    this.handover = outcome;
+    const detail = `Automatic update refused before publication (${outcome.status}): ${outcome.detail}`
+      + ' The installed files and runtime were left unchanged. Install the released suite and restart the daemon manually.'
+      + (preservedPaths.length ? ` Discarded staging was preserved at: ${preservedPaths.join(', ')}` : '');
+    if (this.lastHandoverPreflightRefusal === detail) return;
+    this.lastHandoverPreflightRefusal = detail;
+    this.lastFailureDetail = detail;
+    this.recordReceipt(detail); this.alertOwner(detail);
   }
 
   /** Receipt persistence must not undo a completed swap or detach its handover. */

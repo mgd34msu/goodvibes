@@ -59,6 +59,8 @@ describe('resolveConfiguredServiceName: config-honest name for pre-manager calle
     expect(resolveConfiguredServiceName(from('owner-agent', 'global'))).toBe('owner-agent');
     expect(resolveConfiguredServiceName(from('owner-invocation', 'default', 'runtime'))).toBe('owner-invocation');
     expect(resolveConfiguredServiceName(from('frontend-default', 'default', 'runtime-default'))).toBe('frontend-default');
+    expect(resolveConfiguredServiceName(from('goodvibes', 'default'), 'goodvibes')).toBe('goodvibes');
+    expect(resolveConfiguredServiceName(from('owner-agent', 'global'), 'goodvibes')).toBe('owner-agent');
   });
 });
 

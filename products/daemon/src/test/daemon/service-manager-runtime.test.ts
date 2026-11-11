@@ -2,7 +2,7 @@
  * Reconstructed after executor replacement; see the bounded source-proof audit.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
@@ -85,6 +85,22 @@ describe('canonical service lifecycle and product command composition', () => {
         { command: 'launchctl', args: ['unload', path] }, { command: 'launchctl', args: ['load', path] },
       ]);
     }
+  });
+
+  test('product default selection uses the login unit home rather than a relocated data home', () => {
+    const dataHome = join(root, 'data'), unitHome = join(root, 'login');
+    const legacy = join(unitHome, 'Library/LaunchAgents/goodvibes.plist');
+    const otherCanonical = join(dataHome, 'Library/LaunchAgents/sh.goodvibes.daemon.plist');
+    mkdirSync(join(unitHome, 'Library/LaunchAgents'), { recursive: true });
+    mkdirSync(join(dataHome, 'Library/LaunchAgents'), { recursive: true });
+    writeFileSync(legacy, 'Original login-home definition'); writeFileSync(otherCanonical, 'Unrelated selected-tree definition');
+    const value = new ConfigManager({ configDir: join(root, 'config'), surfaceRoot }); value.set('service.platform', 'launchd');
+    const service = buildManagedDaemonServiceManager({ configManager: value, binaryPath: join(root, 'goodvibes-daemon'),
+      homeDir: dataHome, unitHomeDir: unitHome, workingDirectory: root, host: '127.0.0.1', port: 3421,
+      actionRunner: () => ({ status: 0, stdout: '4242\t0\tgoodvibes\n', stderr: '' }) });
+    expect(service.status()).toMatchObject({ serviceName: 'goodvibes', path: legacy, installed: true, running: true });
+    expect(readFileSync(legacy, 'utf8')).toBe('Original login-home definition');
+    expect(readFileSync(otherCanonical, 'utf8')).toBe('Unrelated selected-tree definition');
   });
 
   test('real manual child install/start/status/restart/stop preserves pid and log path', () => {

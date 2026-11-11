@@ -58,6 +58,7 @@ import { createRuntimeServices, type RuntimeServices } from '../runtime/services
 import { createAsyncDisposalScope, type AsyncDisposalScope } from '../runtime/async-disposal.js';
 import type { DaemonConfig, PendingSurfaceReply } from './types.js';
 import { PlatformServiceManager } from './service-manager.js';
+import { resolveDaemonServiceDefault } from './daemon-service-default.js';
 import type { ResolvedInboundTlsContext } from '../runtime/network/index.js';
 import { PermissionManager, createPermissionConfigReader } from '../permissions/manager.js';
 // Re-export type definitions from the dedicated types module.
@@ -466,7 +467,7 @@ export function resolveDaemonFacadeRuntime(
       homeDirectory: runtimeServices.homeDirectory,
       surfaceRoot: 'goodvibes',
       binaryBaseName: 'goodvibes',
-      defaultServiceName: process.platform === 'darwin' ? 'sh.goodvibes.daemon' : 'goodvibes',
+      defaultServiceName: resolveDaemonServiceDefault(runtimeServices.homeDirectory),
       defaultServiceDescription: 'goodvibes omnichannel daemon host',
       featureFlags: runtimeServices.featureFlags,
     }),

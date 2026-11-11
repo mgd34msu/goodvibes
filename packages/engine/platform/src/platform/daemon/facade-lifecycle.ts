@@ -18,6 +18,7 @@ import { summarizeError } from '../utils/error-display.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { PlatformServiceManager } from './service-manager.js';
 import { DaemonAutoUpdater, type AutoUpdateServiceActions } from './auto-updater.js';
+import { prepareServiceHandover, ServiceHandoverPreflightError, type PreparedServiceHandover } from './service-handover-preflight.js';
 import { DaemonReceiptStore, formatReceiptTime } from './receipts.js';
 import { writeFatalLine } from './fatal-boot-report.js';
 import { FeatureAnnouncementStore, collectStartupAnnouncements, featureAnnouncementsPath } from '../runtime/feature-announcements.js';
@@ -31,7 +32,7 @@ import {
 } from './lifecycle-marker.js';
 import { crashLoopRollbackReceipt, decideCrashLoopRollback } from './boot-rollback.js';
 import { inspectDaemonUpdateInstallation, resolveDaemonUpdateTargets } from '../runtime/daemon-update-installation.js';
-import { configuredSuiteWebuiDirectory, rollbackSuiteUpdate, SuiteUpdateRecoveryError } from '../runtime/suite-update.js';
+import { configuredSuiteWebuiDirectory, rollbackSuiteUpdate, SuiteUpdatePreparationError, SuiteUpdateRecoveryError } from '../runtime/suite-update.js';
 import { rollbackKeptPrevious, realUpdateFileIo, captureUpdateFileIo, retainDaemonNativeFiles, UpdateTransactionError, type UpdateFileIo, type UpdateTransactionReceipt, type DaemonCurrentReader } from '../runtime/self-update.js';
 import { currentProcessSignals, isCompiledBinaryInvocation } from './daemon-exec-invocation.js';
 import { deliverOwnerAlert } from './owner-alert.js';
@@ -199,6 +200,7 @@ export interface DaemonLifecycleRuntimeOptions {
 }
 
 export class DaemonLifecycleRuntime {
+  private lastRollbackPreflightRefusal: string | null = null;
   private autoUpdater: DaemonAutoUpdater | null = null;
   private appliedUpdater: DaemonAutoUpdater | null = null;
   private store: DaemonReceiptStore | null = null;
@@ -408,6 +410,9 @@ export class DaemonLifecycleRuntime {
    * a rollback that did not happen must never be reported as one.
    */
   private rollBackToKeptPrevious(execPath: string, failedStarts: number): boolean {
+    let handover: PreparedServiceHandover | undefined;
+    try { handover = prepareServiceHandover(this.buildServiceActions()); }
+    catch (error) { this.reportRollbackPreflightRefusal(error); return false; }
     const io = captureUpdateFileIo(this.options.rollbackIo ?? realUpdateFileIo);
     const nativeTargets = resolveDaemonUpdateTargets(execPath, process.platform, process.arch);
     if (!nativeTargets) return false;
@@ -418,6 +423,7 @@ export class DaemonLifecycleRuntime {
       if (!installed || installed.version !== this.options.updateArtifact?.version) throw new Error('The running daemon does not own the current native installation version');
       if (this.options.updateArtifact?.suite) {
         const restored = rollbackSuiteUpdate({ execPath, platform: process.platform, arch: process.arch, currentVersion: this.options.updateArtifact.version,
+          beforeCommit: () => handover?.assertCurrent(),
           webuiDirectory: configuredSuiteWebuiDirectory(this.options.configManager), io, assertCurrent: () => {
             if (this.stopping || this.rollbackRecovery || this.rollbackApplied) throw new Error('Suite rollback no longer belongs to the current lifecycle');
           } });
@@ -426,6 +432,7 @@ export class DaemonLifecycleRuntime {
         if (!inspectDaemonUpdateInstallation(execPath, process.platform, process.arch, '.previous', io)) throw new Error('No complete verified previous native daemon installation is available');
         const current = retainDaemonNativeFiles(nativeTargets, io);
         result = rollbackKeptPrevious(targets, io, () => {
+        handover?.assertCurrent();
         if (this.stopping || this.rollbackRecovery || this.rollbackApplied) throw new Error('Native rollback no longer belongs to the current lifecycle');
         current();
         const previous = inspectDaemonUpdateInstallation(execPath, process.platform, process.arch, '.previous', io);
@@ -461,7 +468,15 @@ export class DaemonLifecycleRuntime {
         flushActivityLogSync();
         return true;
       }
-      const compatibility = error instanceof UpdateTransactionError ? error.cause : error;
+      const preparation = error instanceof SuiteUpdatePreparationError ? error : undefined;
+      const admission = preparation && (preparation.cause instanceof ServiceHandoverPreflightError
+        || preparation.cause instanceof UpdateTransactionError && !preparation.cause.receipt.committed && !preparation.cause.receipt.recoveryRequired)
+        ? preparation.cause : error;
+      const compatibility = admission instanceof UpdateTransactionError ? admission.cause : admission;
+      if (compatibility instanceof ServiceHandoverPreflightError) {
+        this.reportRollbackPreflightRefusal(compatibility, preparation?.preservedPaths);
+        return false;
+      }
       if (compatibility instanceof NativeDataCompatibilityError) {
         const detail = `Automatic rollback refused: ${compatibility.message} Continuing the current build without a rollback.`;
         try { this.receiptStore().record(detail); } catch { /* The synchronous owner notice still reports the refusal. */ }
@@ -530,17 +545,18 @@ export class DaemonLifecycleRuntime {
       `goodvibes daemon: ${failedStarts} starts in a row did not finish, rolled back to the kept previous version`
       + ` (${result.restored.map((target) => target.path).join(', ')}) and handing over to it`,
     );
-    this.rollbackHandover = this.handOverAfterRollback().catch((error: unknown) => {
+    this.rollbackHandover = this.handOverAfterRollback(handover).catch((error: unknown) => {
       this.reportIncompleteHandover('rollback', { status: 'failed', detail: summarizeError(error) });
     });
     return true;
   }
 
   /** The same handover the update swap uses: orderly stop first, then restart onto the restored binary. */
-  private async handOverAfterRollback(): Promise<void> {
+  private async handOverAfterRollback(prepared?: PreparedServiceHandover): Promise<void> {
     const abort = new AbortController();
     this.rollbackAbort = abort;
     try {
+      prepared?.assertCurrent();
       try {
         await this.options.stopGracefully?.();
       } catch (error) {
@@ -553,8 +569,8 @@ export class DaemonLifecycleRuntime {
         return;
       }
       const actions = this.buildServiceActions(abort.signal);
-      const supervised = actions.isSupervised();
-      let outcome = await (supervised ? actions.restartService() : actions.adoptIntoService());
+      const supervised = prepared?.supervised ?? actions.isSupervised();
+      let outcome = await (prepared ? prepared.request(abort.signal) : supervised ? actions.restartService() : actions.adoptIntoService());
       if (abort.signal.aborted) outcome = { status: 'unknown', detail: 'handover cancelled' };
       if (outcome?.status !== 'accepted') {
         this.reportIncompleteHandover('rollback', outcome ?? { status: 'unknown', detail: 'no outcome returned' });
@@ -854,6 +870,23 @@ export class DaemonLifecycleRuntime {
       return outcome;
     };
     return {
+      preflight: supervised => {
+        if (platform !== 'linux') return { supported: false,
+          detail: 'Unattended service handover is unavailable on this platform.' };
+        try {
+          assertCurrent?.();
+          const status = this.options.platformServiceManager.status();
+          assertCurrent?.();
+          const currentName = String(this.options.configManager.get('service.serviceName') ?? 'goodvibes').trim() || 'goodvibes';
+          if (status.platform !== 'systemd') return { supported: false,
+            detail: 'Unattended service handover requires the systemd service manager.' };
+          if (status.actionError) return { supported: false,
+            detail: 'The selected systemd service is unavailable for unattended handover.' };
+          if (currentName !== serviceName || supervised !== (status.installed && status.running)) return { supported: false,
+            detail: 'The selected service identity or supervision changed before unattended handover.' };
+          return { supported: true };
+        } catch { return { supported: false, detail: 'The systemd service manager could not be confirmed for unattended handover.' }; }
+      },
       isSupervised: () => {
         try {
           const status = this.options.platformServiceManager.status();
@@ -964,6 +997,12 @@ export class DaemonLifecycleRuntime {
     }
     if (status.installed && status.running) return; // already supervised
     if (this.promotionAttempted || this.promotionTask || this.promotionTimer || this.stopping) return;
+    let prepared: PreparedServiceHandover | undefined;
+    try { prepared = prepareServiceHandover(this.buildServiceActions(undefined, this.assertArtifactCurrent)); }
+    catch {
+      logger.warn('DaemonServer: boot promotion requires a confirmed systemd handover; the current runtime was left running');
+      return;
+    }
     const attempt = (): void => {
       if (this.stopping || this.hasTransactionRecovery() || this.promotionAttempted || !this.options.isIdle()) return;
       this.promotionAttempted = true;
@@ -971,12 +1010,12 @@ export class DaemonLifecycleRuntime {
       this.promotionTimer = null;
       const abort = new AbortController();
       this.promotionAbort = abort;
-      const actions = this.buildServiceActions(abort.signal, this.assertArtifactCurrent);
       // Record task ownership before its synchronous stop hook can reenter.
       this.promotionTask = Promise.resolve().then(async () => {
         try {
           if (abort.signal.aborted) return;
           this.assertArtifactCurrent?.();
+          prepared?.assertCurrent();
           try { await this.options.stopGracefully?.(); }
           catch (error) {
             drainOwned(error);
@@ -988,7 +1027,7 @@ export class DaemonLifecycleRuntime {
             return;
           }
           this.assertArtifactCurrent?.();
-          const outcome = await actions.adoptIntoService();
+          const outcome = await prepared?.request(abort.signal);
           this.assertArtifactCurrent?.();
           if (abort.signal.aborted || this.hasTransactionRecovery()) return;
           if (outcome?.status !== 'accepted') {
@@ -1020,5 +1059,16 @@ export class DaemonLifecycleRuntime {
     }
     this.alertOwner(text);
     this.announceOnStderr(text);
+  }
+
+  private reportRollbackPreflightRefusal(error: unknown, preservedPaths: readonly string[] = []): void {
+    const detail = error instanceof ServiceHandoverPreflightError ? error.message : 'Service handover support could not be confirmed.';
+    const text = `Automatic rollback refused before publication: ${detail}`
+      + ' The installed files and current runtime were left unchanged. Inspect the service manager and restore or restart the daemon manually.'
+      + (preservedPaths.length ? ` Discarded staging was preserved at: ${preservedPaths.join(', ')}` : '');
+    if (this.lastRollbackPreflightRefusal === text) return;
+    this.lastRollbackPreflightRefusal = text;
+    try { this.receiptStore().record(text); } catch { /* The owner notice remains available. */ }
+    this.alertOwner(text); this.announceOnStderr(text);
   }
 }

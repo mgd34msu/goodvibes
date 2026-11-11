@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { bootDaemon, type BootDaemonOptions, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
 import { DaemonServer } from '../platform/src/platform/daemon/facade.ts';
+import type { DaemonLifecycleRuntime } from '../platform/src/platform/daemon/facade-lifecycle.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
 import { withTestTimeout } from './_helpers/test-timeout.ts';
 
@@ -55,6 +56,68 @@ function fixture(configure: (server: DaemonServer, restore: (action: () => void)
     },
   };
 }
+
+for (const action of ['stop', 'fence'] as const) for (const handedOver of [false, true]) {
+  test(`external ${action} retires pending native startup returning ${handedOver}`, async () => {
+    const entered = deferred(), release = deferred(), drainEntered = deferred(), drainRelease = deferred();
+    let binds = 0, delegated = 0, draining = false;
+    const f = fixture((server, restore) => {
+      const owner = server as unknown as { lifecycle: DaemonLifecycleRuntime; surfaceActionHelper: { startDelegatedTelegram(): void } };
+      const start = spyOn(owner.lifecycle, 'onStarting').mockImplementation(async () => {
+        entered.resolve(); await release.promise; return handedOver;
+      });
+      const originalDrain = owner.lifecycle.drainHandovers.bind(owner.lifecycle);
+      const drain = spyOn(owner.lifecycle, 'drainHandovers').mockImplementation(async forHandover => {
+        draining = true; drainEntered.resolve(); await drainRelease.promise; await originalDrain(forHandover);
+      });
+      const delegatedStart = spyOn(owner.surfaceActionHelper, 'startDelegatedTelegram').mockImplementation(() => { delegated++; });
+      restore(() => start.mockRestore()); restore(() => drain.mockRestore()); restore(() => delegatedStart.mockRestore());
+    });
+    const serveFactory: typeof Bun.serve = () => { binds++; throw new Error('Retired native startup must never bind'); };
+    const boot = observed(bootDaemon({ ...f.options, serveFactory }));
+    let stopping: Promise<void> | undefined;
+    let fencedDrain: Promise<void> | undefined;
+    let fenceDrained = false;
+    try {
+      await withTestTimeout(entered.promise);
+      if (action === 'stop') stopping = f.server().stop();
+      else {
+        f.server().fenceRestartAdmission();
+        fencedDrain = f.server().waitForRestart().then(() => { fenceDrained = true; });
+      }
+      release.resolve();
+      await withTestTimeout(drainEntered.promise); await flush();
+      expect(draining).toBe(true); expect(boot.settled()).toBe(false);
+      if (action === 'fence') expect(fenceDrained).toBe(false);
+      expect(delegated).toBe(0); expect(binds).toBe(0);
+      drainRelease.resolve(); await stopping; await fencedDrain;
+      const error = rejection(await withTestTimeout(boot.outcome));
+      expect(String(error)).not.toContain('handed over to a managed replacement');
+      expect(delegated).toBe(0); expect(binds).toBe(0); expect(f.server().isRunning).toBe(false);
+    } finally {
+      release.resolve(); drainRelease.resolve();
+      try { await Promise.allSettled([stopping, fencedDrain, boot.outcome]); }
+      finally { await f.close(); }
+    }
+  }, 60_000);
+}
+
+test('a native startup handover preserves its own orderly stop admission', async () => {
+  let binds = 0;
+  const f = fixture((server, restore) => {
+    const owner = server as unknown as { lifecycle: DaemonLifecycleRuntime; stopRuntime(forHandover: boolean): Promise<void> };
+    const start = spyOn(owner.lifecycle, 'onStarting').mockImplementation(async () => {
+      await owner.stopRuntime(true); return true;
+    });
+    restore(() => start.mockRestore());
+  });
+  const serveFactory: typeof Bun.serve = () => { binds++; throw new Error('Native handover must not bind'); };
+  try {
+    const error = rejection(await withTestTimeout(observed(bootDaemon({ ...f.options, serveFactory })).outcome));
+    expect(String(error)).toContain('handed over to a managed replacement');
+    expect(binds).toBe(0); expect(f.server().isRunning).toBe(false);
+  } finally { await f.close(); }
+}, 60_000);
 
 test('failed listener bind waits for the actual constructor-owned stop drain before rejecting', async () => {
   const entered = deferred(), release = deferred();

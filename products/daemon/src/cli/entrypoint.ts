@@ -5,7 +5,20 @@ import { initializeOriginalDarwinDaemonInstallation } from '../config/original-d
 import { initializeDaemonNativeSqlite } from './native-sqlite-runtime.js';
 
 const args = process.argv.slice(2);
-if (args[0] === 'check-install-reader') {
+if (args[0] === '--internal-launchd-handover') {
+  // This already-loaded worker must survive replacement of its native cohort.
+  // Import only IPC/launchctl code, before SQLite or installation admission.
+  const controller = new AbortController();
+  const abort = () => controller.abort(new Error('Launchd handover worker stopped.'));
+  process.once('SIGTERM', abort);
+  process.once('SIGINT', abort);
+  try {
+    const { runLaunchdHandoverWorker } = await import('@goodvibes-jev/engine/platform/platform/daemon/launchd-handover');
+    process.exitCode = process.platform === 'darwin'
+      ? await runLaunchdHandoverWorker(args.slice(1), controller.signal) : 1;
+  } catch { process.exitCode = 1; }
+  finally { process.removeListener('SIGTERM', abort); process.removeListener('SIGINT', abort); }
+} else if (args[0] === 'check-install-reader') {
   // A staged reader check must work before any database companions or services
   // are installed. It shares the command handler with the ordinary dispatcher.
   const { runInstallReaderCheck } = await import('./check-install-reader.js');

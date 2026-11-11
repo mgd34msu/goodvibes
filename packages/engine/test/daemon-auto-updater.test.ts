@@ -17,6 +17,7 @@ import { DaemonLifecycleRuntime, type DaemonLifecycleRuntimeOptions } from '../p
 import { DaemonReceiptStore } from '../platform/src/platform/daemon/receipts.js';
 import { suiteReleaseFixture } from './_helpers/suite-release-fixture.js';
 import type { ServiceHandoverOutcome } from '../platform/src/platform/daemon/service-handover.js';
+import type { ServiceHandoverReservation } from '../platform/src/platform/daemon/service-handover-preflight.js';
 import {
   BOOT_SETTLE_CHECK_DELAY_MS,
   PREVIOUS_FILE_SUFFIX,
@@ -178,6 +179,7 @@ function makeHarness(options: {
   const sequence: string[] = [];
   const serviceActions: AutoUpdateServiceActions = {
     ...(options.serviceActions?.preflight ? { preflight: options.serviceActions.preflight.bind(options.serviceActions) } : {}),
+    ...(options.serviceActions?.reserve ? { reserve: options.serviceActions.reserve.bind(options.serviceActions) } : {}),
     isSupervised: options.serviceActions?.isSupervised ?? (() => actions.supervised),
     adoptIntoService: (signal) => {
       actions.adopted += 1;
@@ -1709,6 +1711,82 @@ test('an accidental asynchronous preflight is owned and refuses before download 
     expect(h.requests).toEqual([LATEST_URL]); expect(h.mutations).toEqual([]); expect(h.sequence).toEqual([]);
     expect(h.receipts.list()[0]!.text).toContain('preflight must complete synchronously');
     expect(h.receipts.list()[0]!.text).not.toContain('private preflight failure');
+  } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
+});
+
+test('a supervised helper is admitted before publication and armed only after the original runtime drains', async () => {
+  const entered = Promise.withResolvers<void>(), admission = Promise.withResolvers<ServiceHandoverReservation>();
+  const draining = Promise.withResolvers<void>(), drained = Promise.withResolvers<void>();
+  const events: string[] = [];
+  const h = makeHarness({ idle: () => true, supervised: true,
+    serviceActions: { preflight: () => ({ supported: true }), reserve: async () => { events.push('reserve'); entered.resolve(); return admission.promise; } },
+    stopGracefully: async () => { events.push('drain'); draining.resolve(); await drained.promise; },
+  });
+  const tick = h.updater.tick();
+  try {
+    await entered.promise;
+    expect(h.files).toEqual(new Map(Object.entries(h.originalFiles))); expect(h.mutations).toEqual([]);
+    expect(h.requests).toEqual([LATEST_URL]); expect(h.sequence).toEqual([]);
+    admission.resolve({ exitRequired: true, assertCurrent() {},
+      async commit() { events.push('commit'); expect(h.files.get(EXEC_PATH)?.toString()).toBe('daemon-v2'); expect(h.exits).toEqual([]); return { status: 'accepted' }; },
+      async cancel() { events.push('cancel'); },
+    });
+    await draining.promise;
+    expect(events).toEqual(['reserve', 'drain']); expect(h.exits).toEqual([]);
+    drained.resolve(); await tick;
+    expect(events).toEqual(['reserve', 'drain', 'commit']);
+    expect(h.sequence).toEqual(['stop', 'exit']); expect(h.exits).toEqual([0]);
+    expect(h.actions.restarted).toBe(0); expect(h.actions.adopted).toBe(0);
+  } finally { drained.resolve(); admission.reject(new Error('fixture closed')); await tick; h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
+});
+
+test('failed helper admission leaves the original runtime serving without replacing files', async () => {
+  const listener = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json({ ok: true }) });
+  const h = makeHarness({ idle: () => true,
+    serviceActions: { preflight: () => ({ supported: true }), reserve: async () => { throw new Error('fixture manager admission failed'); } },
+    stopGracefully: () => listener.stop(true),
+  });
+  try {
+    await h.updater.tick();
+    expect(h.files).toEqual(new Map(Object.entries(h.originalFiles))); expect(h.mutations).toEqual([]);
+    expect(h.requests).toEqual([LATEST_URL]); expect(h.sequence).toEqual([]); expect(h.exits).toEqual([]);
+    expect(await (await fetch(`http://127.0.0.1:${listener.port}/status`)).json()).toEqual({ ok: true });
+    expect(h.receipts.list()[0]!.text).toContain('refused before publication');
+  } finally { h.updater.stop(); await listener.stop(true); rmSync(h.scratch, { recursive: true, force: true }); }
+});
+
+test('external cancellation owns a late helper admission without publication, cleanup or exit', async () => {
+  const entered = Promise.withResolvers<void>(), admission = Promise.withResolvers<ServiceHandoverReservation>();
+  let cancels = 0, cancelled = false;
+  const h = makeHarness({ idle: () => true, serviceActions: {
+    preflight: () => ({ supported: true }), reserve: async () => { entered.resolve(); return admission.promise; },
+  } });
+  const tick = h.updater.tick();
+  await entered.promise; h.updater.stop();
+  admission.resolve({ exitRequired: true, assertCurrent() {}, async commit() { throw new Error('cancelled helper must not commit'); },
+    async cancel() { if (!cancelled) { cancelled = true; cancels++; } },
+  });
+  try {
+    await tick; await h.updater.drainHandover();
+    expect(cancels).toBe(1); expect(h.files).toEqual(new Map(Object.entries(h.originalFiles))); expect(h.mutations).toEqual([]);
+    expect(h.sequence).toEqual([]); expect(h.exits).toEqual([]);
+  } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
+});
+
+test('an admitted helper retired during download refuses before publication and is cancelled', async () => {
+  let current = true, cancels = 0;
+  const release = releaseFetch();
+  const h = makeHarness({ idle: () => true, serviceActions: {
+    preflight: () => ({ supported: true }), reserve: async () => ({ exitRequired: true,
+      assertCurrent() { if (!current) throw new Error('retired fixture helper'); },
+      async commit() { throw new Error('retired helper must not commit'); }, async cancel() { cancels++; },
+    }),
+  }, fetchOverride: async (url, init) => { const result = await release.fetchImpl(url, init); if (url.endsWith('/SHA256SUMS.txt')) current = false; return result; } });
+  try {
+    await h.updater.tick();
+    expect(cancels).toBe(1); expect(h.files).toEqual(new Map(Object.entries(h.originalFiles)));
+    expect(h.sequence).toEqual([]); expect(h.exits).toEqual([]);
+    expect(h.receipts.list()[0]!.text).toContain('admitted service handover helper is no longer current');
   } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
 });
 

@@ -9,7 +9,7 @@
  *   version (and swaps the host-named executable), not the platform's VERSION.
  */
 import { afterEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DaemonServer } from '../platform/src/platform/daemon/facade.ts';
@@ -20,6 +20,7 @@ import type { ServiceCommandRunner } from '../platform/src/platform/daemon/servi
 import { updateConfigDefaults } from '../platform/src/platform/config/schema-domain-update.js';
 import { VERSION } from '../platform/src/platform/version.ts';
 import { createAsyncDisposalScope } from '../platform/src/platform/runtime/async-disposal.js';
+import { prepareServiceHandover } from '../platform/src/platform/daemon/service-handover-preflight.js';
 
 const scratchDirs: string[] = [];
 
@@ -43,12 +44,13 @@ function lifecycleWith(
     readonly platform?: NodeJS.Platform | undefined;
     readonly timeoutMs?: number | undefined;
     readonly configOverrides?: Record<string, unknown>;
-    readonly status?: (() => { installed: boolean; running: boolean; platform?: string }) | undefined;
+    readonly status?: (() => { installed: boolean; running: boolean; platform?: string; serviceName?: string; path?: string; pid?: number; contents?: string }) | undefined;
     readonly isIdle?: (() => boolean) | undefined;
     readonly promotionRetryMs?: number | undefined;
     readonly isCompiledBinary?: (() => boolean) | undefined;
     readonly stopGracefully?: DaemonLifecycleRuntimeOptions['stopGracefully'];
     readonly hasOverriddenHome?: boolean | undefined;
+    readonly reserveLaunchdHandover?: DaemonLifecycleRuntimeOptions['reserveLaunchdHandover'];
   } = {},
 ): LifecycleHarness {
   const scratch = mkdtempSync(join(tmpdir(), 'update-artifact-'));
@@ -86,6 +88,7 @@ function lifecycleWith(
     isCompiledBinary: overrides.isCompiledBinary ?? (() => true),
     ...(overrides.stopGracefully ? { stopGracefully: overrides.stopGracefully } : {}),
     ...(overrides.hasOverriddenHome === undefined ? {} : { hasOverriddenHome: overrides.hasOverriddenHome }),
+    ...(overrides.reserveLaunchdHandover ? { reserveLaunchdHandover: overrides.reserveLaunchdHandover } : {}),
     ...(overrides.promotionRetryMs !== undefined ? { promotionRetryMs: overrides.promotionRetryMs } : {}),
     ...(updateArtifact !== undefined ? { updateArtifact } : {}),
   });
@@ -349,6 +352,39 @@ test('an externally stopped deferred host cannot later activate updater or promo
   const h = lifecycleWith({ version: '999.0.0-host-artifact' }); h.runtime.onStarted(true); await h.runtime.onStopping(false);
   expect(h.runtime.activateNativeLifecycle()).toBeUndefined(); expect(updaterOf(h.runtime)).toBeNull(); expect(h.installs).toEqual([]); expect(h.exits).toEqual([]);
 });
+
+for (const label of ['sh.goodvibes.daemon', 'custom.goodvibes']) {
+  test(`launchd reservation retains the resolved ${label} identity and rejects a same-byte plist replacement`, async () => {
+    const root = mkdtempSync(join(tmpdir(), 'launchd-resolved-handover-')); scratchDirs.push(root);
+    const path = join(root, label + '.plist'), contents = '<plist><dict><key>Label</key><string>' + label + '</string></dict></plist>';
+    writeFileSync(path, contents, { mode: 0o644 });
+    let reservations = 0, cancelled = 0;
+    const h = lifecycleWith({ version: '3.1.2', execPath: '/opt/goodvibes/goodvibes-daemon', suite: true }, {
+      platform: 'darwin', hasOverriddenHome: false,
+      configOverrides: { 'service.serviceName': label === 'sh.goodvibes.daemon' ? 'goodvibes' : label },
+      status: () => ({ platform: 'launchd', serviceName: label, path, installed: true, running: true,
+        pid: process.pid, contents: readFileSync(path, 'utf8') }),
+      reserveLaunchdHandover: async (input, signal) => {
+        expect(signal?.aborted).toBe(false);
+        expect(input.serviceName).toBe(label); expect(input.servicePath).toBe(path); expect(input.pid).toBe(process.pid);
+        expect(input.executablePath).toBe('/opt/goodvibes/goodvibes-daemon'); input.assertServiceCurrent(); reservations++;
+        return { exitRequired: true, assertCurrent: input.assertServiceCurrent,
+          async commit() { return { status: 'accepted' }; }, async cancel() { cancelled++; },
+        };
+      },
+    });
+    const actions = (h.runtime as unknown as { buildServiceActions(): import('../platform/src/platform/daemon/auto-updater.js').AutoUpdateServiceActions }).buildServiceActions();
+    const prepared = prepareServiceHandover(actions);
+    if (!prepared) throw new Error('Expected the actual launchd action adapter');
+    try {
+      await prepared.reserve(new AbortController().signal);
+      expect(reservations).toBe(1); expect(prepared.exitRequired).toBe(true); prepared.assertCurrent();
+      writeFileSync(path + '.incoming', contents, { mode: 0o644 }); renameSync(path + '.incoming', path);
+      expect(() => prepared.assertCurrent()).toThrow('helper is no longer current');
+      expect(h.installs).toEqual([]); expect(h.exits).toEqual([]);
+    } finally { await prepared.cancel(); expect(cancelled).toBe(1); await h.runtime.onStopping(false); }
+  });
+}
 
 describe('observed service handover', () => {
   const artifact = { version: '999.0.0-host-artifact' };

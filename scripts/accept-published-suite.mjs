@@ -284,6 +284,7 @@ export async function runAcceptanceSteps(host) {
   try {
     attempted = true; await host.install();
     await host.verifyInstalled(); await host.verifyDefaults();
+    await host.verifyNativeLifecycle?.();
     await host.disableUpdates(); await host.restartAndVerifyOptOut();
     await host.install(); await host.verifyOptOut();
     await host.uninstall(); await host.verifyPreserved();
@@ -556,11 +557,12 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   const host = {
     async admit() { assertHome(); },
     async install() { await invoke('sh', [installer], installEnv, false, delivery?.installerSource ?? readFileSync(installer, 'utf8'), delivery?.installerSourcePath); },
-    async verifyInstalled() {
+    async verifyInstalled(expected = {}) {
+      const expectedVersion = expected.version ?? version, expectedReaders = expected.readers ?? readers;
       for (const name of products) {
         checkpoint(`installed.${name}.version`);
-        assert.equal(await invoke(join(bin, name), ['--version']), `${name} ${version}`);
-        const reader = readers.get(name);
+        assert.equal(await invoke(join(bin, name), ['--version']), `${name} ${expectedVersion}`);
+        const reader = expectedReaders.get(name);
         checkpoint(`installed.${name}.compiled-readers`);
         assert.deepEqual(JSON.parse(await invoke(join(bin, name), ['check-install-reader', '--describe'])), reader.readers);
         checkpoint(`installed.${name}.reader-evidence`);
@@ -579,14 +581,14 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       await waitForAcceptanceReadiness(() => service('check'), async () => {
         checkpoint('service.status-version');
         const status = JSON.parse(await invoke(daemon, ['status', '--json']));
-        assert.equal(status.ok, true); assert.equal(status.data.identity.version, version);
+        assert.equal(status.ok, true); assert.equal(status.data.identity.version, expectedVersion);
         const port = await setting('controlPlane.port'); checkpoint('webui.port');
         assert.ok(Number.isInteger(port) && port > 0 && port < 65536);
         const bundle = await setting('controlPlane.webui.bundleDir'); checkpoint('webui.bundle-selection');
         if (!historical) assert.equal(resolve(bundle), join(bin, 'webui', version));
         else assert.equal(resolve(bundle), originalWebui, 'Automatic upgrade must preserve the actual configured WebUI selection.');
         checkpoint('webui.release-marker');
-        const marker = JSON.parse(readFileSync(join(bundle, '.goodvibes-release.json'), 'utf8')); assert.equal(marker.version, version);
+        const marker = JSON.parse(readFileSync(join(bundle, '.goodvibes-release.json'), 'utf8')); assert.equal(marker.version, expectedVersion);
         assert.equal(await setting('controlPlane.webui.serve'), true);
         checkpoint('webui.http-response');
         const page = await fetchBytes(`http://127.0.0.1:${port}/`, 2_097_152, signal);
@@ -605,6 +607,24 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     async uninstall() { await invoke('sh', [installer], { ...installEnv, GOODVIBES_UNINSTALL: '1' }, true, delivery?.installerSource ?? readFileSync(installer, 'utf8'), delivery?.installerSourcePath); },
     verifyPreserved,
   };
+  if (delivery?.verifyNativeLifecycle) {
+    assert.equal(process.platform, 'darwin', 'The unpublished native lifecycle fixture is Mac-only.');
+    host.verifyNativeLifecycle = () => delivery.verifyNativeLifecycle({ daemon, bin, data, root, setting, invoke, signal, checkpoint,
+      verifyCohort: (version, readers) => host.verifyInstalled({ version, readers }),
+      restartService: () => service('restart'),
+      async servicePid() {
+        assertServiceOwned(); const printed = await invoke('launchctl', ['print', `gui/${account.uid}/${label}`]);
+        assert.match(printed, /state = running/); const match = /^\s*pid = (\d+)\s*$/m.exec(printed);
+        assert.ok(match && Number.isSafeInteger(Number(match[1])) && Number(match[1]) > 0); return Number(match[1]);
+      },
+      async stopService() {
+        assertServiceOwned(); await invoke('launchctl', ['bootout', `gui/${account.uid}/${label}`]);
+        await waitForNativeServiceRetirement(() => runOwnedCommand('launchctl', ['print', `gui/${account.uid}/${label}`],
+          { cwd: home, env, timeoutMs: 300_000, signal }), { signal });
+      },
+      async startService() { assertServiceOwned(); await invoke('launchctl', ['bootstrap', `gui/${account.uid}`, servicePath]); },
+    });
+  }
   const previousInstallEnv = { GOODVIBES_VERSION: 'v3.1.1', GOODVIBES_WAKE_MODEL: '0' };
   const upgrade = {
     admit: host.admit,
@@ -706,9 +726,9 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   const selectedHost = historical ? upgrade : host;
   for (const name of Object.keys(selectedHost)) {
     const original = selectedHost[name];
-    selectedHost[name] = async () => {
+    selectedHost[name] = async (...args) => {
       evidence.stage = name; checkpoint(undefined);
-      try { return await original(); }
+      try { return await original(...args); }
       catch (error) { evidence.failures.push(acceptanceFailureRecord({ ...evidence, stage: name }, error)); throw error; }
     };
   }

@@ -19,6 +19,8 @@ import type { ConfigManager } from '../config/manager.js';
 import type { PlatformServiceManager } from './service-manager.js';
 import { DaemonAutoUpdater, type AutoUpdateServiceActions } from './auto-updater.js';
 import { prepareServiceHandover, ServiceHandoverPreflightError, type PreparedServiceHandover } from './service-handover-preflight.js';
+import { reserveLaunchdHandover } from './launchd-handover.js';
+import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { DaemonReceiptStore, formatReceiptTime } from './receipts.js';
 import { writeFatalLine } from './fatal-boot-report.js';
 import { FeatureAnnouncementStore, collectStartupAnnouncements, featureAnnouncementsPath } from '../runtime/feature-announcements.js';
@@ -197,6 +199,8 @@ export interface DaemonLifecycleRuntimeOptions {
   readonly serviceCommandRunner?: ServiceCommandRunner | undefined;
   readonly serviceCommandTimeoutMs?: number | undefined;
   readonly servicePlatform?: NodeJS.Platform | undefined;
+  /** Trusted host/test seam; ordinary Darwin launches use the native helper owner. */
+  readonly reserveLaunchdHandover?: typeof reserveLaunchdHandover | undefined;
 }
 
 export class DaemonLifecycleRuntime {
@@ -228,6 +232,8 @@ export class DaemonLifecycleRuntime {
   private promotionAbort: AbortController | null = null;
   private promotionAttempted = false;
   private rollbackHandover: Promise<void> | null = null;
+  private rollbackPreparation: Promise<boolean> | null = null;
+  private rollbackExitRequested = false;
   private rollbackApplied = false;
   private rollbackRecovery: UpdateTransactionReceipt | null = null;
   private installationStartRefused = false;
@@ -349,7 +355,8 @@ export class DaemonLifecycleRuntime {
    * daemons, dev runs) does not own the binary on disk: it neither counts its
    * boots nor restores anything, and always returns false.
    */
-  onStarting(): boolean {
+  onStarting(): boolean | Promise<boolean> {
+    if (this.rollbackPreparation) return this.rollbackPreparation;
     if (this.rollbackRecovery) return true;
     const artifact = this.options.updateArtifact;
     if (!artifact) return false;
@@ -400,7 +407,13 @@ export class DaemonLifecycleRuntime {
       });
       return completeStarting(false);
     }
-    return completeStarting(this.rollBackToKeptPrevious(artifact.execPath ?? process.execPath, verdict.failedStarts));
+    const rollback = this.rollBackToKeptPrevious(artifact.execPath ?? process.execPath, verdict.failedStarts);
+    if (typeof rollback === 'boolean') return completeStarting(rollback);
+    const completion = rollback.then(completeStarting).finally(() => {
+      if (this.rollbackPreparation === completion) this.rollbackPreparation = null;
+    });
+    this.rollbackPreparation = completion;
+    return completion;
   }
 
   /**
@@ -409,10 +422,11 @@ export class DaemonLifecycleRuntime {
    * continues on the current build, when there is nothing on disk to restore:
    * a rollback that did not happen must never be reported as one.
    */
-  private rollBackToKeptPrevious(execPath: string, failedStarts: number): boolean {
-    let handover: PreparedServiceHandover | undefined;
-    try { handover = prepareServiceHandover(this.buildServiceActions()); }
+  private rollBackToKeptPrevious(execPath: string, failedStarts: number, admitted?: PreparedServiceHandover): boolean | Promise<boolean> {
+    let handover = admitted;
+    try { handover ??= prepareServiceHandover(this.buildServiceActions()); }
     catch (error) { this.reportRollbackPreflightRefusal(error); return false; }
+    if (handover?.reservationRequired && !admitted) return this.reserveRollbackHandover(execPath, failedStarts, handover);
     const io = captureUpdateFileIo(this.options.rollbackIo ?? realUpdateFileIo);
     const nativeTargets = resolveDaemonUpdateTargets(execPath, process.platform, process.arch);
     if (!nativeTargets) return false;
@@ -551,9 +565,41 @@ export class DaemonLifecycleRuntime {
     return true;
   }
 
+  /** Native manager admission is owned before any synchronous rollback effect. */
+  private reserveRollbackHandover(execPath: string, failedStarts: number, prepared: PreparedServiceHandover): Promise<boolean> {
+    const abort = new AbortController();
+    this.rollbackAbort = abort;
+    const work = Promise.resolve().then(async () => {
+      try {
+        await prepared.reserve(abort.signal);
+        abort.signal.throwIfAborted(); prepared.assertCurrent();
+        if (this.stopping) return false;
+        const rolledBack = await this.rollBackToKeptPrevious(execPath, failedStarts, prepared);
+        if (rolledBack && this.rollbackHandover) await this.rollbackHandover;
+        if (rolledBack && !this.rollbackExitRequested && !abort.signal.aborted) {
+          throw new Error('The manager-owned rollback handover did not complete.');
+        }
+        return rolledBack;
+      } catch (error) {
+        if (this.rollbackApplied || this.rollbackRecovery) {
+          this.reportIncompleteHandover('rollback', { status: 'failed', detail: 'The manager-owned rollback handover did not complete; the restored files remain on disk.' });
+          throw new Error('Native rollback handover did not complete.');
+        }
+        if (!abort.signal.aborted) this.reportRollbackPreflightRefusal(error);
+        return false;
+      } finally {
+        if (!this.rollbackExitRequested || abort.signal.aborted) await prepared.cancel();
+        if (this.rollbackAbort === abort) this.rollbackAbort = null;
+      }
+    });
+    this.rollbackPreparation = work;
+    return work;
+  }
+
   /** The same handover the update swap uses: orderly stop first, then restart onto the restored binary. */
   private async handOverAfterRollback(prepared?: PreparedServiceHandover): Promise<void> {
-    const abort = new AbortController();
+    const inheritedAbort = prepared?.reservationRequired ? this.rollbackAbort : null;
+    const abort = inheritedAbort ?? new AbortController();
     this.rollbackAbort = abort;
     try {
       prepared?.assertCurrent();
@@ -576,11 +622,13 @@ export class DaemonLifecycleRuntime {
         this.reportIncompleteHandover('rollback', outcome ?? { status: 'unknown', detail: 'no outcome returned' });
         return;
       }
-      if (supervised) return;
+      if (supervised && !prepared?.exitRequired) return;
       flushActivityLogSync();
-      (this.options.exitProcess ?? ((code: number) => process.exit(code)))(0);
+      this.rollbackExitRequested = true;
+      try { (this.options.exitProcess ?? ((code: number) => process.exit(code)))(0); }
+      catch { this.rollbackExitRequested = false; throw new Error('The original process could not exit after rollback handover.'); }
     } finally {
-      this.rollbackAbort = null;
+      if (!inheritedAbort && this.rollbackAbort === abort) this.rollbackAbort = null;
     }
   }
 
@@ -660,6 +708,7 @@ export class DaemonLifecycleRuntime {
     return Promise.all([
       forHandover ? null : this.promotionTask,
       forHandover ? null : this.rollbackHandover,
+      forHandover ? null : this.rollbackPreparation,
       (this.autoUpdater ?? this.appliedUpdater)?.drainHandover(forHandover),
     ]).then(() => {});
   }
@@ -857,7 +906,9 @@ export class DaemonLifecycleRuntime {
 
   /** The service-manager actions shared by the update swap and boot promotion. */
   private buildServiceActions(signal?: AbortSignal, assertCurrent?: () => void): AutoUpdateServiceActions {
-    const serviceName = String(this.options.configManager.get('service.serviceName') ?? 'goodvibes').trim() || 'goodvibes';
+    const requestedName = String(this.options.configManager.get('service.serviceName') ?? 'goodvibes').trim() || 'goodvibes';
+    let serviceName = requestedName;
+    let selectedService: { name: string; path: string; pid: number | undefined; contents: string | undefined } | undefined;
     const platform = this.options.servicePlatform ?? process.platform;
     const configuredTimeout = this.options.serviceCommandTimeoutMs ?? 10_000;
     const timeoutMs = Number.isFinite(configuredTimeout) ? Math.max(1, Math.min(60_000, configuredTimeout)) : 10_000;
@@ -871,22 +922,51 @@ export class DaemonLifecycleRuntime {
     };
     return {
       preflight: supervised => {
-        if (platform !== 'linux') return { supported: false,
+        if (platform !== 'linux' && platform !== 'darwin') return { supported: false,
           detail: 'Unattended service handover is unavailable on this platform.' };
         try {
           assertCurrent?.();
           const status = this.options.platformServiceManager.status();
           assertCurrent?.();
-          const currentName = String(this.options.configManager.get('service.serviceName') ?? 'goodvibes').trim() || 'goodvibes';
-          if (status.platform !== 'systemd') return { supported: false,
-            detail: 'Unattended service handover requires the systemd service manager.' };
+          if (status.platform !== (platform === 'darwin' ? 'launchd' : 'systemd')) return { supported: false,
+            detail: platform === 'darwin' ? 'Unattended service handover requires the launchd service manager.' : 'Unattended service handover requires the systemd service manager.' };
           if (status.actionError) return { supported: false,
-            detail: 'The selected systemd service is unavailable for unattended handover.' };
-          if (currentName !== serviceName || supervised !== (status.installed && status.running)) return { supported: false,
+            detail: 'The selected service is unavailable for unattended handover.' };
+          const name = status.serviceName?.trim() || requestedName;
+          if (selectedService && (name !== selectedService.name || status.path !== selectedService.path
+            || platform === 'darwin' && (status.pid !== selectedService.pid || status.contents !== selectedService.contents))) return { supported: false,
+            detail: 'The selected service identity or definition changed before unattended handover.' };
+          if (supervised !== (status.installed && status.running)) return { supported: false,
             detail: 'The selected service identity or supervision changed before unattended handover.' };
+          if (platform === 'darwin' && (!supervised || status.pid !== process.pid || !status.serviceName?.trim()
+            || !status.path || typeof status.contents !== 'string' || typeof process.getuid !== 'function')) return { supported: false,
+            detail: 'Unattended launchd handover requires this process to own its selected loaded service.' };
+          selectedService ??= { name, path: status.path, pid: status.pid, contents: status.contents };
+          serviceName = selectedService.name;
           return { supported: true };
-        } catch { return { supported: false, detail: 'The systemd service manager could not be confirmed for unattended handover.' }; }
+        } catch { return { supported: false, detail: 'The selected service manager could not be confirmed for unattended handover.' }; }
       },
+      ...(platform === 'darwin' ? { reserve: async (supervised: boolean, actionSignal: AbortSignal) => {
+        if (!supervised || !selectedService || selectedService.pid !== process.pid) throw new ServiceHandoverPreflightError('The selected launchd service does not belong to this process.');
+        const selected = selectedService;
+        const source = readFileObservation(selected.path);
+        const executablePath = this.options.updateArtifact?.execPath ?? process.execPath;
+        const assertServiceCurrent = () => {
+          actionSignal.throwIfAborted();
+          if (this.hasTransactionRecovery()) throw new ServiceHandoverPreflightError('Filesystem recovery prevents service handover.');
+          const status = this.options.platformServiceManager.status();
+          if (status.platform !== 'launchd' || !status.installed || !status.running || status.pid !== process.pid
+            || status.serviceName !== selected.name || status.path !== selected.path || status.contents !== selected.contents
+            || fileObservationIdentity(selected.path) !== source.physical || !source.bytes.equals(Buffer.from(status.contents ?? ''))) {
+            throw new ServiceHandoverPreflightError('The original loaded launchd service changed during handover.');
+          }
+        };
+        assertServiceCurrent();
+        return await (this.options.reserveLaunchdHandover ?? reserveLaunchdHandover)({
+          serviceName: selected.name, servicePath: selected.path, executablePath,
+          uid: process.getuid!(), pid: process.pid, timeoutMs, assertServiceCurrent,
+        }, actionSignal);
+      } } : {}),
       isSupervised: () => {
         try {
           const status = this.options.platformServiceManager.status();

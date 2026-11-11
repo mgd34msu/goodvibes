@@ -83,6 +83,8 @@ export interface AutoUpdateServiceActions {
   /** Side-effect-free capability check; production checks before publication and cleanup.
    * Optional for existing embedders. Support does not acknowledge a manager request. */
   preflight?(supervised: boolean): import('./service-handover-preflight.js').ServiceHandoverSupport;
+  /** Reserve an independent manager-owned helper before any installed-file publication. */
+  reserve?(supervised: boolean, signal: AbortSignal): Promise<import('./service-handover-preflight.js').ServiceHandoverReservation>;
   /** Whether the daemon currently runs under the platform service manager. */
   isSupervised(): boolean;
   /** Install + enable the service unit. Legacy void carries no acknowledgement. */
@@ -232,6 +234,7 @@ export class DaemonAutoUpdater {
   private handover: ServiceHandoverOutcome | null = null;
   private lastHandoverPreflightRefusal: string | null = null;
   private handoverCancelled = false;
+  private handoverExitRequested = false;
   private handoverTask: Promise<void> | null = null;
   private handoverAbort: AbortController | null = null;
   /** Settles only after lookup/apply/handover, including checks started by the timer. */
@@ -264,6 +267,7 @@ export class DaemonAutoUpdater {
         adoptIntoService: actions.adoptIntoService.bind(actions),
         restartService: actions.restartService.bind(actions),
         ...(actions.preflight ? { preflight: actions.preflight.bind(actions) } : {}),
+        ...(actions.reserve ? { reserve: actions.reserve.bind(actions) } : {}),
       },
     };
     this.writeReceipt = options.receipts.record.bind(options.receipts);
@@ -556,6 +560,15 @@ export class DaemonAutoUpdater {
       return;
     }
 
+    try {
+      try {
+        await handover?.reserve(signal);
+        assertCurrent(); handover?.assertCurrent();
+      } catch (error) {
+        this.pendingSwap = null;
+        if (!signal.aborted) this.reportHandoverPreflightRefusal(error);
+        return;
+      }
     assertCurrent();
     const { tag, targets } = this.pendingSwap;
     const downloadBase = this.options.downloadBaseUrl
@@ -661,6 +674,14 @@ export class DaemonAutoUpdater {
       return;
     }
     await this.restartIntoNewBinary(handover);
+    } finally {
+      try { if (!this.handoverExitRequested || this.handoverCancelled) await handover?.cancel(); }
+      catch {
+        this.handoverCancelled = true;
+        if (this.appliedVersion !== null) this.reportIncompleteHandover({ status: 'unknown', detail: 'The manager-owned handover helper could not be retired.' });
+        else this.reportHandoverPreflightRefusal(new ServiceHandoverPreflightError('The manager-owned handover helper could not be retired; automatic updates are paused.'));
+      }
+    }
   }
 
   /** Filesystem recovery is an observed outcome, never an automatic retry decision. */
@@ -813,12 +834,17 @@ export class DaemonAutoUpdater {
       versionOnDisk: this.appliedVersion,
       supervised,
     });
-    if (supervised) return;
+    if (supervised && !prepared?.exitRequired) return;
     // The handover record has to be on disk before this process stops being
     // one. Without it an update that goes wrong reads, in the log, as a daemon
     // that simply vanished mid-sentence.
     flushActivityLogSync();
-    (this.options.exitProcess ?? ((code: number) => process.exit(code)))(0);
+    this.handoverExitRequested = true;
+    try { (this.options.exitProcess ?? ((code: number) => process.exit(code)))(0); }
+    catch {
+      this.handoverExitRequested = false;
+      this.reportIncompleteHandover({ status: 'failed', detail: 'The original process could not exit after the acknowledged handover.' });
+    }
   }
 
   private reportIncompleteHandover(outcome: ServiceHandoverOutcome): void {

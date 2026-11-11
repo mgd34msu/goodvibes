@@ -40,6 +40,12 @@ test('foreign account admission failure never installs or uninstalls', async () 
   host.admit = async () => { throw original; };
   await expect(runAcceptanceSteps(host)).rejects.toBe(original); expect(events).toEqual([]);
 });
+test('an unpublished native lifecycle proof runs before opt-out and retains owned cleanup when it fails', async () => {
+  const events: string[] = [], host = steps(events), original = new Error('Replacement native runtime did not become healthy');
+  host.verifyNativeLifecycle = async () => { events.push('update-rollback'); throw original; };
+  await expect(runAcceptanceSteps(host)).rejects.toBe(original);
+  expect(events).toEqual(['admit', 'install', 'installed', 'defaults', 'update-rollback', 'uninstall', 'preserved']);
+});
 test('failed install awaits original cleanup before surfacing the original refusal', async () => {
   const events: string[] = [], host = steps(events), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
   const original = new Error('Original install failed');

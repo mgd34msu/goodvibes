@@ -14,7 +14,7 @@
  * swapped and no real time passes.
  */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -33,6 +33,7 @@ import {
   decideCrashLoopRollback,
 } from '../platform/src/platform/daemon/boot-rollback.ts';
 import { DaemonLifecycleRuntime, type DaemonLifecycleRuntimeOptions } from '../platform/src/platform/daemon/facade-lifecycle.ts';
+import type { ServiceHandoverReservation } from '../platform/src/platform/daemon/service-handover-preflight.js';
 import { PREVIOUS_FILE_SUFFIX, NATIVE_READER_REQUIREMENT_FILE, nativeReaderCapabilities, type UpdateFileIo } from '../platform/src/platform/runtime/self-update.ts';
 import { fixtureStrings, nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
 
@@ -210,6 +211,8 @@ function rollbackHarness(overrides: {
   readonly platform?: NodeJS.Platform;
   readonly managerPlatform?: 'manual' | 'launchd' | 'systemd';
   readonly managerContents?: string;
+  readonly managerServiceName?: string;
+  readonly reserveLaunchdHandover?: DaemonLifecycleRuntimeOptions['reserveLaunchdHandover'];
   readonly restartOnFailure?: boolean;
   readonly stopGracefully?: (() => Promise<void> | void) | undefined;
   /** Share one marker filesystem across two harnesses to model two PROCESSES. */
@@ -231,9 +234,16 @@ function rollbackHarness(overrides: {
     get: (key: string) => config.get(key),
     getControlPlaneConfigDir: () => scratch,
   } as unknown as DaemonLifecycleRuntimeOptions['configManager'];
+  const managerServiceName = overrides.managerServiceName ?? 'sh.goodvibes.daemon';
+  const managerPath = join(scratch, managerServiceName + '.plist');
+  const managerContents = overrides.managerContents ?? '<plist><dict><key>Label</key><string>' + managerServiceName + '</string></dict></plist>';
+  if (overrides.reserveLaunchdHandover) writeFileSync(managerPath, managerContents, { mode: 0o644 });
   const platformServiceManager = {
     // A failed install must preserve the completed disk rollback, without exiting.
-    status: () => ({ installed: overrides.supervised ?? false, running: overrides.supervised ?? false, platform: overrides.managerPlatform ?? 'systemd', contents: overrides.managerContents }),
+    status: () => ({ installed: overrides.supervised ?? false, running: overrides.supervised ?? false, platform: overrides.managerPlatform ?? 'systemd',
+      contents: overrides.reserveLaunchdHandover ? managerContents : overrides.managerContents,
+      serviceName: overrides.reserveLaunchdHandover ? managerServiceName : undefined,
+      path: managerPath, pid: overrides.reserveLaunchdHandover ? process.pid : undefined }),
     install: overrides.install ?? (() => { throw new Error('no service manager in this test'); }),
   } as unknown as DaemonLifecycleRuntimeOptions['platformServiceManager'];
   const { io: markerIo, files: markerFiles } = overrides.marker ?? memoryMarkerIo();
@@ -251,6 +261,7 @@ function rollbackHarness(overrides: {
     servicePlatform: overrides.platform ?? 'linux',
     serviceCommandRunner: overrides.runner ?? (async () => ({ status: 'accepted' })),
     serviceCommandTimeoutMs: 20,
+    ...(overrides.reserveLaunchdHandover ? { reserveLaunchdHandover: overrides.reserveLaunchdHandover } : {}),
     isIdle: () => true,
     markerIo,
     rollbackIo,
@@ -704,6 +715,67 @@ test('receipt write failure cannot undo a completed rollback on duplicate start'
     expect(h.exits).toEqual([]);
     expect(h.alerts.some((line) => line.includes('handover incomplete'))).toBe(true);
   } finally { record.mockRestore(); }
+});
+
+test('launchd rollback admits its helper before restoration and exits only after the restored runtime drains and helper arms', async () => {
+  const entered = Promise.withResolvers<void>(), admission = Promise.withResolvers<ServiceHandoverReservation>();
+  const events: string[] = [];
+  let currentService: (() => void) | undefined;
+  let h!: RollbackHarness;
+  h = rollbackHarness({ artifact: ARTIFACT, supervised: true, platform: 'darwin', managerPlatform: 'launchd',
+    configOverrides: { 'service.enabled': true },
+    reserveLaunchdHandover: async (input, signal) => {
+      expect(signal?.aborted).toBe(false); expect(input.serviceName).toBe('sh.goodvibes.daemon'); expect(input.pid).toBe(process.pid);
+      input.assertServiceCurrent(); currentService = input.assertServiceCurrent; events.push('reserve'); entered.resolve(); return admission.promise;
+    },
+    stopGracefully: async () => { events.push('drain'); await h.runtime.onStopping(false, true); },
+  });
+  const original = new Map(h.files);
+  for (let i = 0; i < 3; i++) expect(h.runtime.onStarting()).toBe(false);
+  const starting = h.runtime.onStarting();
+  try {
+    await entered.promise;
+    expect(h.runtime.onStarting()).toBe(starting);
+    expect(h.files).toEqual(original); expect(h.mutations).toEqual([]); expect(h.stops).toEqual([]);
+    admission.resolve({ exitRequired: true, assertCurrent() { currentService!(); },
+      async commit() { currentService!(); events.push('commit'); expect(h.stops).toHaveLength(1); expect(h.files.get(EXEC_PATH)?.toString()).toBe('good-build'); expect(h.exits).toEqual([]); return { status: 'accepted' }; },
+      async cancel() { events.push('cancel'); },
+    });
+    expect(await starting).toBe(true); await h.runtime.drainHandovers();
+    expect(events).toEqual(['reserve', 'drain', 'commit']); expect(h.exits).toEqual([0]);
+    expect(h.files.get(EXEC_PATH)?.toString()).toBe('good-build'); expect(h.files.get(PREVIOUS_PATH)?.toString()).toBe('bad-build');
+  } finally { admission.reject(new Error('fixture closed')); await starting; await h.runtime.onStopping(false); }
+});
+
+test('failed launchd helper admission cannot restore files or stop the current boot runtime', async () => {
+  const h = rollbackHarness({ artifact: ARTIFACT, supervised: true, platform: 'darwin', managerPlatform: 'launchd',
+    reserveLaunchdHandover: async () => { throw new Error('fixture helper admission failed'); },
+  });
+  const original = new Map(h.files);
+  for (let i = 0; i < 3; i++) expect(h.runtime.onStarting()).toBe(false);
+  expect(await h.runtime.onStarting()).toBe(false);
+  await h.runtime.drainHandovers();
+  expect(h.files).toEqual(original); expect(h.mutations).toEqual([]); expect(h.stops).toEqual([]); expect(h.exits).toEqual([]);
+  expect(h.receipts().some(row => row.text.includes('Automatic rollback refused before publication'))).toBe(true);
+  await h.runtime.onStopping(false);
+});
+
+test('external shutdown cancels and drains late launchd rollback admission before restoration', async () => {
+  const entered = Promise.withResolvers<void>(), admission = Promise.withResolvers<ServiceHandoverReservation>();
+  let cancels = 0, cancelled = false;
+  const h = rollbackHarness({ artifact: ARTIFACT, supervised: true, platform: 'darwin', managerPlatform: 'launchd',
+    reserveLaunchdHandover: async () => { entered.resolve(); return admission.promise; },
+  });
+  const original = new Map(h.files);
+  for (let i = 0; i < 3; i++) h.runtime.onStarting();
+  const starting = h.runtime.onStarting(); await entered.promise;
+  const closing = h.runtime.onStopping(false);
+  admission.resolve({ exitRequired: true, assertCurrent() {}, async commit() { throw new Error('cancelled rollback must not commit'); },
+    async cancel() { if (!cancelled) { cancelled = true; cancels++; } },
+  });
+  expect(await starting).toBe(false); await closing;
+  expect(cancels).toBe(1); expect(h.files).toEqual(original); expect(h.mutations).toEqual([]);
+  expect(h.stops).toEqual([]); expect(h.exits).toEqual([]);
 });
 
 for (const managerPlatform of ['manual', 'launchd'] as const) {

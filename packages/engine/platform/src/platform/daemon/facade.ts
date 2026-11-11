@@ -204,6 +204,8 @@ export class DaemonServer {
   /** The detached native socket remains owned until its actual close settles. */
   private listenerDrain: Promise<void> | null = null;
   private tornDown = false; // True once stop() tore this daemon down; cleared by a successful bind. Teardown was gated on `server === null`, which conflated "never bound a socket" with "has nothing to release". The CONSTRUCTOR starts the companion-chat GC sweep and the batch tick, so enable() plus a failed or never-called start() left both running with no reachable stop. What must not run twice is the teardown, so that is what this guards.
+  /** External stop/fence retires a pending boot; its own native handover does not. */
+  private externalStopEpoch = 0;
 
   /** Prepare the actual configured project before creating an owned runtime.
    * Synchronous construction remains available with an already prepared context
@@ -454,12 +456,15 @@ export class DaemonServer {
    * Start the daemon. Refuses to start if not explicitly enabled.
    */
   async start(): Promise<void | { readonly state: 'handover'; readonly drain: Promise<void>; readonly cancel: () => void }> {
+    const stopEpoch = this.externalStopEpoch;
     await this._restartingPromise;
     await this.stoppingRuntime;
+    if (this.externalStopEpoch !== stopEpoch || this._restartAdmissionClosed) return;
     if (this.server === null) this.settingsLifetime = null;
     // Guarantees the daemon refuses to inherit from its host; see
     // facade-boot-guarantees.ts for why each one is owned here and why order matters.
     await runDaemonBootGuarantees(this.configManager, this.runtimeServices);
+    if (this.externalStopEpoch !== stopEpoch || this._restartAdmissionClosed) return;
     if (!this.enabled) {
       logger.info('Daemon mode is disabled (daemon.enabled=false). It is on by default.');
       return;
@@ -476,7 +481,13 @@ export class DaemonServer {
     // never reached a fully-started daemon restore the kept previous binary
     // and hand over to it (facade-lifecycle.ts).
     const lifecycle = this.lifecycle;
-    if (lifecycle?.onStarting()) {
+    const nativeHandover = await lifecycle?.onStarting();
+    if (this.externalStopEpoch !== stopEpoch || this._restartAdmissionClosed) {
+      lifecycle?.beginStopping(false);
+      await lifecycle?.drainHandovers(false);
+      return;
+    }
+    if (nativeHandover && lifecycle) {
       const drain = lifecycle.drainHandovers();
       // The host owns this drain even when startup intentionally binds no listener.
       void drain.catch(() => {});
@@ -810,15 +821,17 @@ export class DaemonServer {
   }
 
   /**
-   * Permanently fence config-driven restart admission without stopping owners.
-   * Already admitted work remains observable through waitForRestart(). Hosts
-   * call this synchronously before draining consumers, then await and stop.
+   * Permanently fence config restart and native startup admission. Cancelled
+   * native reservations remain owned through waitForRestart(). Hosts call this
+   * synchronously before draining consumers, then await and stop resources.
    */
   fenceRestartAdmission(): void {
     this._restartAdmissionClosed = true;
+    this.externalStopEpoch++;
     this._restartDirty = false;
     this._configWatchUnsub?.();
     this._configWatchUnsub = null;
+    this.lifecycle?.beginStopping(false);
   }
 
   /**
@@ -837,9 +850,13 @@ export class DaemonServer {
       if (restart) pending.push(restart.catch(() => { restartFailed = true; }));
       await Promise.all(pending);
     }
-    const failures = [...(startupDrains.get(this)?.failures ?? [])]
+    const failures: unknown[] = [...(startupDrains.get(this)?.failures ?? [])]
       .map((label) => new Error(`Daemon ${label} startup operation failed`));
     if (restartFailed) failures.push(new Error('Daemon config restart failed'));
+    if (this._restartAdmissionClosed) {
+      try { await this.lifecycle?.drainHandovers(false); }
+      catch (error) { failures.push(error); }
+    }
     if (failures.length) throw new AggregateError(failures, 'Daemon startup drain failed');
   }
 
@@ -848,6 +865,7 @@ export class DaemonServer {
   }
 
   private stopRuntime(forHandover: boolean): Promise<void> {
+    if (!forHandover) this.externalStopEpoch++;
     if (this.stoppingRuntime) {
       // A handover's own close must not wait on an external close that is
       // itself draining that handover. Preserve the lifecycle's existing

@@ -8,6 +8,7 @@ export interface AcceptanceSteps {
   disableUpdates(): Promise<void>; restartAndVerifyOptOut(): Promise<void>; verifyOptOut(): Promise<void>;
   uninstall(): Promise<void>; verifyPreserved(): Promise<void>;
   diagnoseFailure?(): Promise<void>;
+  verifyNativeLifecycle?(): Promise<void>;
 }
 export interface HistoricalUpgradeSteps {
   admit(): Promise<void>; installPrevious(): Promise<void>; verifyPrevious(): Promise<void>;
@@ -72,6 +73,13 @@ export interface AcceptanceDelivery {
   }): Promise<void>;
   assertCurrent(): void;
   finish?(): Promise<void>;
+  /** Explicit unpublished Mac fixtures only; ordinary admission is unchanged. */
+  verifyNativeLifecycle?(input: {
+    daemon: string; bin: string; data: string; root: string; signal?: AbortSignal;
+    setting(key: string): Promise<unknown>; invoke(command: string, args: readonly string[]): Promise<string>;
+    checkpoint(check: string): void; verifyCohort(version: string, readers: Map<string, unknown>): Promise<void>;
+    restartService(): Promise<void>; servicePid(): Promise<number>; stopService(): Promise<void>; startService(): Promise<void>;
+  }): Promise<void>;
 }
 export function acceptPublishedSuite(input: { tag: string; source: string; target: string; scenario?: 'fresh' | 'upgrade-v3.1.1'; signal?: AbortSignal; delivery?: AcceptanceDelivery }): Promise<void>;
 export function readPublishedReaders(input: { tag: string; source: string; target: string; assets: ReadonlySet<string> },

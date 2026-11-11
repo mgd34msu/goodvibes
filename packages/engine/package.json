@@ -694,6 +694,11 @@
       "types": "./platform/dist/platform/daemon/auto-updater.d.ts",
       "import": "./platform/dist/platform/daemon/auto-updater.js"
     },
+    "./platform/platform/daemon/launchd-handover": {
+      "bun": "./platform/src/platform/daemon/launchd-handover.ts",
+      "types": "./platform/dist/platform/daemon/launchd-handover.d.ts",
+      "import": "./platform/dist/platform/daemon/launchd-handover.js"
+    },
     "./platform/platform/daemon/receipts": {
       "bun": "./platform/src/platform/daemon/receipts.ts",
       "types": "./platform/dist/platform/daemon/receipts.d.ts",

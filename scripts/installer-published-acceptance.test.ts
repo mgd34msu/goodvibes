@@ -1,9 +1,10 @@
 /** Owned tooling regressions; they do not claim published native/service proof. */
 import { afterEach, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, runHistoricalUpgradeSteps, assertHistoricalRollbackRefusal, type HistoricalUpgradeSteps, type AcceptanceSteps } from './accept-published-suite.mjs';
+import { acceptanceFailureRecord, finishAcceptance, waitForAcceptanceReadiness, assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, runHistoricalUpgradeSteps, assertHistoricalRollbackRefusal, type HistoricalUpgradeSteps, type AcceptanceSteps } from './accept-published-suite.mjs';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -47,6 +48,122 @@ test('failed install and failed native cleanup both remain failures', async () =
   const host = steps([]), original = new Error('Original publication failed'), cleanup = new Error('Original service did not drain');
   host.install = async () => { throw original; }; host.uninstall = async () => { throw cleanup; };
   await expect(runAcceptanceSteps(host)).rejects.toMatchObject({ name: 'AggregateError', errors: [original, cleanup] });
+});
+
+test('a successful command followed by a failed assertion reports the proof and safe error code without private output', async () => {
+  const secret = 'acceptance-private-launchctl-output-38df';
+  const result = await runOwnedCommand(process.execPath, ['-e', `process.stdout.write(${JSON.stringify(secret)})`]);
+  let failure: unknown;
+  try { assert.match(result.stdout, /state = running/); } catch (error) { failure = error; }
+  const record = acceptanceFailureRecord({ stage: 'verifyInstalled', check: 'service.running', command: 'launchctl', exitCode: result.code }, failure);
+  expect(record).toEqual({ stage: 'verifyInstalled', check: 'service.running', command: 'launchctl', exitCode: 0,
+    diagnostics: undefined, error: { name: 'AssertionError', code: 'ERR_ASSERTION' } });
+  expect(JSON.stringify(record)).not.toContain(secret);
+  const untrusted = acceptanceFailureRecord({ stage: 'verifyInstalled', check: 'installed.sqlite-library' },
+    { name: secret, code: secret, message: secret, path: secret });
+  expect(untrusted.error).toEqual({ name: 'Error' }); expect(JSON.stringify(untrusted)).not.toContain(secret);
+});
+
+test('readiness retries the actual service observation before accepting a coherent status and HTTP proof', async () => {
+  const events: string[] = []; let running = false, httpReady = false;
+  await waitForAcceptanceReadiness(async () => {
+    events.push('service');
+    if (!running) { running = true; throw new Error('Service still starting'); }
+  }, async () => {
+    events.push('status-and-http');
+    if (!httpReady) { httpReady = true; throw new Error('HTTP still starting'); }
+  }, { timeoutMs: 1000, intervalMs: 1 });
+  expect(events).toEqual(['service', 'service', 'status-and-http', 'service', 'status-and-http']);
+});
+
+test('readiness timeout keeps its last proof and safe filesystem cause without recording the private path', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-readiness-')); roots.push(root);
+  const secretPath = join(root, 'acceptance-private-missing-bundle');
+  const evidence = { stage: 'verifyInstalled', check: 'webui.release-marker' }; let failure: unknown;
+  try {
+    await waitForAcceptanceReadiness(async () => {}, async () => { readFileSync(secretPath); }, { timeoutMs: 30, intervalMs: 5 });
+  } catch (error) { failure = error; }
+  const record = acceptanceFailureRecord(evidence, failure);
+  expect(record).toMatchObject({ check: 'webui.release-marker', error: { code: 'ERR_ACCEPTANCE_READINESS_TIMEOUT' },
+    lastProbeError: { name: 'Error', code: 'ENOENT' } });
+  expect(JSON.stringify(record)).not.toContain(secretPath);
+});
+
+test('cancellation interrupts the readiness retry delay with the original reason and no further probes', async () => {
+  const controller = new AbortController(), entered = Promise.withResolvers<void>(), reason = new Error('Original readiness owner stopped');
+  let probes = 0;
+  const running = waitForAcceptanceReadiness(async () => { probes++; entered.resolve(); throw new Error('Still starting'); }, async () => {},
+    { signal: controller.signal, intervalMs: 60_000 });
+  try {
+    await entered.promise; await new Promise<void>(done => setImmediate(done));
+    controller.abort(reason); await expect(running).rejects.toBe(reason);
+    await new Promise<void>(done => setImmediate(done)); expect(probes).toBe(1);
+  } finally { controller.abort(reason); await Promise.allSettled([running]); }
+});
+
+test('readiness cancellation retains an aggregate containing the original owner reason and failed drain', async () => {
+  const controller = new AbortController(), reason = new Error('Original owner stopped'), drain = new Error('Owned group did not drain');
+  const original = new AggregateError([reason, drain], 'Owned cancellation and drain failed');
+  await expect(waitForAcceptanceReadiness(async () => { controller.abort(reason); throw original; }, async () => {},
+    { signal: controller.signal })).rejects.toBe(original);
+  expect(original.errors).toEqual([reason, drain]);
+});
+
+test('readiness cancellation retains a singular drain failure alongside its original owner reason', async () => {
+  const controller = new AbortController(), reason = new Error('Original owner stopped'), drain = new Error('Owned group did not drain');
+  await expect(waitForAcceptanceReadiness(async () => { controller.abort(reason); throw drain; }, async () => {},
+    { signal: controller.signal })).rejects.toMatchObject({ name: 'AggregateError', errors: [reason, drain] });
+});
+
+test('cancellation during the actual final native cleanup still drains delivery and prevents a success receipt', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-final-cleanup-')); roots.push(root);
+  const receipt = join(root, 'accepted.json'), events: string[] = [], host = steps(events), controller = new AbortController();
+  const reason = new Error('Owner stopped during final native cleanup'); let uninstalls = 0;
+  host.uninstall = async () => { events.push('uninstall'); if (++uninstalls === 3) controller.abort(reason); };
+  const running = (async () => {
+    await runAcceptanceSteps(host);
+    await finishAcceptance({ signal: controller.signal, finish: async () => { events.push('delivery-drained'); },
+      assertCurrent: () => { events.push('delivery-current'); }, writeReceipt: () => { writeFileSync(receipt, '{"accepted":true}'); } });
+  })();
+  await expect(running).rejects.toBe(reason);
+  expect(events.slice(-4)).toEqual(['uninstall', 'preserved', 'delivery-drained', 'delivery-current']);
+  expect(existsSync(receipt)).toBe(false);
+});
+
+test('cancellation during the shared final delivery drain awaits that drain and prevents a success receipt', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-final-feed-')); roots.push(root);
+  const receipt = join(root, 'accepted.json'), controller = new AbortController(), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const reason = new Error('Owner stopped during final delivery drain'); let drained = false, settled = false;
+  const running = (async () => {
+    await runAcceptanceSteps(steps([]));
+    await finishAcceptance({ signal: controller.signal, finish: async () => { entered.resolve(); await release.promise; drained = true; },
+      writeReceipt: () => { writeFileSync(receipt, '{"accepted":true}'); } });
+  })();
+  void running.then(() => { settled = true; }, () => { settled = true; });
+  try {
+    await entered.promise; controller.abort(reason); await new Promise<void>(done => setImmediate(done));
+    expect(settled).toBe(false); expect(existsSync(receipt)).toBe(false);
+    release.resolve(); await expect(running).rejects.toBe(reason);
+    expect(drained).toBe(true); expect(existsSync(receipt)).toBe(false);
+  } finally { release.resolve(); await Promise.allSettled([running]); }
+});
+
+test('cancellation during an owned readiness command drains it before returning the original abort reason', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-ready-child-')); roots.push(root);
+  const marker = join(root, 'started'), controller = new AbortController(), reason = new Error('Original readiness command owner stopped');
+  let probes = 0;
+  const running = waitForAcceptanceReadiness(async () => {
+    probes++;
+    await runOwnedCommand(process.execPath, ['-e', `require('node:fs').writeFileSync(${JSON.stringify(marker)},String(process.pid));setInterval(()=>{},1000)`],
+      { signal: controller.signal });
+  }, async () => {}, { signal: controller.signal });
+  try {
+    const deadline = Date.now() + 5_000;
+    while (!existsSync(marker) && Date.now() < deadline) await new Promise(done => setTimeout(done, 10));
+    expect(existsSync(marker)).toBe(true); const pid = Number(readFileSync(marker, 'utf8'));
+    controller.abort(reason); await expect(running).rejects.toBe(reason);
+    expect(() => process.kill(pid, 0)).toThrow(); expect(probes).toBe(1);
+  } finally { controller.abort(reason); await Promise.allSettled([running]); }
 });
 test('actual owned command cancellation drains a SIGTERM-resistant child before returning', async () => {
   const root = mkdtempSync(join(tmpdir(), 'published-acceptance-child-')); roots.push(root);

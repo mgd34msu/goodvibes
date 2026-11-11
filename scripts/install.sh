@@ -1543,14 +1543,26 @@ WantedBy=default.target
 EOF
 }
 
+plist_xml_escape() {
+  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' \
+    -e 's/"/\&quot;/g' -e "s/'/\&apos;/g"
+}
+
 write_launchd_plist() {
-  # write_launchd_plist <path> [label] — writes the installer-managed
+  # write_launchd_plist <path> [label] [working-directory] — writes the installer-managed
   # LaunchAgent text only, no activation. The GoodVibesManagedBy key and the
   # XML comment both carry the marker string the uninstall path greps for.
   # The label defaults to the installer's own; regenerating the product's
   # goodvibes.plist passes 'goodvibes' so label/path correspondence survives.
+  # Migration passes an existing chosen workspace; a new service uses HOME.
   _plist_path="$1"
   _plist_label="${2:-$LAUNCHD_DAEMON_LABEL}"
+  _plist_label_xml=$(plist_xml_escape "$_plist_label")
+  _plist_program_xml=$(plist_xml_escape "$INSTALL_DIR/goodvibes-daemon")
+  # Match the systemd user-service default: startup has a writable workspace
+  # even when launchd would otherwise inherit the root directory.
+  _plist_working_directory_xml=$(plist_xml_escape "${3-$HOME}")
+  _plist_marker_xml=$(plist_xml_escape "$INSTALLER_MARKER")
   mkdir -p "$(dirname "$_plist_path")"
   cat > "$_plist_path" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -1559,13 +1571,15 @@ write_launchd_plist() {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>$_plist_label</string>
+  <string>$_plist_label_xml</string>
   <key>GoodVibesManagedBy</key>
-  <string>$INSTALLER_MARKER</string>
+  <string>$_plist_marker_xml</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$INSTALL_DIR/goodvibes-daemon</string>
+    <string>$_plist_program_xml</string>
   </array>
+  <key>WorkingDirectory</key>
+  <string>$_plist_working_directory_xml</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -1971,13 +1985,16 @@ migrate_one_launchd_plist() {
   plist_label="$2"
   [ -f "$plist_path" ] || return 0
   # Already the current launch form — nothing to migrate. Current means the
-  # CANONICAL --daemon-home value AND no pinned endpoint flags: the middle
-  # generation carried --daemon-home PLUS --hostname/--port, and keying the
+  # CANONICAL --daemon-home value, no pinned endpoint flags, and an explicit
+  # working directory. Without it launchd inherits '/', while daemon startup
+  # opens project resources beneath its cwd. Preserve an existing chosen cwd.
+  # The middle generation carried --daemon-home PLUS --hostname/--port, and keying the
   # gate on --daemon-home's mere presence declared those pinned plists — and
   # any plist pointing the daemon's identity at the wrong directory —
   # current forever.
   if unit_daemon_home_is_canonical "$plist_path" &&
-     ! unit_is_endpoint_pinned "$plist_path"; then
+     ! unit_is_endpoint_pinned "$plist_path" &&
+     grep -q '<key>WorkingDirectory</key>' "$plist_path" 2>/dev/null; then
     return 0
   fi
 
@@ -1991,7 +2008,8 @@ migrate_one_launchd_plist() {
   plist_managed=0
   if grep -q "$INSTALLER_MARKER" "$plist_path" 2>/dev/null; then
     plist_managed=1
-  elif grep -q "<string>$INSTALL_DIR/goodvibes-daemon</string>" "$plist_path" 2>/dev/null; then
+  elif grep -qF "<string>$(plist_xml_escape "$INSTALL_DIR/goodvibes-daemon")</string>" "$plist_path" 2>/dev/null ||
+       grep -qF "<string>$INSTALL_DIR/goodvibes-daemon</string>" "$plist_path" 2>/dev/null; then
     plist_managed=1
   fi
 
@@ -2007,6 +2025,28 @@ migrate_one_launchd_plist() {
     return 0
   fi
 
+  # A migration of old launch flags must retain the existing project context.
+  # Native plutil decodes XML entities and verifies the value is a string;
+  # older plutil versions without raw extraction leave the file untouched.
+  # -n suppresses plutil's added newline, while the sentinel keeps shell
+  # command substitution from discarding newlines belonging to the value.
+  _migration_working_directory="$HOME"
+  if grep -q 'WorkingDirectory' "$plist_path" 2>/dev/null; then
+    if _migration_directory_result=$(plutil -extract WorkingDirectory raw -expect string -n -o - -- "$plist_path" 2>/dev/null && printf '.'); then
+      _migration_working_directory=${_migration_directory_result%.}
+    else
+      say "  NOTE: the LaunchAgent working directory could not be decoded safely; leaving the file untouched."
+      return 0
+    fi
+    # The shell/XML writer does not support control characters in paths.
+    # Refuse them before backup, rewrite, or service-manager operations.
+    if [ -z "$_migration_working_directory" ] ||
+       [ "$(printf '%s' "$_migration_working_directory" | LC_ALL=C tr -d '[:cntrl:]'; printf '.')" != "$_migration_working_directory." ]; then
+      say "  NOTE: the LaunchAgent working directory is empty or contains unsupported characters; leaving the file untouched."
+      return 0
+    fi
+  fi
+
   # Record the agent's CURRENT load state BEFORE touching anything.
   agent_loaded=0
   if command -v launchctl >/dev/null 2>&1 &&
@@ -2017,7 +2057,7 @@ migrate_one_launchd_plist() {
   say ""
   say "Upgrading the platform-managed LaunchAgent ($plist_label) to the current launch form ..."
   backup_unit_file "$plist_path"
-  write_launchd_plist "$plist_path" "$plist_label"
+  write_launchd_plist "$plist_path" "$plist_label" "$_migration_working_directory"
   say "  rewrote    $plist_path"
 
   if [ "$agent_loaded" != "1" ]; then

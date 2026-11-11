@@ -26,6 +26,18 @@ export function assertHistoricalRollbackRefusal(input: { bin: string; version: s
   }): Promise<void>;
 export function assertHostedContext(input: HostedContext): void;
 export function runAcceptanceSteps(host: AcceptanceSteps): Promise<void>;
+export interface AcceptanceFailureRecord {
+  stage: string; check?: string; command?: string; exitCode?: number; diagnostics?: readonly string[];
+  error: { name: string; code?: string }; lastProbeError?: { name: string; code?: string };
+}
+export function acceptanceFailureRecord(evidence: {
+  stage: string; check?: string; command?: string; exitCode?: number; diagnostics?: readonly string[];
+}, error: unknown): AcceptanceFailureRecord;
+export function waitForAcceptanceReadiness(serviceReady: () => Promise<void>, verifyReady: () => Promise<void>,
+  options?: { signal?: AbortSignal; timeoutMs?: number; intervalMs?: number }): Promise<void>;
+export function finishAcceptance(options: {
+  signal?: AbortSignal; finish?: () => Promise<void>; assertCurrent?: () => void; writeReceipt(): void;
+}): Promise<void>;
 export function runOwnedCommand(command: string, args: readonly string[], options?: SpawnOptionsWithoutStdio & {
   signal?: AbortSignal; timeoutMs?: number; installerSource?: string; installerSourcePath?: string;
 }): Promise<{ code: number; stdout: string; diagnostics?: string[] }>;

@@ -1,7 +1,7 @@
 import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { DaemonServer } from '@goodvibes-jev/engine/platform/platform/daemon';
@@ -115,6 +115,9 @@ async function createRuntimeFixture(prefix: string) {
         // DaemonServer borrows this graph; stopping its listener cannot close
         // the fixture-owned pollers or their accepted background work.
         try { await stopListener?.(); } catch (error) { failures.push(error); }
+        // The direct transport lazily starts this broker too. Runtime graph
+        // close does not own its GC interval or the final queued state write.
+        try { await runtimeServices.automationSessionRegister.stop(); } catch (error) { failures.push(error); }
         try { await runtimeServices.close(); } catch (error) { failures.push(error); }
         try { await runtimeServices.workspaceCheckpointManager.drain(); } catch (error) { failures.push(error); }
         if (failures.length) throw new AggregateError(failures, 'Transport fixture teardown failed');
@@ -266,6 +269,30 @@ afterEach(async () => {
 });
 
 describe('transport parity gate', () => {
+  test('fixture teardown drains its direct session broker before removing its root', async () => {
+    const fixture = await createRuntimeFixture('gv-transport-parity-broker-drain');
+    const broker = fixture.runtimeServices.automationSessionRegister;
+    await broker.ensureSession({ sessionId: 'direct-broker-drain' });
+    const stop = broker.stop.bind(broker), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    let stops = 0;
+    broker.stop = async () => { stops++; entered.resolve(); await release.promise; await stop(); };
+    const closing = fixture.dispose();
+    try {
+      await Promise.race([entered.promise, closing.then(() => { throw new Error('Fixture removal bypassed its session broker drain'); })]);
+      expect(stops).toBe(1);
+      expect(existsSync(fixture.tempRoot)).toBe(true);
+      expect(fixture.dispose()).toBe(closing);
+      release.resolve();
+      await closing;
+      expect(existsSync(fixture.tempRoot)).toBe(false);
+      expect(stops).toBe(1);
+    } finally {
+      release.resolve();
+      if (stops === 0) await stop();
+      await closing;
+    }
+  });
+
   test('common operator and peer workflows stay transport-compatible across direct, HTTP, and realtime surfaces', async () => {
     const harnesses = await Promise.all([
       (await createDirectHarness()),

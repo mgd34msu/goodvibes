@@ -52,3 +52,40 @@ test('Agent accepts an actual canonical parent-issued root and refuses forged ow
     });
   });
 });
+
+test('fixture identity refusals preserve replacement bytes and print the captured mismatch in CI', () => {
+  const fixture = makeProjectTempDir('agent-fixture-identity-diagnostic');
+  const probe = Bun.spawnSync(['bun', '--no-env-file', '--eval', `
+    import { strict as assert } from 'node:assert';
+    import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+    import { join } from 'node:path';
+    const {makeProjectTempDir, sweepCreatedProjectTempDirs, sweepProjectTestTmpRoot} = await import(${JSON.stringify(helperUrl)});
+    const path = makeProjectTempDir('original'), retained = path + '-retained';
+    const original = lstatSync(path);
+    renameSync(path, retained);
+    mkdirSync(path);
+    writeFileSync(join(path, 'replacement'), 'leave this replacement intact');
+    try {
+      await assert.rejects(sweepCreatedProjectTempDirs(), failure => {
+        assert(failure instanceof AggregateError);
+        assert.equal(failure.errors.length, 1);
+        const refusal = failure.errors[0], identity = refusal.cause;
+        assert.equal(identity.path, path);
+        assert.equal(identity.expected.ino, original.ino);
+        assert.equal(identity.observed.ino, lstatSync(path).ino);
+        assert.notEqual(identity.observed.ino, identity.expected.ino);
+        assert(refusal.message.includes(JSON.stringify(identity)));
+        return true;
+      });
+      assert.equal(readFileSync(join(path, 'replacement'), 'utf8'), 'leave this replacement intact');
+    } finally {
+      rmSync(path, {recursive: true});
+      renameSync(retained, path);
+      await sweepCreatedProjectTempDirs();
+      await sweepProjectTestTmpRoot();
+    }
+  `], {
+    cwd: fixture, env: { ...process.env, GOODVIBES_TEST_PROJECT_TMP_ROOT: '' }, stdout: 'pipe', stderr: 'pipe', timeout: 15_000,
+  });
+  expect({ code: probe.exitCode, stderr: Buffer.from(probe.stderr).toString() }).toEqual({ code: 0, stderr: '' });
+});

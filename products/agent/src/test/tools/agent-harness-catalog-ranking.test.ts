@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from '
 import * as operatorContracts from '@goodvibes-jev/engine/platform/contracts';
 import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { ToolRegistry, assertCurrentToolExecution } from '@goodvibes-jev/engine/platform/platform/tools';
+import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform/security';
 import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { DEFAULT_CONFIG, type GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
@@ -426,12 +427,171 @@ test('real large host catalog keeps canonical eight-request backpressure and can
   try {
     await Promise.race([wait.started, pending.then(() => { throw new Error('The real catalog completed before eight rank requests'); })]);
     expect(dispatched).toBe(8); expect(maxActive).toBe(8); expect(maxScreeningActive).toBe(1);
-    expect(screening.calls.filter(call => call.path === '/v1/chat/completions').length).toBeGreaterThanOrEqual(59);
+    const proposals = screenedParts(screening);
+    expect(proposals.length).toBeGreaterThan(0); expect(proposals.length).toBeLessThan(59);
+    const originalMethods = operatorContracts.getOperatorContract().operator.methods.filter(method => method.id && method.http?.method && method.http.path);
+    const screenedText = proposals.flat().join('\n'); expect(screenedText).toContain('search inbox');
+    for (const method of originalMethods) expect(screenedText).toContain(JSON.stringify(method.id));
     controller.abort(); wait.release(); await expect(pending).rejects.toThrow();
     expect(dispatched).toBe(8); expect(active).toBe(0);
   } finally {
     controller.abort(); wait.release(); await Promise.allSettled([pending]);
   }
+});
+
+function screenedParts(screening: ReturnType<typeof researchScreeningFixture>): readonly (readonly string[])[] {
+  return screening.calls.filter(call => call.path === '/v1/chat/completions').map(call => {
+    const messages = call.body.messages as { content: string }[], source = JSON.parse(messages[1]!.content) as { parts: string[] };
+    expect(source.parts.length).toBeLessThanOrEqual(SOURCE_SCREENING_LIMITS.parts);
+    expect(source.parts.reduce((sum, part) => sum + part.length, 0)).toBeLessThanOrEqual(SOURCE_SCREENING_LIMITS.characters);
+    return source.parts;
+  });
+}
+
+function completeCatalogReadings<T extends { id: string; description: string; evidence?: unknown }>(entries: readonly T[], query: string) {
+  const byId = new Map(entries.map(entry => [entry.id, entry]));
+  return requestDiagnostics.track(fakePort((name, question, state) => {
+    if (name !== 'match' || question.type !== 'noul' || !state || typeof state !== 'object' || Array.isArray(state)
+      || !state.candidate || typeof state.candidate !== 'object' || Array.isArray(state.candidate) || typeof state.candidate.name !== 'string')
+      throw new Error('Expected original complete catalog reading');
+    const entry = byId.get(state.candidate.name); if (!entry) throw new Error('Unexpected catalog candidate');
+    expect(state).toEqual({ query, candidate: { type: 'tool', name: entry.id, description: entry.description, evidenceJson: JSON.stringify(entry.evidence ?? null) } });
+    return noulAnswer(0.99);
+  }), 'completeCatalogReadings');
+}
+
+test('many small preserved candidates use one real screening pair while every original query and DTO reaches the canonical reader', async () => {
+  const entries = Array.from({ length: 96 }, (_, index) => ({ id: `candidate-${index}`, description: `Complete ordinary candidate ${index}`,
+    evidence: { note: `Complete original metadata tail ${index}` } }));
+  const query = 'Read this complete original query', screening = researchScreeningFixture(), fake = completeCatalogReadings(entries, query);
+  installJudgmentPort(fake.port);
+  const result = await rankHarnessCatalog(entries, query, entry => entry, 'agent.test.packed-small-catalog', { sourceOwner: screening.owner, requirePreservedSource: true });
+  expect(result.matches.map(match => match.entry)).toEqual(entries); expect(fake.requests).toHaveLength(entries.length);
+  const parts = screenedParts(screening); expect(parts).toHaveLength(1); expect(parts[0]).toHaveLength(1);
+  expect(JSON.parse(parts[0]![0]!)).toEqual({ query, catalog: entries });
+  expect(screening.calls).toHaveLength(2); expect(Math.ceil((entries.length + 1) / SOURCE_SCREENING_LIMITS.parts)).toBe(13);
+});
+
+test.each(['', 'Read "quoted" original \\ query'] as const)('packed canonical arguments preserve exact strings, absent evidence and empty query %j', async query => {
+  const entries: { id: string; description: string; evidence?: unknown }[] = [
+    { id: 'absent-evidence', description: 'Complete "quoted" description \\ tail' },
+    { id: 'undefined-evidence', description: '', evidence: undefined },
+    { id: 'null-evidence', description: 'Complete null metadata', evidence: null },
+    { id: 'nested-evidence', description: 'Complete nested metadata', evidence: { quoted: '"Original"', path: 'first\\second', empty: '' } },
+  ];
+  const screening = researchScreeningFixture(), fake = completeCatalogReadings(entries, query); installJudgmentPort(fake.port);
+  const result = await rankHarnessCatalog(entries, query, entry => entry, 'agent.test.packed-exact-wire', { sourceOwner: screening.owner, requirePreservedSource: true });
+  expect(result.matches.map(match => match.entry)).toEqual(entries); expect(fake.requests).toHaveLength(entries.length);
+  expect(screenedParts(screening)).toHaveLength(1);
+});
+
+test('the full current workspace catalog preserves every action and category while reducing real screening requests', async () => {
+  const entries = AGENT_WORKSPACE_CATEGORIES.flatMap(category => category.actions.map(action => ({ id: action.id,
+    description: JSON.stringify(action), evidence: { category: { id: category.id, group: category.group, label: category.label,
+      summary: category.summary, detail: category.detail }, action } })));
+  const query = 'Read the complete current workspace', screening = researchScreeningFixture(), fake = completeCatalogReadings(entries, query);
+  installJudgmentPort(fake.port);
+  const result = await rankHarnessCatalog(entries, query, entry => entry, 'agent.test.packed-workspace-catalog', { sourceOwner: screening.owner, requirePreservedSource: true });
+  expect(result.matches.map(match => match.entry)).toEqual(entries); expect(fake.requests).toHaveLength(entries.length);
+  const parts = screenedParts(screening), text = parts.flat().join('\n');
+  expect(parts.length).toBeLessThan(Math.ceil((entries.length + 1) / SOURCE_SCREENING_LIMITS.parts));
+  for (const entry of entries) expect(text).toContain(entry.id);
+  expect(text).toContain(query);
+});
+
+test('preserved compact inputs near the original whole-reading budget still use their complete original framing when wrappers do not fit', async () => {
+  const entries = Array.from({ length: 32 }, (_, index) => ({ id: `near-limit-${index}`, description: '' })), query = 'Complete near-limit query';
+  const tupleOverhead = query.length + entries.reduce((sum, entry) => sum + JSON.stringify([entry.id, entry.description, null]).length, 0);
+  const captureOverhead = entries.reduce((sum, entry) => sum + entry.id.length + 'id'.length + 'description'.length, 0);
+  const available = Math.min(1_000_000 - tupleOverhead, 1_000_000 - captureOverhead) - 16;
+  for (const [index, entry] of entries.entries()) entry.description = 'x'.repeat(Math.floor(available / entries.length) + (index < available % entries.length ? 1 : 0));
+  const originalParts = [query, ...entries.map(entry => JSON.stringify([entry.id, entry.description, null]))];
+  const capturedCharacters = entries.reduce((sum, entry) => sum + entry.id.length + entry.description.length + 'id'.length + 'description'.length, 0);
+  expect(capturedCharacters).toBeLessThan(1_000_000);
+  expect(originalParts.reduce((sum, part) => sum + part.length, 0)).toBeLessThan(1_000_000);
+  expect(JSON.stringify({ query, catalog: entries }).length).toBeGreaterThan(1_000_000);
+  const screening = researchScreeningFixture(), fake = completeCatalogReadings(entries, query); installJudgmentPort(fake.port);
+  const result = await rankHarnessCatalog(entries, query, entry => entry, 'agent.test.packed-budget-compatibility', { sourceOwner: screening.owner, requirePreservedSource: true });
+  expect(result.matches).toHaveLength(entries.length); expect(fake.requests).toHaveLength(entries.length);
+  expect(screenedParts(screening).flat()).toEqual(originalParts);
+});
+
+test.each(['redacted-tail', 'damaged-framing'] as const)('packed preserved catalog %s never reaches the canonical reader', async kind => {
+  const privateTail = 'Private preserved catalog tail';
+  const entries = Array.from({ length: 96 }, (_, index) => ({ id: `candidate-${index}`, description: 'Complete ordinary description',
+    evidence: { note: index === 95 ? privateTail : 'Complete ordinary metadata' } }));
+  const screening = researchScreeningFixture(kind === 'redacted-tail' ? { spans: exactSensitiveSpans([privateTail]) } : {});
+  const owner = kind === 'damaged-framing' ? { ...screening.owner, project(receipt: Parameters<typeof screening.owner.project>[0]) {
+    const original = screening.owner.project(receipt); return original.map((part, index) => index === 0 ? 'Damaged original JSON framing' : part);
+  } } : screening.owner;
+  const fake = readings({}); installJudgmentPort(fake.port);
+  await expect(rankHarnessCatalog(entries, 'Read the complete catalog', entry => entry, 'agent.test.packed-refusal', { sourceOwner: owner, requirePreservedSource: true })).rejects.toThrow();
+  expect(JSON.stringify(screening.calls)).toContain(privateTail); expect(fake.requests).toHaveLength(0);
+});
+
+test.each(['before-invocation', 'caller-guard', 'screening'] as const)('packed prepared source rejects serializer retirement at %s before canonical disclosure', async when => {
+  const privateTail = 'Private prepared complete catalog tail';
+  const entry = { id: 'private-prepared', description: 'Complete ordinary description', evidence: { note: privateTail } };
+  const describeEntry = (value: typeof entry) => value, prepared = prepareHarnessCatalog([entry], describeEntry);
+  const original = JSON.stringify; let restore = () => {}, retired = false;
+  const retire = () => {
+    if (retired) return; retired = true;
+    const replaced = spyOn(JSON, 'stringify').mockImplementation((value: unknown, replacer?: unknown, space?: unknown) => {
+      if (value && typeof value === 'object' && Object.hasOwn(value, 'query') && Object.hasOwn(value, 'catalog')) return '{}';
+      return Reflect.apply(original, JSON, [value, replacer, space]) as string;
+    });
+    restore = () => replaced.mockRestore();
+  };
+  const screening = researchScreeningFixture({ spans: exactSensitiveSpans([privateTail]), beforeProposal: async () => { if (when === 'screening') retire(); } });
+  const fake = readings({ 'private-prepared': 0.99 }); installJudgmentPort(fake.port); let failure: unknown;
+  try {
+    if (when === 'before-invocation') retire();
+    await rankHarnessCatalog(prepared, 'Read complete original prepared source', describeEntry, 'agent.test.packed-serializer-retirement', {
+      sourceOwner: screening.owner, requirePreservedSource: true, assertCurrent() { if (when === 'caller-guard') retire(); },
+    });
+  } catch (error) { failure = error; }
+  finally { restore(); }
+  expect(failure).toBeDefined(); expect(fake.requests).toHaveLength(0);
+  if (when !== 'screening') expect(screening.calls).toHaveLength(0);
+});
+
+test.each(['object', 'array'] as const)('packed prepared source rejects inherited %s toJSON getters without invoking them', async kind => {
+  const entry = { id: 'ordinary-prepared', description: 'Complete ordinary description' }, describeEntry = (value: typeof entry) => value;
+  const prepared = prepareHarnessCatalog([entry], describeEntry), screening = researchScreeningFixture(), fake = readings({});
+  installJudgmentPort(fake.port); let getters = 0, failure: unknown;
+  const prototype = kind === 'object' ? Object.prototype : Array.prototype;
+  try {
+    Object.defineProperty(prototype, 'toJSON', { configurable: true, get() { getters++; return () => ({}); } });
+    await rankHarnessCatalog(prepared, 'Read complete original prepared source', describeEntry, 'agent.test.packed-inherited-serializer', {
+      sourceOwner: screening.owner, requirePreservedSource: true,
+    });
+  } catch (error) { failure = error; }
+  finally { Reflect.deleteProperty(prototype, 'toJSON'); }
+  expect(failure).toBeDefined(); expect(getters).toBe(0); expect(screening.calls).toHaveLength(0); expect(fake.requests).toHaveLength(0);
+});
+
+test.each([false, undefined] as const)('prepared catalog cannot switch entry preservation %j to packed mode inside its caller guard', async initial => {
+  const privateTail = 'Private complete late prepared candidate tail';
+  const entries = Array.from({ length: 96 }, (_, index) => ({ id: `candidate-${index}`, description: `Complete original description ${'ordinary context '.repeat(35)}`,
+    evidence: { note: index === 95 ? privateTail : 'Complete original metadata' } }));
+  const describeEntry = (value: typeof entries[number]) => value, prepared = prepareHarnessCatalog(entries, describeEntry);
+  const query = 'Read the complete prepared catalog';
+  expect(JSON.stringify({ query, catalog: entries }).length).toBeGreaterThan(SOURCE_SCREENING_LIMITS.characters);
+  expect(entries.every(entry => JSON.stringify([entry.id, entry.description, entry.evidence]).length <= SOURCE_SCREENING_LIMITS.characters)).toBe(true);
+  const screening = researchScreeningFixture({ spans: exactSensitiveSpans([privateTail]) }), fake = readings({}); installJudgmentPort(fake.port);
+  const original = JSON.stringify; let restore = () => {}, retired = false, failure: unknown;
+  const options = { sourceOwner: screening.owner, requirePreservedSource: initial as boolean | undefined, assertCurrent() {
+    if (retired) return; retired = true; options.requirePreservedSource = true;
+    const replaced = spyOn(JSON, 'stringify').mockImplementation((value: unknown, replacer?: unknown, space?: unknown) => {
+      if (value && typeof value === 'object' && Object.hasOwn(value, 'path') && Object.hasOwn(value, 'value')) return '{}';
+      return Reflect.apply(original, JSON, [value, replacer, space]) as string;
+    });
+    restore = () => replaced.mockRestore();
+  } };
+  try { await rankHarnessCatalog(prepared, query, describeEntry, 'agent.test.packed-preservation-drift', options); }
+  catch (error) { failure = error; }
+  finally { restore(); }
+  expect(failure).toBeDefined(); expect(screening.calls).toHaveLength(0); expect(fake.requests).toHaveLength(0);
 });
 
 test('aggregate structural capture is bounded across many individually small private DTOs', async () => {

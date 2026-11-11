@@ -16,6 +16,16 @@ on:
         description: Run containing the exact native-release-assets artifact to stage.
         required: true
         type: string
+      previous-tag:
+        description: Published previous suite tag for genuine automatic upgrade and complete-cohort rollback.
+        required: false
+        type: string
+        default: ""
+      previous-source:
+        description: Full original previous payload commit recorded by its published readers.
+        required: false
+        type: string
+        default: ""
       tooling-sha:
         description: Full commit containing the acceptance tooling to run.
         required: true
@@ -33,6 +43,16 @@ on:
         description: Run containing the exact native-release-assets artifact to stage.
         required: true
         type: string
+      previous-tag:
+        description: Published previous suite tag for genuine automatic upgrade and complete-cohort rollback.
+        required: false
+        type: string
+        default: ""
+      previous-source:
+        description: Full original previous payload commit recorded by its published readers.
+        required: false
+        type: string
+        default: ""
       tooling-sha:
         description: Immutable caller commit containing the current acceptance entrypoint.
         required: true
@@ -218,6 +238,92 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: staged-upgrade-v3.1.1-${{ matrix.target }}
+          path: ${{ runner.temp }}/goodvibes-published-*/acceptance-result.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  previous-release-upgrade:
+    needs: [stage-release-assets]
+    # Four original hosted accounts exercise the real previous published suite.
+    # The original v3.1.1 historical job remains a separate evidence path.
+    if: inputs.tag != 'v3.1.2' || inputs.previous-tag != '' || inputs.previous-source != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: darwin-arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout current acceptance tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.tooling-sha }}
+          fetch-depth: 0
+      - name: Checkout the exact candidate payload source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.source }}
+          path: candidate-source
+      - name: Verify both source owners and the previous published identity
+        env:
+          TOOLING_SHA: ${{ inputs.tooling-sha }}
+          SOURCE_SHA: ${{ inputs.source }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          PREVIOUS_TAG: ${{ inputs.previous-tag }}
+          PREVIOUS_SOURCE: ${{ inputs.previous-source }}
+        run: |
+          set -euo pipefail
+          [[ "$TOOLING_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PREVIOUS_SOURCE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]
+          [[ "$PREVIOUS_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]
+          test "$PREVIOUS_TAG" != "$RELEASE_TAG"
+          test "$(git rev-parse HEAD)" = "$TOOLING_SHA"
+          test "$(git -C candidate-source rev-parse HEAD)" = "$SOURCE_SHA"
+          test -f scripts/accept-staged-suite.mjs
+          test -f candidate-source/packages/engine/platform/src/platform/daemon/lifecycle-marker.ts
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: '22'
+      - name: Setup Bun for the original source lifecycle writer
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.3.14'
+      - name: Download the staged artifact from this acceptance run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: staged-release-assets
+          path: ${{ runner.temp }}/staged-release-assets
+      - name: Install source lifecycle writer dependencies
+        working-directory: candidate-source
+        run: bun install --frozen-lockfile
+      - name: Observe previous-suite automatic upgrade and complete-cohort rollback
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SOURCE: ${{ inputs.source }}
+          RELEASE_TARGET: ${{ matrix.target }}
+          PREVIOUS_TAG: ${{ inputs.previous-tag }}
+          PREVIOUS_SOURCE: ${{ inputs.previous-source }}
+          CANDIDATE_SOURCE_ROOT: ${{ github.workspace }}/candidate-source
+        run: node scripts/accept-staged-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET" "$RUNNER_TEMP/staged-release-assets" upgrade-previous "$PREVIOUS_TAG" "$PREVIOUS_SOURCE"
+      - name: Preserve bounded automatic upgrade and rollback result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: staged-upgrade-previous-${{ matrix.target }}
           path: ${{ runner.temp }}/goodvibes-published-*/acceptance-result.json
           if-no-files-found: warn
           retention-days: 7

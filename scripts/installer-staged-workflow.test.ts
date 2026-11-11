@@ -42,8 +42,9 @@ function existingEnv(names: string[]) {
 
 test('manual and reusable staged acceptance require immutable source/tooling and an explicit producer run', () => {
   for (const trigger of ['workflow_call', 'workflow_dispatch']) {
-    expect(Object.keys(staged.on[trigger]!.inputs).sort()).toEqual(['artifact-run-id', 'source', 'tag', 'tooling-sha']);
-    for (const input of Object.values(staged.on[trigger]!.inputs)) expect(input).toMatchObject({ required: true, type: 'string' });
+    expect(Object.keys(staged.on[trigger]!.inputs).sort()).toEqual(['artifact-run-id', 'previous-source', 'previous-tag', 'source', 'tag', 'tooling-sha']);
+    for (const key of ['artifact-run-id', 'source', 'tag', 'tooling-sha']) expect(staged.on[trigger]!.inputs[key]).toMatchObject({ required: true, type: 'string' });
+    for (const key of ['previous-tag', 'previous-source']) expect(staged.on[trigger]!.inputs[key]).toMatchObject({ required: false, type: 'string', default: '' });
   }
   expect(staged.permissions).toEqual({ contents: 'read', actions: 'read' });
   const producer = staged.jobs['stage-release-assets']!;

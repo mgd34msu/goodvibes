@@ -17,6 +17,28 @@ export interface HistoricalUpgradeSteps {
   uninstall(): Promise<void>; verifyPreserved(): Promise<void>;
 }
 export function runHistoricalUpgradeSteps(host: HistoricalUpgradeSteps): Promise<void>;
+export interface PreviousReleaseUpgradeSteps {
+  admit(): Promise<void>; installPrevious(): Promise<void>; verifyPrevious(): Promise<void>;
+  seedPreviousData(): Promise<void>; startPreviousService(): Promise<void>; verifyPreviousService(): Promise<void>;
+  prepareDelivery(): Promise<void>; awaitAutomaticUpgrade(): Promise<void>; verifyUpgradedData(): Promise<void>;
+  verifyCompleteRollback(): Promise<void>; uninstall(): Promise<void>; verifyPreserved(): Promise<void>;
+}
+export function runPreviousReleaseUpgradeSteps(host: PreviousReleaseUpgradeSteps): Promise<void>;
+export function assertPreviousReleaseInputs(input: { tag: string; previousTag?: string; previousSource?: string }): void;
+export interface PublishedReader {
+  target: string; sourceCommit: string; headCommit: string; version?: string;
+  readers: { version: string }; files: readonly { path: string }[];
+}
+export interface NativeLifecycleHost {
+  daemon: string; bin: string; data: string; root: string; signal?: AbortSignal;
+  setting(key: string): Promise<unknown>; invoke(command: string, args: readonly string[]): Promise<string>;
+  checkpoint(check: string): void; verifyCohort(version: string, readers: Map<string, unknown>): Promise<void>;
+  restartService(): Promise<void>; servicePid(): Promise<number>; stopService(): Promise<void>; startService(): Promise<void>;
+}
+export function verifyCompiledSuiteRollback(input: {
+  host: NativeLifecycleHost; target: string; source: string; sourceRoot: string; previousVersion: string; currentVersion: string;
+  previousReaders: Map<string, unknown>; webuiDirectory: string; verifyPreserved(): Promise<void>;
+}): Promise<{ updatedPid: number; rolledBackPid: number }>;
 export interface InstallerMigrationSteps {
   admit(): Promise<void>; installPrevious(): Promise<void>; verifyPrevious(): Promise<void>; seedPreviousData(): Promise<void>;
   disablePreviousUpdates(): Promise<void>; startPreviousService(): Promise<void>; verifyPreviousService(): Promise<void>;
@@ -48,6 +70,7 @@ export interface NativeStartupFailure {
 export interface AcceptanceFailureRecord {
   stage: string; check?: string; command?: string; exitCode?: number; exitSignal?: NodeJS.Signals; diagnostics?: readonly string[];
   httpStatus?: number;
+  observedRelease?: 'previous' | 'target' | 'other';
   nativeDaemonFailure?: NativeDaemonFailure;
   nativeStartupFailure?: NativeStartupFailure;
   error: { name: string; code?: string }; lastProbeError?: { name: string; code?: string };
@@ -55,6 +78,7 @@ export interface AcceptanceFailureRecord {
 export function acceptanceFailureRecord(evidence: {
   stage: string; check?: string; command?: string; exitCode?: number; exitSignal?: NodeJS.Signals; diagnostics?: readonly string[];
   httpStatus?: number;
+  observedRelease?: 'previous' | 'target' | 'other';
   nativeDaemonFailure?: NativeDaemonFailure; nativeStartupFailure?: NativeStartupFailure;
 }, error: unknown): AcceptanceFailureRecord;
 export function markAcceptanceCheckpoint(evidence: Parameters<typeof acceptanceFailureRecord>[0], check?: string): void;
@@ -84,19 +108,19 @@ export interface AcceptanceDelivery {
   assertCurrent(): void;
   finish?(): Promise<void>;
   /** Explicit unpublished Mac fixtures only; ordinary admission is unchanged. */
-  verifyNativeLifecycle?(input: {
-    daemon: string; bin: string; data: string; root: string; signal?: AbortSignal;
-    setting(key: string): Promise<unknown>; invoke(command: string, args: readonly string[]): Promise<string>;
-    checkpoint(check: string): void; verifyCohort(version: string, readers: Map<string, unknown>): Promise<void>;
-    restartService(): Promise<void>; servicePid(): Promise<number>; stopService(): Promise<void>; startService(): Promise<void>;
-  }): Promise<void>;
+  verifyNativeLifecycle?(input: NativeLifecycleHost): Promise<void>;
 }
-export function acceptPublishedSuite(input: { tag: string; source: string; target: string; scenario?: 'fresh' | 'upgrade-v3.1.1' | 'installer-migrate-v3.1.1'; signal?: AbortSignal; delivery?: AcceptanceDelivery }): Promise<void>;
+export function acceptPublishedSuite(input: { tag: string; source: string; target: string;
+  scenario?: 'fresh' | 'upgrade-v3.1.1' | 'installer-migrate-v3.1.1' | 'upgrade-previous';
+  previousTag?: string; previousSource?: string; signal?: AbortSignal; delivery?: AcceptanceDelivery }): Promise<void>;
 export function readPublishedReaders(input: { tag: string; source: string; target: string; assets: ReadonlySet<string>; onCheck?(check: string): void },
-  load: (name: string) => Promise<{ target: string; sourceCommit: string; headCommit: string; version?: string;
-    readers: { version: string }; files: readonly { path: string }[] }>): Promise<Map<string, unknown>>;
+  load: (name: string) => Promise<PublishedReader>): Promise<Map<string, unknown>>;
 export function readPublicAcceptanceDelivery(input: {
   tag: string; source: string; target: string; signal?: AbortSignal;
   checkpoint(check: string): void; onHttpStatus(status: number): void;
 }, fetchImpl?: (url: string, options: RequestInit) => Promise<Response>): Promise<{ readers: Map<string, unknown>;
   published: { bytes: Buffer; url: string }; immutable: { bytes: Buffer; url: string } }>;
+export function readPreviousReleaseCohort(input: {
+  tag: string; source: string; target: string; signal?: AbortSignal;
+  checkpoint(check: string): void; onHttpStatus(status: number): void;
+}, fetchImpl?: (url: string, options: RequestInit) => Promise<Response>): Promise<{ readers: Map<string, unknown>; installer: Buffer }>;

@@ -2,10 +2,11 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
 import { types as nodeTypes } from 'node:util';
 import { judgmentPort, captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateJudgmentRegistry, prepareJudgmentResult, snapshotJudgmentEvidence, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type ProtectedSource, type SourceScreeningReceipt, type SourceScreeningHold } from '@goodvibes-jev/engine/platform/platform/security';
+import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type ProtectedSource, type SourceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Ranked, Rerank } from '@goodvibes-jev/judgment';
-import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
+import { screeningBatches, withModelReadingSource } from './agent-harness-model-reading-source.ts';
+import { requireSettledScreeningReceipt } from './agent-harness-screening-result.ts';
 import { decisionOrClassic, isClassicOperation, rankClassicCatalog } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 const ownDescriptor = Object.getOwnPropertyDescriptor;
@@ -15,6 +16,17 @@ const ownKeys = Reflect.ownKeys;
 const isProxy = nodeTypes.isProxy;
 const NativeWeakSet = WeakSet, nativeWeakSetHas = WeakSet.prototype.has, nativeWeakSetAdd = WeakSet.prototype.add;
 const nativeApply = Reflect.apply, nativeIsFrozen = Object.isFrozen;
+const nativeJson = JSON, nativeStringify = JSON.stringify;
+const nativeObjectPrototype = Object.prototype, nativeArrayPrototype = Array.prototype;
+
+/** Packing must describe the admitted original, never a replaced serializer's
+ * view. Inspect inherited serializer descriptors without invoking getters. */
+function assertCatalogFraming(): void {
+  if (ownDescriptor(globalThis, 'JSON')?.value !== nativeJson || ownDescriptor(nativeJson, 'stringify')?.value !== nativeStringify
+    || prototypeOf(nativeObjectPrototype) !== null || prototypeOf(nativeArrayPrototype) !== nativeObjectPrototype
+    || ownDescriptor(nativeObjectPrototype, 'toJSON') !== undefined || ownDescriptor(nativeArrayPrototype, 'toJSON') !== undefined)
+    throw new ToolInputProjectionError('held');
+}
 
 export interface CatalogRankingOptions {
   readonly signal?: AbortSignal | undefined;
@@ -325,35 +337,6 @@ interface PreparedCatalog {
 }
 const preparedCatalogs = new WeakMap<object, PreparedCatalog>();
 
-const sourceScreeningHolds = Object.freeze({
-  'route-unavailable': true, 'protected-input': true, malformed: true, unsettled: true,
-  cancelled: true, stale: true, capacity: true, busy: true,
-} satisfies Record<SourceScreeningHold, true>);
-
-function screeningResultFields(value: unknown): PropertyDescriptorMap | undefined {
-  if (!value || typeof value !== 'object' || nodeTypes.isProxy(value)) return undefined;
-  const prototype: unknown = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null || Reflect.ownKeys(value).length !== 2) return undefined;
-  const fields = Object.getOwnPropertyDescriptors(value);
-  if (!Object.hasOwn(fields, 'status') || Object.values(fields).some(field => !Object.hasOwn(field, 'value'))) return undefined;
-  return fields;
-}
-
-function isSourceScreeningHold(value: unknown): value is SourceScreeningHold {
-  return typeof value === 'string' && Object.hasOwn(sourceScreeningHolds, value);
-}
-
-/** Preserve only the native owner's finite operational refusal, never its input. */
-function screeningHeldError(fields: PropertyDescriptorMap | undefined): ToolInputProjectionError {
-  const error = new ToolInputProjectionError('held');
-  const status: unknown = fields?.status?.value;
-  const reason: unknown = fields && Object.hasOwn(fields, 'reason') ? fields.reason?.value : undefined;
-  if (status === 'held' && isSourceScreeningHold(reason)) {
-    Object.defineProperty(error, 'cause', { value: Object.freeze({ code: 'source-screening-held', reason }) });
-  }
-  return error;
-}
-
 function catalogEntryDescriptors(entries: readonly unknown[]) {
   if (!Array.isArray(entries) || nodeTypes.isProxy(entries) || Object.getPrototypeOf(entries) !== Array.prototype
     || entries.length >= SOURCE_SCREENING_LIMITS.parts * SOURCE_SCREENING_LIMITS.sources) throw new ToolInputProjectionError('held');
@@ -437,14 +420,23 @@ async function rankDecisionHarnessCatalog<T>(entries: readonly T[], query: strin
   describe: (entry: T) => { readonly id: string; readonly description: string; readonly evidence?: unknown }, site: string,
   options: CatalogRankingOptions, decisionName: string, contextEvidence?: unknown,
 ): Promise<{ readonly matches: readonly { readonly entry: T; readonly judgment: Ranked }[]; readonly judgments: readonly Ranked[] }> {
+  const requirePreservedSource = options.requirePreservedSource;
+  const assertFraming = () => {
+    if (options.requirePreservedSource !== requirePreservedSource) throw new ToolInputProjectionError('held');
+    if (requirePreservedSource === true) assertCatalogFraming();
+  };
+  assertFraming();
   const contextSource = contextEvidence === undefined ? undefined : captureCatalogSnapshot(contextEvidence);
   const assertContext = () => { contextSource?.assertCurrent(contextEvidence); };
   options.signal?.throwIfAborted(); options.assertCurrent?.();
+  assertFraming();
   assertContext();
   const descriptors = catalogEntryDescriptors(entries), found = preparedCatalogs.get(entries);
   const prepared = found?.describe === describe ? found : undefined;
   const capturedEntries = prepared ? entries : captureCatalogEntries(entries, descriptors);
-  const catalog = prepared?.catalog ?? capturedEntries.map((entry) => ({ entry, ...describe(entry) }));
+  const catalog = prepared?.catalog ?? capturedEntries.map((entry) => {
+    assertFraming(); const description = describe(entry); assertFraming(); return { entry, ...description };
+  });
   // Capture the COMPLETE transmitted source before projection or display limits.
   const source = {
     query: snapshotJudgmentInput(query) as string,
@@ -458,10 +450,12 @@ async function rankDecisionHarnessCatalog<T>(entries: readonly T[], query: strin
   const assertOwnerMethods = captureCatalogMethods(owner, ['capture', 'screen', 'project', 'release']);
   const ownerMethods = { capture: owner.capture, screen: owner.screen, project: owner.project, release: owner.release };
   options.retainCurrent?.(assertOwnerMethods, `agent.catalog.owner:${site}`);
-  // A whole candidate is one protected part, so the complete operator catalog
-  // fits the owner's bounded source count without a lexical shortlist. JSON
-  // framing is parsed only after screening; damaged framing holds the reading.
+  // Keep the complete original tuple budget even when preserved candidates
+  // share structured screening frames. Non-preserved projections retain the
+  // original per-candidate framing and are parsed only after screening.
+  assertFraming();
   const parts = [source.query, ...(prepared?.parts ?? catalogParts(source.catalog))];
+  assertFraming();
   // Retain the original canonical whole-reading text budget across batches.
   if (parts.reduce((total, part) => total + part.length, 0) > 1_000_000) throw new ToolInputProjectionError('held');
   if (contextSource || parts.some(part => part.length > SOURCE_SCREENING_LIMITS.characters)) {
@@ -470,11 +464,11 @@ async function rankDecisionHarnessCatalog<T>(entries: readonly T[], query: strin
     // through the existing source framing instead of clipping a candidate or
     // splitting a semantic string. Original-returning readers require exact
     // preservation; uncertain or redacted source remains held.
-    if (options.requirePreservedSource !== true) throw new ToolInputProjectionError('held');
+    if (requirePreservedSource !== true) throw new ToolInputProjectionError('held');
     const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource']);
     const originalAssert = options.assertCurrent;
-    if (contextSource) { options.retainCurrent?.(assertContext, `${site}:context`); assertContext(); }
-    return withModelReadingSource(source, { ...options, assertCurrent() { assertOptions(); assertContext(); originalAssert?.(); assertContext(); } }, async (captured, reading) => {
+    if (contextSource) { options.retainCurrent?.(assertContext, `${site}:context`); assertContext(); assertFraming(); }
+    return withModelReadingSource(source, { ...options, assertCurrent() { assertFraming(); assertOptions(); assertContext(); originalAssert?.(); assertContext(); assertFraming(); } }, async (captured, reading) => {
       let assertBackend: (() => void) | undefined;
       const assertCurrent = () => { reading.assertCurrent?.(); assertBackend?.(); };
       const contextJson = contextSource ? JSON.stringify(captured.context) : undefined;
@@ -487,19 +481,35 @@ async function rankDecisionHarnessCatalog<T>(entries: readonly T[], query: strin
         });
     });
   }
-  const batches: string[][] = [];
-  for (const part of parts) {
-    if (part.length > SOURCE_SCREENING_LIMITS.characters) throw new ToolInputProjectionError('held');
-    let batch = batches.at(-1);
-    if (!batch || batch.length >= SOURCE_SCREENING_LIMITS.parts
-      || batch.reduce((total, text) => total + text.length, 0) + part.length > SOURCE_SCREENING_LIMITS.characters) {
-      batch = []; batches.push(batch);
+  let batches: readonly (readonly string[])[] | undefined;
+  if (requirePreservedSource === true) {
+    // Reuse the existing complete JSON framing, without its separate whole-DTO
+    // capture limits. Only representation-fit refusal may select the original
+    // framing, before any source owner or semantic service has been contacted.
+    assertFraming(); const serialized = nativeStringify(source); assertFraming();
+    if (typeof serialized !== 'string') throw new ToolInputProjectionError('held');
+    try { batches = screeningBatches(source, serialized); }
+    catch (error) {
+      if (!(error instanceof ToolInputProjectionError) || error.problem !== 'held') throw error;
     }
-    batch.push(part);
+    assertFraming();
+  }
+  if (!batches) {
+    const compact: string[][] = [];
+    for (const part of parts) {
+      if (part.length > SOURCE_SCREENING_LIMITS.characters) throw new ToolInputProjectionError('held');
+      let batch = compact.at(-1);
+      if (!batch || batch.length >= SOURCE_SCREENING_LIMITS.parts
+        || batch.reduce((total, text) => total + text.length, 0) + part.length > SOURCE_SCREENING_LIMITS.characters) {
+        batch = []; compact.push(batch);
+      }
+      batch.push(part);
+    }
+    batches = compact;
   }
   if (batches.length > SOURCE_SCREENING_LIMITS.sources) throw new ToolInputProjectionError('held');
+  const screeningParts = batches.flat();
   const signal = options.signal, originalAssert = options.assertCurrent, retainCurrent = options.retainCurrent;
-  const requirePreservedSource = options.requirePreservedSource;
   let assertBackend: (() => void) | undefined;
   const handles: ProtectedSource[] = [];
   const receipts: { readonly receipt: SourceScreeningReceipt; readonly projection: readonly string[] }[] = [];
@@ -516,9 +526,10 @@ async function rankDecisionHarnessCatalog<T>(entries: readonly T[], query: strin
   // This guard deliberately survives source cleanup. Outer readers retain it
   // through subsequent enrichment and the final tool publication/release.
   const assertPublicationCurrent = () => {
+    assertFraming();
     if (options.signal !== signal || options.sourceOwner !== owner || options.assertCurrent !== originalAssert
       || options.retainCurrent !== retainCurrent || options.requirePreservedSource !== requirePreservedSource) throw new ToolInputProjectionError('held');
-    signal?.throwIfAborted(); originalAssert?.(); assertOwnerMethods(); assertBackend?.();
+    signal?.throwIfAborted(); originalAssert?.(); assertFraming(); assertOwnerMethods(); assertBackend?.(); assertFraming();
   };
   const assertCurrent = () => {
     assertPublicationCurrent();
@@ -527,7 +538,7 @@ async function rankDecisionHarnessCatalog<T>(entries: readonly T[], query: strin
       const current = ownerMethods.project.call(owner, receipt);
       if (current.length !== projection.length || current.some((part, index) => part !== projection[index])) throw new ToolInputProjectionError('held');
     }
-    signal?.throwIfAborted();
+    signal?.throwIfAborted(); assertFraming();
   };
   try {
     assertCurrent();
@@ -541,17 +552,16 @@ async function rankDecisionHarnessCatalog<T>(entries: readonly T[], query: strin
       assertCurrent();
       const result = await ownerMethods.screen.call(owner, handle, { signal, assertCurrent });
       assertCurrent();
-      const fields = screeningResultFields(result);
-      const receipt: unknown = fields && Object.hasOwn(fields, 'receipt') ? fields.receipt?.value : undefined;
-      if (!fields || !receipt || typeof receipt !== 'object' || nodeTypes.isProxy(receipt)
-        || result.status !== 'settled') throw screeningHeldError(fields);
-      const projection = ownerMethods.project.call(owner, result.receipt);
-      receipts.push({ receipt: result.receipt, projection }); projected.push(...projection);
+      const receipt = requireSettledScreeningReceipt(result);
+      const projection = ownerMethods.project.call(owner, receipt);
+      receipts.push({ receipt, projection }); projected.push(...projection);
     }
     assertCurrent();
-    if (projected.length !== parts.length || (requirePreservedSource && projected.some((part, index) => part !== parts[index]))) throw new ToolInputProjectionError('held');
-    const preserved = prepared && requirePreservedSource;
-    const projectedCatalog = preserved ? prepared.candidates : projected.slice(1).map((part) => {
+    if (projected.length !== screeningParts.length || (requirePreservedSource && projected.some((part, index) => part !== screeningParts[index]))) throw new ToolInputProjectionError('held');
+    const preserved = requirePreservedSource === true;
+    const projectedCatalog = preserved ? prepared?.candidates ?? source.catalog.map(({ id, description, evidence }) => ({
+      name: id, description, evidenceJson: JSON.stringify(evidence ?? null),
+    })) : projected.slice(1).map((part) => {
       let value: unknown;
       try { value = JSON.parse(part); } catch { throw new ToolInputProjectionError('held'); }
       if (!Array.isArray(value) || value.length !== 3 || typeof value[0] !== 'string' || typeof value[1] !== 'string') throw new ToolInputProjectionError('held');
@@ -559,7 +569,7 @@ async function rankDecisionHarnessCatalog<T>(entries: readonly T[], query: strin
       if (typeof evidenceJson !== 'string') throw new ToolInputProjectionError('held');
       return { name: value[0], description: value[1], evidenceJson };
     });
-    return await consumeProtectedCatalog(capturedEntries, preserved ? prepared.ids : source.catalog.map(({ id }) => id), projected[0]!, projectedCatalog, site, decisionName, {
+    return await consumeProtectedCatalog(capturedEntries, prepared?.ids ?? source.catalog.map(({ id }) => id), preserved ? source.query : projected[0]!, projectedCatalog, site, decisionName, {
       signal, assertCurrent, retainCurrent,
       retainBackend(guard) { assertBackend = guard; },
     });

@@ -1021,6 +1021,8 @@ describe('release.yml: by-reference release', () => {
       source: '${{ needs.verify-tag-version.outputs.sha }}',
       'tooling-sha': '${{ github.sha }}',
       'artifact-run-id': "${{ format('{0}', github.run_id) }}",
+      'previous-tag': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'v3.1.2' || '' }}",
+      'previous-source': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'a5ddf1f151466590eaed4ab387b2f95be7112a86' || '' }}",
     });
     const ready: Record<string, JobResult> = { 'verify-tag-version': 'success', 'prepare-native-assets': 'success', 'publish-npm': 'skipped' };
     expect(permitsPublication(acceptance, ready, 'push', 'release', false)).toBe(true);

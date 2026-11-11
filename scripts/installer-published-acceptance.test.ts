@@ -605,11 +605,13 @@ test('both actual publication workflows await one shared four-native-target acce
   const definition = workflow('reusable-published-install-acceptance.yml');
   for (const trigger of ['workflow_call', 'workflow_dispatch']) {
     const inputs = object(object(object(definition.on)[trigger]).inputs);
-    expect(Object.keys(inputs).sort()).toEqual(['source', 'tag', 'tooling-sha']);
-    for (const input of Object.values(inputs).map(object)) {
+    expect(Object.keys(inputs).sort()).toEqual(['previous-source', 'previous-tag', 'source', 'tag', 'tooling-sha']);
+    for (const name of ['source', 'tag', 'tooling-sha']) {
+      const input = object(inputs[name]);
       expect(input).toMatchObject({ required: true, type: 'string' });
       expect(input.default).toBeUndefined();
     }
+    for (const name of ['previous-source', 'previous-tag']) expect(object(inputs[name])).toMatchObject({ required: false, type: 'string', default: '' });
   }
   const native = object(object(definition.jobs)['native-install']);
   const include = object(object(native.strategy).matrix).include;

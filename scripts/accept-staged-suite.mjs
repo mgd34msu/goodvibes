@@ -122,7 +122,7 @@ export async function acceptStagedSuite({ directory, ...input }) {
       const base = `https://github.com/${repository}/releases/download/${tag}/`;
       const wrapper = `#!/bin/sh\nGOODVIBES_INSTALL_SH_LIB=1\n. ${shellQuote(immutable)}\nfetch() {\n  case "$1" in ${shellQuote(base)}*) staged_name=\${1#${shellQuote(base)}} ;; *) fail 'Unadmitted staged release URL' ;; esac\n  case "$staged_name" in ''|*[!A-Za-z0-9_.-]*) fail 'Invalid staged release asset' ;; esac\n  [ ! -f "$2" ] || return 0\n  cp ${shellQuote(admitted.root)}/"$staged_name" "$2"\n}\nmain "$@"\n`;
       writeFileSync(installer, wrapper, { flag: 'wx', mode: 0o600 });
-      if (input.scenario === 'upgrade-v3.1.1') feed = await startStagedReleaseFeed(admitted, tag);
+      if (input.scenario === 'upgrade-v3.1.1' || input.scenario === 'upgrade-previous') feed = await startStagedReleaseFeed(admitted, tag);
       return { readers, installer, published: { url: `git:${source}:scripts/install.sh`, bytes } };
     },
     assertCurrent() {
@@ -147,10 +147,10 @@ export async function acceptStagedSuite({ directory, ...input }) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [tag, source, target, directory, scenario = 'fresh'] = process.argv.slice(2);
+  const [tag, source, target, directory, scenario = 'fresh', previousTag, previousSource] = process.argv.slice(2);
   const controller = new AbortController(), stop = () => controller.abort(new Error('Staged acceptance owner stopped.'));
   process.once('SIGTERM', stop); process.once('SIGINT', stop);
-  acceptStagedSuite({ tag, source, target, directory, scenario, signal: controller.signal })
+  acceptStagedSuite({ tag, source, target, directory, scenario, previousTag, previousSource, signal: controller.signal })
     .catch(() => { console.error('Staged native acceptance failed; publication must remain blocked.'); process.exitCode = 1; })
     .finally(() => { process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop); });
 }

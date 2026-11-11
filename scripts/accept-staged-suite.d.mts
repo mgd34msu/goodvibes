@@ -11,5 +11,5 @@ export function startStagedReleaseFeed(admitted: AdmittedStagedAssets, tag: stri
 }>;
 export function acceptStagedSuite(input: {
   tag: string; source: string; target: string; directory: string;
-  scenario?: 'fresh' | 'upgrade-v3.1.1'; signal?: AbortSignal;
+  scenario?: 'fresh' | 'upgrade-v3.1.1' | 'upgrade-previous'; previousTag?: string; previousSource?: string; signal?: AbortSignal;
 }): Promise<void>;

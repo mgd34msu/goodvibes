@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.1.3] - 2026-11-11
+
+### Fixed
+
+- Pack complete Agent catalog entries into fewer source-screening requests while
+  preserving original query and evidence values, input limits and lifetime checks.
+- Apply the same descriptor-only screening result validation to structured
+  readings and catalog readings, retaining bounded refusal causes and cleanup.
+
 ## [3.1.2] - 2026-11-10
 
 ### Fixed

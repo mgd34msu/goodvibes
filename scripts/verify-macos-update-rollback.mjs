@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { acceptanceFailureRecord, acceptPublishedSuite, readPublishedReaders, waitForAcceptanceReadiness } from './accept-published-suite.mjs';
+import { acceptanceFailureRecord, acceptPublishedSuite, readPublishedReaders, waitForAcceptanceReadiness, verifyCompiledSuiteRollback } from './accept-published-suite.mjs';
 import { startStagedReleaseFeed } from './accept-staged-suite.mjs';
 
 const [source, target, directory] = process.argv.slice(2), commands = ['goodvibes', 'goodvibes-agent', 'goodvibes-daemon'];
@@ -151,29 +151,10 @@ async function verify() {
         await preserve(); return host.servicePid();
       };
       updatedPid = await ready('3.1.3', future.readers); assert.notEqual(updatedPid, initialPid); updated = true;
-      stage = 'complete-cohort-rollback'; checkpoint('fixture.rollback.previous-cohort');
-      const files = [...commands.flatMap(name => [join(bin, name), join(bin, `${name}.readers.json`)]),
-        join(bin, 'lib', `sqlite-vec-${target}`, 'vec0.dylib'), join(bin, 'lib', `sqlite-${target}`, 'libsqlite3.dylib'),
-        join(bin, 'lib', `sqlite-${target}`, 'libsqlite3.dylib.json')];
-      for (const path of files) { const stat = lstatSync(`${path}.previous`); assert.ok(stat.isFile() && !stat.isSymbolicLink()); }
-      for (const path of [join(bin, 'playwright-core'), bundle]) { const stat = lstatSync(`${path}.previous`); assert.ok(stat.isDirectory() && !stat.isSymbolicLink()); }
-      const previousWebui = JSON.parse(readFileSync(join(`${bundle}.previous`, '.goodvibes-release.json'), 'utf8'));
-      assert.equal(previousWebui.version, '3.1.2');
-      checkpoint('fixture.rollback.stop-before-seeded-history'); await host.stopService();
-      const marker = join(data, 'tui', 'control-plane', 'daemon-lifecycle.json');
-      assert.equal(await setting('update.rollbackAfterFailedStarts'), 3);
-      const seed = join(host.root, 'seed-failed-start-history.mjs');
-      const module = pathToFileURL(join(futureCheckout, 'packages/engine/platform/src/platform/daemon/lifecycle-marker.ts')).href;
-      writeFileSync(seed, `import assert from 'node:assert/strict';\nimport {recordDaemonStartAttempt,readLifecycleMarker} from ${JSON.stringify(module)};\nconst path=process.argv[2];\nconst original=readLifecycleMarker(path);\nassert.equal(original?.version,'3.1.3');\nassert.equal(original?.failedStarts,0);\nassert.equal(original?.autoRollbackAt,undefined);\nfor(let i=0;i<3;i++) recordDaemonStartAttempt(path,{version:'3.1.3'});\nassert.equal(readLifecycleMarker(path)?.failedStarts,3);\n`, { flag: 'wx', mode: 0o600 });
-      retain(seed, 16384n); checkpoint('fixture.rollback.seeded-history-writer'); await invoke('bun', [seed, marker]);
-      // Only history is seeded. The actual compiled startup policy decides to
-      // restore, owns all cohort publication/drain, and requests launchd handover.
-      checkpoint('fixture.rollback.native-startup'); await host.startService();
-      rolledBackPid = await ready('3.1.2', baseline.readers); assert.notEqual(rolledBackPid, updatedPid);
-      checkpoint('fixture.rollback.rejected-version');
-      const status = JSON.parse(await invoke(daemon, ['status', '--json']));
-      assert.equal(status.ok, true); assert.equal(status.data.identity.version, '3.1.2');
-      assert.equal(status.data.local.marker.version, '3.1.2'); assert.equal(status.data.local.marker.rejectedVersion, '3.1.3');
+      stage = 'complete-cohort-rollback';
+      ({ rolledBackPid } = await verifyCompiledSuiteRollback({ host, target, source: fixtureSource, sourceRoot: futureCheckout,
+        previousVersion: '3.1.2', currentVersion: '3.1.3', previousReaders: baseline.readers,
+        webuiDirectory: bundle, verifyPreserved: preserve }));
       rolledBack = true; assertCurrent();
     },
   };

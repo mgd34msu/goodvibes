@@ -18,6 +18,7 @@ import { agentResearchSourceOwner } from '../agent/protected-research-report.ts'
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
+import { requireSettledScreeningReceipt } from './agent-harness-screening-result.ts';
 import type { ProviderApiLike, ArtifactListLike } from './agent-harness-model-routing-types.ts';
 import { contextWindowFor, modelRegistryKey } from './agent-harness-model-catalog.ts';
 
@@ -257,7 +258,7 @@ export function captureModelReadingSnapshotGuard(captured: unknown, exactDescrip
 
 /** Whole semantic values are batched, never truncated or split inside strings.
  * Large collections retain their complete key path and every entry. */
-function screeningBatches(captured: unknown, serialized: string): readonly (readonly string[])[] {
+export function screeningBatches(captured: unknown, serialized: string): readonly (readonly string[])[] {
   if (serialized.length > 1_000_000) throw new ToolInputProjectionError('held');
   const parts: string[] = [];
   const visit = (value: unknown, keys: readonly string[]) => {
@@ -389,8 +390,8 @@ export async function withModelReadingSource<T, R>(source: T, options: ModelRead
     for (const batch of batches) { assertCurrent(); handles.push(capture.call(owner, batch)); }
     for (const [index, handle] of handles.entries()) {
       assertCurrent(); const screened = await screen.call(owner, handle, { signal, assertCurrent }); assertCurrent();
-      if (screened.status !== 'settled') throw new ToolInputProjectionError('held');
-      receipts.push({ receipt: screened.receipt, parts: batches[index]! }); assertCurrent();
+      const receipt = requireSettledScreeningReceipt(screened);
+      receipts.push({ receipt, parts: batches[index]! }); assertCurrent();
     }
     const result = await consume(captured, { ...options, assertCurrent, retainCurrent });
     assertCurrent(); return result;

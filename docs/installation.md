@@ -50,6 +50,17 @@ new release after the repository was renamed to `goodvibes`. Their updater
 rejects GitHub's repository-rename redirect before downloading a replacement.
 Waiting for another automatic check does not resolve this error.
 
+Run the public installer once to migrate that installation:
+
+```sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.1.2 sh
+```
+
+This replaces the suite and restarts its managed daemon while preserving saved
+data and settings, including disabled automatic updates. This migration has been
+verified from a running 3.1.1 installation on Linux x64 and ARM64. It requires
+this one-time command; the old updater cannot discover the renamed repository.
+
 The release installer retains the original installer’s command paths and
 `~/.goodvibes` data. It handles upgrades, running daemon/agent restarts, systemd
 user services and launchd agents. Existing custom services are distinguished from

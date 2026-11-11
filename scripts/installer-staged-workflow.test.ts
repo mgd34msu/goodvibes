@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 
 const repo = resolve(import.meta.dir, '..');
 type Step = { name?: string; id?: string; if?: string; uses?: string; run?: string; with?: Record<string, unknown>; env?: Record<string, string>; 'working-directory'?: string };
-type Job = { needs?: string[]; if?: string; permissions?: Record<string, string>; steps: Step[]; strategy?: { 'fail-fast'?: boolean; matrix: { include: Array<{ target: string; runner: string }> } } };
+type Job = { needs?: string[]; if?: string; 'runs-on'?: string; permissions?: Record<string, string>; steps: Step[]; strategy?: { 'fail-fast'?: boolean; matrix: { include: Array<{ target: string; runner: string }> } } };
 type Workflow = { on: Record<string, { inputs: Record<string, { required: boolean; type: string; default?: unknown }> }>; jobs: Record<string, Job>; permissions: Record<string, string> };
 const load = (name: string) => Bun.YAML.parse(readFileSync(join(repo, '.github/workflows', name), 'utf8')) as Workflow;
 const staged = load('reusable-staged-install-acceptance.yml');
@@ -58,11 +58,14 @@ test('manual and reusable staged acceptance require immutable source/tooling and
 test('manual macOS diagnostics reuse the existing staged artifact without staging or qualifying publication', () => {
   const diagnostic = load('diagnose-staged-macos.yml');
   expect(Object.keys(diagnostic.on)).toEqual(['workflow_dispatch']);
-  expect(Object.keys(diagnostic.on.workflow_dispatch!.inputs).sort()).toEqual(['artifact-run-id', 'source', 'tag', 'tooling-sha']);
-  for (const input of Object.values(diagnostic.on.workflow_dispatch!.inputs)) expect(input).toMatchObject({ required: true, type: 'string' });
+  expect(Object.keys(diagnostic.on.workflow_dispatch!.inputs).sort()).toEqual(['artifact-run-id', 'compare-authenticated', 'mode', 'source', 'tag', 'tooling-sha']);
+  expect(diagnostic.on.workflow_dispatch!.inputs['tooling-sha']).toMatchObject({ required: true, type: 'string' });
+  for (const name of ['tag', 'source', 'artifact-run-id']) expect(diagnostic.on.workflow_dispatch!.inputs[name]).toMatchObject({ required: false, type: 'string' });
+  expect(diagnostic.on.workflow_dispatch!.inputs.mode).toMatchObject({ required: false, type: 'choice', default: 'native' });
   expect(diagnostic.permissions).toEqual({ contents: 'read', actions: 'read' });
-  expect(Object.keys(diagnostic.jobs)).toEqual(['macos-diagnostics']);
+  expect(Object.keys(diagnostic.jobs)).toEqual(['release-metadata-diagnostics', 'macos-diagnostics']);
   const job = diagnostic.jobs['macos-diagnostics']!;
+  expect(job.if).toBe("inputs.mode != 'release-metadata'");
   expect(job.strategy?.matrix.include).toEqual([{ target: 'darwin-x64', runner: 'macos-15-intel' }, { target: 'darwin-arm64', runner: 'macos-15' }]);
   expect(job.strategy?.['fail-fast']).toBe(false);
   expect(job.steps[0]?.with).toEqual({ ref: '${{ inputs.tooling-sha }}', 'fetch-depth': 0 });
@@ -85,6 +88,22 @@ test('manual macOS diagnostics reuse the existing staged artifact without stagin
   expect(native.with?.name).toBe('diagnostic-staged-macos-native-${{ matrix.target }}');
   expect(native.with?.path).toBe('${{ runner.temp }}/goodvibes-macos-crash-summary.json\n${{ runner.temp }}/goodvibes-published-*/native-diagnostics.json\n');
   expect(job.steps.filter(step => step.run).map(step => step.run).join('\n')).not.toMatch(/sha256sums|--out|\bbun\b|\bbuild\b|gh release|git tag|npm publish/);
+});
+
+test('metadata-only macOS diagnostics make fixed HTTP observations without binary or lifecycle work', () => {
+  const workflow = load('diagnose-staged-macos.yml');
+  const job = workflow.jobs['release-metadata-diagnostics']!;
+  expect(job.if).toBe("inputs.mode == 'release-metadata'");
+  expect(job['runs-on']).toBe('macos-15');
+  expect(job.strategy).toBeUndefined();
+  const invoke = job.steps.find(step => step.name === 'Observe fixed public release metadata response')!;
+  expect(invoke.run).toBe('node scripts/diagnose-github-release-http.mjs "$RUNNER_TEMP/github-release-http-diagnostics.json"');
+  expect(invoke.env).toEqual({ GITHUB_TOKEN: "${{ inputs.compare-authenticated && secrets.GITHUB_TOKEN || '' }}" });
+  expect(job.steps.some(step => String(step.uses).startsWith('actions/download-artifact@'))).toBe(false);
+  expect(job.steps.map(step => step.run ?? '').join('\n')).not.toMatch(/accept-staged|accept-published|install\.sh|launchctl|\bbun\b|\bbuild\b|gh release|git tag/);
+  const upload = job.steps.find(step => String(step.uses).startsWith('actions/upload-artifact@'))!;
+  expect(upload.if).toBe('always()');
+  expect(upload.with).toMatchObject({ path: '${{ runner.temp }}/github-release-http-diagnostics.json', 'if-no-files-found': 'error' });
 });
 
 test('the actual macOS diagnostic guard refuses mutable inputs and invalid version or run identifiers', () => {

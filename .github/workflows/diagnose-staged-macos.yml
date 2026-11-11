@@ -1,17 +1,30 @@
 name: Diagnose staged macOS suite
 
-# Manual investigation of an existing staged artifact. These two jobs are not
-# the six-run prepublication gate and cannot publish or replace release bytes.
+# Manual investigation of an existing staged artifact, or metadata-only HTTP
+# observations. Neither mode qualifies publication or replaces release bytes.
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: Native staged lifecycle or fixed public release metadata only.
+        required: false
+        default: native
+        type: choice
+        options:
+          - native
+          - release-metadata
+      compare-authenticated:
+        description: Compare the metadata request using the read-only workflow token.
+        required: false
+        default: true
+        type: boolean
       tag:
         description: Version label recorded by the existing staged payloads.
-        required: true
+        required: false
         type: string
       source:
         description: Full original payload commit; its installer is read unchanged.
-        required: true
+        required: false
         type: string
       tooling-sha:
         description: Full commit containing the diagnostic acceptance tooling.
@@ -19,7 +32,7 @@ on:
         type: string
       artifact-run-id:
         description: Run already containing the complete staged-release-assets artifact, including its original checksum manifest.
-        required: true
+        required: false
         type: string
 
 permissions:
@@ -27,7 +40,39 @@ permissions:
   actions: read
 
 jobs:
+  release-metadata-diagnostics:
+    if: inputs.mode == 'release-metadata'
+    runs-on: macos-15
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.tooling-sha }}
+      - name: Verify immutable metadata diagnostic tooling
+        env:
+          TOOLING_SHA: ${{ inputs.tooling-sha }}
+        run: |
+          set -euo pipefail
+          [[ "$TOOLING_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$TOOLING_SHA"
+          test -f scripts/diagnose-github-release-http.mjs
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: '22'
+      - name: Observe fixed public release metadata response
+        env:
+          GITHUB_TOKEN: ${{ inputs.compare-authenticated && secrets.GITHUB_TOKEN || '' }}
+        run: node scripts/diagnose-github-release-http.mjs "$RUNNER_TEMP/github-release-http-diagnostics.json"
+      - name: Preserve bounded metadata diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: diagnostic-github-release-http-macos-arm64
+          path: ${{ runner.temp }}/github-release-http-diagnostics.json
+          if-no-files-found: error
+          retention-days: 7
   macos-diagnostics:
+    if: inputs.mode != 'release-metadata'
     strategy:
       fail-fast: false
       matrix:

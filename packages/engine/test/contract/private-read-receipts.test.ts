@@ -11,6 +11,7 @@ import { findCardNumberShapes } from '../../platform/src/platform/security/card-
 import { buildUnitBrief } from '../../platform/src/platform/contract/brief.js';
 import { makeContract, makeCriterion, makeUnit } from './fixtures.js';
 import { shapeOf } from './plan-support.js';
+import { unitCheck } from './cli-support.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -139,8 +140,8 @@ test('a card-shaped native Git identity survives the actual repair brief without
   const head = 'a'.repeat(12) + '4111111111111111' + 'b'.repeat(12);
   expect(head).toMatch(/^[0-9a-f]{40}$/);
   expect(findCardNumberShapes(head)).toHaveLength(1);
-  const source = makeUnit({ ...f.contract.units[0]!, role: 'research',
-    checks: f.contract.units[0]!.checks.map(check => ({ ...check, decisionIds: [] })) });
+  const source = makeUnit({ id: 'u1', status: 'passed', files: [], role: 'research', readEvidence: f.observations,
+    checks: [{ ...unitCheck('u1.k3'), result: 'pass' }] });
   const archived = makeUnit({ id: 'u2', status: 'passed', files: [f.relativePath], baseline: { head, dirty: {} } });
   const repair = makeUnit({ id: 'u3', role: 'research', dependsOn: ['u2'],
     criteria: [makeCriterion({ id: 'u3.c1', origin: 'fix', serves: ['c1'] })] });

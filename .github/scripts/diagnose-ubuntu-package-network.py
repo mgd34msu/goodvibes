@@ -15,11 +15,20 @@ import tempfile
 import time
 from pathlib import Path
 
-HOSTS = ("azure.archive.ubuntu.com", "archive.ubuntu.com", "security.ubuntu.com",
-         "ports.ubuntu.com", "packages.microsoft.com", "github.com")
+CANONICAL_HOSTS = ("azure.archive.ubuntu.com", "archive.ubuntu.com", "security.ubuntu.com",
+                   "ports.ubuntu.com", "packages.microsoft.com", "github.com")
+HOSTS = CANONICAL_HOSTS + ("mirrors.edge.kernel.org", "mirrors.mit.edu")
+SOURCES = {"canonical": {"amd64": "https://archive.ubuntu.com/ubuntu", "arm64": "https://ports.ubuntu.com/ubuntu-ports"},
+           "independent": {"amd64": "https://mirrors.edge.kernel.org/ubuntu", "arm64": "https://mirrors.mit.edu/ubuntu-ports"}}
 PROXY_NAMES = ("http_proxy", "https_proxy", "all_proxy", "no_proxy",
                "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "APT_CONFIG")
 ROLES = ("runner", "root", "apt")
+
+
+def archive_source(arch, mode):
+    if mode not in SOURCES or arch not in SOURCES[mode]:
+        raise ValueError()
+    return SOURCES[mode][arch]
 
 
 def command(args, seconds=6, role="runner"):
@@ -69,6 +78,10 @@ def main(report):
     if status["exitCode"] != 0 or arch not in ("amd64", "arm64") or arch != os.environ.get("DIAGNOSTIC_ARCH"):
         raise ValueError()
     report["architecture"] = arch
+    mode = os.environ.get("DIAGNOSTIC_MIRROR_MODE") or "canonical"
+    uri = archive_source(arch, mode)
+    report["mirrorMode"] = mode
+    dns_hosts = CANONICAL_HOSTS if mode == "canonical" else (uri.split("/")[2], "packages.microsoft.com", "github.com")
     resolver = Path("/etc/resolv.conf").read_text()
     hosts = next((line.split("#", 1)[0].split(":", 1)[1].split() for line in Path("/etc/nsswitch.conf").read_text().splitlines()
                   if line.startswith("hosts:")), [])
@@ -91,7 +104,7 @@ def main(report):
     report["stage"] = "dns"
     report["dns"] = []
     for role in ROLES:
-        for host in HOSTS:
+        for host in dns_hosts:
             status, output = command(["getent", "ahosts", host], role=role)
             addresses = set()
             for line in output.splitlines():
@@ -110,10 +123,14 @@ def main(report):
                  ("ports-https", "https://ports.ubuntu.com/ubuntu-ports/dists/jammy/InRelease"),
                  ("microsoft-control", "https://packages.microsoft.com/ubuntu/22.04/prod/dists/jammy/InRelease"),
                  ("github-control", "https://github.com/robots.txt")]
+    if mode == "independent":
+        # The canonical-host failures are already measured separately. Probe
+        # only this architecture's static mirror plus the unchanged controls.
+        endpoints = [("independent-mirror-https", uri + "/dists/jammy/InRelease")] + endpoints[-2:]
     report["http"] = []
     for role in ("runner", "root"):
         for name, url in endpoints:
-            if role == "root" and name not in ("archive-https", "ports-https", "microsoft-control"):
+            if role == "root" and name not in ("archive-https", "ports-https", "independent-mirror-https", "microsoft-control"):
                 continue
             status, output = command(["curl", "--silent", "--show-error", "--stderr", "/dev/null", "--head",
                                       "--connect-timeout", "5", "--max-time", "10", "--output", "/dev/null",
@@ -132,7 +149,6 @@ def main(report):
     keyring = "/usr/share/keyrings/ubuntu-archive-keyring.gpg"
     if not Path(keyring).is_file():
         raise ValueError()
-    uri = "https://archive.ubuntu.com/ubuntu" if arch == "amd64" else "https://ports.ubuntu.com/ubuntu-ports"
     report["apt"] = {"source": uri, "suites": ["jammy", "jammy-updates", "jammy-security"],
                      "component": "main", "signedBy": "installed-ubuntu-archive-keyring", "observations": []}
     with tempfile.TemporaryDirectory(prefix="goodvibes-apt-diagnostic-", dir=os.environ["RUNNER_TEMP"]) as root:

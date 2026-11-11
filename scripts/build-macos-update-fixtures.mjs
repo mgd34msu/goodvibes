@@ -55,15 +55,27 @@ try {
       writeFileSync(lockPath, workspaces.replaceAll('"version": "3.1.2"', '"version": "3.1.3"') + lock.slice(split));
       const floorSource = 'packages/engine/platform/src/platform/runtime/native-reader-compatibility.ts';
       assert.ok(readFileSync(join(checkout, floorSource)).equals(readFileSync(join(original, floorSource))), 'Version fixtures must preserve real format reader floors.');
-      await run('git', ['add', 'package.json', 'bun.lock', 'packages', 'products'], checkout);
+    }
+    stage = `dependencies-${version}`;
+    await run('bun', ['install', '--frozen-lockfile'], checkout);
+    stage = `engine-${version}`; await run('bun', ['packages/engine/scripts/build.ts'], checkout);
+    if (version === '3.1.3') {
+      // Native TUI prebuild exports the engine's versioned operator contract;
+      // WebUI preparation updates checked-in snapshots and versioned icon URLs.
+      // Generate from this fixture's actual built engine before committing, so
+      // the ordinary publisher can enforce its unchanged clean-source guard.
+      stage = `generated-surfaces-${version}`;
+      await run('bun', ['run', 'prepare:build'], join(checkout, 'products/tui'));
+      await run('bun', ['scripts/prebuild.ts'], join(checkout, 'products/agent'));
+      await run('bun', ['scripts/check-version.ts'], join(checkout, 'products/daemon'));
+      await run('bun', ['scripts/release-prepare.ts', '--no-bump'], join(checkout, 'products/webui'));
+      await run('git', ['add', '--update', '--', 'package.json', 'bun.lock', 'packages', 'products'], checkout);
       await run('git', ['-c', 'user.name=Unpublished native fixture', '-c', 'user.email=fixture@invalid.local',
         '-c', 'commit.gpgsign=false', 'commit', '-m', 'Unpublished 3.1.3 native lifecycle version fixture'], checkout);
     }
     const fixtureSource = await run('git', ['rev-parse', 'HEAD'], checkout); assert.match(fixtureSource, /^[a-f0-9]{40}$/);
     assert.equal(await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], checkout), 'HEAD');
-    stage = `dependencies-${version}`;
-    await run('bun', ['install', '--frozen-lockfile'], checkout);
-    stage = `engine-${version}`; await run('bun', ['packages/engine/scripts/build.ts'], checkout);
+    await run('git', ['diff', '--exit-code', 'HEAD'], checkout);
     stage = `native-${version}`;
     await run('bun', ['.github/scripts/package-suite-release.mjs', target, assets, `v${version}`, '--native-members-only'], checkout);
     const publisher = json(join(assets, `suite-release-source-${target}.json`));

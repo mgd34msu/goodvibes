@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
 import { tryAcquireArtifactPublication } from '../platform/src/platform/artifacts/store.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { KnowledgeSourceQualityHeldError } from '../platform/src/platform/knowledge/source-quality.js';
 import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.js';
 import { upsertObservedKnowledgeNode } from '../platform/src/platform/knowledge/store-node-observation.js';
 import { materializeGeneratedKnowledgeProjection, type GeneratedKnowledgeProjectionInput } from '../platform/src/platform/knowledge/generated-projections.js';
@@ -262,3 +263,36 @@ test('a failed fresh source commit releases its exact artifact lease before real
   expect(item.store.getSource(item.first.source.id)).toBe(item.first.source);
   expect(item.artifactStore.get(item.first.artifact.id)).not.toBeNull();
 });
+
+
+for (const mode of ['ignored', 'deferred', 'swallowed-failure', 'rejected-return', 'nonvoid-return', 'repeated'] as const) {
+  test(`a generated projection refuses a borrowed frame that ${mode}`, async () => {
+    const item = await fixture();
+    const failure = new KnowledgeSourceQualityHeldError('stale');
+    let callbacks = 0;
+    const delayed: (() => undefined)[] = [];
+    const authority = () => { callbacks++; if (mode === 'swallowed-failure') throw failure; };
+    const framing = spyOn(item.store, 'assertRecordSnapshotFrame').mockImplementation((callback => {
+      if (mode === 'ignored') { delayed.push(callback); return undefined; }
+      if (mode === 'deferred') return Promise.resolve().then(callback);
+      if (mode === 'swallowed-failure') { try { callback(); } catch {} return undefined; }
+      callback();
+      if (mode === 'rejected-return') return Promise.reject(new Error('Borrowed asynchronous frame failed'));
+      if (mode === 'nonvoid-return') return 'Unusable frame result';
+      try { callback(); } catch {} return undefined;
+    }) as typeof item.store.assertRecordSnapshotFrame);
+    const creating = spyOn(item.artifactStore, 'createForPublication');
+    const before = JSON.stringify({ sources: item.store.listSources(), nodes: item.store.listNodes(), edges: item.store.listEdges() });
+    try {
+      const pending = materializeGeneratedKnowledgeProjection({ ...item.input, markdown: '# Never publish', assertCurrent: authority });
+      if (mode === 'swallowed-failure') await expect(pending).rejects.toBe(failure);
+      else await expect(pending).rejects.toMatchObject({ reason: 'stale' });
+      for (const callback of delayed) callback();
+      await Promise.resolve();
+      expect(callbacks).toBe(mode === 'ignored' || mode === 'deferred' ? 0 : 1);
+      expect(creating).not.toHaveBeenCalled();
+      expect(JSON.stringify({ sources: item.store.listSources(), nodes: item.store.listNodes(), edges: item.store.listEdges() })).toBe(before);
+      expect(item.artifactStore.list().map(artifact => artifact.id)).toEqual([item.first.artifact.id]);
+    } finally { creating.mockRestore(); framing.mockRestore(); }
+  });
+}

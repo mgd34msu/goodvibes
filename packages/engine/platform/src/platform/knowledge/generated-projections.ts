@@ -146,14 +146,30 @@ async function materializeProjectionOwned(
     // Authority, graph and source-identity guards often consume the same rows.
     // Keep every original assertion, sharing one fresh native read image only
     // for this synchronous boundary. The next await or write gets a new frame.
-    try { store.assertRecordSnapshotFrame(() => {
-      checkOwner();
-      if (authority && (input.store.getSource(input.sourceId) !== existing || !originalSource.matches(input.store.getSource(input.sourceId))
-        || readLinked() !== originalLinked || !linkedObservation.matches(readLinked()))) stale();
-    }); } catch (error) {
+    let accepting = true, invoked = false, completed = false, repeated = false, failed = false;
+    let originalFailure: unknown, framed: unknown;
+    const rethrow = (error: unknown): never => {
       if (error instanceof KnowledgeRecordAdmissionHeldError) stale();
       throw error;
-    }
+    };
+    try { framed = store.assertRecordSnapshotFrame(() => {
+      // A borrowed frame cannot defer the original assertions beyond this
+      // synchronous boundary, suppress their failure, or invoke them twice.
+      if (!accepting) return;
+      if (invoked) { repeated = true; stale(); }
+      invoked = true;
+      try {
+        checkOwner();
+        if (authority && (input.store.getSource(input.sourceId) !== existing || !originalSource.matches(input.store.getSource(input.sourceId))
+          || readLinked() !== originalLinked || !linkedObservation.matches(readLinked()))) stale();
+        completed = true;
+      } catch (error) { failed = true; originalFailure = error; throw error; }
+    }); } catch (error) {
+      rethrow(failed ? originalFailure : error);
+    } finally { accepting = false; }
+    if (framed !== undefined) drainOwned(framed);
+    if (failed) rethrow(originalFailure);
+    if (!completed || repeated || framed !== undefined) stale();
   };
   check();
   const stagedTarget = target?.kind === 'node' && graph?.nodes.some(node => node.id === target.id);

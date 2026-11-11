@@ -61,7 +61,7 @@ describe('CI prerequisite acquisition', () => {
   for (const kind of ['browser', 'containment'] as const) {
     const scenarios = kind === 'browser'
       ? ['ready', 'missing', 'download-fails', 'download-hangs', 'config-fails', 'config-override', 'deps-fails', 'deps-hangs', 'probe-timeout', 'probe-hangs', 'verify-fails', 'verify-hangs']
-      : ['ready', 'missing', 'cached-fails', 'cached-hangs', 'update-fails', 'update-hangs', 'deps-fails', 'deps-hangs', 'probe-hangs', 'verify-fails', 'verify-hangs', 'pty-fails'];
+      : ['ready', 'missing', 'cached-fails', 'cached-hangs', 'update-fails', 'update-hangs', 'deps-fails', 'deps-hangs', 'python-missing', 'probe-hangs', 'verify-fails', 'verify-hangs', 'pty-fails'];
     for (const scenario of scenarios) {
       test.skipIf(process.platform !== 'linux')(`${kind}: ${scenario} is bounded and fails closed`, async () => {
         const fixture = mkdtempSync(join(tmpdir(), 'ci-prerequisite-'));
@@ -151,11 +151,35 @@ describe('CI prerequisite acquisition', () => {
               : > "$FIXTURE/cache-attempt"
             fi
             [[ "\${!#}" != update ]] || OP=update
-            [[ "$*" == *'Acquire::Retries=1'* && "$*" == *'Acquire::http::Timeout=15'* && "$*" == *'Acquire::https::Timeout=15'* ]]
+            if [[ "$OP" == cached ]]; then
+              [[ "$*" == *'Acquire::Retries=1'* && "$*" == *'Acquire::http::Timeout=15'* && "$*" == *'Acquire::https::Timeout=15'* ]]
+            else
+              [[ "$*" == *'Acquire::Retries=0'* && "$*" == *'Acquire::http::Timeout=8'* && "$*" == *'Acquire::https::Timeout=8'* ]]
+              [[ "$*" == *'Acquire::AllowInsecureRepositories=false'* && "$*" == *'Acquire::AllowDowngradeToInsecureRepositories=false'* && "$*" == *'APT::Get::AllowUnauthenticated=false'* ]]
+            fi
             if [[ "$OP" == update ]]; then [[ "$*" == *'--error-on=any update' ]]; fi
             ${operation}
-            if [[ "$OP" == cached && ( "$SCENARIO" == update-* || "$SCENARIO" == deps-* ) ]]; then exit 42; fi
+            if [[ "$OP" == cached && ( "$SCENARIO" == update-* || "$SCENARIO" == deps-* || "$SCENARIO" == python-missing ) ]]; then exit 42; fi
             [[ "$OP" == update ]] || : > "$FIXTURE/installed"
+          `);
+          if (kind === 'containment' && scenario !== 'python-missing') executable('python3', `
+            [[ "$#" == 3 && "$1" == .github/scripts/ubuntu22_sandbox_prerequisites.py && "$2" == bubblewrap && "$3" == util-linux ]]
+            printf 'helper\\n' >> "$LOG"
+            # Only this callable boundary is simulated here. The root helper
+            # protocol tests execute its real CLI/security/source admission.
+            helper_options=(-o Acquire::Retries=0 -o Acquire::http::Timeout=8 -o Acquire::https::Timeout=8
+              -o Acquire::AllowInsecureRepositories=false -o Acquire::AllowDowngradeToInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false)
+            helper_phase() {
+              local phase_result
+              set +e
+              sudo -n timeout --signal=KILL 90s apt-get "\${helper_options[@]}" "$@"
+              phase_result=$?
+              set -e
+              printf 'helper-result %s\\n' "$phase_result" >> "$LOG"
+              [[ "$phase_result" == 0 ]] || exit 1
+            }
+            helper_phase --error-on=any update
+            helper_phase install --yes --no-install-recommends bubblewrap util-linux
           `);
           for (const command of ['cat', 'rm', 'mktemp', 'env']) executable(command, `exec /usr/bin/${command} "$@"`);
           executable('realpath', 'printf "/fixture/playwright-cli.js\\n"');
@@ -167,10 +191,11 @@ describe('CI prerequisite acquisition', () => {
           const successful = kind === 'browser'
             ? ['ready', 'missing'].includes(scenario)
             : ['ready', 'missing', 'cached-fails', 'cached-hangs', 'probe-hangs'].includes(scenario);
-          const failure = scenario === 'config-override' ? 1 : scenario === 'probe-timeout' ? 124 : scenario.endsWith('-hangs') ? 137 : 42;
+          const failure = scenario === 'python-missing' ? 127 : kind === 'containment' && /^(?:update|deps)-/.test(scenario) ? 1
+            : scenario === 'config-override' ? 1 : scenario === 'probe-timeout' ? 124 : scenario.endsWith('-hangs') ? 137 : 42;
           expect(result.status, result.stderr).toBe(successful ? 0 : failure);
           const commands = readFileSync(log, 'utf8').trim().split('\n');
-          const operations = commands.filter((line) => !line.startsWith('timeout '));
+          const operations = commands.filter((line) => !line.startsWith('timeout ') && !line.startsWith('helper-result '));
           const expected: string[] = [];
           if (kind === 'browser') {
             expected.push('download');
@@ -191,16 +216,26 @@ describe('CI prerequisite acquisition', () => {
               expected.push('cached');
               const refresh = ['cached-', 'update-', 'deps-'].some((prefix) => scenario.startsWith(prefix));
               if (refresh) {
-                expected.push('update');
+                expected.push('helper', 'update');
                 if (!scenario.startsWith('update-')) expected.push('deps');
               }
-              if (!scenario.startsWith('update-') && !scenario.startsWith('deps-')) {
+              if (scenario !== 'python-missing' && !scenario.startsWith('update-') && !scenario.startsWith('deps-')) {
                 expected.push('verify');
                 if (!scenario.startsWith('verify-')) expected.push('pty');
               }
             }
           }
           expect(operations).toEqual(expected);
+          if (kind === 'containment') {
+            const helperResults = commands.filter(line => line.startsWith('helper-result ')).map(line => Number(line.slice('helper-result '.length)));
+            const phaseResults: number[] = [];
+            if (['cached-', 'update-', 'deps-'].some(prefix => scenario.startsWith(prefix))) {
+              phaseResults.push(scenario === 'update-fails' ? 42 : scenario === 'update-hangs' ? 137 : 0);
+              if (!scenario.startsWith('update-')) phaseResults.push(scenario === 'deps-fails' ? 42 : scenario === 'deps-hangs' ? 137 : 0);
+            }
+            expect(helperResults).toEqual(phaseResults);
+            if (scenario === 'python-missing') expect(result.stderr).toContain('python3: command not found');
+          }
           if (kind === 'browser' && existsSync(`${log}.config`)) {
             const config = readFileSync(`${log}.config`, 'utf8');
             expect(config).toContain('APT::Update::Error-Mode "any";');

@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import { writeSync } from 'node:fs';
+import { nativeStartupFailureLine, type NativeStartupStage } from './native-startup-failure.js';
 import { initializeOriginalDarwinDaemonInstallation } from '../config/original-darwin-installation.js';
 import { initializeDaemonNativeSqlite } from './native-sqlite-runtime.js';
 
@@ -9,10 +11,13 @@ if (args[0] === 'check-install-reader') {
   const { runInstallReaderCheck } = await import('./check-install-reader.js');
   process.exitCode = runInstallReaderCheck(args.slice(1));
 } else {
+  let nativeStage: NativeStartupStage = 'sqlite';
   try {
     const sqlite = initializeDaemonNativeSqlite();
+    nativeStage = 'darwin-original';
     initializeOriginalDarwinDaemonInstallation(sqlite);
-  } catch {
+  } catch (error) {
+    writeSync(2, `${nativeStartupFailureLine(nativeStage, error)}\n`);
     throw new Error('Native daemon startup could not verify its installation. Repair using the released suite installer: curl -fsSL https://goodvibes.sh/install.sh | sh . The installer preserves existing application data.');
   }
   // Service imports occur only after the compiled Darwin database owner is selected.

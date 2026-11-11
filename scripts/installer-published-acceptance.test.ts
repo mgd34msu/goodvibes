@@ -146,6 +146,26 @@ test('native daemon diagnostics cover version, config and reader commands withou
   }
 });
 
+test('native failure receipts retain the original whitelisted startup guard before a later successful probe', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-first-startup-')); roots.push(root);
+  const invoke = nativeDaemonChild(root), secret = 'first-native-startup-private-091c';
+  const result = await invoke(`[goodvibes-daemon:native-startup-failure] sqlite SQLITE_ADMISSION_CHANGED\nprivate cause ${secret}\n`, '', 1, true, ['--version']);
+  expect(result.code).toBe(1); expect(result.nativeDaemonFailure).toBe('native-startup-repair');
+  expect(result.nativeStartupFailure).toEqual({ stage: 'sqlite', code: 'SQLITE_ADMISSION_CHANGED' });
+  const record = acceptanceFailureRecord({ stage: 'verifyInstalled', check: 'installed.goodvibes-daemon.version',
+    exitCode: result.code, nativeDaemonFailure: result.nativeDaemonFailure, nativeStartupFailure: result.nativeStartupFailure }, new Error(secret));
+  expect(record.nativeStartupFailure).toEqual({ stage: 'sqlite', code: 'SQLITE_ADMISSION_CHANGED' });
+  expect(JSON.stringify(record)).not.toContain(secret);
+  const success = await invoke('', 'goodvibes-daemon 3.1.2\n', 0, true, ['--version']);
+  expect(success).not.toHaveProperty('nativeStartupFailure');
+  expect(record.nativeStartupFailure).toEqual({ stage: 'sqlite', code: 'SQLITE_ADMISSION_CHANGED' });
+  const injected = await invoke(JSON.stringify({ ok: false, error: secret,
+    cause: '[goodvibes-daemon:native-startup-failure] sqlite SQLITE_ADMISSION_CHANGED' }));
+  expect(injected).not.toHaveProperty('nativeStartupFailure');
+  const unknown = await invoke(`[goodvibes-daemon:native-startup-failure] sqlite ${secret}\n`, '', 1, true, ['--version']);
+  expect(unknown).not.toHaveProperty('nativeStartupFailure');
+});
+
 test('native diagnostic opt-in requires the installed daemon basename', async () => {
   await expect(runOwnedCommand(process.execPath, ['--version'], { nativeDaemonDiagnostics: true }))
     .rejects.toThrow('Native daemon diagnostics require the installed daemon executable basename.');

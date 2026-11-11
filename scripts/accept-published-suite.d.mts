@@ -29,13 +29,23 @@ export function assertHostedContext(input: HostedContext): void;
 export function runAcceptanceSteps(host: AcceptanceSteps): Promise<void>;
 export type NativeDaemonFailure = 'token-missing' | 'invalid-port' | 'unreachable' | 'auth-refused' | 'route-missing'
   | 'unreadable-reply' | 'cli-command-caught' | 'native-startup-repair' | 'unknown';
+export interface NativeStartupFailure {
+  stage: 'sqlite' | 'darwin-original';
+  code: 'SQLITE_ARCH_UNSUPPORTED' | 'SQLITE_ARCH_MISMATCH' | 'SQLITE_PARENT_TYPE' | 'SQLITE_FILE_MODE' | 'SQLITE_SIZE_BOUND'
+    | 'SQLITE_READ_CHANGED' | 'SQLITE_LIFETIME_ASYNC' | 'SQLITE_RUNTIME_UNDECLARED' | 'SQLITE_COMPILED_OWNER' | 'SQLITE_BYTES_MISMATCH'
+    | 'SQLITE_PROVENANCE_MISMATCH' | 'SQLITE_ADMISSION_CHANGED' | 'SQLITE_LOADER_REFUSED' | 'SQLITE_SOURCE_CHANGED'
+    | 'DARWIN_SQLITE_OWNER' | 'DARWIN_TARGET' | 'DARWIN_IO_OBSERVATIONS' | 'DARWIN_SOURCE_CHANGED'
+    | 'ENOENT' | 'ENOTDIR' | 'EISDIR' | 'EACCES' | 'EPERM' | 'EBADF' | 'EIO' | 'ELOOP' | 'ERR_DLOPEN_FAILED' | 'METADATA_JSON' | 'UNKNOWN';
+}
 export interface AcceptanceFailureRecord {
   stage: string; check?: string; command?: string; exitCode?: number; exitSignal?: NodeJS.Signals; diagnostics?: readonly string[];
   nativeDaemonFailure?: NativeDaemonFailure;
+  nativeStartupFailure?: NativeStartupFailure;
   error: { name: string; code?: string }; lastProbeError?: { name: string; code?: string };
 }
 export function acceptanceFailureRecord(evidence: {
-  stage: string; check?: string; command?: string; exitCode?: number; exitSignal?: NodeJS.Signals; diagnostics?: readonly string[]; nativeDaemonFailure?: NativeDaemonFailure;
+  stage: string; check?: string; command?: string; exitCode?: number; exitSignal?: NodeJS.Signals; diagnostics?: readonly string[];
+  nativeDaemonFailure?: NativeDaemonFailure; nativeStartupFailure?: NativeStartupFailure;
 }, error: unknown): AcceptanceFailureRecord;
 export function waitForAcceptanceReadiness(serviceReady: () => Promise<void>, verifyReady: () => Promise<void>,
   options?: { signal?: AbortSignal; timeoutMs?: number; intervalMs?: number }): Promise<void>;
@@ -50,7 +60,7 @@ export function finishAcceptance(options: {
 }): Promise<void>;
 export function runOwnedCommand(command: string, args: readonly string[], options?: SpawnOptionsWithoutStdio & {
   signal?: AbortSignal; timeoutMs?: number; installerSource?: string; installerSourcePath?: string; nativeDaemonDiagnostics?: boolean;
-}): Promise<{ code: number; stdout: string; exitSignal?: NodeJS.Signals; diagnostics?: string[]; nativeDaemonFailure?: NativeDaemonFailure }>;
+}): Promise<{ code: number; stdout: string; exitSignal?: NodeJS.Signals; diagnostics?: string[]; nativeDaemonFailure?: NativeDaemonFailure; nativeStartupFailure?: NativeStartupFailure }>;
 export interface AcceptanceDelivery {
   installerSource?: string; installerSourcePath?: string; rollbackSourceRoot?: string;
   admit(input: { tag: string; source: string; target: string; root: string; signal?: AbortSignal }): Promise<{

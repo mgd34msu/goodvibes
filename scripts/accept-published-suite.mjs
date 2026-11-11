@@ -22,6 +22,17 @@ const safeError = error => ({ name: safeErrorNames.has(error?.name) ? error.name
 const safeExitSignal = signal => typeof signal === 'string' && Object.hasOwn(osConstants.signals, signal) ? signal : undefined;
 const nativeDaemonFailureKinds = new Set(['token-missing', 'invalid-port', 'unreachable', 'auth-refused', 'route-missing',
   'unreadable-reply', 'cli-command-caught', 'native-startup-repair', 'unknown']);
+const nativeStartupFailureCodes = new Set(['SQLITE_ARCH_UNSUPPORTED', 'SQLITE_ARCH_MISMATCH', 'SQLITE_PARENT_TYPE', 'SQLITE_FILE_MODE',
+  'SQLITE_SIZE_BOUND', 'SQLITE_READ_CHANGED', 'SQLITE_LIFETIME_ASYNC', 'SQLITE_RUNTIME_UNDECLARED', 'SQLITE_COMPILED_OWNER',
+  'SQLITE_BYTES_MISMATCH', 'SQLITE_PROVENANCE_MISMATCH', 'SQLITE_ADMISSION_CHANGED', 'SQLITE_LOADER_REFUSED', 'SQLITE_SOURCE_CHANGED',
+  'DARWIN_SQLITE_OWNER', 'DARWIN_TARGET', 'DARWIN_IO_OBSERVATIONS', 'DARWIN_SOURCE_CHANGED',
+  'ENOENT', 'ENOTDIR', 'EISDIR', 'EACCES', 'EPERM', 'EBADF', 'EIO', 'ELOOP', 'ERR_DLOPEN_FAILED', 'METADATA_JSON', 'UNKNOWN']);
+function nativeStartupFailure(stdout, stderr) {
+  for (const output of [stderr, stdout]) for (const line of output.split(/\r?\n/)) {
+    const match = /^\[goodvibes-daemon:native-startup-failure\] (sqlite|darwin-original) ([A-Z_]+)$/.exec(line.replace(/\u001b\[[0-9;]*m/g, '').trim());
+    if (match && nativeStartupFailureCodes.has(match[2])) return { stage: match[1], code: match[2] };
+  }
+}
 
 /** Match only fixed producer vocabulary. All private error/fix/target/header
  * values remain local, including malformed or malicious machine responses. */
@@ -61,6 +72,9 @@ export function acceptanceFailureRecord(evidence, error) {
     ...(evidence.exitCode !== 0 && safeExitSignal(evidence.exitSignal) ? { exitSignal: evidence.exitSignal } : {}),
     ...(Number.isInteger(evidence.exitCode) && evidence.exitCode !== 0 && nativeDaemonFailureKinds.has(evidence.nativeDaemonFailure)
       ? { nativeDaemonFailure: evidence.nativeDaemonFailure } : {}),
+    ...(Number.isInteger(evidence.exitCode) && evidence.exitCode !== 0 && evidence.nativeStartupFailure
+      && ['sqlite', 'darwin-original'].includes(evidence.nativeStartupFailure.stage) && nativeStartupFailureCodes.has(evidence.nativeStartupFailure.code)
+      ? { nativeStartupFailure: { stage: evidence.nativeStartupFailure.stage, code: evidence.nativeStartupFailure.code } } : {}),
     ...(error?.code === 'ERR_ACCEPTANCE_READINESS_TIMEOUT' ? { lastProbeError: safeError(error.cause) } : {}) };
 }
 
@@ -254,7 +268,11 @@ export async function runOwnedCommand(command, args, options = {}) {
     if (lastInstallerLine) result.diagnostics.unshift(`Installer exited nonzero after source line ${lastInstallerLine}; line captured before EXIT cleanup.`);
     result.diagnostics = result.diagnostics.slice(0, 8);
   }
-  if (result.code !== 0 && nativeDaemonDiagnostics) result.nativeDaemonFailure = nativeDaemonFailure(stdout, stderr);
+  if (result.code !== 0 && nativeDaemonDiagnostics) {
+    const startup = nativeStartupFailure(stdout, stderr);
+    result.nativeDaemonFailure = startup ? 'native-startup-repair' : nativeDaemonFailure(stdout, stderr);
+    if (startup) result.nativeStartupFailure = startup;
+  }
   signal?.throwIfAborted(); return result;
 }
 
@@ -426,16 +444,17 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     || ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'DBUS_SESSION_BUS_ADDRESS', 'NODE_OPTIONS', 'BUN_OPTIONS'].includes(name)) delete env[name];
   const checkpoint = check => {
     evidence.check = check; evidence.command = undefined; evidence.exitCode = undefined; evidence.exitSignal = undefined;
-    evidence.diagnostics = undefined; evidence.nativeDaemonFailure = undefined;
+    evidence.diagnostics = undefined; evidence.nativeDaemonFailure = undefined; evidence.nativeStartupFailure = undefined;
   };
   const invoke = async (command, args, extra = {}, cleanup = false, installerSource, installerSourcePath) => {
     assertHome(); evidence.command = command.split(sep).at(-1); evidence.exitCode = undefined; evidence.exitSignal = undefined;
-    evidence.diagnostics = undefined; evidence.nativeDaemonFailure = undefined;
+    evidence.diagnostics = undefined; evidence.nativeDaemonFailure = undefined; evidence.nativeStartupFailure = undefined;
     const result = await runOwnedCommand(command, args, { cwd: home, env: { ...env, ...extra }, timeoutMs: 300_000,
       signal: cleanup ? undefined : signal, installerSource, installerSourcePath,
       nativeDaemonDiagnostics: evidence.command === 'goodvibes-daemon' }); assertHome();
     evidence.exitCode = result.code; evidence.exitSignal = result.exitSignal;
     evidence.diagnostics = result.diagnostics; evidence.nativeDaemonFailure = result.nativeDaemonFailure;
+    evidence.nativeStartupFailure = result.nativeStartupFailure;
     assert.equal(result.code, 0, `Acceptance command failed: ${command.split(sep).at(-1)}`); return result.stdout.trim();
   };
   if (process.platform === 'linux') {

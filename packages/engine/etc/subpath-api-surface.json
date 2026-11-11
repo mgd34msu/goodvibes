@@ -958,7 +958,7 @@
     {
       "name": "FOUNDATION_METADATA",
       "kind": "const",
-      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.1.3\"; readonly operatorMethodCount: 549; readonly operatorEventCount: 34; readonly peerEndpointCount: 6; }"
+      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.1.4\"; readonly operatorMethodCount: 549; readonly operatorEventCount: 34; readonly peerEndpointCount: 6; }"
     },
     {
       "name": "FailureCategory",
@@ -4362,7 +4362,7 @@
     {
       "name": "FOUNDATION_METADATA",
       "kind": "const",
-      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.1.3\"; readonly operatorMethodCount: 549; readonly operatorEventCount: 34; readonly peerEndpointCount: 6; }"
+      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.1.4\"; readonly operatorMethodCount: 549; readonly operatorEventCount: 34; readonly peerEndpointCount: 6; }"
     },
     {
       "name": "GatewayEventTransport",
@@ -23248,7 +23248,7 @@
     {
       "name": "ownerReply",
       "kind": "const",
-      "text": "ownerReply: import(\"@goodvibes-jev/judgment\").ReplyReader<\"reject\" | \"approve\" | \"amend\" | \"unclear\">"
+      "text": "ownerReply: import(\"@goodvibes-jev/judgment\").ReplyReader<\"approve\" | \"reject\" | \"amend\" | \"unclear\">"
     },
     {
       "name": "parseAmendment",

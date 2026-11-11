@@ -17,6 +17,13 @@ export interface HistoricalUpgradeSteps {
   uninstall(): Promise<void>; verifyPreserved(): Promise<void>;
 }
 export function runHistoricalUpgradeSteps(host: HistoricalUpgradeSteps): Promise<void>;
+export interface InstallerMigrationSteps {
+  admit(): Promise<void>; installPrevious(): Promise<void>; verifyPrevious(): Promise<void>; seedPreviousData(): Promise<void>;
+  disablePreviousUpdates(): Promise<void>; startPreviousService(): Promise<void>; verifyPreviousService(): Promise<void>;
+  installCurrent(): Promise<void>; verifyCurrent(): Promise<void>; verifyMigratedData(): Promise<void>; restartAndVerifyMigrated(): Promise<void>;
+  uninstall(): Promise<void>; verifyPreserved(): Promise<void>;
+}
+export function runInstallerMigrationSteps(host: InstallerMigrationSteps): Promise<void>;
 export function assertHistoricalRollbackRefusal(input: { bin: string; version: string; webuiDirectory: string; signal?: AbortSignal; sourceRoot?: string },
   verifier?: {
     resolveSuiteUpdatePlan(input: object): { files: readonly { path: string }[]; directories: readonly { path: string }[]; assertCurrent(): void };
@@ -84,7 +91,7 @@ export interface AcceptanceDelivery {
     restartService(): Promise<void>; servicePid(): Promise<number>; stopService(): Promise<void>; startService(): Promise<void>;
   }): Promise<void>;
 }
-export function acceptPublishedSuite(input: { tag: string; source: string; target: string; scenario?: 'fresh' | 'upgrade-v3.1.1'; signal?: AbortSignal; delivery?: AcceptanceDelivery }): Promise<void>;
+export function acceptPublishedSuite(input: { tag: string; source: string; target: string; scenario?: 'fresh' | 'upgrade-v3.1.1' | 'installer-migrate-v3.1.1'; signal?: AbortSignal; delivery?: AcceptanceDelivery }): Promise<void>;
 export function readPublishedReaders(input: { tag: string; source: string; target: string; assets: ReadonlySet<string>; onCheck?(check: string): void },
   load: (name: string) => Promise<{ target: string; sourceCommit: string; headCommit: string; version?: string;
     readers: { version: string }; files: readonly { path: string }[] }>): Promise<Map<string, unknown>>;

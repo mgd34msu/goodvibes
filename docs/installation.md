@@ -44,6 +44,12 @@ judgment-model connection. Provider account setup remains in the application.
 
 ## Existing installations and services
 
+Version 3.1.1 installations using
+`https://github.com/mgd34msu/goodvibes-jev/releases/latest` cannot discover the
+new release after the repository was renamed to `goodvibes`. Their updater
+rejects GitHub's repository-rename redirect before downloading a replacement.
+Waiting for another automatic check does not resolve this error.
+
 The release installer retains the original installer’s command paths and
 `~/.goodvibes` data. It handles upgrades, running daemon/agent restarts, systemd
 user services and launchd agents. Existing custom services are distinguished from

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { acceptanceFailureRecord, markAcceptanceCheckpoint, readPublicAcceptanceDelivery, finishAcceptance, waitForAcceptanceReadiness, waitForNativeServiceRetirement, assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, runHistoricalUpgradeSteps, assertHistoricalRollbackRefusal, type HistoricalUpgradeSteps, type AcceptanceSteps, type NativeServiceRetirementObservation } from './accept-published-suite.mjs';
+import { acceptanceFailureRecord, markAcceptanceCheckpoint, readPublicAcceptanceDelivery, finishAcceptance, waitForAcceptanceReadiness, waitForNativeServiceRetirement, assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, runHistoricalUpgradeSteps, runInstallerMigrationSteps, assertHistoricalRollbackRefusal, type InstallerMigrationSteps, type HistoricalUpgradeSteps, type AcceptanceSteps, type NativeServiceRetirementObservation } from './accept-published-suite.mjs';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -657,6 +657,59 @@ function historicalSteps(events: string[]): HistoricalUpgradeSteps {
     seedPreviousData: record('original-data'), startPreviousService: record('start-old-service'), awaitAutomaticUpgrade: record('actual-auto-transition'),
     verifyUpgradedData: record('upgraded-data'), verifyRollbackRefusal: record('real-api-refusal'), uninstall: record('cleanup'), verifyPreserved: record('preserved') };
 }
+
+function installerMigrationSteps(events: string[]): InstallerMigrationSteps {
+  const record = (name: string) => async () => { events.push(name); };
+  return { admit: record('admit'), installPrevious: record('install-old-service-off'), verifyPrevious: record('original-old-versions-defaults'),
+    seedPreviousData: record('original-data-settings'), disablePreviousUpdates: record('old-updater-opt-out'),
+    startPreviousService: record('start-old-service'), verifyPreviousService: record('old-service-status-webui'),
+    installCurrent: record('current-public-installer'), verifyCurrent: record('current-public-cohort-service-webui'),
+    verifyMigratedData: record('saved-data-settings-opt-out'), restartAndVerifyMigrated: record('restart-cohort-data-settings-opt-out'),
+    uninstall: record('cleanup'), verifyPreserved: record('preserved') };
+}
+
+test('public installer migration first proves the opted-out old service and then the current cohort without claiming automatic upgrade or rollback', async () => {
+  const events: string[] = [], host = installerMigrationSteps(events), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const proof = host.verifyPreviousService;
+  host.verifyPreviousService = async () => { entered.resolve(); await release.promise; await proof(); };
+  Object.assign(host, { awaitAutomaticUpgrade: async () => { throw new Error('Migration must not wait for an automatic transition'); },
+    verifyRollbackRefusal: async () => { throw new Error('Migration must not invoke rollback'); } });
+  const running = runInstallerMigrationSteps(host);
+  try {
+    await entered.promise;
+    expect(events).toEqual(['admit', 'install-old-service-off', 'original-old-versions-defaults', 'original-data-settings', 'old-updater-opt-out', 'start-old-service']);
+    release.resolve(); await running;
+    expect(events.slice(6)).toEqual(['old-service-status-webui', 'current-public-installer', 'current-public-cohort-service-webui',
+      'saved-data-settings-opt-out', 'restart-cohort-data-settings-opt-out', 'cleanup', 'preserved']);
+  } finally { release.resolve(); await Promise.allSettled([running]); }
+});
+
+test('a failed old-service proof cannot invoke the current installer but still retires original ownership', async () => {
+  const events: string[] = [], host = installerMigrationSteps(events), original = new Error('Old service did not answer');
+  host.verifyPreviousService = async () => { throw original; };
+  await expect(runInstallerMigrationSteps(host)).rejects.toBe(original);
+  expect(events).not.toContain('current-public-installer'); expect(events.slice(-2)).toEqual(['cleanup', 'preserved']);
+});
+
+test('failed public installer migration waits for cleanup and retains both original and cleanup errors', async () => {
+  const events: string[] = [], host = installerMigrationSteps(events), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const original = new Error('Public installer refused old cohort'), cleanup = new Error('Original service did not drain');
+  host.installCurrent = async () => { events.push('public-installer-failed'); throw original; };
+  host.uninstall = async () => { entered.resolve(); await release.promise; events.push('cleanup-failed'); throw cleanup; };
+  const running = runInstallerMigrationSteps(host); let settled = false;
+  void running.then(() => { settled = true; }, () => { settled = true; });
+  try {
+    await entered.promise; expect(settled).toBe(false); release.resolve();
+    await expect(running).rejects.toMatchObject({ name: 'AggregateError', errors: [original, cleanup] });
+    expect(events).not.toContain('current-public-cohort-service-webui'); expect(events.at(-1)).toBe('cleanup-failed');
+  } finally { release.resolve(); await Promise.allSettled([running]); }
+});
+
+test('installer migration refuses foreign admission before any old install or cleanup', async () => {
+  const events: string[] = [], host = installerMigrationSteps(events), original = new Error('Existing installation belongs to another owner');
+  host.admit = async () => { throw original; };
+  await expect(runInstallerMigrationSteps(host)).rejects.toBe(original); expect(events).toEqual([]);
+});
 
 test('historical Linux delivery waits for actual old automatic transition before rollback and cleanup', async () => {
   const events: string[] = [], host = historicalSteps(events), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();

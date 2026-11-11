@@ -331,6 +331,27 @@ export async function runHistoricalUpgradeSteps(host) {
   if (primary) throw primary;
 }
 
+/** Explicit public-installer recovery, independent of the old automatic
+ * updater. A running opted-out old service is migrated by the real installer. */
+export async function runInstallerMigrationSteps(host) {
+  await host.admit();
+  let attempted = false, primary;
+  try {
+    attempted = true; await host.installPrevious();
+    await host.verifyPrevious(); await host.seedPreviousData(); await host.disablePreviousUpdates();
+    await host.startPreviousService(); await host.verifyPreviousService();
+    await host.installCurrent(); await host.verifyCurrent(); await host.verifyMigratedData();
+    await host.restartAndVerifyMigrated();
+  } catch (error) { primary = error; }
+  finally {
+    if (attempted) {
+      try { await host.uninstall(); await host.verifyPreserved(); }
+      catch (error) { primary = primary ? new AggregateError([primary, error], 'Installer migration and owned cleanup failed.') : error; }
+    }
+  }
+  if (primary) throw primary;
+}
+
 /** Invoke the actual platform API against the downloaded installed tree.
  * The separately built verifier supplies no installed bytes and does not claim
  * an interactive compiled /update rollback was driven by this acceptance. */
@@ -462,11 +483,17 @@ export async function acceptPublishedSuite(input) {
 }
 
 async function performPublishedAcceptance({ tag, source, target, signal, scenario = 'fresh', delivery }, evidence) {
-  assert.ok(scenario === 'fresh' || scenario === 'upgrade-v3.1.1', 'Unknown published acceptance scenario.');
+  assert.ok(scenario === 'fresh' || scenario === 'upgrade-v3.1.1' || scenario === 'installer-migrate-v3.1.1', 'Unknown published acceptance scenario.');
   const historical = scenario === 'upgrade-v3.1.1';
+  const migration = scenario === 'installer-migrate-v3.1.1';
   if (historical) {
     assert.equal(process.platform, 'linux', 'The published old automatic updater supports Linux only.');
     assert.equal(tag, 'v3.1.2', 'This scenario verifies the actual v3.1.1 to v3.1.2 delivery contract.');
+  }
+  if (migration) {
+    assert.equal(process.platform, 'linux', 'The installer migration fixture requires the actual old Linux release cohort.');
+    assert.equal(tag, 'v3.1.2', 'Installer migration verifies actual public v3.1.1 to v3.1.2 delivery.');
+    assert.equal(delivery, undefined, 'Installer migration must exercise the actual public installer and release.');
   }
   const account = userInfo(), home = realpathSync(process.env.HOME ?? '');
   assertHostedContext({ env: process.env, platform: process.platform, arch: process.arch,
@@ -536,7 +563,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   }
   const installEnv = { GOODVIBES_VERSION: tag, GOODVIBES_WAKE_MODEL: '0', GOODVIBES_SHADOW_REMOVE: '0' };
   let previousInstaller, previousSource, previousReader;
-  if (historical) {
+  if (historical || migration) {
     evidence.stage = 'historical-source';
     const oldRelease = JSON.parse((await fetchBytes(`${api}/releases/tags/v3.1.1`, undefined, signal)).bytes);
     assert.equal(oldRelease.tag_name, 'v3.1.1'); assert.equal(oldRelease.draft, false);
@@ -676,7 +703,8 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       assert.equal(originalWebui, join(bin, 'webui', '3.1.1'));
     },
     async seedPreviousData() {
-      mkdirSync(data, { recursive: true }); preserved = 'Original 3.1.1 data survives the actual automatic delivery and refusal.\n';
+      mkdirSync(data, { recursive: true }); preserved = migration ? 'Original 3.1.1 data survives the actual public installer migration.\n'
+        : 'Original 3.1.1 data survives the actual automatic delivery and refusal.\n';
       writeFileSync(sentinel, preserved, { flag: 'wx', mode: 0o600 });
       // A real supported saved value, distinct from its default, must survive.
       await invoke(daemon, ['config', 'set', 'update.intervalMinutes', '61']);
@@ -713,6 +741,38 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       await assertHistoricalRollbackRefusal({ bin, version, webuiDirectory: originalWebui, signal,
         ...(delivery?.rollbackSourceRoot ? { sourceRoot: delivery.rollbackSourceRoot } : {}) });
       await host.verifyInstalled(); await upgrade.verifyUpgradedData();
+    },
+    uninstall: host.uninstall, verifyPreserved,
+  };
+  const installerMigration = {
+    admit: upgrade.admit, installPrevious: upgrade.installPrevious, verifyPrevious: upgrade.verifyPrevious,
+    seedPreviousData: upgrade.seedPreviousData, startPreviousService: upgrade.startPreviousService,
+    async disablePreviousUpdates() {
+      for (const key of ['update.auto', 'update.autoUpdateAtLaunch']) await invoke(daemon, ['config', 'set', key, 'false']);
+      await verifyOptOut();
+    },
+    async verifyPreviousService() {
+      await waitForAcceptanceReadiness(() => service('check'), async () => {
+        checkpoint('migration.previous.status-version');
+        const status = JSON.parse(await invoke(daemon, ['status', '--json']));
+        assert.equal(status.ok, true); assert.equal(status.data.identity.version, '3.1.1');
+        const port = await setting('controlPlane.port'); checkpoint('migration.previous.webui-port');
+        assert.ok(Number.isInteger(port) && port > 0 && port < 65536);
+        assert.equal(resolve(await setting('controlPlane.webui.bundleDir')), originalWebui);
+        assert.equal(await setting('controlPlane.webui.serve'), true);
+        checkpoint('migration.previous.webui-http');
+        const page = await fetchBytes(`http://127.0.0.1:${port}/`, 2_097_152, signal);
+        assert.ok(page.bytes.equals(readFileSync(join(originalWebui, 'index.html'))));
+      }, { signal });
+      await installerMigration.verifyMigratedData();
+    },
+    installCurrent: host.install, verifyCurrent: host.verifyInstalled,
+    async verifyMigratedData() {
+      checkpoint('migration.saved-data'); assert.equal(readFileSync(sentinel, 'utf8'), preserved);
+      assert.equal(await setting('update.intervalMinutes'), 61); await verifyOptOut();
+    },
+    async restartAndVerifyMigrated() {
+      await service('restart'); await host.verifyInstalled(); await installerMigration.verifyMigratedData();
     },
     uninstall: host.uninstall, verifyPreserved,
   };
@@ -760,7 +820,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       if (diagnosticFailure) throw diagnosticFailure;
     };
   }
-  const selectedHost = historical ? upgrade : host;
+  const selectedHost = historical ? upgrade : migration ? installerMigration : host;
   for (const name of Object.keys(selectedHost)) {
     const original = selectedHost[name];
     selectedHost[name] = async (...args) => {
@@ -770,14 +830,16 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     };
   }
   if (historical) await runHistoricalUpgradeSteps(selectedHost);
+  else if (migration) await runInstallerMigrationSteps(selectedHost);
   else await runAcceptanceSteps(selectedHost);
   await finishAcceptance({ signal, finish: delivery?.finish ? async () => {
     evidence.stage = 'staged-delivery-drain'; checkpoint('delivery.finish'); await delivery.finish();
   } : undefined, assertCurrent: () => delivery?.assertCurrent(), writeReceipt: () => {
-    writeFileSync(join(root, 'acceptance-result.json'), JSON.stringify({ tag, source, target, scenario, ...(historical ? { previousTag: 'v3.1.1', previousSource } : {}),
+    writeFileSync(join(root, 'acceptance-result.json'), JSON.stringify({ tag, source, target, scenario, ...(historical || migration ? { previousTag: 'v3.1.1', previousSource } : {}),
     ...(delivery ? { delivery: historical ? 'exact staged candidate; installer fetch adapter and owned loopback update feed'
       : 'exact staged candidate; installer fetch adapter', candidateInstaller: published.url, publicDelivery: 'not claimed' } : { publicInstaller: published.url }),
-    installedProducts: [...products, 'goodvibes-webui'], defaultService: true, updateDefaults: true, optOutPersisted: !historical,
+    installedProducts: [...products, 'goodvibes-webui'], defaultService: true, updateDefaults: !migration, optOutPersisted: !historical,
+    ...(migration ? { installerMigration: 'actual public installer; running v3.1.1 service to v3.1.2; saved data, interval61 and updater opt-out preserved through restart' } : {}),
     uninstallPreservedData: true, futureVersionUpgrade: historical ? 'actual old unattended daemon plus pre-graph suite repair' : 'not claimed', publicRollback: historical ? 'incomplete historical cohort refused without effects' : 'not claimed' }) + '\n', { flag: 'wx', mode: 0o600 });
   } });
 

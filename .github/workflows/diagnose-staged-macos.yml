@@ -1,0 +1,84 @@
+name: Diagnose staged macOS suite
+
+# Manual investigation of an existing staged artifact. These two jobs are not
+# the six-run prepublication gate and cannot publish or replace release bytes.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version label recorded by the existing staged payloads.
+        required: true
+        type: string
+      source:
+        description: Full original payload commit; its installer is read unchanged.
+        required: true
+        type: string
+      tooling-sha:
+        description: Full commit containing the diagnostic acceptance tooling.
+        required: true
+        type: string
+      artifact-run-id:
+        description: Run already containing the complete staged-release-assets artifact, including its original checksum manifest.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  macos-diagnostics:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: darwin-arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.tooling-sha }}
+          fetch-depth: 0
+      - name: Verify immutable diagnostic inputs
+        env:
+          TOOLING_SHA: ${{ inputs.tooling-sha }}
+          SOURCE_SHA: ${{ inputs.source }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact-run-id }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$TOOLING_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ARTIFACT_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]
+          test "$(git rev-parse HEAD)" = "$TOOLING_SHA"
+          git cat-file -e "$SOURCE_SHA^{commit}"
+          test -f scripts/accept-staged-suite.mjs
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: '22'
+      - name: Download the existing staged artifact unchanged
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: staged-release-assets
+          path: ${{ runner.temp }}/staged-release-assets
+          run-id: ${{ inputs.artifact-run-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Diagnose original staged install and native service lifecycle
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SOURCE: ${{ inputs.source }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: node scripts/accept-staged-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET" "$RUNNER_TEMP/staged-release-assets"
+      - name: Preserve bounded macOS diagnostic result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: diagnostic-staged-macos-${{ matrix.target }}
+          path: ${{ runner.temp }}/goodvibes-published-*/acceptance-result.json
+          if-no-files-found: warn
+          retention-days: 7

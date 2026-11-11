@@ -26,12 +26,15 @@ export function assertHistoricalRollbackRefusal(input: { bin: string; version: s
   }): Promise<void>;
 export function assertHostedContext(input: HostedContext): void;
 export function runAcceptanceSteps(host: AcceptanceSteps): Promise<void>;
+export type DaemonStatusFailure = 'token-missing' | 'invalid-port' | 'unreachable' | 'auth-refused' | 'route-missing'
+  | 'unreadable-reply' | 'cli-command-caught' | 'native-startup-repair' | 'unknown';
 export interface AcceptanceFailureRecord {
   stage: string; check?: string; command?: string; exitCode?: number; diagnostics?: readonly string[];
+  daemonStatusFailure?: DaemonStatusFailure;
   error: { name: string; code?: string }; lastProbeError?: { name: string; code?: string };
 }
 export function acceptanceFailureRecord(evidence: {
-  stage: string; check?: string; command?: string; exitCode?: number; diagnostics?: readonly string[];
+  stage: string; check?: string; command?: string; exitCode?: number; diagnostics?: readonly string[]; daemonStatusFailure?: DaemonStatusFailure;
 }, error: unknown): AcceptanceFailureRecord;
 export function waitForAcceptanceReadiness(serviceReady: () => Promise<void>, verifyReady: () => Promise<void>,
   options?: { signal?: AbortSignal; timeoutMs?: number; intervalMs?: number }): Promise<void>;
@@ -39,8 +42,8 @@ export function finishAcceptance(options: {
   signal?: AbortSignal; finish?: () => Promise<void>; assertCurrent?: () => void; writeReceipt(): void;
 }): Promise<void>;
 export function runOwnedCommand(command: string, args: readonly string[], options?: SpawnOptionsWithoutStdio & {
-  signal?: AbortSignal; timeoutMs?: number; installerSource?: string; installerSourcePath?: string;
-}): Promise<{ code: number; stdout: string; diagnostics?: string[] }>;
+  signal?: AbortSignal; timeoutMs?: number; installerSource?: string; installerSourcePath?: string; daemonStatusDiagnostics?: boolean;
+}): Promise<{ code: number; stdout: string; diagnostics?: string[]; daemonStatusFailure?: DaemonStatusFailure }>;
 export interface AcceptanceDelivery {
   installerSource?: string; installerSourcePath?: string; rollbackSourceRoot?: string;
   admit(input: { tag: string; source: string; target: string; root: string; signal?: AbortSignal }): Promise<{

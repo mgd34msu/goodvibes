@@ -19,6 +19,33 @@ const safeErrorCodes = new Set(['ERR_ASSERTION', 'ENOENT', 'ENOTDIR', 'EISDIR', 
   'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ABORT_ERR', 'ERR_ACCEPTANCE_READINESS_TIMEOUT']);
 const safeError = error => ({ name: safeErrorNames.has(error?.name) ? error.name : 'Error',
   ...(safeErrorCodes.has(error?.code) ? { code: error.code } : {}) });
+const daemonStatusFailureKinds = new Set(['token-missing', 'invalid-port', 'unreachable', 'auth-refused', 'route-missing',
+  'unreadable-reply', 'cli-command-caught', 'native-startup-repair', 'unknown']);
+
+/** Match only fixed producer vocabulary. All private error/fix/target/header
+ * values remain local, including malformed or malicious machine responses. */
+function daemonStatusFailure(stdout, stderr) {
+  for (const output of [stderr, stdout]) {
+    const lines = output.split(/\r?\n/).map(line => line.replace(/\u001b\[[0-9;]*m/g, '').trim());
+    if (lines.includes('Daemon command failed')) return 'cli-command-caught';
+    const repair = 'Native daemon startup could not verify its installation. Repair using the released suite installer: curl -fsSL https://goodvibes.sh/install.sh | sh . The installer preserves existing application data.';
+    if (lines.some(line => line === repair || line === `error: ${repair}` || line === `Error: ${repair}`)) return 'native-startup-repair';
+    // CLI warnings may precede its final pretty-printed failure object.
+    const start = output.indexOf('{\n  "ok": false,');
+    let failure;
+    try { failure = JSON.parse(start < 0 ? output.trim() : output.slice(start)); } catch { continue; }
+    if (failure?.ok !== false || typeof failure.error !== 'string') continue;
+    const error = failure.error;
+    if (error === 'no operator token was found for this machine') return 'token-missing';
+    if (error.startsWith("'") && error.endsWith("' is not a usable port")) return 'invalid-port';
+    if (error === 'could not reach the daemon on this machine' || error.startsWith('could not reach the daemon at ')) return 'unreachable';
+    const where = suffix => error === `the daemon on this machine${suffix}` || error.startsWith('the daemon at ') && error.endsWith(suffix);
+    if (where(' refused the operator token')) return 'auth-refused';
+    if (where(' does not know this command')) return 'route-missing';
+    if (where(' sent a reply this build could not read')) return 'unreadable-reply';
+  }
+  return 'unknown';
+}
 
 function preserveAcceptanceCancellation(error, signal) {
   if (!signal?.aborted || error === signal.reason || (error instanceof AggregateError && error.errors.includes(signal.reason))) return error;
@@ -30,6 +57,8 @@ function preserveAcceptanceCancellation(error, signal) {
 export function acceptanceFailureRecord(evidence, error) {
   return { stage: evidence.stage, check: evidence.check, command: evidence.command, exitCode: evidence.exitCode,
     diagnostics: evidence.diagnostics, error: safeError(error),
+    ...(Number.isInteger(evidence.exitCode) && evidence.exitCode !== 0 && daemonStatusFailureKinds.has(evidence.daemonStatusFailure)
+      ? { daemonStatusFailure: evidence.daemonStatusFailure } : {}),
     ...(error?.code === 'ERR_ACCEPTANCE_READINESS_TIMEOUT' ? { lastProbeError: safeError(error.cause) } : {}) };
 }
 
@@ -131,8 +160,10 @@ export function assertHostedContext(input) {
 /** Drain the exact admitted child before reporting timeout/cancellation. Output
  * stays bounded/private: installer/status output can contain local credentials. */
 export async function runOwnedCommand(command, args, options = {}) {
-  const { timeoutMs = 120_000, signal, installerSource, installerSourcePath = args[0], ...spawnOptions } = options;
+  const { timeoutMs = 120_000, signal, installerSource, installerSourcePath = args[0], daemonStatusDiagnostics = false, ...spawnOptions } = options;
   signal?.throwIfAborted();
+  if (daemonStatusDiagnostics) assert.ok(args.length === 2 && args[0] === 'status' && args[1] === '--json',
+    'Daemon status diagnostics require the exact machine-status invocation.');
   const shell = command.split(sep).at(-1);
   const probe = installerSource !== undefined && ['sh', 'bash', 'dash'].includes(shell);
   const probeRoot = probe ? mkdtempSync(join(tmpdir(), 'goodvibes-acceptance-line-')) : undefined;
@@ -151,7 +182,7 @@ export async function runOwnedCommand(command, args, options = {}) {
     bytes += chunk.length;
     if (bytes > 512 * 1024) failOutput(new Error('Acceptance command output exceeded its bound.'));
     else if (retain) stdout += chunk.toString('utf8');
-    else if (installerSource !== undefined) stderr += chunk.toString('utf8');
+    else if (installerSource !== undefined || daemonStatusDiagnostics) stderr += chunk.toString('utf8');
   };
   child.stdout.on('data', chunk => consume(chunk, true));
   child.stderr.on('data', chunk => consume(chunk, false));
@@ -193,6 +224,7 @@ export async function runOwnedCommand(command, args, options = {}) {
     if (lastInstallerLine) result.diagnostics.unshift(`Installer exited nonzero after source line ${lastInstallerLine}; line captured before EXIT cleanup.`);
     result.diagnostics = result.diagnostics.slice(0, 8);
   }
+  if (result.code !== 0 && daemonStatusDiagnostics) result.daemonStatusFailure = daemonStatusFailure(stdout, stderr);
   signal?.throwIfAborted(); return result;
 }
 
@@ -359,13 +391,14 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   for (const name of Object.keys(env)) if (/^(?:GOODVIBES_|OPENAI_|ANTHROPIC_|GOOGLE_|GEMINI_|JEV_|CLEF_)/.test(name)
     || ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'DBUS_SESSION_BUS_ADDRESS', 'NODE_OPTIONS', 'BUN_OPTIONS'].includes(name)) delete env[name];
   const checkpoint = check => {
-    evidence.check = check; evidence.command = undefined; evidence.exitCode = undefined; evidence.diagnostics = undefined;
+    evidence.check = check; evidence.command = undefined; evidence.exitCode = undefined; evidence.diagnostics = undefined; evidence.daemonStatusFailure = undefined;
   };
   const invoke = async (command, args, extra = {}, cleanup = false, installerSource, installerSourcePath) => {
-    assertHome(); evidence.command = command.split(sep).at(-1); evidence.exitCode = undefined; evidence.diagnostics = undefined;
+    assertHome(); evidence.command = command.split(sep).at(-1); evidence.exitCode = undefined; evidence.diagnostics = undefined; evidence.daemonStatusFailure = undefined;
     const result = await runOwnedCommand(command, args, { cwd: home, env: { ...env, ...extra }, timeoutMs: 300_000,
-      signal: cleanup ? undefined : signal, installerSource, installerSourcePath }); assertHome();
-    evidence.exitCode = result.code; evidence.diagnostics = result.diagnostics;
+      signal: cleanup ? undefined : signal, installerSource, installerSourcePath,
+      daemonStatusDiagnostics: evidence.command === 'goodvibes-daemon' && args.length === 2 && args[0] === 'status' && args[1] === '--json' }); assertHome();
+    evidence.exitCode = result.code; evidence.diagnostics = result.diagnostics; evidence.daemonStatusFailure = result.daemonStatusFailure;
     assert.equal(result.code, 0, `Acceptance command failed: ${command.split(sep).at(-1)}`); return result.stdout.trim();
   };
   if (process.platform === 'linux') {

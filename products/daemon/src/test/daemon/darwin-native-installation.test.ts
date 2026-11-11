@@ -1,10 +1,10 @@
 /** Source-only regressions; real Darwin execution remains a native CI-lane check. */
 import { expect, test } from 'bun:test';
-import { copyFileSync, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { captureOriginalDarwinDaemonInstallation, createOriginalDarwinDaemonDataWriter, resolveInstalledDaemonUpdateArtifact } from '../../config/native-installation.js';
 import { originalDarwinProof } from '../../config/original-darwin-installation.js';
-import { inspectDarwinDaemonInstallation, parseClientReaderArtifact, realUpdateFileIo, resolveDarwinDaemonTargets } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { clientReaderPayloadPaths, inspectDarwinDaemonInstallation, parseClientReaderArtifact, realUpdateFileIo, resolveDarwinDaemonTargets, type ClientReaderArtifact } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { darwinInstallationFixture } from '../helpers/darwin-installation.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 const homes = { isOverridden: false };
@@ -17,6 +17,39 @@ for (const arch of ['x64', 'arm64'] as const) test(`early ${arch} source token a
   const floor = JSON.parse(readFileSync(join(f.root, '.goodvibes-reader-requirements.json'), 'utf8')) as { formats: string[] };
   expect(floor.formats).toContain('device-capture-observations-v2'); expect(floor.formats).toContain('payment-operation-reconciliation-v2');
   expect(() => artifact?.assertCurrent?.()).not.toThrow();
+});
+for (const arch of ['x64', 'arm64'] as const) test(`complete ${arch} installed peers allow successive data-floor publications without retiring native sources`, () => {
+  const f = darwinInstallationFixture(makeOwnedTempDir('darwin-native-installed-suite'), arch);
+  // The installed suite has both clients beside the renamed daemon. Adding
+  // these siblings changes the daemon's parent directory clocks after its
+  // original source capture, as do the floor lock and atomic floor writes.
+  // Separate peer files reuse the already pinned inert program bytes.
+  const bytes = readFileSync(f.execPath), programPin = f.artifact.files[0]!;
+  for (const [program, packageName] of [['goodvibes', '@goodvibes-jev/tui'], ['goodvibes-agent', '@goodvibes-jev/agent']] as const) {
+    const path = join(f.root, program);
+    writeFileSync(path, bytes); chmodSync(path, 0o755);
+    const profile: ClientReaderArtifact = { ...f.artifact, packageName,
+      files: [{ ...programPin, path: clientReaderPayloadPaths(packageName, f.artifact.target)[0]! }] };
+    writeFileSync(path + '.readers.json', JSON.stringify(profile)); chmodSync(path + '.readers.json', 0o644);
+  }
+  const artifact = resolveInstalledDaemonUpdateArtifact(homes, f.options)!;
+  const writer = createOriginalDarwinDaemonDataWriter(f.original)!;
+  const floorPath = join(f.root, '.goodvibes-reader-requirements.json');
+  writer.declare('configuration-policy-epochs-v2');
+  writeFileSync(join(f.root, 'unrelated-install-note'), 'An ordinary sibling publication');
+  writer.declare('configuration-policy-snapshots-v3');
+  const originalFloor = readFileSync(floorPath, 'utf8');
+  expect(JSON.parse(originalFloor).formats).toEqual(['configuration-policy-epochs-v2', 'configuration-policy-snapshots-v3']);
+  expect(existsSync(floorPath + '.lock')).toBe(false);
+  expect(() => f.sqlite.assertCurrent()).not.toThrow();
+  expect(() => f.original.assertCurrent()).not.toThrow();
+  expect(() => artifact.assertCurrent?.()).not.toThrow();
+  // The successful sibling/floor writes do not relax peer release pins. A
+  // changed peer must prevent the next new format from being published.
+  writeFileSync(join(f.root, 'goodvibes-agent'), 'Foreign peer bytes');
+  expect(() => writer.declare('device-capture-observations-v2')).toThrow();
+  expect(readFileSync(floorPath, 'utf8')).toBe(originalFloor);
+  expect(existsSync(floorPath + '.lock')).toBe(false);
 });
 test('Darwin requires the actual early token; matching late pathname/version/shape is insufficient', () => {
   const f = darwinInstallationFixture(makeOwnedTempDir('darwin-native-token'));

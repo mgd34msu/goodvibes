@@ -1145,6 +1145,25 @@ describe('release.yml: by-reference release', () => {
   });
 });
 
+describe('manual staged macOS diagnostics stay separate from release qualification', () => {
+  test('the diagnostic workflow has no public writes or release dependency edges', () => {
+    const diagnostic = load('diagnose-staged-macos.yml');
+    expect(Object.keys(diagnostic.on as Record<string, unknown>)).toEqual(['workflow_dispatch']);
+    expect(diagnostic.permissions).toEqual({ contents: 'read', actions: 'read' });
+    for (const [, job] of jobs(diagnostic)) {
+      expect(job.uses).toBeUndefined(); expect(needsOf(job)).toEqual([]);
+      expect(job.permissions).toBeUndefined();
+      expect(steps(job).some(step => String(step.uses).startsWith('oven-sh/setup-bun@'))).toBe(false);
+    }
+    for (const file of ['release.yml', 'reusable-staged-install-acceptance.yml']) {
+      for (const [, job] of jobs(load(file))) {
+        expect(String(job.uses ?? '')).not.toContain('diagnose-staged-macos');
+        expect(needsOf(job)).not.toContain('macos-diagnostics');
+      }
+    }
+  });
+});
+
 describe('reusable workflows: workflow_call contracts', () => {
   test('each reusable workflow declares workflow_call', () => {
     for (const f of readdirSync(WF_DIR).filter((name) => name.startsWith('reusable-') && name.endsWith('.yml'))) {

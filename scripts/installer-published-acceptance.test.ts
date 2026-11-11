@@ -14,6 +14,13 @@ function steps(events: string[]): AcceptanceSteps {
     verifyDefaults: record('defaults'), disableUpdates: record('off'), restartAndVerifyOptOut: record('restart-off'),
     verifyOptOut: record('read-off'), uninstall: record('uninstall'), verifyPreserved: record('preserved') };
 }
+function statusChild(root: string) {
+  const command = join(root, 'goodvibes-daemon');
+  writeFileSync(command, '#!/bin/sh\nprintf "%s" "$STATUS_STDOUT"\nprintf "%s" "$STATUS_STDERR" >&2\nexit "$STATUS_EXIT"\n', { mode: 0o700 });
+  return (stderr: string, stdout = '', code = 1, diagnostics = true) => runOwnedCommand(command, ['status', '--json'], {
+    env: { ...process.env, STATUS_STDOUT: stdout, STATUS_STDERR: stderr, STATUS_EXIT: String(code) }, daemonStatusDiagnostics: diagnostics,
+  });
+}
 test('only original non-root GitHub-hosted native accounts admit real service acceptance', () => {
   const input = { env: { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted', RUNNER_TEMP: '/tmp/runner' },
     platform: 'linux', arch: 'x64', target: 'linux-x64', home: '/home/runner', accountHome: '/home/runner',
@@ -62,6 +69,58 @@ test('a successful command followed by a failed assertion reports the proof and 
   const untrusted = acceptanceFailureRecord({ stage: 'verifyInstalled', check: 'installed.sqlite-library' },
     { name: secret, code: secret, message: secret, path: secret });
   expect(untrusted.error).toEqual({ name: 'Error' }); expect(JSON.stringify(untrusted)).not.toContain(secret);
+});
+
+test('owned status commands classify only fixed failure kinds from private stdout or stderr without exposing values', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-status-')); roots.push(root);
+  const invoke = statusChild(root), secret = 'acceptance-private-status-value-40a9';
+  const failure = (error: string) => JSON.stringify({ ok: false, error, fix: secret, target: `https://${secret}.invalid`,
+    cause: { message: secret, code: secret }, headers: { Authorization: `Bearer ${secret}` } }, null, 2);
+  const cases = [
+    [failure('no operator token was found for this machine'), 'token-missing'],
+    [failure(`'${secret}' is not a usable port`), 'invalid-port'],
+    [failure(`could not reach the daemon at https://${secret}.invalid`), 'unreachable'],
+    [failure(`the daemon at https://${secret}.invalid refused the operator token`), 'auth-refused'],
+    [failure('the daemon on this machine does not know this command'), 'route-missing'],
+    [failure('the daemon on this machine sent a reply this build could not read'), 'unreadable-reply'],
+    [`private warning ${secret}\nDaemon command failed\n`, 'cli-command-caught'],
+    [`error: Native daemon startup could not verify its installation. Repair using the released suite installer: curl -fsSL https://goodvibes.sh/install.sh | sh . The installer preserves existing application data.\nprivate stack ${secret}`, 'native-startup-repair'],
+    [failure(secret), 'unknown'],
+    [`{"ok":false,"error":"${secret}"`, 'unknown'],
+  ] as const;
+  for (const [output, kind] of cases) for (const stream of ['stderr', 'stdout']) {
+    const result = await invoke(stream === 'stderr' ? output : '', stream === 'stdout' ? output : '');
+    expect(result.code).toBe(1); expect(result.daemonStatusFailure).toBe(kind); expect(result).not.toHaveProperty('stderr');
+    const record = acceptanceFailureRecord({ stage: 'verifyInstalled', check: 'service.status-version', command: 'goodvibes-daemon',
+      exitCode: result.code, daemonStatusFailure: result.daemonStatusFailure }, new Error(secret));
+    expect(record.daemonStatusFailure).toBe(kind);
+    expect(JSON.stringify(record)).not.toContain(secret);
+    expect(JSON.stringify(record)).not.toContain('Authorization'); expect(JSON.stringify(record)).not.toContain('https://');
+  }
+});
+
+test('status diagnostics preserve nonzero exits, ignore unrelated fields and do not carry a failure into later probes', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-status-probes-')); roots.push(root);
+  const invoke = statusChild(root), payload = JSON.stringify({ ok: false, error: 'no operator token was found for this machine' }, null, 2);
+  const first = await invoke(`warning before machine reply\n${payload}`);
+  expect(first.daemonStatusFailure).toBe('token-missing');
+  const success = await invoke('', '{"ok":true,"data":{}}', 0);
+  expect(success).toEqual({ code: 0, stdout: '{"ok":true,"data":{}}' });
+  const stale = acceptanceFailureRecord({ stage: 'verifyInstalled', check: 'service.status-version', exitCode: success.code,
+    daemonStatusFailure: first.daemonStatusFailure }, new Error('Subsequent unrelated assertion'));
+  expect(stale).not.toHaveProperty('daemonStatusFailure');
+  const unknown = await invoke(JSON.stringify({ ok: false, error: 'unrecognized', fix: 'no operator token was found for this machine',
+    cause: 'Daemon command failed', headers: { error: 'the daemon on this machine refused the operator token',
+      repair: 'Native daemon startup could not verify its installation. Repair using the released suite installer: curl -fsSL https://goodvibes.sh/install.sh | sh . The installer preserves existing application data.' } }));
+  expect(unknown.daemonStatusFailure).toBe('unknown');
+  const nonzero = await invoke('', '{"ok":true,"data":{}}', 7);
+  expect(nonzero.code).toBe(7); expect(nonzero.daemonStatusFailure).toBe('unknown');
+  expect(await invoke(payload, '', 1, false)).toEqual({ code: 1, stdout: '' });
+});
+
+test('status diagnostic opt-in refuses every invocation other than the exact machine status arguments', async () => {
+  await expect(runOwnedCommand(process.execPath, ['status', '--json', '--token', 'private-status-token'], { daemonStatusDiagnostics: true }))
+    .rejects.toThrow('Daemon status diagnostics require the exact machine-status invocation.');
 });
 
 test('readiness retries the actual service observation before accepting a coherent status and HTTP proof', async () => {

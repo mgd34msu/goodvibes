@@ -54,6 +54,42 @@ test('manual and reusable staged acceptance require immutable source/tooling and
   expect(upload.with).toMatchObject({ name: 'staged-release-assets', 'if-no-files-found': 'error' });
 });
 
+test('manual macOS diagnostics reuse the existing staged artifact without staging or qualifying publication', () => {
+  const diagnostic = load('diagnose-staged-macos.yml');
+  expect(Object.keys(diagnostic.on)).toEqual(['workflow_dispatch']);
+  expect(Object.keys(diagnostic.on.workflow_dispatch!.inputs).sort()).toEqual(['artifact-run-id', 'source', 'tag', 'tooling-sha']);
+  for (const input of Object.values(diagnostic.on.workflow_dispatch!.inputs)) expect(input).toMatchObject({ required: true, type: 'string' });
+  expect(diagnostic.permissions).toEqual({ contents: 'read', actions: 'read' });
+  expect(Object.keys(diagnostic.jobs)).toEqual(['macos-diagnostics']);
+  const job = diagnostic.jobs['macos-diagnostics']!;
+  expect(job.strategy?.matrix.include).toEqual([{ target: 'darwin-x64', runner: 'macos-15-intel' }, { target: 'darwin-arm64', runner: 'macos-15' }]);
+  expect(job.strategy?.['fail-fast']).toBe(false);
+  expect(job.steps[0]?.with).toEqual({ ref: '${{ inputs.tooling-sha }}', 'fetch-depth': 0 });
+  const download = job.steps.find(step => String(step.uses).startsWith('actions/download-artifact@'))!;
+  expect(download.with).toEqual({ name: 'staged-release-assets', path: '${{ runner.temp }}/staged-release-assets',
+    'run-id': '${{ inputs.artifact-run-id }}', 'github-token': '${{ secrets.GITHUB_TOKEN }}' });
+  const invoke = job.steps.find(step => step.run?.startsWith('node scripts/accept-staged-suite.mjs'))!;
+  expect(invoke.run).toBe('node scripts/accept-staged-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET" "$RUNNER_TEMP/staged-release-assets"');
+  expect(invoke.env).toEqual({ RELEASE_TAG: '${{ inputs.tag }}', RELEASE_SOURCE: '${{ inputs.source }}', RELEASE_TARGET: '${{ matrix.target }}' });
+  const result = job.steps.find(step => String(step.uses).startsWith('actions/upload-artifact@'))!;
+  expect(result.with?.name).toBe('diagnostic-staged-macos-${{ matrix.target }}');
+  expect(result.with?.path).toEndWith('/acceptance-result.json');
+  expect(job.steps.filter(step => step.run).map(step => step.run).join('\n')).not.toMatch(/sha256sums|--out|\bbun\b|\bbuild\b|gh release|git tag|npm publish/);
+});
+
+test('the actual macOS diagnostic guard refuses mutable inputs and invalid version or run identifiers', () => {
+  const guard = load('diagnose-staged-macos.yml').jobs['macos-diagnostics']!.steps.find(step => step.name === 'Verify immutable diagnostic inputs')!;
+  const root = mkdtempSync(join(tmpdir(), 'macos-diagnostic-inputs-')); roots.push(root);
+  mkdirSync(join(root, 'bin')); mkdirSync(join(root, 'scripts'));
+  writeFileSync(join(root, 'scripts/accept-staged-suite.mjs'), '');
+  writeFileSync(join(root, 'bin/git'), '#!/bin/sh\ncase "$1" in rev-parse) printf "%s\\n" "$TOOLING_SHA" ;; cat-file) [ "$3" = "$SOURCE_SHA^{commit}" ] ;; *) exit 91 ;; esac\n', { mode: 0o755 });
+  const valid = { TOOLING_SHA: 'a'.repeat(40), SOURCE_SHA: 'b'.repeat(40), RELEASE_TAG: 'v3.1.2', ARTIFACT_RUN_ID: '42941236483', PATH: join(root, 'bin') + ':' + process.env.PATH };
+  expect(run(guard, root, valid).status).toBe(0);
+  for (const invalid of [{ TOOLING_SHA: 'main' }, { SOURCE_SHA: 'refs/heads/main' }, { SOURCE_SHA: '' }, { RELEASE_TAG: '../v3.1.2' }, { ARTIFACT_RUN_ID: '' }, { ARTIFACT_RUN_ID: '42941236483;exit 0' }]) {
+    expect(run(guard, root, { ...valid, ...invalid }).status, JSON.stringify(invalid)).not.toBe(0);
+  }
+});
+
 test('four fresh and two historical runners consume the same staged artifact with current tooling', () => {
   const fresh = staged.jobs['native-install']!, historical = staged.jobs['historical-linux-upgrade']!;
   expect(fresh.strategy?.matrix.include).toEqual([

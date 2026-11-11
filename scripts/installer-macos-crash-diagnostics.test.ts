@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { collectMacosCrashes, summarizeMacosCrash } from './collect-macos-native-crash.mjs';
@@ -78,7 +78,7 @@ test('linked and foreign report directories do not grant a crash read', () => {
   const parent = directory(), actual = directory(), linked = join(parent, 'DiagnosticReports');
   put(actual, 'goodvibes-daemon-current.ips', ips(report())); symlinkSync(actual, linked, 'dir');
   expect(collectMacosCrashes({ directory: linked, ...window })).toEqual({ schema: 1, status: 'unavailable', reports: [] });
-  expect(collectMacosCrashes({ directory: actual, ...window, uid: process.getuid() + 1 })).toEqual({ schema: 1, status: 'unavailable', reports: [] });
+  expect(collectMacosCrashes({ directory: actual, ...window, uid: lstatSync(actual).uid + 1 })).toEqual({ schema: 1, status: 'unavailable', reports: [] });
 });
 
 test('private input and symbolic frame work remain bounded and malformed headers are refused', () => {

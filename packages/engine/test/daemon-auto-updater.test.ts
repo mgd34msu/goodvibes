@@ -1823,7 +1823,7 @@ test('a preserved private suite stage retains a handover refusal without a recov
     await updater.tick();
     expect(foreign, JSON.stringify(updater.snapshot())).toBeDefined();
     expect(readFileSync(foreign!, 'utf8')).toBe('Retain unknown private staging bytes');
-    for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+    for (const [path, bytes] of f.original) expect(readFileSync(path).equals(bytes)).toBe(true);
     expect(readFileSync(join(f.driver, 'original.txt'), 'utf8')).toBe('Retained original directory');
     expect(effects).toEqual([]); expect(updater.snapshot().appliedVersion).toBeNull(); expect(updater.snapshot().recoveryRequired).toBe(false);
     expect(receipts.list()).toHaveLength(1);

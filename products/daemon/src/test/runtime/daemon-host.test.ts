@@ -1140,7 +1140,9 @@ for (const finish of ['ready', 'failed'] as const) test(`native host ${finish} r
   }
 });
 
-for (const ending of ['drain', 'cancel', 'failed-secondary', 'failed-secondary-restart'] as const) test(`configured native recovery ${ending} owns facade handover before ordinary host cleanup`, async () => {
+// These inert Linux cohorts exercise systemd adoption; actual launchd handover
+// has its own native macOS acceptance path.
+for (const ending of ['drain', 'cancel', 'failed-secondary', 'failed-secondary-restart'] as const) (process.platform === 'linux' ? test : test.skip)(`configured native recovery ${ending} owns facade handover before ordinary host cleanup`, async () => {
   const rollbackFailures: unknown[] = [];
   const logError = logger.error.bind(logger);
   keep(spyOn(logger, 'error').mockImplementation((message, details) => {
@@ -1163,10 +1165,11 @@ for (const ending of ['drain', 'cancel', 'failed-secondary', 'failed-secondary-r
   expect(artifact).toBeDefined(); if (!artifact) throw new Error('Native recovery fixture admission missing');
   const entered = gate(); const release = gate(); let bootStarts = 0; let graphCloses = 0; let installs = 0;
   const failedSecondary = ending === 'failed-secondary' || ending === 'failed-secondary-restart';
-  // Unsupported native manager is inert: reach its actual refusal, never spawn a system command.
-  keep(spyOn(PlatformServiceManager.prototype, 'status').mockReturnValue({ platform: 'manual', serviceName: 'fixture', path: '',
+  // Admit an actual supported adoption path. Its install boundary deliberately
+  // refuses only AFTER the owned runtime drain, without invoking systemctl.
+  keep(spyOn(PlatformServiceManager.prototype, 'status').mockReturnValue({ platform: 'systemd', serviceName: 'fixture', path: '',
     installed: false, autostart: false, running: false, commandPreview: '', suggestedCommands: [] }));
-  keep(spyOn(PlatformServiceManager.prototype, 'install').mockImplementation(() => { installs++; throw new Error('Unexpected real service installation'); }));
+  keep(spyOn(PlatformServiceManager.prototype, 'install').mockImplementation(() => { installs++; throw new Error('Synthetic post-drain service installation refusal'); }));
   const fx = fixture((runtime) => {
     // This native fixture owns daemon+driver only. The source-development
     // default static directory is a separate deployment, not its suite WebUI.
@@ -1216,7 +1219,7 @@ for (const ending of ['drain', 'cancel', 'failed-secondary', 'failed-secondary-r
   for (const [index, target] of native.targets.entries()) expect(readFileSync(target.path)).toEqual(readFileSync(previous.targets[index]!.path));
   const receipts = readFileSync(join(controlPlaneDirectory, 'daemon-receipts.json'), 'utf8');
   expect(receipts).toContain('rolled back to the previously installed version');
-  if (ending === 'drain') { expect(receipts).toContain('incomplete (unsupported)'); expect(receipts).not.toContain('handover cancelled'); }
+  if (ending === 'drain') { expect(receipts).toContain('incomplete (failed)'); expect(receipts).toContain('Synthetic post-drain service installation refusal'); expect(receipts).not.toContain('handover cancelled'); }
   else if (ending === 'cancel') expect(receipts).toContain('handover cancelled during orderly stop');
   else {
     expect(receipts).toContain('owned runtime cleanup did not complete');
@@ -1224,8 +1227,56 @@ for (const ending of ['drain', 'cancel', 'failed-secondary', 'failed-secondary-r
     expect(receipts).not.toContain('private secondary restart failure');
     expect(receipts).not.toContain('incomplete (unsupported)');
   }
-  expect(installs).toBe(0); expect(bootStarts).toBe(0); expect(graphCloses).toBe(1);
+  expect(installs).toBe(ending === 'drain' ? 1 : 0); expect(bootStarts).toBe(0); expect(graphCloses).toBe(1);
   expect(fx.host.snapshot().state).toBe(failedSecondary ? 'failed' : 'closed');
+});
+
+test('unsupported native recovery preserves both cohorts and keeps a valid current host serving', async () => {
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const native = writeNativeReaderInstallationFixture(makeOwnedTempDir('host-native-unsupported'), '9.9.9-test', arch);
+  const previous = writeNativeReaderInstallationFixture(makeOwnedTempDir('host-native-unsupported-prior'), '9.9.8-test', arch);
+  for (const [index, target] of native.targets.entries()) copyFileSync(previous.targets[index]!.path, target.path + '.previous');
+  for (const [suffix, version] of [['', native.receipt.version], ['.previous', previous.receipt.version]] as const) {
+    const directory = join(native.execPath, '..', 'playwright-core' + suffix); mkdirSync(directory);
+    writeFileSync(join(directory, '.goodvibes-release.json'), JSON.stringify({ schema: 1, version }));
+    for (const file of ['package.json', 'index.js', 'cli.js']) writeFileSync(join(directory, file), '{}');
+  }
+  const paths = native.targets.flatMap(target => [target.path, target.path + '.previous']);
+  for (const suffix of ['', '.previous']) for (const file of ['.goodvibes-release.json', 'package.json', 'index.js', 'cli.js']) {
+    paths.push(join(native.execPath, '..', 'playwright-core' + suffix, file));
+  }
+  const original = new Map(paths.map(path => [path, readFileSync(path)] as const));
+  const artifact = resolveInstalledDaemonUpdateArtifact({ isOverridden: false }, native.options);
+  if (!artifact) throw new Error('Expected a complete valid current native installation');
+  let installs = 0, sessionStops = 0, graphCloses = 0, bootStarts = 0;
+  keep(spyOn(PlatformServiceManager.prototype, 'status').mockReturnValue({ platform: 'manual', serviceName: 'fixture', path: '',
+    installed: false, autostart: false, running: false, commandPreview: '', suggestedCommands: [] }));
+  keep(spyOn(PlatformServiceManager.prototype, 'install').mockImplementation(() => { installs++; throw new Error('Unsupported recovery must not install a service'); }));
+  const fx = fixture(runtime => {
+    runtime.configManager.set('service.enabled', false); runtime.configManager.set('update.auto', false);
+    runtime.configManager.set('controlPlane.webui.bundleDir', ''); runtime.configManager.set('web.staticAssetsDir', '');
+    const stop = runtime.sessionBroker.stop.bind(runtime.sessionBroker);
+    keep(spyOn(runtime.sessionBroker, 'stop').mockImplementation(async () => { sessionStops++; await stop(); }));
+    const close = runtime.close;
+    keep(spyOn(runtime, 'close').mockImplementation(async () => { graphCloses++; await close(); }));
+    const start = runtime.bootTasks!.start;
+    keep(spyOn(runtime.bootTasks!, 'start').mockImplementation(() => { bootStarts++; return start(); }));
+  }, {}, { updateArtifact: artifact, hasOverriddenHome: false });
+  const controlPlaneDirectory = join(fx.options.runtime.configManager.getControlPlaneConfigDir(), 'control-plane');
+  mkdirSync(controlPlaneDirectory, { recursive: true });
+  writeFileSync(join(controlPlaneDirectory, 'daemon-lifecycle.json'), JSON.stringify({ state: 'clean-shutdown', at: Date.now(),
+    failedStarts: 3, streakStartedAt: Date.now(), version: native.receipt.version }));
+  expect((await fx.host.start()).state).toBe('ready');
+  expect(fx.host.daemon?.isRunning).toBe(true); expect(bootStarts).toBe(1);
+  expect(sessionStops).toBe(0); expect(graphCloses).toBe(0); expect(installs).toBe(0);
+  expect((await fetch(fx.baseUrl + '/status', { headers: { Authorization: 'Bearer synthetic-host-token' } })).status).toBe(200);
+  for (const [path, bytes] of original) expect(readFileSync(path)).toEqual(bytes);
+  const receipts = readFileSync(join(controlPlaneDirectory, 'daemon-receipts.json'), 'utf8');
+  expect(receipts).toContain('Automatic rollback refused before publication');
+  expect(receipts).not.toContain('rolled back to the previously installed version');
+  await fx.host.close();
+  expect(sessionStops).toBeGreaterThan(0); expect(graphCloses).toBe(1); expect(installs).toBe(0);
+  for (const [path, bytes] of original) expect(readFileSync(path)).toEqual(bytes);
 });
 
 test('configured native host forwards only its complete retained installation and resolved home policy', async () => {

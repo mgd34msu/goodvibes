@@ -27117,6 +27117,11 @@
       "text": "export declare function resolveAuthenticatedPrincipal(req: Request, resolver: AuthenticatedPrincipalResolver): AuthenticatedPrincipal | null; ;; via AuthenticatedPrincipal = export interface AuthenticatedPrincipal { readonly principalId: string; readonly principalKind: AuthenticatedPrincipalKind; readonly admin: boolean; readonly scopes: readonly string[]; } ;; AuthenticatedPrincipalResolver = interface AuthenticatedPrincipalResolver { readonly extractAuthToken: (req: Request) => string; readonly describeAuthenticatedPrincipal: (token: string) => AuthenticatedPrincipal | null; } ;; Request = interface Request extends Body { readonly cache: RequestCache; readonly credentials: RequestCredentials; readonly destination: RequestDestination; readonly headers: Headers; readonly integrity: string; readonly keepalive: boolean; readonly method: string; readonly mode: RequestMode; readonly redirect: RequestRedirect; readonly referrer: string; readonly referrerPolicy: ReferrerPolicy; readonly signal: AbortSignal; readonly url: string; clone(): Request; }"
     },
     {
+      "name": "resolveDaemonServiceDefault",
+      "kind": "function",
+      "text": "export declare function resolveDaemonServiceDefault(homeDirectory: string, platform?: string): string;"
+    },
+    {
       "name": "resolveHostBinding",
       "kind": "function",
       "text": "export declare function resolveHostBinding(hostMode: string, customHost: string, customPort: number, serverType: 'controlPlane' | 'httpListener' | 'web'): ResolvedHostBinding;"
@@ -27151,7 +27156,7 @@
         "isSupervised",
         "restartService"
       ],
-      "text": "export interface AutoUpdateServiceActions { isSupervised(): boolean; adoptIntoService(signal?: AbortSignal): void | ServiceHandoverOutcome | Promise<void | ServiceHandoverOutcome>; restartService(signal?: AbortSignal): void | ServiceHandoverOutcome | Promise<void | ServiceHandoverOutcome>; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; ServiceHandoverOutcome = export interface ServiceHandoverOutcome { readonly status: 'accepted' | 'failed' | 'unsupported' | 'unknown'; readonly detail?: string | undefined; }"
+      "text": "export interface AutoUpdateServiceActions { preflight?(supervised: boolean): import('./service-handover-preflight.js').ServiceHandoverSupport; reserve?(supervised: boolean, signal: AbortSignal): Promise<import('./service-handover-preflight.js').ServiceHandoverReservation>; isSupervised(): boolean; adoptIntoService(signal?: AbortSignal): void | ServiceHandoverOutcome | Promise<void | ServiceHandoverOutcome>; restartService(signal?: AbortSignal): void | ServiceHandoverOutcome | Promise<void | ServiceHandoverOutcome>; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; ServiceHandoverOutcome = export interface ServiceHandoverOutcome { readonly status: 'accepted' | 'failed' | 'unsupported' | 'unknown'; readonly detail?: string | undefined; }"
     },
     {
       "name": "DEFAULT_UPDATE_ALERT_AFTER_FAILED_CHECKS",
@@ -27239,6 +27244,66 @@
       "name": "resolveDaemonInstalledFiles",
       "kind": "function",
       "text": "export declare function resolveDaemonInstalledFiles(location: DaemonUpdateInstallLocation): DaemonInstalledFile[];"
+    }
+  ],
+  "./platform/daemon/launchd-handover": [
+    {
+      "name": "LaunchdHandoverDependencies",
+      "kind": "interface",
+      "text": "export interface LaunchdHandoverDependencies { readonly command?: Command; readonly query?: Query; } ;; via Command = type Command = (args: readonly string[], timeoutMs: number, signal?: AbortSignal) => Promise<void>; ;; Query = type Query = (serviceName: string, timeoutMs: number, signal?: AbortSignal) => Promise<LaunchdJobObservation>;"
+    },
+    {
+      "name": "LaunchdHandoverInput",
+      "kind": "interface",
+      "required": [
+        "assertServiceCurrent",
+        "executablePath",
+        "pid",
+        "serviceName",
+        "servicePath",
+        "timeoutMs",
+        "uid"
+      ],
+      "text": "export interface LaunchdHandoverInput { readonly serviceName: string; readonly servicePath: string; readonly executablePath: string; readonly uid: number; readonly pid: number; readonly timeoutMs: number; assertServiceCurrent(): void; }"
+    },
+    {
+      "name": "LaunchdHandoverReservation",
+      "kind": "interface",
+      "required": [
+        "assertCurrent",
+        "cancel",
+        "commit",
+        "exitRequired"
+      ],
+      "text": "export interface LaunchdHandoverReservation { readonly exitRequired: true; assertCurrent(): void; commit(signal?: AbortSignal): Promise<ServiceHandoverOutcome>; cancel(): Promise<void>; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; ServiceHandoverOutcome = export interface ServiceHandoverOutcome { readonly status: 'accepted' | 'failed' | 'unsupported' | 'unknown'; readonly detail?: string | undefined; }"
+    },
+    {
+      "name": "LaunchdJobObservation",
+      "kind": "interface",
+      "required": [
+        "loaded"
+      ],
+      "text": "export interface LaunchdJobObservation { readonly loaded: boolean; readonly pid?: number; }"
+    },
+    {
+      "name": "queryLaunchdJob",
+      "kind": "const",
+      "text": "queryLaunchdJob: Query ;; via Query = type Query = (serviceName: string, timeoutMs: number, signal?: AbortSignal) => Promise<LaunchdJobObservation>;"
+    },
+    {
+      "name": "reserveLaunchdHandover",
+      "kind": "function",
+      "text": "export declare function reserveLaunchdHandover(input: LaunchdHandoverInput, signal?: AbortSignal, dependencies?: LaunchdHandoverDependencies): Promise<LaunchdHandoverReservation>; ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "runLaunchdCommand",
+      "kind": "const",
+      "text": "runLaunchdCommand: Command ;; via Command = type Command = (args: readonly string[], timeoutMs: number, signal?: AbortSignal) => Promise<void>;"
+    },
+    {
+      "name": "runLaunchdHandoverWorker",
+      "kind": "function",
+      "text": "export declare function runLaunchdHandoverWorker(args: readonly string[], signal?: AbortSignal, dependencies?: LaunchdHandoverDependencies): Promise<number>; ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     }
   ],
   "./platform/daemon/receipts": [

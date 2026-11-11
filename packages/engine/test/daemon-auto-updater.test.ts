@@ -1701,8 +1701,7 @@ test('a preflight callback changing supervision at staged admission cannot autho
 
 test('an accidental asynchronous preflight is owned and refuses before download or cleanup', async () => {
   const h = makeHarness({ idle: () => true, serviceActions: {
-    preflight: (() => Promise.reject(new Error('private preflight failure')))
-      as unknown as NonNullable<AutoUpdateServiceActions['preflight']>,
+    preflight: (() => Promise.reject(new Error('private preflight failure'))) as unknown as NonNullable<AutoUpdateServiceActions['preflight']>,
   } });
   try {
     await h.updater.tick(); await Promise.resolve();

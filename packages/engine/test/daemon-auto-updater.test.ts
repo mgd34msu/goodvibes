@@ -1722,7 +1722,7 @@ test('a preserved private suite stage retains a handover refusal without a recov
     suite: { configManager: { get: key => key === 'controlPlane.webui.bundleDir' ? f.webui : undefined } },
     isIdle: () => true, receipts,
     fetchImpl: async url => url === LATEST_URL ? {
-      ok: false, status: 302, url, headers: { get: name => name.toLowerCase() === 'location' ? 'https://fixture.invalid/releases/tag/v3.1.3' : null },
+      ok: false, status: 302, url, headers: { get: name => name.toLowerCase() === 'location' ? 'https://example.test/releases/tag/v3.1.3' : null },
       text: async () => '', arrayBuffer: async () => new ArrayBuffer(0),
     } : f.fetchImpl(url),
     serviceActions: {
@@ -1741,7 +1741,8 @@ test('a preserved private suite stage retains a handover refusal without a recov
   });
   try {
     await updater.tick();
-    expect(foreign).toBeDefined(); expect(readFileSync(foreign!, 'utf8')).toBe('Retain unknown private staging bytes');
+    expect(foreign, JSON.stringify(updater.snapshot())).toBeDefined();
+    expect(readFileSync(foreign!, 'utf8')).toBe('Retain unknown private staging bytes');
     for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
     expect(readFileSync(join(f.driver, 'original.txt'), 'utf8')).toBe('Retained original directory');
     expect(effects).toEqual([]); expect(updater.snapshot().appliedVersion).toBeNull(); expect(updater.snapshot().recoveryRequired).toBe(false);

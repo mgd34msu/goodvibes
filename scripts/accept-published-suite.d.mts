@@ -7,6 +7,7 @@ export interface AcceptanceSteps {
   admit(): Promise<void>; install(): Promise<void>; verifyInstalled(): Promise<void>; verifyDefaults(): Promise<void>;
   disableUpdates(): Promise<void>; restartAndVerifyOptOut(): Promise<void>; verifyOptOut(): Promise<void>;
   uninstall(): Promise<void>; verifyPreserved(): Promise<void>;
+  diagnoseFailure?(): Promise<void>;
 }
 export interface HistoricalUpgradeSteps {
   admit(): Promise<void>; installPrevious(): Promise<void>; verifyPrevious(): Promise<void>;
@@ -26,15 +27,15 @@ export function assertHistoricalRollbackRefusal(input: { bin: string; version: s
   }): Promise<void>;
 export function assertHostedContext(input: HostedContext): void;
 export function runAcceptanceSteps(host: AcceptanceSteps): Promise<void>;
-export type DaemonStatusFailure = 'token-missing' | 'invalid-port' | 'unreachable' | 'auth-refused' | 'route-missing'
+export type NativeDaemonFailure = 'token-missing' | 'invalid-port' | 'unreachable' | 'auth-refused' | 'route-missing'
   | 'unreadable-reply' | 'cli-command-caught' | 'native-startup-repair' | 'unknown';
 export interface AcceptanceFailureRecord {
-  stage: string; check?: string; command?: string; exitCode?: number; diagnostics?: readonly string[];
-  daemonStatusFailure?: DaemonStatusFailure;
+  stage: string; check?: string; command?: string; exitCode?: number; exitSignal?: NodeJS.Signals; diagnostics?: readonly string[];
+  nativeDaemonFailure?: NativeDaemonFailure;
   error: { name: string; code?: string }; lastProbeError?: { name: string; code?: string };
 }
 export function acceptanceFailureRecord(evidence: {
-  stage: string; check?: string; command?: string; exitCode?: number; diagnostics?: readonly string[]; daemonStatusFailure?: DaemonStatusFailure;
+  stage: string; check?: string; command?: string; exitCode?: number; exitSignal?: NodeJS.Signals; diagnostics?: readonly string[]; nativeDaemonFailure?: NativeDaemonFailure;
 }, error: unknown): AcceptanceFailureRecord;
 export function waitForAcceptanceReadiness(serviceReady: () => Promise<void>, verifyReady: () => Promise<void>,
   options?: { signal?: AbortSignal; timeoutMs?: number; intervalMs?: number }): Promise<void>;
@@ -42,8 +43,8 @@ export function finishAcceptance(options: {
   signal?: AbortSignal; finish?: () => Promise<void>; assertCurrent?: () => void; writeReceipt(): void;
 }): Promise<void>;
 export function runOwnedCommand(command: string, args: readonly string[], options?: SpawnOptionsWithoutStdio & {
-  signal?: AbortSignal; timeoutMs?: number; installerSource?: string; installerSourcePath?: string; daemonStatusDiagnostics?: boolean;
-}): Promise<{ code: number; stdout: string; diagnostics?: string[]; daemonStatusFailure?: DaemonStatusFailure }>;
+  signal?: AbortSignal; timeoutMs?: number; installerSource?: string; installerSourcePath?: string; nativeDaemonDiagnostics?: boolean;
+}): Promise<{ code: number; stdout: string; exitSignal?: NodeJS.Signals; diagnostics?: string[]; nativeDaemonFailure?: NativeDaemonFailure }>;
 export interface AcceptanceDelivery {
   installerSource?: string; installerSourcePath?: string; rollbackSourceRoot?: string;
   admit(input: { tag: string; source: string; target: string; root: string; signal?: AbortSignal }): Promise<{

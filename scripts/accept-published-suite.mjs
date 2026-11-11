@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir, userInfo } from 'node:os';
+import { constants as osConstants, tmpdir, userInfo } from 'node:os';
 import { isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -19,12 +19,13 @@ const safeErrorCodes = new Set(['ERR_ASSERTION', 'ENOENT', 'ENOTDIR', 'EISDIR', 
   'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ABORT_ERR', 'ERR_ACCEPTANCE_READINESS_TIMEOUT']);
 const safeError = error => ({ name: safeErrorNames.has(error?.name) ? error.name : 'Error',
   ...(safeErrorCodes.has(error?.code) ? { code: error.code } : {}) });
-const daemonStatusFailureKinds = new Set(['token-missing', 'invalid-port', 'unreachable', 'auth-refused', 'route-missing',
+const safeExitSignal = signal => typeof signal === 'string' && Object.hasOwn(osConstants.signals, signal) ? signal : undefined;
+const nativeDaemonFailureKinds = new Set(['token-missing', 'invalid-port', 'unreachable', 'auth-refused', 'route-missing',
   'unreadable-reply', 'cli-command-caught', 'native-startup-repair', 'unknown']);
 
 /** Match only fixed producer vocabulary. All private error/fix/target/header
  * values remain local, including malformed or malicious machine responses. */
-function daemonStatusFailure(stdout, stderr) {
+function nativeDaemonFailure(stdout, stderr) {
   for (const output of [stderr, stdout]) {
     const lines = output.split(/\r?\n/).map(line => line.replace(/\u001b\[[0-9;]*m/g, '').trim());
     if (lines.includes('Daemon command failed')) return 'cli-command-caught';
@@ -57,8 +58,9 @@ function preserveAcceptanceCancellation(error, signal) {
 export function acceptanceFailureRecord(evidence, error) {
   return { stage: evidence.stage, check: evidence.check, command: evidence.command, exitCode: evidence.exitCode,
     diagnostics: evidence.diagnostics, error: safeError(error),
-    ...(Number.isInteger(evidence.exitCode) && evidence.exitCode !== 0 && daemonStatusFailureKinds.has(evidence.daemonStatusFailure)
-      ? { daemonStatusFailure: evidence.daemonStatusFailure } : {}),
+    ...(evidence.exitCode !== 0 && safeExitSignal(evidence.exitSignal) ? { exitSignal: evidence.exitSignal } : {}),
+    ...(Number.isInteger(evidence.exitCode) && evidence.exitCode !== 0 && nativeDaemonFailureKinds.has(evidence.nativeDaemonFailure)
+      ? { nativeDaemonFailure: evidence.nativeDaemonFailure } : {}),
     ...(error?.code === 'ERR_ACCEPTANCE_READINESS_TIMEOUT' ? { lastProbeError: safeError(error.cause) } : {}) };
 }
 
@@ -160,10 +162,10 @@ export function assertHostedContext(input) {
 /** Drain the exact admitted child before reporting timeout/cancellation. Output
  * stays bounded/private: installer/status output can contain local credentials. */
 export async function runOwnedCommand(command, args, options = {}) {
-  const { timeoutMs = 120_000, signal, installerSource, installerSourcePath = args[0], daemonStatusDiagnostics = false, ...spawnOptions } = options;
+  const { timeoutMs = 120_000, signal, installerSource, installerSourcePath = args[0], nativeDaemonDiagnostics = false, ...spawnOptions } = options;
   signal?.throwIfAborted();
-  if (daemonStatusDiagnostics) assert.ok(args.length === 2 && args[0] === 'status' && args[1] === '--json',
-    'Daemon status diagnostics require the exact machine-status invocation.');
+  if (nativeDaemonDiagnostics) assert.ok(command.split(sep).at(-1) === 'goodvibes-daemon',
+    'Native daemon diagnostics require the installed daemon executable basename.');
   const shell = command.split(sep).at(-1);
   const probe = installerSource !== undefined && ['sh', 'bash', 'dash'].includes(shell);
   const probeRoot = probe ? mkdtempSync(join(tmpdir(), 'goodvibes-acceptance-line-')) : undefined;
@@ -182,13 +184,14 @@ export async function runOwnedCommand(command, args, options = {}) {
     bytes += chunk.length;
     if (bytes > 512 * 1024) failOutput(new Error('Acceptance command output exceeded its bound.'));
     else if (retain) stdout += chunk.toString('utf8');
-    else if (installerSource !== undefined || daemonStatusDiagnostics) stderr += chunk.toString('utf8');
+    else if (installerSource !== undefined || nativeDaemonDiagnostics) stderr += chunk.toString('utf8');
   };
   child.stdout.on('data', chunk => consume(chunk, true));
   child.stderr.on('data', chunk => consume(chunk, false));
   const closed = new Promise((yes, no) => {
     child.once('error', () => no(new Error('Acceptance command could not start.')));
-    child.once('close', code => yes({ code: code ?? 1, stdout }));
+    child.once('close', (code, signal) => yes({ code: code ?? 1, stdout,
+      ...(safeExitSignal(signal) ? { exitSignal: signal } : {}) }));
   });
   let rejectCancellation;
   const cancelled = new Promise((_yes, no) => { rejectCancellation = no; });
@@ -224,7 +227,7 @@ export async function runOwnedCommand(command, args, options = {}) {
     if (lastInstallerLine) result.diagnostics.unshift(`Installer exited nonzero after source line ${lastInstallerLine}; line captured before EXIT cleanup.`);
     result.diagnostics = result.diagnostics.slice(0, 8);
   }
-  if (result.code !== 0 && daemonStatusDiagnostics) result.daemonStatusFailure = daemonStatusFailure(stdout, stderr);
+  if (result.code !== 0 && nativeDaemonDiagnostics) result.nativeDaemonFailure = nativeDaemonFailure(stdout, stderr);
   signal?.throwIfAborted(); return result;
 }
 
@@ -241,7 +244,11 @@ export async function runAcceptanceSteps(host) {
     await host.uninstall(); await host.verifyPreserved();
     await host.uninstall(); await host.verifyPreserved();
     await host.install(); await host.verifyInstalled(); await host.verifyOptOut();
-  } catch (error) { primary = error; }
+  } catch (error) {
+    primary = error;
+    try { await host.diagnoseFailure?.(); }
+    catch (error) { primary = new AggregateError([primary, error], 'Acceptance and failure diagnostics failed.'); }
+  }
   finally {
     if (attempted) {
       try { await host.uninstall(); await host.verifyPreserved(); }
@@ -391,14 +398,17 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   for (const name of Object.keys(env)) if (/^(?:GOODVIBES_|OPENAI_|ANTHROPIC_|GOOGLE_|GEMINI_|JEV_|CLEF_)/.test(name)
     || ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'DBUS_SESSION_BUS_ADDRESS', 'NODE_OPTIONS', 'BUN_OPTIONS'].includes(name)) delete env[name];
   const checkpoint = check => {
-    evidence.check = check; evidence.command = undefined; evidence.exitCode = undefined; evidence.diagnostics = undefined; evidence.daemonStatusFailure = undefined;
+    evidence.check = check; evidence.command = undefined; evidence.exitCode = undefined; evidence.exitSignal = undefined;
+    evidence.diagnostics = undefined; evidence.nativeDaemonFailure = undefined;
   };
   const invoke = async (command, args, extra = {}, cleanup = false, installerSource, installerSourcePath) => {
-    assertHome(); evidence.command = command.split(sep).at(-1); evidence.exitCode = undefined; evidence.diagnostics = undefined; evidence.daemonStatusFailure = undefined;
+    assertHome(); evidence.command = command.split(sep).at(-1); evidence.exitCode = undefined; evidence.exitSignal = undefined;
+    evidence.diagnostics = undefined; evidence.nativeDaemonFailure = undefined;
     const result = await runOwnedCommand(command, args, { cwd: home, env: { ...env, ...extra }, timeoutMs: 300_000,
       signal: cleanup ? undefined : signal, installerSource, installerSourcePath,
-      daemonStatusDiagnostics: evidence.command === 'goodvibes-daemon' && args.length === 2 && args[0] === 'status' && args[1] === '--json' }); assertHome();
-    evidence.exitCode = result.code; evidence.diagnostics = result.diagnostics; evidence.daemonStatusFailure = result.daemonStatusFailure;
+      nativeDaemonDiagnostics: evidence.command === 'goodvibes-daemon' }); assertHome();
+    evidence.exitCode = result.code; evidence.exitSignal = result.exitSignal;
+    evidence.diagnostics = result.diagnostics; evidence.nativeDaemonFailure = result.nativeDaemonFailure;
     assert.equal(result.code, 0, `Acceptance command failed: ${command.split(sep).at(-1)}`); return result.stdout.trim();
   };
   if (process.platform === 'linux') {
@@ -603,6 +613,31 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     },
     uninstall: host.uninstall, verifyPreserved,
   };
+  if (process.platform === 'darwin' && delivery && process.env.GOODVIBES_ACCEPTANCE_DIAGNOSTICS === '1') {
+    host.diagnoseFailure = async () => {
+      if (signal?.aborted) return;
+      checkpoint('native.failure-diagnostics');
+      const records = []; let diagnosticFailure;
+      try {
+        const { diagnoseMacosNative } = await import('./diagnose-macos-native.mjs');
+        await diagnoseMacosNative({ daemon, home, env, signal, onSafeEvidence: record => { records.push(record); }, stopService: async () => {
+          assertServiceOwned();
+          await runOwnedCommand('launchctl', ['bootout', `gui/${account.uid}/${label}`], { cwd: home, env, timeoutMs: 300_000, signal });
+          assertHome();
+          const stopped = await runOwnedCommand('launchctl', ['print', `gui/${account.uid}/${label}`], { cwd: home, env, timeoutMs: 300_000, signal });
+          assert.notEqual(stopped.code, 0, 'The original native service must retire before foreground diagnosis.');
+        } });
+      } catch (error) { diagnosticFailure = error; }
+      try {
+        // The owned controller admits only bounded fixed codes/numbers and
+        // sanitized public source coordinates, never runtime values or output.
+        writeFileSync(join(root, 'native-diagnostics.json'), JSON.stringify({ target, evidence: records }) + '\n', { flag: 'wx', mode: 0o600 });
+      } catch (error) {
+        diagnosticFailure = diagnosticFailure ? new AggregateError([diagnosticFailure, error], 'Native diagnosis and evidence publication failed.') : error;
+      }
+      if (diagnosticFailure) throw diagnosticFailure;
+    };
+  }
   const selectedHost = historical ? upgrade : host;
   for (const name of Object.keys(selectedHost)) {
     const original = selectedHost[name];

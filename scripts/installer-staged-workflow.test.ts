@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const repo = resolve(import.meta.dir, '..');
-type Step = { name?: string; id?: string; uses?: string; run?: string; with?: Record<string, unknown>; env?: Record<string, string>; 'working-directory'?: string };
+type Step = { name?: string; id?: string; if?: string; uses?: string; run?: string; with?: Record<string, unknown>; env?: Record<string, string>; 'working-directory'?: string };
 type Job = { needs?: string[]; if?: string; permissions?: Record<string, string>; steps: Step[]; strategy?: { 'fail-fast'?: boolean; matrix: { include: Array<{ target: string; runner: string }> } } };
 type Workflow = { on: Record<string, { inputs: Record<string, { required: boolean; type: string; default?: unknown }> }>; jobs: Record<string, Job>; permissions: Record<string, string> };
 const load = (name: string) => Bun.YAML.parse(readFileSync(join(repo, '.github/workflows', name), 'utf8')) as Workflow;
@@ -70,10 +70,19 @@ test('manual macOS diagnostics reuse the existing staged artifact without stagin
     'run-id': '${{ inputs.artifact-run-id }}', 'github-token': '${{ secrets.GITHUB_TOKEN }}' });
   const invoke = job.steps.find(step => step.run?.startsWith('node scripts/accept-staged-suite.mjs'))!;
   expect(invoke.run).toBe('node scripts/accept-staged-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET" "$RUNNER_TEMP/staged-release-assets"');
-  expect(invoke.env).toEqual({ RELEASE_TAG: '${{ inputs.tag }}', RELEASE_SOURCE: '${{ inputs.source }}', RELEASE_TARGET: '${{ matrix.target }}' });
-  const result = job.steps.find(step => String(step.uses).startsWith('actions/upload-artifact@'))!;
+  expect(invoke.env).toEqual({ RELEASE_TAG: '${{ inputs.tag }}', RELEASE_SOURCE: '${{ inputs.source }}', RELEASE_TARGET: '${{ matrix.target }}', GOODVIBES_ACCEPTANCE_DIAGNOSTICS: '1' });
+  const result = job.steps.find(step => step.name === 'Preserve bounded macOS diagnostic result')!;
   expect(result.with?.name).toBe('diagnostic-staged-macos-${{ matrix.target }}');
   expect(result.with?.path).toEndWith('/acceptance-result.json');
+  const recorded = job.steps.findIndex(step => step.name === 'Record fresh native diagnostic window');
+  expect(recorded).toBeGreaterThan(job.steps.indexOf(download)); expect(recorded).toBeLessThan(job.steps.indexOf(invoke));
+  const crash = job.steps.find(step => step.name === 'Collect bounded safe native crash evidence')!;
+  expect(crash.if).toBe("failure() && steps.native-diagnostic.outcome == 'failure'");
+  expect(crash.run).toBe('node scripts/collect-macos-native-crash.mjs "$RUNNER_TEMP/goodvibes-macos-diagnostic-start.json" "$RUNNER_TEMP/goodvibes-macos-crash-summary.json"');
+  const native = job.steps.find(step => step.name === 'Preserve safe native crash and foreground evidence')!;
+  expect(native.if).toBe("always() && steps.native-diagnostic.outcome == 'failure'");
+  expect(native.with?.name).toBe('diagnostic-staged-macos-native-${{ matrix.target }}');
+  expect(native.with?.path).toBe('${{ runner.temp }}/goodvibes-macos-crash-summary.json\n${{ runner.temp }}/goodvibes-published-*/native-diagnostics.json\n');
   expect(job.steps.filter(step => step.run).map(step => step.run).join('\n')).not.toMatch(/sha256sums|--out|\bbun\b|\bbuild\b|gh release|git tag|npm publish/);
 });
 

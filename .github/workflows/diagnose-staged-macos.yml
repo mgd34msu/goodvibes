@@ -68,12 +68,31 @@ jobs:
           path: ${{ runner.temp }}/staged-release-assets
           run-id: ${{ inputs.artifact-run-id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Record fresh native diagnostic window
+        env:
+          DIAGNOSTIC_START: ${{ runner.temp }}/goodvibes-macos-diagnostic-start.json
+        run: node -e 'require("node:fs").writeFileSync(process.env.DIAGNOSTIC_START, JSON.stringify({startedAtMs:Date.now()}), {flag:"wx",mode:0o600})'
       - name: Diagnose original staged install and native service lifecycle
+        id: native-diagnostic
         env:
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_SOURCE: ${{ inputs.source }}
           RELEASE_TARGET: ${{ matrix.target }}
+          GOODVIBES_ACCEPTANCE_DIAGNOSTICS: '1'
         run: node scripts/accept-staged-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET" "$RUNNER_TEMP/staged-release-assets"
+      - name: Collect bounded safe native crash evidence
+        if: failure() && steps.native-diagnostic.outcome == 'failure'
+        run: node scripts/collect-macos-native-crash.mjs "$RUNNER_TEMP/goodvibes-macos-diagnostic-start.json" "$RUNNER_TEMP/goodvibes-macos-crash-summary.json"
+      - name: Preserve safe native crash and foreground evidence
+        if: always() && steps.native-diagnostic.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: diagnostic-staged-macos-native-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/goodvibes-macos-crash-summary.json
+            ${{ runner.temp }}/goodvibes-published-*/native-diagnostics.json
+          if-no-files-found: warn
+          retention-days: 7
       - name: Preserve bounded macOS diagnostic result
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

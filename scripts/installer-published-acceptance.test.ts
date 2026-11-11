@@ -14,11 +14,11 @@ function steps(events: string[]): AcceptanceSteps {
     verifyDefaults: record('defaults'), disableUpdates: record('off'), restartAndVerifyOptOut: record('restart-off'),
     verifyOptOut: record('read-off'), uninstall: record('uninstall'), verifyPreserved: record('preserved') };
 }
-function statusChild(root: string) {
+function nativeDaemonChild(root: string) {
   const command = join(root, 'goodvibes-daemon');
   writeFileSync(command, '#!/bin/sh\nprintf "%s" "$STATUS_STDOUT"\nprintf "%s" "$STATUS_STDERR" >&2\nexit "$STATUS_EXIT"\n', { mode: 0o700 });
-  return (stderr: string, stdout = '', code = 1, diagnostics = true) => runOwnedCommand(command, ['status', '--json'], {
-    env: { ...process.env, STATUS_STDOUT: stdout, STATUS_STDERR: stderr, STATUS_EXIT: String(code) }, daemonStatusDiagnostics: diagnostics,
+  return (stderr: string, stdout = '', code = 1, diagnostics = true, args: readonly string[] = ['status', '--json']) => runOwnedCommand(command, args, {
+    env: { ...process.env, STATUS_STDOUT: stdout, STATUS_STDERR: stderr, STATUS_EXIT: String(code) }, nativeDaemonDiagnostics: diagnostics,
   });
 }
 test('only original non-root GitHub-hosted native accounts admit real service acceptance', () => {
@@ -57,6 +57,21 @@ test('failed install and failed native cleanup both remain failures', async () =
   await expect(runAcceptanceSteps(host)).rejects.toMatchObject({ name: 'AggregateError', errors: [original, cleanup] });
 });
 
+test('failure-only diagnostics run before original uninstall and their failure cannot skip owned cleanup', async () => {
+  const events: string[] = [], host = steps(events), primary = new Error('Original install failed'), diagnostic = new Error('Owned diagnostics failed');
+  host.install = async () => { events.push('install-failed'); throw primary; };
+  host.diagnoseFailure = async () => { events.push('diagnose-failed'); throw diagnostic; };
+  await expect(runAcceptanceSteps(host)).rejects.toMatchObject({ name: 'AggregateError', errors: [primary, diagnostic] });
+  expect(events).toEqual(['admit', 'install-failed', 'diagnose-failed', 'uninstall', 'preserved']);
+});
+
+test('successful native acceptance never runs its optional failure diagnostic hook', async () => {
+  const events: string[] = [], host = steps(events);
+  host.diagnoseFailure = async () => { throw new Error('Successful acceptance must not diagnose failure'); };
+  await runAcceptanceSteps(host);
+  expect(events.at(-2)).toBe('uninstall'); expect(events.at(-1)).toBe('preserved');
+});
+
 test('a successful command followed by a failed assertion reports the proof and safe error code without private output', async () => {
   const secret = 'acceptance-private-launchctl-output-38df';
   const result = await runOwnedCommand(process.execPath, ['-e', `process.stdout.write(${JSON.stringify(secret)})`]);
@@ -73,7 +88,7 @@ test('a successful command followed by a failed assertion reports the proof and 
 
 test('owned status commands classify only fixed failure kinds from private stdout or stderr without exposing values', async () => {
   const root = mkdtempSync(join(tmpdir(), 'published-acceptance-status-')); roots.push(root);
-  const invoke = statusChild(root), secret = 'acceptance-private-status-value-40a9';
+  const invoke = nativeDaemonChild(root), secret = 'acceptance-private-status-value-40a9';
   const failure = (error: string) => JSON.stringify({ ok: false, error, fix: secret, target: `https://${secret}.invalid`,
     cause: { message: secret, code: secret }, headers: { Authorization: `Bearer ${secret}` } }, null, 2);
   const cases = [
@@ -90,10 +105,10 @@ test('owned status commands classify only fixed failure kinds from private stdou
   ] as const;
   for (const [output, kind] of cases) for (const stream of ['stderr', 'stdout']) {
     const result = await invoke(stream === 'stderr' ? output : '', stream === 'stdout' ? output : '');
-    expect(result.code).toBe(1); expect(result.daemonStatusFailure).toBe(kind); expect(result).not.toHaveProperty('stderr');
+    expect(result.code).toBe(1); expect(result.nativeDaemonFailure).toBe(kind); expect(result).not.toHaveProperty('stderr');
     const record = acceptanceFailureRecord({ stage: 'verifyInstalled', check: 'service.status-version', command: 'goodvibes-daemon',
-      exitCode: result.code, daemonStatusFailure: result.daemonStatusFailure }, new Error(secret));
-    expect(record.daemonStatusFailure).toBe(kind);
+      exitCode: result.code, nativeDaemonFailure: result.nativeDaemonFailure }, new Error(secret));
+    expect(record.nativeDaemonFailure).toBe(kind);
     expect(JSON.stringify(record)).not.toContain(secret);
     expect(JSON.stringify(record)).not.toContain('Authorization'); expect(JSON.stringify(record)).not.toContain('https://');
   }
@@ -101,26 +116,59 @@ test('owned status commands classify only fixed failure kinds from private stdou
 
 test('status diagnostics preserve nonzero exits, ignore unrelated fields and do not carry a failure into later probes', async () => {
   const root = mkdtempSync(join(tmpdir(), 'published-acceptance-status-probes-')); roots.push(root);
-  const invoke = statusChild(root), payload = JSON.stringify({ ok: false, error: 'no operator token was found for this machine' }, null, 2);
+  const invoke = nativeDaemonChild(root), payload = JSON.stringify({ ok: false, error: 'no operator token was found for this machine' }, null, 2);
   const first = await invoke(`warning before machine reply\n${payload}`);
-  expect(first.daemonStatusFailure).toBe('token-missing');
+  expect(first.nativeDaemonFailure).toBe('token-missing');
   const success = await invoke('', '{"ok":true,"data":{}}', 0);
   expect(success).toEqual({ code: 0, stdout: '{"ok":true,"data":{}}' });
   const stale = acceptanceFailureRecord({ stage: 'verifyInstalled', check: 'service.status-version', exitCode: success.code,
-    daemonStatusFailure: first.daemonStatusFailure }, new Error('Subsequent unrelated assertion'));
-  expect(stale).not.toHaveProperty('daemonStatusFailure');
+    nativeDaemonFailure: first.nativeDaemonFailure }, new Error('Subsequent unrelated assertion'));
+  expect(stale).not.toHaveProperty('nativeDaemonFailure');
   const unknown = await invoke(JSON.stringify({ ok: false, error: 'unrecognized', fix: 'no operator token was found for this machine',
     cause: 'Daemon command failed', headers: { error: 'the daemon on this machine refused the operator token',
       repair: 'Native daemon startup could not verify its installation. Repair using the released suite installer: curl -fsSL https://goodvibes.sh/install.sh | sh . The installer preserves existing application data.' } }));
-  expect(unknown.daemonStatusFailure).toBe('unknown');
+  expect(unknown.nativeDaemonFailure).toBe('unknown');
   const nonzero = await invoke('', '{"ok":true,"data":{}}', 7);
-  expect(nonzero.code).toBe(7); expect(nonzero.daemonStatusFailure).toBe('unknown');
+  expect(nonzero.code).toBe(7); expect(nonzero.nativeDaemonFailure).toBe('unknown');
   expect(await invoke(payload, '', 1, false)).toEqual({ code: 1, stdout: '' });
 });
 
-test('status diagnostic opt-in refuses every invocation other than the exact machine status arguments', async () => {
-  await expect(runOwnedCommand(process.execPath, ['status', '--json', '--token', 'private-status-token'], { daemonStatusDiagnostics: true }))
-    .rejects.toThrow('Daemon status diagnostics require the exact machine-status invocation.');
+test('native daemon diagnostics cover version, config and reader commands without exposing private output', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-native-commands-')); roots.push(root);
+  const invoke = nativeDaemonChild(root), secret = 'acceptance-private-native-command-f01b';
+  for (const args of [['--version'], ['config', 'get', 'controlPlane.port', '--json'], ['check-install-reader', '--describe']]) {
+    const result = await invoke(`private context ${secret}\nDaemon command failed\n`, '', 1, true, args);
+    expect(result.code).toBe(1); expect(result.nativeDaemonFailure).toBe('cli-command-caught');
+    expect(result).not.toHaveProperty('stderr');
+    const record = acceptanceFailureRecord({ stage: 'verifyInstalled', check: 'installed.goodvibes-daemon.version',
+      command: 'goodvibes-daemon', exitCode: result.code, nativeDaemonFailure: result.nativeDaemonFailure }, new Error(secret));
+    expect(JSON.stringify(record)).not.toContain(secret);
+  }
+});
+
+test('native diagnostic opt-in requires the installed daemon basename', async () => {
+  await expect(runOwnedCommand(process.execPath, ['--version'], { nativeDaemonDiagnostics: true }))
+    .rejects.toThrow('Native daemon diagnostics require the installed daemon executable basename.');
+});
+
+test('actual SIGKILL and SIGTERM failures retain safe OS signals and never become ordinary exit-one diagnoses', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'published-acceptance-native-signals-')); roots.push(root);
+  const command = join(root, 'goodvibes-daemon'), secret = 'acceptance-private-signal-context-42fa';
+  writeFileSync(command, '#!/bin/sh\nulimit -c 0\nprintf "%s\\n" "$PRIVATE_CONTEXT" >&2\nkill -s "$EXIT_SIGNAL" "$$"\n', { mode: 0o700 });
+  for (const signal of ['KILL', 'TERM'] as const) {
+    const result = await runOwnedCommand(command, ['--version'], {
+      env: { ...process.env, PRIVATE_CONTEXT: secret, EXIT_SIGNAL: signal }, nativeDaemonDiagnostics: true,
+    });
+    expect(result.code).toBe(1); expect(result.exitSignal).toBe(`SIG${signal}`); expect(result.nativeDaemonFailure).toBe('unknown');
+    const record = acceptanceFailureRecord({ stage: 'verifyInstalled', check: 'installed.goodvibes-daemon.version',
+      command: 'goodvibes-daemon', exitCode: result.code, exitSignal: result.exitSignal, nativeDaemonFailure: result.nativeDaemonFailure }, new Error(secret));
+    expect(record.exitSignal).toBe(`SIG${signal}`); expect(JSON.stringify(record)).not.toContain(secret);
+  }
+  writeFileSync(command, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+  const success = await runOwnedCommand(command, ['--version'], { nativeDaemonDiagnostics: true });
+  expect(success).toEqual({ code: 0, stdout: '' });
+  const stale = acceptanceFailureRecord({ stage: 'verifyInstalled', exitCode: success.code, exitSignal: 'SIGKILL', nativeDaemonFailure: 'unknown' }, new Error('Later assertion'));
+  expect(stale).not.toHaveProperty('exitSignal'); expect(stale).not.toHaveProperty('nativeDaemonFailure');
 });
 
 test('readiness retries the actual service observation before accepting a coherent status and HTTP proof', async () => {

@@ -40,14 +40,17 @@ export interface NativeStartupFailure {
 }
 export interface AcceptanceFailureRecord {
   stage: string; check?: string; command?: string; exitCode?: number; exitSignal?: NodeJS.Signals; diagnostics?: readonly string[];
+  httpStatus?: number;
   nativeDaemonFailure?: NativeDaemonFailure;
   nativeStartupFailure?: NativeStartupFailure;
   error: { name: string; code?: string }; lastProbeError?: { name: string; code?: string };
 }
 export function acceptanceFailureRecord(evidence: {
   stage: string; check?: string; command?: string; exitCode?: number; exitSignal?: NodeJS.Signals; diagnostics?: readonly string[];
+  httpStatus?: number;
   nativeDaemonFailure?: NativeDaemonFailure; nativeStartupFailure?: NativeStartupFailure;
 }, error: unknown): AcceptanceFailureRecord;
+export function markAcceptanceCheckpoint(evidence: Parameters<typeof acceptanceFailureRecord>[0], check?: string): void;
 export function waitForAcceptanceReadiness(serviceReady: () => Promise<void>, verifyReady: () => Promise<void>,
   options?: { signal?: AbortSignal; timeoutMs?: number; intervalMs?: number }): Promise<void>;
 export interface NativeServiceRetirementObservation {
@@ -82,6 +85,11 @@ export interface AcceptanceDelivery {
   }): Promise<void>;
 }
 export function acceptPublishedSuite(input: { tag: string; source: string; target: string; scenario?: 'fresh' | 'upgrade-v3.1.1'; signal?: AbortSignal; delivery?: AcceptanceDelivery }): Promise<void>;
-export function readPublishedReaders(input: { tag: string; source: string; target: string; assets: ReadonlySet<string> },
+export function readPublishedReaders(input: { tag: string; source: string; target: string; assets: ReadonlySet<string>; onCheck?(check: string): void },
   load: (name: string) => Promise<{ target: string; sourceCommit: string; headCommit: string; version?: string;
     readers: { version: string }; files: readonly { path: string }[] }>): Promise<Map<string, unknown>>;
+export function readPublicAcceptanceDelivery(input: {
+  tag: string; source: string; target: string; signal?: AbortSignal;
+  checkpoint(check: string): void; onHttpStatus(status: number): void;
+}, fetchImpl?: (url: string, options: RequestInit) => Promise<Response>): Promise<{ readers: Map<string, unknown>;
+  published: { bytes: Buffer; url: string }; immutable: { bytes: Buffer; url: string } }>;

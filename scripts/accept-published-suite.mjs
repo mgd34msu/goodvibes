@@ -69,6 +69,7 @@ function preserveAcceptanceCancellation(error, signal) {
 export function acceptanceFailureRecord(evidence, error) {
   return { stage: evidence.stage, check: evidence.check, command: evidence.command, exitCode: evidence.exitCode,
     diagnostics: evidence.diagnostics, error: safeError(error),
+    ...(Number.isInteger(evidence.httpStatus) && evidence.httpStatus >= 100 && evidence.httpStatus <= 599 ? { httpStatus: evidence.httpStatus } : {}),
     ...(evidence.exitCode !== 0 && safeExitSignal(evidence.exitSignal) ? { exitSignal: evidence.exitSignal } : {}),
     ...(Number.isInteger(evidence.exitCode) && evidence.exitCode !== 0 && nativeDaemonFailureKinds.has(evidence.nativeDaemonFailure)
       ? { nativeDaemonFailure: evidence.nativeDaemonFailure } : {}),
@@ -76,6 +77,12 @@ export function acceptanceFailureRecord(evidence, error) {
       && ['sqlite', 'darwin-original'].includes(evidence.nativeStartupFailure.stage) && nativeStartupFailureCodes.has(evidence.nativeStartupFailure.code)
       ? { nativeStartupFailure: { stage: evidence.nativeStartupFailure.stage, code: evidence.nativeStartupFailure.code } } : {}),
     ...(error?.code === 'ERR_ACCEPTANCE_READINESS_TIMEOUT' ? { lastProbeError: safeError(error.cause) } : {}) };
+}
+
+export function markAcceptanceCheckpoint(evidence, check) {
+  evidence.check = check; evidence.command = undefined; evidence.exitCode = undefined; evidence.exitSignal = undefined;
+  evidence.diagnostics = undefined; evidence.nativeDaemonFailure = undefined; evidence.nativeStartupFailure = undefined;
+  evidence.httpStatus = undefined;
 }
 
 /** Every attempt observes the actual service before the status/HTTP proof.
@@ -368,34 +375,76 @@ export async function readPublishedReaders(input, load) {
   const suffix = input.target.replace(/^darwin-/, 'macos-'), records = new Map();
   for (const command of products) {
     const asset = `${command}-${suffix}`, descriptor = `${asset}.reader-ci-artifact.json`;
+    const check = field => input.onCheck?.(`catalog.reader.${command}.${field}`);
+    check('assets');
     assert.ok(input.assets.has(asset) && input.assets.has(descriptor), 'A public native reader cohort is missing.');
     const value = await load(descriptor);
-    assert.equal(value.target, input.target); assert.equal(value.sourceCommit, input.source); assert.equal(value.headCommit, input.source);
+    check('target'); assert.equal(value.target, input.target);
+    check('source'); assert.equal(value.sourceCommit, input.source);
+    check('head'); assert.equal(value.headCommit, input.source);
+    check('version');
     assert.equal(value.version ?? value.readers?.version, input.tag.slice(1));
+    check('files');
     assert.ok(Array.isArray(value.files) && value.files.some(file => file.path === asset));
     records.set(command, value);
   }
   return records;
 }
 
-async function fetchBytes(url, limit = 1_048_576, signal) {
+async function fetchBytes(url, limit = 1_048_576, signal, onHttpStatus, fetchImpl = fetch) {
   try {
     const timeout = AbortSignal.timeout(60_000);
-    const response = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
-    assert.equal(response.status, 200, 'Public release request did not succeed.');
-    const reader = response.body?.getReader(); assert.ok(reader);
+    const response = await fetchImpl(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+    if (Number.isInteger(response.status) && response.status >= 100 && response.status <= 599) onHttpStatus?.(response.status);
+    const reader = response.body?.getReader();
     const chunks = []; let size = 0;
     try {
+      assert.equal(response.status, 200, 'Public release request did not succeed.');
+      assert.ok(reader);
       for (;;) {
         const { done, value } = await reader.read(); if (done) break;
         size += value.length; assert.ok(size <= limit, 'Public metadata exceeds its bound.'); chunks.push(value);
       }
-    } finally { await reader.cancel(); }
+    } finally { await reader?.cancel(); }
     return { bytes: Buffer.concat(chunks), url: response.url };
   } catch (error) {
     if (signal?.aborted && error?.name === 'AbortError' && (error?.code === 'ABORT_ERR' || error?.code === 20)) throw signal.reason;
     throw preserveAcceptanceCancellation(error, signal);
   }
+}
+
+/** The actual public admission path, with fixed checkpoints and status-only
+ * observations. The injected fetch seam supplies owned HTTP fixtures in tests. */
+export async function readPublicAcceptanceDelivery({ tag, source, target, signal, checkpoint, onHttpStatus }, fetchImpl = fetch) {
+  const api = `https://api.github.com/repos/${repository}`;
+  const request = async (check, url, limit) => {
+    checkpoint(check);
+    return fetchBytes(url, limit, signal, onHttpStatus, fetchImpl);
+  };
+  const release = JSON.parse((await request('catalog.release.http', `${api}/releases/tags/${tag}`)).bytes);
+  checkpoint('catalog.release.tag'); assert.equal(release.tag_name, tag);
+  checkpoint('catalog.release.draft'); assert.equal(release.draft, false);
+  checkpoint('catalog.release.asset-count');
+  assert.ok(Array.isArray(release.assets) && release.assets.length >= 65, 'The complete native suite must be published first.');
+  checkpoint('catalog.release.unique-assets');
+  const names = new Set(release.assets.map(asset => asset.name)); assert.equal(names.size, release.assets.length);
+  checkpoint('catalog.release.manifest'); assert.ok(names.has('SHA256SUMS.txt'));
+  const readers = await readPublishedReaders({ tag, source, target, assets: names, onCheck: checkpoint }, async name => {
+    const suffix = target.replace(/^darwin-/, 'macos-');
+    const command = products.find(command => name === `${command}-${suffix}.reader-ci-artifact.json`); assert.ok(command);
+    const value = JSON.parse((await request(`catalog.reader.${command}.http`, `https://github.com/${repository}/releases/download/${tag}/${name}`, 131_072)).bytes);
+    return value;
+  });
+  const latest = JSON.parse((await request('catalog.latest.http', `${api}/releases/latest`)).bytes);
+  checkpoint('catalog.latest.tag');
+  assert.equal(latest.tag_name, tag, 'Default updater acceptance requires this exact tag to be latest.');
+  const immutable = await request('installer.immutable.http', `https://raw.githubusercontent.com/${repository}/${source}/scripts/install.sh`);
+  const published = await request('installer.public.http', 'https://goodvibes.sh/install.sh');
+  checkpoint('installer.public.redirect');
+  assert.match(published.url, /^https:\/\/raw\.githubusercontent\.com\/mgd34msu\/goodvibes\/(?:main|[a-f0-9]{40})\/scripts\/install\.sh$/);
+  checkpoint('installer.public.bytes');
+  assert.ok(published.bytes.equals(immutable.bytes), 'The public installer differs from the accepted release source.');
+  return { readers, published, immutable };
 }
 
 export async function acceptPublishedSuite(input) {
@@ -443,10 +492,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   const env = { ...process.env, HOME: home };
   for (const name of Object.keys(env)) if (/^(?:GOODVIBES_|OPENAI_|ANTHROPIC_|GOOGLE_|GEMINI_|JEV_|CLEF_)/.test(name)
     || ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'DBUS_SESSION_BUS_ADDRESS', 'NODE_OPTIONS', 'BUN_OPTIONS'].includes(name)) delete env[name];
-  const checkpoint = check => {
-    evidence.check = check; evidence.command = undefined; evidence.exitCode = undefined; evidence.exitSignal = undefined;
-    evidence.diagnostics = undefined; evidence.nativeDaemonFailure = undefined; evidence.nativeStartupFailure = undefined;
-  };
+  const checkpoint = check => markAcceptanceCheckpoint(evidence, check);
   const invoke = async (command, args, extra = {}, cleanup = false, installerSource, installerSourcePath) => {
     assertHome(); evidence.command = command.split(sep).at(-1); evidence.exitCode = undefined; evidence.exitSignal = undefined;
     evidence.diagnostics = undefined; evidence.nativeDaemonFailure = undefined; evidence.nativeStartupFailure = undefined;
@@ -480,20 +526,11 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     evidence.stage = 'staged-candidate';
     ({ readers, published, installer } = await delivery.admit({ tag, source, target, root, signal }));
   } else {
-    const release = JSON.parse((await fetchBytes(`${api}/releases/tags/${tag}`, undefined, signal)).bytes);
-    assert.equal(release.tag_name, tag); assert.equal(release.draft, false);
-    assert.ok(Array.isArray(release.assets) && release.assets.length >= 65, 'The complete native suite must be published first.');
-    const names = new Set(release.assets.map(asset => asset.name));
-    assert.equal(names.size, release.assets.length); assert.ok(names.has('SHA256SUMS.txt'));
-    readers = await readPublishedReaders({ tag, source, target, assets: names }, async name =>
-      JSON.parse((await fetchBytes(`https://github.com/${repository}/releases/download/${tag}/${name}`, 131_072, signal)).bytes));
-    const latest = JSON.parse((await fetchBytes(`${api}/releases/latest`, undefined, signal)).bytes);
-    assert.equal(latest.tag_name, tag, 'Default updater acceptance requires this exact tag to be latest.');
-    evidence.stage = 'public-installer';
-    const immutable = await fetchBytes(`https://raw.githubusercontent.com/${repository}/${source}/scripts/install.sh`, undefined, signal);
-    published = await fetchBytes('https://goodvibes.sh/install.sh', undefined, signal);
-    assert.match(published.url, /^https:\/\/raw\.githubusercontent\.com\/mgd34msu\/goodvibes\/(?:main|[a-f0-9]{40})\/scripts\/install\.sh$/);
-    assert.ok(published.bytes.equals(immutable.bytes), 'The public installer differs from the accepted release source.');
+    let immutable;
+    ({ readers, published, immutable } = await readPublicAcceptanceDelivery({ tag, source, target, signal,
+      checkpoint(check) { evidence.stage = check.startsWith('installer.') ? 'public-installer' : 'published-catalog'; checkpoint(check); },
+      onHttpStatus(status) { evidence.httpStatus = status; },
+    }));
     installer = join(root, 'install.sh'); writeFileSync(installer, published.bytes, { flag: 'wx', mode: 0o600 });
     writeFileSync(join(root, 'immutable-install.sh'), immutable.bytes, { flag: 'wx', mode: 0o600 });
   }

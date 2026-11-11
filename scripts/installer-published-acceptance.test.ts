@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { acceptanceFailureRecord, finishAcceptance, waitForAcceptanceReadiness, waitForNativeServiceRetirement, assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, runHistoricalUpgradeSteps, assertHistoricalRollbackRefusal, type HistoricalUpgradeSteps, type AcceptanceSteps, type NativeServiceRetirementObservation } from './accept-published-suite.mjs';
+import { acceptanceFailureRecord, markAcceptanceCheckpoint, readPublicAcceptanceDelivery, finishAcceptance, waitForAcceptanceReadiness, waitForNativeServiceRetirement, assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, runHistoricalUpgradeSteps, assertHistoricalRollbackRefusal, type HistoricalUpgradeSteps, type AcceptanceSteps, type NativeServiceRetirementObservation } from './accept-published-suite.mjs';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -21,6 +21,111 @@ function nativeDaemonChild(root: string) {
     env: { ...process.env, STATUS_STDOUT: stdout, STATUS_STDERR: stderr, STATUS_EXIT: String(code) }, nativeDaemonDiagnostics: diagnostics,
   });
 }
+
+function publicDeliveryFixture() {
+  const source = 'a'.repeat(40), tag = 'v3.1.2', target = 'darwin-arm64';
+  const api = 'https://api.github.com/repos/mgd34msu/goodvibes', download = `https://github.com/mgd34msu/goodvibes/releases/download/${tag}/`;
+  const releaseUrl = `${api}/releases/tags/${tag}`, latestUrl = `${api}/releases/latest`;
+  const immutableUrl = `https://raw.githubusercontent.com/mgd34msu/goodvibes/${source}/scripts/install.sh`, publicUrl = 'https://goodvibes.sh/install.sh';
+  const descriptors = ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent'].map(command => `${command}-macos-arm64.reader-ci-artifact.json`);
+  const assets = ['SHA256SUMS.txt', ...descriptors.flatMap(name => [name, name.replace('.reader-ci-artifact.json', '')]),
+    ...Array.from({ length: 58 }, (_, i) => `other-native-member-${i}`)].map(name => ({ name }));
+  const release = { tag_name: tag, draft: false, assets }, latest = { tag_name: tag };
+  const readers = descriptors.map(name => ({ target, sourceCommit: source, headCommit: source, readers: { version: '3.1.2' },
+    files: [{ path: name.replace('.reader-ci-artifact.json', '') }] }));
+  const responses = new Map<string, { body: unknown; status?: number; url?: string }>([
+    [releaseUrl, { body: release }], [latestUrl, { body: latest }],
+    [immutableUrl, { body: '#!/bin/sh\nexit 0\n' }], [publicUrl, { body: '#!/bin/sh\nexit 0\n', url: immutableUrl }],
+    ...descriptors.map((name, i) => [download + name, { body: readers[i] }] as const),
+  ]);
+  const evidence: Parameters<typeof acceptanceFailureRecord>[0] = { stage: 'published-catalog' }, requests: string[] = [];
+  const deliver = () => readPublicAcceptanceDelivery({ tag, source, target,
+    checkpoint(check) { markAcceptanceCheckpoint(evidence, check); }, onHttpStatus(status) { evidence.httpStatus = status; },
+  }, async (url, options) => {
+    expect(options.headers).toBeUndefined(); requests.push(url);
+    const fixture = responses.get(url); if (!fixture) throw new Error('Unowned public fixture request');
+    const body = typeof fixture.body === 'string' ? fixture.body : JSON.stringify(fixture.body);
+    const response = new Response(body, { status: fixture.status ?? 200, headers: { 'x-private-fixture': 'private-http-header-sentinel' } });
+    Object.defineProperty(response, 'url', { value: fixture.url ?? url }); return response;
+  });
+  return { evidence, requests, responses, release, latest, readers, releaseUrl, latestUrl, publicUrl, immutableUrl, descriptors, download, deliver };
+}
+
+async function publicDeliveryFailure(fixture: ReturnType<typeof publicDeliveryFixture>) {
+  let failure: unknown;
+  try { await fixture.deliver(); } catch (error) { failure = error; }
+  expect(failure).toBeDefined(); return acceptanceFailureRecord(fixture.evidence, failure);
+}
+
+for (const status of [403, 429, 503]) test(`public catalog retains only actual HTTP ${status} and its fixed request checkpoint`, async () => {
+  const fixture = publicDeliveryFixture(), secret = 'private-http-body-token-sentinel';
+  fixture.responses.set(fixture.releaseUrl, { status, body: { message: secret, authorization: `Bearer ${secret}` }, url: `https://private.invalid/${secret}` });
+  const record = await publicDeliveryFailure(fixture);
+  expect(record).toMatchObject({ stage: 'published-catalog', check: 'catalog.release.http', httpStatus: status,
+    error: { name: 'AssertionError', code: 'ERR_ASSERTION' } });
+  expect(fixture.requests).toEqual([fixture.releaseUrl]);
+  for (const value of [secret, 'private-http-header-sentinel', 'private.invalid', 'Bearer']) expect(JSON.stringify(record)).not.toContain(value);
+});
+
+test('malformed HTTP200 catalog JSON retains its request status without returning the private body', async () => {
+  const fixture = publicDeliveryFixture(), secret = 'private-malformed-response-sentinel';
+  fixture.responses.set(fixture.releaseUrl, { body: `{${secret}` });
+  const record = await publicDeliveryFailure(fixture);
+  expect(record).toMatchObject({ check: 'catalog.release.http', httpStatus: 200, error: { name: 'SyntaxError' } });
+  expect(JSON.stringify(record)).not.toContain(secret);
+});
+
+for (const field of ['tag', 'draft', 'asset-count', 'unique-assets', 'manifest']) test(`public release ${field} refusal has its own checkpoint and clears prior HTTP status`, async () => {
+  const fixture = publicDeliveryFixture();
+  if (field === 'tag') fixture.release.tag_name = 'private-wrong-tag-sentinel';
+  if (field === 'draft') fixture.release.draft = true;
+  if (field === 'asset-count') fixture.release.assets = [];
+  if (field === 'unique-assets') fixture.release.assets[0] = fixture.release.assets[1]!;
+  if (field === 'manifest') fixture.release.assets[0] = { name: 'private-wrong-manifest-sentinel' };
+  const record = await publicDeliveryFailure(fixture);
+  expect(record.check).toBe(`catalog.release.${field}`); expect(record.httpStatus).toBeUndefined();
+  expect(record.error).toEqual({ name: 'AssertionError', code: 'ERR_ASSERTION' });
+  expect(JSON.stringify(record)).not.toContain('sentinel');
+});
+
+for (const field of ['target', 'source', 'head', 'version', 'files']) test(`public reader ${field} validation identifies its original assertion without echoing values`, async () => {
+  const fixture = publicDeliveryFixture(), reader = fixture.readers[0]!;
+  if (field === 'target') reader.target = 'private-reader-sentinel';
+  if (field === 'source') reader.sourceCommit = 'private-reader-sentinel';
+  if (field === 'head') reader.headCommit = 'private-reader-sentinel';
+  if (field === 'version') reader.readers.version = 'private-reader-sentinel';
+  if (field === 'files') reader.files = [];
+  const record = await publicDeliveryFailure(fixture);
+  expect(record.check).toBe(`catalog.reader.goodvibes.${field}`); expect(record.httpStatus).toBeUndefined();
+  expect(record.error).toEqual({ name: 'AssertionError', code: 'ERR_ASSERTION' }); expect(JSON.stringify(record)).not.toContain('sentinel');
+});
+
+test('public latest and installer refusals keep distinct checkpoints after earlier successful requests', async () => {
+  const latest = publicDeliveryFixture(); latest.latest.tag_name = 'private-latest-sentinel';
+  const wrongLatest = await publicDeliveryFailure(latest); expect(wrongLatest.check).toBe('catalog.latest.tag'); expect(wrongLatest.httpStatus).toBeUndefined();
+  const redirect = publicDeliveryFixture(); redirect.responses.get(redirect.publicUrl)!.url = 'https://private.invalid/private-redirect-sentinel';
+  expect((await publicDeliveryFailure(redirect)).check).toBe('installer.public.redirect');
+  const bytes = publicDeliveryFixture(); bytes.responses.get(bytes.publicUrl)!.body = 'private-installer-body-sentinel';
+  const wrongBytes = await publicDeliveryFailure(bytes); expect(wrongBytes.check).toBe('installer.public.bytes'); expect(wrongBytes.httpStatus).toBeUndefined();
+  for (const record of [wrongLatest, wrongBytes]) expect(JSON.stringify(record)).not.toContain('sentinel');
+});
+
+test('HTTP status is scoped to its actual request and only valid integer statuses can enter a receipt', async () => {
+  for (const member of ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']) {
+    const fixture = publicDeliveryFixture();
+    fixture.responses.set(`${fixture.download}${member}-macos-arm64.reader-ci-artifact.json`, { status: 503, body: 'private-reader-body-sentinel' });
+    const record = await publicDeliveryFailure(fixture);
+    expect(record.check).toBe(`catalog.reader.${member}.http`); expect(record.httpStatus).toBe(503);
+  }
+  for (const [key, check] of [['latestUrl', 'catalog.latest.http'], ['immutableUrl', 'installer.immutable.http'], ['publicUrl', 'installer.public.http']] as const) {
+    const fixture = publicDeliveryFixture(); fixture.responses.set(fixture[key], { status: 403, body: 'private-http-body-sentinel' });
+    const record = await publicDeliveryFailure(fixture); expect(record.check).toBe(check); expect(record.httpStatus).toBe(403);
+  }
+  for (const status of [0, 99, 600, NaN, Infinity, 200.5, 'private-http-status-sentinel'])
+    expect(acceptanceFailureRecord({ stage: 'published-catalog', httpStatus: status as number }, new Error('private-error-sentinel')).httpStatus).toBeUndefined();
+  const fixture = publicDeliveryFixture(); await fixture.deliver();
+  expect(fixture.evidence.check).toBe('installer.public.bytes'); expect(fixture.evidence.httpStatus).toBeUndefined();
+});
 test('only original non-root GitHub-hosted native accounts admit real service acceptance', () => {
   const input = { env: { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted', RUNNER_TEMP: '/tmp/runner' },
     platform: 'linux', arch: 'x64', target: 'linux-x64', home: '/home/runner', accountHome: '/home/runner',

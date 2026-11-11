@@ -293,10 +293,32 @@ describe('model catalog protected source and caller boundaries', () => {
     // The complete source passed its own receipt; a later catalog receipt is
     // deliberately redacted to prove the consumer requires source preservation.
     const sensitive = 'synthetic-private-rank-description';
-    const screening = researchScreeningFixture({ spans: source => source.parts.some(part => part.startsWith('["route:')) ? exactSensitiveSpans([sensitive])(source) : [] });
+    let completeSources = 0, redactedSpans = 0;
+    const rankingCandidates: Json[][] = [];
+    const screening = researchScreeningFixture({ spans: source => {
+      const frames = source.parts.flatMap(part => {
+        try { return [record(JSON.parse(part))]; } catch { return []; }
+      });
+      // Select the ranking DTO by its semantic fields, rather than the old
+      // one-candidate tuple prefix. Assert selection below so a future framing
+      // change cannot silently stop injecting the intended privacy refusal.
+      const ranking = frames.find(frame => frame.query === query && Array.isArray(frame.catalog));
+      if (!ranking) {
+        if (source.parts.some(part => part.includes(sensitive))) completeSources++;
+        return [];
+      }
+      rankingCandidates.push(rows(ranking.catalog));
+      const spans = exactSensitiveSpans([sensitive])(source);
+      redactedSpans += spans.length;
+      return spans;
+    } });
     const f = fixture(screening.owner); f.models[1]!.displayName = sensitive;
     const fake = readings({ [`model:${winner}`]: 0.99 }); installJudgmentPort(fake.port);
     await expect(f.tools.models.execute({ action: 'status', query, limit: 1 })).rejects.toThrow();
+    expect(completeSources).toBeGreaterThan(0); expect(redactedSpans).toBeGreaterThan(0);
+    expect(rankingCandidates.flat().find(candidate => candidate.id === `model:${winner}`)).toMatchObject({
+      evidence: { registryKey: winner, displayName: sensitive },
+    });
     expect(JSON.stringify(screening.calls)).toContain(sensitive); expect(ranks(fake)).toHaveLength(0); expect(f.effects).toEqual([]);
   });
 

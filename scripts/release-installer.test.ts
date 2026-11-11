@@ -5,9 +5,12 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { nativeReaderCapabilities } from '../packages/engine/platform/src/platform/runtime/self-update.ts';
+import { COMPILED_VERSION } from '../products/daemon/src/version.ts';
 
 let root: string, assets: string, home: string;
-const version = '3.1.2';
+// The fixture delegates reader checks to the actual source command handler;
+// its released descriptors must identify that handler's compiled version.
+const version = COMPILED_VERSION;
 const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
 function writeChecksums() {
   writeFileSync(join(assets, 'SHA256SUMS.txt'), readdirSync(assets).filter(name => name !== 'SHA256SUMS.txt').map(name => `${digest(join(assets, name))}  ${name}\n`).join(''));
@@ -241,7 +244,7 @@ test.each(['source', 'version', 'formats'] as const)('independently pinned confl
   mkdirSync(join(home, 'bin')); writeFileSync(join(home, 'bin/goodvibes'), 'original program');
   const candidate = readerArtifact();
   if (field === 'source') candidate.sourceTree = 'f'.repeat(40);
-  if (field === 'version') candidate.readers.version = '3.1.3';
+  if (field === 'version') candidate.readers.version = version === '0.0.0' ? '0.0.1' : '0.0.0';
   if (field === 'formats') candidate.readers.formats = [];
   writeFileSync(join(assets, 'goodvibes-daemon-linux-x64.reader-ci-artifact.json'), JSON.stringify(candidate)); writeChecksums();
   const result = run(); expect(result.status).not.toBe(0); expect(result.stderr).toContain('release metadata could not be confirmed');

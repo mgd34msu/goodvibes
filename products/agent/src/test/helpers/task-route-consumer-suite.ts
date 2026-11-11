@@ -59,6 +59,37 @@ async function waitForReadingStart(began: Promise<void>, pending: ReturnType<Too
   if (first.status !== 'started') throw new Error('Native reading completed without reaching the deferred reader');
 }
 
+/** Decode the ranker's complete candidate frames, including packed path/value
+ * frames. Invocation objects and named-target arrays are not catalog evidence. */
+function screenedCatalogCandidates(parts: readonly string[], query: string): { id: string; description: string; evidence: unknown }[] {
+  const result: { id: string; description: string; evidence: unknown }[] = [];
+  const candidate = (value: unknown) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+    const record = value as Record<string, unknown>;
+    if (typeof record.id === 'string' && typeof record.description === 'string' && Object.hasOwn(record, 'evidence'))
+      result.push({ id: record.id, description: record.description, evidence: record.evidence });
+  };
+  const frame = (value: unknown): void => {
+    if (Array.isArray(value)) { for (const entry of value) frame(entry); return; }
+    if (!value || typeof value !== 'object') return;
+    const record = value as Record<string, unknown>;
+    if (typeof record.query === 'string' && record.query === query && Array.isArray(record.catalog)) {
+      for (const entry of record.catalog) candidate(entry); return;
+    }
+    if (!Array.isArray(record.path) || record.path[0] !== 'catalog') return;
+    if (record.path.length === 1 && Array.isArray(record.value)) for (const entry of record.value) candidate(entry);
+    else if (record.path.length === 2 && typeof record.path[1] === 'string') candidate(record.value);
+  };
+  if (parts[0] === query) {
+    for (const part of parts.slice(1)) {
+      let value: unknown; try { value = JSON.parse(part); } catch { continue; }
+      if (Array.isArray(value) && value.length === 3 && typeof value[0] === 'string' && typeof value[1] === 'string')
+        result.push({ id: value[0], description: value[1], evidence: value[2] });
+    }
+  } else for (const part of parts) { try { frame(JSON.parse(part)); } catch { /* The invocation's raw query is not JSON framing. */ } }
+  return result;
+}
+
 describe(`${kind} engine task-route consumer`, () => {
   test('uses engine readings rather than request keywords, preserving plan schema and real catalog IDs', async () => {
     const fake = fixture();
@@ -268,15 +299,11 @@ describe(`${kind} engine task-route consumer`, () => {
     const capturedBatches: Array<readonly string[]> = [];
     const native = AGENT_WORKSPACE_CATEGORIES.flatMap(category => category.actions.map(action => ({ category, action })));
     const screening = researchScreeningFixture({ async beforeProposal(source) {
-      // This is the real ranker's exact query/complete-candidate framing, not
-      // the preceding invocation or named-target screening source.
-      if (source.parts[0] !== args.query || source.parts.length < 2) return;
-      const candidates: unknown[] = source.parts.slice(1).map(part => JSON.parse(part));
-      // The planner also screens named-ID arrays with this same query prefix.
-      // Wait only on the distinct, complete rank-candidate tuple contract.
-      if (!candidates.every((candidate): candidate is [string, string, unknown] => Array.isArray(candidate)
-        && candidate.length === 3 && typeof candidate[0] === 'string' && typeof candidate[1] === 'string')) return;
-      const workspaceSource = candidates.some(candidate => native.some(({ action }) => action.id === candidate[0]));
+      const candidates = screenedCatalogCandidates(source.parts, args.query);
+      if (!candidates.length) return;
+      const workspaceSource = candidates.some(candidate => candidate.evidence && typeof candidate.evidence === 'object'
+        && !Array.isArray(candidate.evidence) && Object.hasOwn(candidate.evidence, 'action') && Object.hasOwn(candidate.evidence, 'category')
+        && native.some(({ action }) => action.id === candidate.id));
       capturedBatches.push([...source.parts]); if (workspaceSource) started(); await gate;
     } });
     const pending = caller(kind, channels, context, screening.owner).execute({ ...args });
@@ -285,12 +312,11 @@ describe(`${kind} engine task-route consumer`, () => {
       await waitForReadingStart(began, pending);
       expect(capturedBatches.length).toBeGreaterThan(0);
       let completeNativeAction = false;
-      for (const part of capturedBatches.flatMap(parts => parts.slice(1))) {
-        const candidate: unknown = JSON.parse(part);
-        if (!Array.isArray(candidate)) throw new Error('Captured native catalog frame is missing');
-        const original = native.find(({ action }) => action.id === candidate[0]);
-        if (original) {
-          expect(candidate[2]).toEqual({ action: original.action, category: {
+      for (const candidate of capturedBatches.flatMap(parts => screenedCatalogCandidates(parts, args.query))) {
+        const original = native.find(({ action }) => action.id === candidate.id);
+        if (original && candidate.evidence && typeof candidate.evidence === 'object'
+          && Object.hasOwn(candidate.evidence, 'action') && Object.hasOwn(candidate.evidence, 'category')) {
+          expect(candidate.evidence).toEqual({ action: original.action, category: {
             id: original.category.id, label: original.category.label, group: original.category.group,
             summary: original.category.summary, detail: original.category.detail,
           } });

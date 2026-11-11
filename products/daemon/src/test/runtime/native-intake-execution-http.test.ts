@@ -117,7 +117,7 @@ test('stable work-derived criterion reference executes without regenerating the 
     const plans = contract.nativeDecisions!.history.filter(record => record.stage === 'plan');
     expect(plans).toHaveLength(1);
     expect(plans[0]!.decision.outcome).toBe('act');
-    expect(plans[0]!.decision.evidence).toContainEqual({ id: criteriaId, revision: '1' });
+    expect(plans[0]!.decision.evidence).toContainEqual({ id: `criteria-v2:work-${opaqueUuid(workId.slice('work-'.length))}`, revision: '1' });
     expect(plans[0]!.decision.judgmentDecisionIds.length).toBeGreaterThan(0);
     expect(operationJudgmentRequests(f.judgmentRequests).some(request => request.context?.site === 'contract.native.plan')).toBe(true);
   } finally { try { await f?.stop(); } finally { generated.mockRestore(); } }

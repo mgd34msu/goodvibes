@@ -149,6 +149,7 @@ async function materializeProjectionOwned(
     let accepting = true, invoked = false, completed = false, repeated = false, failed = false;
     let originalFailure: unknown, framed: unknown;
     const rethrow = (error: unknown): never => {
+      drainOwned(error);
       if (error instanceof KnowledgeRecordAdmissionHeldError) stale();
       throw error;
     };
@@ -165,6 +166,7 @@ async function materializeProjectionOwned(
         completed = true;
       } catch (error) { failed = true; originalFailure = error; throw error; }
     }); } catch (error) {
+      if (failed && error !== originalFailure) drainOwned(error);
       rethrow(failed ? originalFailure : error);
     } finally { accepting = false; }
     if (framed !== undefined) drainOwned(framed);

@@ -265,16 +265,40 @@ test('a failed fresh source commit releases its exact artifact lease before real
 });
 
 
-for (const mode of ['ignored', 'deferred', 'swallowed-failure', 'rejected-return', 'nonvoid-return', 'repeated'] as const) {
+for (const mode of ['ignored', 'deferred', 'swallowed-failure', 'rejected-return', 'nonvoid-return', 'repeated',
+  'thrown-rejection', 'swallowed-rejection', 'replaced-rejection'] as const) {
   test(`a generated projection refuses a borrowed frame that ${mode}`, async () => {
     const item = await fixture();
     const failure = new KnowledgeSourceQualityHeldError('stale');
     let callbacks = 0;
+    let originalRejection: Promise<never> | undefined, frameRejection: Promise<never> | undefined;
+    const unhandled: unknown[] = [];
+    const observeRejection = (error: unknown) => { unhandled.push(error); };
+    process.on('unhandledRejection', observeRejection);
     const delayed: (() => undefined)[] = [];
-    const authority = () => { callbacks++; if (mode === 'swallowed-failure') throw failure; };
+    const authority = () => {
+      callbacks++;
+      if (mode === 'swallowed-failure') throw failure;
+      if (mode === 'swallowed-rejection' || mode === 'replaced-rejection') {
+        originalRejection = Promise.reject(new Error('Original borrowed authority rejection'));
+        throw originalRejection;
+      }
+    };
     const framing = spyOn(item.store, 'assertRecordSnapshotFrame').mockImplementation((callback => {
       if (mode === 'ignored') { delayed.push(callback); return undefined; }
       if (mode === 'deferred') return Promise.resolve().then(callback);
+      if (mode === 'thrown-rejection') {
+        frameRejection = Promise.reject(new Error('Borrowed frame rejection'));
+        throw frameRejection;
+      }
+      if (mode === 'swallowed-rejection' || mode === 'replaced-rejection') {
+        try { callback(); } catch {}
+        if (mode === 'replaced-rejection') {
+          frameRejection = Promise.reject(new Error('Replacement borrowed frame rejection'));
+          throw frameRejection;
+        }
+        return undefined;
+      }
       if (mode === 'swallowed-failure') { try { callback(); } catch {} return undefined; }
       callback();
       if (mode === 'rejected-return') return Promise.reject(new Error('Borrowed asynchronous frame failed'));
@@ -286,13 +310,16 @@ for (const mode of ['ignored', 'deferred', 'swallowed-failure', 'rejected-return
     try {
       const pending = materializeGeneratedKnowledgeProjection({ ...item.input, markdown: '# Never publish', assertCurrent: authority });
       if (mode === 'swallowed-failure') await expect(pending).rejects.toBe(failure);
+      else if (mode === 'thrown-rejection') await expect(pending).rejects.toBe(frameRejection);
+      else if (mode === 'swallowed-rejection' || mode === 'replaced-rejection') await expect(pending).rejects.toBe(originalRejection);
       else await expect(pending).rejects.toMatchObject({ reason: 'stale' });
       for (const callback of delayed) callback();
-      await Promise.resolve();
-      expect(callbacks).toBe(mode === 'ignored' || mode === 'deferred' ? 0 : 1);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+      expect(callbacks).toBe(mode === 'ignored' || mode === 'deferred' || mode === 'thrown-rejection' ? 0 : 1);
       expect(creating).not.toHaveBeenCalled();
       expect(JSON.stringify({ sources: item.store.listSources(), nodes: item.store.listNodes(), edges: item.store.listEdges() })).toBe(before);
       expect(item.artifactStore.list().map(artifact => artifact.id)).toEqual([item.first.artifact.id]);
-    } finally { creating.mockRestore(); framing.mockRestore(); }
+    } finally { process.removeListener('unhandledRejection', observeRejection); creating.mockRestore(); framing.mockRestore(); }
   });
 }

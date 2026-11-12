@@ -113,22 +113,6 @@ export interface PublishPackageConfig {
   readonly maxTarballBytes: number;
 }
 
-/** per-job-green parameters. */
-export interface PerJobGreenConfig {
-  readonly owner: string;
-  readonly repo: string;
-  /** Workflow file whose run is verified, e.g. `ci.yml`. */
-  readonly workflow: string;
-  /** Triggering event to match, e.g. `push`. */
-  readonly event: string;
-  readonly pollIntervalMs: number;
-  readonly deadlineMs: number;
-  /** Bounded retry attempts applied to EVERY GitHub API call before its status is treated as final. */
-  readonly retryAttempts: number;
-  /** Sleep between retry attempts. */
-  readonly retryDelayMs: number;
-}
-
 /** The complete repo config. All sections are optional so a repo declares only the tools it uses. */
 export interface ToolchainConfig {
   /** npm name of the repo's primary package, e.g. `@goodvibes-jev/engine`. */
@@ -139,20 +123,11 @@ export interface ToolchainConfig {
   readonly smoke?: SmokeConfig;
   readonly releaseCut?: ReleaseCutConfig;
   readonly publish?: PublishPackageConfig;
-  readonly perJobGreen?: PerJobGreenConfig;
 }
 
 export const DEFAULT_ENGINE_PACKAGE = '@goodvibes-jev/engine';
 export const DEFAULT_LOCKFILE = 'bun.lock';
 export const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
-export const DEFAULT_POLL_INTERVAL_MS = 20_000;
-export const DEFAULT_DEADLINE_MS = 1_800_000;
-// Default transient-error posture: the GitHub API's observed flaky mode makes
-// single-shot calls fail a meaningful fraction of the time, so every call gets
-// ~8 bounded attempts with sleeps in the 5-10s band before its status is final.
-export const DEFAULT_RETRY_ATTEMPTS = 8;
-export const DEFAULT_RETRY_DELAY_MS = 7_000;
-
 /** Fill an EnginePinConfig with the conventional defaults for any missing field. */
 export function resolveEnginePinConfig(partial: Partial<EnginePinConfig> | undefined): EnginePinConfig {
   const enginePackage = partial?.enginePackage ?? DEFAULT_ENGINE_PACKAGE;
@@ -167,20 +142,6 @@ export function resolveEnginePinConfig(partial: Partial<EnginePinConfig> | undef
   };
 }
 
-/** Fill a PerJobGreenConfig from a partial plus required identity fields. */
-export function resolvePerJobGreenConfig(partial: Partial<PerJobGreenConfig> & Pick<PerJobGreenConfig, 'owner' | 'repo'>): PerJobGreenConfig {
-  return {
-    owner: partial.owner,
-    repo: partial.repo,
-    workflow: partial.workflow ?? 'ci.yml',
-    event: partial.event ?? 'push',
-    pollIntervalMs: partial.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
-    deadlineMs: partial.deadlineMs ?? DEFAULT_DEADLINE_MS,
-    retryAttempts: partial.retryAttempts ?? DEFAULT_RETRY_ATTEMPTS,
-    retryDelayMs: partial.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS,
-  };
-}
-
 // Schemas below mirror the interfaces above field-for-field and validate the
 // TYPE of each field that is present. `.catchall(z.unknown())` at every level
 // keeps unrecognized keys in the parsed result, so a valid config still
@@ -189,9 +150,8 @@ export function resolvePerJobGreenConfig(partial: Partial<PerJobGreenConfig> & P
 // pattern for "keep unknown keys" (see zod-schemas/events.ts's
 // RuntimeEventRecordSchema), preferred over the deprecated `.passthrough()`.
 //
-// enginePin and perJobGreen are the two sections with a `resolve*Config`
-// function that fills every field from a `Partial<...>` plus defaults, so
-// requiredness for those two lives in the resolver, not here: every field
+// enginePin has a resolver that fills fields from a partial plus defaults,
+// so requiredness lives in that resolver, not here: every field
 // below is optional and the resolver decides what is missing. The other
 // sections (build, coverage, smoke, releaseCut, publish) have no resolver,
 // their consumers read the parsed fields directly, so their required fields
@@ -253,17 +213,6 @@ const PublishPackageConfigSchema = z.object({
   maxTarballBytes: z.number(),
 }).catchall(z.unknown());
 
-const PerJobGreenConfigSchema = z.object({
-  owner: z.string().optional(),
-  repo: z.string().optional(),
-  workflow: z.string().optional(),
-  event: z.string().optional(),
-  pollIntervalMs: z.number().optional(),
-  deadlineMs: z.number().optional(),
-  retryAttempts: z.number().optional(),
-  retryDelayMs: z.number().optional(),
-}).catchall(z.unknown());
-
 const ToolchainConfigSchema = z.object({
   packageName: z.string().min(1, 'must be a non-empty string'),
   enginePin: EnginePinConfigSchema.optional(),
@@ -272,7 +221,6 @@ const ToolchainConfigSchema = z.object({
   smoke: SmokeConfigSchema.optional(),
   releaseCut: ReleaseCutConfigSchema.optional(),
   publish: PublishPackageConfigSchema.optional(),
-  perJobGreen: PerJobGreenConfigSchema.optional(),
 }).catchall(z.unknown());
 
 /** Render a `ZodError` as one line per bad field, each naming its path. */

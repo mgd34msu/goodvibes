@@ -30,13 +30,6 @@ export interface FsReader {
   readonly isDirectory: (path: string) => boolean;
 }
 
-/** An HTTP GET returning a parsed JSON body plus the transport status. */
-export interface HttpResponse {
-  readonly status: number;
-  readonly body: unknown;
-}
-export type HttpGetJson = (url: string, headers: Readonly<Record<string, string>>) => Promise<HttpResponse>;
-
 /** Structured logger seam (tests capture lines; bins print to console). */
 export interface Logger {
   readonly info: (line: string) => void;
@@ -90,19 +83,6 @@ export function realFsReader(root: string): FsReader {
     },
   };
 }
-
-/** Real HTTP GET returning parsed JSON. Non-2xx does not throw, the status is reported so callers can branch (e.g. 503 fallback). */
-export const realHttpGetJson: HttpGetJson = async (url, headers) => {
-  const response = await fetch(url, { headers });
-  const text = await response.text();
-  let body: unknown = null;
-  try {
-    body = text.length > 0 ? JSON.parse(text) : null;
-  } catch {
-    body = text;
-  }
-  return { status: response.status, body };
-};
 
 /** Console-backed logger. */
 export const consoleLogger: Logger = {

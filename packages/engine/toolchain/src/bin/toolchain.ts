@@ -11,8 +11,8 @@
  * whose bins include this one; every tool also stays directly invocable by
  * its own `goodvibes-*` bin name.
  *
- * The tool argument accepts both the bare tool name (`per-job-green`) and the
- * bin-prefixed form (`goodvibes-per-job-green`) so existing invocation
+ * The tool argument accepts both the bare tool name (`train-status`) and the
+ * bin-prefixed form (`goodvibes-train-status`) so existing invocation
  * strings work unchanged.
  */
 const TOOLS: Record<string, string> = {
@@ -24,7 +24,6 @@ const TOOLS: Record<string, string> = {
   'post-build-smoke': './post-build-smoke.js',
   'package-install-check': './package-install-check.js',
   'publish-package': './publish-package.js',
-  'per-job-green': './per-job-green.js',
   'changelog-gate': './changelog-gate.js',
   'sha256sums': './sha256sums.js',
   'train-status': './train-status.js',

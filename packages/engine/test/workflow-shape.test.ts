@@ -2,7 +2,7 @@
  * Workflow-shape gate.
  *
  * Local checks for failure propagation, artifact producer/consumer pairing,
- * pinned actions, and by-reference release wiring. Actual platform and
+ * pinned actions, and fresh-build release wiring. Actual platform and
  * containment behavior is proved by the required CI fixtures, not YAML shape.
  */
 
@@ -66,7 +66,7 @@ type JobResult = 'success' | 'failure' | 'cancelled' | 'skipped';
 
 /** Evaluate the boolean/comparison subset used by the publication guards. */
 function permitsPublication(job: Job, results: Record<string, JobResult>, event: string, mode = 'release', publishNpm = true,
-  release: { ref: string; armed: boolean; toolingSha?: string; payloadSha?: string } = { ref: 'refs/heads/main', armed: false }): boolean {
+  release: { ref: string; armed: boolean } = { ref: 'refs/heads/main', armed: false }): boolean {
   const condition = String(job.if ?? 'true');
   const status = {
     always: true,
@@ -77,10 +77,6 @@ function permitsPublication(job: Job, results: Record<string, JobResult>, event:
   const hasStatus = /\b(?:always|success|failure|cancelled)\s*\(\)/.test(condition);
   const expression = condition
     .replace(/\b(always|success|failure|cancelled)\s*\(\)/g, (_, name: keyof typeof status) => String(status[name]))
-    .replace(/\bgithub\.sha\s*(==|!=)\s*needs\.verify-tag-version\.outputs\.sha\b/g, (_, operator: string) => {
-      const equal = (release.toolingSha ?? 'same-source') === (release.payloadSha ?? 'same-source');
-      return String(operator === '==' ? equal : !equal);
-    })
     .replace(/\b(github\.event_name|github\.ref|github\.event\.inputs\.mode|vars\.PUBLISH_NPM|vars\.RELEASE_ARMED|needs\.([\w-]+)\.result)\s*(==|!=)\s*'([^']*)'/g,
       (_, field: string, dependency: string | undefined, operator: string, expected: string) => {
         const values: Record<string, string> = { 'github.event_name': event, 'github.ref': release.ref,
@@ -765,23 +761,29 @@ describe('ci.yml: zero-touch auto-release', () => {
   });
 });
 
-describe('release.yml: by-reference release', () => {
+describe('release.yml: fresh builds and staged installation acceptance', () => {
   const rel = load('release.yml');
 
-  test('release-verify calls the reusable by-reference workflow', () => {
-    const rv = rel.jobs!['release-verify']!;
-    expect(rv.uses).toContain('reusable-release-verify.yml');
-    expect(needsOf(rv)).toContain('verify-tag-version');
+  test('release builds do not depend on a previous CI run', () => {
+    expect(needsOf(rel.jobs!['complete-suite-assets']!)).toEqual(['verify-tag-version']);
+    for (const [, job] of jobs(rel)) {
+      expect(needsOf(job)).not.toContain('release-verify');
+      expect(needsOf(job)).not.toContain('release-verify-tooling');
+      expect(stepText(job)).not.toContain('workspace-build-output');
+      for (const step of steps(job).filter(step => String(step.uses).includes('download-artifact'))) {
+        expect(step.with).not.toHaveProperty('run-id');
+      }
+    }
+    expect(rel.jobs!['release-verify']).toBeUndefined();
+    expect(rel.jobs!['release-verify-tooling']).toBeUndefined();
   });
 
   test('manual native publication resolves a version tag and binds artifacts to its verified source', () => {
     const verify = rel.jobs!['verify-tag-version']!;
     const resolve = steps(verify).find(step => step.id === 'source')!;
     expect(verify).toHaveProperty('outputs.sha', '${{ steps.version.outputs.sha }}');
-    expect(rel.jobs!['release-verify']).toHaveProperty('with.sha', '${{ needs.verify-tag-version.outputs.sha }}');
     expect(rel.jobs!['complete-suite-assets']).toHaveProperty('with.tag', '${{ needs.verify-tag-version.outputs.tag }}');
-    expect(runText(rel, 'prepare-native-assets')).toContain('test "$RECORDED_SOURCE" = "$SOURCE_SHA"');
-    expect(runText(rel, 'prepare-native-assets')).toContain('test "$(git rev-parse HEAD)" = "$SOURCE_SHA"');
+    expect(steps(rel.jobs!['prepare-native-assets']!).find(step => step.name === 'Checkout released source')).toHaveProperty('with.ref', '${{ needs.verify-tag-version.outputs.sha }}');
     expect(rel.jobs!['github-release']).toHaveProperty('with.tag', '${{ needs.verify-tag-version.outputs.tag }}');
     const root = mkdtempSync(join(tmpdir(), 'gv-release-tag-'));
     try {
@@ -826,7 +828,7 @@ describe('release.yml: by-reference release', () => {
     expect(steps(prepare).find(step => step.name === 'Checkout released source')).toHaveProperty('with.ref', '${{ needs.verify-tag-version.outputs.sha }}');
     expect(rel.jobs!['complete-suite-assets']).toHaveProperty('with.candidate-source', "${{ github.event.inputs.mode == 'candidate' && needs.verify-tag-version.outputs.sha || '' }}");
     expect(rel.jobs!['complete-suite-assets']).toHaveProperty('with.publish_existing', false);
-    for (const name of ['verify-tag-version', 'release-verify', 'complete-suite-assets', 'prepare-native-assets', 'staged-install-acceptance']) {
+    for (const name of ['verify-tag-version', 'complete-suite-assets', 'prepare-native-assets', 'staged-install-acceptance']) {
       const job = rel.jobs![name]!;
       const results: Record<string, JobResult> = Object.fromEntries(needsOf(job).map(dependency => [dependency, 'success']));
       expect(permitsPublication(job, results, 'workflow_dispatch', 'candidate'), name).toBe(true);
@@ -838,7 +840,7 @@ describe('release.yml: by-reference release', () => {
     }
   });
 
-  test('candidate suite packaging refuses public completion and keeps exact-source CI ahead of its build', () => {
+  test('candidate suite packaging builds its selected source without public completion', () => {
     const suite = load('suite-release-assets.yml'), packaging = suite.jobs!['package']!;
     const guard = steps(packaging).find(step => step.name === 'Require a nonpublishing immutable candidate')!;
     for (const [source, publish, allowed] of [['a'.repeat(40), 'false', true], ['a'.repeat(40), 'true', false], ['main', 'false', false], ['', 'true', true]] as const) {
@@ -852,10 +854,9 @@ describe('release.yml: by-reference release', () => {
     for (const name of ['build-native-ci.ts', 'native-execution-process.mjs']) {
       expect(steps(packaging)[retained]?.run).toContain(`cp products/daemon/scripts/${name} "$RUNNER_TEMP/${name}"`);
     }
-    const verification = steps(packaging).findIndex(step => step.name === 'Require exact-source successful push CI');
     const build = steps(packaging).findIndex(step => step.name === 'Build publisher tooling and engine');
-    expect(verification).toBeGreaterThan(0); expect(build).toBeGreaterThan(verification);
-    expect(runText(suite, 'package')).toContain('head_sha=$(cat "$RUNNER_TEMP/source-sha")&event=push&status=completed');
+    expect(build).toBeGreaterThan(sourceCheckout);
+    expect(runText(suite, 'package')).not.toContain('actions/workflows/ci.yml/runs');
     const complete = steps(suite.jobs!['collect']!).find(step => step.name === 'Complete existing published release')!;
     expect(complete.if).toBe("inputs.publish_existing && inputs.candidate-source == ''");
     expect(String(suite.jobs!['published-install-acceptance']!.if)).toContain("inputs.candidate-source == ''");
@@ -891,35 +892,19 @@ describe('release.yml: by-reference release', () => {
     }
   });
 
-  test('publish-npm gates on release-verify, checks artifact integrity, and restores by run id', () => {
+  test('opt-in npm publication builds the selected tag after installation acceptance', () => {
     const pub = rel.jobs!['publish-npm']!;
-    expect(needsOf(pub)).toContain('release-verify');
+    expect(needsOf(pub)).toEqual(['verify-tag-version', 'staged-install-acceptance']);
+    expect(steps(pub).find(step => String(step.uses).startsWith('actions/checkout@'))).toHaveProperty('with.ref', '${{ needs.verify-tag-version.outputs.tag }}');
+    const list = steps(pub);
+    const build = list.findIndex(step => step.run === 'bun run build');
+    const publish = list.findIndex(step => step.run === 'bun run release:publish:ci');
+    expect(build).toBeGreaterThanOrEqual(0);
+    expect(build).toBeLessThan(publish);
     const text = stepText(pub);
-    expect(text).toContain('head_sha'); // recorded SHA == tagged SHA assertion
-    expect(text).toContain('run-id');   // cross-workflow artifact restore
-    expect(text).toContain('release:publish:ci'); // provenance publish preserved
-    expect(text).toContain('--prepublish-registry-state'); // registry-state precheck preserved
-    expect(text).toContain('release:verify:published'); // propagation poll preserved
-  });
-
-  test('publish-npm hard-fails on an empty run_id BEFORE download-artifact can misdirect', () => {
-    const pub = rel.jobs!['publish-npm']!;
-    const stepList = steps(pub);
-    const guardIdx = stepList.findIndex((s) => {
-      const env = s.env as Record<string, string> | undefined;
-      return env?.RUN_ID !== undefined && String(s.run ?? '').includes('exit 1');
-    });
-    const downloadIdx = stepList.findIndex(
-      (s) => s.uses?.toString().includes('download-artifact') && (s.with as { name?: string })?.name === 'workspace-build-output',
-    );
-    expect(guardIdx, 'publish-npm must guard against an empty release-verify run_id').toBeGreaterThanOrEqual(0);
-    expect(downloadIdx).toBeGreaterThanOrEqual(0);
-    // The guard must run before the CI-build download; an empty run-id fed to
-    // download-artifact silently stops targeting the CI run.
-    expect(guardIdx).toBeLessThan(downloadIdx);
-    const guard = stepList[guardIdx]!;
-    expect(String((guard.env as Record<string, string>).RUN_ID)).toContain('release-verify.outputs.run_id');
-    expect(String(guard.run)).toContain('-z');
+    expect(text).toContain('--prepublish-registry-state');
+    expect(text).toContain('release:verify:published');
+    expect(text).not.toContain('download-artifact');
   });
 
   test('publish-npm keeps provenance identity and the production environment', () => {
@@ -934,7 +919,7 @@ describe('release.yml: by-reference release', () => {
     expect(prerequisites(rel, 'github-release').has('publish-npm')).toBe(true);
   });
 
-  test('GitHub release requires the complete admitted CI native assets', () => {
+  test('native acceptance consumes the freshly built complete installer assets directly', () => {
     const preparation = rel.jobs!['prepare-native-assets']!;
     const release = rel.jobs!['github-release']!;
     expect(needsOf(release)).toContain('prepare-native-assets');
@@ -946,42 +931,28 @@ describe('release.yml: by-reference release', () => {
       'toolchain-source': 'workspace',
     }));
     const list = steps(preparation);
-    const guard = list.findIndex((step) => String(step.name) === 'Require the verified CI producer');
-    const downloads = list.filter((step) => String(step.uses ?? '').includes('download-artifact'));
-    expect(downloads).toHaveLength(7);
-    expect(downloads.map((step) => (step.with as Record<string, unknown>).name)).toEqual([
-      'workspace-build-output', 'tui-native-linux-x64',
-      'daemon-native-linux-x64', 'daemon-native-linux-arm64',
-      'daemon-native-darwin-x64', 'daemon-native-darwin-arm64',
-      'installer-release-assets',
-    ]);
-    expect(guard).toBeGreaterThanOrEqual(0);
-    for (const download of downloads.filter(step => (step.with as Record<string, unknown>).name !== 'installer-release-assets')) {
-      expect(download).toHaveProperty('with.run-id', '${{ needs.release-verify.outputs.run_id }}');
-      expect(guard).toBeLessThan(list.indexOf(download));
-    }
-    const completion = downloads.find(step => (step.with as Record<string, unknown>).name === 'installer-release-assets');
-    expect(completion).not.toHaveProperty('with.run-id');
-    expect(needsOf(preparation)).toContain('complete-suite-assets');
-    const staged = list.findIndex((step) => String(step.run ?? '').includes('.github/scripts/stage-native-release-assets.mjs'));
-    const uploaded = list.findIndex((step) => String(step.uses ?? '').includes('upload-artifact'));
-    expect(staged).toBeGreaterThanOrEqual(0);
-    expect(staged).toBeLessThan(uploaded);
-    expect(list[uploaded]).toHaveProperty('with.name', 'native-release-assets');
-    expect(list[uploaded]).toHaveProperty('with.if-no-files-found', 'error');
-    expect(runText(rel, 'prepare-native-assets')).not.toContain('build:binary');
-    const helper = load('reusable-gh-release.yml');
-    expect(helper).toHaveProperty('on.workflow_call.inputs.toolchain-spec.default', '@goodvibes-jev/engine');
-    expect(runText(helper, 'gh-release')).toContain('bunx --package "$TOOLCHAIN_SPEC"');
+    const downloads = list.filter(step => String(step.uses).includes('download-artifact'));
+    expect(downloads).toHaveLength(1);
+    expect(downloads[0]).toHaveProperty('with.name', 'installer-release-assets');
+    expect(downloads[0]).toHaveProperty('with.path', '/tmp/native-release-assets');
+    expect(downloads[0]).not.toHaveProperty('with.run-id');
+    expect(needsOf(preparation)).toEqual(['verify-tag-version', 'complete-suite-assets']);
+    const upload = list.find(step => String(step.uses).includes('upload-artifact'))!;
+    expect(list.indexOf(downloads[0]!)).toBeLessThan(list.indexOf(upload));
+    expect(upload).toHaveProperty('with.name', 'native-release-assets');
+    expect(upload).toHaveProperty('with.path', '/tmp/native-release-assets/*');
+    expect(upload).toHaveProperty('with.if-no-files-found', 'error');
+    const text = runText(rel, 'prepare-native-assets');
+    expect(text).not.toContain('stage-native-release-assets');
+    expect(text).not.toContain('merge-suite-release-assets');
+    expect(text).not.toContain('tar -x');
   });
 
   test('publication guards block failed, cancelled, or skipped prerequisites on both release paths', () => {
     for (const [target, prerequisite] of [
       ['publish-npm', 'verify-tag-version'],
-      ['publish-npm', 'release-verify'],
       ['publish-npm', 'staged-install-acceptance'],
       ['prepare-native-assets', 'verify-tag-version'],
-      ['prepare-native-assets', 'release-verify'],
       ['prepare-native-assets', 'complete-suite-assets'],
       ['github-release', 'publish-npm'],
       ['github-release', 'prepare-native-assets'],
@@ -1005,9 +976,9 @@ describe('release.yml: by-reference release', () => {
   test('native GitHub releases proceed without npm while explicit npm publishing remains gated', () => {
     const npm = rel.jobs!['publish-npm']!, release = rel.jobs!['github-release']!, preparation = rel.jobs!['prepare-native-assets']!;
     for (const event of ['push', 'workflow_dispatch']) {
-      expect(permitsPublication(npm, { 'verify-tag-version': 'success', 'release-verify': 'success' }, event, 'release', false)).toBe(false);
-      expect(permitsPublication(preparation, { 'verify-tag-version': 'success', 'release-verify': 'success', 'complete-suite-assets': 'success' }, event, 'release', false)).toBe(true);
-      const results: Record<string, JobResult> = { 'verify-tag-version': 'success', 'release-verify-tooling': 'skipped', 'publish-npm': 'skipped', 'prepare-native-assets': 'success', 'staged-install-acceptance': 'success' };
+      expect(permitsPublication(npm, { 'verify-tag-version': 'success' }, event, 'release', false)).toBe(false);
+      expect(permitsPublication(preparation, { 'verify-tag-version': 'success', 'complete-suite-assets': 'success' }, event, 'release', false)).toBe(true);
+      const results: Record<string, JobResult> = { 'verify-tag-version': 'success', 'publish-npm': 'skipped', 'prepare-native-assets': 'success', 'staged-install-acceptance': 'success' };
       expect(permitsPublication(release, results, event, 'release', false)).toBe(true);
       expect(permitsPublication(release, results, event, 'release', true)).toBe(false);
       results['publish-npm'] = 'failure';
@@ -1042,47 +1013,10 @@ describe('release.yml: by-reference release', () => {
     expect(prerequisites(rel, 'github-release').has('staged-install-acceptance')).toBe(true);
   });
 
-  test('distinct tooling needs its own exact successful push CI before either publication job', () => {
-    const verify = rel.jobs!['release-verify-tooling']!;
-    expect(verify.uses).toBe('./.github/workflows/reusable-release-verify.yml');
-    expect(needsOf(verify)).toEqual(['verify-tag-version']);
-    expect(verify.with).toEqual({ sha: '${{ github.sha }}', workflow: 'ci.yml', event: 'push', 'toolchain-source': 'workspace' });
-    expect(verify.permissions).toEqual({ contents: 'read', actions: 'read', checks: 'read' });
-    const same = { ref: 'refs/tags/v3.1.3', armed: false, toolingSha: 'a', payloadSha: 'a' };
-    const distinct = { ...same, ref: 'refs/heads/main', toolingSha: 'b' };
-    for (const event of ['push', 'workflow_dispatch']) {
-      expect(permitsPublication(verify, { 'verify-tag-version': 'success' }, event, 'release', true, same)).toBe(false);
-      expect(permitsPublication(verify, { 'verify-tag-version': 'success' }, event, 'release', true, distinct)).toBe(true);
-      for (const result of ['failure', 'cancelled', 'skipped'] as const) {
-        expect(permitsPublication(verify, { 'verify-tag-version': result }, event, 'release', true, distinct)).toBe(false);
-      }
-      for (const name of ['publish-npm', 'github-release']) {
-        const job = rel.jobs![name]!;
-        expect(needsOf(job)).toContain('release-verify-tooling');
-        expect(needsOf(job)).toContain('staged-install-acceptance');
-        const ready: Record<string, JobResult> = Object.fromEntries(needsOf(job).map(dependency => [dependency, 'success']));
-        expect(permitsPublication(job, ready, event, 'release', true, distinct), name).toBe(true);
-        for (const result of ['failure', 'cancelled', 'skipped'] as const) {
-          expect(permitsPublication(job, { ...ready, 'release-verify-tooling': result }, event, 'release', true, distinct), `${name}:${result}`).toBe(false);
-        }
-        expect(permitsPublication(job, { ...ready, 'release-verify-tooling': 'skipped' }, event, 'release', true, same), name).toBe(true);
-        for (const result of ['failure', 'cancelled'] as const) {
-          expect(permitsPublication(job, { ...ready, 'release-verify-tooling': result }, event, 'release', true, same), `${name}:same:${result}`).toBe(false);
-        }
-        if (name === 'github-release') {
-          expect(permitsPublication(job, { ...ready, 'publish-npm': 'skipped' }, event, 'release', false, distinct)).toBe(true);
-        }
-      }
-    }
-    expect(permitsPublication(verify, { 'verify-tag-version': 'success' }, 'workflow_dispatch', 'dry-run', true, distinct)).toBe(false);
-  });
-
   test('publication is terminal and standalone public acceptance remains explicitly available', () => {
     expect(Object.keys(rel.jobs!).at(-1)).toBe('github-release');
     expect(jobs(rel).filter(([, job]) => job.uses === './.github/workflows/reusable-published-install-acceptance.yml')).toEqual([]);
     for (const [, job] of jobs(rel)) expect(needsOf(job)).not.toContain('github-release');
-    expect(prerequisites(rel, 'github-release').has('release-verify')).toBe(true);
-    expect(prerequisites(rel, 'github-release').has('release-verify-tooling')).toBe(true);
     expect(prerequisites(rel, 'github-release').has('staged-install-acceptance')).toBe(true);
     expect(load('reusable-published-install-acceptance.yml').on).toHaveProperty('workflow_dispatch');
   });
@@ -1192,7 +1126,7 @@ describe('release.yml: by-reference release', () => {
   test('the tag-push publish path is preserved unchanged (manual redo)', () => {
     // Every release job that gates on a release-mode dispatch must still also
     // gate on a plain push, so pushing a v* tag by hand releases exactly as before.
-    for (const name of ['verify-tag-version', 'release-verify', 'publish-npm', 'prepare-native-assets', 'staged-install-acceptance', 'github-release']) {
+    for (const name of ['verify-tag-version', 'publish-npm', 'prepare-native-assets', 'staged-install-acceptance', 'github-release']) {
       expect(String(rel.jobs![name]!.if)).toContain("github.event_name == 'push'");
     }
   });
@@ -1223,67 +1157,6 @@ describe('reusable workflows: workflow_call contracts', () => {
       const wf = load(f);
       expect(wf.on).toHaveProperty('workflow_call');
     }
-  });
-
-  test('reusable-release-verify exposes run_id + head_sha outputs', () => {
-    const wf = load('reusable-release-verify.yml');
-    const outputs = (wf.on as { workflow_call?: { outputs?: Record<string, unknown> } }).workflow_call?.outputs ?? {};
-    expect(Object.keys(outputs)).toEqual(expect.arrayContaining(['run_id', 'head_sha', 'ok']));
-  });
-
-  test('reusable-release-verify fails when it verifies green but resolves no run_id', () => {
-    // Consumers inherit the guard release.yml already had: an empty run_id fed
-    // to download-artifact stops targeting the verified run and downloads from
-    // the caller's own run instead.
-    const verify = load('reusable-release-verify.yml').jobs!['verify']!;
-    const guard = steps(verify).find((s) => (s.env as Record<string, string> | undefined)?.RUN_ID !== undefined);
-    expect(guard, 'reusable-release-verify must guard an unresolved run_id').toBeTruthy();
-    const runId = String((guard!.env as Record<string, string>).RUN_ID);
-    expect(runId).toContain('pjg-workspace');
-    expect(runId).toContain('pjg-registry');
-    expect(String(guard!.run)).toContain('-z');
-    expect(String(guard!.run)).toContain('exit 1');
-    // Unconditioned, so it applies to both toolchain-source modes.
-    expect(guard!.if).toBeUndefined();
-  });
-
-  test('reusable-release-verify supports both toolchain sources, defaulting to registry', () => {
-    const wf = load('reusable-release-verify.yml');
-    const inputs = (wf.on as { workflow_call?: { inputs?: Record<string, { default?: string }> } }).workflow_call?.inputs ?? {};
-    expect(inputs['toolchain-source']?.default).toBe('registry');
-
-    const verify = wf.jobs!['verify']!;
-    const byIf = (mode: string) => steps(verify).filter((s) => String(s.if ?? '').includes(`toolchain-source == '${mode}'`));
-    const workspaceSteps = byIf('workspace');
-    const registrySteps = byIf('registry');
-
-    // Workspace mode self-hosts the exact verified source with pinned Bun.
-    // Recompiling its project-reference graph cannot strengthen the CI verdict.
-    expect(JSON.stringify(workspaceSteps)).toContain('actions/checkout');
-    const checkout = workspaceSteps.find(step => String(step.uses ?? '').includes('actions/checkout'));
-    expect(checkout?.with).toEqual(expect.objectContaining({ ref: '${{ inputs.sha }}' }));
-    expect(JSON.stringify(workspaceSteps)).toContain('bun packages/engine/toolchain/src/bin/per-job-green.ts');
-    expect(JSON.stringify(workspaceSteps)).not.toContain('tsc -b');
-    expect(JSON.stringify(workspaceSteps)).not.toContain('toolchain/dist/bin/per-job-green.js');
-    expect(JSON.stringify(workspaceSteps)).not.toContain('bunx @goodvibes-jev/engine/toolchain');
-
-    // registry mode bunx-es the published package and never assumes a checkout.
-    expect(JSON.stringify(registrySteps)).toContain('goodvibes-per-job-green');
-    expect(JSON.stringify(registrySteps)).not.toContain('actions/checkout');
-
-    // Both mode steps carry ids feeding the coalesced job outputs.
-    const outputsText = JSON.stringify(verify.outputs ?? {});
-    expect(outputsText).toContain('pjg-workspace');
-    expect(outputsText).toContain('pjg-registry');
-  });
-
-  test('the platform release.yml self-hosts release-verify with the workspace toolchain', () => {
-    const rel = load('release.yml');
-    const rv = rel.jobs!['release-verify']! as Job & { with?: Record<string, unknown> };
-    // The platform cannot bunx-from-registry: its own release publishes the
-    // toolchain (first-release bootstrap), and later releases must verify with
-    // the commit under release, not the previously published version.
-    expect(rv.with?.['toolchain-source']).toBe('workspace');
   });
 
   test('reusable-npm-publish requests id-token and takes an npm-token secret', () => {
@@ -1396,21 +1269,4 @@ describe('reusable workflows: workflow_call contracts', () => {
     expect(files).not.toContain('inputs.assets-glob');
   });
 
-  test('per-job-green gets an explicit deadline sized UNDER the verify job cap in both modes', () => {
-    const wf = load('reusable-release-verify.yml');
-    const verify = wf.jobs!['verify']!;
-    const capMinutes = verify['timeout-minutes']!;
-    if (typeof capMinutes !== 'number') throw new Error('The verify job must have a numeric timeout-minutes cap');
-    expect(capMinutes).toBeGreaterThan(0);
-    for (const id of ['pjg-workspace', 'pjg-registry']) {
-      const step = steps(verify).find((s) => s.id === id);
-      expect(step, `verify step ${id} must exist`).toBeTruthy();
-      const match = /--deadline-ms\s+"?(\d+)"?/.exec(String(step!.run ?? ''));
-      // Without an explicit deadline under the cap, the tool's honest
-      // deadline-exceeded verdict is unreachable, the job kill wins.
-      expect(match, `${id} must pass --deadline-ms`).toBeTruthy();
-      const deadlineMinutes = Number(match![1]) / 60_000;
-      expect(deadlineMinutes).toBeLessThan(capMinutes);
-    }
-  });
 });

@@ -1,4 +1,4 @@
-import type { FsReader, Exec, ExecResult, HttpGetJson, HttpResponse } from '@goodvibes-jev/engine/toolchain';
+import type { FsReader, Exec, ExecResult } from '@goodvibes-jev/engine/toolchain';
 
 /** Build an in-memory FsReader from a path→content map. Executable paths are listed separately. */
 export function fakeFs(files: Record<string, string>, executable: readonly string[] = []): FsReader {
@@ -39,9 +39,4 @@ export function fakeFs(files: Record<string, string>, executable: readonly strin
 /** Build an Exec stub that returns scripted results keyed by the first arg (or command). */
 export function scriptedExec(handler: (command: string, args: readonly string[]) => Partial<ExecResult>): Exec {
   return (command, args) => ({ status: 0, stdout: '', stderr: '', ...handler(command, args) });
-}
-
-/** Build an HttpGetJson stub from a queue or a URL matcher. */
-export function scriptedHttp(handler: (url: string) => HttpResponse): HttpGetJson {
-  return async (url) => handler(url);
 }

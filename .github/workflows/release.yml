@@ -6,12 +6,8 @@ name: Release
 # restrictions (tags only). This YAML alone cannot enforce manual approval; the
 # gate lives in the GitHub UI at Settings > Environments > production.
 #
-# By-reference release (2026-07-16 redesign): validation happened exactly once,
-# on the release commit's push-CI run. This workflow VERIFIES that run is
-# per-job green (release-verify, ~2m) instead of re-running the 45-minute gate
-# suite, then restores that CI run's build artifact for publish after an
-# integrity check (recorded head SHA == tagged SHA). Tagging is gated on push-CI
-# green, which structurally retires the tag-redo dance.
+# Release assets are built from the selected source in this workflow.
+# Fresh and upgrade installation acceptance must pass before publication.
 permissions:
   contents: read
 
@@ -113,56 +109,6 @@ jobs:
           GITHUB_REF_NAME="$RELEASE_TAG" bun packages/engine/scripts/verify-release-tag-version.ts
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-  # By-reference validation: verify the tagged commit's push-CI run is per-job
-  # green. Replaces the old 45-minute validate-release re-run. Emits the CI run
-  # id + head SHA so publish-npm can restore that run's build artifact.
-  #
-  # toolchain-source: workspace, the engine MUST self-host per-job-green from the
-  # checked-out commit. bunx-from-registry would deadlock the first release
-  # (this release is what publishes @goodvibes-jev/engine) and would make
-  # every later release verify itself with the PREVIOUS toolchain version.
-  release-verify:
-    if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'release' || github.event.inputs.mode == 'candidate'))
-    needs: [verify-tag-version]
-    # Caller permissions must be a superset of what the called workflow's jobs
-    # request, or GitHub rejects the whole workflow at startup (jobs: []).
-    permissions:
-      contents: read
-      actions: read
-      checks: read
-    uses: ./.github/workflows/reusable-release-verify.yml
-    with:
-      sha: ${{ needs.verify-tag-version.outputs.sha }}
-      workflow: ci.yml
-      toolchain-source: workspace
-    secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
-
-  # A resume can use newer publishing/acceptance tooling than the immutable
-  # payload. That exact tooling commit needs its own successful push-CI run.
-  release-verify-tooling:
-    if: >-
-      !cancelled() &&
-      needs.verify-tag-version.result == 'success' &&
-      github.sha != needs.verify-tag-version.outputs.sha &&
-      (github.event_name == 'push' ||
-       (github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'release' || github.event.inputs.mode == 'candidate')))
-    needs: [verify-tag-version]
-    permissions:
-      contents: read
-      actions: read
-      checks: read
-    uses: ./.github/workflows/reusable-release-verify.yml
-    with:
-      sha: ${{ github.sha }}
-      workflow: ci.yml
-      event: push
-      toolchain-source: workspace
-    secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
-
   # A manual dispatch defaults to dry-run. Only an explicit release-mode
   # dispatch or a tag push may reach the publish job below.
   dry-run:
@@ -197,17 +143,14 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    needs: [verify-tag-version, release-verify, release-verify-tooling, staged-install-acceptance]
+    needs: [verify-tag-version, staged-install-acceptance]
     if: >-
       !cancelled() &&
       vars.PUBLISH_NPM == 'true' &&
       (github.event_name == 'push' ||
        (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'release')) &&
       needs.verify-tag-version.result == 'success' &&
-      needs.release-verify.result == 'success' &&
-      needs.staged-install-acceptance.result == 'success' &&
-      (needs.release-verify-tooling.result == 'success' ||
-       (github.sha == needs.verify-tag-version.outputs.sha && needs.release-verify-tooling.result == 'skipped'))
+      needs.staged-install-acceptance.result == 'success'
     environment:
       name: production
       url: https://www.npmjs.com/package/@goodvibes-jev/engine
@@ -219,9 +162,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          # Release-mode dispatch restores + publishes the tag ref (github.ref);
-          # a push uses the pushed tag ref. Never the "main" input default here.
-          ref: ${{ (github.event.inputs.mode == 'release' && github.ref) || github.event.inputs.ref || github.ref }}
+          ref: ${{ needs.verify-tag-version.outputs.tag }}
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -233,45 +174,8 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      # Artifact-integrity handoff: restore the exact build the CI run produced
-      # for this SHA (not a fresh throwaway build), and assert the run's recorded
-      # head SHA equals the tagged SHA before trusting its bytes.
-      #
-      # Guard FIRST on an empty run id: the per-job-green check-suites fallback
-      # can verify green without resolving the Actions run id. An empty run-id
-      # fed to download-artifact silently misdirects the download (it stops
-      # targeting the CI run), so fail early and honestly instead.
-      - name: Require a resolved CI run id for the artifact restore
-        env:
-          RUN_ID: ${{ needs.release-verify.outputs.run_id }}
-        run: |
-          if [ -z "$RUN_ID" ]; then
-            echo "release-verify reported green but could not resolve the CI run id (check-suites fallback path)." >&2
-            echo "The publish job restores the CI build artifact BY RUN ID; without it the download would" >&2
-            echo "misdirect to the current Release run. Re-run this workflow once the Actions API recovers" >&2
-            echo "so release-verify resolves the run id, then publish proceeds normally." >&2
-            exit 1
-          fi
-          echo "CI run id resolved: $RUN_ID"
-      - name: Assert recorded head SHA matches the tagged SHA
-        env:
-          RECORDED_SHA: ${{ needs.release-verify.outputs.head_sha }}
-          TAGGED_SHA: ${{ github.sha }}
-        run: |
-          if [ "$RECORDED_SHA" != "$TAGGED_SHA" ]; then
-            echo "Artifact integrity check FAILED: CI build head SHA ($RECORDED_SHA) != tagged SHA ($TAGGED_SHA)." >&2
-            exit 1
-          fi
-          echo "Artifact integrity OK: $RECORDED_SHA == $TAGGED_SHA"
-      - name: Download CI build artifact (by recorded run id)
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: workspace-build-output
-          path: /tmp/workspace-build-output
-          run-id: ${{ needs.release-verify.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Restore workspace build output
-        run: tar -xzf /tmp/workspace-build-output/workspace-build-output.tgz -C .
+      - name: Build release packages from the tag
+        run: bun run build
       # Empty, complete, or a partial at exactly this version (the shape a
       # mid-loop publish failure leaves, which the publish loop's per-package
       # skip converges) all proceed. The stop condition is a published package
@@ -305,7 +209,7 @@ jobs:
     if: >-
       (github.event_name == 'push' ||
        (github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'release' || github.event.inputs.mode == 'candidate')))
-    needs: [verify-tag-version, release-verify]
+    needs: [verify-tag-version]
     permissions:
       contents: write
       actions: read
@@ -321,9 +225,8 @@ jobs:
       (github.event_name == 'push' ||
        (github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'release' || github.event.inputs.mode == 'candidate'))) &&
       needs.verify-tag-version.result == 'success' &&
-      needs.release-verify.result == 'success' &&
       needs.complete-suite-assets.result == 'success'
-    needs: [verify-tag-version, release-verify, complete-suite-assets]
+    needs: [verify-tag-version, complete-suite-assets]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -332,28 +235,14 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Checkout release tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Retain release merge tooling
-        run: |
-          mkdir "$RUNNER_TEMP/release-merge-tooling"
-          cp .github/scripts/merge-suite-release-assets.py .github/scripts/release_asset_pins.py .github/scripts/release_asset_sources.py "$RUNNER_TEMP/release-merge-tooling/"
       - name: Checkout released source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ needs.verify-tag-version.outputs.sha }}
-          fetch-depth: 0
-      - name: Require the verified CI producer
-        env:
-          RUN_ID: ${{ needs.release-verify.outputs.run_id }}
-          RECORDED_SOURCE: ${{ needs.release-verify.outputs.head_sha }}
-          SOURCE_SHA: ${{ needs.verify-tag-version.outputs.sha }}
-        run: |
-          test -n "$RUN_ID"
-          test "$RECORDED_SOURCE" = "$SOURCE_SHA"
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-      - name: Setup Bun + deps (cached)
-        uses: ./.github/actions/setup
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.14"
       - name: Select the published engine version
         id: version
         env:
@@ -362,69 +251,12 @@ jobs:
           version=$(bun -e 'console.log(JSON.parse(await Bun.file("packages/engine/package.json").text()).version)')
           test "v$version" = "$RELEASE_TAG"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Download exact workspace and Agent output
+      - name: Download freshly built complete installer assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: workspace-build-output
-          path: /tmp/workspace-build-output
-          run-id: ${{ needs.release-verify.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Restore exact workspace and Agent output
-        run: tar -xzf /tmp/workspace-build-output/workspace-build-output.tgz -C .
-      - name: Download admitted TUI Linux cohort
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: tui-native-linux-x64
-          path: /tmp/native-release-downloads/tui-native-linux-x64
-          run-id: ${{ needs.release-verify.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download admitted Daemon Linux x64 cohort
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: daemon-native-linux-x64
-          path: /tmp/native-release-downloads/daemon-native-linux-x64
-          run-id: ${{ needs.release-verify.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download admitted Daemon Linux ARM cohort
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: daemon-native-linux-arm64
-          path: /tmp/native-release-downloads/daemon-native-linux-arm64
-          run-id: ${{ needs.release-verify.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download admitted Daemon Darwin x64 cohort
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: daemon-native-darwin-x64
-          path: /tmp/native-release-downloads/daemon-native-darwin-x64
-          run-id: ${{ needs.release-verify.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download admitted Daemon Darwin ARM cohort
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: daemon-native-darwin-arm64
-          path: /tmp/native-release-downloads/daemon-native-darwin-arm64
-          run-id: ${{ needs.release-verify.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Verify and stage admitted native release assets
-        env:
-          CI_RUN_ID: ${{ needs.release-verify.outputs.run_id }}
-          SOURCE_SHA: ${{ needs.verify-tag-version.outputs.sha }}
-        run: bun .github/scripts/stage-native-release-assets.mjs "$SOURCE_SHA" "$CI_RUN_ID" /tmp/native-release-downloads /tmp/native-release-assets
-      - name: Download complete installer assets
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: installer-release-assets
-          path: /tmp/installer-release-assets
-      - name: Complete the admitted native release
-        env:
-          RELEASE_TAG: ${{ needs.verify-tag-version.outputs.tag }}
-          SOURCE_SHA: ${{ needs.verify-tag-version.outputs.sha }}
-        run: |
-          # CI-admitted bytes win collisions; all selected reader/companion
-          # pins must match those actual bytes before adding any missing files.
-          python3 "$RUNNER_TEMP/release-merge-tooling/merge-suite-release-assets.py" /tmp/native-release-assets /tmp/installer-release-assets "$RELEASE_TAG" "$SOURCE_SHA"
-      - name: Upload admitted native release assets
+          path: /tmp/native-release-assets
+      - name: Upload native release assets for installation acceptance
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: native-release-assets
@@ -462,10 +294,8 @@ jobs:
       (needs.publish-npm.result == 'success' ||
        (vars.PUBLISH_NPM != 'true' && needs.publish-npm.result == 'skipped')) &&
       needs.prepare-native-assets.result == 'success' &&
-      needs.staged-install-acceptance.result == 'success' &&
-      (needs.release-verify-tooling.result == 'success' ||
-       (github.sha == needs.verify-tag-version.outputs.sha && needs.release-verify-tooling.result == 'skipped'))
-    needs: [verify-tag-version, release-verify-tooling, publish-npm, prepare-native-assets, staged-install-acceptance]
+      needs.staged-install-acceptance.result == 'success'
+    needs: [verify-tag-version, publish-npm, prepare-native-assets, staged-install-acceptance]
     permissions:
       contents: write
     uses: ./.github/workflows/reusable-gh-release.yml

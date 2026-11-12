@@ -13,13 +13,12 @@
  *   - every job declares `runs-on` and either `steps` or `uses` (reusable call);
  *   - no job carries `continue-on-error: true` (banned across the ecosystem,
  *     a run that reports success over a failing job is a false green);
- *   - the release workflow is wired onto the shared reusable workflows: by-
- *     reference validation (reusable-release-verify), the binary build matrix
+ *   - the release workflow is wired onto the shared reusable workflows: the binary build matrix
  *     (reusable-binary-matrix), the GitHub Release (reusable-gh-release), and
  *     the npm publish (reusable-npm-publish), no hand-rolled CI poll, no
  *     throwaway validate build;
  *   - the release lane still carries every required job: tag/version check,
- *     by-reference verify, npm pack, the binary matrix, the asset assembly, the
+ *     npm pack, the binary matrix, the asset assembly, the
  *     GitHub Release, the npm publish, and the registry install smoke;
  *   - the assembled release assets cover all four platform binaries, all four
  *     per-platform sqlite-vec native addon archives (sqlite-vec-<os>-<arch>.tar.gz),
@@ -64,7 +63,6 @@ if (files.length === 0) {
 /** Jobs the release workflow must define to ship both the npm channel and binaries. */
 const RELEASE_REQUIRED_JOBS: ReadonlyArray<string> = [
   'verify-tag-version',
-  'release-verify',
   'pack',
   'binaries',
   'browser-driver',
@@ -76,7 +74,6 @@ const RELEASE_REQUIRED_JOBS: ReadonlyArray<string> = [
 
 /** Shared reusable workflows the release lane must consume (one implementation per concern). */
 const RELEASE_REQUIRED_REUSABLES: ReadonlyArray<string> = [
-  'reusable-release-verify.yml',
   'reusable-binary-matrix.yml',
   'reusable-gh-release.yml',
   'reusable-npm-publish.yml',

@@ -1,7 +1,7 @@
 /**
  * Shared reclaim-on-startup helper for anything that puts its own working
  * directory straight under the real `os.tmpdir()` (a per-run test-tmp root,
- * a release-verify scratch registry, a native build's work directory) and
+ * a native build's work directory) and
  * cannot guarantee it always gets to remove that directory itself: a signal
  * kill (Ctrl-C, a CI job timeout, `pkill`) skips `finally` blocks the same
  * way it skips `afterAll` hooks, so the directory is orphaned.

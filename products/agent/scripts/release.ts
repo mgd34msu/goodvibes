@@ -288,16 +288,8 @@ export function main(argv = process.argv.slice(2), root = process.cwd()): void {
   console.log('\n[preflight] Checking release evidence text hygiene...');
   assertReleaseEvidenceHygiene('release evidence text hygiene', root);
 
-  // --- Pre-release validation: none (CI owns validation) ---
-  //
-  // Per the shared CI/CD design (principle 4) and the toolchain release-cut
-  // contract, a release cut NEVER re-runs the gate battery. Validation happened
-  // exactly once, on the release commit's push-CI run (per-job green); the tag
-  // is cut from that already-green tree and verified by-reference downstream
-  // (release.yml → reusable-release-verify). The old local [1/5] gate re-run
-  // (typecheck/architecture/build/publish:check/package:install-check/pack/diff)
-  // is intentionally gone. This step only prepares, bumps,
-  // updates the changelog, and tags.
+  // This command prepares the version, changelog and tag. The release workflow
+  // builds fresh assets and checks their installation before publication.
 
   // --- Bump package.json ---
 

@@ -24,9 +24,6 @@ and a thin CLI (`bin` entry):
 - **post-build-smoke.** Boots a compiled binary and checks its version protocol and emitted module initialization.
 - **package-install-check.** Static `npm pack` tarball plus bin-shim policy check.
 - **publish-package.** Idempotent `npm publish` plus a propagation poll.
-- **per-job-green.** Verifies a commit's push-CI run concluded with every job
-  green, with a 503-resilient check-suites fallback. The by-reference
-  validation check.
 - **changelog-gate.** Asserts CHANGELOG carries a section for a version.
 - **sha256sums.** Generate or verify a `SHA256SUMS` manifest over release assets.
 - **train-status.** Read-only: one table per release-train cycle across the

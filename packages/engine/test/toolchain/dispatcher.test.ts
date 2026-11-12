@@ -50,16 +50,15 @@ describe('goodvibes-toolchain dispatcher', () => {
   });
 
   test('the goodvibes- prefixed form dispatches the same as the bare tool name', () => {
-    // per-job-green with no --repo/--sha exits 2 with its own named error,
+    // train-status with no --manifest exits 2 with its own named error,
     // proof the dispatcher reached the real tool with a clean argv.
-    for (const name of ['per-job-green', 'goodvibes-per-job-green']) {
+    for (const name of ['train-status', 'goodvibes-train-status']) {
       const res = spawnSync('bun', [DISPATCHER_DIST, name], {
         encoding: 'utf8',
         timeout: 30_000,
-        env: { ...process.env, GITHUB_REPOSITORY: '', GITHUB_SHA: '' },
       });
       expect(res.status).toBe(2);
-      expect(res.stderr + res.stdout).toContain('per-job-green: --repo');
+      expect(res.stderr + res.stdout).toContain('train-status: --manifest');
     }
   });
 });

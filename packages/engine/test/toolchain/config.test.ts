@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseToolchainConfig, resolveEnginePinConfig, resolvePerJobGreenConfig, DEFAULT_ENGINE_PACKAGE } from '@goodvibes-jev/engine/toolchain';
+import { parseToolchainConfig, resolveEnginePinConfig, DEFAULT_ENGINE_PACKAGE } from '@goodvibes-jev/engine/toolchain';
 
 describe('toolchain config', () => {
   test('accepts an optional compile driver and rejects an empty path', () => {
@@ -25,22 +25,6 @@ describe('toolchain config', () => {
     expect(resolved.lockfile).toBe('bun.lock');
     expect(resolved.overlayMarker).toContain('.local-engine-overlay.json');
   });
-  test('resolvePerJobGreenConfig requires owner/repo and defaults the rest', () => {
-    const resolved = resolvePerJobGreenConfig({ owner: 'a', repo: 'b' });
-    expect(resolved.workflow).toBe('ci.yml');
-    expect(resolved.event).toBe('push');
-    expect(resolved.pollIntervalMs).toBeGreaterThan(0);
-  });
-  test('per-job-green default retry posture: ~8 attempts with sleeps in the 5-10s band', () => {
-    const resolved = resolvePerJobGreenConfig({ owner: 'a', repo: 'b' });
-    expect(resolved.retryAttempts).toBe(8);
-    expect(resolved.retryDelayMs).toBeGreaterThanOrEqual(5000);
-    expect(resolved.retryDelayMs).toBeLessThanOrEqual(10000);
-    // And it stays configurable.
-    const custom = resolvePerJobGreenConfig({ owner: 'a', repo: 'b', retryAttempts: 3, retryDelayMs: 100 });
-    expect(custom.retryAttempts).toBe(3);
-    expect(custom.retryDelayMs).toBe(100);
-  });
   test('a one-field enginePin section parses: requiredness lives in resolveEnginePinConfig, not the schema', () => {
     const raw = JSON.stringify({
       packageName: '@goodvibes-jev/tui',
@@ -52,19 +36,6 @@ describe('toolchain config', () => {
     const resolved = resolveEnginePinConfig(config.enginePin);
     expect(resolved.pinSource).toBe('devDependencies');
     expect(resolved.enginePackage).toBe(DEFAULT_ENGINE_PACKAGE);
-  });
-  test('a perJobGreen section with only owner/repo parses: the rest defaults via resolvePerJobGreenConfig', () => {
-    const raw = JSON.stringify({
-      packageName: '@goodvibes-jev/tui',
-      perJobGreen: { owner: 'mgd34msu', repo: 'goodvibes-platform' },
-    });
-    const config = parseToolchainConfig(raw);
-    expect(Object.keys(config.perJobGreen ?? {}).sort()).toEqual(['owner', 'repo']);
-    expect(config.perJobGreen?.owner).toBe('mgd34msu');
-    expect(config.perJobGreen?.repo).toBe('goodvibes-platform');
-    const resolved = resolvePerJobGreenConfig(config.perJobGreen as { owner: string; repo: string });
-    expect(resolved.workflow).toBe('ci.yml');
-    expect(resolved.retryAttempts).toBe(8);
   });
   test('rejects a present-but-wrongly-typed optional enginePin field, naming it', () => {
     const raw = JSON.stringify({

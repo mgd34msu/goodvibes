@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Build release assets directly from the version tag and remove the prior-CI
+  commit gate and artifact reuse tooling. Fresh-install and upgrade checks
+  still finish before publication.
+
 - Start contract planning with complete directory-based filename catalogs and
   read source contents and symbols as needed. Review catalogs retain every
   captured path, including dotfiles and files without extensions.

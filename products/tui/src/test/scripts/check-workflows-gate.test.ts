@@ -268,8 +268,6 @@ describe('check-workflows', () => {
   const suiteRelease = [
     'name: Suite Release', 'on:', '  workflow_dispatch:', 'jobs:',
     '  verify-tag-version:', '    runs-on: ubuntu-latest', '    steps:', '      - run: echo verify',
-    '  release-verify:', '    uses: ./.github/workflows/reusable-release-verify.yml',
-    '    with:', '      toolchain-source: workspace',
     '  publish-npm:', '    runs-on: ubuntu-latest', '    steps:', '      - run: echo publish',
     '  complete-suite-assets:', '    uses: ./.github/workflows/suite-release-assets.yml',
     '  prepare-native-assets:', '    runs-on: ubuntu-latest', '    steps:', '      - run: echo prepare',

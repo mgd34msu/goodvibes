@@ -87,7 +87,6 @@ test('new patch release pins the previous public suite for required prepublicati
   expect(release.jobs['github-release']!.if).toContain("needs.staged-install-acceptance.result == 'success'");
   expect(release.jobs['published-install-acceptance']).toBeUndefined();
   for (const job of Object.values(release.jobs)) expect(job.needs ?? []).not.toContain('github-release');
-  expect(release.jobs['github-release']!.needs).toContain('release-verify-tooling');
 });
 
 test('manual suite preparation requires an explicit tag and defaults to no public mutation', () => {
@@ -100,4 +99,24 @@ test('manual suite preparation requires an explicit tag and defaults to no publi
     'previous-tag': "${{ inputs.tag == 'v3.1.3' && 'v3.1.2' || '' }}",
     'previous-source': "${{ inputs.tag == 'v3.1.3' && '" + previousSource + "' || '' }}",
   });
+});
+
+test('suite packaging builds the selected source fresh without requiring a previous CI run', () => {
+  const suite = load('suite-release-assets.yml'), packaging = suite.jobs.package!;
+  expect(packaging.strategy?.matrix.include).toEqual(matrix);
+  const steps = packaging.steps!;
+  const checkout = steps.findIndex(step => step.with?.ref === '${{ inputs.candidate-source || inputs.tag }}');
+  const build = steps.findIndex(step => step.name === 'Build publisher tooling and engine');
+  const native = steps.findIndex(step => step.name === 'Package and execute native release binaries');
+  expect(checkout).toBeGreaterThanOrEqual(0);
+  expect(build).toBeGreaterThan(checkout); expect(native).toBeGreaterThan(build);
+  expect(steps[build]?.run).toBe('bun packages/engine/scripts/build.ts');
+  expect(steps[native]?.run).toContain('bun "$RUNNER_TEMP/package-suite-release.mjs" "$TARGET" "$RUNNER_TEMP/release-assets" "$RELEASE_TAG"');
+  expect(steps[native]?.env).toEqual({ TARGET: '${{ matrix.target }}', RELEASE_TAG: '${{ inputs.tag }}' });
+  const commands = steps.map(step => step.run ?? '').join('\n');
+  expect(commands).not.toMatch(/gh api|actions\/workflows\/ci\.yml|ci-runs\.json|ci-jobs\.json|head_sha=/);
+  expect(steps.some(step => step.name === 'Require exact-source successful push CI')).toBe(false);
+  expect(suite.jobs.collect!.needs).toBe('package');
+  expect(suite.jobs['published-install-acceptance']!.needs).toBe('collect');
+  expect(suite.jobs['published-install-acceptance']!.uses).toBe('./.github/workflows/reusable-published-install-acceptance.yml');
 });

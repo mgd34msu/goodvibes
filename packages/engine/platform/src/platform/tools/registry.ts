@@ -124,8 +124,51 @@ interface CurrentToolExecution {
   readonly settingsPresentation?: Readonly<{ previous: unknown; current: unknown }> | undefined;
   settingsReceipt?: PreparedConfigMutationReceipt | undefined;
   settingsRetired?: boolean | undefined;
+  /** The invocation's own cancellation signal, checked at every checkpoint. */
+  readonly signal: AbortSignal | undefined;
+  /** The registered definition declares local reads as its only side effect. */
+  readonly readOnlyDefinition: boolean;
+  /** Set only by {@link relaxCurrentToolReadFences}; see there. */
+  readFence?: { validUntil: number } | undefined;
   active: boolean;
   checking: boolean;
+}
+
+/**
+ * How long one complete currentness verification stands in for the following
+ * intermediate checkpoints of a read-only body. A complete verification
+ * re-captures and compares owner, admission and registration state; a search
+ * reaches a checkpoint several times per file, so repeating the complete
+ * verification at each one made the verification the whole cost of the search.
+ */
+const READ_FENCE_WINDOW_MS = 50;
+/** The window grows with what a verification costs, so verification stays a
+ * small share of a long read; it never grows past this. */
+const READ_FENCE_MAX_WINDOW_MS = 250;
+const readFenceDeadline = (startedAt: number): number => {
+  const finishedAt = performance.now();
+  return finishedAt + Math.min(READ_FENCE_MAX_WINDOW_MS, Math.max(READ_FENCE_WINDOW_MS, (finishedAt - startedAt) * 8));
+};
+
+function expireReadFence(options: ToolExecuteOptions | undefined): void {
+  const fence = options && currentToolExecutions.get(options)?.readFence;
+  if (fence) fence.validUntil = 0;
+}
+
+/**
+ * Called by a tool body that only reads local files (and whose registered
+ * definition says the same). Its intermediate checkpoints are liveness fences
+ * that stop work early, not gates in front of an effect, so between complete
+ * verifications they check cancellation and the proof's own retirement only.
+ * A complete verification still runs at least every READ_FENCE_MAX_WINDOW_MS, on
+ * every effect or nested-call check, and once more before the result leaves
+ * the registry: nothing is published on a verdict older than the body's end.
+ * A definition with any other side effect, or a legacy call, is unchanged.
+ */
+export function relaxCurrentToolReadFences(args: Record<string, unknown>, options?: ToolExecuteOptions): void {
+  if (!assertCurrentToolInvocation(args, options)) return;
+  const proof = currentToolExecutions.get(options!);
+  if (proof?.readOnlyDefinition) proof.readFence ??= { validUntil: 0 };
 }
 
 // Exact options identity is the invocation capability. No caller-visible field
@@ -169,6 +212,7 @@ export function assertCurrentToolInvocation(args: Record<string, unknown>, optio
 /** A code-owned effect cannot relax the captured owner's deterministic restrictions. */
 export function assertCurrentToolEffect(args: Record<string, unknown>, options?: ToolExecuteOptions,
   effect: ToolExecutionEffect = 'write'): boolean {
+  expireReadFence(options);
   if (!assertCurrentToolInvocation(args, options)) return false;
   const proof = options && currentToolExecutions.get(options);
   if (!proof) return false;
@@ -208,6 +252,13 @@ export function assertCurrentToolExecution(args: Record<string, unknown>, option
   // Restrictions apply even to ordinary/legacy invocations. They never mint an
   // authenticated admission: absent proof still returns false below.
   const proof = options && currentToolExecutions.get(options);
+  const fence = proof?.readFence;
+  if (proof && fence && proof.active && !proof.checking && proof.args === args && performance.now() < fence.validUntil) {
+    try { assertProjectionSignal(proof.signal); }
+    catch (error) { proof.active = false; throw error; }
+    return true;
+  }
+  const startedAt = fence ? performance.now() : 0;
   try { assertProjectionCurrent(options === undefined ? undefined : projectionFunction<(args?: Record<string, unknown>) => void>(projectionProperty(options, 'assertCurrent')), args); }
   catch (error) { if (proof) proof.active = false; throw error; }
   if (!proof) return false;
@@ -216,6 +267,7 @@ export function assertCurrentToolExecution(args: Record<string, unknown>, option
   try {
     proof.assertCurrent();
     if (!proof.active) throw new ToolInputProjectionError('stale');
+    if (fence) fence.validUntil = readFenceDeadline(startedAt);
     return true;
   } catch (error) {
     proof.active = false;
@@ -226,6 +278,7 @@ export function assertCurrentToolExecution(args: Record<string, unknown>, option
 /** Consume the exact registered local effect. Neither options nor callbacks mint a grant. */
 export function commitCurrentToolSettings(args: Record<string, unknown>, options?: ToolExecuteOptions): PreparedConfigMutationReceipt {
   const proof = options && currentToolExecutions.get(options);
+  expireReadFence(options);
   if (!proof?.commitSettings || !assertCurrentToolExecution(args, options)) throw new ToolInputProjectionError('held');
   // Retire before begin: a callback can never reenter this invocation to write.
   proof.active = false;
@@ -235,6 +288,7 @@ export function commitCurrentToolSettings(args: Record<string, unknown>, options
 /** Consume a complete config/credential plan once. Async acquisition stays under its original proof. */
 export async function commitCurrentToolSettingsPlan(args: Record<string, unknown>, options?: ToolExecuteOptions): Promise<PreparedConfigMutationReceipt> {
   const proof = options && currentToolExecutions.get(options);
+  expireReadFence(options);
   if (!proof?.commitSettingsPlan || !assertCurrentToolExecution(args, options)) throw new ToolInputProjectionError('held');
   proof.active = false;
   const receipt = await proof.commitSettingsPlan(); proof.settingsReceipt = receipt; return receipt;
@@ -988,7 +1042,9 @@ export class ToolRegistry {
         } : undefined;
         const nestedOwner = readAutonomousNestedOwner(assertAdmissionCurrent);
         if (!nestedOwner) throw new ToolInputProjectionError('held');
+        const declaredEffects = record.projection.definition.sideEffects;
         proof = { name: call.name, registry: this, nestedOwner, admissionGuard: assertAdmissionCurrent, args: call.args, active: true, checking: false, assertEffect,
+          signal, readOnlyDefinition: Array.isArray(declaredEffects) && declaredEffects.length > 0 && declaredEffects.every(effect => effect === 'read_fs'),
           assertWorkspace: readAutonomousWorkspaceConstraint(assertAdmissionCurrent),
           settingsPresentation: readAutonomousSettingsPresentation(assertAdmissionCurrent),
           ...(mutation && commitPlan ? { ...(commitConfig && !mutation.remoteImport && !mutation.secretDeletion && !mutation.secretImport && !mutation.subscriptionImport ? { commitSettings: commitConfig } : {}), commitSettingsPlan: commitPlan } : {}), assertCurrent: () => {
@@ -1018,6 +1074,9 @@ export class ToolRegistry {
       } : undefined;
       const retainedMode = registryPermissionOwners.get(this)?.captureExecutionMode();
       const result = await (mode === undefined ? invoke() : withInvocationExecutionMode(mode, invoke, assertModeCurrent, retainedMode?.assertCurrent));
+      // A relaxed read body ends on a complete verification, never on a
+      // verdict carried over from an earlier checkpoint.
+      if (proof?.readFence) { proof.readFence.validUntil = 0; assertCurrentToolExecution(call.args, executionOptions); }
       assertProjectionCurrent(callerCurrent);
       if (proof?.settingsReceipt) { assertProjectionSignal(signal); assertAdmissionCurrent?.(); }
       if (proof?.settingsRetired) throw new ToolInputProjectionError('stale');
@@ -1058,6 +1117,7 @@ export class ToolRegistry {
     const restrictionSignal = restrictions === undefined ? undefined : projectionSignal(projectionProperty(restrictions, 'signal'));
     const restrictionCurrent = restrictions === undefined ? undefined : projectionFunction<() => void>(projectionProperty(restrictions, 'assertCurrent'));
     const assertParentProof = () => {
+      expireReadFence(opts);
       if (currentToolExecutions.get(opts) !== parent || !parent.active || parent.registry !== this
         || !assertCurrentToolExecution(parent.args, opts)) throw new ToolInputProjectionError('stale');
     };

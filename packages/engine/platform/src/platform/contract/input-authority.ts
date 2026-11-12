@@ -211,7 +211,7 @@ export function isCapturedInputPath(path: string): boolean {
   } catch {
     /* A missing reserved view still fails closed below. */
   }
-  if ([...capturedRoots].some((root) => absolute === root || absolute.startsWith(`${root}${sep}`))) return true;
+  for (const root of capturedRoots) if (absolute === root || absolute.startsWith(`${root}${sep}`)) return true;
   // Reserved runtime views also fail closed before a restored lease is rebound.
   // This is only a denial check; prefixes never confer original-owner authority.
   return /[/\\]\.goodvibes[/\\]\.worktrees[/\\](?:contract-input|contract-planner|contract)(?:[/\\]|$)/.test(absolute);

@@ -23,7 +23,7 @@ import { analyzePermissionRequest, withReading } from './analysis.js';
 import { effectivePermissionMode, presetForMode, type GatePreset, type GatePresetName } from '../gate/presets.js';
 import { judgmentInputBoundary, runBoundary } from '../gate/boundary.js';
 import { readToolCall, shellCommandsIn } from '../gate/reading.js';
-import { currentExecutionMode, currentExecutionModeOwner, isInvocationAdmitted, withExecutionMode } from '../gate/execution-context.js';
+import { currentExecutionMode, currentExecutionModeForReadDecision, currentExecutionModeOwner, isInvocationAdmitted, withExecutionMode } from '../gate/execution-context.js';
 import type { UntrustedContentLedger } from '../security/untrusted-content.js';
 import { currentTurnSurfaceId } from '../security/turn-boundary.js';
 import { effectPermittedForProvenance } from '../gate/surface-authority.js';
@@ -1118,7 +1118,7 @@ export class PermissionManager {
 
   /** Search, map and read tools share explicit owner rules without per-path Jev calls. */
   async readAccess(rawPath: string): Promise<'allow' | 'restricted'> {
-    this.assertSelectedModeCurrent();
+    this.assertSelectedModeCurrent(true);
     const assertWorkspace = await this.autonomousWorkspaceConstraint('read');
     assertWorkspace();
     if (this.getMode() === 'yolo') return 'allow';
@@ -1176,8 +1176,8 @@ export class PermissionManager {
     } });
   }
 
-  private assertSelectedModeCurrent(): void {
-    const selected = currentExecutionMode();
+  private assertSelectedModeCurrent(forReadDecision = false): void {
+    const selected = forReadDecision ? currentExecutionModeForReadDecision() : currentExecutionMode();
     if (selected !== undefined && selected !== this.getMode()) throw new Error('Execution mode changed during the invocation');
   }
 

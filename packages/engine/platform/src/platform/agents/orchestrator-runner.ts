@@ -75,6 +75,32 @@ const MAX_TURNS = 0; // fallback turn budget when no config source (mirrors agen
 const MAX_TURNS_CAP = 0; // fallback policy bound when no config source (mirrors agents.maxTurnsCap default)
 const NETWORK_RETRY_DELAYS_MS = [5_000, 10_000, 20_000, 40_000, 60_000]; // exponential back-off on transient network errors
 const RATE_LIMIT_RETRY_DELAY_MS = 60_000; // fixed pause on 429/quota responses
+const TOOL_CALL_NOTICE_INTERVAL_MS = 60_000; // how often a still-running tool call is surfaced
+
+/**
+ * A tool call emits nothing between its start and its result, so a call that
+ * runs for a long time looks the same as an agent that is merely "running".
+ * While one is in flight this keeps the agent's operator progress line saying
+ * which call it is and for how long, and logs it after the first minute and
+ * every five minutes after. It writes the record only: it is not an agent
+ * event, so it is never counted as progress by a silence watchdog.
+ */
+function surfaceLongToolCall(record: AgentRecord, turn: number, toolName: string): () => void {
+  const startedAt = Date.now();
+  const started = record.progress;
+  let shown = started;
+  const timer = setInterval(() => {
+    const minutes = Math.floor((Date.now() - startedAt) / 60_000);
+    if (minutes < 1 || record.status !== 'running' || record.progress !== shown) return;
+    shown = `${started ?? `Turn ${turn} · ${toolName}`} (running ${minutes}m)`;
+    setAgentProgress(record, shown, 'operator');
+    if (minutes === 1 || minutes % 5 === 0) {
+      logger.warn('Agent tool call still running', { agentId: record.id, turn, tool: toolName, elapsedMs: Date.now() - startedAt });
+    }
+  }, TOOL_CALL_NOTICE_INTERVAL_MS);
+  (timer as { unref?: () => void }).unref?.();
+  return () => clearInterval(timer);
+}
 
 /** The applied turn ceiling: agents.maxTurns default, a per-spawn override, clamped by the agents.maxTurnsCap bound. */
 function resolveRunTurnBudget(context: AgentOrchestratorRunContext, record: AgentRecord): ResolvedTurnBudget {
@@ -207,6 +233,7 @@ async function executeToolCalls(
     setAgentProgress(record, `Turn ${turn} · ${call.name}${argsSummary}`, 'operator');
     record.toolCallCount++;
     context.emitAgentProgress(record.id, record.progress ?? '', 'operator');
+    const stopLongCallNotice = surfaceLongToolCall(record, turn, call.name);
 
     const callSig = `${call.name}::${JSON.stringify(call.arguments)}`;
     // Push a result AND log the matching session record, so the denied /
@@ -295,7 +322,7 @@ async function executeToolCalls(
       if (err instanceof OrchestratorObservationHeldError || (err instanceof Error && err.cause instanceof OrchestratorObservationHeldError)) throw new OrchestratorObservationHeldError();
       const toolErr = signal?.aborted ? 'cancelled by user' : summarizeError(err);
       recordResult({ callId: call.id, success: false, error: toolErr, ...(signal?.aborted ? { cancelled: true } : {}) }, JSON.stringify(call.arguments));
-    }
+    } finally { stopLongCallNotice(); }
 
 
   }

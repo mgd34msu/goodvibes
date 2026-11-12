@@ -1,4 +1,4 @@
-import { assertCurrentToolInvocation } from '../registry.js';
+import { assertCurrentToolInvocation, relaxCurrentToolReadFences } from '../registry.js';
 import type { Tool, ToolExecuteOptions } from '../../types/tools.js';
 import { appendSchemaFingerprint } from '../shared/schema-fingerprint.js';
 import { findSchema } from './schema.js';
@@ -46,6 +46,9 @@ export function createFindTool(
           if (allowOutsideProject() !== outsideProjectAllowed) throw new Error('Find permission mode changed');
         };
         current();
+        // Find only reads. Its per-entry checkpoints stop work early; the
+        // registry verifies completely again before the result is published.
+        relaxCurrentToolReadFences(args, opts);
         const reading = { ...(opts?.signal ? { signal: opts.signal } : {}), assertCurrent: current };
         const walkOptions = { ...(opts?.signal ? { signal: opts.signal } : {}), beforeAttempt: current, allowOutsideProject: outsideProjectAllowed };
         const queryOptions = { ...walkOptions, ...reading };

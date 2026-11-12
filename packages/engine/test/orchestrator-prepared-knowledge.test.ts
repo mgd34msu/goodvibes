@@ -131,15 +131,15 @@ function readings(probability = 0.99) {
 }
 
 const nativeCriteriaId = 'criteria:d6b72d9f28026994604091a0bbac8dfa87467c68300f6960922429de420bbdfb';
-function nativePlannerTask(field?: 'goal' | 'criterion' | 'unit' | 'repair', value = '') {
+function nativePlannerTask(field?: 'goal' | 'criterion' | 'unit' | 'repair', value = '', phase: 'initial' | 'repair' = 'repair') {
   const nativeSource = { sourceId: 'owned-native-source', sourceRevision: '1', inputRevision: 'owned-input',
     criteriaId: nativeCriteriaId, criteriaRevision: '1', goal: field === 'goal' ? value : 'Deploy the exact release.',
     criteria: [field === 'criterion' ? value : 'Preserve the release qualification.', 'Preserve the release qualification.'] };
   return buildContractPlannerRequest({ ask: 'Displayed request', nativeSource, shape: shapeOf(),
     config: { defaultAttempts: 1, maxUnits: 3 }, repositoryMap: 'Repository context: release package',
     proposedUnits: [{ task: field === 'unit' ? value : 'Keep the derived deployment instructions.', template: 'engineer' }],
-    repair: { problems: [{ code: 'native-source-changed', message: field === 'repair' ? value : 'Restore the missing qualification.' }],
-      previousPlan: 'Previous plan retained the staging requirement.' } });
+    ...(phase === 'initial' ? {} : { repair: { problems: [{ code: 'native-source-changed', message: field === 'repair' ? value : 'Restore the missing qualification.' }],
+      previousPlan: 'Previous plan retained the staging requirement.' } }) });
 }
 
 describe('orchestrator prepared curated knowledge', () => {
@@ -166,17 +166,21 @@ describe('orchestrator prepared curated knowledge', () => {
     } finally { installJudgmentPort(previous); }
   });
 
-  test('native planner knowledge reads preserve roots and derived repair context while protocol identity stays local', async () => {
-    const { deps } = await fixture(); const agent = { ...record(), task: nativePlannerTask() }; const fake = readings();
+  for (const phase of ['initial', 'repair'] as const) test(`native ${phase} planner knowledge reads preserve roots and relevant context while protocol identity stays local`, async () => {
+    const { deps } = await fixture(); const agent = { ...record(), task: nativePlannerTask(undefined, '', phase) }; const fake = readings();
     const previous = installJudgmentPort(fake.port);
     try {
       const prepared = await prepareOrchestratorPromptContext(agent, deps);
       const prompt = buildOrchestratorSystemPrompt(agent, undefined, prepared);
       for (const text of ['Deploy the exact release.', 'Preserve the release qualification.',
-        'Keep the derived deployment instructions.', 'Restore the missing qualification.',
-        'Previous plan retained the staging requirement.', 'Repository context: release package']) {
+        'Keep the derived deployment instructions.', ...(phase === 'initial' ? ['Repository context: release package']
+          : ['Restore the missing qualification.', 'Previous plan retained the staging requirement.'])]) {
         expect(agent.task).toContain(text); expect(prompt).not.toContain(text);
         expect(JSON.stringify(fake.requests)).toContain(text);
+      }
+      if (phase === 'repair') {
+        expect(agent.task).not.toContain('Repository context: release package');
+        expect(JSON.stringify(fake.requests)).not.toContain('Repository context: release package');
       }
       expect(agent.task).toContain(JSON.stringify(['Preserve the release qualification.', 'Preserve the release qualification.']));
       expect(agent.task).not.toContain(nativeCriteriaId);

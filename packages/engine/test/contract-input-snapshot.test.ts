@@ -4,6 +4,7 @@ import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions
 import { judgmentInputBoundary } from '../platform/src/platform/gate/boundary.js';
 import { createContractInputAuthority, authorizeContractInputPath, withContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
 import { defaultRepositoryMap } from '../platform/src/platform/contract/planner.js';
+import { createRepoMapTool } from '../platform/src/platform/tools/repo-map/index.js';
 import type { Contract } from '../platform/src/platform/contract/types.js';
 import { useGateReadings } from './_helpers/gate-readings.js';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
@@ -247,14 +248,24 @@ describe('local frozen contract input', () => {
 
 
 test('denied captured source exports stay withheld from the repository map', async () => {
-  const { defaultRepositoryMap } = await import('../platform/src/platform/contract/planner.js');
-  const { createContractInputAuthority, withContractInputAuthority } = await import('../platform/src/platform/contract/input-authority.js');
   const root = repo(); writeFileSync(join(root, 'secret.ts'), 'export const SYNTHETIC_PRIVATE_EXPORT = 123;\n');
   const snapshot = await captureContractInput(root); const frozen = await view(root, snapshot);
   const authority = await createContractInputAuthority({ projectRoot: root, inputSnapshot: snapshot } as import('../platform/src/platform/contract/types.js').Contract, frozen);
   const checked: string[] = [];
-  const map = await withContractInputAuthority(authority, () => defaultRepositoryMap(frozen, async (path) => { checked.push(path); return !path.endsWith('/secret.ts'); }));
+  const filter = async (path: string) => { checked.push(path); return !path.endsWith('/secret.ts'); };
+  const structure = await withContractInputAuthority(authority, () => defaultRepositoryMap(frozen, filter, filter));
+  expect(structure).toContain('# Repository structure');
+  expect(structure).toContain('"secret.ts"'); expect(structure).toContain('"tracked.ts"');
+  expect(structure).not.toContain('SYNTHETIC_PRIVATE_EXPORT'); expect(structure).not.toContain('export const');
+  expect(checked).toEqual([]);
+  const symbols = await withContractInputAuthority(authority, () => createRepoMapTool({
+    projectRoot: frozen, readAccessFilter: filter, capturedReadAccess: filter,
+  }).execute({ detail: 'symbols' }));
+  expect(symbols.success).toBe(true);
+  const map = symbols.output!;
   expect(checked.some((path) => path === join(frozen, 'secret.ts'))).toBe(true);
+  expect(map).toContain('secret.ts'); expect(map).toContain('[access-restricted]');
+  expect(map).toContain('exports: value');
   expect(map).not.toContain('SYNTHETIC_PRIVATE_EXPORT');
 });
 
@@ -318,19 +329,30 @@ test('generated snapshot paths preserve allowed repository maps through the unch
   expect(isContractInputSnapshot({ ...snapshot, id: rawId })).toBe(true);
   expect(isContractInputSnapshot({ ...snapshot, id: '../outside' })).toBe(false);
   const frozen = await view(root, snapshot);
-  const manager = new PermissionManager(async () => ({ approved: true }), {
+  let approvals = 0;
+  const manager = new PermissionManager(async () => { approvals++; return { approved: true }; }, {
     isAutoApproveEnabled: () => false,
     getWorkingDirectory: () => root,
     getSnapshot: () => ({ permissions: { mode: 'prompt', tools: {} } }),
   } as PermissionConfigReader, new PolicyRuntimeState());
   const authority = await createContractInputAuthority({ projectRoot: root, inputSnapshot: snapshot } as Contract, frozen);
-  const ownerRead = async (path: string) => (await manager.readAccess(path)) === 'allow';
+  const checked: string[] = [];
+  const ownerRead = async (path: string) => { checked.push(path); return (await manager.readAccess(path)) === 'allow'; };
   const filter = async (path: string) => {
     try { await authorizeContractInputPath(authority, path, ownerRead); return true; } catch { return false; }
   };
-  const map = await withContractInputAuthority(authority, () => defaultRepositoryMap(frozen, filter, filter));
-  expect(map).toContain('value');
+  const structure = await withContractInputAuthority(authority, () => defaultRepositoryMap(frozen, filter, filter));
+  expect(structure).toContain('# Repository structure'); expect(structure).toContain('"tracked.ts"');
+  expect(structure).not.toContain('exports:'); expect(structure).not.toContain('export const');
+  expect(checked).toEqual([]); expect(approvals).toBe(0);
+  const symbols = await withContractInputAuthority(authority, () => createRepoMapTool({
+    projectRoot: frozen, readAccessFilter: filter, capturedReadAccess: filter,
+  }).execute({ detail: 'symbols' }));
+  expect(symbols.success).toBe(true);
+  const map = symbols.output!;
+  expect(map).toContain('exports: value');
   expect(map).not.toContain('[access-restricted]');
+  expect(checked).toContain(join(root, 'tracked.ts')); expect(checked).toContain(join(frozen, 'tracked.ts'));
   expect(snapshot.id).toMatch(/^[a-z-]+$/);
   expect(await manager.readAccess(join(root, rawId, 'tracked.ts'))).toBe('allow');
 });

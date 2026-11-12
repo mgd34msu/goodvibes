@@ -125,6 +125,7 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
       let memoryReads = 0;
       let ownerIndexReads = 0;
       let ownerReindexes = 0;
+      let revokedAfterRead = false;
       const memoryStore = new MemoryStore(':memory:', {
         embeddingRegistry: new MemoryEmbeddingProviderRegistry({
           configManager: config,
@@ -170,6 +171,26 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
           const planner = !request.tools?.some((tool) => tool.name === 'write');
           const turn = planner ? ++plannerCalls : ++memberCalls;
           requests.push({ planner, text: JSON.stringify(request) });
+          if (mode === 'revoke-map' && planner && turn === 2) {
+            // Structure orientation discovers names without reading bodies.
+            // Revoke only after the planner's real find preview has exercised
+            // captured source authorization and retained that read obligation.
+            expect(JSON.stringify(request)).toContain('ALLOWED_GRAPH_MARKER = 2');
+            await runtime.userPermissionRuleStore.add({
+              rule: {
+                id: 'revoke-map-source',
+                type: 'path-scope',
+                origin: 'user',
+                effect: 'deny',
+                toolPattern: 'read',
+                pathPatterns: [join(root, 'allowed.ts')],
+              },
+              createdAt: Date.now(),
+              tier: 'path',
+              tool: 'read',
+            });
+            revokedAfterRead = true;
+          }
           if (mode === 'resume' && !resumed && !planner && turn === 3) {
             paused = true;
             return new Promise<never>((_, reject) => {
@@ -415,21 +436,8 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
       let admittedMap = '';
       runtime.agentManager.setExecutor({
         async runAgent(record) {
-          if (mode === 'revoke-map' && record.template === 'planner') {
+          if (record.template === 'planner') {
             admittedMap = record.task;
-            await runtime.userPermissionRuleStore.add({
-              rule: {
-                id: 'revoke-map-source',
-                type: 'path-scope',
-                origin: 'user',
-                effect: 'deny',
-                toolPattern: 'read',
-                pathPatterns: [join(root, 'allowed.ts')],
-              },
-              createdAt: Date.now(),
-              tier: 'path',
-              tool: 'read',
-            });
           }
           await runtime.agentOrchestrator.runAgent(record);
         },
@@ -526,8 +534,9 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
         if (mode === 'revoke-map') {
           await waitFor(() => runner.get(id!)!.decisions.some(decision => decision.action === 'stalled'),
             'captured input permission wait', 20_000);
+          expect(revokedAfterRead).toBe(true);
           expect(runner.get(id)!.plannerAgentIds).toHaveLength(1);
-          expect(plannerCalls).toBe(0);
+          expect(plannerCalls).toBe(2);
           expect(memberCalls).toBe(0);
           runner.cancel(id, 'fixture owner cancels while its captured source permission remains denied');
         }
@@ -540,12 +549,17 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
           90_000,
         );
         const result = runner.get(id)!;
+        expect(admittedMap).toContain('allowed.ts');
+        expect(admittedMap).toContain('private.ts');
+        expect(admittedMap).not.toContain('ALLOWED_GRAPH_MARKER');
+        expect(admittedMap).not.toContain('PRIVATE_GRAPH_MARKER');
+        expect(requests.some(request => request.planner && request.text.includes('ALLOWED_GRAPH_MARKER = 2'))).toBe(true);
+        expect(requests.some(request => request.text.includes('PRIVATE_GRAPH_MARKER'))).toBe(false);
         if (mode === 'revoke-map') {
-          expect(admittedMap).toContain('ALLOWED_GRAPH_MARKER');
-          expect(admittedMap).not.toContain('PRIVATE_GRAPH_MARKER');
           expect(result.status).toBe('cancelled');
-          expect(plannerCalls).toBe(0);
+          expect(plannerCalls).toBe(2);
           expect(memberCalls).toBe(0);
+          expect(result.units).toEqual([]);
           return;
         }
         if (result.status !== 'passed')

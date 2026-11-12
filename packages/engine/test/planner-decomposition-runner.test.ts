@@ -62,6 +62,7 @@ function makeFake(opts: FakeOpts) {
       forced = 'cancelled';
       return true;
     },
+    async join(_id: string) {},
   };
 
   const now = () => clock.t;
@@ -140,6 +141,70 @@ describe('AgentManager decomposition runner', () => {
     expect(result.status).toBe('failed');
     expect(result.detail).toBe('spawn rejected');
   });
+
+  test('reports a spawned planner before polling or completion and awaits the ownership handoff', async () => {
+    const fake = makeFake({ poll: () => ({ status: 'completed', fullOutput: 'planned' }) });
+    let release!: () => void;
+    const checkpoint = new Promise<void>(resolve => { release = resolve; });
+    const events: string[] = [];
+    const agentManager = { ...fake.agentManager, getStatus(_id: string) {
+      events.push('polled'); return fake.agentManager.getStatus();
+    } };
+    const runner = createAgentManagerDecompositionRunner({ agentManager, now: fake.now, sleep: fake.sleep });
+    const pending = runner.run({ ...REQ, onStarted: async id => {
+      events.push(`started:${id}`); await checkpoint; events.push('persisted');
+    } });
+    expect(events).toEqual(['started:agent-planner-1']);
+    release();
+    const result = await pending;
+    expect(events.slice(0, 3)).toEqual(['started:agent-planner-1', 'persisted', 'polled']);
+    expect(result.status).toBe('completed');
+    expect(result.agentId).toBe('agent-planner-1');
+  });
+
+  test('failed spawns and pre-aborted requests do not report an active planner', async () => {
+    let started = 0;
+    for (const options of [{ throwOnSpawn: true }, {}]) {
+      const fake = makeFake(options);
+      const runner = createAgentManagerDecompositionRunner({ agentManager: fake.agentManager, now: fake.now, sleep: fake.sleep });
+      await runner.run({ ...REQ, ...(options.throwOnSpawn ? {} : { signal: AbortSignal.abort() }), onStarted: () => { started++; } });
+    }
+    expect(started).toBe(0);
+  });
+
+  test('a start callback without join support is refused before spawn while legacy requests still run', async () => {
+    const fake = makeFake({});
+    const { join: _join, ...legacyManager } = fake.agentManager;
+    let spawned = 0, started = 0;
+    const agentManager = { ...legacyManager, spawn() { spawned++; return legacyManager.spawn(); } };
+    const runner = createAgentManagerDecompositionRunner({ agentManager, now: fake.now, sleep: fake.sleep });
+    const refused = await runner.run({ ...REQ, onStarted: () => { started++; } });
+    expect(refused.status).toBe('failed');
+    expect(refused.detail).toContain('requires joinable agent execution');
+    expect(refused.agentId).toBeUndefined();
+    expect(spawned).toBe(0);
+    expect(started).toBe(0);
+    expect(fake.cancelCalls).toHaveLength(0);
+    expect((await runner.run(REQ)).status).toBe('completed');
+    expect(spawned).toBe(1);
+  });
+
+  test('callback failure drains through the join method bound before admission', async () => {
+    const fake = makeFake({});
+    const joined: string[] = [];
+    const agentManager = { ...fake.agentManager, async join(id: string) {
+      expect(this).toBe(agentManager);
+      joined.push(id);
+    } };
+    const runner = createAgentManagerDecompositionRunner({ agentManager, now: fake.now, sleep: fake.sleep });
+    const result = await runner.run({ ...REQ, onStarted: () => {
+      agentManager.join = async () => { throw new Error('Replacement join must not own admitted work'); };
+      throw new Error('checkpoint failed');
+    } });
+    expect(result).toMatchObject({ status: 'failed', agentId: 'agent-planner-1', detail: 'checkpoint failed' });
+    expect(joined).toEqual(['agent-planner-1']);
+    expect(fake.cancelCalls).toEqual([{ id: 'agent-planner-1', kind: 'kill' }]);
+  });
 });
 
 
@@ -168,4 +233,34 @@ test('the real planner driver and manager carry only host-owned contract proposa
   expect(hasContractPlanConsumer(manager.getStatus(ordinary.agentId!)!)).toBe(false);
   expect(hasContractPlanConsumer(manager.getStatus(contract.agentId!)!)).toBe(true);
   expect(JSON.stringify(manager.getStatus(contract.agentId!))).not.toContain('proposalConsumer');
+});
+
+for (const asynchronous of [false, true]) test(`a ${asynchronous ? 'rejected' : 'throwing'} start callback cancels and drains its real admitted planner`, async () => {
+  let releaseCleanup!: () => void;
+  const cleanup = new Promise<void>(resolve => { releaseCleanup = resolve; });
+  let cleanupStarted!: () => void;
+  const enteredCleanup = new Promise<void>(resolve => { cleanupStarted = resolve; });
+  let cleaned = false;
+  const manager: AgentManager = new AgentManager({ configManager: { get: (key: string) => key === 'fleet.maxSize' ? 20 : undefined } as never,
+    archetypeLoader: { loadArchetype: () => null }, executor: { async runAgent(record) {
+      const signal = manager.getCancellationSignal(record.id)!;
+      try { await new Promise<void>(resolve => { if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }); }
+      finally { cleanupStarted(); await cleanup; cleaned = true; }
+    } } });
+  const runner = createAgentManagerDecompositionRunner({ agentManager: manager, pollIntervalMs: 1 });
+  let startedId = '';
+  let returned = false;
+  const pending = runner.run({ ...REQ, onStarted: id => {
+    startedId = id;
+    if (asynchronous) return Promise.reject(new Error('checkpoint unavailable'));
+    throw new Error('checkpoint unavailable');
+  } }).then(result => { returned = true; return result; });
+  await enteredCleanup;
+  expect(manager.getStatus(startedId)?.status).toBe('cancelled');
+  expect(cleaned).toBe(false);
+  expect(returned).toBe(false);
+  releaseCleanup();
+  const result = await pending;
+  expect(cleaned).toBe(true);
+  expect(result).toMatchObject({ status: 'failed', agentId: startedId, detail: 'checkpoint unavailable' });
 });

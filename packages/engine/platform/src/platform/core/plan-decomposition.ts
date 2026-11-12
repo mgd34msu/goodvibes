@@ -100,6 +100,8 @@ export interface DecompositionRunnerRequest {
   route?: DecompositionRoute | undefined;
   /** Aborting stops the planning agent (the contract runner aborts it when its contract is cancelled). */
   signal?: AbortSignal | undefined;
+  /** Called immediately after spawn, before polling, so ownership can be persisted while the planner runs. Failure cancels and joins the spawned work. */
+  onStarted?: ((agentId: string) => void | Promise<void>) | undefined;
 }
 
 /** A chosen model for the planning agent. */

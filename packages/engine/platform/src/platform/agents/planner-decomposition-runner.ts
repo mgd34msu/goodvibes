@@ -34,7 +34,7 @@ import type { DecompositionAgentUsage } from '../core/plan-proposal.js';
 export const PLANNER_DECOMPOSITION_TOOLS = ['read', 'find', 'analyze', 'inspect'] as const;
 
 export interface AgentManagerDecompositionRunnerDeps {
-  agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'>;
+  agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'> & Partial<Pick<AgentManager, 'join'>>;
   /** Injectable clock (tests). */
   now?: () => number;
   /** Injectable sleep (tests). */
@@ -96,6 +96,10 @@ export function createAgentManagerDecompositionRunner(
     async run(request: DecompositionRunnerRequest): Promise<DecompositionRunResult> {
       const start = now();
       if (request.signal?.aborted) return { status: 'cancelled', output: '', elapsedMs: 0, detail: 'stopped before planner admission' };
+      const onStarted = request.onStarted;
+      const join = deps.agentManager.join?.bind(deps.agentManager);
+      if (onStarted && !join) return { status: 'failed', output: '', elapsedMs: now() - start,
+        detail: 'Planner start notification requires joinable agent execution' };
 
       const spawnInput: AgentInput = {
         mode: 'spawn',
@@ -126,6 +130,18 @@ export function createAgentManagerDecompositionRunner(
         agentId = record.id;
       } catch (err) {
         return { status: 'failed', output: '', elapsedMs: now() - start, detail: summarizeError(err) };
+      }
+
+      if (onStarted && join) {
+        try {
+          await onStarted(agentId);
+        } catch (error) {
+          // A failed ownership/checkpoint handoff must not leave the admitted
+          // planner running. Terminal record status can precede async cleanup.
+          deps.agentManager.cancel(agentId, 'kill');
+          await join(agentId);
+          return { status: 'failed', output: '', elapsedMs: now() - start, detail: summarizeError(error), agentId };
+        }
       }
 
       const deadline = start + request.bounds.wallTimeoutMs;

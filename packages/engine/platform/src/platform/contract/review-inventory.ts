@@ -58,36 +58,29 @@ export async function captureReviewInventory(root: string, signal?: AbortSignal)
 }
 
 /**
- * A bounded planner presentation. Small inventories list every exact path;
- * large ones list directory groups with exact counts, so one planning request
- * never embeds hundreds of thousands of path characters. Host coverage checks
- * always compare exact paths, and repair messages name actual missed files.
+ * A lossless planner catalog: share each directory prefix once, retaining all
+ * direct filenames, including dotfiles and files without extensions. Host
+ * coverage checks still compare the original exact paths. The former budget
+ * argument remains accepted for callers, but never hides inventory entries.
  */
-export function reviewInventoryPlannerView(inventory: ReviewInventory, budget = 60_000): JsonValue {
-  const base = { source: inventory.source, errors: [...inventory.errors], totalFiles: inventory.paths.length };
-  if (JSON.stringify(inventory.paths).length <= budget) return { ...base, paths: [...inventory.paths] };
-  const group = (depth: number) => {
-    const directories = new Map<string, { files: number; extensions: Map<string, number> }>();
-    for (const path of inventory.paths) {
-      const parts = path.split('/');
-      const directory = parts.length === 1 ? '.' : parts.slice(0, Math.min(depth, parts.length - 1)).join('/');
-      const name = parts.at(-1)!, dot = name.lastIndexOf('.');
-      const extension = dot > 0 ? name.slice(dot) : '(none)';
-      const entry = directories.get(directory) ?? { files: 0, extensions: new Map<string, number>() };
-      entry.files++;
-      entry.extensions.set(extension, (entry.extensions.get(extension) ?? 0) + 1);
-      directories.set(directory, entry);
-    }
-    return [...directories.entries()].sort(([left], [right]) => left < right ? -1 : 1)
-      .map(([directory, entry]) => ({ directory, files: entry.files, extensions: Object.fromEntries([...entry.extensions.entries()].sort(([, a], [, b]) => b - a)) }));
-  };
-  for (let depth = 6; depth >= 1; depth--) {
-    const directories = group(depth);
-    if (depth > 1 && JSON.stringify(directories).length > budget) continue;
-    return { ...base, directories,
-      meaning: 'The exact file list is too large for one request, so files are grouped by directory with exact counts. Assign scope with directory paths or globs; the host checks coverage against the exact inventory and names any actually unassigned files in repair feedback.' };
+export function reviewInventoryPlannerView(inventory: ReviewInventory, _budget?: number): JsonValue {
+  const directories = new Map<string, string[]>();
+  for (const path of inventory.paths) {
+    const separator = path.lastIndexOf('/');
+    const directory = separator === -1 ? '.' : path.slice(0, separator);
+    const name = path.slice(separator + 1);
+    const files = directories.get(directory) ?? [];
+    files.push(name);
+    directories.set(directory, files);
   }
-  return base;
+  return {
+    source: inventory.source,
+    errors: [...inventory.errors],
+    totalFiles: inventory.paths.length,
+    directories: [...directories.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([directory, files]) => ({ directory, files: files.sort() })),
+    meaning: 'Complete exact inventory. Each directory lists its direct filenames; "." is the project root. Join each other directory and filename with "/" to reconstruct every original path. No files are omitted. Assign scope with exact paths, directories or globs; the host checks coverage against the original inventory.',
+  };
 }
 
 export function reviewProjectPath(root: string, path: string): string | undefined {

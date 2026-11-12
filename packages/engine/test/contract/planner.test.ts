@@ -504,3 +504,60 @@ test('completion recovery revalidates the actual generated plan and preserves it
   expect(contract.goal).toBe(validPlan().goal);
   expect(contract.criteria.map(c => c.quote)).toEqual(validPlan().criteria.map(c => c.quote));
 });
+
+test('large project review repairs exact hidden scope without resending repository orientation', async () => {
+  install();
+  const paths = Array.from({ length: 12_000 }, (_, index) => `src/domain-${index % 20}/file-${index}.ts`)
+    .concat(['.gitattributes', '.gitignore', '.gitleaksignore', 'packages/engine/platform/LICENSE']);
+  const initial = validPlan(); initial.groups[0]!.units[0]!.files = ['src'];
+  const repaired = structuredClone(initial);
+  repaired.groups[1]!.units[0]!.files = ['.gitattributes', '.gitignore', '.gitleaksignore', 'packages/engine/platform/LICENSE'];
+  const contract = shapedContract(shapeOf([], { project_review: { verdict: 'yes', probability: .99, outcome: 'act' } }), {
+    reviewInventory: { source: 'git', paths, errors: [] },
+  });
+  const { deps, requests } = harness([plannerOutput(initial), plannerOutput(repaired)]);
+  const outcome = await planContract(contract, { ...deps, repositoryMap: undefined });
+  expect(outcome.kind).toBe('accepted'); expect(requests).toHaveLength(2);
+  const first = requests[0]!.userPrompt, repair = requests[1]!.userPrompt;
+  expect(first).toContain('"totalFiles":12004');
+  expect(first).toContain('".gitattributes"'); expect(first).toContain('"LICENSE"');
+  expect(repair).toContain('4 actual inventory files');
+  for (const file of ['.gitattributes', '.gitignore', '.gitleaksignore', 'LICENSE']) expect(repair).toContain(file);
+  expect(repair).toContain('Previous plan:'); expect(repair).toContain(ASK);
+  expect(repair).not.toContain('## Native review inventory');
+  expect(repair.length).toBeLessThan(first.length / 4);
+  expect(contract.reviewInventory!.paths).toEqual(paths);
+});
+
+test('unlimited planning stops repeated structural failure without an attempt cap', async () => {
+  install();
+  const contract = shapedContract();
+  const { deps, requests } = harness(['invalid A', 'invalid B', 'invalid A']);
+  const run = deps.decompositionRunner.run.bind(deps.decompositionRunner);
+  const outcome = await planContract(contract, { ...deps, decompositionRunner: { run(request) {
+    if (requests.length >= 2) throw new Error('A repeated structural failure launched another planner');
+    return run(request);
+  } } });
+  expect(outcome.kind).toBe('failed'); expect(requests).toHaveLength(2);
+  expect(contract.failureKind).toBe('planning');
+  expect(contract.error).toContain('repeated the same unresolved planning state');
+  expect(contract.groups).toEqual([]); expect(contract.units).toEqual([]);
+});
+
+test('an active planner is announced before completion and recorded only once', async () => {
+  install();
+  const contract = shapedContract();
+  const { deps } = harness([plannerOutput(validPlan())]);
+  const persisted: string[][] = [];
+  const outcome = await planContract(contract, { ...deps,
+    onPlannerStarted: id => { expect(id).toBe('active-planner'); persisted.push([...contract.plannerAgentIds]); },
+    decompositionRunner: { async run(request) {
+      await request.onStarted?.('active-planner');
+      expect(contract.plannerAgentIds).toEqual(['active-planner']);
+      expect(persisted).toEqual([['active-planner']]);
+      return { status: 'completed', output: plannerOutput(validPlan()), elapsedMs: 1, agentId: 'active-planner' };
+    } },
+  });
+  expect(outcome.kind).toBe('accepted'); expect(contract.plannerAgentIds).toEqual(['active-planner']);
+  expect(persisted).toHaveLength(1);
+});

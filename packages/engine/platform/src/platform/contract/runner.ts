@@ -1036,6 +1036,10 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     return {
       readOwnerEvidence: deps.readOwnerEvidence,
       native,
+      onPlannerStarted: () => {
+        deps.store.put(run.contract);
+        if (!deps.store.write(run.contract.id)) throw new Error('Active planner checkpoint failed');
+      },
       decompositionRunner: deps.decompositionRunner,
       routeSelector: deps.routeSelector,
       configManager: deps.configManager,

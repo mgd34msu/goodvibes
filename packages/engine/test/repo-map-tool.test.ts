@@ -7,11 +7,12 @@
  * (incl. contract verification), budget respected, stable ranking by import
  * centrality, and top-level export extraction.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRepoMapTool, extractTopLevelExports } from '../platform/src/platform/tools/repo-map/index.ts';
+import { ImportGraph } from '../platform/src/platform/intelligence/import-graph.ts';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import { estimateTokens } from '../platform/src/platform/core/compaction-types.ts';
 
@@ -112,4 +113,66 @@ test('an omitted map budget includes every file and export beyond the former cap
   for (let file = 0; file < 80; file++) expect(result.output).toContain(`symbol_${file}_29`);
   const explicit = await tool.execute({ budgetTokens: 100_000 });
   expect(explicit.output).toContain('symbol_79_29');
+});
+
+function structurePaths(output: string): string[] {
+  return output.split('\n').filter(line => line.startsWith('[')).flatMap(line => {
+    const [directory, names] = JSON.parse(line) as [string, string[]];
+    return names.map(name => directory === '.' ? name : `${directory}/${name}`);
+  });
+}
+
+describe('repo_map structure detail', () => {
+  test('preserves every discovered path without a symbol budget, graph build or source permission request', async () => {
+    const root = makeRepo();
+    const names = Array.from({ length: 100 }, (_, index) => `extra-${index}.ts`);
+    for (const name of names) writeFileSync(join(root, 'src', name), 'export const PRIVATE_SOURCE_SYMBOL = 1;\n');
+    writeFileSync(join(root, 'root.ts'), 'export const PRIVATE_ROOT_SYMBOL = 2;\n');
+    writeFileSync(join(root, 'src', 'quote"name.ts'), 'export const PRIVATE_ODD_SYMBOL = 3;\n');
+    mkdirSync(join(root, 'node_modules'), { recursive: true });
+    writeFileSync(join(root, 'node_modules', 'dependency.ts'), 'export const DEPENDENCY = 4;\n');
+    let permissionRequests = 0;
+    const denyContents = async () => { permissionRequests++; return false; };
+    const build = spyOn(ImportGraph.prototype, 'build').mockImplementation(async () => { throw new Error('Structure must not build an import graph'); });
+    try {
+      const tool = createRepoMapTool({ projectRoot: root, readAccessFilter: denyContents, capturedReadAccess: denyContents });
+      const result = await tool.execute({ detail: 'structure', budgetTokens: 1 });
+      expect(result.success).toBe(true);
+      expect(build).not.toHaveBeenCalled();
+      expect(permissionRequests).toBe(0);
+      expect(result.output).not.toContain('PRIVATE_');
+      expect(result.output).not.toContain('omitted');
+      expect(result.output).toContain('does not establish content read permission');
+      expect(structurePaths(result.output!).sort()).toEqual([
+        'root.ts', 'src/a.ts', 'src/b.ts', 'src/core.ts', 'src/index.ts', 'src/quote"name.ts',
+        ...names.map(name => `src/${name}`),
+      ].sort());
+    } finally { build.mockRestore(); }
+  });
+
+  test('uses the requested subdirectory as root and orders complete paths consistently', async () => {
+    const root = makeRepo();
+    const tool = createRepoMapTool({ projectRoot: root });
+    const first = await tool.execute({ detail: 'structure', path: 'src' });
+    const second = await tool.execute({ detail: 'structure', path: 'src' });
+    expect(first.success).toBe(true);
+    expect(first.output).toBe(second.output);
+    expect(structurePaths(first.output!)).toEqual(['a.ts', 'b.ts', 'core.ts', 'index.ts']);
+    expect(first.output).not.toContain('coreFn');
+  });
+
+  test('retained captured inputs require their construction-owned authority even for structure discovery', async () => {
+    const root = makeRepo();
+    const captured = join(root, '.goodvibes', '.worktrees', 'contract-input', 'old');
+    mkdirSync(captured, { recursive: true });
+    writeFileSync(join(captured, 'private.ts'), 'export const PRIVATE_CAPTURED_SYMBOL = 1;\n');
+    const tool = createRepoMapTool({ projectRoot: root });
+    const live = await tool.execute({ detail: 'structure' });
+    expect(live.success).toBe(true);
+    expect(live.output).not.toContain('private.ts');
+    expect(structurePaths(live.output!)).toHaveLength(4);
+    const retained = await tool.execute({ detail: 'structure', path: captured });
+    expect(retained.success).toBe(false);
+    expect(retained.error).toContain('construction-owned authority');
+  });
 });

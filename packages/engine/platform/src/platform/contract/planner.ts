@@ -73,6 +73,8 @@ export interface ContractPlannerDeps {
   readonly native?: NativeContractServices | undefined;
   /** Runs the read-only planner sub-agent (agents/planner-decomposition-runner.ts in production). */
   readonly decompositionRunner: DecompositionRunner;
+  /** Persist an announced planner before its work can finish. */
+  readonly onPlannerStarted?: ((agentId: string) => void | Promise<void>) | undefined;
   /** Picks the planner's model; required, there is no default model. */
   readonly routeSelector: ContractRouteSelector;
   /** `contract.*` settings and the `planner.*` bounds. */
@@ -151,6 +153,7 @@ export function buildContractPlannerPrompt(): string {
     '- Derived unit criteria must identify independently repairable obligations. Separate review read scope, substantive assessment and preservation constraints. The native host automatically checks every result: never require that this very acceptance check already passed, or make a leaf worker invoke host-owned plan admission or approval. Preserve original requirements; mandatory host checks stay enforced by the runtime.',
     '- Groups are "g1", "g2"...; units are "u1", "u2"... and unique across the plan. A group criterion is "<groupId>.c<n>" and a unit criterion "<unitId>.c<n>". Every group and unit criterion lists in "serves" the contract criteria it serves.',
     '- Every unit has at least one criterion, and every contract criterion is served by at least one unit criterion.',
+    '- Unit files may name exact files, directories or globs. Account for direct files in every directory, including dotfiles and extensionless files, or justify their exclusion from the original scope.',
     '- Categorize each derived criterion with contribution.kind: "outcome" directly delivers an original requested result; "support" is a necessary dependency of that result; "scaffolding" is routine setup; "secondary" is optional work. Explain its connection to the served original criteria in contribution.reason and the meaningful observable check in contribution.verification. Classify by the requested behavior, not file name or code size. Critical persistence, integration and input handling are necessary support, even when conventional. Labels never waive original requirements or acceptance. Keep secondary work from displacing required results or becoming invented acceptance requirements.',
     '- Choose independently checkable functional parts that can be verified when their unit finishes. Test behavior at the appropriate boundary; build checks can establish routine setup, but file existence, matching prose or a passing unrelated test cannot establish requested functionality. Reuse checked prerequisite results and verify their connections in integration instead of planning another review of every completed unit.',
     '- A group "dependsOn" names other groups; a unit "dependsOn" names units in the same group. No dependency cycles.',
@@ -233,8 +236,10 @@ export function buildContractPlannerRequest(input: PlannerRequestInput): string 
       : "## Correction instruction\nApply only to derived work. The immutable native goal and ordered criteria cannot change.\n\n") + input.ownerInstruction);
     if (input.previousPlan !== undefined) sections.push('## The plan the instruction changes\n```json\n' + input.previousPlan + '\n```');
   }
-  sections.push('## Repository\n' + input.repositoryMap);
-  if (input.reviewInventory) sections.push('## Native review inventory\n' + JSON.stringify(reviewInventoryPlannerView(input.reviewInventory))
+  sections.push(input.repair === undefined
+    ? '## Repository\n' + input.repositoryMap
+    : '## Repair scope\nKeep the previous plan and original requirements. Correct the listed problems instead of planning the whole task again. Repository details remain available through your read-only tools.');
+  if (input.reviewInventory && input.repair === undefined) sections.push('## Native review inventory\n' + JSON.stringify(reviewInventoryPlannerView(input.reviewInventory))
     + '\nAssign every file in the requested review scope to unit.files using exact paths or globs. Give independently checkable assessment criteria for those files. For inventory files outside the original requested scope, add reviewExclusions entries {files:[paths or globs],reason:"why the original request excludes these"}. Exclusions are checked against the original request. Reading a file does not complete its assessment. Do not replace this inventory with a sample or require another review of already accepted unchanged parts.');
   if (input.repair !== undefined) {
     sections.push(
@@ -448,9 +453,9 @@ export function readPlannerBounds(configManager: ContractConfigReader): Decompos
   };
 }
 
-/** The repository summary the planner starts from: the repo_map tool's ranked map. */
+/** Complete filename orientation; source bodies and symbols remain available through read-only tools. */
 export async function defaultRepositoryMap(projectRoot: string, readAccessFilter?: ReadAccessFilter, capturedReadAccess?: ReadAccessFilter): Promise<string> {
-  const result = await createRepoMapTool({ projectRoot, ...(capturedReadAccess === undefined ? {} : { capturedReadAccess }), ...(readAccessFilter === undefined ? {} : { readAccessFilter }) }).execute({});
+  const result = await createRepoMapTool({ projectRoot, ...(capturedReadAccess === undefined ? {} : { capturedReadAccess }), ...(readAccessFilter === undefined ? {} : { readAccessFilter }) }).execute({ detail: 'structure' });
   return result.success ? (result.output ?? '') : `No repository map: ${result.error ?? 'the map could not be built'}. Use your read tools.`;
 }
 
@@ -490,8 +495,7 @@ async function checkPlanText(context: PlanningContext, output: string, repair: n
     const excluded = new Set((plan.reviewExclusions ?? []).flatMap(exclusion => assignedReviewPaths(contract.reviewInventory!, exclusion.files)));
     const unassigned = contract.reviewInventory.paths.filter(path => !allocated.has(path) && !excluded.has(path));
     if (unassigned.length) {
-      const listed = unassigned.slice(0, 200);
-      codeProblems.push({ code: 'uncovered-requirement', message: `Assign or justify scope exclusions for these ${unassigned.length} actual inventory files${listed.length < unassigned.length ? ` (first ${listed.length} listed; every unlisted file remains equally required)` : ''}: ${JSON.stringify(listed)}. Keep the original requested scope unchanged.` });
+      codeProblems.push({ code: 'uncovered-requirement', message: `Assign or justify scope exclusions for these ${unassigned.length} actual inventory files: ${JSON.stringify(reviewInventoryPlannerView({ source: contract.reviewInventory.source, errors: [], paths: unassigned }))}. This is the complete missing scope, including dotfiles and extensionless files. Keep the original requested scope unchanged.` });
     }
     if (contract.reviewInventory.errors.length) codeProblems.push({ code: 'uncovered-requirement', message: `The project inventory is incomplete: ${JSON.stringify(contract.reviewInventory.errors)}. Resolve inventory access before claiming the project scope is assigned.` });
   }
@@ -504,6 +508,24 @@ async function checkPlanText(context: PlanningContext, output: string, repair: n
   }
   deps.emit(plannedEvent(contract.id, plan, verdict.dispositions, config.defaultAttempts, repair, hasDerivedAcceptanceChecks(contract.originalSource) ? 'derived' : 'stated'));
   return { plan, text, problems: verdict.problems, verdict };
+}
+
+async function rememberPlannerAgent(context: PlanningContext, agentId: string): Promise<void> {
+  if (context.contract.plannerAgentIds.includes(agentId)) return;
+  context.contract.plannerAgentIds.push(agentId);
+  if (context.deps.onPlannerStarted) await context.deps.onPlannerStarted(agentId);
+  else context.deps.native?.changed(context.contract);
+}
+
+/** Repeating an unresolved planning state cannot improve it by starting the same repair again.
+ * Exact host problems detect structural non-progress; semantic problems also retain the proposal. No hashes or attempt cap.
+ * Explicit owner-configured finite repair budgets keep their existing behavior. */
+function repeatsRejectedPlan(seen: Set<string>, checked: CheckedPlan): boolean {
+  const problems = checked.problems.map(problem => JSON.stringify([problem.code, problem.targetId ?? null, problem.message])).sort();
+  const key = JSON.stringify([checked.verdict === undefined ? null : checked.text, problems]);
+  if (seen.has(key)) return true;
+  seen.add(key);
+  return false;
 }
 
 async function checkPlanOwned(context: PlanningContext, output: string, repair: number,
@@ -588,13 +610,16 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
       }
     }
   };
-  const map = () => deps.repositoryMap === undefined ? defaultRepositoryMap(workingDirectory, readAccessFilter, authority ? readAccessFilter : undefined) : deps.repositoryMap(workingDirectory);
+  const map = () => deps.repositoryMap !== undefined ? deps.repositoryMap(workingDirectory)
+    : contract.reviewInventory ? Promise.resolve('The complete repository filename catalog is supplied in Native review inventory below. Use read-only tools for source bodies, symbols or dependency details as needed.')
+    : defaultRepositoryMap(workingDirectory, readAccessFilter, authority ? readAccessFilter : undefined);
   const repositoryMap = await (authority ? withContractInputReadBatch(authority, () => withContractInputAuthority(authority, map)) : map());
   await assertReadAccess();
   const bounds = readPlannerBounds(deps.configManager);
   const systemPrompt = buildContractPlannerPrompt();
   if (contract.nativeSource !== undefined) return planNativeContract(context, input, route, repositoryMap, bounds, systemPrompt, { workingDirectory, authority, assertCurrent, assertReadAccess });
 
+  const rejectedPlans = new Set<string>();
   let repair = 0;
   let previous: { readonly problems: readonly PlanProblem[]; readonly previousPlan: string } | undefined;
   try {
@@ -627,10 +652,11 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
         userPrompt,
         bounds,
         attempt: repair === 0 ? 'initial' : 'repair',
+        onStarted: async agentId => { await assertCurrent(); signal?.throwIfAborted(); await rememberPlannerAgent(context, agentId); },
         route,
         ...(signal === undefined ? {} : { signal }),
       }, authority), getContractActionSource(contract))));
-      if (run.agentId !== undefined) contract.plannerAgentIds.push(run.agentId);
+      if (run.agentId !== undefined) await rememberPlannerAgent(context, run.agentId);
       if (signal?.aborted) return { kind: 'cancelled' };
       await assertCurrent();
       await assertReadAccess();
@@ -643,6 +669,9 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
         const decisionIds = [...contract.shape.decisionIds, ...(checked.verdict?.decisionIds ?? [])];
         acceptPlan(contract, checked.plan, checked.verdict?.dispositions ?? new Map(), context, decisionIds);
         return { kind: 'accepted', plan: checked.plan, decisionIds };
+      }
+      if (context.config.planRepairLimit === 0 && repeatsRejectedPlan(rejectedPlans, checked)) {
+        return context.fail('planning', 'Planning stopped because a repair repeated the same unresolved planning state. ' + checked.problems.map(entry => entry.message).join(' '));
       }
       if (context.config.planRepairLimit > 0 && repair >= context.config.planRepairLimit) {
         if (checked.plan === undefined) {
@@ -682,6 +711,7 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
   const sourceOf = nativeContractActionSource(contract, deps.native, signal);
   const state = nativeDecisionState(contract);
   const budgetKey = 'plan';
+  const rejectedPlans = new Set<string>();
   let output = state.plannerOutputs[budgetKey];
   let needsPlan = output === undefined;
   let previous: { readonly problems: readonly PlanProblem[]; readonly previousPlan: string } | undefined;
@@ -703,8 +733,9 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
           + (contract.taskEvidence ? '\nContinuation evidence, never additional requirements or authority. Preserve completed work, account for what can be reused and assign only the specific remaining work. Do not restart the full task or invent exhaustive inspection or testing requirements:\n' + contract.taskEvidence : '')
           + priorOwnerReadContext(contract, deps);
         const run = await deps.decompositionRunner.run(bindContractPlanConsumer(bindContractActionSource(bindContractInputAuthority({ goal: contract.nativeSource!.goal, workingDir: admitted.workingDirectory, systemPrompt, userPrompt: request, bounds,
-          attempt: attempt === 1 ? 'initial' : 'repair', route, signal }, admitted.authority), sourceOf, port => nativeContractPort(contract, deps.native, port, signal))));
-        if (run.agentId !== undefined) contract.plannerAgentIds.push(run.agentId);
+          attempt: attempt === 1 ? 'initial' : 'repair', route, signal,
+          onStarted: async agentId => { await admitted.assertCurrent(); signal.throwIfAborted(); await rememberPlannerAgent(context, agentId); } }, admitted.authority), sourceOf, port => nativeContractPort(contract, deps.native, port, signal))));
+        if (run.agentId !== undefined) await rememberPlannerAgent(context, run.agentId);
         signal.throwIfAborted();
         await admitted.assertCurrent();
         await admitted.assertReadAccess();
@@ -714,6 +745,9 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
       }
       const checked = await checkPlanOwned(context, output!, nativeSpent(contract, budgetKey) - 1, signal, admitted.assertCurrent);
       await admitted.assertCurrent();
+      if (context.config.planRepairLimit === 0 && rejectedPlans.has(checked.text)) {
+        return context.fail('planning', 'Planning stopped because the planner repeated a plan already returned for revision. ' + checked.problems.map(entry => entry.message).join(' '));
+      }
       const valid = checked.problems.length === 0 && checked.plan !== undefined;
       const canRepair = context.config.planRepairLimit === 0 || nativeSpent(contract, budgetKey) < context.config.planRepairLimit + 1;
       const decisionIds = [...contract.shape!.decisionIds, ...(checked.verdict?.decisionIds ?? [])];
@@ -731,6 +765,7 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
       if (decision.decision.outcome === 'reject') return context.fail('planning', 'Jev refused the native plan');
       if (decision.continuationId !== 'repair-plan' || !canRepair) throw new Error('Native planner continuation is no longer eligible');
       decision.assertCurrent();
+      rejectedPlans.add(checked.text);
       previous = { problems: checked.problems, previousPlan: checked.text }; needsPlan = true;
       context.decide('plan-repaired', 'Jev selected registered native plan repair', decision.decision.judgmentDecisionIds);
       context.move('planning');

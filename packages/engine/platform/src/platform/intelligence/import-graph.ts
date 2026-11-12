@@ -193,6 +193,13 @@ async function collectSourceFiles(dir: string, diagnostics: ImportGraphDiagnosti
   return results;
 }
 
+/** Discover the graph's source paths without reading source bodies or imports. */
+export async function discoverProjectSourceFiles(projectRoot: string): Promise<{ readonly files: readonly string[]; readonly warnings: readonly string[] }> {
+  const diagnostics: ImportGraphDiagnostics = { warnings: [] };
+  const files = await collectSourceFiles(projectRoot, diagnostics, scanCheckpoint());
+  return { files, warnings: diagnostics.warnings };
+}
+
 // ---------------------------------------------------------------------------
 // ImportGraph class
 // ---------------------------------------------------------------------------
@@ -230,9 +237,10 @@ export class ImportGraph {
   async build(projectRoot: string, readAccessFilter?: ReadAccessFilter): Promise<void> {
     if (!readAccessFilter && !this.dirty && this.scannedRoot === projectRoot) return;
 
-    const diagnostics: ImportGraphDiagnostics = { warnings: [] };
     const checkpoint = scanCheckpoint();
-    const files = await collectSourceFiles(projectRoot, diagnostics, checkpoint);
+    const discovered = await discoverProjectSourceFiles(projectRoot);
+    const files = discovered.files;
+    const diagnostics: ImportGraphDiagnostics = { warnings: [...discovered.warnings] };
     const imports: ImportsMap = new Map();
     const dependents: DependentsMap = new Map();
 

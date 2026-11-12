@@ -2,12 +2,14 @@ import { resolveAndValidatePath } from '../../utils/path-safety.js';
 import { assertCapturedInputPathContext } from '../../contract/input-authority.js';
 // Model-invoked repository map. Every indexed source file and export is
 // included by default; a caller can explicitly request a smaller token budget.
-// Import-graph centrality determines ordering, not which files are included.
+// Structure detail discovers complete paths without reading source bodies.
+// Import-graph centrality determines ordering in symbol detail only.
 import { statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, sep, relative, resolve } from 'node:path';
 import type { Tool, ToolDefinition, ToolResult } from '../../types/tools.js';
 import { ImportGraph } from '../../intelligence/index.js';
+import { discoverProjectSourceFiles } from '../../intelligence/import-graph.js';
 import { estimateTokens } from '../../core/compaction-types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { accessRestrictedNote, partitionByReadAccess, type ReadAccessFilter } from '../shared/read-access.js';
@@ -96,6 +98,30 @@ function requestedBudget(raw: unknown): number | undefined {
   return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : undefined;
 }
 
+/** Every path is reconstructible from its directory and exact JSON basename. */
+export function formatRepositoryStructure(root: string, files: readonly string[], warnings: readonly string[] = []): string {
+  const directories = new Map<string, string[]>();
+  for (const file of files) {
+    const path = relative(root, file).split(sep).join('/');
+    const slash = path.lastIndexOf('/');
+    const directory = slash < 0 ? '.' : path.slice(0, slash);
+    const names = directories.get(directory) ?? [];
+    names.push(path.slice(slash + 1));
+    directories.set(directory, names);
+  }
+  const lines = [
+    '# Repository structure',
+    `${files.length} source file(s). Complete path listing; no source bodies, exported symbols or import graph read.`,
+    'Each row is [directory, exact basenames]; join each basename to its directory to recover every path. Directory "." means the requested root.',
+    'Path discovery does not establish content read permission or completed review. Use read tools for source contents and symbols.',
+    '',
+    ...[...directories.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([directory, names]) => JSON.stringify([directory, names.sort()])),
+  ];
+  if (warnings.length) lines.push('', 'Discovery warnings:', ...warnings);
+  return lines.join('\n');
+}
+
 const REPO_MAP_SCHEMA: Record<string, unknown> = {
   type: 'object',
   properties: {
@@ -105,7 +131,12 @@ const REPO_MAP_SCHEMA: Record<string, unknown> = {
     },
     budgetTokens: {
       type: 'number',
-      description: 'Optional approximate token budget explicitly requested for this map. Omit or set 0 to include every indexed source file and its exported symbols.',
+      description: 'Optional approximate token budget for symbol detail. Omit or set 0 to include every indexed source file and its exported symbols. Structure detail always includes every discovered source path.',
+    },
+    detail: {
+      type: 'string',
+      enum: ['symbols', 'structure'],
+      description: 'Default symbols includes the full ranked import graph and exported symbols. Structure lists all source paths grouped by directory without reading source bodies; use it for initial orientation.',
     },
   },
   additionalProperties: false,
@@ -138,7 +169,7 @@ export function createRepoMapTool(options: {
       'Return a map of the repository: a per-directory source-file count plus all indexed '
       + 'source files (ranked by how many other files import them, size as a '
       + 'tie-break) with their top-level exported symbols. Call this to orient in an unfamiliar '
-      + 'codebase before reading files. Read-only; covers TypeScript/JavaScript source files.',
+      + 'codebase before reading files. Use detail="structure" for complete source paths without reading bodies or building an import graph. Read-only; covers TypeScript/JavaScript source files.',
     parameters: REPO_MAP_SCHEMA,
     sideEffects: ['read_fs'],
     concurrency: 'parallel',
@@ -155,6 +186,15 @@ export function createRepoMapTool(options: {
       const assertModeCurrent = () => {
         if ((options.allowOutsideProject?.() ?? false) !== outsideProjectAllowed) throw new Error('Map permission mode changed');
       };
+      if (args['detail'] === 'structure') {
+        // Names are discovery, never a content authorization or source-read receipt.
+        // Use the same traversal and captured-input fences as the symbol map.
+        assertCapturedInputPathContext(root);
+        const discovered = await discoverProjectSourceFiles(root);
+        assertModeCurrent();
+        assertCapturedInputPathContext(root);
+        return { success: true, output: formatRepositoryStructure(root, discovered.files, discovered.warnings) };
+      }
       const graph = new ImportGraph();
       await graph.build(root, options.capturedReadAccess);
       assertModeCurrent();

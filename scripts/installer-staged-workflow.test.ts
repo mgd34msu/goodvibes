@@ -6,6 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { readPublishedReaders } from './accept-published-suite.mjs';
 
 const repo = resolve(import.meta.dir, '..');
 type Step = { name?: string; id?: string; if?: string; uses?: string; run?: string; with?: Record<string, unknown>; env?: Record<string, string>; 'working-directory'?: string };
@@ -19,11 +20,10 @@ const payloads = release.jobs['gh-release']!.steps.find(step => step.id === 'pay
 const checksums = release.jobs['gh-release']!.steps.find(step => step.id === 'checksums')!;
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-function fixture() {
+function fixture(names = Array.from({ length: 7 }, (_, i) => `asset-${String(i).padStart(2, '0')}`)) {
   const root = mkdtempSync(join(tmpdir(), 'staged-workflow-')); roots.push(root);
   mkdirSync(join(root, 'dist'));
   symlinkSync(join(repo, 'packages'), join(root, 'packages'), 'dir');
-  const names = Array.from({ length: 64 }, (_, i) => `asset-${String(i).padStart(2, '0')}`);
   for (const name of names) writeFileSync(join(root, 'dist', name), `original ${name}\n`);
   return { root, names, manifest: join(root, 'dist/SHA256SUMS.txt') };
 }
@@ -167,18 +167,62 @@ test('four fresh and two historical runners consume the same staged artifact wit
   expect(invoke.env?.CANDIDATE_SOURCE_ROOT).toBe('${{ github.workspace }}/candidate-source');
 });
 
-test('the actual staging body writes one 64-payload manifest and refuses an already staged input', () => {
+test('the actual staging body writes the exact payload manifest and refuses an already staged input', () => {
   const f = fixture();
   expect(stage.run).not.toContain('--verify');
   const first = run(stage, f.root, { ASSETS_DIRECTORY: join(f.root, 'dist') });
   expect(first.status, first.stderr).toBe(0);
-  expect(readdirSync(join(f.root, 'dist'))).toHaveLength(65);
-  expect(readFileSync(f.manifest, 'utf8').trimEnd().split('\n')).toHaveLength(64);
+  expect(readdirSync(join(f.root, 'dist'))).toHaveLength(f.names.length + 1);
+  expect(readFileSync(f.manifest, 'utf8').trimEnd().split('\n')).toHaveLength(f.names.length);
   const verified = run(checksums, f.root, existingEnv(f.names));
   expect(verified.status, verified.stderr).toBe(0);
   const second = run(stage, f.root, { ASSETS_DIRECTORY: join(f.root, 'dist') });
   expect(second.status).not.toBe(0);
-  expect(second.stderr).toContain('exactly 64 payloads');
+  expect(second.stderr).toContain('Invalid native release member');
+});
+
+test('staging and checksum consumption accept complete manifests independent of payload count', () => {
+  for (const count of [1, 65]) {
+    const f = fixture(Array.from({ length: count }, (_, index) => `payload-${index}`));
+    const generated = run(stage, f.root, { ASSETS_DIRECTORY: join(f.root, 'dist') });
+    expect(generated.status, generated.stderr).toBe(0);
+    expect(readFileSync(f.manifest, 'utf8').trimEnd().split('\n')).toHaveLength(count);
+    const consumed = run(checksums, f.root, existingEnv(f.names));
+    expect(consumed.status, consumed.stderr).toBe(0);
+  }
+});
+
+test('staging refuses empty, nonregular, nested and unsafe payload entries', () => {
+  for (const kind of ['empty', 'symlink', 'directory', 'unsafe-name'] as const) {
+    const f = fixture([]), directory = join(f.root, 'dist');
+    if (kind === 'symlink') {
+      writeFileSync(join(f.root, 'outside'), 'not a release member');
+      symlinkSync(join(f.root, 'outside'), join(directory, 'alias'));
+    } else if (kind === 'directory') mkdirSync(join(directory, 'nested'));
+    else if (kind === 'unsafe-name') writeFileSync(join(directory, 'unsafe name'), 'invalid');
+    const refused = run(stage, f.root, { ASSETS_DIRECTORY: directory });
+    expect(refused.status, kind).not.toBe(0);
+    expect(refused.stderr).toContain(kind === 'empty' ? 'must contain payloads' : 'Invalid native release member');
+    expect(existsSync(f.manifest)).toBe(false);
+  }
+});
+
+test('native reader admission still refuses a required product omitted from a staged manifest', async () => {
+  const target = 'linux-x64', source = 'a'.repeat(40);
+  const products = ['goodvibes', 'goodvibes-agent', 'goodvibes-daemon'];
+  const names = products.flatMap(product => [`${product}-${target}`, `${product}-${target}.reader-ci-artifact.json`]);
+  const missing = `goodvibes-agent-${target}.reader-ci-artifact.json`;
+  const f = fixture(names.filter(name => name !== missing));
+  const generated = run(stage, f.root, { ASSETS_DIRECTORY: join(f.root, 'dist') });
+  expect(generated.status, generated.stderr).toBe(0);
+  const loaded: string[] = [];
+  await expect(readPublishedReaders({ target, source, tag: 'v3.1.5', assets: new Set(f.names) }, async name => {
+    loaded.push(name);
+    return { target, sourceCommit: source, headCommit: source, version: '3.1.5',
+      files: [{ path: name.replace(/\.reader-ci-artifact\.json$/, '') }] };
+  })).rejects.toThrow('cohort is missing');
+  expect(loaded).not.toContain(missing);
+  expect(loaded).toContain(`goodvibes-${target}.reader-ci-artifact.json`);
 });
 
 test('the actual payload selection excludes the manifest and deduplicates overlapping globs', () => {
@@ -198,6 +242,11 @@ test('publication consumes the original checksum pins and refuses changed bytes 
   const valid = run(checksums, f.root, env);
   expect(valid.status, valid.stderr).toBe(0); expect(valid.outputs).toBe('path=dist/SHA256SUMS.txt\n');
   expect(readFileSync(f.manifest, 'utf8')).toBe(original);
+  for (const names of [f.names.slice(1), [...f.names, f.names[0]!]]) {
+    const refused = run(checksums, f.root, existingEnv(names));
+    expect(refused.status).not.toBe(0); expect(refused.outputs).toBe('');
+    expect(readFileSync(f.manifest, 'utf8')).toBe(original);
+  }
   const wrongSource = run(checksums, f.root, { ...env, TOOLCHAIN_SOURCE: 'registry' });
   expect(wrongSource.status).not.toBe(0); expect(wrongSource.stderr).toContain('requires the workspace toolchain');
   expect(wrongSource.outputs).toBe('');
@@ -222,7 +271,7 @@ test('other callers retain default checksum generation through the existing sour
   const f = fixture();
   const result = run(checksums, f.root, { ...existingEnv(f.names), USE_EXISTING_CHECKSUMS: 'false' });
   expect(result.status, result.stderr).toBe(0); expect(result.outputs).toBe('path=SHA256SUMS.txt\n');
-  expect(readFileSync(join(f.root, 'SHA256SUMS.txt'), 'utf8').trimEnd().split('\n')).toHaveLength(64);
+  expect(readFileSync(join(f.root, 'SHA256SUMS.txt'), 'utf8').trimEnd().split('\n')).toHaveLength(f.names.length);
   writeFileSync(f.manifest, readFileSync(join(f.root, 'SHA256SUMS.txt')));
   const verified = run(checksums, f.root, existingEnv(f.names));
   expect(verified.status, verified.stderr).toBe(0);

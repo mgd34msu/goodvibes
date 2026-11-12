@@ -5,8 +5,8 @@ name: Reusable GitHub release
 # Consumer contract
 #   Creates a GitHub Release for a tag: resolves the release body (an optional
 #   per-release notes file wins; otherwise the tag's CHANGELOG section is
-#   extracted), generates a SHA256SUMS manifest over the staged assets via the
-#   toolchain `sha256sums` CLI (a missing asset is fatal), and uploads the
+#   extracted), generates or verifies a SHA256SUMS manifest over the staged
+#   assets via the toolchain `sha256sums` CLI (a missing asset is fatal), and uploads the
 #   assets with a pinned softprops/action-gh-release. An existing release instead
 #   fills only missing assets after validating metadata against the original
 #   published bytes; reruns never replace an existing program. One copy,
@@ -59,7 +59,7 @@ on:
         required: true
         type: string
       use-existing-checksums:
-        description: Verify and publish the exact staged 64-payload checksum manifest without regenerating it.
+        description: Verify and publish the exact staged checksum manifest and complete payload set without regenerating it.
         required: false
         type: boolean
         default: false
@@ -257,7 +257,7 @@ jobs:
               exit 1
             fi
             # The acceptance artifact contains this exact manifest beside its
-            # 64 payloads. Validate its complete name set before the source CLI
+            # payloads. Validate its complete name set before the source CLI
             # consumes its expected pins; never hash a new publication manifest.
             CHECKSUM_PATH="dist/$SHA256_NAME"
             export CHECKSUM_PATH
@@ -267,13 +267,14 @@ jobs:
           paths = [Path(value) for value in os.environ['PAYLOAD_PATHS'].splitlines()]
           manifest = Path(os.environ['CHECKSUM_PATH'])
           assert manifest.is_file() and not manifest.is_symlink(), 'Staged checksum manifest is missing'
-          assert len(paths) == 64 and all(path.parent == manifest.parent for path in paths), 'Expected exactly 64 staged payloads beside the manifest'
+          assert paths and all(path.parent == manifest.parent for path in paths), 'Expected staged payloads beside the manifest'
+          assert len({path.name for path in paths}) == len(paths), 'Staged payload names must be unique'
           names = []
           for line in manifest.read_text().splitlines():
               match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9_.-]+)', line)
               assert match and match[2] != manifest.name, 'Invalid staged checksum entry'
               names.append(match[2])
-          assert len(names) == 64 and len(set(names)) == 64 and set(names) == {path.name for path in paths}, 'Staged checksum names must exactly cover all 64 payloads'
+          assert names and len(set(names)) == len(names) and set(names) == {path.name for path in paths}, 'Staged checksum names must uniquely and exactly cover all payloads'
           PY_CHECKSUMS
             bun packages/engine/toolchain/src/bin/sha256sums.ts --verify "$CHECKSUM_PATH"
           else

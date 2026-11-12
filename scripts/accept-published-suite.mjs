@@ -566,8 +566,8 @@ export async function readPublicAcceptanceDelivery({ tag, source, target, signal
   const release = JSON.parse((await request('catalog.release.http', `${api}/releases/tags/${tag}`)).bytes);
   checkpoint('catalog.release.tag'); assert.equal(release.tag_name, tag);
   checkpoint('catalog.release.draft'); assert.equal(release.draft, false);
-  checkpoint('catalog.release.asset-count');
-  assert.ok(Array.isArray(release.assets) && release.assets.length >= 65, 'The complete native suite must be published first.');
+  checkpoint('catalog.release.assets');
+  assert.ok(Array.isArray(release.assets), 'The release asset catalog must be an array.');
   checkpoint('catalog.release.unique-assets');
   const names = new Set(release.assets.map(asset => asset.name)); assert.equal(names.size, release.assets.length);
   checkpoint('catalog.release.manifest'); assert.ok(names.has('SHA256SUMS.txt'));
@@ -599,7 +599,7 @@ export async function readPreviousReleaseCohort({ tag, source, target, signal, c
   const release = JSON.parse((await request('previous.catalog.release.http', `${api}/releases/tags/${tag}`)).bytes);
   checkpoint('previous.catalog.release');
   assert.equal(release.tag_name, tag); assert.equal(release.draft, false); assert.equal(release.prerelease, false);
-  assert.ok(Array.isArray(release.assets) && release.assets.length >= 65);
+  assert.ok(Array.isArray(release.assets));
   const names = new Set(release.assets.map(asset => asset.name)); assert.equal(names.size, release.assets.length);
   for (const name of ['SHA256SUMS.txt', 'browser-driver.tar.gz', `goodvibes-webui-bundle-${tag.slice(1)}.tar.gz`]) assert.ok(names.has(name));
   const reference = JSON.parse((await request('previous.catalog.tag.http', `${api}/git/ref/tags/${tag}`, 131_072)).bytes);

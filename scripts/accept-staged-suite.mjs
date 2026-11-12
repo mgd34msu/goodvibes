@@ -30,7 +30,6 @@ export async function admitStagedAssets(directory, signal) {
     assert.ok(match && match[2] !== checksumName && !entries.has(match[2]), 'Invalid staged release checksum entry.');
     entries.set(match[2], {});
   }
-  assert.ok(entries.size >= 64, 'The complete staged native suite is required.');
   const names = readdirSync(root);
   assert.equal(names.length, entries.size + 1);
   assert.ok(names.every(name => flatName.test(name) && (name === checksumName || entries.has(name))), 'Unexpected staged release member.');

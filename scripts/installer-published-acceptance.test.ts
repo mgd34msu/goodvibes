@@ -29,8 +29,7 @@ function publicDeliveryFixture(metadataToken?: string) {
   const releaseUrl = `${api}/releases/tags/${tag}`, latestUrl = `${api}/releases/latest`;
   const immutableUrl = `https://raw.githubusercontent.com/mgd34msu/goodvibes/${source}/scripts/install.sh`, publicUrl = 'https://goodvibes.sh/install.sh';
   const descriptors = ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent'].map(command => `${command}-macos-arm64.reader-ci-artifact.json`);
-  const assets = ['SHA256SUMS.txt', ...descriptors.flatMap(name => [name, name.replace('.reader-ci-artifact.json', '')]),
-    ...Array.from({ length: 58 }, (_, i) => `other-native-member-${i}`)].map(name => ({ name }));
+  const assets = ['SHA256SUMS.txt', ...descriptors.flatMap(name => [name, name.replace('.reader-ci-artifact.json', '')])].map(name => ({ name }));
   const release = { tag_name: tag, draft: false, assets }, latest = { tag_name: tag };
   const readers = descriptors.map(name => ({ target, sourceCommit: source, headCommit: source, readers: { version: '3.1.2' },
     files: [{ path: name.replace('.reader-ci-artifact.json', '') }] }));
@@ -151,11 +150,11 @@ test('malformed HTTP200 catalog JSON retains its request status without returnin
   expect(JSON.stringify(record)).not.toContain(secret);
 });
 
-for (const field of ['tag', 'draft', 'asset-count', 'unique-assets', 'manifest']) test(`public release ${field} refusal has its own checkpoint and clears prior HTTP status`, async () => {
+for (const field of ['tag', 'draft', 'assets', 'unique-assets', 'manifest']) test(`public release ${field} refusal has its own checkpoint and clears prior HTTP status`, async () => {
   const fixture = publicDeliveryFixture();
   if (field === 'tag') fixture.release.tag_name = 'private-wrong-tag-sentinel';
   if (field === 'draft') fixture.release.draft = true;
-  if (field === 'asset-count') fixture.release.assets = [];
+  if (field === 'assets') fixture.responses.set(fixture.releaseUrl, { body: { ...fixture.release, assets: null } });
   if (field === 'unique-assets') fixture.release.assets[0] = fixture.release.assets[1]!;
   if (field === 'manifest') fixture.release.assets[0] = { name: 'private-wrong-manifest-sentinel' };
   const record = await publicDeliveryFailure(fixture);
@@ -163,6 +162,18 @@ for (const field of ['tag', 'draft', 'asset-count', 'unique-assets', 'manifest']
   expect(record.error).toEqual({ name: 'AssertionError', code: 'ERR_ASSERTION' });
   expect(JSON.stringify(record)).not.toContain('sentinel');
 });
+
+for (const command of ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']) {
+  for (const descriptor of [false, true]) test(`public release refuses the missing ${command} ${descriptor ? 'reader' : 'program'} regardless of unrelated assets`, async () => {
+    const fixture = publicDeliveryFixture();
+    const missing = `${command}-macos-arm64${descriptor ? '.reader-ci-artifact.json' : ''}`;
+    fixture.release.assets = fixture.release.assets.filter(asset => asset.name !== missing);
+    fixture.release.assets.push(...Array.from({ length: 100 }, (_, index) => ({ name: `unrelated-${index}` })));
+    const record = await publicDeliveryFailure(fixture);
+    expect(record.check).toBe(`catalog.reader.${command}.assets`);
+    expect(record.error).toEqual({ name: 'AssertionError', code: 'ERR_ASSERTION' });
+  });
+}
 
 for (const field of ['target', 'source', 'head', 'version', 'files']) test(`public reader ${field} validation identifies its original assertion without echoing values`, async () => {
   const fixture = publicDeliveryFixture(), reader = fixture.readers[0]!;

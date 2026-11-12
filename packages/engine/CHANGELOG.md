@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.1.6] - 2026-11-12
+
+### Fixed
+
+- Reduce repeated permission-owner validation during contract worker file
+  searches. Read-only checkpoints briefly reuse completed checks while
+  retaining cancellation checks and complete validation before returning results.
+- Show elapsed time for tool calls running longer than a minute on agent
+  progress lines and record diagnostic log notices.
+
 ## [3.1.5] - 2026-11-11
 
 ### Fixed

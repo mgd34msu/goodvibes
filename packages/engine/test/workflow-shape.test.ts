@@ -997,8 +997,8 @@ describe('release.yml: fresh builds and staged installation acceptance', () => {
       source: '${{ needs.verify-tag-version.outputs.sha }}',
       'tooling-sha': '${{ github.sha }}',
       'artifact-run-id': "${{ format('{0}', github.run_id) }}",
-      'previous-tag': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.5' && 'v3.1.4' || needs.verify-tag-version.outputs.tag == 'v3.1.4' && 'v3.1.3' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'v3.1.2' || '' }}",
-      'previous-source': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.5' && '9c19f683bf3e19250e64a04ae6c8c8f4a3988522' || needs.verify-tag-version.outputs.tag == 'v3.1.4' && '0065d6726d4d9fe3f800e255711b6cf8d78d0d72' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'a5ddf1f151466590eaed4ab387b2f95be7112a86' || '' }}",
+      'previous-tag': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.6' && 'v3.1.5' || needs.verify-tag-version.outputs.tag == 'v3.1.5' && 'v3.1.4' || needs.verify-tag-version.outputs.tag == 'v3.1.4' && 'v3.1.3' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'v3.1.2' || '' }}",
+      'previous-source': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.6' && 'b160053d8d934364ec4884df4f6dbb909e963147' || needs.verify-tag-version.outputs.tag == 'v3.1.5' && '9c19f683bf3e19250e64a04ae6c8c8f4a3988522' || needs.verify-tag-version.outputs.tag == 'v3.1.4' && '0065d6726d4d9fe3f800e255711b6cf8d78d0d72' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'a5ddf1f151466590eaed4ab387b2f95be7112a86' || '' }}",
     });
     const ready: Record<string, JobResult> = { 'verify-tag-version': 'success', 'prepare-native-assets': 'success', 'publish-npm': 'skipped' };
     expect(permitsPublication(acceptance, ready, 'push', 'release', false)).toBe(true);

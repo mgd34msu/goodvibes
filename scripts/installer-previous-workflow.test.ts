@@ -67,6 +67,7 @@ for (const mode of ['staged', 'published'] as const) {
     const accepted = run(); expect(accepted.error).toBeUndefined(); expect(accepted.status, accepted.stderr).toBe(0);
     const invalidInputs: Record<string, string>[] = [{ PREVIOUS_TAG: '', PREVIOUS_SOURCE: '' },
       { RELEASE_TAG: 'v3.1.4', PREVIOUS_TAG: '', PREVIOUS_SOURCE: '' }, { RELEASE_TAG: 'v3.1.5', PREVIOUS_TAG: '', PREVIOUS_SOURCE: '' },
+      { RELEASE_TAG: 'v3.1.6', PREVIOUS_TAG: '', PREVIOUS_SOURCE: '' },
       { PREVIOUS_TAG: '' }, { PREVIOUS_SOURCE: '' }, { PREVIOUS_SOURCE: 'main' },
       { PREVIOUS_TAG: 'v3.1.3' }, { FIXTURE_SOURCE: 'c'.repeat(40) }, { FIXTURE_TOOLING: 'c'.repeat(40) }];
     for (const invalid of invalidInputs) {
@@ -79,8 +80,8 @@ test('new patch release pins the previous public suite for required prepublicati
   const release = load('release.yml');
   for (const job of ['staged-install-acceptance']) {
     expect(release.jobs[job]?.with).toMatchObject({
-      'previous-tag': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.5' && 'v3.1.4' || needs.verify-tag-version.outputs.tag == 'v3.1.4' && 'v3.1.3' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'v3.1.2' || '' }}",
-      'previous-source': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.5' && '9c19f683bf3e19250e64a04ae6c8c8f4a3988522' || needs.verify-tag-version.outputs.tag == 'v3.1.4' && '0065d6726d4d9fe3f800e255711b6cf8d78d0d72' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && '" + previousSource + "' || '' }}",
+      'previous-tag': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.6' && 'v3.1.5' || needs.verify-tag-version.outputs.tag == 'v3.1.5' && 'v3.1.4' || needs.verify-tag-version.outputs.tag == 'v3.1.4' && 'v3.1.3' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'v3.1.2' || '' }}",
+      'previous-source': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.6' && 'b160053d8d934364ec4884df4f6dbb909e963147' || needs.verify-tag-version.outputs.tag == 'v3.1.5' && '9c19f683bf3e19250e64a04ae6c8c8f4a3988522' || needs.verify-tag-version.outputs.tag == 'v3.1.4' && '0065d6726d4d9fe3f800e255711b6cf8d78d0d72' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && '" + previousSource + "' || '' }}",
     });
   }
   expect(release.jobs['github-release']!.needs).toContain('staged-install-acceptance');

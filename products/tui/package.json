@@ -1,6 +1,6 @@
 {
   "name": "@goodvibes-jev/tui",
-  "version": "3.1.5",
+  "version": "3.1.6",
   "description": "Terminal-native GoodVibes client for coding, operations, knowledge and channel workflows; a pure client of the GoodVibes daemon.",
   "type": "module",
   "main": "src/main.ts",

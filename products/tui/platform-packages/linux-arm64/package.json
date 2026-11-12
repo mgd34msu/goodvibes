@@ -1,6 +1,6 @@
 {
   "name": "@goodvibes-jev/tui-linux-arm64",
-  "version": "3.1.4",
+  "version": "3.1.5",
   "description": "Prebuilt goodvibes terminal binary for linux-arm64, with the matching sqlite-vec native addon (vec0.so). Installed automatically as an optional dependency of @goodvibes-jev/tui; do not install directly.",
   "license": "MIT",
   "os": [

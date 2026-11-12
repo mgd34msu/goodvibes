@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.1.5] - 2026-11-11
+
+### Fixed
+
+- Start contract planning with complete directory-based filename catalogs and
+  read source contents and symbols as needed. Review catalogs retain every
+  captured path, including dotfiles and files without extensions.
+- Focus plan repairs on the previous plan, original requirements and listed
+  problems without resubmitting the full repository map or review catalog.
+- Stop repairs that repeat the same unresolved planning state. Native plans
+  returned for revision must change before another acceptance decision.
+- Checkpoint active planner agent IDs immediately and wait for admitted planner
+  work and cleanup to drain during cancellation.
+
 ## [3.1.4] - 2026-11-11
 
 ### Fixed

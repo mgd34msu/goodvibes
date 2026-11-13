@@ -71,6 +71,7 @@ function run(uninstall = false, fault?: 'agent' | 'prefix', platform?: 'darwin',
     migrate_legacy_installer_unit() { :; }
     uninstall_services_and_processes() { :; }
     if [ "$FIXTURE_FAIL_AFTER_PROGRAMS" = 1 ]; then install_agent() { fail 'fixture interrupted suite'; }; fi
+    if [ -n "\${FIXTURE_INJECT:-}" ]; then eval "$FIXTURE_INJECT"; fi
     if [ -n "\${FIXTURE_DECISION_POLICY:-}" ]; then main --decision-policy "$FIXTURE_DECISION_POLICY"; else main; fi
   `, 'release-installer-test', script], { encoding: 'utf8', timeout: 20_000,
     env: { ...process.env, HOME: home, PATH: `${home}/bin:${process.env.PATH}`, GOODVIBES_INSTALL_SH_LIB: '1', GOODVIBES_VERSION: `v${version}`,
@@ -277,14 +278,35 @@ test('orphaned companion transaction evidence is preserved before any executable
   expect(readdirSync(join(home, 'bin')).filter(name => /update-transaction|install-claim/.test(name))).toEqual([]);
 });
 
-test('interrupted suite publication retains exact claims and refuses a blind second attempt', () => {
-  const result = run(false, 'agent'); expect(result.status).not.toBe(0); expect(result.stderr).toContain('suite replacement did not finish');
-  const claims = ['goodvibes-daemon', 'goodvibes', 'goodvibes-agent'].map(name => join(home, 'bin', name + '.update-transaction'));
-  const original = claims.map(path => readFileSync(path)); const before = readFileSync(join(home, 'bin/goodvibes'));
+test('an unfinished first install is rolled back: programs removed, claims released, a second attempt succeeds', () => {
+  const result = run(false, 'agent'); expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain('previous programs were restored');
+  expect(result.stderr).toContain('curl -fsSL https://goodvibes.sh/install.sh');
+  const bin = join(home, 'bin');
+  for (const name of ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']) {
+    for (const suffix of ['', '.bun', '.bun.json', '.bun.LICENSE.md', '.readers.json', '.incoming', '.goodvibes-previous', '.update-transaction']) expect(existsSync(join(bin, name + suffix))).toBe(false);
+  }
+  expect(readdirSync(bin).filter(name => /install-claim|update-transaction|\.incoming|goodvibes-previous/.test(name))).toEqual([]);
   expect(result.stdout).not.toContain('Install complete');
-  const retried = run(); expect(retried.status).not.toBe(0); expect(retried.stderr).toContain('Another update');
-  for (const [index, path] of claims.entries()) expect(readFileSync(path)).toEqual(original[index]);
-  expect(readFileSync(join(home, 'bin/goodvibes'))).toEqual(before);
+  const retried = run(); expect(retried.status, retried.stderr).toBe(0);
+});
+
+test('a failed post-swap version check restores the previous programs and companions and releases the claims', () => {
+  const first = run(); expect(first.status, first.stderr).toBe(0);
+  const bin = join(home, 'bin');
+  const tracked = ['goodvibes', 'goodvibes.bun', 'goodvibes.bun.json', 'goodvibes.bun.LICENSE.md', 'goodvibes.readers.json', 'goodvibes-daemon', 'goodvibes-daemon.bun', 'goodvibes-daemon.readers.json'];
+  const before = new Map(tracked.filter(name => existsSync(join(bin, name))).map(name => [name, readFileSync(join(bin, name))]));
+  expect(before.size).toBeGreaterThan(4);
+  // A new release whose goodvibes cannot report its version, with a changed companion.
+  writeFileSync(join(assets, 'goodvibes-linux-x64'), '#!/bin/sh\nexit 1\n');
+  writeFileSync(join(assets, 'goodvibes-linux-x64.bun.LICENSE.md'), 'Changed runtime notice');
+  writeFileSync(join(assets, 'goodvibes-linux-x64.reader-ci-artifact.json'), JSON.stringify(terminalReaderArtifact('goodvibes'), null, 2) + '\n');
+  writeChecksums();
+  const result = run(); expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain('previous programs were restored');
+  for (const [name, bytes] of before) expect(readFileSync(join(bin, name)), name).toEqual(bytes);
+  expect(readdirSync(bin).filter(name => /install-claim|update-transaction|\.incoming|goodvibes-previous/.test(name))).toEqual([]);
+  expect(statSync(join(bin, 'goodvibes')).mode & 0o111).not.toBe(0);
 });
 
 test('directory replacement during the real install cannot redirect later companion writes', () => {
@@ -329,4 +351,57 @@ test('uninstall delegates an existing checkout receipt to its own installed unin
   expect(readFileSync(join(home,'source-uninstall-owned'),'utf8').trim()).toBe('source-owned');
   expect(existsSync(join(root,'fetches'))).toBe(false);
   expect(existsSync(join(prefix,'installation.json'))).toBe(true);
+});
+
+const rollbackScope = (name: string) => /install-claim|update-transaction|\.incoming|goodvibes-previous/.test(name);
+function installOnce() { const first = run(); expect(first.status, first.stderr).toBe(0); return first; }
+const trackedFiles = ['goodvibes', 'goodvibes.bun', 'goodvibes.bun.json', 'goodvibes.bun.LICENSE.md', 'goodvibes-daemon', 'goodvibes-daemon.bun'];
+function snapshot() { return new Map(trackedFiles.map(name => [name, readFileSync(join(home, 'bin', name))])); }
+function breakNextGoodvibes() {
+  writeFileSync(join(assets, 'goodvibes-linux-x64'), '#!/bin/sh\nexit 1\n');
+  writeFileSync(join(assets, 'goodvibes-linux-x64.bun.LICENSE.md'), 'Changed runtime notice');
+  writeFileSync(join(assets, 'goodvibes-linux-x64.reader-ci-artifact.json'), JSON.stringify(terminalReaderArtifact('goodvibes'), null, 2) + '\n');
+  writeChecksums();
+}
+
+test('a second interrupt or hang-up during rollback cannot cut the restore short', () => {
+  installOnce(); const before = snapshot(); breakNextGoodvibes();
+  const result = run(false, undefined, undefined, { FIXTURE_INJECT: 'mv() { case "$2" in *.goodvibes-previous) kill -INT $$; kill -TERM $$; kill -HUP $$ ;; esac; command mv "$@"; }' });
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain('previous programs were restored');
+  for (const [name, bytes] of before) expect(readFileSync(join(home, 'bin', name)), name).toEqual(bytes);
+  expect(readdirSync(join(home, 'bin')).filter(rollbackScope)).toEqual([]);
+});
+
+test('a hang-up during the swap rolls back and releases the claims like an interrupt', () => {
+  const result = run(false, undefined, undefined, { FIXTURE_INJECT: 'install_agent() { kill -HUP $$; sleep 2; }' });
+  expect(result.status).toBe(129);
+  expect(result.stderr).toContain('previous programs were restored');
+  expect(readdirSync(join(home, 'bin')).filter(rollbackScope)).toEqual([]);
+  expect(existsSync(join(home, 'bin/goodvibes'))).toBe(false);
+});
+
+test('leftover backups from a killed run are all listed in one refusal, never restored, and removable with one command', () => {
+  installOnce(); const before = snapshot(); const bin = join(home, 'bin');
+  const stale = [join(bin, 'goodvibes.goodvibes-previous'), join(bin, 'goodvibes-daemon.bun.goodvibes-previous'), join(bin, 'goodvibes-agent.goodvibes-previous.partial')];
+  mkdirSync(join(bin, 'lib/sqlite-vec-linux-x64'), { recursive: true });
+  stale.push(join(bin, 'lib/sqlite-vec-linux-x64/vec0.so.goodvibes-previous'));
+  for (const file of stale) writeFileSync(file, 'old bytes from a killed run');
+  const result = run(); expect(result.status).not.toBe(0);
+  for (const file of stale) { expect(result.stderr).toContain(file); expect(readFileSync(file, 'utf8')).toBe('old bytes from a killed run'); }
+  expect(result.stderr).toContain('rm -f --');
+  for (const [name, bytes] of before) expect(readFileSync(join(bin, name)), name).toEqual(bytes);
+  expect(readdirSync(bin).filter(name => /install-claim|update-transaction/.test(name))).toEqual([]);
+  for (const file of stale) rmSync(file);
+  const again = run(); expect(again.status, again.stderr).toBe(0);
+});
+
+test('an interrupt while a Darwin library stage exists is cleaned up and does not block the retry', () => {
+  darwinAssets();
+  const result = run(false, undefined, 'darwin', { FIXTURE_INJECT: 'chmod() { case "${2:-}" in *libsqlite3.dylib.incoming) return 1 ;; esac; command chmod "$@"; }' });
+  expect(result.status).not.toBe(0);
+  const bin = join(home, 'bin');
+  expect(existsSync(join(bin, 'lib/sqlite-darwin-x64/libsqlite3.dylib.incoming'))).toBe(false);
+  expect(readdirSync(bin).filter(rollbackScope)).toEqual([]);
+  const retried = run(false, undefined, 'darwin'); expect(retried.status, retried.stderr).toBe(0);
 });

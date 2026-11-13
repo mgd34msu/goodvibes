@@ -74,7 +74,9 @@ export function HunkCommentSheet({
   return (
     <Dialog
       open
-      onClose={onCancel}
+      // Same as the Cancel button: no dismissal while the send is in flight, or the
+      // send's late result would land on whatever sheet the operator opened next.
+      onClose={pending ? () => undefined : onCancel}
       title="Comment on this change"
       className="hunk-sheet"
       initialFocusRef={textareaRef}

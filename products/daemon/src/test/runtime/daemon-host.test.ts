@@ -17,7 +17,7 @@ import * as contractRuntime from '@goodvibes-jev/engine/platform/platform/runtim
 import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createFeatureFlagManager, deriveFeatureStates, RuntimeEventBus } from '../../runtime/index.js';
-import { createDaemonHost, type DaemonHost, type DaemonHostFactories, type DaemonHostOptions } from '../../runtime/daemon-host.js';
+import { createDaemonHost, daemonHostLifecycle, type DaemonHost, type DaemonHostFactories, type DaemonHostOptions } from '../../runtime/daemon-host.js';
 import { createDaemonBootOperations } from '../../runtime/boot-composition.js';
 import { NATIVE_READER_REQUIREMENT_FILE, assertNativeReaderCompatible, nativeReaderCapabilities, realUpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.js';
@@ -243,6 +243,33 @@ test('not-running refusal closes partial owners, skips boot and permits a fresh 
   await expect(fx.host.start()).rejects.toThrow('server startup failed'); await fx.host.close();
   expect(closed).toBe(1); expect(boot).toBe(0); expect(fx.host.snapshot().state).toBe('failed');
   const retry = fixture(); expect((await retry.host.start()).state).toBe('ready'); await retry.host.close();
+});
+
+test('a failed start reports failed before cleanup begins, and every state move stays inside the declared table', async () => {
+  const seen: string[] = [];
+  const warned = spyOn(logger, 'warn');
+  let host: DaemonHost | undefined;
+  const fx = fixture(undefined, { createServer(config) {
+    const server = new DaemonServer(config);
+    keep(spyOn(server, 'start').mockImplementation(async () => {
+      // Sample on every microtask hop between this failure and the cleanup that follows it.
+      void (async () => { for (let tick = 0; tick < 100; tick++) { seen.push(host!.snapshot().state); await Promise.resolve(); } })();
+    }));
+    return server;
+  } });
+  host = fx.host;
+  await expect(host.start()).rejects.toThrow('server startup failed'); await host.close();
+  const states = seen.filter((state, index) => state !== seen[index - 1]);
+  expect(states).toContain('failed');
+  expect(states.indexOf('failed')).toBeLessThan(states.indexOf('closing'));
+  expect(host.snapshot().state).toBe('failed');
+  const healthy = fixture(); await healthy.host.start(); await healthy.host.close();
+  expect(healthy.host.snapshot().state).toBe('closed');
+  const never = fixture(); await never.host.close();
+  expect(warned.mock.calls.filter(call => String(call[0]).includes('lifecycle move outside')).length).toBe(0);
+  warned.mockRestore();
+  expect(daemonHostLifecycle.can('starting', 'failed')).toBe(true);
+  expect(daemonHostLifecycle.can('closed', 'starting')).toBe(false);
 });
 
 test('independent server and listener stop failures still await graph close and expose no rejected values', async () => {

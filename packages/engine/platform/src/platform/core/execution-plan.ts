@@ -139,6 +139,20 @@ function findLastSeparator(text: string): { index: number; sepLen: number } {
   return { index: lastIdx, sepLen: lastSepLen };
 }
 
+/**
+ * The plan's top-level status as a pure function of its items. A dismissed plan
+ * is archived and stays dismissed. A plan that was complete or failed and whose
+ * items moved back to unfinished work is active again, never left stale; a
+ * draft or active plan with nothing finished or failed keeps its status.
+ */
+export function derivePlanStatus(current: ExecutionPlanStatus, items: readonly Pick<PlanItem, 'status'>[]): ExecutionPlanStatus {
+  if (current === 'dismissed') return current;
+  if (items.every((i) => i.status === 'complete' || i.status === 'skipped')) return 'complete';
+  if (items.some((i) => i.status === 'failed')) return 'failed';
+  if (items.some((i) => i.status === 'in_progress')) return 'active';
+  return current === 'complete' || current === 'failed' ? 'active' : current;
+}
+
 function phaseStatus(items: PlanItem[]): string {
   if (items.length === 0) return 'PENDING';
   if (items.every((i) => i.status === 'complete' || i.status === 'skipped')) return 'COMPLETE';
@@ -279,17 +293,8 @@ export class ExecutionPlanManager {
     item.status = status;
     if (agentId !== undefined) item.agentId = agentId;
 
-    // A dismissed plan is archived, never resurrect its top-level status from
-    // an item edit. Persist the item change but leave status 'dismissed'.
-    if (plan.status !== 'dismissed') {
-      // Derive top-level plan status
-      const allDone = plan.items.every((i) => i.status === 'complete' || i.status === 'skipped');
-      const anyFailed = plan.items.some((i) => i.status === 'failed');
-      const anyActive = plan.items.some((i) => i.status === 'in_progress');
-      if (allDone) plan.status = 'complete';
-      else if (anyFailed) plan.status = 'failed';
-      else if (anyActive) plan.status = 'active';
-    }
+    // A dismissed plan is archived: derivePlanStatus keeps it dismissed.
+    plan.status = derivePlanStatus(plan.status, plan.items);
 
     plan.updatedAt = new Date().toISOString();
     this.save(plan);

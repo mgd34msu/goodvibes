@@ -38,6 +38,9 @@ export interface CompactionReceiptsState {
   error: string | null;
 }
 
+/** Fixed copy: `err.message` can be the raw 401 response body and is never shown. */
+const STREAM_ERROR_MESSAGE = 'Compaction event stream error.';
+
 export function useCompactionReceipts(sessionId: string, enabled: boolean): CompactionReceiptsState {
   const [receipts, setReceipts] = useState<CompactionReceipt[]>([]);
   const [latestCheck, setLatestCheck] = useState<CompactionCheck | null>(null);
@@ -82,10 +85,10 @@ export function useCompactionReceipts(sessionId: string, enabled: boolean): Comp
               if (check.sessionId === sessionId) setLatestCheck(check);
             }
           },
-          onError: (err: unknown) => {
+          onError: (_err: unknown) => {
             if (disposed) return;
             setConnected(false);
-            setError(err instanceof Error ? err.message : 'Compaction event stream error');
+            setError(STREAM_ERROR_MESSAGE);
           },
           onTerminate: () => {
             if (disposed) return;
@@ -102,9 +105,9 @@ export function useCompactionReceipts(sessionId: string, enabled: boolean): Comp
         }
         close = dispose;
       })
-      .catch((err: unknown) => {
+      .catch((_err: unknown) => {
         if (disposed) return;
-        setError(err instanceof Error ? err.message : 'Failed to open compaction event stream');
+        setError(STREAM_ERROR_MESSAGE);
       });
 
     return () => {

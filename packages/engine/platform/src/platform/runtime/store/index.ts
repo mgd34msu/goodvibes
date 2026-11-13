@@ -55,6 +55,7 @@ import type { AutomationSourceRecord } from '../../automation/sources.js';
 import type { AutomationRouteBinding } from '../../automation/routes.js';
 import type { AutomationSurfaceKind } from '../../automation/types.js';
 import type { AutomationDeliveryAttempt } from '../../automation/delivery.js';
+import { canRetry } from '../tasks/lifecycle.js';
 import { createInitialRuntimeState } from './state.js';
 import type { RuntimeState } from './state.js';
 import {
@@ -136,6 +137,8 @@ export interface DomainDispatch {
     patch?: Partial<RuntimeTask>,
     source?: string,
   ): void;
+  /** True when the task exists and its status allows an explicit retry (`canRetry`). */
+  canRetryRuntimeTask?(taskId: string): boolean;
   transitionRuntimeAgent(
     agentId: string,
     status: AgentLifecycleState,
@@ -244,6 +247,10 @@ export function createDomainDispatch(store: RuntimeStore): DomainDispatch {
         ...state,
         tasks: transitionTaskDomainRecord(state.tasks, taskId, status, patch, source),
       }));
+    },
+    canRetryRuntimeTask(taskId) {
+      const task = store.getState().tasks.tasks.get(taskId);
+      return task !== undefined && canRetry(task.status);
     },
     transitionRuntimeAgent(agentId, status, patch, source = 'domain-dispatch') {
       mutateRuntimeStore(store, (state) => ({

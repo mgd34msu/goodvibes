@@ -40,133 +40,6 @@ function existingEnv(names: string[]) {
     TOOLCHAIN_SPEC: '@goodvibes-jev/engine', SHA256_NAME: 'SHA256SUMS.txt', USE_EXISTING_CHECKSUMS: 'true' };
 }
 
-test('manual and reusable staged acceptance require immutable source/tooling and an explicit producer run', () => {
-  for (const trigger of ['workflow_call', 'workflow_dispatch']) {
-    expect(Object.keys(staged.on[trigger]!.inputs).sort()).toEqual(['artifact-run-id', 'previous-source', 'previous-tag', 'source', 'tag', 'tooling-sha']);
-    for (const key of ['artifact-run-id', 'source', 'tag', 'tooling-sha']) expect(staged.on[trigger]!.inputs[key]).toMatchObject({ required: true, type: 'string' });
-    for (const key of ['previous-tag', 'previous-source']) expect(staged.on[trigger]!.inputs[key]).toMatchObject({ required: false, type: 'string', default: '' });
-  }
-  expect(staged.permissions).toEqual({ contents: 'read', actions: 'read' });
-  const producer = staged.jobs['stage-release-assets']!;
-  const download = producer.steps.find(step => String(step.uses).startsWith('actions/download-artifact@'))!;
-  expect(download.with).toMatchObject({ name: 'native-release-assets', 'run-id': '${{ inputs.artifact-run-id }}', 'github-token': '${{ secrets.GITHUB_TOKEN }}' });
-  expect(producer.steps.filter(step => step.run).map(step => step.run).join('\n')).not.toContain('GITHUB_TOKEN');
-  const upload = producer.steps.find(step => String(step.uses).startsWith('actions/upload-artifact@'))!;
-  expect(upload.with).toMatchObject({ name: 'staged-release-assets', 'if-no-files-found': 'error' });
-});
-
-test('reusable acceptance supplies read-only metadata credentials only to its observing parent steps', () => {
-  for (const name of ['reusable-staged-install-acceptance.yml', 'reusable-published-install-acceptance.yml']) {
-    const workflow = load(name);
-    expect(workflow.permissions.contents).toBe('read');
-    const observing = Object.values(workflow.jobs).flatMap(job => job.steps).filter(step => /^node scripts\/accept-(?:published|staged)-suite\.mjs /.test(step.run ?? ''));
-    expect(observing).toHaveLength(3);
-    const scoped = observing.filter(step => !(name === 'reusable-published-install-acceptance.yml' && step.run?.endsWith(' upgrade-v3.1.1')));
-    for (const step of scoped) {
-      expect(step.env?.GOODVIBES_ACCEPTANCE_METADATA_TOKEN).toBe('${{ secrets.GITHUB_TOKEN }}');
-      expect(step.env?.GITHUB_TOKEN).toBeUndefined();
-    }
-    if (name === 'reusable-published-install-acceptance.yml') {
-      const legacy = observing.find(step => step.run?.endsWith(' upgrade-v3.1.1'))!;
-      expect(legacy.env?.GOODVIBES_ACCEPTANCE_METADATA_TOKEN).toBeUndefined();
-      expect(legacy.env?.GITHUB_TOKEN).toBeUndefined();
-    }
-    const owners = Object.values(workflow.jobs).flatMap(job => job.steps).filter(step => step.env?.GOODVIBES_ACCEPTANCE_METADATA_TOKEN !== undefined);
-    expect(owners).toEqual(scoped);
-    expect(readFileSync(join(repo, '.github/workflows', name), 'utf8').match(/GOODVIBES_ACCEPTANCE_METADATA_TOKEN/g)).toHaveLength(scoped.length);
-  }
-});
-
-test('manual macOS diagnostics reuse the existing staged artifact without staging or qualifying publication', () => {
-  const diagnostic = load('diagnose-staged-macos.yml');
-  expect(Object.keys(diagnostic.on)).toEqual(['workflow_dispatch']);
-  expect(Object.keys(diagnostic.on.workflow_dispatch!.inputs).sort()).toEqual(['artifact-run-id', 'compare-authenticated', 'mode', 'source', 'tag', 'tooling-sha']);
-  expect(diagnostic.on.workflow_dispatch!.inputs['tooling-sha']).toMatchObject({ required: true, type: 'string' });
-  for (const name of ['tag', 'source', 'artifact-run-id']) expect(diagnostic.on.workflow_dispatch!.inputs[name]).toMatchObject({ required: false, type: 'string' });
-  expect(diagnostic.on.workflow_dispatch!.inputs.mode).toMatchObject({ required: false, type: 'choice', default: 'native' });
-  expect(diagnostic.permissions).toEqual({ contents: 'read', actions: 'read' });
-  expect(Object.keys(diagnostic.jobs)).toEqual(['release-metadata-diagnostics', 'macos-diagnostics']);
-  const job = diagnostic.jobs['macos-diagnostics']!;
-  expect(job.if).toBe("inputs.mode != 'release-metadata'");
-  expect(job.strategy?.matrix.include).toEqual([{ target: 'darwin-x64', runner: 'macos-15-intel' }, { target: 'darwin-arm64', runner: 'macos-15' }]);
-  expect(job.strategy?.['fail-fast']).toBe(false);
-  expect(job.steps[0]?.with).toEqual({ ref: '${{ inputs.tooling-sha }}', 'fetch-depth': 0 });
-  const download = job.steps.find(step => String(step.uses).startsWith('actions/download-artifact@'))!;
-  expect(download.with).toEqual({ name: 'staged-release-assets', path: '${{ runner.temp }}/staged-release-assets',
-    'run-id': '${{ inputs.artifact-run-id }}', 'github-token': '${{ secrets.GITHUB_TOKEN }}' });
-  const invoke = job.steps.find(step => step.run?.startsWith('node scripts/accept-staged-suite.mjs'))!;
-  expect(invoke.run).toBe('node scripts/accept-staged-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET" "$RUNNER_TEMP/staged-release-assets"');
-  expect(invoke.env).toEqual({ RELEASE_TAG: '${{ inputs.tag }}', RELEASE_SOURCE: '${{ inputs.source }}', RELEASE_TARGET: '${{ matrix.target }}', GOODVIBES_ACCEPTANCE_DIAGNOSTICS: '1' });
-  const result = job.steps.find(step => step.name === 'Preserve bounded macOS diagnostic result')!;
-  expect(result.with?.name).toBe('diagnostic-staged-macos-${{ matrix.target }}');
-  expect(result.with?.path).toEndWith('/acceptance-result.json');
-  const recorded = job.steps.findIndex(step => step.name === 'Record fresh native diagnostic window');
-  expect(recorded).toBeGreaterThan(job.steps.indexOf(download)); expect(recorded).toBeLessThan(job.steps.indexOf(invoke));
-  const crash = job.steps.find(step => step.name === 'Collect bounded safe native crash evidence')!;
-  expect(crash.if).toBe("failure() && steps.native-diagnostic.outcome == 'failure'");
-  expect(crash.run).toBe('node scripts/collect-macos-native-crash.mjs "$RUNNER_TEMP/goodvibes-macos-diagnostic-start.json" "$RUNNER_TEMP/goodvibes-macos-crash-summary.json"');
-  const native = job.steps.find(step => step.name === 'Preserve safe native crash and foreground evidence')!;
-  expect(native.if).toBe("always() && steps.native-diagnostic.outcome == 'failure'");
-  expect(native.with?.name).toBe('diagnostic-staged-macos-native-${{ matrix.target }}');
-  expect(native.with?.path).toBe('${{ runner.temp }}/goodvibes-macos-crash-summary.json\n${{ runner.temp }}/goodvibes-published-*/native-diagnostics.json\n');
-  expect(job.steps.filter(step => step.run).map(step => step.run).join('\n')).not.toMatch(/sha256sums|--out|\bbun\b|\bbuild\b|gh release|git tag|npm publish/);
-});
-
-test('metadata-only macOS diagnostics make fixed HTTP observations without binary or lifecycle work', () => {
-  const workflow = load('diagnose-staged-macos.yml');
-  const job = workflow.jobs['release-metadata-diagnostics']!;
-  expect(job.if).toBe("inputs.mode == 'release-metadata'");
-  expect(job['runs-on']).toBe('macos-15');
-  expect(job.strategy).toBeUndefined();
-  const invoke = job.steps.find(step => step.name === 'Observe fixed public release metadata response')!;
-  expect(invoke.run).toBe('node scripts/diagnose-github-release-http.mjs "$RUNNER_TEMP/github-release-http-diagnostics.json"');
-  expect(invoke.env).toEqual({ GITHUB_TOKEN: "${{ inputs.compare-authenticated && secrets.GITHUB_TOKEN || '' }}" });
-  expect(job.steps.some(step => String(step.uses).startsWith('actions/download-artifact@'))).toBe(false);
-  expect(job.steps.map(step => step.run ?? '').join('\n')).not.toMatch(/accept-staged|accept-published|install\.sh|launchctl|\bbun\b|\bbuild\b|gh release|git tag/);
-  const upload = job.steps.find(step => String(step.uses).startsWith('actions/upload-artifact@'))!;
-  expect(upload.if).toBe('always()');
-  expect(upload.with).toMatchObject({ path: '${{ runner.temp }}/github-release-http-diagnostics.json', 'if-no-files-found': 'error' });
-});
-
-test('the actual macOS diagnostic guard refuses mutable inputs and invalid version or run identifiers', () => {
-  const guard = load('diagnose-staged-macos.yml').jobs['macos-diagnostics']!.steps.find(step => step.name === 'Verify immutable diagnostic inputs')!;
-  const root = mkdtempSync(join(tmpdir(), 'macos-diagnostic-inputs-')); roots.push(root);
-  mkdirSync(join(root, 'bin')); mkdirSync(join(root, 'scripts'));
-  writeFileSync(join(root, 'scripts/accept-staged-suite.mjs'), '');
-  writeFileSync(join(root, 'bin/git'), '#!/bin/sh\ncase "$1" in rev-parse) printf "%s\\n" "$TOOLING_SHA" ;; cat-file) [ "$3" = "$SOURCE_SHA^{commit}" ] ;; *) exit 91 ;; esac\n', { mode: 0o755 });
-  const valid = { TOOLING_SHA: 'a'.repeat(40), SOURCE_SHA: 'b'.repeat(40), RELEASE_TAG: 'v3.1.2', ARTIFACT_RUN_ID: '42941236483', PATH: join(root, 'bin') + ':' + process.env.PATH };
-  expect(run(guard, root, valid).status).toBe(0);
-  for (const invalid of [{ TOOLING_SHA: 'main' }, { SOURCE_SHA: 'refs/heads/main' }, { SOURCE_SHA: '' }, { RELEASE_TAG: '../v3.1.2' }, { ARTIFACT_RUN_ID: '' }, { ARTIFACT_RUN_ID: '42941236483;exit 0' }]) {
-    expect(run(guard, root, { ...valid, ...invalid }).status, JSON.stringify(invalid)).not.toBe(0);
-  }
-});
-
-test('four fresh and two historical runners consume the same staged artifact with current tooling', () => {
-  const fresh = staged.jobs['native-install']!, historical = staged.jobs['historical-linux-upgrade']!;
-  expect(fresh.strategy?.matrix.include).toEqual([
-    { target: 'linux-x64', runner: 'ubuntu-24.04' }, { target: 'linux-arm64', runner: 'ubuntu-22.04-arm' },
-    { target: 'darwin-x64', runner: 'macos-15-intel' }, { target: 'darwin-arm64', runner: 'macos-15' },
-  ]);
-  expect(historical.strategy?.matrix.include).toEqual(fresh.strategy?.matrix.include.slice(0, 2));
-  expect(historical.if).toBe("inputs.tag == 'v3.1.2'");
-  for (const job of [fresh, historical]) {
-    expect(job.needs).toEqual(['stage-release-assets']); expect(job.strategy?.['fail-fast']).toBe(false);
-    expect(job.steps[0]?.with).toEqual({ ref: '${{ inputs.tooling-sha }}', 'fetch-depth': 0 });
-    const download = job.steps.find(step => String(step.uses).startsWith('actions/download-artifact@'))!;
-    expect(download.with).toEqual({ name: 'staged-release-assets', path: '${{ runner.temp }}/staged-release-assets' });
-    const invoke = job.steps.find(step => step.run?.startsWith('node scripts/accept-staged-suite.mjs'))!;
-    expect(job.steps.indexOf(download)).toBeLessThan(job.steps.indexOf(invoke));
-    expect(invoke.run).toContain('"$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET" "$RUNNER_TEMP/staged-release-assets"');
-  }
-  expect(historical.steps[1]?.with).toEqual({ ref: '${{ inputs.source }}', path: 'candidate-source' });
-  const build = historical.steps.find(step => step.name === 'Build only the source-bound rollback verifier')!;
-  expect(build['working-directory']).toBe('candidate-source');
-  expect(build.run).toBe('bun install --frozen-lockfile\nbun packages/engine/scripts/build.ts\n');
-  const invoke = historical.steps.find(step => step.run?.startsWith('node scripts/accept-staged-suite.mjs'))!;
-  expect(invoke.run).toEndWith(' upgrade-v3.1.1');
-  expect(invoke.env?.CANDIDATE_SOURCE_ROOT).toBe('${{ github.workspace }}/candidate-source');
-});
-
 test('the actual staging body writes the exact payload manifest and refuses an already staged input', () => {
   const f = fixture();
   expect(stage.run).not.toContain('--verify');
@@ -218,7 +91,7 @@ test('native reader admission still refuses a required product omitted from a st
   const loaded: string[] = [];
   await expect(readPublishedReaders({ target, source, tag: 'v3.1.5', assets: new Set(f.names) }, async name => {
     loaded.push(name);
-    return { target, sourceCommit: source, headCommit: source, version: '3.1.5',
+    return { target, sourceCommit: source, headCommit: source, version: '3.1.5', readers: { version: '3.1.5' },
       files: [{ path: name.replace(/\.reader-ci-artifact\.json$/, '') }] };
   })).rejects.toThrow('cohort is missing');
   expect(loaded).not.toContain(missing);

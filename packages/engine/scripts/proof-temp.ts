@@ -1,7 +1,7 @@
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
-import { sweepStaleTmpDirs } from './stale-tmp-sweep.ts';
+import { sweepStaleTmpDirs } from '../toolchain/src/test-runner/temp.ts';
 
 /** Completed proof logs and explicitly retained failed projects are evidence, not abandoned scratch. */
 export const PROOF_RETAINED_MARKER = '.keep-proof-output';

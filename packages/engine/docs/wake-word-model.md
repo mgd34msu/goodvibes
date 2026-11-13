@@ -97,6 +97,9 @@ Four rules hold across all three:
    absent network, not DNS, not a proxy serving HTML, not an unwritable home
    directory. A failure degrades to precisely the previous behaviour. Status
    reports `not-provisioned` **by content**, and the recovery command works.
+   The hash of an installed file is reused while its device, inode, size and
+   timestamps are unchanged; a file that was written or replaced is hashed
+   again. Downloads are always hashed in full.
 2. **It says so once, plainly.** One line of prose naming what happened and how
    to retry, printed by the installer or logged by the daemon. Not a stack trace,
    not a debug-level line nobody reads, and not one message per artifact.

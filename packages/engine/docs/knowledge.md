@@ -885,10 +885,16 @@ value and maps to one concrete maintenance routine.
 | `semantic-enrichment` | Re-run semantic extraction over sources to refresh derived facts |
 | `semantic-self-improvement` | Run the gap-repair pipeline over detected knowledge gaps on a scheduled trigger |
 | `light-consolidation` | Run consolidation without auto-promoting results, producing a report |
-| `deep-consolidation` | Run consolidation with auto-promotion enabled, producing a report | Each job and schedule has an id of the form
+| `deep-consolidation` | Run consolidation with auto-promotion enabled, producing a report |
+
+Each job and schedule has an id of the form
 `knowledge-<kind>` (for example kind `sync-browser-history` has id
 `knowledge-sync-browser-history`), and `knowledge.jobs.run()` takes that id, not
 the bare kind.
+
+A job run that is still `queued` or `running` more than six hours after it was
+requested, and that the starting process did not start itself, is recorded as
+`failed` with an "interrupted" error when the knowledge service initializes.
 
 Jobs can run inline or in the background. Schedules are persisted and can be
 created, enabled, disabled, listed, and deleted through the knowledge API. New

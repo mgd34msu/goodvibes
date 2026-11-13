@@ -4,10 +4,9 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import net from 'node:net';
 import tls from 'node:tls';
-import { isolatedTestEnvironment } from '../scripts/test-isolation.ts';
-import { RUNNER_ENV_FLAG } from '../scripts/test-run-tmp.ts';
-import { installTestNetworkGuard, TestExternalNetworkError } from '../scripts/test-network-guard.ts';
-import { runOwnedTestChild } from '../scripts/owned-test-child.ts';
+import { isolatedTestEnvironment } from '../toolchain/src/test-runner/test-isolation.ts';
+import { installTestNetworkGuard, TestExternalNetworkError } from '../toolchain/src/test-runner/test-network-guard.ts';
+import { runBunTest } from '../scripts/test.ts';
 
 const roots: string[] = [];
 let restore: (() => void) | undefined;
@@ -24,8 +23,8 @@ function root(): string {
 test('child env isolates persisted state and inherited credentials while retaining explicit fixture values', () => {
   const directory = root();
   const env = isolatedTestEnvironment({
-    PATH: '/bin', CI: 'true', GOODVIBES_TEST_TIMEOUT_MS: '123', GOODVIBES_UPDATE_GOLDENS: '1', [RUNNER_ENV_FLAG]: '1', GOODVIBES_PLATFORM_PRIVATE_CONFIG: '/real/private',
-    GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST: '1', GOODVIBES_E2E_BINARY: join(directory, 'selected native binary'), GOODVIBES_E2E_TOKEN: 'private-token',
+    PATH: '/bin', CI: 'true', GOODVIBES_TEST_TIMEOUT_MS: '123', GOODVIBES_UPDATE_GOLDENS: '1', GOODVIBES_PLATFORM_PRIVATE_CONFIG: '/real/private',
+    GOODVIBES_ENGINE_TEST_RUNNER: '1', GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST: '1', GOODVIBES_E2E_BINARY: join(directory, 'selected native binary'), GOODVIBES_E2E_TOKEN: 'private-token',
     OPENAI_API_KEY: 'private-key', ABACUS_API_KEY: 'private-key', TYPESAFE_API_KEY: 'private-key',
     HTTP_PROXY: 'https://private-proxy', NODE_OPTIONS: '--require=private', GIT_CEILING_DIRECTORIES: '/inherited-git-ceiling',
     HOME: '/real/home', XDG_CONFIG_HOME: '/real/config', GOODVIBES_DAEMON_HOME: '/real/daemon',
@@ -33,7 +32,7 @@ test('child env isolates persisted state and inherited credentials while retaini
   expect(env.PATH).toBe('/bin');
   expect(env.GOODVIBES_TEST_TIMEOUT_MS).toBe('123');
   expect(env.GOODVIBES_UPDATE_GOLDENS).toBe('1');
-  expect(env[RUNNER_ENV_FLAG]).toBe('1');
+  expect(env.GOODVIBES_ENGINE_TEST_RUNNER).toBe('1');
   expect(env.GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST).toBe('1');
   expect(env.GOODVIBES_E2E_BINARY).toBe(join(directory, 'selected native binary'));
   expect(env.GOODVIBES_E2E_TOKEN).toBeUndefined();
@@ -105,7 +104,7 @@ test('existing test mocks may replace and restore the guarded fetch', async () =
   expect(violations).toHaveLength(1);
 });
 
-test('the owned runner ignores dotenv, isolates home, preserves fixture env, and cleans it up', async () => {
+test('the runner ignores dotenv, isolates home, preserves fixture env, and cleans it up', async () => {
   const directory = root();
   const marker = join(directory, 'home-path');
   const fixture = join(directory, 'isolation.test.ts');
@@ -120,25 +119,26 @@ test('the owned runner ignores dotenv, isolates home, preserves fixture env, and
       expect(process.env.DOTENV_MARKER).toBeUndefined();
       expect(process.env.FIXTURE_MARKER).toBe('declared');
       expect(process.env.GIT_CEILING_DIRECTORIES?.split(${JSON.stringify(delimiter)}).sort()).toEqual([
-        process.env.GOODVIBES_TEST_OWNED_TMP_ROOT,
+        process.env.GOODVIBES_TEST_TMP_ROOT,
+        ${JSON.stringify(join(directory, '.test-tmp'))},
         ${JSON.stringify(join(directory, 'fixture-ceiling'))},
       ].sort());
-      expect(process.env[${JSON.stringify(RUNNER_ENV_FLAG)}]).toBe('1');
+      expect(process.env.GOODVIBES_ENGINE_TEST_RUNNER).toBe('1');
       expect(process.env.GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST).toBe('1');
       writeFileSync(${JSON.stringify(marker)}, process.env.HOME!);
     });
   `);
-  const result = await runOwnedTestChild({ argv: [fixture], cwd: directory, env: { ...process.env, GIT_CEILING_DIRECTORIES: '/inherited-git-ceiling', OPENAI_API_KEY: 'inherited-secret', GOODVIBES_E2E_BINARY: join(directory, 'selected native binary'), GOODVIBES_E2E_TOKEN: 'private-token', GOODVIBES_PLATFORM_PRIVATE_CONFIG: '/real/private', [RUNNER_ENV_FLAG]: '1', GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST: '1' }, fixtureEnv: { FIXTURE_MARKER: 'declared', GIT_CEILING_DIRECTORIES: join(directory, 'fixture-ceiling') } });
-  expect(result.exitCode).toBe(0);
+  const exitCode = await runBunTest({ args: [fixture], cwd: directory, env: { ...process.env, GIT_CEILING_DIRECTORIES: '/inherited-git-ceiling', OPENAI_API_KEY: 'inherited-secret', GOODVIBES_E2E_BINARY: join(directory, 'selected native binary'), GOODVIBES_E2E_TOKEN: 'private-token', GOODVIBES_PLATFORM_PRIVATE_CONFIG: '/real/private', GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST: '1' }, fixtureEnv: { FIXTURE_MARKER: 'declared', GIT_CEILING_DIRECTORIES: join(directory, 'fixture-ceiling') } });
+  expect(exitCode).toBe(0);
   const childHome = await Bun.file(marker).text();
   expect(childHome).not.toBe(process.env.HOME);
   expect(existsSync(childHome)).toBe(false);
 });
 
-test('a swallowed blocked request still fails the owned runner with sanitized diagnostics', async () => {
+test('a swallowed blocked request still fails the runner with sanitized diagnostics', async () => {
   const directory = root();
   const fixture = join(directory, 'blocked.test.ts');
   writeFileSync(fixture, `import { test } from 'bun:test'; test('caught network error', async () => { await fetch('https://outside.invalid/private?token=secret').catch(() => undefined); });`);
-  const result = await runOwnedTestChild({ argv: [fixture], cwd: directory, env: process.env });
-  expect(result.exitCode).toBe(1);
+  const exitCode = await runBunTest({ args: [fixture], cwd: directory, env: process.env });
+  expect(exitCode).toBe(1);
 });

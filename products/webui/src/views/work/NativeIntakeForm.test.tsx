@@ -1145,3 +1145,29 @@ test("selected comment form saves exact text separately, scopes reopening, and r
   expect(view.el.textContent).not.toContain("broker-input-real");
   expect(connected.turn.request).not.toHaveBeenCalled();
 });
+
+describe("Native intake connection failure", () => {
+  test("a failed connect offers Retry connection, which reconnects and opens the form", async () => {
+    open.mockImplementationOnce(async () => {
+      throw new Error("daemon unreachable");
+    });
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const root = createRoot(el);
+    cleanups.push(() => {
+      flushSync(() => root.unmount());
+      el.remove();
+    });
+    flushSync(() => root.render(<NativeIntakeForm lifetime={getClientLifetime()} />));
+    const retry = () => [...el.querySelectorAll("button")].find((b) => b.textContent === "Retry connection");
+    await settle(() => Boolean(retry()));
+    expect(el.textContent).toContain("daemon unreachable");
+    expect(el.querySelector("textarea")).toBeNull();
+
+    flushSync(() => retry()!.click());
+    await settle(() => Boolean(el.querySelector("textarea")));
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(el.textContent).not.toContain("daemon unreachable");
+    expect(retry()).toBeUndefined();
+  });
+});

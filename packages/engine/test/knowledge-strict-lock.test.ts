@@ -30,7 +30,7 @@ test.each(['', 'not-json', '{"pid":0}', '{"pid":-7}', '{"pid":99999999,"token":"
 test('strict ownership recovers a real exited owner and releases only its own inode', async () => {
   const file = lockPath();
   const modulePath = new URL('../platform/src/platform/workspace/checkpoint/cross-process-lock.ts', import.meta.url).pathname;
-  const child = Bun.spawn([process.execPath, '--no-env-file', '--preload', new URL('../scripts/test-network-preload.ts', import.meta.url).pathname, '-e',
+  const child = Bun.spawn([process.execPath, '--no-env-file', '--preload', new URL('../toolchain/src/test-runner/test-network-preload.ts', import.meta.url).pathname, '-e',
     `const { acquireCrossProcessLock } = await import(process.argv[1]); await acquireCrossProcessLock(process.argv[2], { strictOwnership: true }); console.log(process.pid); process.exit(0);`, modulePath, file,
   ], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env } });
   const [exit, output, errors] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
@@ -58,7 +58,7 @@ test('unsupported atomic publication fails closed, including after another calle
     try { await acquireCrossProcessLock(process.argv[2], { strictOwnership: true }); console.log('wrongly acquired'); }
     catch (error) { console.log(error.message); }
   `;
-  const child = Bun.spawn([process.execPath, '--no-env-file', '--preload', new URL('../scripts/test-network-preload.ts', import.meta.url).pathname, '-e', script, modulePath, file],
+  const child = Bun.spawn([process.execPath, '--no-env-file', '--preload', new URL('../toolchain/src/test-runner/test-network-preload.ts', import.meta.url).pathname, '-e', script, modulePath, file],
     { stdout: 'pipe', stderr: 'pipe', env: { ...process.env } });
   const [exit, output] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
   expect(exit).toBe(0);

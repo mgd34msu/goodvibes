@@ -66,7 +66,7 @@ import { openEscalation } from '../platform/src/platform/contract/intake-route.t
 import { runContractCli, type ContractCliIo } from '../platform/src/platform/contract/cli.ts';
 import type { ContractUnitView, ContractView, CriterionView, UnitCheck } from '../platform/src/platform/contract/types.ts';
 import { decisionLogPath } from '../platform/src/platform/state/decision-log.ts';
-import { sweepStaleTmpDirs } from './stale-tmp-sweep.ts';
+import { sweepStaleTmpDirs } from '../toolchain/src/test-runner/temp.ts';
 import { PROOF_RETAINED_MARKER, STALE_PROOF_TMP_MS, retainProofOutput } from './proof-temp.ts';
 import { describeRequestedModel, describeProofResult } from './contract-proof-model.ts';
 

@@ -6,6 +6,7 @@ import type { ProgressBearingRecord } from '../../agents/progress-audience.js';
 import type { ContractAgentRole } from '../../../events/contract.js';
 import type { AgentInput } from './schema.js';
 import type { DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 
 export interface AgentRecord extends ProgressBearingRecord {
   decisionPolicy?: DecisionModelPolicyState;
@@ -130,4 +131,26 @@ export interface AgentRecord extends ProgressBearingRecord {
    * reference-only runtime feedback, then clears the field.
    */
   resumeSteer?: { readonly steer: string; readonly priorSummary?: string | undefined; readonly referenceOnly?: true } | undefined;
+}
+
+/**
+ * The moves an agent run makes. A failed loop is woken with a steer
+ * (`wakeWithSteer`) and a completed contract unit with `allowCompleted`, so both
+ * can start again. A completed run can still become failed: its clean-up runs
+ * after completion, and a clean-up that fails (owned processes not confirmed
+ * stopped) must be visible on the record. A cancelled run is final.
+ */
+export const agentRunLifecycle = defineLifecycle<AgentRecord['status']>('agent run', {
+  pending: ['running', 'failed', 'cancelled'],
+  running: ['completed', 'failed', 'cancelled'],
+  failed: ['pending', 'running'],
+  completed: ['pending', 'running', 'failed'],
+  cancelled: [],
+});
+
+/** Applies `to` when the lifecycle allows it from the record's current status; otherwise leaves the record untouched and returns false. */
+export function moveAgentRun(record: Pick<AgentRecord, 'status'>, to: AgentRecord['status']): boolean {
+  if (!agentRunLifecycle.can(record.status, to)) return false;
+  record.status = to;
+  return true;
 }

@@ -1,3 +1,4 @@
+import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreFile } from '@/utils/store-file.ts';
@@ -111,7 +112,7 @@ function parsePersona(value: unknown): AgentPersonaRecord | null {
   const description = readString(value.description).trim();
   const body = readString(value.body).trim();
   if (!id || !name || !description || !body) return null;
-  const reviewState = value.reviewState === 'reviewed' || value.reviewState === 'stale' ? value.reviewState : 'fresh';
+  const reviewState = parseAgentReviewState(value.reviewState);
   const source = value.source === 'agent' || value.source === 'imported' || value.source === 'system' ? value.source : 'user';
   const staleReason = readString(value.staleReason).trim();
   const reviewedAt = readString(value.reviewedAt).trim();
@@ -245,9 +246,7 @@ export class AgentPersonaRegistry {
       tags: input.tags === undefined ? existing.tags : normalizeList(input.tags),
       triggers: input.triggers === undefined ? existing.triggers : normalizeList(input.triggers),
       provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
-      reviewState: 'fresh',
-      staleReason: undefined,
-      reviewedAt: undefined,
+      ...freshReviewPatch(),
       updatedAt: nowIso(),
     };
     this.writeStore({
@@ -276,9 +275,7 @@ export class AgentPersonaRegistry {
     if (!existing) throw new Error(`Unknown persona ${idOrName}`);
     const updated: AgentPersonaRecord = {
       ...existing,
-      reviewState: 'reviewed',
-      staleReason: undefined,
-      reviewedAt: nowIso(),
+      ...reviewedReviewPatch(),
       updatedAt: nowIso(),
     };
     this.writeStore({
@@ -294,8 +291,7 @@ export class AgentPersonaRegistry {
     if (!existing) throw new Error(`Unknown persona ${idOrName}`);
     const updated: AgentPersonaRecord = {
       ...existing,
-      reviewState: 'stale',
-      staleReason: reason.trim() || 'Marked stale by user.',
+      ...staleReviewPatch(reason),
       updatedAt: nowIso(),
     };
     this.writeStore({

@@ -97,6 +97,24 @@ describe('TtsEngine', () => {
     expect(engine.getState().error).toBeTruthy();
   });
 
+  test('a rejected enqueue (undecodable audio) returns to rest with an honest error, not stuck playing', async () => {
+    const sink = new FakeSink();
+    sink.enqueue = () => Promise.reject(new Error('EncodingError: unable to decode'));
+    const engine = new TtsEngine();
+    await engine.speak({
+      id: 'msg',
+      segments: ['One.', 'Two.'],
+      synth: dummySynth,
+      createSink: () => sink,
+      schedule: fakeSchedule([ok(0, 'One.'), ok(1, 'Two.')]),
+    });
+    const state = engine.getState();
+    expect(state.id).toBeNull();
+    expect(state.phase).toBeNull();
+    expect(state.error).toContain('could not be played');
+    expect(sink.closed).toBe(true);
+  });
+
   test('empty text is refused honestly without creating a sink', async () => {
     const engine = new TtsEngine();
     let created = false;

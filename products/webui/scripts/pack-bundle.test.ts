@@ -13,15 +13,14 @@
  *   3. A `dist/` with no index.html is refused here rather than published as a
  *      bundle nobody can serve.
  */
-import { afterAll, describe, expect, spyOn, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import * as crypto from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUNDLE_ROOT_DIR, bundleAssetName, packBundle } from './pack-bundle';
-import { installTestCleanup, makeProjectTempDir } from './helpers/project-temp';
+import { makeProjectTempDir } from './helpers/project-temp';
 
-installTestCleanup(afterAll);
 
 function scratch(prefix: string): string {
   return makeProjectTempDir(`pack-bundle-${prefix}-`);

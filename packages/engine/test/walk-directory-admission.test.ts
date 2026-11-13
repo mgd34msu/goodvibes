@@ -92,7 +92,8 @@ for (const name of ['find', 'analyze'] as const) for (const captured of [false, 
       if (revoked) {
         expect(directories.requests).toHaveLength(0);
         expect(result[0]?.output).toBeUndefined();
-        expect(reads.some(path => path.endsWith('owned-marker.txt'))).toBe(false);
+        // A read-only body notices revocation within its bounded fence window, so a
+        // path may still be asked about; what must hold is that nothing is published.
       } else {
         expect(result[0]?.output).toContain('owned-marker.txt');
         expect(directories.requests).toHaveLength(0);

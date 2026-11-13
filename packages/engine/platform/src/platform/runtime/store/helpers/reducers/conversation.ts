@@ -2,6 +2,8 @@ import type { TurnEvent, ToolEvent } from '../events.js';
 import type { ConversationDomainState, ActiveToolCall, ToolExecutionState, TurnUsage } from '../../domains/conversation.js';
 import { canStartNewTurn, formatPartialToolPreview, isCurrentTurnEvent, isTerminalTurnState, now, resetStreamState, updateDomainMetadata } from './shared.js';
 
+const TERMINAL_TOOL_STATES: ReadonlySet<ToolExecutionState> = new Set<ToolExecutionState>(['succeeded', 'failed', 'cancelled']);
+
 function formatToolArgs(event: ToolEvent | TurnEvent): string {
   if ('args' in event) {
     return JSON.stringify(event.args);
@@ -50,6 +52,13 @@ export function updateConversationState(
       BUDGET_EXCEEDED_COST: 'failed',
     };
     const nextState = stateByEvent[event.type];
+    // A call that has succeeded, failed or been cancelled is settled: a later event
+    // for the same callId (a stale phase event, a cancel racing a failure) must not
+    // rewrite what the UI already shows. The same terminal state may still refine its
+    // own detail, e.g. TOOL_FAILED's message after a BUDGET_EXCEEDED_* event.
+    // Call ids are unique per call (the orchestrator emits TOOL_RECEIVED once per id),
+    // so no re-run reuses one.
+    if (existing && TERMINAL_TOOL_STATES.has(existing.state) && nextState !== existing.state) return domain;
     const timestamp = now();
     const nextRecord: ActiveToolCall = {
       callId: event.callId,

@@ -114,4 +114,24 @@ describe('AgentResearchSourceRegistry', () => {
       fixture.cleanup();
     }
   });
+  test('refuses illegal status moves and names the legal ones', () => {
+    const fixture = makeRegistry();
+    try {
+      const source = fixture.registry.create({ question: 'Which moves are legal?', title: 'Lifecycle source', url: 'https://example.test/lifecycle', summary: 'Lifecycle summary.' });
+      // An unreviewed candidate cannot be cited as used.
+      expect(() => fixture.registry.markUsed(source.id)).toThrow(/candidate and cannot become used; from candidate it can become reviewed, rejected/);
+      expect(fixture.registry.get(source.id)?.status).toBe('candidate');
+      fixture.registry.reject(source.id, 'Not credible.');
+      // A rejected source is not used; it is re-reviewed or re-added.
+      expect(() => fixture.registry.markUsed(source.id)).toThrow(/rejected and cannot become used; from rejected it can become reviewed/);
+      expect(fixture.registry.review(source.id, { credibility: 'medium', note: 'Second look.' }).status).toBe('reviewed');
+      expect(fixture.registry.markUsed(source.id, { reportArtifactId: 'a1' }).status).toBe('used');
+      // attaching a report to an already used source stays allowed.
+      expect(fixture.registry.markUsed(source.id, { reportArtifactId: 'a2' }).usedInReportArtifactId).toBe('a2');
+      // a used source superseded later may still be rejected.
+      expect(fixture.registry.reject(source.id, 'Superseded.').status).toBe('rejected');
+    } finally {
+      fixture.cleanup();
+    }
+  });
 });

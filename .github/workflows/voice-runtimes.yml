@@ -10,7 +10,7 @@ name: Voice runtimes
 # Manual only: this publishes a durable artifact that the platform manifest pins, so
 # it is never triggered automatically. After a successful run, stamp the printed
 # WHISPER_ENGINES entry (url + bytes + sha256) into
-# packages/platform/src/platform/voice/provisioning/manifest.ts in the same PR.
+# packages/engine/platform/src/platform/voice/provisioning/manifest.ts in the same PR.
 
 permissions:
   contents: read

@@ -6,7 +6,7 @@
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search } from 'lucide-react';
-import { useEffect, useState, type SyntheticEvent } from 'react';
+import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import { DataPage } from '../../components/data-view/DataView';
 import { LIBRARY, resolveTab } from '../../components/shell/nav';
 import { Button } from '../../components/ui/Button';
@@ -41,14 +41,27 @@ export function LibraryView({ tab, onTabChange }: LibraryViewProps) {
   useEffect(() => setForced(null), [text]);
   const query = forced ?? settled;
 
+  // One number per opening of the dialog. A save answers the opening it was started in:
+  // if the dialog was closed (and perhaps reopened) meanwhile, its late success must not
+  // close the new one or move the page.
+  const addOpeningRef = useRef(0);
   const add = useMutation({
     mutationFn: (input: MemoryAddInput) => platformClient.operator.memory.add(input),
-    onSuccess: async () => {
+    onMutate: () => addOpeningRef.current,
+    onSuccess: async (_result, _input, openedAs) => {
       await queryClient.invalidateQueries({ queryKey: ['memory'] });
+      if (openedAs !== addOpeningRef.current) return;
       setAdding(false);
       if (current !== 'memory') onTabChange('memory');
     },
   });
+
+  // Every opener goes through here, so a previous save's error never greets a fresh dialog.
+  function openAdd(): void {
+    addOpeningRef.current += 1;
+    add.reset();
+    setAdding(true);
+  }
 
   function submitSearch(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -65,7 +78,7 @@ export function LibraryView({ tab, onTabChange }: LibraryViewProps) {
           <Button
             variant="primary"
             icon={<Plus aria-hidden="true" />}
-            onClick={() => { add.reset(); setAdding(true); }}
+            onClick={openAdd}
           >
             Add memory
           </Button>
@@ -96,14 +109,14 @@ export function LibraryView({ tab, onTabChange }: LibraryViewProps) {
         )}
         className="lib-page"
       >
-        {current === 'memory' && <MemoryView query={query} onAddMemory={() => setAdding(true)} onServedChange={setMemoryServed} />}
+        {current === 'memory' && <MemoryView query={query} onAddMemory={openAdd} onServedChange={setMemoryServed} />}
         {current === 'knowledge' && <KnowledgeView query={query} />}
         {current === 'review' && <ReviewTab query={query} />}
       </DataPage>
 
       <AddMemoryDialog
         open={adding}
-        onClose={() => setAdding(false)}
+        onClose={() => { addOpeningRef.current += 1; setAdding(false); }}
         isPending={add.isPending}
         error={add.error ? formatError(add.error) : null}
         onSubmit={(input) => add.mutate(input)}

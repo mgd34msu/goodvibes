@@ -64,8 +64,11 @@ self.addEventListener('install', (event) => {
       .open(SHELL_CACHE)
       .then((cache) => cache.addAll(SHELL_URLS))
       // A missing precache entry must not wedge the whole install (e.g. a dev
-      // server that does not serve one of these yet). Best-effort shell fill.
-      .catch(() => undefined)
+      // server that does not serve one of these yet). Best-effort shell fill, but
+      // never silent: an incomplete shell cache means a broken offline shell.
+      .catch((error) => {
+        console.warn('Service worker precache failed; the offline shell may be incomplete:', error);
+      })
       .then(() => self.skipWaiting()),
   );
 });

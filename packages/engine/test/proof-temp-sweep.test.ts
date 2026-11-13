@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sweepStaleTmpDirs } from '../scripts/stale-tmp-sweep.ts';
+import { sweepStaleTmpDirs } from '../toolchain/src/test-runner/temp.ts';
 import { PROOF_RETAINED_MARKER, STALE_PROOF_TMP_MS, prepareObserveProofWorkspace, retainProofOutput } from '../scripts/proof-temp.ts';
 
 const roots: string[] = [];

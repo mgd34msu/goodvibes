@@ -131,6 +131,37 @@ test('saved contract observation hashes no unreviewed answer and compares a shar
   } finally { hashes.mockRestore(); }
 });
 
+test('repeated listings hash each unchanged answer and goal source once, even though the runner returns fresh copies', () => {
+  const reviewed = approvedWork()[0]!;
+  const content = reviewed.contentReview!.record, goal = reviewed.goalCoverage!.record;
+  const answer = 'Memoised complete answer. '.repeat(1_000), commitment = hashState(answer);
+  const source = contract({ answer });
+  const saved = contract({ answer, decisions: [
+    { id: 'memo-content', targetId: 'work.final-answer-review', reason: JSON.stringify({ ...content, outputDigest: commitment }) },
+    { id: 'memo-goal', targetId: 'work.goal-obligations', reason: JSON.stringify({ ...goal, outputDigest: commitment, literalSourceDigest: hashState(goalObligationSource(source)) }) },
+  ] });
+  const hashes = spyOn(Bun.CryptoHasher, 'hash');
+  try {
+    const sha256Inputs = () => hashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256').map(([, input]) => String(input));
+    for (let listing = 0; listing < 3; listing++) {
+      const current = completedContractEvidence({ list: () => [structuredClone(saved)] }, 'session')[0]!;
+      expect(current.contentReview!.matchesSavedAnswer).toBe(true);
+      expect(current.goalCoverage!.matchesSavedAnswer).toBe(true);
+      expect(current.goalCoverage!.matchesOriginalScope).toBe(true);
+    }
+    expect(sha256Inputs().filter(input => input === JSON.stringify(answer))).toHaveLength(1);
+    expect(sha256Inputs().filter(input => input.includes('"originalRequest"'))).toHaveLength(1);
+    // A changed answer is never matched against the earlier digest.
+    hashes.mockClear();
+    const edited = { ...structuredClone(saved), answer: `${answer}Edited.` };
+    const stale = completedContractEvidence({ list: () => [edited] }, 'session')[0]!;
+    expect(stale.contentReview!.matchesSavedAnswer).toBe(false);
+    expect(sha256Inputs().filter(input => input === JSON.stringify(edited.answer))).toHaveLength(1);
+    const changedGoal = { ...structuredClone(saved), goal: 'A different goal' };
+    expect(completedContractEvidence({ list: () => [changedGoal] }, 'session')[0]!.goalCoverage!.matchesOriginalScope).toBe(false);
+  } finally { hashes.mockRestore(); }
+});
+
 test('a later map override cannot grant a copied saved-work checkpoint native provenance', () => {
   const work = approvedWork()[0]!, copied = structuredClone(work);
   const get = WeakMap.prototype.get, set = WeakMap.prototype.set, apply = Reflect.apply;

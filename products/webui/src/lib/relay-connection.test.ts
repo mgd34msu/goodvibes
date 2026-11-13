@@ -12,12 +12,14 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
+  closeRelayClient,
   getActiveRoute,
+  getRelayClient,
   routedFetch,
   setActiveRoute,
   subscribeActiveRoute,
 } from './relay-connection';
-import { RELAY_PAIRING_STORAGE_KEY } from './relay-pairing';
+import { RELAY_PAIRING_STORAGE_KEY, clearStoredRelayPairing, storeRelayPairing } from './relay-pairing';
 
 /** A minimal, correctly-typed fetch stub (see relay-connection.ts's own note on why
  * `typeof fetch` needs a `preconnect` static in this project's bun-typed globals). */
@@ -126,5 +128,20 @@ describe('routedFetch', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe('getRelayClient', () => {
+  test('a client is closed, not just dropped, when its pairing disappears', () => {
+    storeRelayPairing({ protocol: 1, relayUrl: 'wss://relay.example.test', rid: 'rid-1', daemonPublicKey: 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc' });
+    const relayClient = getRelayClient();
+    expect(relayClient).not.toBeNull();
+    let closes = 0;
+    const realClose = relayClient!.close.bind(relayClient);
+    relayClient!.close = () => { closes += 1; realClose(); };
+    clearStoredRelayPairing();
+    expect(getRelayClient()).toBeNull();
+    expect(closes).toBe(1);
+    closeRelayClient();
   });
 });

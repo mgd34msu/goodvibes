@@ -416,7 +416,12 @@ uninstall still own that cleanup. Fixture tests cover manual and Windows
 status with malformed PID files without invoking any host process operation.
 
 Migration refuses a managed target that already has a definition or reports
-an active runtime, before installation or rollback. Failed setup cleans up
+an active runtime, before installation or rollback. The one exception is a
+resume: when the managed unit is installed, running and identical to the
+definition this tool renders while the legacy unit still exists, migration
+skips installation and the health check and runs only the retirement steps.
+Incomplete-retirement messages print `goodvibes-daemon migrate-service -y` as
+the retry command. Failed setup cleans up
 only the newly attempted target and retains recovery state when stop/disable
 cannot be confirmed. Tests include custom target names and thrown install or
 start failures. Service fixtures model an initially inactive target that
@@ -613,24 +618,21 @@ alone do not establish native execution on those platforms.
 
 The daemon leg of root `product-tests` restores the canonical `build` job's
 workspace outputs, completes the declared daemon suite, then builds the actual
-Linux x64 entrypoint once. It records and checks `native/ci-artifact.json` before
+Linux x64 entrypoint once. It records `native/ci-artifact.json` before
 uploading a tar archive of the executable, ordinary Bun runtime, runtime license
 and provenance, and sqlite-vec library. The manifest binds the exact checkout
 commit/tree and PR head (or main commit), plus each payload's SHA-256, byte size
 and mode. A dirty tracked source tree cannot be recorded as that commit.
 
 The separate `daemon-native` job uses the established `ubuntu-22.04` containment
-runner and probes real unprivileged namespaces, without relaxing host security
-or running the verifier as root. It requires a successful producer, restores the
-canonical workspace output and daemon archive, and checks their daemon manifest
-against its exact checkout before running the existing `verify:binary`. Missing
-files, source mismatch, tampering and mode loss fail before native execution.
+runner, without relaxing host security or running the verifier as root. It
+requires a successful producer, restores the canonical workspace output and
+daemon archive, and runs `verify:binary` against the restored files.
 The consumer never rebuilds. Behavioral tests exercise tar restoration and
-negative payload/source cases; workflow checks preserve this ordering and the
-single build. A missing or skipped producer cannot produce a green consumer.
+negative payload/source cases. A missing or skipped producer cannot produce a
+green consumer.
 
-The release dependency graph requires this consumer under its existing trigger
-and `RELEASE_ARMED` policy; this does not independently enable tags or publication.
+Nothing here enables tags or publication; releases are cut by `release.yml`.
 A missing or skipped producer cannot make its consumer green. Validate actual
 tar restoration and negative source/payload/mode cases without consumer rebuild.
 Only the supported CI target has an acquisition lane; configured targets and

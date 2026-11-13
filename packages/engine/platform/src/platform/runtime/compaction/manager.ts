@@ -22,7 +22,7 @@ import type { RuntimeEventBus } from '../events/index.js';
 import type { FeatureFlagManager } from '../feature-flags/manager.js';
 import type { EmitterContext } from '../emitters/index.js';
 import {
-  applyTransition,
+  compactionLifecycle,
   selectStrategy,
   strategyToState,
 } from './lifecycle.js';
@@ -206,7 +206,7 @@ export class CompactionManager {
       catch (error) { if (!work.current) return null; throw error; }
       finally {
         work.retire();
-        if (!this._disposed) this._state = 'idle';
+        if (!this._disposed) this._abandon();
       }
     });
     this._runChain = run.catch(() => undefined);
@@ -351,11 +351,8 @@ export class CompactionManager {
         });
         work.assertCurrent();
 
-        // Force state to the escalated strategy state, bypassing normal transition
-        // validation. This is intentional: quality-correction reruns are not modelled
-        // in the standard state machine, and forcing the state allows _runStrategy to
-        // emit the correct strategy event while keeping lifecycle state consistent.
-        this._state = strategyToState(escalated);
+        // Quality-correction rerun: a declared strategy-to-strategy move.
+        this._setState(strategyToState(escalated));
 
         const escalatedInput: StrategyInput = { ...strategyInput, strategy: escalated };
         let escalatedOutput: StrategyOutput | undefined;
@@ -370,7 +367,7 @@ export class CompactionManager {
             error,
           });
           // Fall back to the original output, restore to the original strategy state
-          this._state = strategyToState(strategy);
+          this._setState(strategyToState(strategy));
         }
         if (escalatedOutput !== undefined) {
           // Re-score the escalated result
@@ -524,7 +521,7 @@ export class CompactionManager {
     if (this._disposed) return;
     this._disposed = true;
     this._lastCommit = null;
-    this._state = 'idle';
+    this._abandon();
     this._lifetime.abort(new Error(`CompactionManager for session ${this._sessionId} is disposed`));
   }
 
@@ -546,7 +543,7 @@ export class CompactionManager {
     const assertCurrent = (): void => { this._lifetime.signal.throwIfAborted(); };
     assertCurrent();
 
-    if (this._state !== 'idle') this._state = 'idle';
+    this._abandon();
     this._transition('checking_threshold');
     if (live()) {
       emitCompactionCheck(this._bus, this._ctx, { sessionId: this._sessionId, tokenCount, threshold });
@@ -756,23 +753,39 @@ export class CompactionManager {
   }
 
   /**
-   * Applies a state transition, throwing if invalid.
-   * Invalid transitions are logged and treated as internal errors.
+   * The one place a table-legal move is applied. A refusal is logged and leaves
+   * the state untouched; it never throws. Returns whether the move applied.
    */
-  private _transition(target: CompactionLifecycleState): void {
-    if (this._disposed) return;
-    const result = applyTransition(this._state, target);
-    if (!result.ok) {
+  private _setState(target: CompactionLifecycleState): boolean {
+    const check = compactionLifecycle.check(this._state, target);
+    if (!check.ok) {
       logger.error('[CompactionManager] invalid state transition', {
         from: this._state,
         to: target,
-        reason: result.reason,
+        reason: check.reason,
         sessionId: this._sessionId,
       });
-      // Force to failed to avoid being stuck in an inconsistent state
-      this._state = 'failed';
-      return;
+      return false;
     }
-    this._state = result.state;
+    this._state = target;
+    return true;
+  }
+
+  /**
+   * The deliberate way out of the table: abandons whatever the machine was
+   * doing and rests at `idle` (end of a run, start of a lifecycle run, dispose),
+   * or at `failed` when a refused move left it in no state it can trust.
+   */
+  private _abandon(to: 'idle' | 'failed' = 'idle'): void {
+    this._state = to;
+  }
+
+  /**
+   * Applies a state transition. A refused move is logged and, so a bad call
+   * cannot leave the machine mid-run, recovers to `failed`.
+   */
+  private _transition(target: CompactionLifecycleState): void {
+    if (this._disposed) return;
+    if (!this._setState(target)) this._abandon('failed');
   }
 }

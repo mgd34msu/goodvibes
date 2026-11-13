@@ -37,7 +37,7 @@ export class ProjectIdentityRegistry {
   constructor(directory: string, private readonly ownerCurrent: () => void) {
     this.directory = resolve(directory); let parent = this.directory;
     while (!lstatSync(parent, { throwIfNoEntry: false })) { this.missing.unshift(parent); const next = dirname(parent); if (next === parent) throw new ProjectIdentityUnavailableError(); parent = next; }
-    this.ancestors.push(captureExistingDirectory(parent)); this.assertCurrent();
+    this.ancestors.push(captureExistingDirectory(parent, { allowPrivatePermissionTightening: true })); this.assertCurrent();
   }
   private assertCurrent(): void { invokeGuard(this.ownerCurrent); for (const parent of this.ancestors) parent.assertCurrent(); }
   /** Only adopt real private directories under the original checked parent.
@@ -60,7 +60,7 @@ export class ProjectIdentityRegistry {
         if (!sameFile(entry, opened)) throw new ProjectIdentityUnavailableError();
         // Correct our own umask only; an existing foreign mode is never changed.
         if (created) { fchmodSync(fd, 0o700); if (!sameFile(opened, lstatSync(path, { bigint: true }))) throw new ProjectIdentityUnavailableError(); }
-        const captured = captureExistingDirectory(path);
+        const captured = captureExistingDirectory(path, { allowPrivatePermissionTightening: true });
         if (!sameFile(opened, lstatSync(path, { bigint: true }))) throw new ProjectIdentityUnavailableError();
         this.ancestors.push(captured); this.missing.shift(); this.assertCurrent();
       } finally { closeSync(fd); }

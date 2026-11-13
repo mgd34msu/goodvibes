@@ -40,7 +40,7 @@ test('idle expiry cleanup retains resolved records until their expiry, then rele
   const store = new WorkProposalStore({ now: () => now }); stores.push(store);
   const timers = track();
   try {
-    const proposal = store.create(input); store.resolve(proposal.id, 'accepted');
+    const proposal = store.create(input); store.markDelivered(proposal.id); store.resolve(proposal.id, 'accepted');
     timers.tick();
     expect(store.disclose().tracked).toBe(1); expect(timers.live.size).toBe(1);
     now += input.ttlMs + 1; timers.tick();
@@ -146,7 +146,7 @@ test('late init across stop and explicit restart has one sweep and preserves con
   const timers = track();
   try {
     const loading = store.init(); await entered.promise;
-    const concurrent = store.create(input); store.resolve(concurrent.id, 'accepted');
+    const concurrent = store.create(input); store.markDelivered(concurrent.id); store.resolve(concurrent.id, 'accepted');
     store.dispose(); const drain = store.flush(); expect(timers.live.size).toBe(0);
     release.resolve(); await loading; await drain; expect(timers.live.size).toBe(0);
     store.startSweep(); store.startSweep();

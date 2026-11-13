@@ -26,7 +26,7 @@ import type {
   TaskFailParams,
 } from './types.js';
 import { TaskRegistry } from './registry.js';
-import { canTransition } from './lifecycle.js';
+import { canRetry, canTransition } from './lifecycle.js';
 import {
   emitTaskCreated,
   emitTaskStarted,
@@ -356,7 +356,7 @@ export class UnifiedTaskManager implements TaskManager {
     this._requireEnabled('retry runtime task');
     const task = this._requireTask(taskId);
 
-    if (task.status !== 'failed' && task.status !== 'cancelled') {
+    if (!canRetry(task.status)) {
       throw new TaskTransitionError(task.id, task.status, 'queued');
     }
 

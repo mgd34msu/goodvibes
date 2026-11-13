@@ -649,6 +649,25 @@ export function transitionContract(contract: Contract, to: ContractStatus): Stat
   return move(CONTRACT_TRANSITIONS, 'contract', contract, to);
 }
 
+/**
+ * The one move outside CONTRACT_TRANSITIONS: a contract that failed while its
+ * repair round was being planned, with every unit and group already passed,
+ * goes back to `fixing` so that same unstarted round can be planned again.
+ * `failed` stays terminal for every other purpose; only startup recovery
+ * (resume.ts), after it has established that exact history, may call this.
+ * Declared here so the exception is visible beside the table it bypasses and
+ * cannot be applied from any other status.
+ */
+export function reopenFailedRepairPlanning(contract: Contract): StatusChange<ContractStatus> {
+  if (contract.status !== 'failed') throw new IllegalContractTransitionError('contract', contract.id, contract.status, 'fixing');
+  contract.status = 'fixing';
+  contract.failureKind = undefined;
+  contract.error = undefined;
+  contract.completedAt = undefined;
+  contract.statusLine = undefined;
+  return { from: 'failed', to: 'fixing' };
+}
+
 /** Moves a group to `to`, or throws IllegalContractTransitionError. */
 export function transitionGroup(group: ContractGroup, to: GroupStatus): StatusChange<GroupStatus> {
   return move(GROUP_TRANSITIONS, 'group', group, to);

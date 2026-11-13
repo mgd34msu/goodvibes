@@ -21,7 +21,7 @@ const cleanups: (() => void)[] = [];
 function Probe() {
   const url = useUrlState();
   const relay = useRelayPairingHandoff();
-  return <output data-status={relay.status} data-error={relay.error === null ? 'absent' : 'present'}>{url.view}</output>;
+  return <output data-status={relay.status} data-paired={relay.pairing === null ? 'no' : 'yes'} data-error={relay.error === null ? 'absent' : 'present'}>{url.view}</output>;
 }
 
 function render(strict = false) {
@@ -124,4 +124,25 @@ test('identity-driven remount consumes a handoff only once', async () => {
   flushSync(() => {});
   expect(changes).toBe(1);
   expect(getStoredRelayPairing()).toEqual(payload);
+});
+
+test('a remount after the pairing was stored reports stored with that pairing and stores nothing again', async () => {
+  window.history.replaceState(null, '', '/#relay=' + encodeURIComponent(code));
+  const first = render();
+  await untilStatus(first.container, 'stored');
+  window.localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
+  const second = render();
+  expect(second.container.querySelector('output')?.getAttribute('data-status')).toBe('stored');
+  expect(second.container.querySelector('output')?.getAttribute('data-paired')).toBe('yes');
+  await new Promise<void>(resolve => setImmediate(resolve));
+  // Single-use: the second mount must not write the pairing a second time.
+  expect(getStoredRelayPairing()).toBeNull();
+});
+
+test('a remount after a malformed code reports the same error', async () => {
+  window.history.replaceState(null, '', '/#relay=gvrelay1.not-a-real-code');
+  const first = render();
+  await untilStatus(first.container, 'error');
+  const second = render();
+  expect(second.container.querySelector('output')?.getAttribute('data-status')).toBe('error');
 });

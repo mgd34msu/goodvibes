@@ -115,4 +115,20 @@ describe('HunkCommentSheet', () => {
     expect(cancelled).toBe(1);
     unmount();
   });
+
+  test('Escape does not dismiss the sheet while a send is pending, but does when idle', () => {
+    const pendingSheet = render({ pending: true });
+    flushSync(() => {
+      document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(cancelled).toBe(0);
+    pendingSheet.unmount();
+
+    const idleSheet = render({ pending: false });
+    flushSync(() => {
+      document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(cancelled).toBe(1);
+    idleSheet.unmount();
+  });
 });

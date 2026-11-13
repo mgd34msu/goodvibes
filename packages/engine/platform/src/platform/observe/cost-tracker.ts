@@ -14,6 +14,7 @@ import type { AgentEvent, TurnEvent } from '../runtime/events/index.js';
 import { resolveSessionCost, type PricingSourceKind, type SessionCostResult } from '../providers/session-cost.js';
 import type { AgentRecord } from '../tools/agent/record.js';
 import type { UiEventFeed } from '../runtime/ui-events.js';
+import { defineLifecycle } from '../utils/lifecycle-machine.js';
 
 /** Cumulative session token counters. */
 export interface CostTrackerUsage {
@@ -45,6 +46,19 @@ export interface TrackedAgentCost {
   /** Owners aggregate their children; their displayed cost is excluded from agentsCost(). */
   readonly contractRole?: AgentRecord['contractRole'];
 }
+
+/**
+ * The cost row's status lifecycle. The first terminal outcome wins between done
+ * and failed; cancellation is sticky once recorded. done/failed -> running is the
+ * deliberate "same agent id woken again" path (`agentRunning`); a late cancel
+ * still lands on a done/failed row, as before.
+ */
+export const agentCostLifecycle = defineLifecycle<TrackedAgentCost['status']>('agent cost row', {
+  running: ['done', 'failed', 'cancelled'],
+  done: ['running', 'cancelled'],
+  failed: ['running', 'cancelled'],
+  cancelled: [],
+});
 
 /** Prices cumulative token counters for a model, in USD. */
 export type SessionPricer = (input: number, output: number, cacheRead: number, cacheWrite: number, model: string) => number;
@@ -204,7 +218,7 @@ export class CostTracker {
   private finishAgent(agentId: string, status: 'done' | 'failed' | 'cancelled'): void {
     const row = this.agentRows.get(agentId);
     if (!row) return;
-    if (row.status !== 'cancelled') row.status = status;
+    if (row.status === status || agentCostLifecycle.can(row.status, status)) row.status = status;
     const record = this.getAgentStatus?.(agentId);
     if (record) this.applyUsage(row, record);
     this.terminalOrder.add(agentId);

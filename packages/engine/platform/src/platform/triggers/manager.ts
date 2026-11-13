@@ -40,7 +40,7 @@ import {
   sweepTriggers,
   type TriggerRetentionPolicy,
 } from './store.js';
-import { applyFailure, applySuccess, isDue, resetBreaker, resolveSupervisionPolicy, type SupervisionPolicy } from './supervision.js';
+import { applyFailure, applySuccess, checkReset, isDue, resetBreaker, triggerLifecycle, resolveSupervisionPolicy, type SupervisionPolicy } from './supervision.js';
 import { activateStreamTrigger, drainStreamTrigger, startStreamTrigger, type StreamOwner, type StreamRuntime } from './manager-streams.js';
 import type {
   ConditionTriggerSpec, OnExitTriggerSpec, StreamTriggerSpec, TriggerActionGrant, TriggerDefinition,
@@ -385,6 +385,9 @@ export class TriggerManager {
     this.load();
     const record = this.records.get(id);
     if (!record) return null;
+    const refused = triggerLifecycle.check(record.state, 'cancelled');
+    // A finished trigger keeps the state it finished in; cancelling it again is a no-op.
+    if (!refused.ok) return record;
     const now = this.now();
 
     const termination = record.process ? buildCancelledTermination({ process: record.process, now }) : undefined;
@@ -423,12 +426,26 @@ export class TriggerManager {
     return removed;
   }
 
+  /** Why reset(id) would be refused, or null when it would apply (or the trigger is unknown). */
+  resetRefusal(id: string): string | null {
+    this.load();
+    const record = this.records.get(id);
+    if (!record) return null;
+    const check = checkReset(record);
+    return check.ok ? null : check.reason;
+  }
+
   /** Explicit breaker reset. The breaker never closes on its own. */
   reset(id: string): TriggerRecord | null {
     this.requireEnabled('reset a trigger');
     this.load();
     const record = this.records.get(id);
     if (!record) return null;
+    const allowed = checkReset(record);
+    if (!allowed.ok) {
+      logger.warn('Trigger reset refused', { triggerId: id, reason: allowed.reason });
+      return null;
+    }
     const next = resetBreaker(record, this.now());
     this.records.set(id, next);
     this.persist();

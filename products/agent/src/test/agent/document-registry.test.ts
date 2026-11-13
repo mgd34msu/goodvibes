@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { createShellPathService } from '@/runtime/index.ts';
-import { AgentDocumentRegistry, documentStorePath, renderAgentDocumentMarkdown } from '../../agent/document-registry.ts';
+import { AgentDocumentRegistry, agentDocumentCommentLifecycle, agentDocumentLifecycle, agentDocumentSuggestionLifecycle, documentStorePath, renderAgentDocumentMarkdown } from '../../agent/document-registry.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 function registry(): AgentDocumentRegistry {
@@ -173,5 +173,24 @@ describe('AgentDocumentRegistry', () => {
     expect(rejected.suggestions[1]?.status).toBe('rejected');
     expect(rejected.body).toBe('Suggested replacement body.');
     expect(rejected.versions).toHaveLength(2);
+  });
+  test('a decided suggestion cannot be flipped and the refusal names the legal moves', () => {
+    const documents = registry();
+    const created = documents.create({ title: 'Flip Guard', body: 'Body.' });
+    documents.suggestUpdate(created.id, { body: 'A.', summary: 'First.', rationale: 'Because.' });
+    documents.suggestUpdate(created.id, { body: 'B.', summary: 'Second.', rationale: 'Because.' });
+    documents.acceptSuggestion(created.id, 's1');
+    documents.rejectSuggestion(created.id, 's2');
+    expect(() => documents.rejectSuggestion(created.id, 's1')).toThrow(/accepted, which is final; it cannot become rejected/);
+    expect(() => documents.acceptSuggestion(created.id, 's2')).toThrow(/rejected, which is final; it cannot become accepted/);
+    // repeating the same decision stays an idempotent no-op.
+    expect(documents.acceptSuggestion(created.id, 's1').suggestions[0]?.status).toBe('accepted');
+    expect(documents.rejectSuggestion(created.id, 's2').suggestions[1]?.status).toBe('rejected');
+  });
+
+  test('declares the document, comment and suggestion lifecycles', () => {
+    expect(agentDocumentSuggestionLifecycle.next('proposed')).toEqual(['accepted', 'rejected']);
+    expect(agentDocumentCommentLifecycle.next('open')).toEqual(['resolved']);
+    expect(agentDocumentLifecycle.can('archived', 'draft')).toBe(true);
   });
 });

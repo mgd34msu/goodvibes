@@ -1,2 +1,0 @@
-// Compatibility entry point; the public toolchain owns this implementation.
-export * from '../toolchain/src/test-runner/stale-tmp-sweep.js';

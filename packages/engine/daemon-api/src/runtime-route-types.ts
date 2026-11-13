@@ -291,6 +291,8 @@ export interface DaemonRuntimeRouteContext {
       patch: Record<string, unknown>,
       source: string,
     ): void;
+    /** Whether the task's current status allows an explicit retry (canRetry). */
+    canRetryRuntimeTask?(taskId: string): boolean;
   } | null;
   /** Publish a conversation follow-up event scoped to a shared session. */
   readonly publishConversationFollowup: (sessionId: string, envelope: Omit<ConversationMessageEnvelope, 'sessionId'>) => void;

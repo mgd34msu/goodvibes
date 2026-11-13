@@ -10,9 +10,8 @@
  * checked first, exactly; this reading is asked only about a key the list does
  * not name:
  *   - a key a client asks to store as a secret (credentials-write.ts);
- *   - every schema key the list does not name, by `credential-keys:read`,
- *     whose stored readings the pre-commit credential-scope check compares
- *     against the list, so a credential nobody declared blocks the commit.
+ *   - (the pre-commit credential-scope check no longer asks this; it flags a
+ *     schema key named like a secret that the list does not declare.)
  *
  * State: `{ key, description }`, the dotted key and its schema description
  * (empty when the key has none).

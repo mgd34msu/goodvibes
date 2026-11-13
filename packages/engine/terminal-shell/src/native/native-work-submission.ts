@@ -43,6 +43,10 @@ interface Draft extends NativeSubmissionJournalRecord {
   outcome: 'unknown' | 'submitted' | 'conflict';
 }
 type Mode = 'submit' | 'status' | 'retry';
+/** The step a run is in; error classification reads it, so a typo here must not compile. */
+type Phase = 'source' | 'principal' | 'journal-read' | 'snapshot' | 'journal-save' | 'lookup' | 'journal-confirm' | 'submit';
+type JournalPhase = Extract<Phase, `journal-${string}`>;
+const isJournalPhase = (phase: Phase): phase is JournalPhase => phase === 'journal-read' || phase === 'journal-save' || phase === 'journal-confirm';
 
 /** Durable source/identity first; lookup before any replay; execution is a separate capability. */
 export class NativeWorkSubmissionControls {
@@ -77,12 +81,13 @@ export class NativeWorkSubmissionControls {
       if (selected.identity !== this.active.identity || !selected.available) { this.close(); return; }
       return this.state;
     }
-    const publish = (value: NativeWorkSubmissionState): NativeWorkSubmissionState => { this.lastIdentity = selected.identity; this.last = value; return value; };
+    let published = undefined as NativeWorkSubmissionState | undefined;
+    const publish = (value: NativeWorkSubmissionState): NativeWorkSubmissionState => { this.lastIdentity = selected.identity; this.last = value; published = value; return value; };
     if (!selected.available) return publish({ status: 'unavailable', message: selected.reason });
     const epoch = ++this.epoch; const controller = new AbortController();
     let binding: NativeWorkSubmissionBinding | undefined; let disposed = false;
     let operationDraft: Draft | undefined; let scope: NativeSubmissionJournalBinding | undefined;
-    let phase = 'source'; let result: NativeWorkSubmissionState | undefined;
+    let phase: Phase = 'source'; let result: NativeWorkSubmissionState | undefined;
     const dispose = (): void => { if (disposed || !binding) return; disposed = true; try { binding.dispose(); } catch {} };
     const current = (): boolean => {
       if (epoch !== this.epoch || controller.signal.aborted) return false;
@@ -167,7 +172,7 @@ export class NativeWorkSubmissionControls {
       }
       const request = operationDraft ? requestIdentity(operationDraft.command) : undefined;
       if (error instanceof NativeWorkSourceError) result = publish({ status: 'invalid', message: error.message });
-      else if (phase.startsWith('journal-')) result = publish({ status: 'unavailable', message: 'The durable submission journal could not be confirmed. No submission was sent. The visible record was preserved; repair storage, then inspect the same request before retrying.', request });
+      else if (isJournalPhase(phase)) result = publish({ status: 'unavailable', message: 'The durable submission journal could not be confirmed. No submission was sent. The visible record was preserved; repair storage, then inspect the same request before retrying.', request });
       else if (code === 'NATIVE_SUBMISSION_CONFLICT' || code === 'CONFLICT') {
         if (operationDraft) operationDraft.outcome = 'conflict';
         result = publish({ status: 'conflict', message: 'Native ledger revision changed. The original request was not rewritten. Inspect its status; an explicitly new submit-file command may capture a fresh revision.', request });
@@ -181,6 +186,10 @@ export class NativeWorkSubmissionControls {
     } finally {
       if (timer) clearInterval(timer); dispose();
       if (epoch === this.epoch) this.active = undefined;
+      // Every early `if (!current()) return` lands here with nothing settled. The
+      // pending line this run published must not outlive it: nothing is working
+      // on it, and it would reappear if the selection flipped back.
+      if (result === undefined && this.last !== undefined && this.last === published && this.last.status === 'pending') this.last = undefined;
     }
     if (!current()) { if (operationDraft) operationDraft.outcome = 'unknown'; return; }
     return result;

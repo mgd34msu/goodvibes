@@ -1,0 +1,30 @@
+name: Install apt packages
+description: Install Ubuntu packages with a plain apt-get, retried a few times with timeouts. Skips the network when every package is already installed.
+
+inputs:
+  packages:
+    description: Space-separated package names.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: apt-get install
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        # Bounded apt: a stalled mirror fails the attempt instead of hanging the job.
+        APT=(sudo timeout --kill-after=10 300 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+        # shellcheck disable=SC2086
+        if dpkg -s $PACKAGES >/dev/null 2>&1; then exit 0; fi
+        for attempt in 1 2 3; do
+          # Existing indexes first; a refresh is only needed when they are stale or a third-party repo is broken.
+          # shellcheck disable=SC2086
+          if "${APT[@]}" install -y --no-install-recommends $PACKAGES; then exit 0; fi
+          # shellcheck disable=SC2086
+          if "${APT[@]}" update && "${APT[@]}" install -y --no-install-recommends $PACKAGES; then exit 0; fi
+          echo "apt-get attempt $attempt failed" >&2
+          sleep $((attempt * 10))
+        done
+        exit 1

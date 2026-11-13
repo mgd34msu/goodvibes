@@ -436,7 +436,11 @@ export function useChatSearch(
         setNextCursor(page.nextCursor);
         setHasMoreSessions(page.hasMore);
       } catch (error) {
-        if (isNotInvokableError(error)) setSessionSearchState('unavailable');
+        // A failure for a superseded request says nothing about the newer search.
+        const superseded = searchGenerationRef.current !== requestedGeneration
+          || activeSessionParamsRef.current.query !== requestedParams.query
+          || activeSessionParamsRef.current.includeClosed !== requestedParams.includeClosed;
+        if (!superseded && isNotInvokableError(error)) setSessionSearchState('unavailable');
         // Otherwise: leave the existing page's results in place. A failed
         // load-more is not a failed search, do not blow away what already
         // rendered successfully.

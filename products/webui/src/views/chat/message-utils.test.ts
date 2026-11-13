@@ -17,6 +17,8 @@ import {
   formatToolDuration,
   workingStatusLabel,
   settledTurnLabel,
+  nextTurnStatus,
+  TURN_STATES,
 } from './message-utils';
 
 describe('toolFriendlyLabel', () => {
@@ -187,5 +189,54 @@ describe('settledTurnLabel', () => {
     expect(settledTurnLabel('completed')).toBe('');
     expect(settledTurnLabel('streaming')).toBe('');
     expect(settledTurnLabel('idle')).toBe('');
+  });
+});
+
+describe('nextTurnStatus: guarded turn-status transitions for racing writers', () => {
+  test('a late delta/tool frame does not un-stop a turn the user already stopped', () => {
+    expect(nextTurnStatus('stopping', 'streaming')).toBe('stopping');
+    expect(nextTurnStatus('stopping', 'tooling')).toBe('stopping');
+  });
+
+  test('frames still advance every non-stopping live status', () => {
+    for (const current of ['running', 'streaming', 'tooling', 'reconnecting', 'syncing', 'submitted'] as const) {
+      expect(nextTurnStatus(current, 'streaming')).toBe('streaming');
+      expect(nextTurnStatus(current, 'tooling')).toBe('tooling');
+    }
+  });
+
+  test('stopping can still be resolved by the terminal outcomes', () => {
+    for (const proposed of ['stopped', 'completed', 'error', 'stopped locally', 'idle', 'session expired'] as const) {
+      expect(nextTurnStatus('stopping', proposed)).toBe(proposed);
+    }
+  });
+
+  test('a late error outcome never overwrites a settled turn', () => {
+    expect(nextTurnStatus('completed', 'error')).toBe('completed');
+    expect(nextTurnStatus('stopped', 'error')).toBe('stopped');
+    expect(nextTurnStatus('stopped locally', 'error')).toBe('stopped locally');
+    expect(nextTurnStatus('session expired', 'error')).toBe('session expired');
+  });
+
+  test('error still applies from live, idle and already-error statuses', () => {
+    for (const current of ['idle', 'sending', 'submitted', 'running', 'streaming', 'tooling', 'stopping', 'error'] as const) {
+      expect(nextTurnStatus(current, 'error')).toBe('error');
+    }
+  });
+
+  test('a new turn can always start from a settled status', () => {
+    for (const current of ['completed', 'stopped', 'error', 'session expired', 'idle'] as const) {
+      expect(nextTurnStatus(current, 'sending')).toBe('sending');
+      expect(nextTurnStatus(current, 'running')).toBe('running');
+    }
+  });
+
+  test('is total over TURN_STATES and passes unknown current values through the proposal', () => {
+    for (const current of TURN_STATES) {
+      for (const proposed of TURN_STATES) {
+        expect(TURN_STATES as readonly string[]).toContain(nextTurnStatus(current, proposed));
+      }
+    }
+    expect(nextTurnStatus('not-a-state', 'streaming')).toBe('streaming');
   });
 });

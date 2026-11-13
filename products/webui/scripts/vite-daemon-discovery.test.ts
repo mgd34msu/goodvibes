@@ -1,11 +1,10 @@
-import { afterAll, describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { installTestCleanup, makeProjectTempDir } from './helpers/project-temp';
+import { makeProjectTempDir } from './helpers/project-temp';
 
-installTestCleanup(afterAll);
 const configPath = fileURLToPath(new URL('../vite.config.ts', import.meta.url));
 const daemonEntry = fileURLToPath(new URL('../../daemon/src/cli/entrypoint.ts', import.meta.url));
 const result = { schema: 'goodvibes.daemon.webui-binding', schemaVersion: 1, source: 'configuration', endpoint: 'web' };

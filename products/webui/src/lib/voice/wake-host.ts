@@ -281,13 +281,17 @@ export class WakeHost {
         await this.#startListening(settings);
         return;
       }
-      const outcome = await listener.start();
-      if (outcome.started) {
-        this.#patch({ phase: 'listening', deviceLabel: outcome.deviceLabel, refusal: null });
-      } else {
-        this.#patch({ phase: 'refused', refusal: { kind: outcome.refusal, detail: outcome.detail } });
-      }
+      await this.#restartListener(listener);
     });
+  }
+
+  async #restartListener(listener: WakeListener): Promise<void> {
+    const outcome = await listener.start();
+    if (outcome.started) {
+      this.#patch({ phase: 'listening', deviceLabel: outcome.deviceLabel, refusal: null, error: null });
+    } else {
+      this.#patch({ phase: 'refused', refusal: { kind: outcome.refusal, detail: outcome.detail } });
+    }
   }
 
   /** Stop for good and release everything. */
@@ -301,10 +305,35 @@ export class WakeHost {
 
   /** Clear a latched supervisor. The deliberate act the latch waits for. */
   clearLatch(): void {
-    this.#listener?.clearLatch();
-    this.#patch({ error: null });
-    const settings = this.#settings;
-    if (settings?.active === true) void this.resume();
+    void this.#run(async () => {
+      const listener = this.#listener;
+      listener?.clearLatch();
+      this.#patch({ error: null });
+      // A suspended host is restarted by resume(); anything else that is latched
+      // must leave the latched phase and refusal here, or the indicator keeps
+      // saying "latched" for a detector that is allowed to run again.
+      if (this.#suspended || this.#state.phase !== 'latched') return;
+      const settings = this.#settings;
+      if (settings?.active !== true) return;
+      if (listener === null) await this.#startListening(settings);
+      else await this.#restartListener(listener);
+    });
+  }
+
+  /**
+   * The one place a callback running OUTSIDE the serialised chain (a transcript
+   * finishing) may change phase. It may only replace the phases that belong to the
+   * utterance itself; `suspended`, `latched`, `restarting` and anything else were
+   * set by something newer and must survive.
+   */
+  #finishUtterance(next: Partial<WakeHostState>): void {
+    const phase = this.#state.phase;
+    const mine = phase === 'transcribing' || phase === 'capturing' || phase === 'listening';
+    if (!mine) {
+      this.#patch(next);
+      return;
+    }
+    this.#patch({ ...next, phase: this.#listener === null ? 'off' : 'listening' });
   }
 
   #run(step: () => Promise<void>): Promise<void> {
@@ -446,7 +475,7 @@ export class WakeHost {
       // Nothing above the silence floor followed the wake. Sending that to a
       // provider bills a request to transcribe a room, so it is reported instead.
       this.#deps.warn('a wake fired but nothing was said after it', { modelId: detection.modelId });
-      this.#patch({ phase: 'listening', error: 'A wake fired but nothing was said after it, nothing was sent.' });
+      this.#finishUtterance({ error: 'A wake fired but nothing was said after it, nothing was sent.' });
       return;
     }
     this.#patch({ phase: 'transcribing' });
@@ -454,13 +483,12 @@ export class WakeHost {
       const artifact = utteranceToAudioArtifact(utterance);
       const text = (await this.#deps.transcribe(artifact)).trim();
       const autoSubmit = this.#settings?.autoSubmit === true;
-      this.#patch({ phase: this.#listener === null ? 'off' : 'listening', lastTranscript: text, error: null });
+      this.#finishUtterance({ lastTranscript: text, error: null });
       if (text.length > 0) this.#sink?.(text, { autoSubmit });
       else this.#patch({ error: 'Speech-to-text returned no words for that utterance.' });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      this.#patch({
-        phase: this.#listener === null ? 'off' : 'listening',
+      this.#finishUtterance({
         error: `The utterance after the wake could not be transcribed: ${detail}`,
       });
     }

@@ -32,6 +32,7 @@ let applyResult: unknown = {
 
 const planCalls: unknown[] = [];
 const applyCalls: unknown[] = [];
+let applyGate: Promise<void> | null = null;
 const restoreCalls: unknown[] = [];
 
 const MESSAGES = {
@@ -51,7 +52,7 @@ mock.module('../../lib/goodvibes', () => ({
       sessions: { messages: { list: (_id: string) => Promise.resolve(MESSAGES) } },
       rewind: {
         plan: (input: unknown) => { planCalls.push(input); return Promise.resolve(planResult); },
-        apply: (input: unknown) => { applyCalls.push(input); return Promise.resolve(applyResult); },
+        apply: async (input: unknown) => { applyCalls.push(input); if (applyGate) await applyGate; return applyResult; },
       },
       checkpoints: {
         restore: (input: unknown) => { restoreCalls.push(input); return Promise.resolve({ result: { checkpointId: 'wcp-safety', safetyCheckpointId: null, restoredFiles: [], removedFiles: [] }, refused: false, refusal: null }); },
@@ -106,6 +107,7 @@ afterEach(() => {
     },
     refused: false, refusal: null,
   };
+  applyGate = null;
   planCalls.length = 0;
   applyCalls.length = 0;
   restoreCalls.length = 0;
@@ -183,6 +185,61 @@ describe('SessionRewind', () => {
 
     expect(restoreCalls).toHaveLength(1);
     expect((restoreCalls[0] as { id?: string }).id).toBe('wcp-safety');
+    unmount();
+  });
+
+  test('while an apply is in flight the preview, scope, anchor and rewind controls are locked', async () => {
+    let release!: () => void;
+    applyGate = new Promise<void>((resolve) => { release = resolve; });
+    const { container, unmount } = render();
+    await settle();
+    click(container.querySelector('.session-rewind__preview-btn'));
+    await settle(3);
+    click(container.querySelector('.session-rewind__apply-btn'));
+    await settle(2);
+    click(container.querySelector('.gv-confirm__confirm'));
+    await settle(2);
+
+    expect(applyCalls).toHaveLength(1);
+    expect((container.querySelector('.session-rewind__preview-btn') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('.session-rewind__apply-btn') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('button[aria-label="Rewind scope"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('button[aria-label="Rewind turn anchor"]') as HTMLButtonElement).disabled).toBe(true);
+    // A click on the locked controls changes nothing.
+    click(container.querySelector('.session-rewind__preview-btn'));
+    click(container.querySelector('.session-rewind__apply-btn'));
+    await settle(2);
+    expect(planCalls).toHaveLength(1);
+    expect(applyCalls).toHaveLength(1);
+
+    release();
+    await settle(4);
+    expect(container.querySelector('.session-rewind__receipt')).not.toBeNull();
+    expect(applyCalls).toHaveLength(1);
+    unmount();
+  });
+
+  test('a refused apply cannot be re-fired with the same token; previewing again mints a fresh one', async () => {
+    applyResult = { receipt: null, refused: true, refusal: { reason: 'token expired' } };
+    const { container, unmount } = render();
+    await settle();
+    click(container.querySelector('.session-rewind__preview-btn'));
+    await settle(3);
+    click(container.querySelector('.session-rewind__apply-btn'));
+    await settle(2);
+    click(container.querySelector('.gv-confirm__confirm'));
+    await settle(3);
+
+    expect(container.textContent).toContain('token expired');
+    expect((container.querySelector('.session-rewind__apply-btn') as HTMLButtonElement).disabled).toBe(true);
+    click(container.querySelector('.session-rewind__apply-btn'));
+    await settle(2);
+    expect(container.querySelector('.gv-confirm__confirm')).toBeNull();
+    expect(applyCalls).toHaveLength(1);
+
+    click(container.querySelector('.session-rewind__preview-btn'));
+    await settle(3);
+    expect((container.querySelector('.session-rewind__apply-btn') as HTMLButtonElement).disabled).toBe(false);
     unmount();
   });
 });

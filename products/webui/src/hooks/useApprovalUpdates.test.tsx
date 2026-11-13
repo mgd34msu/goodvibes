@@ -109,6 +109,16 @@ describe('useApprovalUpdates', () => {
     unmount();
   });
 
+  test('a transport error body (raw 401 JSON) never reaches the returned error', () => {
+    const { state, unmount } = renderHook();
+    flushSync(() => capturedHandlers?.onError?.(new Error('{"error":"Authentication required","code":"AUTH_REQUIRED","status":401}')));
+    expect(state().error).not.toBeNull();
+    expect(state().error).not.toContain('AUTH_REQUIRED');
+    expect(state().error).not.toContain('{');
+    expect(state().connected).toBe(false);
+    unmount();
+  });
+
   test('disabled: never opens a stream', () => {
     const { unmount } = renderHook(false);
     expect(openCalls.length).toBe(0);

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Tool } from '../../types/tools.js';
 import { resolveScopedDirectory } from '../../runtime/surface-root.js';
+import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import { PACKET_TOOL_SCHEMA, type PacketToolInput } from './schema.js';
 
 interface PacketRecord {
@@ -17,6 +18,12 @@ interface PacketRecord {
   readonly updatedAt: number;
   readonly publishedAt?: number | undefined;
 }
+
+/** A packet is drafted, then published once. Revising a published packet is allowed and does not change its status. */
+const packetLifecycle = defineLifecycle<PacketRecord['status']>('packet', {
+  draft: ['published'],
+  published: [],
+});
 
 function summarizePacket(record: PacketRecord) {
   return {
@@ -128,6 +135,12 @@ export function createPacketTool(
       }
 
       if (input.mode === 'publish') {
+        if (!packetLifecycle.can(record.status, 'published')) {
+          return {
+            success: false,
+            error: `Packet ${record.id} is already published${record.publishedAt ? ` (at ${new Date(record.publishedAt).toISOString()})` : ''}; publishing again would re-stamp it. Use revise to change its content or show to read it.`,
+          };
+        }
         const next: PacketRecord = {
           ...record,
           status: 'published',

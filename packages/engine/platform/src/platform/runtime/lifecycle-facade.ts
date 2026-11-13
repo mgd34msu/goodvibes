@@ -1,4 +1,8 @@
 import type { CompactionLifecycleState } from './compaction/index.js';
+import { compactionLifecycle } from './compaction/lifecycle.js';
+import { mcpServerLifecycle } from './mcp/lifecycle.js';
+import { pluginLifecycle } from './plugins/lifecycle.js';
+import { taskLifecycle } from './tasks/lifecycle.js';
 import {
   applyTransition as applyCompactionTransition,
   canTransition as canCompactionTransition,
@@ -31,48 +35,6 @@ import {
   isTerminalStatus,
 } from './tasks/index.js';
 
-const TASK_STATES = new Set<TaskLifecycleState>([
-  'queued',
-  'running',
-  'blocked',
-  'completed',
-  'failed',
-  'cancelled',
-]);
-
-const PLUGIN_STATES = new Set<PluginLifecycleState>([
-  'discovered',
-  'loading',
-  'loaded',
-  'active',
-  'degraded',
-  'error',
-  'unloading',
-  'disabled',
-]);
-
-const MCP_STATES = new Set<McpServerState>([
-  'configured',
-  'connecting',
-  'connected',
-  'degraded',
-  'auth_required',
-  'reconnecting',
-  'disconnected',
-]);
-
-const COMPACTION_STATES = new Set<CompactionLifecycleState>([
-  'idle',
-  'checking_threshold',
-  'microcompact',
-  'collapse',
-  'autocompact',
-  'reactive_compact',
-  'boundary_commit',
-  'done',
-  'failed',
-]);
-
 type RuntimeLifecycleState =
   | TaskLifecycleState
   | PluginLifecycleState
@@ -90,19 +52,19 @@ export type RuntimeTransitionResult =
   | { ok: false; reason: string; readonly success?: never; readonly previous?: never; readonly next?: never; readonly from?: never; readonly to?: never; readonly state?: never };
 
 function isTaskState(state: string): state is TaskLifecycleState {
-  return TASK_STATES.has(state as TaskLifecycleState);
+  return taskLifecycle.isState(state);
 }
 
 function isPluginState(state: string): state is PluginLifecycleState {
-  return PLUGIN_STATES.has(state as PluginLifecycleState);
+  return pluginLifecycle.isState(state);
 }
 
 function isMcpState(state: string): state is McpServerState {
-  return MCP_STATES.has(state as McpServerState);
+  return mcpServerLifecycle.isState(state);
 }
 
 function isCompactionState(state: string): state is CompactionLifecycleState {
-  return COMPACTION_STATES.has(state as CompactionLifecycleState);
+  return compactionLifecycle.isState(state);
 }
 
 export function canTransition(from: McpServerState, to: McpServerState): boolean;
@@ -156,9 +118,7 @@ export function reachableFrom(from: RuntimeLifecycleState): ReadonlySet<RuntimeL
   if (isCompactionState(from)) return reachableFromCompactionState(from);
   if (isTaskState(from)) return new Set(getValidTaskTransitions(from));
   if (isPluginState(from)) {
-    return new Set(
-      [...PLUGIN_STATES].filter((target) => canPluginTransition(from, target)),
-    );
+    return new Set(pluginLifecycle.next(from));
   }
   return new Set();
 }

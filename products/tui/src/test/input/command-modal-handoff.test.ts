@@ -132,7 +132,8 @@ describe('command modal handoff', () => {
     expect(result.commandMode).toBe(false);
     expect(result.prompt).toBe('');
     expect(result.cursorPos).toBe(0);
-    expect(modalStack).toEqual(['selection']);
+    // 'selection' cannot be reopened and is not on screen here, so popping drops it rather than leaving a dead entry.
+    expect(modalStack).toEqual([]);
     expect(resetCount).toBe(1);
   });
 

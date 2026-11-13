@@ -160,26 +160,30 @@ export class Thing {
   });
 });
 
-describe('an undeclared schema key passes only on a settled no', () => {
-  test('a settled no passes, a yes is a credential, and everything else fails closed', async () => {
-    const { credentialReadingStanding } = await import('../scripts/credential-key-readings.ts');
-    expect(credentialReadingStanding({ verdict: 'no', outcome: 'act' })).toBe('settled-no');
-    expect(credentialReadingStanding({ verdict: 'yes', outcome: 'act' })).toBe('credential');
-    expect(credentialReadingStanding({ verdict: 'yes', outcome: 'confirm' })).toBe('credential');
-    // These passed before: the gate failed only on a yes.
-    expect(credentialReadingStanding({ verdict: 'uncertain', outcome: 'escalate' })).toBe('unsettled');
-    expect(credentialReadingStanding({ verdict: 'no', outcome: 'confirm' })).toBe('unsettled');
+describe('an undeclared schema key must not be named like a secret', () => {
+  test('the name rule matches secret-shaped final segments only', async () => {
+    const { looksLikeSecretKey } = await import('../scripts/credential-key-names.ts');
+    for (const key of ['a.apiKey', 'a.authToken', 'a.clientSecret', 'a.password', 'a.bearer']) expect(looksLikeSecretKey(key)).toBe(true);
+    for (const key of ['planner.tokenCeiling', 'runtime.toolBudget.maxTokens', 'security.tokenAudit.enabled', 'surfaces.telegram.discoveredBotTokenId']) expect(looksLikeSecretKey(key)).toBe(false);
   });
 
-  test('every stored reading for an undeclared key is currently a settled no', async () => {
-    const { credentialReadingStanding, loadCredentialKeyReadings, undeclaredSchemaKeys } = await import('../scripts/credential-key-readings.ts');
-    const stored = loadCredentialKeyReadings();
-    const unsettled = undeclaredSchemaKeys()
-      .filter(({ key }) => {
-        const reading = stored?.readings[key];
-        return reading === undefined || credentialReadingStanding(reading) !== 'settled-no';
-      })
-      .map(({ key }) => key);
-    expect(unsettled).toEqual([]);
+  test('no undeclared schema key is currently named like a secret', async () => {
+    const { looksLikeSecretKey, undeclaredSchemaKeys } = await import('../scripts/credential-key-names.ts');
+    expect(undeclaredSchemaKeys().map(({ key }) => key).filter(looksLikeSecretKey)).toEqual([]);
+  });
+});
+
+describe('the credential name rule', () => {
+  test('every declared secret-bearing key matches it or is listed as name-opaque, and the check passes on the tree', async () => {
+    const { SECRET_BEARING_CONFIG_PATHS } = await import('../platform/src/platform/config/secret-bearing-config-keys.ts');
+    const { looksLikeSecretKey, NAME_OPAQUE_SECRET_KEYS } = await import('../scripts/credential-key-names.ts');
+    const unmatched = [...SECRET_BEARING_CONFIG_PATHS].filter((key) => !looksLikeSecretKey(key) && !NAME_OPAQUE_SECRET_KEYS.includes(key));
+    expect(unmatched).toEqual([]);
+    for (const key of NAME_OPAQUE_SECRET_KEYS) expect([...SECRET_BEARING_CONFIG_PATHS]).toContain(key);
+    // Names that look similar but are not secrets stay unmatched.
+    for (const key of ['runtime.toolBudget.maxTokens', 'ui.publicUrl', 'cloud.tokenCount']) expect(looksLikeSecretKey(key)).toBe(false);
+    for (const key of ['x.apiKeys', 'x.credentials', 'x.fooPasswordRef', 'x.secretKey', 'x.webhookUrl', 'x.groupMaterial']) expect(looksLikeSecretKey(key)).toBe(true);
+    const proc = Bun.spawn(['bun', SCRIPT], { stdout: 'pipe', stderr: 'pipe' });
+    expect(await proc.exited).toBe(0);
   });
 });

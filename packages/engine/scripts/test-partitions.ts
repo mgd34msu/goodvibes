@@ -1,9 +1,6 @@
-import { assertTestManifest } from './test-manifest.ts';
-import { resolve } from 'node:path';
 import { defaultTestArgs } from './test-discovery.ts';
 
-// Capacity changes belong here, not in the runner's deadlines. CI runs these
-// on separate hosts; a local invocation still owns one sequential Bun child.
+// CI runs the engine suite as this many `--partition=I/N` jobs on separate hosts.
 export const ENGINE_TEST_PARTITIONS = 9;
 const DEDICATED_TEST_FILES = ['test/knowledge-semantic-answer.test.ts'];
 const MAX_PARTITIONS = 16;
@@ -12,10 +9,10 @@ export function partitionTestFiles(files: readonly string[], count: number): rea
   if (!Number.isSafeInteger(count) || count < 1 || count > MAX_PARTITIONS || count > files.length) {
     throw new Error(`Test partition count must be 1..${MAX_PARTITIONS} and cannot create empty partitions`);
   }
-  if (new Set(files).size !== files.length) throw new Error('Test manifest contains duplicate files');
+  if (new Set(files).size !== files.length) throw new Error('Test file list contains duplicates');
   const partitions: string[][] = Array.from({ length: count }, () => []);
-  // This complete native workflow suite needs its own host. Sharing its
-  // nine-minute CI run with ordinary suites exhausted their enclosing budget.
+  // This complete native workflow suite needs its own host; sharing it with
+  // ordinary suites exhausted their enclosing CI budget.
   const dedicated = count > DEDICATED_TEST_FILES.length
     ? DEDICATED_TEST_FILES.filter(file => files.includes(file)) : [];
   const sharedCount = count - dedicated.length;
@@ -27,67 +24,19 @@ export function partitionTestFiles(files: readonly string[], count: number): rea
   return partitions;
 }
 
-export function engineTestManifest(engineRoot: string, count?: number) {
-  const files = defaultTestArgs(engineRoot);
-  return {
-    version: 2,
-    files,
-    partitions: partitionTestFiles(files, count ?? Math.min(ENGINE_TEST_PARTITIONS, files.length)).map((selected, index, partitions) => ({
-      id: `${index + 1}/${partitions.length}`, files: selected,
-    })),
-  };
-}
-
-/** Select only the canonical default manifest; never combine a shard with filters. */
-export function partitionTestArgs(engineRoot: string, args: readonly string[]): readonly string[] | null {
-  if (!args.some((arg) => arg.startsWith('--partition') || arg.startsWith('--manifest'))) return null;
-  const partition = args.filter((arg) => arg.startsWith('--partition='));
-  const expected = args.filter((arg) => arg.startsWith('--manifest='));
-  if (partition.length !== 1 || expected.length > 1 || args.length !== partition.length + expected.length) {
-    throw new Error('Use --partition=INDEX/COUNT with optional --manifest=FILE and no other test arguments');
-  }
-  const match = /^--partition=([1-9]\d*)\/([1-9]\d*)$/.exec(partition[0]!);
+/**
+ * The files of `--partition=INDEX/COUNT`, as explicit `./test/...` paths (bun
+ * treats bare names as substring filters, so `test/a.test.ts` would also match
+ * `test/nested/test/a.test.ts` in another partition).
+ */
+export function selectPartition(engineRoot: string, spec: string): readonly string[] {
+  const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(spec);
   if (!match) throw new Error('Invalid test partition; expected --partition=INDEX/COUNT');
   const index = Number(match[1]);
   const count = Number(match[2]);
-  const manifest = engineTestManifest(engineRoot, count);
-  if (!Number.isSafeInteger(index) || index > count) throw new Error('Test partition index is outside its manifest');
-  if (expected.length > 0) assertTestManifest(expected[0]!.slice('--manifest='.length), manifest, 'Engine');
-  const selected = manifest.partitions[index - 1]!;
-  console.log(`[engine-tests] partition ${selected.id}: ${selected.files.length}/${manifest.files.length} files`);
-  // Bun treats bare test/... arguments as substring filters. Explicit paths
-  // prevent test/a.test.ts from also selecting test/nested/test/a.test.ts in
-  // another partition. Keep the canonical manifest independent of argv.
-  return selected.files.map((file) => `./${file}`);
-}
-
-/** Complete platform matrix, generated from the very manifest each runner selects. */
-export function platformTestMatrix(engineRoot: string) {
-  const manifest = engineTestManifest(engineRoot);
-  return { include: [
-    ...manifest.partitions.map((partition, index) => ({
-      platform: 'bun',
-      name: `bun ${partition.id}`,
-      'node-version': '22',
-      foundation: index === 0,
-      // This dedicated workflow declares a four-minute test. Its watchdog
-      // must let that test settle; ordinary partitions keep the default stall
-      // ceiling and every partition retains the same finite overall deadline.
-      'test-cmd': `GOODVIBES_TEST_CEILING_MS=900000${partition.files.some(file => DEDICATED_TEST_FILES.includes(file)) ? ' GOODVIBES_TEST_STALL_MS=270000' : ''} bun packages/engine/scripts/test.ts --partition=${partition.id} --manifest=/tmp/engine-test-manifest/engine-test-manifest.json`,
-    })),
-    ...[
-      ['rn-bundle', 'test:rn'], ['workers', 'test:workers'], ['workers-wrangler', 'test:workers:wrangler'],
-    ].map(([platform, script]) => ({
-      platform: platform!, name: platform!, 'node-version': '22', foundation: false, 'test-cmd': `bun run ${script}`,
-    })),
-  ] };
-}
-
-if (import.meta.main) {
-  const mode = process.argv[2];
-  if (process.argv.length !== 3 || !['matrix', 'manifest'].includes(mode ?? '')) {
-    throw new Error('Usage: bun packages/engine/scripts/test-partitions.ts matrix|manifest');
-  }
-  const root = resolve(import.meta.dir, '..');
-  console.log(JSON.stringify(mode === 'matrix' ? platformTestMatrix(root) : engineTestManifest(root)));
+  if (index > count) throw new Error('Test partition index is outside its partition count');
+  const files = defaultTestArgs(engineRoot);
+  const selected = partitionTestFiles(files, count)[index - 1]!;
+  console.log(`[engine-tests] partition ${index}/${count}: ${selected.length}/${files.length} files`);
+  return selected.map((file) => `./${file}`);
 }

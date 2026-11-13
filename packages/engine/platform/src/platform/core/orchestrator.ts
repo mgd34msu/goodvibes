@@ -338,7 +338,8 @@ export class Orchestrator {
     this.compactionManager = createSessionCompactionManager(this.currentSessionId, runtimeBus, flagManager, () => this.coreServices.providerRegistry);
     this.agentManager = services.agentManager; this.contractRunner = services.contractRunner; this.contractIntake = services.contractIntake;
     this.followUpRuntime = new OrchestratorFollowUpRuntime({
-      getThinkingState: () => ({ isThinking: this.isThinking || this.turnInFlight || this.activeNativeConversationTurn, isCompacting: this.isCompacting }),
+      // Compaction is reported separately: the follow-up runtime waits on it as its own condition.
+      getThinkingState: () => ({ isThinking: this.isThinking || this.isTurnInFlight, isCompacting: this.isCompacting }),
       getQueuedUserMessageCount: () => this.messageQueue.length,
       routeLowPriorityMessage: (message) => {
         if (this.systemMessageRouter) this.systemMessageRouter.low(message);
@@ -491,7 +492,9 @@ export class Orchestrator {
   public enqueueConversationFollowUp(item: ConversationFollowUpItem): void {
     // The live coordinator already observes the typed event and waits for its
     // own delegates. Do not schedule a second reply after its checked final.
-    if (this.turnInFlight || this.activeNativeConversationTurn) return;
+    // Deliberately only execution ownership, not isThinking/isCompacting: the follow-up runtime
+    // holds its own flush while those are set, so the item is kept rather than dropped.
+    if (this.isTurnInFlight) return;
     this.followUpRuntime.enqueue(item);
   }
 
@@ -647,7 +650,7 @@ export class Orchestrator {
     if (options?.nativeConversationTurnPermit) {
       if (!this.nativeConversationProjectId) throw new NativeConversationTurnAdmissionError('identity_mismatch');
       validateNativeConversationTurn(options.nativeConversationTurnPermit, text, content, this.nativeConversationProjectId);
-      if (options.requireImmediateNativeTurn && (this.disposed || this.turnInFlight || this.activeNativeConversationTurn || this.isThinking || this.isCompacting)) {
+      if (options.requireImmediateNativeTurn && (this.disposed || this.isTurnOccupied)) {
         throw new NativeConversationTurnAdmissionError('recovery_required');
       }
     }
@@ -659,7 +662,7 @@ export class Orchestrator {
     options = options ? Object.freeze({ ...options, ...(options.origin ? { origin: Object.freeze({ ...options.origin }) } : {}) }) : undefined;
     if (nativeTurn && content) content = [{ type: 'text', text }];
 
-    if (this.turnInFlight || this.activeNativeConversationTurn || this.isThinking || this.isCompacting) {
+    if (this.isTurnOccupied) {
       this.queuedMessageSeq += 1;
       const id = `qm-${this.queuedMessageSeq}`;
       this.messageQueue.push({ id, queuedAt: Date.now(), text, content, options, nativeTurn });
@@ -714,7 +717,7 @@ export class Orchestrator {
    */
   private async drainMessageQueue(): Promise<void> {
     let failure: unknown;
-    while (!this.disposed && this.messageQueue.length > 0 && !this.turnInFlight && !this.activeNativeConversationTurn && !this.isThinking && !this.isCompacting) {
+    while (!this.disposed && this.messageQueue.length > 0 && !this.isTurnOccupied) {
       const next = this.messageQueue.shift()!;
       this.emitQueueChange('delivered', next.id);
       try { await withTurnSurface(next.options?.origin, () => this.runTurn(next.text, next.content, next.options, next.nativeTurn)); }
@@ -731,7 +734,8 @@ export class Orchestrator {
   private setCompacting(value: boolean): void {
     const wasCompacting = this.isCompacting;
     this.isCompacting = value;
-    if (wasCompacting && !value && !this.turnInFlight && !this.activeNativeConversationTurn && !this.isThinking && this.messageQueue.length > 0) {
+    // isCompacting was just cleared (wasCompacting && !value), so this is the same question as isTurnOccupied.
+    if (wasCompacting && !value && !this.isTurnOccupied && this.messageQueue.length > 0) {
       void this.drainMessageQueue().catch((err) => logger.error('Orchestrator: queued message drain after compaction failed', {
         error: err instanceof Error ? err.message : String(err),
       }));
@@ -743,7 +747,9 @@ export class Orchestrator {
   /** Actual execution ownership, including cancellation and hook drainage. */
   public get isTurnInFlight(): boolean { return this.turnInFlight || this.activeNativeConversationTurn; }
   /** Session replacement must wait for admission, streaming, compaction and queued input. */
-  public get isBusy(): boolean { return this.isTurnInFlight || this.isThinking || this.isCompacting || this.messageQueue.length > 0; }
+  public get isBusy(): boolean { return this.isTurnOccupied || this.messageQueue.length > 0; }
+  /** The one "a new turn cannot start now" question: execution owned, thinking, or compacting. Queued input is not part of it. */
+  private get isTurnOccupied(): boolean { return this.isTurnInFlight || this.isThinking || this.isCompacting; }
 
   private startThinking(estimatedInputTokens?: number, resume = false): void {
     this.postTurnPlanOwner = {};

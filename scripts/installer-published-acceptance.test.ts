@@ -680,7 +680,7 @@ test('release publication is last while explicitly requested public acceptance r
   const staged = object(release['staged-install-acceptance']), publisher = object(release['github-release']);
   const existing = object(suite['published-install-acceptance']);
   expect(staged.uses).toBe('./.github/workflows/reusable-staged-install-acceptance.yml');
-  expect(existing.uses).toBe(reusable); expect(existing.needs).toBe('collect');
+  expect(existing.uses).toBe(reusable); expect(existing.needs).toEqual(['collect', 'previous-release']);
   expect(release['published-install-acceptance']).toBeUndefined();
   expect(publisher.needs).toContain('staged-install-acceptance');
   expect(String(publisher.if)).toContain("needs.staged-install-acceptance.result == 'success'");
@@ -689,6 +689,10 @@ test('release publication is last while explicitly requested public acceptance r
   }
   expect(existing.if).toBe("inputs.publish_existing && inputs.candidate-source == '' && needs.collect.result == 'success'");
   expect(object(existing.with).source).toBe('${{ needs.collect.outputs.source }}');
+  expect(object(existing.with)['previous-tag']).toBe('${{ needs.previous-release.outputs.tag }}');
+  expect(object(existing.with)['previous-source']).toBe('${{ needs.previous-release.outputs.source }}');
+  expect(object(staged.with)['previous-tag']).toBe('${{ needs.verify-tag-version.outputs.previous-tag }}');
+  expect(object(staged.with)['previous-source']).toBe('${{ needs.verify-tag-version.outputs.previous-source }}');
   expect(object(object(suite.collect).outputs).source).toBe('${{ steps.admit.outputs.source }}');
   for (const caller of [staged, existing]) expect(object(caller.with)['tooling-sha']).toBe('${{ github.sha }}');
   const definition = workflow('reusable-published-install-acceptance.yml');
@@ -835,23 +839,4 @@ test('historical rollback accepts only the actual admission refusal and checks o
     return () => { if (++checks > 1) throw new Error('Original installed file changed'); };
   };
   await expect(assertHistoricalRollbackRefusal(input, verifier)).rejects.toThrow('Original installed file changed');
-});
-
-test('historical upgrade uses separate Linux-only hosted accounts and a verifier build without native payload copying', () => {
-  const value = Bun.YAML.parse(readFileSync(resolve(import.meta.dir, '../.github/workflows/reusable-published-install-acceptance.yml'), 'utf8')) as {
-    jobs: Record<string, { if: string; strategy: { matrix: { include: Array<{ target: string; runner: string }> } }; steps: Array<{ name?: string; run?: string; uses?: string; with?: Record<string, unknown>; env?: Record<string, string> }> }>;
-  };
-  const job = value.jobs['historical-linux-upgrade']!;
-  expect(job.if).toBe("inputs.tag == 'v3.1.2'");
-  expect(job.strategy.matrix.include).toEqual([{ target: 'linux-x64', runner: 'ubuntu-24.04' }, { target: 'linux-arm64', runner: 'ubuntu-22.04-arm' }]);
-  expect(job.steps.find(step => String(step.uses).startsWith('actions/checkout@'))?.with).toEqual({ ref: '${{ inputs.source }}' });
-  expect(job.steps.find(step => step.name === 'Verify the original released payload source')?.run).toBe('test "$(git rev-parse HEAD)" = "$PAYLOAD_SOURCE"');
-  expect(job.steps.find(step => step.name === 'Build only the source-bound rollback verifier')?.run)
-    .toBe('bun install --frozen-lockfile\nbun packages/engine/scripts/build.ts\n');
-  const upgrade = job.steps.find(step => step.name === 'Observe actual old unattended upgrade and unsupported rollback refusal');
-  expect(upgrade?.env).toEqual({
-    RELEASE_TAG: '${{ inputs.tag }}', RELEASE_SOURCE: '${{ inputs.source }}', RELEASE_TARGET: '${{ matrix.target }}',
-  });
-  expect(upgrade?.run)
-    .toBe('node scripts/accept-published-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET" upgrade-v3.1.1');
 });

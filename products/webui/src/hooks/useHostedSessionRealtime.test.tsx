@@ -37,6 +37,7 @@ function renderHook(attachedSessionId: string | null = null): {
   invalidate: ReturnType<typeof mock>;
   frames: StreamFrame[];
   lifecycleUpdates: unknown[];
+  state: () => { connected: boolean; error: string | null };
   unmount: () => void;
 } {
   const client = new QueryClient();
@@ -50,8 +51,9 @@ function renderHook(attachedSessionId: string | null = null): {
   document.body.appendChild(container);
   const root = createRoot(container);
 
+  let latest: { connected: boolean; error: string | null } = { connected: false, error: null };
   function Harness() {
-    useHostedSessionRealtime({
+    latest = useHostedSessionRealtime({
       enabled: true,
       attachedSessionId,
       onStreamFrame: (frame) => frames.push(frame),
@@ -68,6 +70,7 @@ function renderHook(attachedSessionId: string | null = null): {
     invalidate,
     frames,
     lifecycleUpdates,
+    state: () => latest,
     unmount: () => {
       flushSync(() => root.unmount());
       if (container.parentNode) container.parentNode.removeChild(container);
@@ -81,6 +84,24 @@ afterEach(() => {
 });
 
 describe('useHostedSessionRealtime', () => {
+  test('a transport error body (raw 401 JSON) never reaches the returned error', () => {
+    const { state, unmount } = renderHook();
+    flushSync(() => capturedHandlers?.onError?.(new Error('{"error":"Authentication required","code":"AUTH_REQUIRED","status":401}')));
+    expect(state().error).not.toBeNull();
+    expect(state().error).not.toContain('AUTH_REQUIRED');
+    expect(state().error).not.toContain('{');
+    unmount();
+  });
+
+  test('the terminal state does not claim it is still reconnecting', () => {
+    const { state, unmount } = renderHook();
+    flushSync(() => capturedHandlers?.onTerminate?.({ error: null, reconnectAttempts: 3 }));
+    expect(state().connected).toBe(false);
+    expect(state().error).not.toBeNull();
+    expect(state().error?.toLowerCase()).not.toContain('reconnecting');
+    unmount();
+  });
+
   test('opens one stream narrowed to session, turn and tools', () => {
     const { unmount } = renderHook();
     expect(openCalls.length).toBe(1);

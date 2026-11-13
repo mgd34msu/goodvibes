@@ -108,6 +108,14 @@ export function ChatView({
   const setTurnState = useCallback<Dispatch<SetStateAction<string>>>((next) => {
     if (next === 'sending' || next === 'submitted' || next === 'sending while reconnecting') {
       responseBaselineRef.current = new Set(assistantIdsRef.current);
+    } else if (next === 'running' && !responseBaselineRef.current) {
+      // A turn this tab did not send (initial mount, after a session switch, another
+      // client): snapshot the replies that already exist so they never count as this turn's.
+      responseBaselineRef.current = new Set(assistantIdsRef.current);
+    } else if (next === 'completed' || next === 'stopped' || next === 'stopped locally') {
+      // The turn is over: its baseline must not be reused for a later turn started
+      // by another client, whose `running` then takes a fresh snapshot above.
+      responseBaselineRef.current = null;
     }
     setTurn((current) => ({
       ...current,
@@ -455,6 +463,13 @@ export function ChatView({
 
   useEffect(() => {
     if ((!ACTIVE_TURN_STATES.includes(turnState) && turnState !== 'syncing') || liveText) return;
+    if (!responseBaselineRef.current && turnState !== 'syncing') {
+      // No baseline yet while the turn is still live: any assistant message present now
+      // predates it. Establish it BEFORE comparing, so an old reply is never taken for
+      // the new one. ('syncing' is a turn already concluding, its reply is the last message.)
+      responseBaselineRef.current = new Set(assistantIdsRef.current);
+      return;
+    }
     const lastMessage = renderedMessageItems.at(-1);
     if (lastMessage && messageTone(lastMessage) === 'assistant' && !responseBaselineRef.current?.has(bestId(lastMessage))) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- guarded by condition; resolves syncing state after DB messages load

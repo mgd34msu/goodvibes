@@ -21,6 +21,22 @@ export function isNativeCompletedWorkReceipt(original: unknown, admitted: unknow
   catch { return false; }
 }
 
+// The runner returns a fresh copy of every contract on each listing, so an
+// object-keyed cache could never hit. Contract ids are stable: remember the last
+// hashed value per (kind, contract) and reuse its digest only while the value is
+// still exactly equal. Bounded; never consulted for a different value.
+const DIGEST_MEMO_LIMIT = 512;
+const digestMemo = new Map<string, { readonly value: unknown; readonly digest: string }>();
+function memoHash(kind: string, contractId: string, value: Parameters<typeof hashState>[0]): string {
+  const key = `${kind}\0${contractId}`, hit = digestMemo.get(key);
+  if (hit !== undefined && (typeof value === 'string' ? hit.value === value : isDeepStrictEqual(hit.value, value))) return hit.digest;
+  const digest = hashState(value);
+  digestMemo.delete(key);
+  digestMemo.set(key, { value: typeof value === 'string' ? value : structuredClone(value), digest });
+  if (digestMemo.size > DIGEST_MEMO_LIMIT) digestMemo.delete(digestMemo.keys().next().value!);
+  return digest;
+}
+
 function recordedReview(contract: ContractView, target: 'final-answer-review' | 'goal-obligations' | 'original-obligations', answerDigest: () => string | null) {
   const decision = contract.decisions.findLast(entry => entry.targetId === `${contract.id}.${target}`);
   if (!decision) return null;
@@ -57,8 +73,8 @@ function recordedReview(contract: ContractView, target: 'final-answer-review' | 
             && reading(record.reading) && reading(record.sourceGoal));
     return { record, recordedDecisionId: decision.id, wellFormed,
       matchesSavedAnswer: wellFormed && record.outputDigest === answerDigest(),
-      ...(target === 'goal-obligations' ? { matchesOriginalScope: wellFormed && record.literalSourceDigest === hashState(goalObligationSource(contract)) } : {}),
-      ...(target === 'original-obligations' ? { matchesOriginalScope: wellFormed && record.sourceDigest === hashState(originalObligationSource(contract)) } : {}),
+      ...(target === 'goal-obligations' ? { matchesOriginalScope: wellFormed && record.literalSourceDigest === memoHash('goal-source', contract.id, goalObligationSource(contract)) } : {}),
+      ...(target === 'original-obligations' ? { matchesOriginalScope: wellFormed && record.sourceDigest === memoHash('original-source', contract.id, originalObligationSource(contract)) } : {}),
       meaning: 'Exact saved native Jev receipt with host-computed bindings. A mismatched or rejected receipt is not acceptance. A matching passed receipt establishes review of that saved result under its recorded policy; it grants no current final-response permit.' };
   } catch { return null; }
 }
@@ -75,7 +91,7 @@ export function completedContractEvidence(runner: Pick<ContractRunner, 'list'>, 
       // observation. The complete answer itself is already returned below.
       const answer = contract.answer;
       let retainedAnswerDigest: string | undefined;
-      const answerDigest = () => typeof answer === 'string' ? retainedAnswerDigest ??= hashState(answer) : null;
+      const answerDigest = () => typeof answer === 'string' ? retainedAnswerDigest ??= memoHash('answer', contract.id, answer) : null;
       const originalObligationCoverage = recordedReview(contract, 'original-obligations', answerDigest);
       const hasOriginalObligationCoverage = contract.decisions.some(decision => decision.targetId === `${contract.id}.original-obligations`);
       const work = {

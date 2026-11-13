@@ -127,4 +127,30 @@ describe('AgentResearchRunRegistry', () => {
       fixture.cleanup();
     }
   });
+  test('refuses illegal status moves and names the legal ones', () => {
+    const fixture = makeRegistry();
+    try {
+      const run = fixture.registry.create({ title: 'Lifecycle', question: 'Which moves are legal?' });
+      // planned: not pausable, not resumable; start is the way in.
+      expect(() => fixture.registry.pause(run.id)).toThrow(/planned and cannot become paused; from planned it can become running/);
+      expect(() => fixture.registry.resume(run.id)).toThrow(/planned.*start/i);
+      fixture.registry.start(run.id);
+      // running never returns to planned, by checkpoint or otherwise.
+      expect(() => fixture.registry.checkpoint(run.id, { status: 'planned', note: 'reset' })).toThrow(/running and cannot become planned/);
+      expect(fixture.registry.get(run.id)?.status).toBe('running');
+      // start is for planned runs; paused/blocked runs use resume.
+      fixture.registry.pause(run.id);
+      expect(() => fixture.registry.start(run.id)).toThrow(/paused.*resume/i);
+      expect(fixture.registry.resume(run.id).status).toBe('running');
+      // blocked is left by resume, not parked by pause.
+      fixture.registry.checkpoint(run.id, { status: 'blocked', note: 'search down' });
+      expect(() => fixture.registry.pause(run.id)).toThrow(/blocked and cannot become paused/);
+      expect(fixture.registry.resume(run.id).status).toBe('running');
+      // a same-status checkpoint still works, and phase may move backwards.
+      fixture.registry.checkpoint(run.id, { phase: 'reviewing', note: 'review' });
+      expect(fixture.registry.checkpoint(run.id, { phase: 'searching', note: 're-search' }).phase).toBe('searching');
+    } finally {
+      fixture.cleanup();
+    }
+  });
 });

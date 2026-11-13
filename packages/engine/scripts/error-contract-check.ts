@@ -1,6 +1,5 @@
 import { createReadStream, readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { CHECKED_FILES, loadStaleServerKindReadings, staleServerKindFindings } from './stale-server-kind-readings.ts';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -140,17 +139,22 @@ async function assertRetryContract(): Promise<void> {
   }
 }
 
-/**
- * The consumer-facing error docs and worker tests must not present 'server'
- * as an error kind. Whether a file does is read through Jev
- * (`errors.stale-server-kind`) by `bun run error-kinds:read` and stored per
- * file content in etc/stale-server-kind-readings.json; this check is offline
- * and passes only a settled no for each file's current text.
- */
-function assertNoStaleServerKindDocs(): void {
-  const findings = staleServerKindFindings(repoRoot, CHECKED_FILES, loadStaleServerKindReadings());
-  if (findings.length > 0) fail(findings.join('\nerror-contract-check: '));
+/** Consumer-facing docs and worker tests that must not present 'server' as an error kind. */
+const STALE_KIND_FILES = [
+  'docs/browser-integration.md',
+  'docs/error-handling.md',
+  'docs/error-kinds.md',
+  'docs/expo-integration.md',
+  'docs/react-native-integration.md',
+  'docs/web-ui-integration.md',
+  'test/workers/workers.test.ts',
+  'test/workers-wrangler/wrangler.test.ts',
+];
 
+function assertNoStaleServerKindDocs(): void {
+  for (const rel of STALE_KIND_FILES) {
+    if (/(['"`])server\1/.test(read(rel))) fail(`${rel} still names the removed EngineErrorKind 'server'`);
+  }
 }
 
 assertErrorKindContract();

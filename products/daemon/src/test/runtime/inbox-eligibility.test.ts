@@ -73,3 +73,47 @@ test('invalid currentness withdraws on probe without inventing expiry for valid 
   expect(f.events).toContain('withdrawn');
   await f.owner.close();
 });
+
+function failureFixture(register: () => () => Promise<void>, stop: () => Promise<void> = async () => {}) {
+  const clock = new FakeClusterClock();
+  const authority = new AbortController();
+  const proof = { signal: authority.signal, assertCurrent() {} };
+  const logs: string[] = [];
+  let calls = 0;
+  const owner = ownInboxEligibility({ clock, verify: async () => { calls++; return proof; },
+    control: { async start() {}, stop },
+    register,
+    log: message => { logs.push(message); },
+  });
+  return { clock, authority, owner, logs, get calls() { return calls; } };
+}
+
+test('a transient registration failure is logged and the next scheduled probe registers again', async () => {
+  let attempts = 0;
+  const f = failureFixture(() => {
+    attempts++;
+    if (attempts === 1) throw new Error('registry busy');
+    return async () => {};
+  });
+  await f.owner.ready.catch(() => {}); await flush();
+  expect(attempts).toBe(1);
+  expect(f.logs.length).toBeGreaterThan(0);
+  f.clock.advance(30_000); await flush();
+  expect(f.calls).toBe(2);
+  expect(attempts).toBe(2);
+  await f.owner.close();
+});
+
+test('a failed retirement stops probing permanently and says so', async () => {
+  let stopFails = false;
+  const f = failureFixture(() => async () => {}, async () => { if (stopFails) throw new Error('drain failed'); });
+  await f.owner.ready; await flush();
+  stopFails = true;
+  f.authority.abort(); await flush();
+  expect(f.logs.some(line => /stopp|retire|withdraw/i.test(line))).toBe(true);
+  const before = f.calls;
+  f.clock.advance(30_000); await flush();
+  f.clock.advance(30_000); await flush();
+  expect(f.calls).toBe(before);
+  await expect(f.owner.close()).rejects.toThrow('did not retire cleanly');
+});

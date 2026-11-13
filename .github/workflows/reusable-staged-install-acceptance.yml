@@ -88,9 +88,7 @@ jobs:
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]
           test "$(git rev-parse HEAD)" = "$TOOLING_SHA"
           git cat-file -e "$SOURCE_SHA^{commit}"
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
-        with:
-          bun-version: '1.3.14'
+      - uses: ./.github/actions/bun
       - name: Download the exact admitted native artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -174,81 +172,11 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  historical-linux-upgrade:
-    needs: [stage-release-assets]
-    # The published v3.1.1 unattended updater supports Linux only. These are
-    # separate fresh accounts; native-install's four fresh-install lanes remain.
-    if: inputs.tag == 'v3.1.2'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-x64
-            runner: ubuntu-24.04
-          - target: linux-arm64
-            runner: ubuntu-22.04-arm
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: ${{ inputs.tooling-sha }}
-          fetch-depth: 0
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: ${{ inputs.source }}
-          path: candidate-source
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-        with:
-          node-version: '22'
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
-        with:
-          bun-version: '1.3.14'
-      - name: Verify current tooling and original payload source separately
-        env:
-          PAYLOAD_SOURCE: ${{ inputs.source }}
-          TOOLING_SHA: ${{ inputs.tooling-sha }}
-        run: |
-          test "$(git rev-parse HEAD)" = "$TOOLING_SHA"
-          test "$(git -C candidate-source rev-parse HEAD)" = "$PAYLOAD_SOURCE"
-          test -f scripts/accept-staged-suite.mjs
-      - name: Build only the source-bound rollback verifier
-        # These JS outputs only support rollback verification. Installed
-        # programs and automatic delivery use the staged native artifact.
-        working-directory: candidate-source
-        run: |
-          bun install --frozen-lockfile
-          bun packages/engine/scripts/build.ts
-      - name: Download the staged artifact from this acceptance run
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: staged-release-assets
-          path: ${{ runner.temp }}/staged-release-assets
-      - name: Observe actual old unattended upgrade and unsupported rollback refusal
-        env:
-          GOODVIBES_ACCEPTANCE_METADATA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ inputs.tag }}
-          RELEASE_SOURCE: ${{ inputs.source }}
-          RELEASE_TARGET: ${{ matrix.target }}
-          CANDIDATE_SOURCE_ROOT: ${{ github.workspace }}/candidate-source
-        run: node scripts/accept-staged-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET" "$RUNNER_TEMP/staged-release-assets" upgrade-v3.1.1
-      - name: Preserve bounded historical delivery result
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: staged-upgrade-v3.1.1-${{ matrix.target }}
-          path: ${{ runner.temp }}/goodvibes-published-*/acceptance-result.json
-          if-no-files-found: warn
-          retention-days: 7
-
   previous-release-upgrade:
     needs: [stage-release-assets]
     # Four original hosted accounts exercise the real previous published suite.
-    # The original v3.1.1 historical job remains a separate evidence path.
-    if: inputs.tag != 'v3.1.2' || inputs.previous-tag != '' || inputs.previous-source != ''
+    # A release with no earlier version tag has nothing to upgrade from.
+    if: inputs.previous-tag != '' && inputs.previous-source != ''
     strategy:
       fail-fast: false
       matrix:
@@ -301,9 +229,7 @@ jobs:
         with:
           node-version: '22'
       - name: Setup Bun for the original source lifecycle writer
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
-        with:
-          bun-version: '1.3.14'
+        uses: ./.github/actions/bun
       - name: Download the staged artifact from this acceptance run
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:

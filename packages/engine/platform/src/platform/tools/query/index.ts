@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Tool } from '../../types/tools.js';
 import { resolveScopedDirectory } from '../../runtime/surface-root.js';
+import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import { QUERY_TOOL_SCHEMA, type QueryToolInput } from './schema.js';
 
 interface QueryRecord {
@@ -15,6 +16,13 @@ interface QueryRecord {
   readonly createdAt: number;
   readonly updatedAt: number;
 }
+
+/** A query is asked (open), may be answered (and its answer revised), and is closed for good; a closed query is never reopened. */
+const queryLifecycle = defineLifecycle<QueryRecord['status']>('query', {
+  open: ['answered', 'closed'],
+  answered: ['answered', 'closed'],
+  closed: [],
+});
 
 function summarizeQuery(record: QueryRecord) {
   return {
@@ -107,6 +115,8 @@ export function createQueryTool(
 
       if (input.mode === 'answer') {
         if (!input.answer) return { success: false, error: 'answer requires answer text.' };
+        const move = queryLifecycle.check(record.status, 'answered');
+        if (!move.ok) return { success: false, error: move.reason };
         const next: QueryRecord = {
           ...record,
           answer: input.answer,
@@ -118,6 +128,8 @@ export function createQueryTool(
       }
 
       if (input.mode === 'close') {
+        const move = queryLifecycle.check(record.status, 'closed');
+        if (!move.ok) return { success: false, error: move.reason };
         const next: QueryRecord = {
           ...record,
           ...(input.resolution ? { resolution: input.resolution } : {}),

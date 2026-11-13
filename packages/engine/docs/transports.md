@@ -39,7 +39,9 @@ connector (`createWebSocketConnector`) adds connection-lifecycle hooks that the
 SSE connector (`createEventSourceConnector`) does not fire:
 
 - `onConnectionStateChange(state)`: `state` is one of `'connecting'`,
-  `'connected'`, `'reconnecting'`, `'disconnected'`, `'failed'`.
+  `'connected'`, `'reconnecting'`, `'disconnected'`, `'failed'`. `'failed'` is
+  final: disposing a connector that has given up reconnecting does not emit
+  `'disconnected'` afterwards.
 - `onReconnectAttempt(info)`: `info` is `{ attempt, maxAttempts, delayMs, reason }`.
   The legacy `onReconnect(attempt, delayMs)` is `@deprecated` but still fired.
 - `onOpen()` and `onBackpressure(info)` signal connect and outbound-queue saturation.

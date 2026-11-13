@@ -176,6 +176,8 @@ export class McpClient {
   private buffer = '';
   private readLoopRunning = false;
   private restartCount = 0;
+  /** The pending crash-restart timer, held so a deliberate disconnect can cancel it. */
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private initialized = false;
   /** Set true by disconnect() to suppress the read-loop's auto-restart. Reset on each successful _startProcess(). */
   private intentionalClose = false;
@@ -285,7 +287,9 @@ export class McpClient {
     if (this.http) return this.http.isOpen;
     if (!this.proc) return false;
     try {
-      return (this.proc as { exitCode: number | null }).exitCode === null;
+      // A process ended by a signal (kill, crash) has a null exitCode but a signalCode.
+      const proc = this.proc as { exitCode: number | null; signalCode?: string | null };
+      return proc.exitCode === null && (proc.signalCode ?? null) === null;
     } catch {
       return false;
     }
@@ -324,6 +328,8 @@ export class McpClient {
     if (this.proc && this.isConnected) return;
     await this._startProcess();
     await this._negotiate();
+    // Only a negotiated connection counts as a successful start.
+    this.restartCount = 0;
   }
 
   /**
@@ -472,6 +478,7 @@ export class McpClient {
     // resurrect the process via _scheduleRestart(). Set synchronously before
     // any await so it is already true when the detached read loop runs.
     this.intentionalClose = true;
+    this._cancelRestart();
     this.retireConnection();
     if (this.http) {
       const http = this.http;
@@ -530,7 +537,6 @@ export class McpClient {
         ...(cwd ? { cwd } : {}),
       });
       this.buffer = '';
-      this.restartCount = 0;
       this.intentionalClose = false;
       this._startReadLoop();
     } catch (err) {
@@ -928,26 +934,61 @@ export class McpClient {
     }
   }
 
+  private _cancelRestart(): void {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+  }
+
   private _scheduleRestart(): void {
+    this._cancelRestart();
     this.restartCount++;
     const delay = RESTART_DELAY_MS * this.restartCount;
     logger.info('McpClient: scheduling restart', { server: this.config.name, attempt: this.restartCount, delayMs: delay });
 
     const timer = setTimeout(async () => {
+      if (this.restartTimer === timer) this.restartTimer = null;
       if (this.intentionalClose) return; // Deliberately disconnected, do not restart
       if (this.proc && this.isConnected) return; // Already restarted by something else
       try {
         await this._startProcess();
         await this._negotiate();
+        // A restart only counts once the server has negotiated; a process that
+        // spawns and then crashes must still run out of attempts.
+        this.restartCount = 0;
         // Invalidate tool caches so they're re-fetched after restart (the
         // restarted server may advertise changed tool lists or schemas).
         this.#invalidateToolCatalog();
         logger.info('McpClient: restart successful', { server: this.config.name });
       } catch (err) {
         logger.error('McpClient: restart failed', { server: this.config.name, err: summarizeError(err) });
+        this._handleFailedRestart();
       }
     }, delay);
     timer.unref?.();
+    this.restartTimer = timer;
+  }
+
+  /**
+   * A restart attempt did not produce a negotiated server. Treat it like a crash:
+   * a live but un-negotiated process is killed so the read loop's exit path
+   * counts the attempt and either schedules the next one or gives up, leaving the
+   * client disconnected. A process that already exited is handled by that same
+   * path; only a failed spawn (no process at all) needs scheduling here.
+   */
+  private _handleFailedRestart(): void {
+    if (this.intentionalClose) return;
+    const proc = this.proc;
+    if (proc) {
+      try { proc.kill(); } catch { /* already gone; the read loop reports the exit */ }
+      return;
+    }
+    if (this.restartCount < MAX_RESTART_ATTEMPTS) {
+      this._scheduleRestart();
+    } else {
+      logger.info('McpClient: exceeded max restart attempts', { server: this.config.name });
+    }
   }
 
   /**

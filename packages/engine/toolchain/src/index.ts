@@ -26,7 +26,6 @@ export * from './lib/publish-package.js';
 export * from './lib/changelog-gate.js';
 export * from './lib/sha256sums.js';
 export * from './lib/train-status.js';
-export { suiteWorkflowProblems } from './lib/suite-workflow-contract.js';
 
 export { nativeAddonFailure } from './batteries/native-addon-failure.js';
 

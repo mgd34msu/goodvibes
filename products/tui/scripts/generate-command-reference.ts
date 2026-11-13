@@ -6,8 +6,5 @@
  */
 import { join } from 'node:path';
 import { syncCommandReference } from './project-surfaces.ts';
-import { withWorkspaceLock } from './workspace-lock.ts';
 
-withWorkspaceLock('sync command reference', () => {
-  syncCommandReference(join(import.meta.dir, '..'));
-});
+syncCommandReference(join(import.meta.dir, '..'));

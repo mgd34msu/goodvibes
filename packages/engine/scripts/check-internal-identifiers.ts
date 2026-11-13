@@ -1,129 +1,76 @@
 // check-internal-identifiers.ts
 //
-// CI/pre-commit gate: fails the build when internal planning identifiers
-// (wave/work-order/debt-register/UX-workstream/lettered-finding shorthand)
-// appear in tracked text. See internal-identifier-rule.ts for the content-bound reading, the owner doctrine quoted verbatim, and the exemption rules
-// (docs/decisions/** is the sanctioned home for that shorthand).
+// Pre-release gate: internal planning labels (wave / work-order / debt-register /
+// UX-workstream ids) and unfinished-work comment markers must not appear in
+// tracked text. Pure regex over the source tree, no stored state.
+// docs/decisions/** is the sanctioned home for planning shorthand.
 //
-// Scanned: packages/*/src, scripts/, docs/, test/, eval/, examples/, and
-// root-level markdown, .ts/.tsx/.md files, excluding dist/, node_modules/,
-// generated/, and vendor/ (generated and vendored text is not hand-authored here).
-//
-// Test-harness overrides:
-//   INTERNAL_ID_ROOT      , override the repo root directory
-//   INTERNAL_ID_DIRS_JSON , JSON array of dirs/files to scan, relative to
-//                            INTERNAL_ID_ROOT (default: the standard set)
-//
-// Usage:
 //   bun run internal-id:check
-//   bun scripts/check-internal-identifiers.ts
+//
+// Test override: INTERNAL_ID_ROOT replaces the engine package root.
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import type { Dirent } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
-import {
-  checkNoInternalIdentifiers,
-  type InternalIdentifierCandidate,
-} from './internal-identifier-rule.ts';
-import { loadStaticSourceReadings } from './static-source-readings.ts';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 export const INTERNAL_ID_ROOT = process.env.INTERNAL_ID_ROOT ?? resolve(import.meta.dir, '..');
 
-const TEXT_EXTENSIONS = new Set(['.ts', '.tsx', '.md', '.json']);
-const SKIP_DIR_NAMES = new Set(['node_modules', 'dist', '.git', 'generated', 'vendor']);
+const ID_PATTERNS: readonly RegExp[] = [
+  /\bW\d+\.\d+\b/, // wave.item
+  /\bWO-[0-9A-Z]+\b/, // work-order
+  /\bwo\d{3}\b/, // numeric work-order
+  /\bDEBT-\d+\b/, // debt register
+  /\bUX-[A-Z]\b/, // UX workstream
+  /\bWave[ -]\d+\b/, // wave word-form
+  /\bW\d+-R\d+\b/, // wave round
+];
+const MARKER_PATTERN = /(?:\/\/|\/\*|^\s*\*|#)\s*(?:TODO|FIXME|XXX|HACK)\b/;
 
-/**
- * Extensionless files (shell scripts like the tracked git hooks) are
- * hand-authored text too: a dot-less basename is scanned rather than skipped,
- * so a hook script cannot hide an identifier behind a missing extension.
- */
-function isScannableFile(target: string): boolean {
-  const base = target.split('/').pop()!.split('\\').pop()!;
-  const dot = base.lastIndexOf('.');
-  if (dot <= 0) return true; // no extension (or a leading-dot name): treat as text
-  return TEXT_EXTENSIONS.has(base.slice(dot));
+const SELF = new Set(['scripts/check-internal-identifiers.ts', 'test/internal-identifier-check.test.ts']);
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', 'generated', 'vendor']);
+const TEXT_EXT = /\.(?:ts|tsx|mjs|js|md|json)$/;
+const CODE_EXT = /\.(?:ts|tsx|mjs|js)$/;
+
+export function findViolations(relPath: string, text: string): string[] {
+  const path = relPath.split('\\').join('/');
+  if (path.startsWith('docs/decisions/') || SELF.has(path)) return [];
+  const checkMarkers = CODE_EXT.test(path) && !/\.(?:test|spec)\./.test(path) && !path.startsWith('test/');
+  const found: string[] = [];
+  text.split('\n').forEach((line, index) => {
+    if (ID_PATTERNS.some(pattern => pattern.test(line))) found.push(`${path}:${index + 1}: internal planning identifier; use plain language or a decision-record path`);
+    else if (checkMarkers && MARKER_PATTERN.test(line)) found.push(`${path}:${index + 1}: unfinished-work marker`);
+  });
+  return found;
 }
 
-function walkTextFiles(target: string, root: string): InternalIdentifierCandidate[] {
-  let stat: ReturnType<typeof statSync>;
-  try {
-    stat = statSync(target);
-  } catch {
-    return [];
+function* textFiles(root: string, target: string): Generator<string> {
+  const base = join(root, target);
+  if (!existsSync(base)) return;
+  if (TEXT_EXT.test(base)) { yield target; return; }
+  for (const entry of readdirSync(base, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || !TEXT_EXT.test(entry.name)) continue;
+    const rel = join(entry.parentPath, entry.name).slice(root.length + 1);
+    if (!rel.split(/[\\/]/).some(part => SKIP_DIRS.has(part))) yield rel;
   }
-
-  if (stat.isFile()) {
-    const relPath = relative(root, target).split('\\').join('/');
-    if (!isScannableFile(target)) return [];
-    return [{ relPath, text: readFileSync(target, 'utf8') }];
-  }
-
-  if (!stat.isDirectory()) return [];
-  let entries: Dirent[];
-  try {
-    entries = readdirSync(target, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-
-  const results: InternalIdentifierCandidate[] = [];
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      if (SKIP_DIR_NAMES.has(entry.name)) continue;
-      results.push(...walkTextFiles(join(target, entry.name), root));
-      continue;
-    }
-    if (!entry.isFile()) continue;
-    results.push(...walkTextFiles(join(target, entry.name), root));
-  }
-  return results;
 }
 
-function defaultScanTargets(root: string): string[] {
-  const targets: string[] = [];
-  // The old packages/* are the engine's top-level directories.
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const srcDir = join(entry.name, 'src');
-    if (existsSync(join(root, srcDir))) targets.push(srcDir);
+export function scanTree(root = INTERNAL_ID_ROOT): { files: number; violations: string[] } {
+  const targets = ['scripts', 'docs', 'test', 'eval', 'examples', 'SECURITY.md', 'CHANGELOG.md', 'README.md',
+    ...readdirSync(root, { withFileTypes: true }).filter(e => e.isDirectory() && existsSync(join(root, e.name, 'src'))).map(e => `${e.name}/src`)];
+  let files = 0;
+  const violations: string[] = [];
+  for (const target of targets) for (const rel of textFiles(root, target)) {
+    files++;
+    violations.push(...findViolations(rel, readFileSync(join(root, rel), 'utf8')));
   }
-  // .githooks and SECURITY.md are repo-wide and sit at the repo root.
-  for (const dir of ['scripts', 'docs', 'test', 'eval', 'examples', '../../.githooks', '../../SECURITY.md']) {
-    if (existsSync(join(root, dir))) targets.push(dir);
-  }
-  // Root-level hand-authored text: markdown (CHANGELOG.md included) and JSON
-  // (bundle budgets, configs), both carried identifiers the old set missed.
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    if (entry.isFile() && (entry.name.endsWith('.md') || entry.name.endsWith('.json'))) targets.push(entry.name);
-  }
-  return targets.sort();
-}
-
-export function collectInternalIdentifierCandidates(root = INTERNAL_ID_ROOT, targets?: readonly string[]): InternalIdentifierCandidate[] {
-  return (targets ?? defaultScanTargets(root)).flatMap(target => walkTextFiles(join(root, target), root));
-}
-
-export function scanTargetsFromEnvironment(value: string | undefined): readonly string[] | undefined {
-  if (value === undefined) return undefined;
-  const parsed: unknown = JSON.parse(value);
-  if (!Array.isArray(parsed) || !parsed.every(item => typeof item === 'string')) throw new Error('Scan targets must be a JSON array of paths');
-  return parsed;
+  return { files, violations };
 }
 
 if (import.meta.main) {
-  const candidates = collectInternalIdentifierCandidates(INTERNAL_ID_ROOT, scanTargetsFromEnvironment(process.env.INTERNAL_ID_DIRS_JSON));
-  const advisories: string[] = [];
-  const violations = checkNoInternalIdentifiers(candidates, loadStaticSourceReadings(process.env.STATIC_SOURCE_READINGS_PATH), finding => advisories.push(finding));
-  if (advisories.length > 0) {
-    console.error(`internal-identifier-check ADVISORY: ${advisories.length} inconclusive reading(s); source review required.\n`);
-    for (const advisory of advisories.slice(0, 100)) console.error(`- ${advisory}`);
-    if (advisories.length > 100) console.error(`... ${advisories.length - 100} additional advisories`);
-  }
+  const { files, violations } = scanTree();
   if (violations.length > 0) {
-    console.error(`internal-identifier-check FAILED: ${violations.length} confirmed violation(s).\n`);
+    console.error(`internal-identifier-check FAILED: ${violations.length} finding(s).\n`);
     for (const violation of violations.slice(0, 100)) console.error(`- ${violation}`);
-    if (violations.length > 100) console.error(`... ${violations.length - 100} additional findings`);
     process.exit(1);
   }
-  console.log(`internal-identifier-check PASSED: no confirmed violations in ${candidates.length} text files; ${advisories.length} inconclusive advisories.`);
+  console.log(`internal-identifier-check PASSED: ${files} text files.`);
 }

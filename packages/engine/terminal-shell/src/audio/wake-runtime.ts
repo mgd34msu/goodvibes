@@ -285,7 +285,31 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
         ...(deps.clearTimeout !== undefined ? { clearTimeout: deps.clearTimeout } : {}),
       });
       listener = active;
-      const outcome = await active.start();
+      let outcome: Awaited<ReturnType<WakeListener['start']>>;
+      try {
+        outcome = await active.start();
+      } catch (error) {
+        // A start that throws must not leave `listener` set: refresh() returns
+        // early while one is, so nothing would ever start again.
+        const message = error instanceof Error ? error.message : String(error);
+        const stillOurs = lifetime === controller;
+        if (stillOurs) {
+          controller.abort();
+          lifetime = null;
+          listener = null;
+          phase = 'idle';
+          deviceLabel = null;
+          detail = undefined;
+          refusal = null;
+        }
+        await active.stop().catch(() => undefined);
+        if (stillOurs) {
+          diagnostic(false, 'wake-capture-start', message, 'the wake detector failed while starting');
+          deps.notify(`[Wake] The wake-word detector failed while starting: ${message}`);
+          deps.render();
+        }
+        return;
+      }
       // A delayed opener cannot regain ownership after stop or a replacement start.
       if (!current()) {
         await active.stop();
@@ -320,34 +344,52 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
       phase = 'idle';
       deviceLabel = null;
       detail = undefined;
+      // A refusal belongs to the start that was refused; once wake is stopped
+      // there is nothing left for the status chip to explain.
+      refusal = null;
       if (active) await active.stop();
+    };
+    const refreshNow = async (): Promise<void> => {
+      const provision = readProvision();
+      vadReady = provision.vadReady;
+      const settings = resolve();
+      if (!settings.active) {
+        await stop();
+        if (settings.enabled && settings.surfaceEnabled && settings.blockers.length)
+          deps.notify(['[Wake] The wake-word detector cannot start:', ...policy.describeBlockers(settings)].join('\n'));
+        deps.render();
+        return;
+      }
+      if (listener) return;
+      if (starting) {
+        const ownerEpoch = startingEpoch;
+        await starting;
+        if (ownerEpoch !== epoch && !listener && resolve().active) await runtime.refresh();
+        return;
+      }
+      startingEpoch = epoch;
+      const pending = start(settings, provision);
+      starting = pending;
+      try {
+        await pending;
+      } finally {
+        if (starting === pending) starting = null;
+      }
+    };
+    // refresh() runs from config subscriptions with nobody awaiting it, so a
+    // failure has to surface as a notice and a diagnostic rather than escape.
+    const reportRefreshFailure = (error: unknown): void => {
+      const message = error instanceof Error ? error.message : String(error);
+      diagnostic(false, 'wake-refresh', message, 'refreshing the wake runtime failed');
+      deps.notify(`[Wake] Could not apply the wake settings: ${message}`);
+      deps.render();
     };
     const runtime: TerminalWakeRuntime<Kind> = {
       async refresh() {
-        const provision = readProvision();
-        vadReady = provision.vadReady;
-        const settings = resolve();
-        if (!settings.active) {
-          await stop();
-          if (settings.enabled && settings.surfaceEnabled && settings.blockers.length)
-            deps.notify(['[Wake] The wake-word detector cannot start:', ...policy.describeBlockers(settings)].join('\n'));
-          deps.render();
-          return;
-        }
-        if (listener) return;
-        if (starting) {
-          const ownerEpoch = startingEpoch;
-          await starting;
-          if (ownerEpoch !== epoch && !listener && resolve().active) await runtime.refresh();
-          return;
-        }
-        startingEpoch = epoch;
-        const pending = start(settings, provision);
-        starting = pending;
         try {
-          await pending;
-        } finally {
-          if (starting === pending) starting = null;
+          await refreshNow();
+        } catch (error) {
+          reportRefreshFailure(error);
         }
       },
       status() {

@@ -3,15 +3,10 @@
  * state, and available tools per server.
  */
 
-/** States for the MCP server lifecycle machine. */
-export type McpServerLifecycleState =
-  | 'configured'
-  | 'connecting'
-  | 'connected'
-  | 'degraded'
-  | 'auth_required'
-  | 'reconnecting'
-  | 'disconnected';
+import type { McpServerState } from '../../mcp/types.js';
+
+/** States for the MCP server lifecycle machine. One declaration: an alias of {@link McpServerState}. */
+export type McpServerLifecycleState = McpServerState;
 
 /** A tool registered by an MCP server. */
 export interface McpRegisteredTool {

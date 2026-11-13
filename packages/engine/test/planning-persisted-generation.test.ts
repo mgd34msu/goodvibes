@@ -97,7 +97,7 @@ test('separate processes released from one barrier cannot both win an expected-n
     console.log(JSON.stringify({ owner: process.argv[2], kind: result.kind }));
   `;
   const children = ['first', 'second'].map(owner => Bun.spawn([
-    process.execPath, '--no-env-file', '--preload', new URL('../scripts/test-network-preload.ts', import.meta.url).pathname,
+    process.execPath, '--no-env-file', '--preload', new URL('../toolchain/src/test-runner/test-network-preload.ts', import.meta.url).pathname,
     '-e', script, f.path, owner,
   ], { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env }, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }));
   const readers = children.map(child => child.stdout.getReader());

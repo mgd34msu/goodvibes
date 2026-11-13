@@ -100,7 +100,9 @@ interface ActionReport {
 /** What the panel's row components need from their parent. Passed explicitly rather than
  *  through context: one panel, one level of nesting, no indirection worth the cost. */
 interface RowActions {
-  readonly onSave: (field: ProfileField, value: string) => void;
+  /** `onSaved` runs only when the daemon actually recorded the value, so the editor
+   *  (and the typed draft) stays put after a failure or a refusal. */
+  readonly onSave: (field: ProfileField, value: string, onSaved: () => void) => void;
   readonly onForget: (target: ProfileTarget, label: string) => void;
   readonly onUndo: (fieldId: string, label: string) => void;
   readonly busy: boolean;
@@ -183,8 +185,8 @@ function FieldRow({ field, actions }: { field: ProfileField; actions: RowActions
 
   function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    setEditing(false);
-    actions.onSave(field, draft);
+    if (actions.busy) return;
+    actions.onSave(field, draft, () => setEditing(false));
   }
 
   return (
@@ -332,7 +334,7 @@ function SectionBlock({
 }: {
   section: ProfileSection;
   actions: RowActions;
-  onAppend: (section: ProfileSection, text: string) => void;
+  onAppend: (section: ProfileSection, text: string, onAdded: () => void) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
@@ -343,9 +345,8 @@ function SectionBlock({
     event.preventDefault();
     const text = draft.trim();
     if (!text) return;
-    setAdding(false);
-    setDraft('');
-    onAppend(section, text);
+    if (actions.busy) return;
+    onAppend(section, text, () => { setAdding(false); setDraft(''); });
   }
 
   return (
@@ -435,7 +436,7 @@ export function OwnerProfileSettings() {
   const verbUnavailable =
     profile.isError && (isMethodUnavailableError(profile.error) || isMethodNotInvokableError(profile.error));
 
-  function onSave(field: ProfileField, value: string) {
+  function onSave(field: ProfileField, value: string, onSaved: () => void) {
     setField.mutate(
       { fieldId: field.fieldId, value },
       {
@@ -445,18 +446,20 @@ export function OwnerProfileSettings() {
             `Saved ${field.label}. The previous value is kept in the file, and Undo puts it back.`,
             MALFORMED_WRITE,
           ));
+          if (outcome?.ok) onSaved();
         },
         onError: (error) => { setReport({ tone: 'warning', text: formatError(error) }); },
       },
     );
   }
 
-  function onAppend(section: ProfileSection, text: string) {
+  function onAppend(section: ProfileSection, text: string, onAdded: () => void) {
     appendLine.mutate(
       { section: section.heading, text },
       {
         onSuccess: (outcome) => {
           setReport(writeReportLine(outcome, `Added a line to ${section.heading}.`, MALFORMED_WRITE));
+          if (outcome?.ok) onAdded();
         },
         onError: (error) => { setReport({ tone: 'warning', text: formatError(error) }); },
       },

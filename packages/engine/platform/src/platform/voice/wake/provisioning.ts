@@ -77,7 +77,7 @@ import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   downloadVerifiedFile,
-  fileMatches,
+  fileMatchesCached,
   type VerifiedDownloadSpec,
 } from '../provisioning/download-verified.js';
 import {
@@ -175,7 +175,8 @@ export function wakeArtifactStatus(path: string, spec: VerifiedDownloadSpec): Wa
   } catch {
     return { path, verified: false, corrupt: true, bytes: 0 };
   }
-  const verified = fileMatches(path, spec);
+  // Status of an installed file: re-hash only when its revision or pin changed.
+  const verified = fileMatchesCached(path, spec);
   return { path, verified, corrupt: !verified, bytes };
 }
 

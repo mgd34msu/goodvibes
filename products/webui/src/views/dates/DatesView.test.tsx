@@ -33,6 +33,8 @@ let forgetImpl: (input: OperatorMethodInput<'profile.forget'>) => Promise<unknow
 let interviewAnswerImpl: (input: OperatorMethodInput<'occasions.interview.answer'>) => Promise<OperatorMethodOutput<'occasions.interview.answer'>> = () => Promise.reject(new Error('not used'));
 let interviewRecordImpl: (input: OperatorMethodInput<'occasions.interview.record'>) => Promise<OperatorMethodOutput<'occasions.interview.record'>> = () => Promise.reject(new Error('not used'));
 
+let proposeImpl: () => Promise<OperatorMethodOutput<'occasions.propose'>> = () => Promise.reject(new Error('not used'));
+const proposeCalls: unknown[] = [];
 const answerCalls: unknown[] = [];
 const giftsCalls: string[] = [];
 const removeCalls: OperatorMethodInput<'occasions.remove'>[] = [];
@@ -71,7 +73,7 @@ mock.module('../../lib/goodvibes', () => ({
           removeCalls.push(input);
           return Promise.resolve({ ok: true, reason: null, occasionId: 'occ-1', disclosure: 'Removed.', droppedRecords: 1 });
         },
-        propose: () => Promise.reject(Object.assign(new Error('not used'), { status: 500 })),
+        propose: (input: unknown) => { proposeCalls.push(input); return proposeImpl(); },
         confirm: () => Promise.reject(Object.assign(new Error('not used'), { status: 500 })),
         gifts: (occasionId: string) => {
           giftsCalls.push(occasionId);
@@ -158,6 +160,8 @@ afterEach(() => {
   forgetImpl = () => Promise.reject(new Error('not used'));
   interviewAnswerImpl = () => Promise.reject(new Error('not used'));
   interviewRecordImpl = () => Promise.reject(new Error('not used'));
+  proposeImpl = () => Promise.reject(new Error('not used'));
+  proposeCalls.length = 0;
   answerCalls.length = 0;
   giftsCalls.length = 0;
   removeCalls.length = 0;
@@ -797,6 +801,37 @@ describe('DatesView: add dialogs', () => {
 
     flushSync(() => buttonNamed(el, 'Add plan')?.click());
     await waitFor(() => Boolean(document.body.querySelector('#dates-add-plan')));
+    unmount();
+  });
+});
+
+describe('DatesView: a preview answers only the draft it was asked for', () => {
+  test('a late preview for an edited draft does not appear against the new text', async () => {
+    let release!: (value: OperatorMethodOutput<'occasions.propose'>) => void;
+    proposeImpl = () => new Promise((resolve) => { release = resolve; });
+    const { el, unmount } = render();
+    await waitFor(() => buttonNamed(el, 'Add occasion') !== undefined);
+    flushSync(() => buttonNamed(el, 'Add occasion')?.click());
+    await waitFor(() => Boolean(document.body.querySelector('#dates-add-occasion')));
+
+    const form = document.body.querySelector('#dates-add-occasion') as HTMLFormElement;
+    const setText = (input: HTMLInputElement, value: string) => flushSync(() => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    });
+    const inputs = () => [...form.querySelectorAll('input')] as HTMLInputElement[];
+    setText(inputs()[0], 'Mum birthday');
+    setText(inputs()[1], '2026-09-01');
+    flushSync(() => form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+    await waitFor(() => proposeCalls.length === 1);
+
+    // The operator keeps editing while the preview is in flight.
+    setText(inputs()[0], 'Dad birthday');
+    release({ ok: true, confirmation: 'Add Mum birthday on 2026-09-01?', conflictsWith: [], needsKind: true } as unknown as OperatorMethodOutput<'occasions.propose'>);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    flushSync(() => {});
+
+    expect(document.body.textContent).not.toContain('Add Mum birthday on 2026-09-01?');
     unmount();
   });
 });

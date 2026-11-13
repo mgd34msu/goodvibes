@@ -1,3 +1,33 @@
+/**
+ * Every modal the input handler can stack, in the order they take the screen
+ * when more than one is active (first active wins, see getActiveModalName).
+ * The single source of truth: the stack, the close switch, the reopen switch
+ * and the active-flag ladder are all derived from or checked against it.
+ */
+export const MODAL_NAMES = [
+    'help',
+    'shortcuts',
+    'bookmark',
+    'liveTail',
+    'settings',
+    'mcpWorkspace',
+    'agentWorkspace',
+    'sessionPicker',
+    'profilePicker',
+    'config',
+    'contextInspector',
+    'process',
+    'modelPicker',
+    'filePicker',
+    'blockActions',
+    'selection',
+    'onboarding',
+    'command',
+] as const;
+export type ModalName = (typeof MODAL_NAMES)[number];
+export function isModalName(value: unknown): value is ModalName {
+    return typeof value === 'string' && (MODAL_NAMES as readonly string[]).includes(value);
+}
 export type ActiveModalState = {
     helpOverlayActive: boolean;
     shortcutsOverlayActive: boolean;
@@ -66,44 +96,54 @@ export type ActiveModalState = {
     } | undefined;
     commandMode: boolean;
 };
-export function getActiveModalName(state: ActiveModalState): string | null {
-    if (state.helpOverlayActive)
-        return 'help';
-    if (state.shortcutsOverlayActive)
-        return 'shortcuts';
-    if (state.bookmarkModal.active)
-        return 'bookmark';
-    if (state.liveTailModal?.active)
-        return 'liveTail';
-    if (state.settingsModal.active)
-        return 'settings';
-    if (state.mcpWorkspace?.active)
-        return 'mcpWorkspace';
-    if (state.agentWorkspace?.active)
-        return 'agentWorkspace';
-    if (state.sessionPickerModal.active)
-        return 'sessionPicker';
-    if (state.profilePickerModal.active)
-        return 'profilePicker';
-    if (state.configModal?.active)
-        return 'config';
-    if (state.contextInspectorModal.active)
-        return 'contextInspector';
-    if (state.processModal?.active)
-        return 'process';
-    if (state.modelPicker.active)
-        return 'modelPicker';
-    if (state.filePicker.active)
-        return 'filePicker';
-    if (state.blockActionsMenu.active)
-        return 'blockActions';
-    if (state.selectionModal.active)
-        return 'selection';
-    if (state.onboardingWizard?.active)
-        return 'onboarding';
-    if (state.commandMode)
-        return 'command';
-    return null;
+/** Whether one modal's own `active` flag (or overlay/mode flag) is set. Exhaustive over {@link ModalName}. */
+export function isModalActive(state: ActiveModalState, name: ModalName): boolean {
+    switch (name) {
+        case 'help':
+            return state.helpOverlayActive;
+        case 'shortcuts':
+            return state.shortcutsOverlayActive;
+        case 'bookmark':
+            return state.bookmarkModal.active;
+        case 'liveTail':
+            return state.liveTailModal?.active === true;
+        case 'settings':
+            return state.settingsModal.active;
+        case 'mcpWorkspace':
+            return state.mcpWorkspace?.active === true;
+        case 'agentWorkspace':
+            return state.agentWorkspace?.active === true;
+        case 'sessionPicker':
+            return state.sessionPickerModal.active;
+        case 'profilePicker':
+            return state.profilePickerModal.active;
+        case 'config':
+            return state.configModal?.active === true;
+        case 'contextInspector':
+            return state.contextInspectorModal.active;
+        case 'process':
+            return state.processModal?.active === true;
+        case 'modelPicker':
+            return state.modelPicker.active;
+        case 'filePicker':
+            return state.filePicker.active;
+        case 'blockActions':
+            return state.blockActionsMenu.active;
+        case 'selection':
+            return state.selectionModal.active;
+        case 'onboarding':
+            return state.onboardingWizard?.active === true;
+        case 'command':
+            return state.commandMode;
+        default:
+            return assertNever(name);
+    }
+}
+function assertNever(name: never): never {
+    throw new Error(`Unhandled modal name: ${String(name)}`);
+}
+export function getActiveModalName(state: ActiveModalState): ModalName | null {
+    return MODAL_NAMES.find((name) => isModalActive(state, name)) ?? null;
 }
 export type ModalCloseOps = {
     resetHelp: () => void;
@@ -125,7 +165,7 @@ export type ModalCloseOps = {
     closeOnboarding?: (() => void) | undefined;
     closeCommandMode: () => void;
 };
-export function closeModalByName(name: string, ops: ModalCloseOps): void {
+export function closeModalByName(name: ModalName, ops: ModalCloseOps): void {
     switch (name) {
         case 'help':
             ops.resetHelp();
@@ -181,6 +221,8 @@ export function closeModalByName(name: string, ops: ModalCloseOps): void {
         case 'command':
             ops.closeCommandMode();
             break;
+        default:
+            assertNever(name);
     }
 }
 export type ModalOpenOps = {
@@ -195,37 +237,67 @@ export type ModalOpenOps = {
     openAgentWorkspace?: (() => void) | undefined;
     openCommandMode: () => void;
 };
-export function reopenModalByName(name: string, ops: ModalOpenOps): void {
+/**
+ * Bring a modal back after the one stacked above it closed. Returns true when
+ * it was reopened and false when it cannot be: the caller then drops it from
+ * the stack (or keeps it when it is still on screen) instead of leaving a
+ * stack entry that does nothing.
+ *
+ * help, shortcuts, bookmark, contextInspector, mcpWorkspace, process,
+ * agentWorkspace, config, onboarding and command reopen from their own
+ * state. The rest cannot: closing settings, sessionPicker, profilePicker,
+ * modelPicker, filePicker, blockActions, selection or liveTail discards what
+ * they were showing (a selection's callback, a file picker's insert position,
+ * the process a live tail followed, the block a menu acted on), and nothing
+ * but their opener can rebuild it. Exhaustive over {@link ModalName}.
+ */
+export function reopenModalByName(name: ModalName, ops: ModalOpenOps): boolean {
     switch (name) {
         case 'help':
             ops.openHelp();
-            break;
+            return true;
         case 'shortcuts':
             ops.openShortcuts();
-            break;
+            return true;
         case 'bookmark':
             ops.openBookmark();
-            break;
+            return true;
         case 'contextInspector':
             ops.openContextInspector();
-            break;
+            return true;
         case 'mcpWorkspace':
-            ops.openMcpWorkspace?.();
-            break;
+            if (!ops.openMcpWorkspace) return false;
+            ops.openMcpWorkspace();
+            return true;
         case 'process':
-            ops.openProcess?.();
-            break;
+            if (!ops.openProcess) return false;
+            ops.openProcess();
+            return true;
         case 'agentWorkspace':
-            ops.openAgentWorkspace?.();
-            break;
+            if (!ops.openAgentWorkspace) return false;
+            ops.openAgentWorkspace();
+            return true;
         case 'config':
-            ops.openConfigModal?.();
-            break;
+            if (!ops.openConfigModal) return false;
+            ops.openConfigModal();
+            return true;
         case 'onboarding':
-            ops.openOnboarding?.();
-            break;
+            if (!ops.openOnboarding) return false;
+            ops.openOnboarding();
+            return true;
         case 'command':
             ops.openCommandMode();
-            break;
+            return true;
+        case 'settings':
+        case 'sessionPicker':
+        case 'profilePicker':
+        case 'modelPicker':
+        case 'filePicker':
+        case 'blockActions':
+        case 'selection':
+        case 'liveTail':
+            return false;
+        default:
+            return assertNever(name);
     }
 }

@@ -17,10 +17,12 @@ import {
   isTerminalGroupStatus,
   isTerminalUnitStatus,
   newContractId,
+  reopenFailedRepairPlanning,
   transitionContract,
   transitionGroup,
   transitionUnit,
   type Contract,
+  type ContractStatus,
   type ContractGroup,
   type ContractUnit,
 } from '../../platform/src/platform/contract/index.js';
@@ -158,5 +160,26 @@ describe('contract ids', () => {
     for (const bad of ['ctr-0000000', 'ctr-0000000g', 'CTR-00000000', '../ctr-00000000', 'ctr-00000000/..', 'ctr-00000000.json', '', 7, null]) {
       expect(isContractId(bad)).toBe(false);
     }
+  });
+});
+
+describe('the declared recovery exception', () => {
+  const failed = (status: ContractStatus): Contract => ({ id: 'ctr-recovery', status, failureKind: 'planning', error: 'the fix could not be planned', completedAt: 5, statusLine: 'failed' } as unknown as Contract);
+
+  test('a failed contract is reopened to fixing and its failure fields are cleared', () => {
+    const contract = failed('failed');
+    expect(reopenFailedRepairPlanning(contract)).toEqual({ from: 'failed', to: 'fixing' });
+    expect([contract.status, contract.failureKind, contract.error, contract.completedAt, contract.statusLine]).toEqual(['fixing', undefined, undefined, undefined, undefined]);
+  });
+
+  test('it applies from failed only, and failed stays terminal in the table', () => {
+    for (const status of CONTRACT_STATUSES.filter((candidate) => candidate !== 'failed')) {
+      const contract = failed(status);
+      expect(() => reopenFailedRepairPlanning(contract)).toThrow(IllegalContractTransitionError);
+      expect(contract.status).toBe(status);
+      expect(contract.error).toBe('the fix could not be planned');
+    }
+    expect(isTerminalContractStatus('failed')).toBe(true);
+    expect(() => transitionContract(failed('failed'), 'fixing')).toThrow(IllegalContractTransitionError);
   });
 });

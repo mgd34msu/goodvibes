@@ -41,13 +41,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runOwnedTestChild } from './owned-test-child.ts';
-import { sweepStaleTmpDirs } from './stale-tmp-sweep.ts';
-import {
-  RUN_TMP_PREFIX, RUNNER_ENV_FLAG, STALE_RUN_MS,
-  testTmpEnv, TEST_TMP_ROOT, withRunTmpDir,
-} from './test-run-tmp.ts';
-import { withWorkspaceLock } from './workspace-lock.ts';
+import { runBunTest } from './test.ts';
 
 const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -102,53 +96,27 @@ export async function runWakeRaceSweep(engineCheckoutRoot: string, delayMs: numb
   console.log(`sweep-wake-race: ${String(suites.length)} suites, ${String(delayMs)} ms window\n`);
 
   const failed: string[] = [];
-  let interrupted: NodeJS.Signals | null = null;
-  const onInterrupt = (): void => { interrupted = 'SIGINT'; };
-  const onTerminate = (): void => { interrupted = 'SIGTERM'; };
-  const onHangup = (): void => { interrupted = 'SIGHUP'; };
-  process.on('SIGINT', onInterrupt);
-  process.on('SIGTERM', onTerminate);
-  process.on('SIGHUP', onHangup);
-  try {
-    sweepStaleTmpDirs(TEST_TMP_ROOT, RUN_TMP_PREFIX, STALE_RUN_MS);
-    for (const name of suites) {
-      if (interrupted !== null) break;
-      console.log(`  run   test/${name}`);
-      const result = await withRunTmpDir(TEST_TMP_ROOT, (runTmpDir) => runOwnedTestChild({
-        ownProcessGroup: process.platform !== 'win32',
-        // Keep the original per-test ceiling. Ownership/isolation must not
-        // make an existing failure green merely by granting it more time.
-        argv: ['--timeout=5000', `test/${name}`],
-        cwd: engineCheckoutRoot,
-        env: { ...process.env, ...testTmpEnv(runTmpDir), [RUNNER_ENV_FLAG]: '1' },
-        // The isolation allowlist deliberately drops this inherited variable.
-        // Declare it as fixture input so the sweep cannot become a silent no-op.
-        fixtureEnv: { GOODVIBES_WAKE_RACE_PROBE_MS: String(delayMs) },
-      }));
-      if (result.exitCode === 0 && result.signalCode === null && result.stopped === null && interrupted === null) {
-        console.log(`  ok    test/${name}`);
-        continue;
-      }
-      failed.push(name);
-      const reason = result.stopped !== null
-        ? `${result.stopped}: ${result.stopReason ?? 'no reason recorded'}`
-        : interrupted !== null ? `interrupted by ${interrupted}`
-          : result.signalCode !== null ? `killed by ${result.signalCode}`
-            : `exited with code ${String(result.exitCode)}`;
-      console.error(`  FAIL  test/${name}: ${reason}`);
-      // A cancelled or watchdog-ended sweep must not launch another child.
-      if (interrupted !== null || result.signalCode !== null || result.stopped !== null) return 1;
+  for (const name of suites) {
+    console.log(`  run   test/${name}`);
+    const exitCode = await runBunTest({
+      // Keep the original per-test ceiling: a longer one could turn an
+      // existing failure green.
+      args: ['--timeout=5000', `test/${name}`],
+      cwd: engineCheckoutRoot,
+      // The isolation allowlist drops this inherited variable. Declare it as
+      // fixture input so the sweep cannot become a silent no-op.
+      fixtureEnv: { GOODVIBES_WAKE_RACE_PROBE_MS: String(delayMs) },
+    });
+    if (exitCode === 0) {
+      console.log(`  ok    test/${name}`);
+      continue;
     }
-  } finally {
-    process.off('SIGINT', onInterrupt);
-    process.off('SIGTERM', onTerminate);
-    process.off('SIGHUP', onHangup);
+    failed.push(name);
+    console.error(`  FAIL  test/${name}: exited with code ${String(exitCode)}`);
+    // 128+ means a signal ended it; do not launch another child.
+    if (exitCode > 128) return 1;
   }
 
-  if (interrupted !== null) {
-    console.error(`sweep-wake-race: interrupted by ${interrupted}; remaining suites were not run.`);
-    return 1;
-  }
   if (failed.length > 0) {
     console.error(`\nsweep-wake-race: ${String(failed.length)} suite(s) failed under the ${String(delayMs)} ms probe.`);
     console.error('Full child output is preserved above; a failure does not by itself establish a lost-wake race.');
@@ -161,5 +129,5 @@ export async function runWakeRaceSweep(engineCheckoutRoot: string, delayMs: numb
 if (import.meta.main) {
   const delayArg = process.argv.indexOf('--delay');
   const delayMs = delayArg === -1 ? DEFAULT_DELAY_MS : Number(process.argv[delayArg + 1]);
-  process.exitCode = await withWorkspaceLock('sweep-wake-race', () => runWakeRaceSweep(ENGINE_ROOT, delayMs));
+  process.exitCode = await runWakeRaceSweep(ENGINE_ROOT, delayMs);
 }

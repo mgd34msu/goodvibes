@@ -42,6 +42,20 @@ For how tool-call arguments are parsed, validated, and dropped when malformed, s
 | `channel` | Use channel-owned runtime tools | surface-specific tool bridge |
 | `web_search` | Run provider-backed web search | query, safe-search, evidence fetching |
 
+## Record status rules
+
+Tools that manage a record with a status refuse a move the record's lifecycle
+does not allow. The call returns `success: false` and the error text names the
+current status and the moves that remain, for example
+`query is closed, which is final; it cannot become answered`. See
+[Lifecycles](./runtime-orchestration.md#lifecycles).
+
+| Tool | Rule |
+|---|---|
+| `query` | A query is `open`, then `answered`, then `closed`. An answer can be revised with another `answer` until the query is closed. A closed query cannot be answered or closed again. |
+| `packet` | A packet is published once. A second `publish` is refused and reports the original publish time. `revise` still works on a published packet and does not change its status. |
+| `workflow` | `cancel` applies to a workflow that is still in progress. Cancelling a workflow that already finished or was already cancelled is refused with the reason, and its completion time is unchanged. |
+
 ## Captured Bun commands
 
 Captured `exec` consumes its construction-owned ordinary Bun admission directly;

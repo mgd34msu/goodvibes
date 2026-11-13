@@ -56,6 +56,7 @@ import {
   type AttemptJudgment,
   type AttemptPickResult,
   type HeldMergeGroup,
+  workItemLifecycle,
 } from './types.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { UnitRoute } from '../contract/types.js';
@@ -417,6 +418,13 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   }
 
   function failItem(workstream: Workstream, item: WorkItem, reason: string, cancelled = false): void {
+    // A passed or failed item is settled: a late failure (a run that throws after kill) must not
+    // revive it through auto-retry nor overwrite its recorded reason.
+    const move = workItemLifecycle.check(item.state, 'failed');
+    if (!move.ok) {
+      logger.warn('orchestration engine: failure ignored, the item is already settled', { itemId: item.id, state: item.state, reason: move.reason });
+      return;
+    }
     // Bounded auto-retry; past the bound the failure is HARD. Cancels never retry.
     if (shouldAutoRetry(item, cancelled, maxItemRetries)) {
       item.retryCount = (item.retryCount ?? 0) + 1;

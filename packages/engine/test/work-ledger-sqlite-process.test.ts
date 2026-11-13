@@ -6,7 +6,7 @@ import type { WorkLedgerCommand, WorkLedgerState } from '../platform/src/platfor
 import type { WorkLedgerProcessInput, WorkLedgerProcessOutput } from './helpers/work-ledger-process.js';
 
 const fixture = new URL('./helpers/work-ledger-process.ts', import.meta.url).pathname;
-const networkGuard = new URL('../scripts/test-network-preload.ts', import.meta.url).pathname;
+const networkGuard = new URL('../toolchain/src/test-runner/test-network-preload.ts', import.meta.url).pathname;
 const roots: string[] = [];
 interface ChildFixture {
   readonly process: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;

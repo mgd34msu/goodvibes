@@ -81,6 +81,13 @@ export function useHostedAttachment(
   const detachRef = useRef<{ sessionId: string; clientId: string } | null>(null);
   const refreshRef = useRef<(() => void) | null>(null);
   const streamRevision = useRef(0);
+  // The session the pane is on right now, so an async result for a session the
+  // user already switched away from (a kill that settles after a row change)
+  // is not shown as the current pane's record.
+  const selectedIdRef = useRef(selectedId);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
   const reconcileHistory = useCallback(() => { refreshRef.current?.(); }, []);
 
   const [attachedSession, setAttachedSession] = useState<HostedSessionRecord | null>(null);
@@ -139,9 +146,11 @@ export function useHostedAttachment(
 
   const killMutation = useMutation({
     mutationFn: (sessionId: string) => platformClient.operator.sessions.hosted.kill(sessionId),
-    onSuccess: (result) => {
+    onSuccess: (result, killedSessionId) => {
       const updated = hostedSessionFromResult(result);
-      if (updated) setAttachedSession(updated);
+      if (updated && selectedIdRef.current === killedSessionId && updated.id === killedSessionId) {
+        setAttachedSession(updated);
+      }
       toast({ title: 'Session ended', tone: 'info' });
       void queryClient.invalidateQueries({ queryKey: queryKeys.hostedSessionsAll });
     },

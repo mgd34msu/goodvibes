@@ -530,47 +530,66 @@ export class DiscordGatewayClient {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private sequence: number | null = null;
   private started = false;
-  /** True while `stop()` is closing the socket, so its close is not a loss. */
-  private stopping = false;
+  /** The one start in progress, shared by every concurrent `start()` caller. */
+  private startInFlight: Promise<DiscordGatewayBotResponse> | null = null;
+  /** Bumped by `stop()` so a start that was awaiting the gateway lookup does not open a socket after it. */
+  private epoch = 0;
   private readonly WebSocketImpl: typeof WebSocket;
 
   constructor(private readonly options: DiscordGatewayClientOptions) {
     this.WebSocketImpl = options.WebSocketImpl ?? WebSocket;
   }
 
-  async start(): Promise<DiscordGatewayBotResponse> {
+  start(): Promise<DiscordGatewayBotResponse> {
     if (this.started && this.socket) {
-      return {
+      return Promise.resolve({
         url: this.options.gatewayUrl ?? '',
         shards: 1,
-      };
+      });
     }
+    if (this.startInFlight) return this.startInFlight;
+    const inFlight = this.openSocket().finally(() => {
+      if (this.startInFlight === inFlight) this.startInFlight = null;
+    });
+    this.startInFlight = inFlight;
+    return inFlight;
+  }
+
+  private async openSocket(): Promise<DiscordGatewayBotResponse> {
+    const epoch = this.epoch;
     const gateway = this.options.gatewayUrl
       ? { url: this.options.gatewayUrl, shards: 1 }
       : await this.options.integration.getGatewayBot(this.options.token);
+    // stop() ran while the gateway URL was being fetched: do not open a socket nobody wants.
+    if (epoch !== this.epoch) throw new Error('DiscordGatewayClient: stopped before the gateway connection opened');
     const url = `${gateway.url.replace(/\/+$/, '')}/?v=10&encoding=json`;
     const socket = new this.WebSocketImpl(url);
     this.socket = socket;
     this.started = true;
     socket.addEventListener('message', (event) => {
+      if (this.socket !== socket) return;
       void this.handleMessage(event.data).catch((error: unknown) => {
         logger.warn('[discord] gateway message handling failed', { error: summarizeError(error) });
       });
     });
     socket.addEventListener('close', () => {
-      const wasDeliberate = this.stopping;
+      // A socket that is no longer current was either closed on purpose (stop()
+      // detaches it first) or replaced; its close must not touch the live one's
+      // heartbeat or started state.
+      if (this.socket !== socket) return;
+      this.socket = null;
       this.cleanup();
-      if (!wasDeliberate) this.options.onClosed?.('the Discord gateway connection closed');
+      this.options.onClosed?.('the Discord gateway connection closed');
     });
     return gateway;
   }
 
   stop(): void {
-    this.stopping = true;
+    this.epoch += 1;
+    const socket = this.socket;
     this.cleanup();
-    this.socket?.close();
     this.socket = null;
-    this.stopping = false;
+    socket?.close();
   }
 
   send(op: number, d: unknown): void {

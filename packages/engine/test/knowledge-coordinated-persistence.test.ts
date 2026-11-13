@@ -278,7 +278,7 @@ test('a concurrent ordinary process writer cannot undo a successful guarded proc
     console.log(result);
   `;
   const children = ['ordinary', 'guarded'].map(mode => Bun.spawn([
-    process.execPath, '--no-env-file', '--preload', new URL('../scripts/test-network-preload.ts', import.meta.url).pathname, '-e', script, file, mode,
+    process.execPath, '--no-env-file', '--preload', new URL('../toolchain/src/test-runner/test-network-preload.ts', import.meta.url).pathname, '-e', script, file, mode,
   ], { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env }, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }));
   const readers = children.map(child => child.stdout.getReader());
   const deadline = setTimeout(() => { for (const child of children) if (child.exitCode === null) child.kill(); }, 12000);

@@ -84,7 +84,8 @@ From this directory:
   this source checkout, the source fallback
 - `bun dist/cli/entrypoint.js config get controlPlane.port --json`
 - `bun run typecheck` checks source and tests
-- `bun run test` rebuilds and runs the guarded suites, including the emitted CLI
+- `bun run test` rebuilds, then runs `src/test` through the shared runner
+  (`packages/engine/scripts/test.ts`), including the emitted CLI
 
 Repository-only, opt-in local native packaging (first run `bun run build` at the
 repository root to build the installed engine toolchain):

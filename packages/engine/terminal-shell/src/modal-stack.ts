@@ -1,11 +1,22 @@
-import { closeModalByName, getActiveModalName, reopenModalByName, type ActiveModalState, } from './modal-state.js';
+import { closeModalByName, getActiveModalName, isModalActive, isModalName, reopenModalByName, type ActiveModalState, type ModalName, } from './modal-state.js';
 import type { SelectionResult } from './selection-modal.js';
 export type ModalStackState = ActiveModalState & {
+    /**
+     * Holds {@link ModalName}s. Typed as string[] so a product's own handler
+     * contract that still says string[] keeps accepting it; every read here
+     * narrows with isModalName, and every write goes through modalOpened.
+     */
     modalStack: string[];
     modalReturnFocus?: ('prompt' | 'indicator') | undefined;
     indicatorFocused: boolean;
 };
+/**
+ * Record a modal as opened. A name that is not a {@link ModalName} is not
+ * stacked: nothing could close or reopen it, so it would only be a dead entry.
+ */
 export function modalOpened(state: ModalStackState, name: string): void {
+    if (!isModalName(name))
+        return;
     if (getActiveModalName(state) === null && state.modalStack.length > 0) {
         state.modalStack.length = 0;
     }
@@ -150,7 +161,7 @@ export function handleEscape(state: EscapeState, clearCommandText = false): {
             modalReturnFocus,
         };
     }
-    const closeModal = (name: string): void => {
+    const closeModal = (name: ModalName): void => {
         closeModalByName(name, {
             resetHelp: () => {
                 helpOverlayActive = false;
@@ -207,17 +218,20 @@ export function handleEscape(state: EscapeState, clearCommandText = false): {
             },
         });
     };
-    const reopenModal = (name: string): void => {
-        reopenModalByName(name, {
+    // An absent optional modal has nothing to reopen: leave its op undefined so
+    // the pop is reported as not reopened rather than silently doing nothing.
+    const reopenModal = (name: ModalName): boolean => {
+        const { processModal, agentWorkspace, configModal, mcpWorkspace, onboardingWizard } = state;
+        return reopenModalByName(name, {
             openHelp: () => { helpOverlayActive = true; },
             openShortcuts: () => { shortcutsOverlayActive = true; },
             openBookmark: () => state.bookmarkModal.open(),
-            openProcess: () => state.processModal?.open(),
-            openAgentWorkspace: () => state.agentWorkspace?.reopen(),
+            openProcess: processModal ? () => processModal.open() : undefined,
+            openAgentWorkspace: agentWorkspace ? () => agentWorkspace.reopen() : undefined,
             openContextInspector: () => state.contextInspectorModal.open(),
-            openConfigModal: () => state.configModal?.reopen(),
-            openMcpWorkspace: () => state.mcpWorkspace?.reopen(),
-            openOnboarding: () => state.onboardingWizard?.reopen(),
+            openConfigModal: configModal ? () => configModal.reopen() : undefined,
+            openMcpWorkspace: mcpWorkspace ? () => mcpWorkspace.reopen() : undefined,
+            openOnboarding: onboardingWizard ? () => onboardingWizard.reopen() : undefined,
             openCommandMode: () => {
                 commandMode = true;
                 prompt = '/';
@@ -230,13 +244,31 @@ export function handleEscape(state: EscapeState, clearCommandText = false): {
         const current = state.modalStack.pop();
         if (current === undefined)
             throw new Error('Modal stack changed during Escape routing');
-        const previous = state.modalStack[state.modalStack.length - 1];
-        closeModal(current);
-        if (previous) {
-            reopenModal(previous);
-        }
-        else {
-            restoreFocus();
+        if (isModalName(current))
+            closeModal(current);
+        // Back to the entry below. One that cannot be reopened and is no longer
+        // on screen is dropped and the next one tried, so popping never ends
+        // with a stack entry that did nothing and focus left unrestored.
+        for (;;) {
+            const previous = state.modalStack[state.modalStack.length - 1];
+            if (previous === undefined) {
+                restoreFocus();
+                break;
+            }
+            if (!isModalName(previous)) {
+                state.modalStack.pop();
+                continue;
+            }
+            if (reopenModal(previous))
+                break;
+            if (isModalActive({
+                ...state,
+                helpOverlayActive,
+                shortcutsOverlayActive,
+                commandMode,
+            }, previous))
+                break;
+            state.modalStack.pop();
         }
         state.requestRender();
         return {

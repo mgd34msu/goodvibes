@@ -105,6 +105,30 @@ function parseArgs(argv: readonly string[]): PrepareArgs {
   };
 }
 
+/**
+ * The command that continues a run whose version bump already happened: the same
+ * options with the bump choice replaced by `--no-bump`, so the version is not bumped again.
+ */
+export function resumeCommandAfterBump(argv: readonly string[]): string {
+  const kept: string[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]!;
+    if (arg === '--patch' || arg === '--minor' || arg === '--major' || arg === '--no-bump') continue;
+    if (arg === '--version') { i += 1; continue; }
+    kept.push(arg);
+  }
+  return ['bun', 'run', 'release:prepare', '--no-bump', ...kept].join(' ');
+}
+
+function afterBumpFailure(error: unknown, argv: readonly string[], from: string, to: string): Error {
+  const reason = error instanceof Error ? error.message : String(error);
+  return new Error(
+    `${reason}\n[release:prepare] package.json was already bumped ${from} -> ${to} and stays at ${to}; the steps after it are safe to repeat.\n`
+    + `  Resume at ${to} (do NOT repeat the bump option; it would bump again): ${resumeCommandAfterBump(argv)}\n`
+    + `  Or abandon the bump: git checkout -- package.json`,
+  );
+}
+
 function run(label: string, command: string, args: readonly string[]): void {
   console.log(`[release:prepare] ${label}: ${command} ${args.join(' ')}`);
   const result = spawnSync(command, args, { cwd: ROOT, stdio: 'inherit' });
@@ -131,19 +155,23 @@ function main(argv: readonly string[]): void {
     console.log(`[release:prepare] package.json ${current} -> ${version}`);
   }
 
-  if (args.install) run('relock', 'bun', ['install']);
-  run('project surfaces', 'bun', ['run', 'scripts/prebuild.ts']);
+  try {
+    if (args.install) run('relock', 'bun', ['install']);
+    run('project surfaces', 'bun', ['run', 'scripts/prebuild.ts']);
 
-  if (args.changelog) {
-    const changelogPath = join(ROOT, 'CHANGELOG.md');
-    const before = readFileSync(changelogPath, 'utf8');
-    const after = scaffoldChangelogText(before, version, new Date().toISOString().slice(0, 10));
-    if (after !== before) {
-      writeFileSync(changelogPath, after);
-      console.log(`[release:prepare] CHANGELOG.md: scaffolded ## [${version}]; write the notes before pushing.`);
-    } else {
-      console.log(`[release:prepare] CHANGELOG.md already has a ## [${version}] section.`);
+    if (args.changelog) {
+      const changelogPath = join(ROOT, 'CHANGELOG.md');
+      const before = readFileSync(changelogPath, 'utf8');
+      const after = scaffoldChangelogText(before, version, new Date().toISOString().slice(0, 10));
+      if (after !== before) {
+        writeFileSync(changelogPath, after);
+        console.log(`[release:prepare] CHANGELOG.md: scaffolded ## [${version}]; write the notes before pushing.`);
+      } else {
+        console.log(`[release:prepare] CHANGELOG.md already has a ## [${version}] section.`);
+      }
     }
+  } catch (error) {
+    throw args.bump === null ? error : afterBumpFailure(error, argv, current, version);
   }
   console.log('[release:prepare] done; review `git diff`.');
 }

@@ -23,7 +23,11 @@ relay routes traffic the vendor can read; this one cannot.
 ```
 
 - The **daemon dials the relay outbound** and registers under an unguessable
-  **rendezvous id**. It needs no inbound port and no public IP.
+  **rendezvous id**. It needs no inbound port and no public IP. A connection
+  that has not received the relay's `registered` frame within the registration
+  deadline (`registrationTimeoutMs`, 15 seconds by default) is closed and
+  retried through the normal reconnect backoff. An error frame from the relay
+  before registration completes is handled the same way.
 - A **surface dials the same rendezvous id**; the relay pairs the two and
   multiplexes many surface pipes over the one daemon socket.
 - Before any application byte, an **end-to-end (E2E) handshake** runs *inside*

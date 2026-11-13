@@ -13,7 +13,7 @@ import { resolveConnectedHostConnection as resolveNativeLedgerHost } from './run
 import { homedir } from 'node:os';
 import { SetupPairingController } from './shell/setup-pairing-controller.ts';
 import { parseSlashCommand } from './input/slash-command-parser.ts';
-import { settleInteractiveExit } from './shell/exit-completion.ts';
+import { runUnsubscribes, settleInteractiveExit, withShutdownDeadline } from './shell/exit-completion.ts';
 import { buildAgentHerdrSessionUpdate } from './shell/herdr-session.ts';
 import './renderer/compositor.ts';
 import { installStartupThemeProbe } from './renderer/startup-theme-probe.ts';
@@ -406,6 +406,7 @@ async function main() {
     exiting = true;
     const herdrRelease = closeHerdr();
     let exitCompletion = settleInteractiveExit(Promise.resolve(), Promise.resolve(), herdrRelease);
+    let shutdownIncomplete = false;
     try {
       setupPairing?.dispose();
       // Gate render() before anything else so no late frame follows the terminal-restore write below.
@@ -420,18 +421,25 @@ async function main() {
       } catch (error) {
         spokenOutputDrain = Promise.reject(error);
       }
-      unsubs.forEach((fn) => fn());
+      // One throwing unsubscribe must not skip autonomy.stop() or the session-saving ctx.shutdown below.
+      runUnsubscribes(unsubs, (error) => logger.warn('Unsubscribe failed during exitApp', { error: summarizeError(error) }));
       // Persist last-seen before shutdown so the next launch can compute the digest.
       const autonomyDrain = autonomy.stop();
       const snapshot = buildCurrentSessionSnapshot();
-      const runtimeShutdown = autonomyDrain.then(() => ctx.shutdown(snapshot));
+      // Bounded so a hung owner cannot hold the process open. The session is
+      // saved near the end of ctx.shutdown, so the recovery snapshot is removed
+      // only once that shutdown has finished: if the deadline wins, the snapshot
+      // stays and the next launch can restore from it.
+      const runtimeShutdown = withShutdownDeadline(autonomyDrain.then(() => ctx.shutdown(snapshot)))
+        .then(() => {
+          // Scoped to this session only, a keyless call would clear every snapshot in the recovery dir.
+          removeRecoveryPoint(ctx.services.surface, runtime.sessionId);
+        }, (error: unknown) => { shutdownIncomplete = true; throw error; });
       exitCompletion = settleInteractiveExit(runtimeShutdown, spokenOutputDrain, herdrRelease);
       if (recoveryInterval !== null) {
         clearInterval(recoveryInterval);
         recoveryInterval = null;
       }
-      // Scoped to this session only, a keyless call would clear every snapshot in the recovery dir.
-      removeRecoveryPoint(ctx.services.surface, runtime.sessionId);
       stdin.removeAllListeners('data');
       stdout.removeListener('resize', resizeHandler);
       process.removeListener('SIGINT', sigintHandler);
@@ -451,7 +459,10 @@ async function main() {
     // handover wait for runtime ownership release and the bounded audio drain.
     void exitCompletion.then((failures) => {
       for (const error of failures) logger.warn('Owned cleanup failed during exitApp', { error: summarizeError(error) });
-      process.exit(handOver ? handOver() : 0);
+      // A handover replaces this process while it may still hold its session and
+      // services; after an unfinished shutdown, exit and let the next launch recover.
+      if (handOver && shutdownIncomplete) logger.warn('Restart onto the updated program skipped: shutdown did not finish. Start it again to continue from the saved recovery point.');
+      process.exit(handOver && !shutdownIncomplete ? handOver() : 0);
     });
   };
 

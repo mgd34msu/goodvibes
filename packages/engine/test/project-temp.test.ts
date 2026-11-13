@@ -1,28 +1,42 @@
 import { expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { makeProjectTempDir, PROJECT_TEST_TMP_ROOT } from './_helpers/project-temp.ts';
-import { registeredTempDirs } from './_helpers/temp-registry.ts';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { sweepStaleTmpDirs } from '../toolchain/src/test-runner/temp.ts';
 
-test('helper allocates unique registered directories inside the official private root', () => {
+test('helper allocates unique directories under the runner-supplied root', () => {
+  const root = process.env.GOODVIBES_TEST_TMP_ROOT;
   const first = makeProjectTempDir('project'); const second = makeProjectTempDir('project');
-  expect(first).not.toBe(second); expect(basename(first)).toStartWith('project-');
-  expect(existsSync(first)).toBe(true); expect(dirname(first)).toBe(PROJECT_TEST_TMP_ROOT);
-  expect(PROJECT_TEST_TMP_ROOT).toBe(process.env.GOODVIBES_TEST_OWNED_TMP_ROOT!);
-  expect(registeredTempDirs()).toContain(first); expect(registeredTempDirs()).toContain(second);
-  expect(existsSync(second)).toBe(true); expect(existsSync(PROJECT_TEST_TMP_ROOT)).toBe(true);
+  expect(first).not.toBe(second); expect(basename(first)).toStartWith('project-'); expect(existsSync(first)).toBe(true);
+  if (root) expect(dirname(first)).toBe(root);
 });
 test('helper refuses escaping prefixes before allocation', () => {
   for (const value of ['', '.', '..', '../escape', '/absolute', 'a/b', 'a\\b', 'a\0b']) expect(() => makeProjectTempDir(value)).toThrow();
 });
-test('raw helper invocation refuses before creating cwd temp data', () => {
+test('plain bun test (no runner root) falls back to a per-process os.tmpdir directory', () => {
   const root = mkdtempSync(join(tmpdir(), 'raw-helper-proof-'));
   try {
     const helper = resolve(import.meta.dir, '_helpers/project-temp.ts');
-    const env = { ...process.env }; delete env.GOODVIBES_TEST_OWNED_TMP_ROOT; delete env.GOODVIBES_ENGINE_TEST_RUNNER;
-    const result = Bun.spawnSync([process.execPath, '-e', `import {makeProjectTempDir} from ${JSON.stringify(helper)};makeProjectTempDir('raw');`], { cwd: root, env, stdout: 'pipe', stderr: 'pipe' });
-    expect(result.exitCode).not.toBe(0); expect(new TextDecoder().decode(result.stderr)).toContain('official test runner');
-    expect(existsSync(join(root, '.test-tmp'))).toBe(false);
+    const env = { ...process.env }; delete env.GOODVIBES_TEST_TMP_ROOT;
+    const result = Bun.spawnSync([process.execPath, '-e', `import {makeProjectTempDir} from ${JSON.stringify(helper)};require('node:fs').writeFileSync('child.json',JSON.stringify({d:makeProjectTempDir('raw')}))`], { cwd: root, env, stdout: 'pipe', stderr: 'pipe' });
+    expect(result.exitCode, new TextDecoder().decode(result.stderr)).toBe(0);
+    const { d } = JSON.parse(readFileSync(join(root, 'child.json'), 'utf8')) as { d: string };
+    expect(existsSync(d)).toBe(true);
+    expect(dirname(dirname(d))).toBe(realpathSync(tmpdir())); expect(basename(dirname(d))).toStartWith('goodvibes-plaintest-');
+    rmSync(dirname(d), { recursive: true, force: true });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+test('the sweep removes only old directories carrying its own prefix', () => {
+  const root = mkdtempSync(join(tmpdir(), 'sweep-proof-'));
+  try {
+    const { mkdirSync } = require('node:fs') as typeof import('node:fs');
+    for (const name of ['mine-old', 'mine-new', 'other-old']) mkdirSync(join(root, name));
+    const old = new Date(Date.now() - 2 * 3_600_000);
+    for (const name of ['mine-old', 'other-old']) utimesSync(join(root, name), old, old);
+    sweepStaleTmpDirs(root, 'mine-');
+    expect(existsSync(join(root, 'mine-old'))).toBe(false);
+    expect(existsSync(join(root, 'mine-new'))).toBe(true);
+    expect(existsSync(join(root, 'other-old'))).toBe(true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

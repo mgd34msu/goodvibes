@@ -15,6 +15,7 @@ import { DelegatedInboundReviewReceiver, type DelegatedReviewGrant } from '../co
 import { delegatedTelegramDecisionSchema, type DelegatedTelegramConfiguration, type DelegatedTelegramDecision } from '../control-plane/delegated-inbound-wire.js';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
+import { defineLifecycle } from '../utils/lifecycle-machine.js';
 // Isolate the provider reader from the long-lived coordinator closure context.
 const sourceReader = (read: () => string) => () => ({ text: read(), unsupportedSources: [] });
 const routeKey = (chatId: string, threadId?: string) => JSON.stringify([chatId, threadId ?? null]);
@@ -38,6 +39,27 @@ export interface DelegatedTelegramAdapter {
   accept(input: DelegatedTelegramIngress): Promise<Record<string, unknown>>;
 }
 type RaisedOwnerApproval = Awaited<ReturnType<ApprovalBroker['raiseOwnerApproval']>>;
+/**
+ * A pending review's state. `awaiting-owner`, `deciding`, `approved`, `held` and
+ * `cancelled` are the intake's own; `transferred`, `started` and `unknown` are the
+ * handoff dispositions an approved review ends in, which `status` has always
+ * reported verbatim.
+ */
+type PendingState = 'awaiting-owner' | 'deciding' | 'approved' | 'held' | 'cancelled' | 'transferred' | 'started' | 'unknown';
+const pendingLifecycle = defineLifecycle<PendingState>('delegated Telegram review', {
+  'awaiting-owner': ['deciding', 'held', 'cancelled'],
+  // A decision attempt that fails returns to awaiting-owner so the owner can retry.
+  deciding: ['awaiting-owner', 'approved', 'held', 'cancelled'],
+  // Once approved the source is being handed off; only the handoff's own outcome follows.
+  approved: ['held', 'unknown', 'transferred', 'started'],
+  held: [], cancelled: [], transferred: [], started: [], unknown: [],
+});
+/** Move a pending review along the declared table; an illegal move (a late callback over a final state) is ignored. */
+function movePending(pending: { state: PendingState }, to: PendingState): boolean {
+  if (!pendingLifecycle.can(pending.state, to)) return false;
+  pending.state = to;
+  return true;
+}
 interface Pending {
   readonly ref: NativeInboundSourceRef; readonly configuration: Configuration;
   readonly sourceController: AbortController; readonly assertCurrent: () => void;
@@ -46,7 +68,7 @@ interface Pending {
   readonly run: () => Promise<Record<string, unknown>>;
   readonly approveRetainedSource: () => void;
   grant?: DelegatedReviewGrant;
-  state: string;
+  state: PendingState;
 }
 export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
   private readonly configurations = new Map<string, Configuration>();
@@ -244,13 +266,13 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
       });
       const run = async () => {
         const result = await handoff.run({ sessionId: ref.sessionId, input: submitted.submission.input, task: '' });
-        pending.state = result.disposition ?? 'held';
+        movePending(pending, result.disposition ?? 'held');
         if (result.disposition === 'transferred') await submitted.complete({ disposition: 'transferred', ref, requestId: ref.requestId });
         return { outcome: result.disposition ?? 'held', ref, execution: 'not-started' };
       };
       Object.assign(pending, { run }); this.pending.set(ref.requestId, pending);
       // Await the real broker outcome without holding the provider invocation open.
-      void approval.decision.then(async decision => { if (!decision.approved) { pending.state = 'held'; sourceController.abort(); } }).catch(() => { sourceController.abort(); });
+      void approval.decision.then(async decision => { if (!decision.approved) { movePending(pending, 'held'); sourceController.abort(); } }).catch(() => { sourceController.abort(); });
       return { outcome: 'held', reason: 'awaiting-exact-owner-decision', approvalId: approval.approval.id, ref, sourceExpiresAt: sourceExpiresAt.value };
     } catch { sourceController.abort(); return { outcome: 'held', reason: 'Original source or canonical binding is unavailable; no legacy fallback.' }; }
   }
@@ -275,7 +297,8 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
         pending.grant = { configurationId: pending.configuration.id, ownerRevision: pending.configuration.revision, owner: expectedOwner, workspaceRevision: this.workspaceRevision,
           approvalId: input.approvalId, choices: Object.freeze({ ...input.choices }), sourceExpiresAt: expiresAt };
       }
-      pending.state = 'deciding';
+      movePending(pending, 'deciding');
+      try {
       const settled = await pending.approval.resolveOwnerDecision({ decision: { approved: input.approved, ...(input.approved ? { modifiedArgs: input } : {}) }, actor: expectedOwner.principalId, actorSurface: 'paired-owner-command', assertCurrent: assert });
       assertOwner();
       if (input.approved && (settled?.status !== 'approved' || settled.decision?.disposition !== 'approved' || JSON.stringify(settled.decision.modifiedArgs) !== JSON.stringify(input))) { pending.sourceController.abort(); throw new Error('Exact approval was not durably resolved'); }
@@ -290,7 +313,16 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
       pending.approveRetainedSource();
       pending.sourceExpiresAt.value = pending.grant!.sourceExpiresAt;
       const timer = setTimeout(() => pending.sourceController.abort(), Math.max(1, pending.sourceExpiresAt.value - Date.now())); timer.unref(); pending.timers.add(timer);
-      pending.state = 'approved'; const outcome = await pending.run(); assertOwner(); return outcome;
+      movePending(pending, 'approved'); const outcome = await pending.run(); assertOwner(); return outcome;
+      } catch (error) {
+        // A failed attempt must not strand the review in 'deciding': that state
+        // rejects every retry. Return it to the owner, unless something already
+        // moved it on (approved, or a final state).
+        // movePending assigns state, which the compiler cannot see through the earlier narrowing.
+        const stateNow: string = pending.state;
+        if (stateNow === 'deciding') { delete pending.grant; movePending(pending, 'awaiting-owner'); }
+        throw error;
+      }
     }
   }
   private captureOwner(authority: NativeExecutionAuthority): { owner: DelegatedReviewOwner; assertCurrent: () => void } {
@@ -335,7 +367,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     if (record) { if (!delegatedReviewOwnership(owner)(record)) throw new Error('Review receipt belongs to another paired owner'); }
     else if (pending && sameNativeInboundSourceRef(pending.ref, ref)) { if (!isDeepStrictEqual(pending.configuration.expected, owner)) throw new Error('Review receipt belongs to another paired owner'); }
     else return { outcome: 'held', reason: 'missing-source-proof' };
-    if (pending) { pending.sourceController.abort(); pending.state = 'cancelled'; await this.deps.approvals.cancelApproval(pending.approval.approval.id, owner.principalId, 'paired-owner-command'); assertCurrent(); }
+    if (pending) { pending.sourceController.abort(); movePending(pending, 'cancelled'); await this.deps.approvals.cancelApproval(pending.approval.approval.id, owner.principalId, 'paired-owner-command'); assertCurrent(); }
     const row = this.deps.broker.getInputs(ref.sessionId, 500).find(value => value.id === ref.inputId);
     if (row?.state === 'queued') { await this.deps.broker.cancelInput(ref.sessionId, ref.inputId); assertCurrent(); }
     await this.receiver.cancel(ref); assertCurrent(); return { outcome: 'cancelled', execution: 'not-started' };

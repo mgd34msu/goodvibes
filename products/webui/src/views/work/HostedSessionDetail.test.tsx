@@ -8,6 +8,7 @@ import type { UseHostedSessionRealtimeOptions } from '../../hooks/useHostedSessi
 const pending: { id: string; client: string; resolve: (result: unknown) => void }[] = [];
 const detach = mock(async () => ({}));
 const beacon = mock(() => {});
+let killImpl: (id: string) => Promise<unknown> = async () => ({});
 let realtime: UseHostedSessionRealtimeOptions;
 const notify = () => {};
 mock.module('../../lib/goodvibes', () => ({
@@ -16,7 +17,7 @@ mock.module('../../lib/goodvibes', () => ({
   getCurrentAuth: async () => ({}), invokeMethod: async () => ({}), hostedSessionDetachBeacon: beacon,
   client: { operator: { sessions: { hosted: {
     attach: (id: string, client: string) => new Promise(resolve => pending.push({ id, client, resolve })),
-    detach, kill: async () => ({}),
+    detach, kill: (id: string) => killImpl(id),
   } } } },
 }));
 mock.module('../../hooks/useHostedSessionRealtime', () => ({
@@ -39,7 +40,7 @@ function mount(id: string) {
 }
 const reply = (id: string, content = 'history') => ({ session: { id, status: 'idle', updatedAt: 1, effectiveDetachPolicy: 'kill' }, history: [{ role: 'assistant', content }] });
 const settle = async () => { await new Promise(resolve => setTimeout(resolve, 0)); flushSync(() => {}); };
-afterEach(() => { for (const clean of cleanups.splice(0)) clean(); pending.length = 0; detach.mockClear(); beacon.mockClear(); });
+afterEach(() => { killImpl = async () => ({}); for (const clean of cleanups.splice(0)) clean(); pending.length = 0; detach.mockClear(); beacon.mockClear(); });
 
 test('two live attachments never share ownership, even with legacy browser storage', async () => {
   localStorage.setItem('goodvibes.webui.hosted.clientId', 'legacy-shared');
@@ -67,4 +68,18 @@ test('stream recovery replaces missing history without duplicating completed liv
   pending[1]!.resolve(reply('a', 'recovered terminal reply')); await settle();
   expect(h.result.history.map(message => message.content)).toEqual(['recovered terminal reply']);
   expect(h.result.liveMessages).toEqual([]); expect(h.result.liveText).toBe('');
+});
+
+test('a kill that settles after the selection moved on does not show the killed session in the new pane', async () => {
+  let finishKill!: () => void;
+  killImpl = (id) => new Promise((resolve) => { finishKill = () => resolve({ session: { id, status: 'killed', updatedAt: 5, effectiveDetachPolicy: 'kill' } }); });
+  const h = mount('a'); pending[0]!.resolve(reply('a')); await settle();
+  expect(h.result.session?.id).toBe('a');
+  h.result.kill(); await settle();
+
+  h.render('b'); pending[1]!.resolve(reply('b')); await settle();
+  expect(h.result.session?.id).toBe('b');
+
+  finishKill(); await settle();
+  expect(h.result.session?.id).toBe('b');
 });

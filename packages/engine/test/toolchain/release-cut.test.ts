@@ -84,6 +84,34 @@ describe('release-cut against a temp git fixture', () => {
     }
   });
 
+  test('an unreadable version file is found before any file is rewritten', () => {
+    const dir = makeRepo();
+    try {
+      expect(() => runReleaseCut({ cwd: dir, bump: 'patch', config: { ...config, versionFiles: ['missing.json'] } })).toThrow(/nothing was changed/);
+      expect(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version).toBe('1.0.0');
+      expect(execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8' }).trim()).toBe('');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a failure after the files were rewritten names the state and a command that restores a clean tree', () => {
+    const dir = makeRepo();
+    try {
+      let message = '';
+      try { runReleaseCut({ cwd: dir, bump: 'patch', config: { ...config, syncCommands: [['false']] } }); }
+      catch (error) { message = error instanceof Error ? error.message : String(error); }
+      expect(message).toContain('version-sync command failed');
+      expect(message).toContain('git restore --source=HEAD --staged --worktree -- package.json CHANGELOG.md');
+      expect(execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8' }).trim()).not.toBe('');
+      execFileSync('git', ['restore', '--source=HEAD', '--staged', '--worktree', '--', 'package.json', 'CHANGELOG.md'], { cwd: dir });
+      expect(execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8' }).trim()).toBe('');
+      expect(runReleaseCut({ cwd: dir, bump: 'patch', config }).version).toBe('1.0.1');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('refuses a dirty tree', () => {
     const dir = makeRepo();
     try {

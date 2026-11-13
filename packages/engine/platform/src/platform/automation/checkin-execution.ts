@@ -18,6 +18,8 @@ import type { AutomationJob } from './jobs.js';
 import type { AutomationRun } from './runs.js';
 import type { AutomationRunTrigger } from './types.js';
 import type { AutomationManagerExecutionContext } from './manager-runtime-execution.js';
+import { canSettleStoredRun } from './manager-runtime-helpers.js';
+import { logger } from '../utils/logger.js';
 
 /** What a single check-in evaluation decided, the outcome the evaluator returns. */
 export interface AutomationCheckinOutcome {
@@ -83,10 +85,19 @@ export async function executeCheckinJob(
   context.emitRunQueued(runningJob, baseRun);
   context.emitRunStarted(runningJob, baseRun);
 
+  let written: AutomationRun | undefined;
   try {
     const evaluation = await evaluator(job);
     const end = Date.now();
     const failed = evaluation.outcome === 'error';
+    const stored = context.runs.get(baseRun.id);
+    if (stored && !canSettleStoredRun(stored, failed ? 'failed' : 'completed')) {
+      // Cancelled while the evaluator ran: keep that outcome, count nothing.
+      logger.warn('AutomationManager: check-in finished after its run was already settled; keeping its recorded status', {
+        jobId: job.id, runId: baseRun.id, status: stored.status,
+      });
+      return stored;
+    }
     const terminal: AutomationRun = {
       ...baseRun,
       status: failed ? 'failed' : 'completed',
@@ -99,6 +110,7 @@ export async function executeCheckinJob(
     const currentJob = context.jobs.get(runningJob.id);
     const finalJob = currentJob ? settleCurrentJob(currentJob, runningJob, end, failed) : undefined;
     context.runs.set(terminal.id, terminal);
+    written = terminal;
     if (finalJob) context.jobs.set(finalJob.id, finalJob);
     context.pruneRunHistory(runningJob.id);
     await Promise.all([context.saveJobs(), context.saveRuns()]);
@@ -109,6 +121,13 @@ export async function executeCheckinJob(
   } catch (error) {
     const end = Date.now();
     const message = error instanceof Error ? error.message : String(error);
+    const stored = context.runs.get(baseRun.id);
+    if (stored && stored !== written && !canSettleStoredRun(stored, 'failed')) {
+      logger.warn('AutomationManager: check-in failed after its run was already settled; keeping its recorded status', {
+        jobId: job.id, runId: baseRun.id, status: stored.status, error: message,
+      });
+      return stored;
+    }
     const failedRun: AutomationRun = {
       ...baseRun,
       status: 'failed',

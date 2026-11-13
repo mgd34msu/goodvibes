@@ -102,17 +102,7 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
         // Esc pops exactly one level: the effort and context-cap steps and a
         // provider-first model list are sub-levels of the picker; otherwise the
         // picker closes. A typed query is not a level, it goes with the picker.
-        if (state.modelPicker.mode === 'effort') {
-          state.modelPicker.mode = 'model';
-          state.modelPicker.selectedIndex = 0;
-        } else if (state.modelPicker.mode === 'contextCap') {
-          state.modelPicker.contextCapQuery = '';
-          state.modelPicker.contextCapPendingModel = null;
-          state.modelPicker.mode = 'model';
-        } else if (state.modelPicker.mode === 'model' && state.modelPicker.previousMode === 'provider') {
-          state.modelPicker.mode = 'provider';
-          state.modelPicker.selectedIndex = 0;
-        } else {
+        if (state.modelPicker.popLevel() === null) {
           state.handleEscape();
           return true;
         }

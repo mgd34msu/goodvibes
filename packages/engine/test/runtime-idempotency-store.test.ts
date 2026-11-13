@@ -52,3 +52,26 @@ describe('IdempotencyStore finalization', () => {
     expect(record?.result).toEqual({ ok: true });
   });
 });
+
+describe('IdempotencyStore finalization is once, from in-flight only', () => {
+  test('markFailed on a completed record keeps the cached result', () => {
+    const store = new IdempotencyStore();
+    const key = store.generateKey({ sessionId: 's', turnId: 't', callId: 'c' });
+    store.checkAndRecord(key);
+    store.markComplete(key, { ok: true });
+    store.markFailed(key);
+    const again = store.checkAndRecord(key);
+    expect(again.status).toBe('duplicate');
+    expect(again.status === 'duplicate' && again.record.result).toEqual({ ok: true });
+  });
+
+  test('markComplete on a failed record does not resurrect it', () => {
+    const store = new IdempotencyStore();
+    const key = store.generateKey({ sessionId: 's', turnId: 't', callId: 'c2' });
+    store.checkAndRecord(key);
+    store.markFailed(key);
+    store.markComplete(key, { late: true });
+    expect(store.getRecord(key)?.status).toBe('failed');
+    expect(store.getRecord(key)?.result).toBeUndefined();
+  });
+});

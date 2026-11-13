@@ -1,342 +1,189 @@
-import { appendFileSync, closeSync, constants, createWriteStream, fstatSync, lstatSync, mkdirSync, openSync, read, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import type { Writable } from 'node:stream';
-import { finished } from 'node:stream/promises';
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { availableParallelism, tmpdir } from 'node:os';
+import { basename, delimiter, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { pumpTestOutput, runOwnedTestChild } from './owned-test-child.ts';
-import { defaultTestArgs } from './test-discovery.ts';
-import { partitionTestArgs } from './test-partitions.ts';
-import { sweepStaleTmpDirs } from './stale-tmp-sweep.ts';
-import {
-  makeRunTmpDirName,
-  retainRunTmpDir,
-  RUN_TMP_PREFIX,
-  RUNNER_ENV_FLAG,
-  STALE_RUN_MS,
-  testTmpEnv,
-  TEST_TMP_ROOT,
-  withRunTmpDir,
-} from './test-run-tmp.ts';
-import { withWorkspaceLock } from './workspace-lock.ts';
+import { isolatedTestEnvironment } from '../toolchain/src/test-runner/test-isolation.ts';
+import { RUN_TMP_PREFIX, sweepStaleTmpDirs, TEST_TMP_ROOT_ENV } from '../toolchain/src/test-runner/temp.ts';
+import { defaultTestArgs, discoverTestFiles } from './test-discovery.ts';
+import { selectPartition } from './test-partitions.ts';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ENGINE_ROOT = resolve(__dirname, '..');
-const args = process.argv.slice(2);
+const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const NETWORK_PRELOAD = join(ENGINE_ROOT, 'toolchain/src/test-runner/test-network-preload.ts');
+const SIGNAL_NUMBERS = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;
+// bun test flags whose value may be given as the next argument.
+const VALUE_FLAGS = new Set(['--timeout', '--preload', '--path-ignore-patterns', '-t', '--test-name-pattern', '--rerun-each', '--retry',
+  '--seed', '--reporter', '--reporter-outfile', '--coverage-reporter', '--coverage-dir', '--max-concurrency', '--shard']);
 
 /**
- * Where this run's tests put their temp directories.
- *
- * The suite calls `mkdtempSync(join(tmpdir(), …))` in hundreds of places, and
- * the ones whose cleanup does not run, a test that throws before its
- * `afterEach`, a process killed mid-file, leave the directory behind in the
- * system temp dir, where nothing ever reclaims it. On a machine where /tmp is a
- * tmpfs that is a slow inode leak, and inodes are the resource that runs out
- * first: measured on this project's own host, ~74k leaked directories from
- * these suites had consumed all 1,048,576 tmpfs inodes, at which point every
- * subsequent test failed with ENOSPC no matter what it was asserting. That is
- * the worst kind of failure, because it looks like a defect in whichever test
- * happened to run next.
- *
- * The fix is a single per-run PARENT inside the system temp dir: this run's
- * leftovers are one directory, removed with the run, and an age-based sweep
- * (scripts/stale-tmp-sweep.ts, params in scripts/test-run-tmp.ts, shared with
- * scripts/leak-scan.ts, the other direct-`bun test` entry point) reclaims what
- * a signal-killed run could not remove itself. Thousands of unowned siblings
- * become one owned subtree.
- *
- * It deliberately does NOT live inside the checkout. `tmpdir()` is expected to
- * be somewhere no project rooted above it, and tests rely on that: pointing it
- * at `<repo>/.test-tmp` put a tsconfig.json above every temp directory, so
- * post-edit-diagnostics.test.ts's "returns [] when no TS project context is
- * detectable" case suddenly had one and reported 14 diagnostics where it
- * expected none. Anything rooted above the temp dir, tsconfig, .git,
- * package.json, an editorconfig, is a property tests are entitled to assume
- * absent.
+ * Per-test timeout. bun's default is 5 000 ms, an idle machine's number: this
+ * suite boots real daemons, opens real sockets, shells out to real `git` and
+ * signs real crypto, work whose cost is set by how busy the host is. Under
+ * load the daemon-backed files failed with "timed out after 5000ms" while the
+ * daemon was still coming up normally. It is a ceiling, not a delay: a fast
+ * host finishes as quickly as before. A test's own timeout still wins, and so
+ * does an explicit `--timeout`.
  */
-const RUN_TMP_DIR_NAME = makeRunTmpDirName();
-
-function resolveTestArgs(): readonly string[] {
-  return partitionTestArgs(ENGINE_ROOT, args) ?? (args.length > 0 ? args : defaultTestArgs(ENGINE_ROOT));
-}
-
-/**
- * Per-test ceiling. bun's built-in default is 5 000 ms, and that is an idle
- * machine's number: this suite boots real daemons, opens real sockets, shells
- * out to real `git`, and signs real crypto, work whose wall-clock cost is set
- * by how busy the host is, not by what the test asserts. Measured on this
- * project's own machine under a realistic concurrent load, the daemon-backed
- * spine files failed outright with "this test timed out after 5000ms" while the
- * daemon was still coming up perfectly normally, and one of them takes ~37 s in
- * total there.
- *
- * A CEILING, not a delay: nothing waits it out, so a fast host finishes exactly
- * as quickly as before and only a genuinely stuck test pays it. A test that
- * needs a different budget still declares its own as the third argument to
- * test(), which continues to win over this default.
- */
-function resolveTimeoutMs(): number {
+function defaultTimeoutMs(): number {
   const env = Number(process.env.GOODVIBES_TEST_TIMEOUT_MS);
-  if (Number.isFinite(env) && env >= 1) return Math.floor(env);
-  return 60_000;
+  return Number.isFinite(env) && env >= 1 ? Math.floor(env) : 60_000;
 }
 
-/** True when the caller already passed an explicit --timeout, which wins. */
-function hasExplicitTimeout(testArgs: readonly string[]): boolean {
-  return testArgs.some((arg) => arg === '--timeout' || arg.startsWith('--timeout='));
+export interface BunTestRun {
+  /** Everything after `bun test`: flags and test files or filters. */
+  readonly args: readonly string[];
+  readonly cwd?: string;
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  /** Variables the isolation allowlist would otherwise strip. */
+  readonly fixtureEnv?: Readonly<Record<string, string | undefined>>;
+  /** With more than 1, each test file runs in its own `bun test` process, this many at a time. */
+  readonly jobs?: number;
 }
 
-function captureEvidenceFile(path: string): () => void {
-  const identity = lstatSync(path);
-  if (!identity.isFile() || identity.isSymbolicLink() || realpathSync(path) !== path) throw new Error('Test owner evidence must be an owned regular file');
-  return () => {
-    const current = lstatSync(path);
-    if (!current.isFile() || current.isSymbolicLink() || current.dev !== identity.dev || current.ino !== identity.ino || realpathSync(path) !== path) {
-      throw new Error('Test owner evidence file ownership changed');
+interface SplitArgs { flags: string[]; filters: string[]; cwd?: string | undefined; partition?: string | undefined; jobs?: string | undefined }
+
+/** Separate runner options, bun flags (with their values) and file filters. */
+function splitArgs(argv: readonly string[]): SplitArgs {
+  const out: SplitArgs = { flags: [], filters: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    const eq = arg.startsWith('--') ? arg.indexOf('=') : -1;
+    const name = eq === -1 ? arg : arg.slice(0, eq);
+    const takesValue = VALUE_FLAGS.has(name) || ['--cwd', '--partition', '--jobs', '--manifest'].includes(name);
+    let value = eq === -1 ? undefined : arg.slice(eq + 1);
+    if (value === undefined && takesValue) {
+      value = argv[++i];
+      if (value === undefined) throw new Error(`${name} requires a value`);
     }
+    if (name === '--cwd') out.cwd = value;
+    else if (name === '--partition') out.partition = value;
+    else if (name === '--jobs') out.jobs = value;
+    else if (name === '--manifest') continue; // accepted for old workflow lines, ignored
+    else if (!arg.startsWith('-')) out.filters.push(arg);
+    else if (value === undefined) out.flags.push(arg);
+    else out.flags.push(...(name.startsWith('--') ? [`${name}=${value}`] : [name, value]));
+  }
+  return out;
+}
+
+/** Test files of `cwd` selected by bun-style filters, minus `--path-ignore-patterns`. */
+function expandFiles(cwd: string, filters: readonly string[], flags: readonly string[]): string[] {
+  const ignores = flags.filter((flag) => flag.startsWith('--path-ignore-patterns=')).flatMap((flag) => flag.slice(23).split(','))
+    .map((pattern) => new Bun.Glob(pattern.replace(/^\.\//, '')));
+  const exact = (filter: string) => (filter.startsWith('./') || filter.startsWith('/') ? relative(cwd, resolve(cwd, filter)) : undefined);
+  const files = discoverTestFiles(cwd).filter((file) => !ignores.some((glob) => glob.match(file))
+    && (filters.length === 0 || filters.some((filter) => exact(filter) === undefined ? file.includes(filter) : file === exact(filter))));
+  if (files.length === 0) throw new Error('No test files matched');
+  return files;
+}
+
+/**
+ * Run `bun test` in an isolated environment inside a per-run temp directory.
+ *
+ * The directory is exported as TMPDIR (and GOODVIBES_TEST_TMP_ROOT) and removed
+ * in a `finally`; an older leftover of a killed run is reclaimed at start.
+ * SIGINT/SIGTERM/SIGHUP are relayed to every child's process group (a second
+ * one kills it), and whatever is left in a group is killed when its child exits.
+ * Resolves with the exit code (128+n when a signal ended the run).
+ */
+export async function runBunTest(run: BunTestRun): Promise<number> {
+  sweepStaleTmpDirs(tmpdir(), RUN_TMP_PREFIX);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), RUN_TMP_PREFIX)));
+  const cwd = run.cwd ?? ENGINE_ROOT;
+  const violations = join(root, 'network-violations');
+  const env = isolatedTestEnvironment({ ...(run.env ?? process.env) }, join(root, 'isolated'), run.fixtureEnv);
+  // Set before Bun starts: native spawns keep the startup environment, so a later
+  // assignment inside a test never reaches a `git` it launches. In-checkout test
+  // dirs (`<cwd>/.test-tmp`) and the run root must both stop git's upward search.
+  const ceilings = new Set([root, ...(cwd === ENGINE_ROOT ? [] : [join(cwd, '.test-tmp')]), ...(env.GIT_CEILING_DIRECTORIES?.split(delimiter).filter(Boolean) ?? [])]);
+  const { flags, filters } = splitArgs(run.args);
+  if (!flags.some((flag) => flag.startsWith('--timeout='))) flags.unshift(`--timeout=${defaultTimeoutMs()}`);
+  let signalled: keyof typeof SIGNAL_NUMBERS | undefined;
+  const children = new Set<ReturnType<typeof Bun.spawn>>();
+  const killGroups = (signal: NodeJS.Signals): void => {
+    for (const child of children) { try { process.kill(-child.pid, signal); } catch { /* group already gone */ } }
   };
-}
-
-interface TestOwnerLog {
-  readonly path: string;
-  readonly dev: number;
-  readonly ino: number;
-}
-
-/** Relay complete private logs without extending the shared execution deadline. */
-export async function replayTestOwnerLogs(files: readonly TestOwnerLog[], deadlineAt: number, sink: Writable = process.stdout, signal?: AbortSignal,
-  assertEvidenceRoot: () => void = () => {}): Promise<{ outputTruncated: boolean; stopReason: string | null }> {
-  const abort = new AbortController();
-  const onInterrupt = () => abort.abort(new Error('Owner-log replay was interrupted'));
-  const signals = ['SIGTERM', 'SIGINT', 'SIGHUP'] as const;
-  for (const name of signals) process.on(name, onInterrupt);
-  signal?.addEventListener('abort', onInterrupt, { once: true });
-  if (signal?.aborted) onInterrupt();
-  const remaining = deadlineAt - Date.now();
-  const timer = setTimeout(() => abort.abort(new Error('The shared absolute deadline expired during owner-log replay')), Math.max(1, remaining));
-  const opened: { readonly fd: number; readonly assertCurrent: () => void }[] = [];
-  try {
-    if (remaining <= 0 || abort.signal.aborted) return { outputTruncated: true, stopReason: 'The shared absolute deadline expired or replay was interrupted before owner-log replay' };
-    // Capture native data before the borrowed root callback can change it.
-    const originalFiles = files.map(source => {
-      const path: unknown = Object.getOwnPropertyDescriptor(source, 'path')?.value;
-      const dev: unknown = Object.getOwnPropertyDescriptor(source, 'dev')?.value;
-      const ino: unknown = Object.getOwnPropertyDescriptor(source, 'ino')?.value;
-      if (typeof path !== 'string' || typeof dev !== 'number' || typeof ino !== 'number') {
-        throw new Error('Test owner log capture must contain original data fields');
-      }
-      return Object.freeze({ source, path, dev, ino });
-    });
-    const assertOriginalFiles = () => {
-      if (Object.getOwnPropertyDescriptor(files, 'length')?.value !== originalFiles.length) {
-        throw new Error('Test owner log selection changed');
-      }
-      for (const [index, file] of originalFiles.entries()) {
-        if (Object.getOwnPropertyDescriptor(files, String(index))?.value !== file.source
-          || Object.getOwnPropertyDescriptor(file.source, 'path')?.value !== file.path
-          || Object.getOwnPropertyDescriptor(file.source, 'dev')?.value !== file.dev
-          || Object.getOwnPropertyDescriptor(file.source, 'ino')?.value !== file.ino) {
-          throw new Error('Test owner log capture changed');
-        }
-      }
-    };
-    // Pin every original log before any asynchronous sink callback can replace a path.
-    for (const file of originalFiles) {
-      assertOriginalFiles();
-      assertEvidenceRoot();
-      assertOriginalFiles();
-      const fd = openSync(file.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-      const assertCurrent = () => {
-        assertOriginalFiles();
-        assertEvidenceRoot();
-        assertOriginalFiles();
-        const current = fstatSync(fd), path = lstatSync(file.path);
-        if (!current.isFile() || current.dev !== file.dev || current.ino !== file.ino || !path.isFile() || path.isSymbolicLink()
-          || path.dev !== current.dev || path.ino !== current.ino || realpathSync(file.path) !== file.path) throw new Error('Test owner log ownership changed');
-      };
-      opened.push({ fd, assertCurrent });
-      assertCurrent();
-    }
-    for (const [index, file] of opened.entries()) {
-      file.assertCurrent();
-      const header = new ReadableStream<Uint8Array>({ start(controller) {
-        controller.enqueue(new TextEncoder().encode(`[test-owner ${index + 1}/${opened.length}]\n`));
-        controller.close();
-      } });
-      await pumpTestOutput(header, sink, { lastLine: null, lastFile: null }, abort.signal);
-      file.assertCurrent();
-      let pendingRead: Promise<number> | undefined, cancelled = false;
-      const stream = new ReadableStream<Uint8Array>({
-        async pull(controller) {
-          const bytes = new Uint8Array(64 * 1024);
-          pendingRead = new Promise((resolve, reject) => read(file.fd, bytes, 0, bytes.length, null,
-            (error, count) => error ? reject(error) : resolve(count)));
-          const count = await pendingRead;
-          if (cancelled) return;
-          if (count === 0) controller.close(); else controller.enqueue(bytes.subarray(0, count));
-        },
-        cancel() { cancelled = true; },
-      });
-      try { await pumpTestOutput(stream, sink, { lastLine: null, lastFile: null }, abort.signal); }
-      finally { cancelled = true; await pendingRead?.catch(() => {}); }
-    }
-    return { outputTruncated: false, stopReason: null };
-  } catch {
-    return { outputTruncated: true, stopReason: 'Owner-log replay failed or did not drain before the shared absolute deadline' };
-  } finally {
-    for (const file of opened) closeSync(file.fd);
-    clearTimeout(timer);
-    for (const name of signals) process.off(name, onInterrupt);
-    signal?.removeEventListener('abort', onInterrupt);
-  }
-}
-
-/** A direct Agent selection uses the same issued project root as its CI groups.
- * Match the actual product root, rather than fencing an arbitrary caller cwd. */
-function agentProjectTmpParent(testArgs: readonly string[]): string | undefined {
-  let cwd: string | undefined;
-  for (let index = 0; index < testArgs.length; index++) {
-    const argument = testArgs[index]!;
-    if (argument === '--cwd') {
-      const selected = testArgs[++index];
-      if (!selected) throw new Error('--cwd requires a test working directory');
-      cwd = resolve(ENGINE_ROOT, selected);
-    } else if (argument.startsWith('--cwd=')) cwd = resolve(ENGINE_ROOT, argument.slice('--cwd='.length));
-  }
-  if (cwd === undefined) return undefined;
-  const agentRoot = realpathSync(resolve(ENGINE_ROOT, '../../products/agent'));
-  return realpathSync(cwd) === agentRoot ? join(agentRoot, '.test-tmp') : undefined;
-}
-
-/** Resolve every child selection inside the single workspace/build lease. */
-export async function runTests(resolvePlans: () => readonly (readonly string[])[] = () => [resolveTestArgs()], projectTmpParent?: string): Promise<void> {
-  const expectedParentPid = process.ppid;
-  await withWorkspaceLock('test', async () => {
-    const plans = resolvePlans();
-    if (plans.length === 0 || plans.some(plan => plan.length === 0)) throw new Error('Test child plans must be nonempty');
-    sweepStaleTmpDirs(TEST_TMP_ROOT, RUN_TMP_PREFIX, STALE_RUN_MS);
-    if (projectTmpParent) {
-      mkdirSync(projectTmpParent, { recursive: true });
-      sweepStaleTmpDirs(projectTmpParent, RUN_TMP_PREFIX, STALE_RUN_MS);
-    }
-    await withRunTmpDir(TEST_TMP_ROOT, async (runTmpDir) => {
-      const runIdentity = lstatSync(runTmpDir);
-      const ownerPath = join(runTmpDir, '.goodvibes-test-owner.json');
-      const assertOwnerFile = captureEvidenceFile(ownerPath);
-      const ownerBytes = readFileSync(ownerPath, 'utf8');
-      const assertEvidenceRoot = () => {
-        const current = lstatSync(runTmpDir);
-        if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== runIdentity.dev || current.ino !== runIdentity.ino || realpathSync(runTmpDir) !== runTmpDir) {
-          throw new Error('Test owner evidence root ownership changed');
-        }
-        assertOwnerFile();
-        if (readFileSync(ownerPath, 'utf8') !== ownerBytes) throw new Error('Test owner evidence issuer changed');
-      };
-      const logFiles: (TestOwnerLog & { readonly assertCurrent: () => void })[] = [];
-      const interrupted = new AbortController();
-      const onInterrupt = () => interrupted.abort(new Error('The shared test runner was interrupted'));
-      const signals = ['SIGTERM', 'SIGINT', 'SIGHUP'] as const;
-      for (const name of signals) process.on(name, onInterrupt);
-      try {
-        const configuredCeiling = Number(process.env.GOODVIBES_TEST_CEILING_MS);
-        const ceilingMs = Number.isFinite(configuredCeiling) && configuredCeiling > 0
-          ? Math.min(720_000, Math.floor(configuredCeiling)) : 720_000;
-        const deadlineAt = Date.now() + ceilingMs;
-        const runPlan = async (testArgs: readonly string[], index: number) => {
-          const timeoutArgs = hasExplicitTimeout(testArgs) ? [] : [`--timeout=${resolveTimeoutMs()}`];
-          const output = plans.length > 1 ? (() => {
-            assertEvidenceRoot();
-            const path = join(runTmpDir, `owner-${index + 1}.log`);
-            const fd = openSync(path, 'wx', 0o600);
-            const identity = fstatSync(fd);
-            logFiles[index] = { path, dev: identity.dev, ino: identity.ino, assertCurrent: () => {
-              const current = lstatSync(path);
-              if (!current.isFile() || current.isSymbolicLink() || current.dev !== identity.dev || current.ino !== identity.ino || realpathSync(path) !== path) {
-                throw new Error('Test owner log ownership changed');
-              }
-            } };
-            return createWriteStream(path, { fd, autoClose: true });
-          })() : undefined;
-          try {
-            const execute = (projectTmpRoot?: string) => {
-              if (interrupted.signal.aborted) throw new Error('Test dispatch was interrupted before this child could start');
-              return runOwnedTestChild({
-                ownProcessGroup: process.platform !== 'win32',
-                expectedParentPid,
-                ...(output ? { deadlineAt, stdout: output, stderr: output } : {}),
-                argv: [...timeoutArgs, ...testArgs],
-                cwd: ENGINE_ROOT,
-                ...(projectTmpRoot ? { fixtureEnv: {
-                  GOODVIBES_TEST_PROJECT_TMP_ROOT: projectTmpRoot,
-                  // Set before Bun starts: some native spawn APIs retain their
-                  // startup environment instead of later process.env changes.
-                  GIT_CEILING_DIRECTORIES: projectTmpRoot,
-                } } : {}),
-                env: {
-                  ...process.env,
-                  ...testTmpEnv(runTmpDir),
-                  // Keep the runner flag independent of the temporary environment.
-                  [RUNNER_ENV_FLAG]: '1',
-                },
-              });
-            };
-            const selectedProjectParent = projectTmpParent ?? agentProjectTmpParent(testArgs);
-            if (selectedProjectParent && !projectTmpParent) {
-              mkdirSync(selectedProjectParent, { recursive: true });
-              sweepStaleTmpDirs(selectedProjectParent, RUN_TMP_PREFIX, STALE_RUN_MS);
-            }
-            return selectedProjectParent ? await withRunTmpDir(selectedProjectParent, async projectRoot => {
-              try { return await execute(projectRoot); }
-              catch (error) { retainRunTmpDir(projectRoot, 'Owned test lifecycle did not establish complete child settlement'); throw error; }
-            }) : await execute();
-          } finally {
-            if (output) { output.end(); await finished(output); }
-          }
-        };
-        const results = await Promise.allSettled(plans.map(runPlan));
-        let replay: { outputTruncated: boolean; stopReason: string | null } = { outputTruncated: false, stopReason: null };
-        if (plans.length > 1) {
-          // Finite native result fields remain visible even when no replay time remains.
-          process.stderr.write(`goodvibes: test owner results ${JSON.stringify(results.map((result, index) => result.status === 'fulfilled'
-            ? { owner: index + 1, status: result.status, exitCode: result.value.exitCode, signalCode: result.value.signalCode, stopped: result.value.stopped, outputTruncated: result.value.outputTruncated }
-            : { owner: index + 1, status: result.status }))}\n`);
-          assertEvidenceRoot();
-          for (const file of logFiles) file.assertCurrent();
-          replay = await replayTestOwnerLogs(logFiles, deadlineAt, process.stdout, interrupted.signal, assertEvidenceRoot);
-          const failed = replay.outputTruncated || interrupted.signal.aborted || results.some(result => result.status === 'rejected'
-            || result.value.exitCode !== 0 || result.value.stopped !== null || result.value.outputTruncated);
-          assertEvidenceRoot();
-          const resultPath = join(runTmpDir, 'owner-results.json');
-          writeFileSync(resultPath, JSON.stringify({ plans, deadlineAt, replay, results: results.map(result => result.status === 'fulfilled'
-            ? result : { status: 'rejected', reason: 'Owned child lifecycle failed before settlement could be established' }) }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
-          const assertResult = captureEvidenceFile(resultPath);
-          const githubOutput = process.env.GITHUB_OUTPUT;
-          if (failed || githubOutput) {
-            retainRunTmpDir(runTmpDir, 'Complete owner logs and failure/output-truncation manifest');
-            process.stderr.write(`goodvibes: test owner evidence retained at ${runTmpDir}\n`);
-          }
-          if (githubOutput) {
-            assertEvidenceRoot();
-            for (const file of logFiles) file.assertCurrent();
-            assertResult();
-            const paths = [...logFiles.map(file => file.path), resultPath];
-            if (paths.some(path => /[\r\n]/.test(path))) throw new Error('Test owner evidence paths cannot contain newlines');
-            const delimiter = `GOODVIBES_OWNER_EVIDENCE_${process.pid}`;
-            appendFileSync(githubOutput, `owner_evidence<<${delimiter}\n${paths.join('\n')}\n${delimiter}\n`);
-          }
-        }
-        for (const result of results) {
-          if (result.status === 'rejected') throw result.reason;
-          const { exitCode, signalCode, stopped, stopReason, outputTruncated } = result.value;
-          if (stopped !== null) throw new Error(`bun test ended by the ${stopped} ceiling: ${stopReason ?? 'no reason recorded'}`);
-          if (outputTruncated) throw new Error('bun test output did not completely drain');
-          if (exitCode !== 0) throw new Error(`bun test ${signalCode ? `killed by ${signalCode}` : `exited with code ${exitCode}`}`);
-        }
-        if (replay.outputTruncated) throw new Error(`bun test outputTruncated: ${replay.stopReason}`);
-        if (interrupted.signal.aborted) throw new Error('bun test was interrupted');
-      } finally { for (const name of signals) process.off(name, onInterrupt); }
-    }, RUN_TMP_DIR_NAME);
+  const relays = (Object.keys(SIGNAL_NUMBERS) as (keyof typeof SIGNAL_NUMBERS)[]).map((name) => {
+    const relay = (): void => { killGroups(signalled ? 'SIGKILL' : name); signalled ??= name; };
+    process.on(name, relay);
+    return () => process.off(name, relay);
   });
+  /** One `bun test` child; with `capture`, its output is returned instead of inherited. */
+  const spawnBun = async (testArgs: readonly string[], capture: boolean): Promise<{ code: number; output: string }> => {
+    const child = Bun.spawn([process.execPath, '--no-env-file', 'test', '--preload', NETWORK_PRELOAD, ...testArgs], {
+      cwd,
+      detached: process.platform !== 'win32',
+      stdio: ['inherit', capture ? 'pipe' : 'inherit', capture ? 'pipe' : 'inherit'],
+      env: {
+        ...env,
+        TMPDIR: root, TMP: root, TEMP: root,
+        [TEST_TMP_ROOT_ENV]: root,
+        GIT_CEILING_DIRECTORIES: [...ceilings].join(delimiter),
+        GOODVIBES_ENGINE_TEST_RUNNER: '1',
+        GOODVIBES_TEST_NETWORK_VIOLATIONS: violations,
+      },
+    });
+    children.add(child);
+    try {
+      const [stdout, stderr, code] = capture
+        ? await Promise.all([new Response(child.stdout as ReadableStream).text(), new Response(child.stderr as ReadableStream).text(), child.exited])
+        : ['', '', await child.exited];
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* nothing left in the group */ }
+      return { code: code ?? 1, output: stdout + stderr };
+    } finally { children.delete(child); }
+  };
+  try {
+    let exitCode: number;
+    if ((run.jobs ?? 1) <= 1) exitCode = (await spawnBun([...flags, ...filters], false)).code;
+    else {
+      // One child per file, at most `jobs` at a time; output is printed as each finishes.
+      const files = expandFiles(cwd, filters, flags);
+      const failed: string[] = [];
+      let next = 0;
+      const worker = async (): Promise<void> => {
+        while (!signalled && next < files.length) {
+          const file = files[next++]!;
+          const started = Date.now();
+          const { code, output } = await spawnBun([...flags, `./${file}`], true);
+          if (code !== 0 || signalled) failed.push(file);
+          process.stdout.write(`\n==> ${file} (${((Date.now() - started) / 1000).toFixed(1)}s)${code !== 0 ? `  [FAIL: exit ${code}]` : ''}\n${output}`);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(run.jobs!, files.length) }, worker));
+      console.log(`\nTest files: ${files.length}, failed: ${failed.length}${failed.length ? `\n${failed.map((file) => `  FAIL ${file}`).join('\n')}` : ''}`);
+      exitCode = failed.length > 0 ? 1 : 0;
+    }
+    let blocked = '';
+    try { blocked = readFileSync(violations, 'utf8'); } catch { /* none were blocked */ }
+    if (blocked) { process.stderr.write(`goodvibes: ordinary tests attempted blocked network access:\n${blocked}`); return 1; }
+    return signalled ? 128 + SIGNAL_NUMBERS[signalled] : exitCode;
+  } finally {
+    for (const remove of relays) remove();
+    // A failed removal (a daemon still writing) must not replace the run's exit code.
+    // Twice, a moment apart: a detached daemon may still flush into the directory it just lost.
+    for (const pass of [0, 1]) {
+      if (pass === 1) await new Promise((done) => setTimeout(done, 300));
+      for (const path of [root, ...(cwd === ENGINE_ROOT ? [] : [join(cwd, '.test-tmp', `run-${basename(root)}`)])]) {
+        try { rmSync(path, { recursive: true, force: true }); } catch (error) { if (pass === 1) console.error(`goodvibes: could not remove ${path}: ${String(error)}`); }
+      }
+    }
+  }
 }
 
-if (import.meta.main) await runTests();
+/**
+ * CLI: `bun scripts/test.ts [--cwd DIR] [--partition=I/N] [--jobs=N|auto] [bun test flags] [files]`.
+ * `--cwd` is relative to the engine package. `--jobs=auto` is min(4, cores - 1). `--manifest=` is accepted and ignored.
+ */
+function parseCli(argv: readonly string[]): BunTestRun {
+  const { flags, filters, cwd, partition, jobs } = splitArgs(argv);
+  const jobCount = jobs === undefined ? 1 : jobs === 'auto' ? Math.max(1, Math.min(4, availableParallelism() - 1)) : Number(jobs);
+  if (!Number.isInteger(jobCount) || jobCount < 1) throw new Error('--jobs expects a positive integer or "auto"');
+  if (partition !== undefined) {
+    if (cwd !== undefined || filters.length > 0) throw new Error('--partition selects engine test files itself; do not combine it with --cwd or test files');
+    return { args: [...flags, ...selectPartition(ENGINE_ROOT, partition)], jobs: jobCount };
+  }
+  if (cwd === undefined && filters.length === 0) return { args: [...flags, ...defaultTestArgs(ENGINE_ROOT)], jobs: jobCount };
+  return { args: [...flags, ...filters], cwd: resolve(ENGINE_ROOT, cwd ?? '.'), jobs: jobCount };
+}
+
+if (import.meta.main) process.exitCode = await runBunTest(parseCli(process.argv.slice(2)));

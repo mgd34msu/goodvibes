@@ -67,6 +67,9 @@ function ScopedNativeIntakeForm({
   const generation = useRef(0);
   const busyRef = useRef(true);
   const cancelling = useRef(false);
+  // Bumped by "Retry connection": re-runs the connect effect after a failed connect,
+  // which otherwise leaves the form gated on `ready` with nothing to press.
+  const [connectAttempt, setConnectAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -150,7 +153,15 @@ function ScopedNativeIntakeForm({
       session.current?.dispose();
       session.current = undefined;
     };
-  }, [lifetime, continuationSessionId, selectedDiff, projectId]);
+  }, [lifetime, continuationSessionId, selectedDiff, projectId, connectAttempt]);
+
+  const retryConnection = () => {
+    if (ready || busyRef.current) return;
+    busyRef.current = true;
+    setError(undefined);
+    setBusy("Connecting");
+    setConnectAttempt((attempt) => attempt + 1);
+  };
 
   const run = async (
     label: string,
@@ -382,6 +393,11 @@ function ScopedNativeIntakeForm({
       </p>
       {error && <p role="alert">{error}</p>}
       {busy && <p role="status">{busy}…</p>}
+      {!ready && !busy && (
+        <Button type="button" onClick={retryConnection}>
+          Retry connection
+        </Button>
+      )}
       {closed && <p role="status">Session closed: reopen to submit a continuation.</p>}
       {ready && !selected && !closed && (
         <form className="work-form" onSubmit={submit}>

@@ -252,29 +252,53 @@ export function runReleaseCut(options: ReleaseCutOptions): ReleaseCutResult {
     return { version, tag, committed: false, resumed: false };
   }
 
-  setManifestVersion(rootManifestPath, version);
-  for (const rel of config.versionFiles) {
-    setManifestVersion(resolve(cwd, rel), version);
+  // Everything that can be checked without writing is checked before the first write, so a
+  // missing or unparsable file cannot strand a half-bumped tree.
+  for (const path of [rootManifestPath, ...config.versionFiles.map((rel) => resolve(cwd, rel))]) {
+    try { JSON.parse(readFileSync(path, 'utf8')); }
+    catch (error) { throw new Error(`Cannot read version file ${path} as JSON; nothing was changed. (${error instanceof Error ? error.message : String(error)})`); }
   }
-
-  for (const cmd of config.syncCommands) {
-    const [bin, ...args] = cmd;
-    if (!bin) continue;
-    const res = exec(bin, args, { cwd });
-    if (res.status !== 0) throw new Error(`version-sync command failed: ${cmd.join(' ')}\n${res.stderr}`);
-  }
-
   const changelogPath = resolve(cwd, 'CHANGELOG.md');
-  const changelog = readFileSync(changelogPath, 'utf8');
-  const section = buildChangelogSection(version, config.changelogHeading, date, options.notes ?? []);
-  writeFileSync(changelogPath, insertChangelogSection(changelog, section, config.changelogInsertMarker));
+  try { readFileSync(changelogPath, 'utf8'); }
+  catch (error) { throw new Error(`Cannot read ${changelogPath}; nothing was changed. (${error instanceof Error ? error.message : String(error)})`); }
 
-  const add = exec('git', ['add', ...config.commitPaths], { cwd });
-  if (add.status !== 0) throw new Error(`git add failed: ${add.stderr}`);
-  const commit = exec('git', ['commit', '-m', releaseCommitMessage(version)], { cwd });
-  if (commit.status !== 0) throw new Error(`git commit failed: ${commit.stderr}`);
-  const tagRes = exec('git', ['tag', '-a', tag, '-m', `release ${version}`], { cwd });
-  if (tagRes.status !== 0) throw new Error(`git tag failed: ${tagRes.stderr}`);
+  // Past this point the tree is modified. Whatever fails, say which state that leaves and the next command.
+  let committed = false;
+  try {
+    setManifestVersion(rootManifestPath, version);
+    for (const rel of config.versionFiles) {
+      setManifestVersion(resolve(cwd, rel), version);
+    }
+
+    for (const cmd of config.syncCommands) {
+      const [bin, ...args] = cmd;
+      if (!bin) continue;
+      const res = exec(bin, args, { cwd });
+      if (res.status !== 0) throw new Error(`version-sync command failed: ${cmd.join(' ')}\n${res.stderr}`);
+    }
+
+    const changelog = readFileSync(changelogPath, 'utf8');
+    const section = buildChangelogSection(version, config.changelogHeading, date, options.notes ?? []);
+    writeFileSync(changelogPath, insertChangelogSection(changelog, section, config.changelogInsertMarker));
+
+    const add = exec('git', ['add', ...config.commitPaths], { cwd });
+    if (add.status !== 0) throw new Error(`git add failed: ${add.stderr}`);
+    const commit = exec('git', ['commit', '-m', releaseCommitMessage(version)], { cwd });
+    if (commit.status !== 0) throw new Error(`git commit failed: ${commit.stderr}`);
+    committed = true;
+    const tagRes = exec('git', ['tag', '-a', tag, '-m', `release ${version}`], { cwd });
+    if (tagRes.status !== 0) throw new Error(`git tag failed: ${tagRes.stderr}`);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (committed) {
+      throw new Error(`${reason}\n[release-cut] The release commit for ${version} exists but is untagged; re-run the same command to create the missing tag ${tag}.`);
+    }
+    throw new Error(
+      `${reason}\n[release-cut] The cut stopped before committing; the files for ${version} were rewritten in the working tree, which a re-run would refuse as unclean. `
+      + `The tree was clean before this run, so to discard the partial cut and start over: git restore --source=HEAD --staged --worktree -- ${config.commitPaths.join(' ')}`
+      + ` (then git status, and remove any untracked files the sync commands generated).`,
+    );
+  }
 
   logger.info(`[release-cut] committed and tagged ${tag}. Push with: git push && git push origin ${tag}`);
   return { version, tag, committed: true, resumed: false };

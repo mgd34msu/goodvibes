@@ -76,45 +76,55 @@ if (only && targets.length === 0) {
   throw new Error(`unknown target '${only}'. Known: ${PLATFORM_PACKAGES.map((p) => p.dir).join(', ')}`);
 }
 
-let published = 0;
-for (const pkg of targets) {
-  const pkgDir = join(packagesRoot, pkg.dir);
-  const app = join(pkgDir, 'bin', pkg.appArtifact);
+// The checked-in manifests are only rewritten for the duration of this run and are
+// put back byte-for-byte in `finally`, however the run ends.
+const originalManifests = new Map<string, string>();
 
-  if (!existsSync(app)) {
-    if (allowMissing) {
-      console.log(`skip ${pkg.name}: not assembled`);
+let published = 0;
+try {
+  for (const pkg of targets) {
+    const pkgDir = join(packagesRoot, pkg.dir);
+    const app = join(pkgDir, 'bin', pkg.appArtifact);
+
+    if (!existsSync(app)) {
+      if (allowMissing) {
+        console.log(`skip ${pkg.name}: not assembled`);
+        continue;
+      }
+      throw new Error(`${pkg.name} is not assembled (missing binary in ${pkgDir}/bin); run assemble-platform-packages first`);
+    }
+
+    const pkgJsonPath = join(pkgDir, 'package.json');
+    const originalManifest = readFileSync(pkgJsonPath, 'utf8');
+    const pkgJson = JSON.parse(originalManifest) as { version: string; name: string };
+    const version = pkgJson.version;
+    if (version !== mainVersion) {
+      throw new Error(`${pkg.name} version ${version} does not match main package ${mainVersion}; re-run assembly`);
+    }
+
+    // Apply the mirror scope override in place before publishing. On the npm path
+    // scopeOverride is empty and the name is left as its @goodvibes-jev original.
+    const publishName = rescopeName(pkg.name);
+    if (publishName !== pkgJson.name) {
+      pkgJson.name = publishName;
+      originalManifests.set(pkgJsonPath, originalManifest);
+      writeFileSync(pkgJsonPath, `${JSON.stringify(pkgJson, null, 2)}\n`);
+    }
+
+    if (!dryRun && alreadyPublished(publishName, version)) {
+      console.log(`skip ${publishName}@${version}: already published to ${registry}`);
       continue;
     }
-    throw new Error(`${pkg.name} is not assembled (missing binary in ${pkgDir}/bin); run assemble-platform-packages first`);
-  }
 
-  const pkgJsonPath = join(pkgDir, 'package.json');
-  const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf8')) as { version: string; name: string };
-  const version = pkgJson.version;
-  if (version !== mainVersion) {
-    throw new Error(`${pkg.name} version ${version} does not match main package ${mainVersion}; re-run assembly`);
+    const npmArgs = dryRun
+      ? ['pack']
+      : ['publish', '--access', 'public', '--registry', registry];
+    console.log(`${dryRun ? 'pack' : 'publish'} ${publishName}@${version} -> ${registry}`);
+    execFileSync('npm', npmArgs, { cwd: pkgDir, stdio: 'inherit', env: process.env });
+    published++;
   }
-
-  // Apply the mirror scope override in place before publishing. On the npm path
-  // scopeOverride is empty and the name is left as its @goodvibes-jev original.
-  const publishName = rescopeName(pkg.name);
-  if (publishName !== pkgJson.name) {
-    pkgJson.name = publishName;
-    writeFileSync(pkgJsonPath, `${JSON.stringify(pkgJson, null, 2)}\n`);
-  }
-
-  if (!dryRun && alreadyPublished(publishName, version)) {
-    console.log(`skip ${publishName}@${version}: already published to ${registry}`);
-    continue;
-  }
-
-  const npmArgs = dryRun
-    ? ['pack']
-    : ['publish', '--access', 'public', '--registry', registry];
-  console.log(`${dryRun ? 'pack' : 'publish'} ${publishName}@${version} -> ${registry}`);
-  execFileSync('npm', npmArgs, { cwd: pkgDir, stdio: 'inherit', env: process.env });
-  published++;
+} finally {
+  for (const [path, original] of originalManifests) writeFileSync(path, original);
 }
 
 console.log(`Done: ${published}/${targets.length} platform package(s) ${dryRun ? 'packed' : 'published'}.`);

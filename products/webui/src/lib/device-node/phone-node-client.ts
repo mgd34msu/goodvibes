@@ -203,7 +203,8 @@ export class PhoneNodeClient {
   private pullTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private pendingChallenge = '';
-  private busy = false;
+  /** The lifetime whose pump is in flight; per lifetime so a stale pump cannot clear a newer one's flag. */
+  private busyLifetime: AbortController | null = null;
   private lifetime = new AbortController();
   /**
    * Work item ids whose capability has already run, keyed to their reported
@@ -284,6 +285,24 @@ export class PhoneNodeClient {
     return { status: response.status, json };
   }
 
+  /**
+   * A pairing attempt failed. While a valid stored identity still exists the node
+   * IS paired, so showing `error` would contradict the token we keep (and a reload
+   * would flip it back to `connected`): fall back to `connected` and say what failed.
+   */
+  private failPairing(message: string): void {
+    if (this.identity) {
+      this.pendingChallenge = '';
+      this.setState({
+        status: 'connected',
+        pendingRequestId: '',
+        message: `${message} This device is still paired with its previous pairing.`,
+      });
+      return;
+    }
+    this.setState({ status: 'error', message });
+  }
+
   /** Ask the daemon to pair this browser as a device node. */
   async requestPairing(): Promise<void> {
     this.stop();
@@ -311,14 +330,14 @@ export class PhoneNodeClient {
       });
       if (!this.isCurrent(lifetime)) return;
       if (status >= 400) {
-        this.setState({ status: 'error', message: `The daemon refused the pairing request (HTTP ${status}).` });
+        this.failPairing(`The daemon refused the pairing request (HTTP ${status}).`);
         return;
       }
       const parsed = (json ?? {}) as PairRequestResponse;
       const requestId = typeof parsed.request?.id === 'string' ? parsed.request.id : '';
       this.pendingChallenge = typeof parsed.challenge === 'string' ? parsed.challenge : '';
       if (!requestId || !this.pendingChallenge) {
-        this.setState({ status: 'error', message: 'The daemon answered without a pairing challenge.' });
+        this.failPairing('The daemon answered without a pairing challenge.');
         return;
       }
       this.setState({
@@ -328,23 +347,34 @@ export class PhoneNodeClient {
         message: 'Waiting for approval on the desktop. Approve this device there, then press Finish pairing.',
       });
     } catch {
-      if (this.isCurrent(lifetime)) this.setState({ status: 'error', message: 'Could not reach the daemon. Ask to pair again.' });
+      if (this.isCurrent(lifetime)) this.failPairing('Could not reach the daemon. Ask to pair again.');
     }
   }
 
   /** Complete pairing once the operator has approved the request. */
   async verifyPairing(): Promise<void> {
+    // A stop() (view teardown, polling halted) aborts the lifetime but leaves the
+    // pending request intact; finishing it is a deliberate user action, so it gets a
+    // fresh lifetime rather than an aborted one that would fail every request silently.
+    if (this.lifetime.signal.aborted) this.lifetime = new AbortController();
     const lifetime = this.lifetime;
     try {
       if (!this.state.pendingRequestId || !this.pendingChallenge) {
-        this.setState({ status: 'error', message: 'There is no pairing request to finish. Ask to pair again.' });
+        this.failPairing('There is no pairing request to finish. Ask to pair again.');
         return;
       }
       const { status, json } = await this.post('/api/remote/pair/verify', {
         requestId: this.state.pendingRequestId,
         challenge: this.pendingChallenge,
       });
-      if (!this.isCurrent(lifetime)) return;
+      if (!this.isCurrent(lifetime)) {
+        // Superseded lifetimes belong to whoever replaced them. One that was only
+        // stopped leaves the request pending, so say the check did not complete.
+        if (lifetime === this.lifetime && this.state.status === 'awaiting-approval') {
+          this.setState({ message: 'The pairing check was interrupted. Press Finish pairing again.' });
+        }
+        return;
+      }
       if (status >= 400) {
         this.setState({
           status: 'awaiting-approval',
@@ -358,7 +388,7 @@ export class PhoneNodeClient {
       const nodeId = parsed.peer?.id ?? '';
       const token = parsed.token?.value ?? '';
       if (!nodeId || !token) {
-        this.setState({ status: 'error', message: 'The daemon approved pairing but returned no device token.' });
+        this.failPairing('The daemon approved pairing but returned no device token.');
         return;
       }
       this.identity = { nodeId, token, label: this.options.label };
@@ -428,8 +458,8 @@ export class PhoneNodeClient {
   /** Pull one batch of work and run it. */
   async pumpOnce(): Promise<void> {
     const lifetime = this.lifetime;
-    if (!this.identity || this.busy || !this.isCurrent(lifetime)) return;
-    this.busy = true;
+    if (!this.identity || this.busyLifetime === lifetime || !this.isCurrent(lifetime)) return;
+    this.busyLifetime = lifetime;
     try {
       const { status, json } = await this.post('/api/remote/work/pull', { maxItems: 3 }, this.identity.token);
       if (!this.isCurrent(lifetime)) return;
@@ -444,7 +474,7 @@ export class PhoneNodeClient {
         await this.runWork(item);
       }
     } finally {
-      this.busy = false;
+      if (this.busyLifetime === lifetime) this.busyLifetime = null;
     }
   }
 

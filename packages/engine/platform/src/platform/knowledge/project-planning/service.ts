@@ -16,6 +16,7 @@ import { knowledgeSpaceMetadata, normalizeProjectId } from '../spaces.js';
 import type { KnowledgeSourceRecord, KnowledgeSourceUpsertInput } from '../types.js';
 import { KnowledgeSourcePublicationHeldError, type KnowledgeSourceSnapshot } from '../store-source-generation.js';
 import { KnowledgeStore } from '../store.js';
+import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import {
   emitWorkPlanSnapshotInvalidated,
@@ -147,6 +148,25 @@ function captureNativePlanningOptions(options: Omit<ProjectPlanningServiceOption
   };
   return { startup, bus, assertCurrent };
 }
+
+/**
+ * Work-plan task status is a CHECKLIST, not a one-way workflow: every state may
+ * move to every state, including out of done, failed and cancelled. That is
+ * deliberate and relied on: the contract plan sync re-opens a unit's task when
+ * a later check finds its work failing (repair/retry), the checklist cycle
+ * (workflow/work-plan-store.ts `nextWorkPlanStatus`) moves done/failed/
+ * cancelled back to pending, and an operator may un-cancel through the status
+ * route. Nothing here is final, so no move is refused; declaring the table makes
+ * that the answer in code. Narrowing it takes effect at updateWorkPlanTask.
+ */
+export const projectWorkPlanTaskLifecycle = defineLifecycle<ProjectWorkPlanTaskStatus>('work plan task', {
+  pending: ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'],
+  in_progress: ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'],
+  blocked: ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'],
+  done: ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'],
+  failed: ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'],
+  cancelled: ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'],
+});
 
 export class ProjectPlanningService {
   readonly #nativeDefault: NativePlanningDefault | undefined;
@@ -654,6 +674,7 @@ export class ProjectPlanningService {
       now,
       fallbackOrder: previousTask.order,
     });
+    projectWorkPlanTaskLifecycle.assert(previousTask.status, task.status);
     const workPlan = await this.saveWorkPlanArtifact(space, {
       ...existing,
       tasks: sortWorkPlanTasks(existing.tasks.map((entry) => entry.taskId === input.taskId ? task : entry)),

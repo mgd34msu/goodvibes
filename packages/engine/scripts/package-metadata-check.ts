@@ -1,11 +1,8 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkBunPins, isExactVersion, type PinSource } from './bun-pin-rule.ts';
 import { SOURCE_CONDITION } from './export-conditions.ts';
 import { packageDirs, publicPackageDirs, REPO_ROOT } from './release-shared.ts';
-import { READINGS_PATH as README_READINGS_PATH, readmeAdvisories, readmeState } from './ci-readings/package-readmes.ts';
-import { loadStoredReadings } from './ci-readings/stored-readings.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENGINE_ROOT = resolve(__dirname, '..');
@@ -19,8 +16,6 @@ const requiredStringFields = [
   'license',
   'homepage',
 ];
-
-const readmes: { dir: string; state: ReturnType<typeof readmeState>; isPublic: boolean }[] = [];
 
 const rootSharedMetadata = {
   license: rootPackage.license,
@@ -172,43 +167,18 @@ function assertContractsGeneratedTypesReexported(): void {
   }
 }
 
-/** Every tracked YAML under `.github/`, as pin-rule input. */
-function githubYamlSources(): PinSource[] {
-  // .github is repo-wide and sits at the repo root.
-  const root = resolve(REPO_ROOT, '.github');
-  const sources: PinSource[] = [];
-  const walk = (dir: string): void => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = resolve(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-      } else if (entry.isFile() && /\.ya?ml$/.test(entry.name)) {
-        sources.push({
-          relPath: relative(REPO_ROOT, full).split('\\').join('/'),
-          text: readFileSync(full, 'utf8'),
-        });
-      }
-    }
-  };
-  walk(root);
-  return sources;
-}
-
 /**
  * One bun version across the whole repository.
  *
- * `engines.bun` in the root package.json is the number; everything else, the
- * `packageManager` field, the `@types/bun` devDependency, and every
- * `bun-version` pin or default under `.github/`, is held to it. The per-package
- * `engines.bun` copies are already checked against the root above.
- *
- * The floor exists for a reason (bun 1.3.10-1.3.13 deadlock the module loader
- * after two `fs.watch` closes; see .github/actions/setup/action.yml), and a
- * reason is only as good as the weakest copy of the number.
+ * `engines.bun` in the root package.json is the number; the `packageManager`
+ * field and the `@types/bun` devDependency are held to it. The per-package
+ * `engines.bun` copies are already checked against the root above. CI reads the
+ * version from `engines.bun` (see .github/actions/bun/action.yml, which records
+ * why the floor exists).
  */
 function assertBunPinAgreement(): void {
   const expected: unknown = rootSharedMetadata.engines?.bun;
-  if (!isExactVersion(expected)) {
+  if (typeof expected !== 'string' || !/^\d+\.\d+\.\d+$/.test(expected)) {
     throw new Error(
       `root package.json engines.bun must be an exact version like 1.3.14 (found: ${JSON.stringify(expected)})`,
     );
@@ -233,30 +203,6 @@ function assertBunPinAgreement(): void {
       `examples/package.json devDependencies["@types/bun"] must be ${JSON.stringify(`^${expected}`)} `
       + `to match engines.bun (found: ${JSON.stringify(examplesTypesBun)})`,
     );
-  }
-  const violations = checkBunPins(expected, githubYamlSources());
-  if (violations.length > 0) {
-    throw new Error(`bun version pins disagree with root engines.bun:\n  ${violations.join('\n  ')}`);
-  }
-}
-
-/**
- * Editorial readings are advisory, independent of deterministic metadata
- * validation. Keep their provenance and adverse answers visible without
- * requiring an external reading after every prose edit. This never calls Jev.
- */
-function reportReadmeAdvisories(): void {
-  try {
-    const stored = loadStoredReadings(README_READINGS_PATH);
-    for (const { dir, state, isPublic } of readmes) {
-      for (const advisory of readmeAdvisories(dir, state, isPublic, stored)) {
-        console.warn(`[package-readme editorial advisory] ${advisory}`);
-      }
-    }
-  } catch (error) {
-    // A broken editorial cache cannot substitute for, or block, correctness
-    // checks. Report its unavailability rather than claiming a good reading.
-    console.warn(`[package-readme editorial advisory] Stored editorial evidence unavailable: ${error instanceof Error ? error.message : String(error)}; run \`bun run package-readmes:read\` to refresh it`);
   }
 }
 
@@ -341,15 +287,12 @@ for (const dir of packageDirs) {
   if (!existsSync(readmePath)) {
     throw new Error(`${dir} is missing README.md`);
   }
-  const state = readmeState(resolve(ENGINE_ROOT, dir));
-  if (state.readme.length === 0) {
+  if (readFileSync(readmePath, 'utf8').trim().length === 0) {
     throw new Error(`${dir}/README.md is empty`);
   }
-  readmes.push({ dir, state, isPublic });
 }
 
 assertContractsGeneratedTypesReexported();
 assertBunPinAgreement();
 
 console.log('package metadata check passed (structural checks)');
-reportReadmeAdvisories();

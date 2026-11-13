@@ -23,7 +23,7 @@ Use this surface when you want runtime-event subscriptions without pulling in th
 
 `createWebSocketConnector(baseUrl, token, WebSocket, options?)` returns a connector with the same shape as the SSE connector but adds WebSocket-only lifecycle hooks (the SSE connector does not fire them):
 
-- `onConnectionStateChange(state: ConnectionState)`: `'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'failed'`.
+- `onConnectionStateChange(state: ConnectionState)`: `'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'failed'`. `'failed'` is final: disposing a connector that has given up reconnecting does not emit `'disconnected'` afterwards.
 - `onReconnectAttempt(info: ReconnectAttemptInfo)`: `{ attempt, maxAttempts, delayMs, reason }`. The legacy `onReconnect(attempt, delayMs)` is deprecated but still fired.
 - `onBackpressure(info: BackpressureInfo)`: `{ droppedCount, queueLength, queueBytes, reason }`, emitted when the bounded outbound queue saturates (1,024 messages or 16 MiB total; a single message above 1 MiB is rejected). It fires on the first overflow and every tenth thereafter; `droppedCount` is always the cumulative total, not the size of the latest burst.
 

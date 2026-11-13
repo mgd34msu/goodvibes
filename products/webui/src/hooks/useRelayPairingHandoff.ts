@@ -37,7 +37,13 @@ export interface RelayPairingHandoff {
   pairing: RelayPairingPayload | null;
 }
 
-const capture: { done: boolean; consumed: boolean; code: string | null } = { done: false, consumed: false, code: null };
+type RelayOutcome =
+  | { readonly status: 'stored'; readonly pairing: RelayPairingPayload }
+  | { readonly status: 'error'; readonly error: unknown };
+
+// `outcome` is the remembered result of consuming the code once; a remount reports it
+// instead of reading as idle, and never decodes or stores the pairing a second time.
+const capture: { done: boolean; outcome: RelayOutcome | null; code: string | null } = { done: false, outcome: null, code: null };
 
 function captureRelayPairingCode(): string | null {
   if (!capture.done) {
@@ -53,26 +59,38 @@ function captureRelayPairingCode(): string | null {
 /** Test-only: reset the module-level capture between cases. */
 export function resetRelayPairingCaptureForTest(): void {
   capture.done = false;
-  capture.consumed = false;
+  capture.outcome = null;
   capture.code = null;
+}
+
+/** Decode and store the captured code, at most once per capture. */
+function consumeRelayPairingCode(code: string): RelayOutcome {
+  if (capture.outcome !== null) return capture.outcome;
+  try {
+    const pairing = decodeRelayPairingCode(code);
+    storeRelayPairing(pairing);
+    capture.outcome = { status: 'stored', pairing };
+  } catch (error) {
+    capture.outcome = { status: 'error', error };
+  }
+  return capture.outcome;
 }
 
 export function useRelayPairingHandoff(): RelayPairingHandoff {
   const [code] = useState(captureRelayPairingCode);
-  const [status, setStatus] = useState<RelayPairingHandoffStatus>('idle');
-  const [error, setError] = useState<unknown>(null);
-  const [pairing, setPairing] = useState<RelayPairingPayload | null>(null);
+  const remembered = capture.outcome;
+  const [status, setStatus] = useState<RelayPairingHandoffStatus>(remembered?.status ?? 'idle');
+  const [error, setError] = useState<unknown>(remembered?.status === 'error' ? remembered.error : null);
+  const [pairing, setPairing] = useState<RelayPairingPayload | null>(remembered?.status === 'stored' ? remembered.pairing : null);
 
   useEffect(() => {
-    if (code === null || capture.consumed) return;
-    capture.consumed = true;
-    try {
-      const decoded = decodeRelayPairingCode(code);
-      storeRelayPairing(decoded);
-      setPairing(decoded);
+    if (code === null) return;
+    const outcome = consumeRelayPairingCode(code);
+    if (outcome.status === 'stored') {
+      setPairing(outcome.pairing);
       setStatus('stored');
-    } catch (err) {
-      setError(err);
+    } else {
+      setError(outcome.error);
       setStatus('error');
     }
     // Mount-once: the code was captured synchronously above; a later hash change is not

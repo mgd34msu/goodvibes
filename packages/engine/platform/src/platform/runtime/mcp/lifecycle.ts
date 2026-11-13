@@ -5,23 +5,20 @@
  * All state changes flow through `applyTransition()`.
  */
 import type { McpServerState } from './types.js';
+import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 
 // ── Valid transitions ─────────────────────────────────────────────────────────
 
-/**
- * Adjacency map for the MCP lifecycle state machine.
- *
- * Keys are source states; values are the set of reachable target states.
- */
-const VALID_TRANSITIONS: ReadonlyMap<McpServerState, ReadonlySet<McpServerState>> = new Map([
-  ['configured',    new Set<McpServerState>(['connecting', 'disconnected'])],
-  ['connecting',    new Set<McpServerState>(['connected', 'auth_required', 'reconnecting', 'disconnected'])],
-  ['connected',     new Set<McpServerState>(['degraded', 'auth_required', 'reconnecting', 'disconnected'])],
-  ['degraded',      new Set<McpServerState>(['connected', 'reconnecting', 'disconnected'])],
-  ['auth_required', new Set<McpServerState>(['connecting', 'disconnected'])],
-  ['reconnecting',  new Set<McpServerState>(['connecting', 'connected', 'disconnected'])],
-  ['disconnected',  new Set<McpServerState>(['connecting'])],
-]);
+/** The MCP server lifecycle: for each state, the states reachable from it. */
+export const mcpServerLifecycle = defineLifecycle<McpServerState>('MCP server', {
+  configured:    ['connecting', 'disconnected'],
+  connecting:    ['connected', 'auth_required', 'reconnecting', 'disconnected'],
+  connected:     ['degraded', 'auth_required', 'reconnecting', 'disconnected'],
+  degraded:      ['connected', 'reconnecting', 'disconnected'],
+  auth_required: ['connecting', 'disconnected'],
+  reconnecting:  ['connecting', 'connected', 'disconnected'],
+  disconnected:  ['connecting'],
+});
 
 // ── Guards ────────────────────────────────────────────────────────────────────
 
@@ -33,7 +30,7 @@ const VALID_TRANSITIONS: ReadonlyMap<McpServerState, ReadonlySet<McpServerState>
  * @param to   - Proposed next state
  */
 export function canTransition(from: McpServerState, to: McpServerState): boolean {
-  return VALID_TRANSITIONS.get(from)?.has(to) ?? false;
+  return mcpServerLifecycle.can(from, to);
 }
 
 /**
@@ -42,7 +39,7 @@ export function canTransition(from: McpServerState, to: McpServerState): boolean
  * @param from - Current state
  */
 export function reachableFrom(from: McpServerState): ReadonlySet<McpServerState> {
-  return VALID_TRANSITIONS.get(from) ?? new Set();
+  return new Set(mcpServerLifecycle.next(from));
 }
 
 // ── Transition result ─────────────────────────────────────────────────────────

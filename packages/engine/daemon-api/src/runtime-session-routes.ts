@@ -26,6 +26,8 @@ import {
   type JsonRecord,
 } from './route-helpers.js';
 
+const RETRY_REFUSED_MESSAGE = 'Task cannot be retried: only failed or cancelled tasks can be retried';
+
 type SharedSessionSubmission = Awaited<ReturnType<DaemonRuntimeRouteContext['sessionBroker']['submitMessage']>>;
 type SharedSessionSteerSubmission = Awaited<ReturnType<DaemonRuntimeRouteContext['sessionBroker']['steerMessage']>>;
 type SharedSessionFollowUpSubmission = Awaited<ReturnType<DaemonRuntimeRouteContext['sessionBroker']['followUpMessage']>>;
@@ -853,6 +855,12 @@ function handleRuntimeTaskAction(context: DaemonRuntimeRouteContext, taskId: str
     if (task.kind !== 'agent') {
       return jsonErrorResponse({ error: 'Retry is only implemented for agent tasks' }, { status: 400 });
     }
+    // Decide eligibility BEFORE spawning: a spawn is paid work, and the store
+    // refuses queued for anything but a retryable status (see canRetry in
+    // runtime/tasks/lifecycle.ts, reached through the dispatch seam).
+    if (context.runtimeDispatch.canRetryRuntimeTask?.(taskId) === false) {
+      return jsonErrorResponse({ error: RETRY_REFUSED_MESSAGE }, { status: 400 });
+    }
     const spawnResult = context.trySpawnAgent({
       mode: 'spawn',
       task: task.description ?? task.title ?? '',
@@ -867,9 +875,16 @@ function handleRuntimeTaskAction(context: DaemonRuntimeRouteContext, taskId: str
       error: undefined,
       result: undefined,
     }, 'daemon.server.tasks.retry');
+    // The store refuses a move it does not allow without throwing, so read the
+    // record back: if this retry did not land, stop the agent it just spawned.
+    const after = context.runtimeStore.getState().tasks.tasks.get(taskId);
+    if (after?.owner !== spawnResult.id) {
+      context.agentManager.cancel(spawnResult.id);
+      return jsonErrorResponse({ error: RETRY_REFUSED_MESSAGE }, { status: 400 });
+    }
     return Response.json({
       retried: true,
-      task: context.runtimeStore.getState().tasks.tasks.get(taskId),
+      task: after,
       agentId: spawnResult.id,
     });
   }

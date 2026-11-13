@@ -120,6 +120,26 @@ describe('retained standalone release boundary', () => {
     }
   });
 
+  test('a failure after the bump says the version is already bumped and names the resume command', async () => {
+    const root = makeProjectTempDir('gv-release-resume');
+    try {
+      writeFileSync(join(root, 'package.json'), `${JSON.stringify({ name: 'standalone-agent', version: '2.1.0' }, null, 2)}\n`);
+      let failure: unknown;
+      try {
+        await prepareRelease(['--patch', '--no-install', '--no-live'], {
+          root,
+          runCommand: () => ({ status: 1, stdout: '' }),
+        });
+      } catch (error) { failure = error; }
+      expect(String(failure)).toContain('project surfaces failed (exit 1)');
+      expect(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version).toBe('2.1.1');
+      expect(String(failure)).toContain('already bumped 2.1.0 -> 2.1.1');
+      expect(String(failure)).toContain('bun run release:prepare --no-bump --no-install --no-live');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('the actual private workspace refuses before any command or write', async () => {
     const root = resolve(import.meta.dir, '../../..');
     const before = readFileSync(join(root, 'package.json'), 'utf8');

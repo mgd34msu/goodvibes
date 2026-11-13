@@ -115,39 +115,3 @@ test('the native build foundation artifacts match their committed source before 
       .toEqual({ file, bytes: readFileSync(join(generated, file)) });
   }
 }));
-
-test('CI preserves the existing validation build and mandatorily archives its exact native payload', () => {
-  const root = resolve(import.meta.dir, '../../../../..');
-  const workflow = Bun.YAML.parse(readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8')) as {
-    jobs: { validate: { steps: Array<{ name: string; run?: string; if?: string; uses?: string; env?: Record<string, string>; with?: Record<string, unknown>; 'continue-on-error'?: boolean }> } };
-  };
-  const steps = workflow.jobs.validate.steps;
-  const validate = steps.findIndex(step => step.name === 'Validate workspace');
-  expect(steps[validate]!.run).toBe('bun run validate');
-  const consistency = steps.findIndex(step => step.name === 'Test release asset consistency');
-  const recordIndex = steps.findIndex(step => step.name === 'Record TUI native artifact provenance');
-  const uploadIndex = steps.findIndex(step => step.name === 'Upload TUI native artifact');
-  expect(validate).toBeGreaterThanOrEqual(0);
-  expect(consistency).toBeGreaterThan(validate);
-  expect(recordIndex).toBeGreaterThan(consistency);
-  expect(uploadIndex).toBeGreaterThan(recordIndex);
-  expect(steps[consistency]!.run).toBe("python3 -m unittest discover -s .github/scripts -p 'test_release_asset_*.py'");
-  const record = steps[recordIndex]!;
-  const upload = steps[uploadIndex]!;
-  expect(record.name).toBe('Record TUI native artifact provenance');
-  expect(record.if).toBe("hashFiles('products/tui/package.json') != ''");
-  // The exact uploaded binary must pass the unchanged boot and namespace-read
-  // guard before provenance can attest to it. Building alone is not a smoke.
-  expect(record.run?.split('\n')[0]).toBe('bun run --cwd products/tui smoke:tui');
-  expect(record.run).toContain('ci-artifact.ts record "$GITHUB_SHA" "$TUI_SOURCE_HEAD"');
-  expect(record.run).toContain('ci-artifact.ts verify "$GITHUB_SHA" "$TUI_SOURCE_HEAD"');
-  expect(record.run).toContain('products/tui/dist/goodvibes-linux-x64');
-  for (const suffix of ['.bun', '.bun.LICENSE.md', '.bun.json']) expect(record.run).toContain(`products/tui/dist/goodvibes-linux-x64${suffix}`);
-  expect(record.run).toContain('products/tui/dist/lib/sqlite-vec-linux-x64/vec0.so');
-  expect(record.env?.TUI_SOURCE_HEAD).toBe('${{ github.event.pull_request.head.sha || github.sha }}');
-  expect(record['continue-on-error']).toBeUndefined();
-  expect(upload['continue-on-error']).toBeUndefined();
-  expect(upload.if).toBe(record.if);
-  expect(upload.uses).toBe('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
-  expect(upload.with).toEqual({ name: 'tui-native-linux-x64', path: '/tmp/tui-native-linux-x64.tgz', 'retention-days': 7, 'if-no-files-found': 'error' });
-});

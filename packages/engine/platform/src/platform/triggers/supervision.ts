@@ -15,6 +15,7 @@
  */
 
 import type { FailureTransience } from '../integrations/delivery.js';
+import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import type { TriggerRecord, TriggerState } from './types.js';
 
 /** The default ladder: 30s, 60s, 5m, 15m, 60m. The last rung repeats. */
@@ -111,6 +112,40 @@ export function applySuccess(intervalMs: number, now: number): {
   readonly nextCheckAt: number;
 } {
   return { state: 'idle', strikes: 0, backoffRung: 0, nextCheckAt: now + Math.max(1, intervalMs) };
+}
+
+/**
+ * The trigger lifecycle, declared from every state assignment in manager.ts,
+ * manager-streams.ts, manager-stream-restarts.ts and this file.
+ *
+ * - idle -> running: an on-exit launch or a stream (re)start reserves the record.
+ * - running/idle/backoff -> idle: a success, or a stream that exited with restart disabled.
+ * - -> backoff / circuit-open: applyFailure.
+ * - circuit-open -> idle: explicit operator reset.
+ * - -> fired: an on-exit trigger's child exited and its action was reserved (fired stays fired).
+ * - -> cancelled: operator cancel. fired and cancelled are final.
+ * - failed: nothing assigns it; it can only arrive from a persisted snapshot
+ *   (snapshot-validation accepts it), where it is an operator-visible parked state.
+ */
+export const triggerLifecycle = defineLifecycle<TriggerState>('trigger', {
+  idle: ['idle', 'running', 'backoff', 'circuit-open', 'fired', 'cancelled'],
+  running: ['idle', 'backoff', 'circuit-open', 'fired', 'cancelled'],
+  backoff: ['idle', 'running', 'backoff', 'circuit-open', 'fired', 'cancelled'],
+  'circuit-open': ['idle', 'fired', 'cancelled'],
+  fired: ['fired'],
+  cancelled: [],
+  failed: ['idle', 'cancelled'],
+});
+
+/** States an operator reset applies to: parked or waiting, never in flight (running would double-start) and never finished. */
+const RESETTABLE: readonly TriggerState[] = ['idle', 'backoff', 'circuit-open', 'failed'];
+
+/** Whether an operator reset may apply to this record, and when not, why and what it can do instead. */
+export function checkReset(record: Pick<TriggerRecord, 'state'>): { readonly ok: true } | { readonly ok: false; readonly reason: string } {
+  const lifecycle = triggerLifecycle.check(record.state, 'idle');
+  if (!lifecycle.ok) return { ok: false, reason: `${lifecycle.reason}; a finished trigger is not revived, create a new one` };
+  if (!RESETTABLE.includes(record.state)) return { ok: false, reason: `trigger is ${record.state}; reset applies only to ${RESETTABLE.join(', ')} triggers, cancel it or wait for it to finish first` };
+  return { ok: true };
 }
 
 /** True when the breaker is open and the trigger must not run. */

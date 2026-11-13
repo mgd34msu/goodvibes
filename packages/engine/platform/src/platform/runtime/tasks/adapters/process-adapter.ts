@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { createDomainDispatch } from '../../store/index.js';
 import type { RuntimeStore, DomainDispatch } from '../../store/index.js';
 import type { RuntimeTask } from '../../store/domains/tasks.js';
+import { isTerminalStatus } from '../lifecycle.js';
 import { ProcessManager } from '../../../tools/shared/process-manager.js';
 
 /** Owner context supplied when wrapping a process. */
@@ -166,7 +167,10 @@ export class ProcessTaskAdapter {
       const entry = this._manager.getStatus(proc.id);
       if (entry?.done) {
         const taskId = this._idToTask.get(proc.id);
-        if (taskId !== undefined) {
+        // Apply the outcome once: a task already finished (completed/failed, or
+        // cancelled by cancelProcess) is final and must not be re-stamped each sync.
+        const current = taskId === undefined ? undefined : this._store.getState().tasks.tasks.get(taskId);
+        if (taskId !== undefined && current !== undefined && !isTerminalStatus(current.status)) {
           const exitCode = entry.exitCode ?? 1;
           this._transitionTask(taskId, exitCode === 0 ? 'completed' : 'failed', {
             exitCode,

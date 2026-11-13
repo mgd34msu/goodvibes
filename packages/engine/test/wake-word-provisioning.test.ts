@@ -8,7 +8,8 @@
  * content, and a truncated or mismatched artifact must be refused and refetched
  * rather than used.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import * as nodeCrypto from 'node:crypto';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -120,6 +121,22 @@ describe('wake artifact verification is by content, never by existence', () => {
     expect(status.bytes).toBe(MODEL.onnx.bytes);
     expect(status.verified).toBe(false);
     expect(status.corrupt).toBe(true);
+  });
+
+  test('an unchanged installed file is hashed once across repeated status reads; a changed one is re-verified', () => {
+    const path = join(root, 'cached.onnx');
+    const body = Buffer.from('installed model bytes'.repeat(100));
+    const spec = { url: 'u', bytes: body.length, sha256: createHash('sha256').update(body).digest('hex') };
+    writeFileSync(path, body);
+    const hashing = spyOn(nodeCrypto, 'createHash');
+    try {
+      for (let read = 0; read < 3; read++) expect(wakeArtifactStatus(path, spec).verified).toBe(true);
+      expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+      writeFileSync(path, Buffer.alloc(body.length));
+      const changed = wakeArtifactStatus(path, spec);
+      expect(changed.verified).toBe(false); expect(changed.corrupt).toBe(true);
+      expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(2);
+    } finally { hashing.mockRestore(); }
   });
 
   test('a truncated file is reported corrupt', () => {

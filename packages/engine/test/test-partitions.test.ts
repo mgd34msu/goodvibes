@@ -3,7 +3,7 @@ import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { defaultTestArgs } from '../scripts/test-discovery.ts';
-import { engineTestManifest, partitionTestArgs, partitionTestFiles, platformTestMatrix } from '../scripts/test-partitions.ts';
+import { partitionTestFiles, selectPartition } from '../scripts/test-partitions.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -18,12 +18,6 @@ function fixture(paths: readonly string[]): string {
     writeFileSync(file, '');
   }
   return root;
-}
-
-function manifestArgument(manifest: unknown): string {
-  const root = mkdtempSync(join(tmpdir(), 'engine-expected-manifest-')); roots.push(root);
-  const path = join(root, 'manifest.json'); writeFileSync(path, JSON.stringify(manifest));
-  return `--manifest=${path}`;
 }
 
 test('partitions deterministically, balances file counts, and visits every input exactly once', () => {
@@ -44,80 +38,31 @@ test('rejects duplicate input, invalid counts and empty partitions rather than p
   expect(() => partitionTestFiles(['a', 'a'], 2)).toThrow('duplicate');
 });
 
-test('default and focused local arguments are unchanged, and partitions cannot mix filters or cwd', () => {
+test('rejects malformed partition specs', () => {
   const root = fixture(['a.test.ts', 'b.test.ts', 'c.test.ts', 'd.test.ts']);
-  expect(partitionTestArgs(root, [])).toBeNull();
-  expect(partitionTestArgs(root, ['test/a.test.ts', '--timeout=123'])).toBeNull();
-  expect(partitionTestArgs(root, ['--cwd', '../judgment', 'test'])).toBeNull();
-  for (const args of [
-    ['--partition'], ['--partition=0/4'], ['--partition=5/4'], ['--partition=1/0'],
-    ['--partition=1/5'], ['--partition=1/4.0'], ['--partition=01/4'],
-    ['--partition=1/4', '--partition=2/4'], ['--partition=1/4', 'test/a.test.ts'],
-    ['--partition=1/4', '--cwd', '../judgment'], ['--partition=1/4', '--test-name-pattern=x'],
-    ['--manifest=bad'], ['--partition=1/4', '--manifest=bad'],
-    ['--partition=1/4', '--manifest=bad', '--manifest=bad'],
-  ]) expect(() => partitionTestArgs(root, args), JSON.stringify(args)).toThrow();
+  for (const spec of ['', '0/4', '5/4', '1/0', '1/5', '1/4.0', '01/4', '1', 'x/4']) expect(() => selectPartition(root, spec), spec).toThrow();
 });
 
-test('the actual repo matrix is an exact disjoint cover of canonical and independently inventoried files', () => {
+test('the actual repo partitions are an exact disjoint cover of the discovered files', () => {
   const root = resolve(import.meta.dir, '..');
-  const manifest = engineTestManifest(root);
+  const files = defaultTestArgs(root);
   const independent = readdirSync(join(root, 'test'), { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile() && /\.(test|spec)\.[cm]?[jt]sx?$/.test(entry.name))
     .map((entry) => join(entry.parentPath, entry.name).slice(root.length + 1).replaceAll('\\', '/'))
     .filter((file) => !/^test\/(workers|workers-wrangler|hermes|fixtures|types)\//.test(file))
     .filter((file) => !file.split('/').some((part) => ['node_modules', '.git', 'dist'].includes(part)))
     .sort();
-  expect(manifest.files).toEqual(independent);
-  expect(manifest.files).toEqual(defaultTestArgs(root));
-  const rows = platformTestMatrix(root).include.filter((row) => row.platform === 'bun');
-  const selected = rows.map((row) => {
-    const command = row['test-cmd'].split(' ');
-    const script = command.indexOf('packages/engine/scripts/test.ts');
-    expect(script).toBeGreaterThan(0);
-    const files = partitionTestArgs(root, command.slice(script + 1).map(arg => arg.startsWith('--manifest=') ? manifestArgument(manifest) : arg))!.map((file) => {
-      expect(file).toStartWith('./test/');
-      return file.slice(2);
-    });
-    expect(command[0]).toBe('GOODVIBES_TEST_CEILING_MS=900000');
-    expect(command.includes('GOODVIBES_TEST_STALL_MS=270000')).toBe(files.includes('test/knowledge-semantic-answer.test.ts'));
-    return files;
-  });
-  expect(selected.flat().sort()).toEqual([...manifest.files]);
-  expect(new Set(selected.flat()).size).toBe(manifest.files.length);
-  expect(selected.map((files) => files.length).every((count) => count > 0)).toBe(true);
-  const dedicated = selected.find(files => files.includes('test/knowledge-semantic-answer.test.ts'));
+  expect(files).toEqual(independent);
+  const selected = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((index) => selectPartition(root, `${index}/9`).map((file) => {
+    expect(file).toStartWith('./test/');
+    return file.slice(2);
+  }));
+  expect(selected.flat().sort()).toEqual([...files]);
+  expect(new Set(selected.flat()).size).toBe(files.length);
+  const dedicated = selected.find(part => part.includes('test/knowledge-semantic-answer.test.ts'));
   expect(dedicated).toEqual(['test/knowledge-semantic-answer.test.ts']);
-  const shared = selected.filter(files => files !== dedicated);
-  expect(Math.max(...shared.map(files => files.length)) - Math.min(...shared.map(files => files.length))).toBeLessThanOrEqual(1);
-});
-
-test('new nested files enter the manifest once and stale CI discovery fails closed', () => {
-  const root = fixture(['a.test.ts', 'b.test.ts', 'c.test.ts', 'd.test.ts', 'workers/other.test.ts', 'fixtures/other.test.ts']);
-  const previous = engineTestManifest(root);
-  mkdirSync(join(root, 'test/future/deeper'), { recursive: true });
-  writeFileSync(join(root, 'test/future/deeper/new.spec.mjs'), '');
-  const current = engineTestManifest(root);
-  expect(current.files).toHaveLength(5);
-  expect(current.partitions.flatMap((partition) => partition.files).filter((file) => file === 'test/future/deeper/new.spec.mjs')).toHaveLength(1);
-  expect(current).not.toEqual(previous);
-  expect(() => partitionTestArgs(root, ['--partition=1/4', manifestArgument(previous)])).toThrow('differs');
-});
-
-test('a complete manifest comparison rejects regrouping, extra fields and malformed discovery without changing test inventory', () => {
-  const root = fixture(['a.test.ts', 'b.test.ts', 'c.test.ts', 'd.test.ts']);
-  const manifest = engineTestManifest(root);
-  const altered = structuredClone(manifest);
-  [altered.partitions[0]!.files, altered.partitions[1]!.files] = [altered.partitions[1]!.files, altered.partitions[0]!.files];
-  expect(altered.files).toEqual(manifest.files);
-  for (const expected of [altered, { ...manifest, extra: true }, null, { ...manifest, version: 1 }]) {
-    expect(() => partitionTestArgs(root, ['--partition=1/4', manifestArgument(expected)])).toThrow('differs');
-  }
-  const argument = manifestArgument(manifest), path = argument.slice('--manifest='.length);
-  writeFileSync(path, '{"version":2');
-  expect(() => partitionTestArgs(root, ['--partition=1/4', argument])).toThrow('could not be read');
-  rmSync(path);
-  expect(() => partitionTestArgs(root, ['--partition=1/4', argument])).toThrow('could not be read');
+  const shared = selected.filter(part => part !== dedicated);
+  expect(Math.max(...shared.map(part => part.length)) - Math.min(...shared.map(part => part.length))).toBeLessThanOrEqual(1);
 });
 
 test('real owned runner executes each partition once, preserves skips and propagates a failing partition', () => {
@@ -127,9 +72,7 @@ test('real owned runner executes each partition once, preserves skips and propag
   const root = fixture([...paths, 'workers/ignored.test.ts', 'fixtures/ignored.test.ts']);
   const scripts = join(root, 'scripts');
   mkdirSync(scripts);
-  for (const file of ['test.ts', 'test-discovery.ts', 'test-partitions.ts', 'test-manifest.ts', 'owned-test-child.ts', 'stale-tmp-sweep.ts',
-    'test-run-tmp.ts', 'workspace-lock.ts', 'test-child-watchdog-env.ts', 'test-child-watchdog.ts',
-    'test-isolation.ts', 'test-network-guard.ts', 'test-network-preload.ts']) {
+  for (const file of ['test.ts', 'test-discovery.ts', 'test-partitions.ts']) {
     copyFileSync(resolve(import.meta.dir, '../scripts', file), join(scripts, file));
   }
   cpSync(resolve(import.meta.dir, '../toolchain/src/test-runner'), join(root, 'toolchain/src/test-runner'), { recursive: true });
@@ -155,20 +98,18 @@ test('real owned runner executes each partition once, preserves skips and propag
     });
     return { code: child.exitCode, output: `${child.stdout.toString()}${child.stderr.toString()}` };
   };
-  const expected = manifestArgument(engineTestManifest(root, 2));
   for (const id of ['1/2', '2/2']) {
-    const result = run([`--partition=${id}`, expected]);
+    const result = run([`--partition=${id}`, '--manifest=/nonexistent/ignored.json']);
     expect(result.code, result.output).toBe(0);
     expect(result.output).toContain('2 pass');
     expect(result.output).toContain('2 skip');
   }
   expect(readFileSync(receipt, 'utf8').trim().split('\n').sort()).toEqual(paths);
   writeFileSync(join(root, 'test/z.test.ts'), "import { test, expect } from 'bun:test'; test('failure must reach CI', () => expect(false).toBe(true));");
-  const failed = run(['--partition=2/2', expected]);
+  const failed = run(['--partition=2/2']);
   expect(failed.code, failed.output).not.toBe(0);
   expect(failed.output).toContain('failure must reach CI');
-  expect(failed.output).toContain('bun test exited with code 1');
-  const invalid = run(['--partition=1/2', '--test-name-pattern=does-not-exist']);
+    const invalid = run(['--partition=1/2', 'test/a.test.ts']);
   expect(invalid.code).not.toBe(0);
-  expect(invalid.output).toContain('no other test arguments');
+  expect(invalid.output).toContain('do not combine');
 }, 60_000);

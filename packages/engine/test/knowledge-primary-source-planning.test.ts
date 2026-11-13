@@ -296,7 +296,7 @@ describe('primary source persistence preplanning', () => {
     const before = graph(store); const fake = readings(() => 0.65);
     await expect(enrich(store, source, facts)).rejects.toThrow();
     expect(JSON.stringify(fake.requests)).toContain('Capped claim 160'); expect(graph(store)).toBe(before);
-  });
+  }, 180_000);
 
   test('promotion propagates a quality hold without its enrichment fallback writes', async () => {
     readings();

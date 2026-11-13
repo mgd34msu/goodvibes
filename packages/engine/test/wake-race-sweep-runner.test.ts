@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { RUN_TMP_PREFIX } from '../toolchain/src/test-runner/test-run-tmp.ts';
+import { RUN_TMP_PREFIX } from '../toolchain/src/test-runner/temp.ts';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -27,7 +27,7 @@ function suite(root: string, name: string, body: string): void {
     import { writeFileSync, mkdtempSync } from 'node:fs';
     import { tmpdir } from 'node:os';
     import { basename, join } from 'node:path';
-import { RUN_TMP_PREFIX } from '../toolchain/src/test-runner/test-run-tmp.ts';
+import { RUN_TMP_PREFIX } from '../toolchain/src/test-runner/temp.ts';
     test(${JSON.stringify(name)}, async () => { ${body} });
   `);
 }
@@ -52,8 +52,6 @@ async function run(root: string): Promise<{ code: number; output: string }> {
       ...process.env,
       OPENAI_API_KEY: 'authored-inherited-fixture-value',
       GOODVIBES_WAKE_RACE_PROBE_MS: '999',
-      GOODVIBES_TEST_STALL_MS: '3000',
-      GOODVIBES_TEST_CEILING_MS: '6000',
     },
     stdout: 'pipe', stderr: 'pipe',
   });
@@ -126,7 +124,7 @@ test('sweep treats even a swallowed external request as a failure', async () => 
   `);
   const result = await run(root);
   expect(result.code, result.output).toBe(1);
-  expect(result.output).toContain('unexpected external test I/O was blocked');
+  expect(result.output).toContain('attempted blocked network access');
   expect(result.output).toContain('https://outside.invalid');
   expect(result.output).not.toContain('private-path');
   expectCleaned(root, 'blocked-paths');
@@ -155,8 +153,7 @@ test('cancellation reaps the child and prevents the next suite even if it exits 
   suite(root, 'b-must-not-start', recordPaths(root, 'unexpected-paths'));
   const result = await run(root);
   expect(result.code, result.output).toBe(1);
-  expect(result.output).toContain('goodvibes: test runner received SIGTERM; ending its owned suite');
-  expect(result.output).toContain('FAIL  test/a-cancel.test.ts: interrupted: test runner received SIGTERM; ending its owned suite');
+  expect(result.output).toContain('FAIL  test/a-cancel.test.ts: exited with code 143');
   expect(existsSync(join(root, 'unexpected-paths'))).toBe(false);
   expectCleaned(root, 'cancel-paths');
 }, 15_000);

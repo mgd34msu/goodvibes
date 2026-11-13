@@ -363,7 +363,7 @@ Importing any path not in this table will produce an `ERR_PACKAGE_PATH_NOT_EXPOR
 | `platform/tools/exec/sandbox` | The per-command exec sandbox runner: `detectSandboxAvailability` (host-probe → honest availability), `probeSandboxHost` (the real host probe), `buildBwrapArgv`, `resolveExecSandboxPlan`/`resolveRuntimeSandboxPlan`, `attachSandboxMeta`, and their types, so a consumer can detect the boundary and probe the host when wiring approval flows to the sandbox | beta |
 | `platform/triggers` | Stream watchers, model-free condition checks, and one-shot on-exit process-lifecycle triggers over one supervision spine; gated off by default | beta |
 | `platform/types` | Shared platform type contracts | beta |
-| `platform/utils` | Shared platform utilities | beta |
+| `platform/utils` | Shared platform utilities, including `defineLifecycle` for declaring a record's legal status moves | beta |
 | `platform/version` | The package's baked semver string, read from `package.json` at build time | beta |
 | `platform/voice` | Voice provider registry, provider-agnostic TTS/STT/realtime voice types, and streaming TTS primitives | beta |
 | `platform/voice/capture` | Runtime-neutral microphone capture shared by push-to-talk input and wake-word detection | beta |

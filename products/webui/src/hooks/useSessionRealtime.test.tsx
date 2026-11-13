@@ -40,8 +40,9 @@ mock.module('../lib/goodvibes', () => ({
 }));
 
 const { useSessionRealtime, sessionIdFromUpdateFrame, updateEventName } = await import('./useSessionRealtime');
+type SessionRealtimeState = import('./useSessionRealtime').SessionRealtimeState;
 
-function renderHook(): { client: QueryClient; invalidate: ReturnType<typeof mock>; unmount: () => void } {
+function renderHook(): { client: QueryClient; invalidate: ReturnType<typeof mock>; state: () => SessionRealtimeState; unmount: () => void } {
   const client = new QueryClient();
   const invalidate = mock(() => Promise.resolve());
   // Spy on invalidation without triggering real refetches.
@@ -51,8 +52,9 @@ function renderHook(): { client: QueryClient; invalidate: ReturnType<typeof mock
   document.body.appendChild(container);
   const root = createRoot(container);
 
+  let latest: SessionRealtimeState = { error: null, connected: false };
   function Harness() {
-    useSessionRealtime(true);
+    latest = useSessionRealtime(true);
     return null;
   }
 
@@ -65,6 +67,7 @@ function renderHook(): { client: QueryClient; invalidate: ReturnType<typeof mock
   return {
     client,
     invalidate,
+    state: () => latest,
     unmount: () => {
       flushSync(() => root.unmount());
       if (container.parentNode) container.parentNode.removeChild(container);
@@ -78,6 +81,15 @@ afterEach(() => {
 });
 
 describe('useSessionRealtime', () => {
+  test('a transport error body (raw 401 JSON) never reaches the returned error', () => {
+    const { state, unmount } = renderHook();
+    flushSync(() => capturedHandlers?.onError?.(new Error('{"error":"Authentication required","code":"AUTH_REQUIRED","status":401}')));
+    expect(state().error).not.toBeNull();
+    expect(state().error).not.toContain('AUTH_REQUIRED');
+    expect(state().error).not.toContain('{');
+    unmount();
+  });
+
   test('opens the un-domained control-plane events stream, not a per-domain viaSse feed', () => {
     const { unmount } = renderHook();
     expect(openCalls.length).toBe(1);

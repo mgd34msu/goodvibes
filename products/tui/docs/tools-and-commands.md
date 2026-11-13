@@ -631,7 +631,7 @@ GoodVibes also reads MCP servers already configured for other tools, read-only: 
 }
 ```
 
-MCP tools appear in the tool registry as `mcp:<server-name>:<tool-name>`. Tool schemas load progressively: names and descriptions at startup, full parameter schemas on first use. Connections auto-restart on crash.
+MCP tools appear in the tool registry as `mcp:<server-name>:<tool-name>`. Tool schemas load progressively: names and descriptions at startup, full parameter schemas on first use. A stdio server that exits unexpectedly is restarted, up to three attempts with a growing delay. The attempt count resets only after the restarted server completes protocol negotiation, so a server that keeps crashing before it negotiates is given up on and left disconnected.
 
 MCP tool calls respect the `permissions.tools.mcp` setting (default: `prompt`).
 

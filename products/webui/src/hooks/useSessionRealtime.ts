@@ -39,6 +39,13 @@ export function updateEventName(frame: unknown): string {
   return firstString(frame, ['event']);
 }
 
+/**
+ * Fixed copy for transport failures. NEVER surface `err.message`: on a pre-auth open it
+ * is the daemon's raw 401 response body (see useRealtimeInvalidation.ts).
+ */
+const STREAM_ERROR_MESSAGE = 'Session event stream error: live updates paused, falling back to periodic refresh.';
+const STREAM_OPEN_FAILED_MESSAGE = 'Failed to open the session event stream: live updates paused, falling back to periodic refresh.';
+
 export function useSessionRealtime(enabled: boolean): SessionRealtimeState {
   const queryClient = useQueryClient();
   const lifetime = useSyncExternalStore(subscribeClientLifetime, getClientLifetime, getClientLifetime);
@@ -102,13 +109,13 @@ export function useSessionRealtime(enabled: boolean): SessionRealtimeState {
             void sessionUpdateIntent(wireEvent); // reserved for finer-grained targeting
             void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
           },
-          onError: (err: unknown) => {
+          onError: (_err: unknown) => {
             if (!current()) return;
-            setState({ connection, connected: false, error: err instanceof Error ? err.message : 'Session event stream error' });
+            setState({ connection, connected: false, error: STREAM_ERROR_MESSAGE });
           },
           onTerminate: () => {
             if (!current()) return;
-            setState({ connection, connected: false, error: 'Session event stream disconnected: live updates paused, falling back to periodic refresh.' });
+            setState({ connection, connected: false, error: 'Session event stream disconnected after reconnect attempts ran out: live updates paused, falling back to periodic refresh.' });
           },
         },
         { reconnect: DEFAULT_SSE_RECONNECT, signal: controller.signal },
@@ -120,9 +127,9 @@ export function useSessionRealtime(enabled: boolean): SessionRealtimeState {
         }
         close = dispose;
       })
-      .catch((err: unknown) => {
+      .catch((_err: unknown) => {
         if (!current()) return;
-        setState({ connection, connected: false, error: err instanceof Error ? err.message : 'Failed to open session event stream' });
+        setState({ connection, connected: false, error: STREAM_OPEN_FAILED_MESSAGE });
       });
 
     return () => {

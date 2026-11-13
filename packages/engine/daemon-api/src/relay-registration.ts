@@ -77,6 +77,13 @@ export interface RelayDaemonRegistrationOptions {
   readonly reconnectBaseDelayMs?: number;
   /** Reconnect backoff cap in ms (default 30000). */
   readonly reconnectMaxDelayMs?: number;
+  /**
+   * How long a connection may go without the relay's `registered` frame before
+   * the attempt is abandoned and retried through the reconnect backoff
+   * (default 15000). Covers a socket that never opens and one that opens but is
+   * never registered.
+   */
+  readonly registrationTimeoutMs?: number;
   /** Max concurrent event-subscription streams per pipe (default 8). */
   readonly maxStreamsPerPipe?: number;
   /** Bounded per-stream send buffer, in chunks; overflow drops-with-notice (default 256). */
@@ -295,6 +302,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
   const ridBytes = encodeUtf8(options.rid);
   const baseDelay = options.reconnectBaseDelayMs ?? 500;
   const maxDelay = options.reconnectMaxDelayMs ?? 30_000;
+  const registrationTimeout = Math.max(1, options.registrationTimeoutMs ?? 15_000);
   const maxStreamsPerPipe = options.maxStreamsPerPipe ?? DEFAULT_MAX_STREAMS_PER_PIPE;
   const streamBufferChunks = options.streamBufferChunks ?? DEFAULT_STREAM_BUFFER_CHUNKS;
   const maxPipes = Math.max(1, Math.trunc(options.maxPipes ?? DEFAULT_MAX_PIPES));
@@ -305,6 +313,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
   let stopped = false;
   let attempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let registrationTimer: ReturnType<typeof setTimeout> | null = null;
   let inFlightRequests = 0;
   let droppedPipes = 0;
   let droppedRequests = 0;
@@ -409,6 +418,28 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
   function setStatus(next: RelayRegistrationStatus): void {
     status = next;
     options.onStatusChange?.(next);
+  }
+
+  function clearRegistrationTimer(): void {
+    if (registrationTimer) clearTimeout(registrationTimer);
+    registrationTimer = null;
+  }
+
+  /** Abandon a connection that never reached `registered` and retry through the normal backoff. */
+  function failRegistration(ws: RelayClientWebSocket, reason: string): void {
+    if (socket !== ws || stopped) return;
+    logger.warn('relay registration failed; reconnecting', { rid: options.rid, reason });
+    clearRegistrationTimer();
+    socket = null;
+    abortAllRequests();
+    for (const pipeKey of [...pipeStreams.keys()]) closePipeStreams(pipeKey);
+    channels.clear();
+    try {
+      ws.close();
+    } catch {
+      // ignore: the attempt is already abandoned
+    }
+    scheduleReconnect();
   }
 
   function scheduleReconnect(): void {
@@ -706,6 +737,8 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     }
     ws.binaryType = 'arraybuffer';
     socket = ws;
+    clearRegistrationTimer();
+    registrationTimer = setTimeout(() => failRegistration(ws, 'no registered frame before the deadline'), registrationTimeout);
     ws.addEventListener('open', () => {
       ws.send(encodeControlFrame({ t: 'register', role: 'daemon', protocol: RELAY_PROTOCOL_VERSION, rid: options.rid }));
     });
@@ -719,6 +752,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
             if (!frame) return;
             if (frame.t === 'registered') {
               attempt = 0;
+              clearRegistrationTimer();
               setStatus('registered');
               logger.info('relay registered', { rid: options.rid });
             } else if (frame.t === 'pipe-close') {
@@ -727,6 +761,8 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
               closePipeStreams(frame.pipe);
             } else if (frame.t === 'error') {
               logger.warn('relay error frame', { code: frame.code, message: frame.message });
+              // Before `registered`, an unscoped error means the relay refused this registration.
+              if (status !== 'registered' && frame.pipe === undefined) failRegistration(ws, `relay error ${frame.code}`);
             }
             return;
           }
@@ -742,6 +778,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     });
     ws.addEventListener('close', () => {
       if (socket !== ws) return;
+      clearRegistrationTimer();
       socket = null;
       abortAllRequests();
       for (const pipeKey of [...pipeStreams.keys()]) closePipeStreams(pipeKey);
@@ -764,6 +801,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       stopped = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       reconnectTimer = null;
+      clearRegistrationTimer();
       abortAllRequests();
       for (const pipeKey of [...pipeStreams.keys()]) closePipeStreams(pipeKey);
       channels.clear();

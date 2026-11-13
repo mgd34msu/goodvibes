@@ -24,6 +24,7 @@ export {
   isTerminalGroupStatus,
   isTerminalUnitStatus,
   newContractId,
+  reopenFailedRepairPlanning,
   transitionContract,
   transitionGroup,
   transitionUnit,

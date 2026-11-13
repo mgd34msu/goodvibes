@@ -424,3 +424,86 @@ test('pairing recovers from network and malformed response failures', async () =
   await client.requestPairing(); expect(client.getState().status).toBe('awaiting-approval');
   client.stop();
 });
+
+describe('state machine hazards', () => {
+  test('a failed re-pair while a valid identity is stored falls back to connected and says so', async () => {
+    const store = memoryStorage({ nodeId: 'phone', token: 'token', label: 'Phone' });
+    const client = new PhoneNodeClient({ baseUrl: 'http://daemon.test', label: 'Phone', storage: store, bindings: bindings(),
+      fetchImpl: (async () => Response.json({ error: 'nope' }, { status: 500 })) });
+    await client.requestPairing();
+    const state = client.getState();
+    expect(store.current?.token).toBe('token');
+    expect(state.status).toBe('connected');
+    expect(state.message).toContain('HTTP 500');
+    expect(state.message).toContain('still paired');
+    expect(state.pendingRequestId).toBe('');
+    client.stop();
+  });
+
+  test('a failed first pairing with no identity is still an error', async () => {
+    const client = new PhoneNodeClient({ baseUrl: 'http://daemon.test', label: 'Phone', storage: memoryStorage(), bindings: bindings(),
+      fetchImpl: (async () => Response.json({}, { status: 500 })) });
+    await client.requestPairing();
+    expect(client.getState().status).toBe('error');
+  });
+
+  test('verifyPairing after stop() runs on a fresh lifetime instead of going silent', async () => {
+    const { impl } = stubFetch([
+      { status: 200, json: { request: { id: 'req-1' }, challenge: 'chal' } },
+      { status: 200, json: { peer: { id: 'node-1' }, token: { value: 'secret' } } },
+    ]);
+    const client = new PhoneNodeClient({
+      baseUrl: 'http://daemon.test', label: 'Pixel', storage: memoryStorage(), fetchImpl: impl, bindings: bindings(),
+    });
+    await client.requestPairing();
+    client.stop();
+    await client.verifyPairing();
+    expect(client.getState().status).toBe('connected');
+  });
+
+  test('verifyPairing interrupted by stop() explains itself instead of leaving the old message', async () => {
+    let release!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { release = resolve; });
+    let call = 0;
+    const client = new PhoneNodeClient({ baseUrl: 'http://daemon.test', label: 'Pixel', storage: memoryStorage(), bindings: bindings(),
+      fetchImpl: (async () => {
+        call += 1;
+        if (call === 1) return Response.json({ request: { id: 'req-1' }, challenge: 'chal' });
+        return pending;
+      }) });
+    await client.requestPairing();
+    const before = client.getState().message;
+    const verifying = client.verifyPairing();
+    client.stop();
+    release(Response.json({}));
+    await verifying;
+    expect(client.getState().status).toBe('awaiting-approval');
+    expect(client.getState().message).not.toBe(before);
+    expect(client.getState().message).toContain('interrupted');
+  });
+
+  test('an old pump finishing does not clear busy for the new lifetime', async () => {
+    const store = memoryStorage({ nodeId: 'phone', token: 'token', label: 'Phone' });
+    const gates: ((response: Response) => void)[] = [];
+    let pulls = 0;
+    const client = new PhoneNodeClient({ baseUrl: 'http://daemon.test', label: 'Phone', storage: store, bindings: bindings(),
+      pullIntervalMs: 1_000_000, heartbeatIntervalMs: 1_000_000,
+      fetchImpl: ((input: RequestInfo | URL) => {
+        if (!String(input).includes('/work/pull')) return Promise.resolve(Response.json({}));
+        pulls += 1;
+        return new Promise<Response>((resolve) => { gates.push(resolve); });
+      }) as typeof fetch });
+    const first = client.pumpOnce();
+    await Promise.resolve();
+    client.start(); // new lifetime; start() also begins a pump
+    await Promise.resolve(); await Promise.resolve();
+    expect(pulls).toBe(2);
+    gates[0]?.(Response.json({ work: [] }));
+    await first;
+    // The new lifetime's pump is still in flight: a further pump must be refused.
+    await client.pumpOnce();
+    expect(pulls).toBe(2);
+    gates[1]?.(Response.json({ work: [] }));
+    client.stop();
+  });
+});

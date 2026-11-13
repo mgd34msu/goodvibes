@@ -45,7 +45,7 @@ on:
 
 concurrency:
   # Keyed on the TAG being released, so the two paths that can release the same
-  # version serialize with each other: a v* tag push and ci.yml's auto-release
+  # version serialize with each other: a v* tag push and a manual release-mode
   # dispatch both run at refs/tags/vX, so both produce engine-release-vX. Different
   # versions get different groups and never evict one another.
   #
@@ -66,6 +66,8 @@ jobs:
     outputs:
       tag: ${{ steps.source.outputs.tag }}
       sha: ${{ steps.version.outputs.sha }}
+      previous-tag: ${{ steps.previous.outputs.tag }}
+      previous-source: ${{ steps.previous.outputs.source }}
     steps:
       - name: Resolve immutable release tag
         id: source
@@ -94,10 +96,9 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ steps.source.outputs.ref }}
+          fetch-depth: 0
       - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: "1.3.14"
+        uses: ./.github/actions/bun
       - name: Verify git tag matches package.json version
         id: version
         env:
@@ -108,6 +109,20 @@ jobs:
           if [ "$RELEASE_MODE" = candidate ]; then test "$(git rev-parse HEAD)" = "$CANDIDATE_SOURCE"; fi
           GITHUB_REF_NAME="$RELEASE_TAG" bun packages/engine/scripts/verify-release-tag-version.ts
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # The release being upgraded from is the nearest earlier version tag in
+      # this release's own history; empty for the first release.
+      - name: Resolve the previous published release
+        id: previous
+        env:
+          RELEASE_TAG: ${{ steps.source.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/$RELEASE_TAG^{commit}" >/dev/null; then base="refs/tags/$RELEASE_TAG^"; else base=HEAD; fi
+          previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$base" 2>/dev/null || true)
+          if [ -n "$previous" ] && [ "$previous" != "$RELEASE_TAG" ]; then
+            echo "tag=$previous" >> "$GITHUB_OUTPUT"
+            echo "source=$(git rev-parse "$previous^{commit}")" >> "$GITHUB_OUTPUT"
+          fi
 
   # A manual dispatch defaults to dry-run. Only an explicit release-mode
   # dispatch or a tag push may reach the publish job below.
@@ -164,9 +179,7 @@ jobs:
         with:
           ref: ${{ needs.verify-tag-version.outputs.tag }}
       - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: "1.3.14"
+        uses: ./.github/actions/bun
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
@@ -180,7 +193,7 @@ jobs:
       # mid-loop publish failure leaves, which the publish loop's per-package
       # skip converges) all proceed. The stop condition is a published package
       # whose recorded gitHead is a DIFFERENT commit than the one being
-      # released. See scripts/verify-published-packages.ts.
+      # released. See packages/engine/scripts/verify-published-packages.ts.
       - name: Check the npm registry state for this version
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -240,9 +253,7 @@ jobs:
         with:
           ref: ${{ needs.verify-tag-version.outputs.sha }}
       - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: "1.3.14"
+        uses: ./.github/actions/bun
       - name: Select the published engine version
         id: version
         env:
@@ -282,8 +293,8 @@ jobs:
       tag: ${{ needs.verify-tag-version.outputs.tag }}
       source: ${{ needs.verify-tag-version.outputs.sha }}
       tooling-sha: ${{ github.sha }}
-      previous-tag: ${{ needs.verify-tag-version.outputs.tag == 'v3.1.6' && 'v3.1.5' || needs.verify-tag-version.outputs.tag == 'v3.1.5' && 'v3.1.4' || needs.verify-tag-version.outputs.tag == 'v3.1.4' && 'v3.1.3' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'v3.1.2' || '' }}
-      previous-source: ${{ needs.verify-tag-version.outputs.tag == 'v3.1.6' && 'b160053d8d934364ec4884df4f6dbb909e963147' || needs.verify-tag-version.outputs.tag == 'v3.1.5' && '9c19f683bf3e19250e64a04ae6c8c8f4a3988522' || needs.verify-tag-version.outputs.tag == 'v3.1.4' && '0065d6726d4d9fe3f800e255711b6cf8d78d0d72' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'a5ddf1f151466590eaed4ab387b2f95be7112a86' || '' }}
+      previous-tag: ${{ needs.verify-tag-version.outputs.previous-tag }}
+      previous-source: ${{ needs.verify-tag-version.outputs.previous-source }}
       artifact-run-id: ${{ format('{0}', github.run_id) }}
 
   github-release:

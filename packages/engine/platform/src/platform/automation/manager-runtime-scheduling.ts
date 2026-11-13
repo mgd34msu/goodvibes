@@ -3,7 +3,7 @@ import type { ConfigManager } from '../config/manager.js';
 import type { AutomationJob } from './jobs.js';
 import type { AutomationRun } from './runs.js';
 import type { AutomationRunTrigger } from './types.js';
-import { computeNextRun } from './manager-runtime-helpers.js';
+import { computeNextRun, jobEnablement } from './manager-runtime-helpers.js';
 import { summarizeError } from '../utils/error-display.js';
 
 const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
@@ -126,8 +126,7 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
         }
         const completedOneShot: AutomationJob = {
           ...current,
-          enabled: false,
-          status: 'paused',
+          ...jobEnablement(false),
           pausedReason: 'one-shot-complete',
           nextRunAt: undefined,
           updatedAt: Date.now(),
@@ -207,8 +206,7 @@ export function advanceScheduledHeartbeatAutomationJob(
   }
   const completedOneShot: AutomationJob = {
     ...current,
-    enabled: false,
-    status: 'paused',
+    ...jobEnablement(false),
     pausedReason: 'one-shot-complete',
     nextRunAt: undefined,
     updatedAt: Date.now(),

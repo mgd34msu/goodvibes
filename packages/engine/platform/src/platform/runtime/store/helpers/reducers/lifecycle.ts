@@ -9,6 +9,8 @@ import type { TaskDomainState, RuntimeTask, TaskLifecycleState } from '../../dom
 import type { AgentDomainState, RuntimeAgent, AgentLifecycleState } from '../../domains/agents.js';
 import type { PermissionCategory } from '../../../../permissions/manager.js';
 import { now, updateDomainMetadata, isTerminalLifecycleState, computeActiveIds } from './shared.js';
+import { logger } from '../../../../utils/logger.js';
+import { canMirror } from '../../../tasks/lifecycle.js';
 import { parsePermissionMode } from '../../../../gate/presets.js';
 
 function permissionMachineStateForEvent(
@@ -43,7 +45,11 @@ export function updateSessionState(
   const base = updateDomainMetadata(domain, event.type);
   switch (event.type) {
     case 'COMPACTION_CHECK':
-      return { ...base, compactionState: 'checking_threshold' };
+      // The manager answers a below-threshold auto check with done -> idle and
+      // emits nothing further, so a check under the threshold must not leave the
+      // mirror reading "running". A manual or prompt-too-long run under the
+      // threshold goes on to emit its strategy event straight away.
+      return { ...base, compactionState: event.tokenCount < event.threshold ? 'idle' : 'checking_threshold' };
     case 'COMPACTION_MICROCOMPACT':
       return { ...base, compactionState: 'microcompact' };
     case 'COMPACTION_COLLAPSE':
@@ -55,17 +61,20 @@ export function updateSessionState(
     case 'COMPACTION_BOUNDARY_COMMIT':
       return { ...base, compactionState: 'boundary_commit' };
     case 'COMPACTION_DONE':
-      return { ...base, compactionState: 'done', lastCompactedAt: now() };
+      // The manager moves done -> idle in the same breath; the mirror settles
+      // with it. `failed` is deliberately NOT settled: it stays until the next
+      // compaction begins, which is how session-maintenance reports the failure.
+      return { ...base, compactionState: 'idle', lastCompactedAt: now() };
     case 'COMPACTION_FAILED':
       return { ...base, compactionState: 'failed', recoveryError: event.error };
     case 'COMPACTION_RESUME_REPAIR':
       return { ...base, wasRepaired: event.repaired, recoveryState: event.safeToResume ? 'ready' : domain.recoveryState };
     case 'COMPACTION_RECEIPT':
-      // Mandatory receipt: mark the compaction boundary as done only when the
+      // Mandatory receipt: record the completed compaction only when the
       // compacted context was actually applied; a kept-original/failed receipt
       // leaves the conversation (and compaction state) untouched.
       return event.outcome === 'applied'
-        ? { ...base, compactionState: 'done', lastCompactedAt: now() }
+        ? { ...base, compactionState: 'idle', lastCompactedAt: now() }
         : base;
     case 'COMPACTION_QUALITY_SCORE':
     case 'COMPACTION_STRATEGY_SWITCH':
@@ -231,6 +240,11 @@ function transitionTaskDomainRecord(
 ): TaskDomainState {
   const existing = domain.tasks.get(taskId);
   if (!existing) return domain;
+  if (!canMirror(existing.status, status)) {
+    // A refused move is logged and leaves the store as it was; it never throws.
+    logger.warn('[task-store] illegal task transition refused', { taskId, from: existing.status, to: status, source });
+    return domain;
+  }
   return updateTaskDomainFromRecord(domain, { ...existing, ...patch, status }, source);
 }
 

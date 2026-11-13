@@ -76,6 +76,8 @@ interface SessionSearchStub {
   /** Delay (ms) applied ONLY to load-more calls (those carrying a cursor), lets a test
    *  hold a load-more in flight while a fresh search completes and supersedes it. */
   loadMoreDelayMs: number;
+  /** When set, a (delayed) load-more call rejects NOT_INVOKABLE instead of resolving. */
+  loadMoreRejectNotInvokable: boolean;
 }
 
 const sessionSearchStub: SessionSearchStub = {
@@ -83,6 +85,7 @@ const sessionSearchStub: SessionSearchStub = {
   response: { sessions: [], nextCursor: undefined, hasMore: false },
   failMode: 'none',
   loadMoreDelayMs: 0,
+  loadMoreRejectNotInvokable: false,
 };
 
 // Mock the platform before any import of useChatSearch.
@@ -116,6 +119,11 @@ mock.module('../../lib/goodvibes', () => ({
           const snapshot = sessionSearchStub.response;
           if (input.cursor && sessionSearchStub.loadMoreDelayMs > 0) {
             await new Promise((r) => setTimeout(r, sessionSearchStub.loadMoreDelayMs));
+          }
+          if (input.cursor && sessionSearchStub.loadMoreRejectNotInvokable) {
+            throw Object.assign(new Error('Method sessions.search is not invokable from this surface'), {
+              status: 400, category: 'service', body: { code: 'NOT_INVOKABLE' },
+            });
           }
           return snapshot;
         },
@@ -241,6 +249,7 @@ function resetSessionSearchStub() {
   sessionSearchStub.response = { sessions: [], nextCursor: undefined, hasMore: false };
   sessionSearchStub.failMode = 'none';
   sessionSearchStub.loadMoreDelayMs = 0;
+  sessionSearchStub.loadMoreRejectNotInvokable = false;
 }
 
 beforeEach(() => {
@@ -685,6 +694,42 @@ describe('useChatSearch: session search pagination', () => {
     await elapse(200);
     expect(handle.state.sessionResults.map((r) => r.sessionId)).toEqual(['fresh-p1']);
     expect(handle.state.sessionResults.some((r) => r.sessionId === 'stale-page-2')).toBe(false);
+
+    handle.unmount();
+  });
+});
+
+describe('useChatSearch: a stale load-more failure', () => {
+  test('a superseded load-more that fails NOT_INVOKABLE does not overwrite the newer search\'s ready state', async () => {
+    const page = (id: string, cursor?: string, hasMore = false) => ({
+      sessions: [{
+        id, kind: 'companion-chat', title: id, status: 'active', createdAt: 1, updatedAt: 1, lastActivityAt: 1,
+        messageCount: 1, pendingInputCount: 0, routeIds: [], surfaceKinds: [], participants: [], metadata: {},
+      }],
+      nextCursor: cursor,
+      hasMore,
+    });
+    sessionSearchStub.response = page('p1', 'c1', true);
+    const handle = mountHook('', []);
+    handle.setQuery('paginate');
+    await elapse(450);
+    expect(handle.state.sessionSearchState).toBe('ready');
+
+    sessionSearchStub.loadMoreDelayMs = 500;
+    sessionSearchStub.loadMoreRejectNotInvokable = true;
+    handle.loadMoreSessions();
+    await elapse(20);
+
+    sessionSearchStub.loadMoreDelayMs = 0;
+    sessionSearchStub.response = page('fresh-p1');
+    handle.setQuery('paginat');
+    handle.setQuery('paginate');
+    await elapse(450);
+    expect(handle.state.sessionSearchState).toBe('ready');
+
+    await elapse(200); // the stale load-more now rejects
+    expect(handle.state.sessionSearchState).toBe('ready');
+    expect(handle.state.sessionResults.map((r) => r.sessionId)).toEqual(['fresh-p1']);
 
     handle.unmount();
   });

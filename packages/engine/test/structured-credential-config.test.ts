@@ -12,7 +12,7 @@ import { screenSettingsForIngestion } from '../platform/src/platform/config/sett
 import { redactConfigValue, redactObjectByPath } from '../platform/src/platform/tools/goodvibes-runtime/credential-redaction.ts';
 import { attachConfigEmitBridge } from '../platform/src/platform/runtime/config/emit-bridge.ts';
 import { RuntimeEventBus, type ConfigEvent } from '../platform/src/platform/runtime/events/index.ts';
-import { credentialReadingStanding, undeclaredSchemaKeys } from '../scripts/credential-key-readings.ts';
+import { undeclaredSchemaKeys } from '../scripts/credential-key-names.ts';
 import { createCredentialSetHandler, createCredentialDeleteHandler, type CredentialWriteDeps } from '../platform/src/platform/control-plane/routes/credentials-write.ts';
 import { sweepPlaintextCredentials } from '../platform/src/platform/config/plaintext-credential-sweep.ts';
 import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
@@ -33,8 +33,6 @@ test('structured references have an exact declaration without entering scalar se
   expect(structuredCredentialConfigSchemaFailures(CONFIG_SCHEMA)).toEqual([]);
   expect(undeclaredSchemaKeys().some(entry => entry.key === key)).toBe(false);
   expect(undeclaredSchemaKeys().some(entry => entry.key === 'judgment.timeoutMs')).toBe(true);
-  expect(credentialReadingStanding({ verdict: 'uncertain', outcome: 'escalate' })).toBe('unsettled');
-  expect(credentialReadingStanding({ verdict: 'no', outcome: 'confirm' })).toBe('unsettled');
 });
 
 test('the declaration gate rejects missing, duplicate, wrong-shaped, wrong-parser and invalid-default contracts', () => {

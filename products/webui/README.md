@@ -35,7 +35,7 @@ From `products/webui`:
 - `bun run dev`: local Vite server, with daemon binding discovery
 - `bun run build`: verify engine-derived snapshots, then compile the browser app
 - `bun run typecheck`: browser, tooling and Playwright TypeScript programs
-- `bun run test`: isolated Bun behavior tests
+- `bun run test`: Bun behavior tests, run through the shared runner (`packages/engine/scripts/test.ts`)
 - `bun run e2e --project=phone --project=desktop`: synthetic daemon browser matrix
 - `bun run lint`: source and tooling lint
 - `bun run release:gate`: shared engine workspace dependency/export checks

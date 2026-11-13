@@ -16,6 +16,11 @@ interface Operation<Result> {
   value: string;
   invalidInput: boolean;
 }
+/** What a pairing preview yields: the displayable result, and the capability to confirm it when it can be applied. */
+export interface HostPairingPreview<Result> {
+  readonly result: Result;
+  readonly confirm?: ((answer: string, signal: AbortSignal) => Promise<Result>) | undefined;
+}
 export class TerminalHostPairingController<
   Request extends {
     readonly apply: boolean;
@@ -35,10 +40,7 @@ export class TerminalHostPairingController<
       readonly preview: (
         request: Request,
         signal: AbortSignal,
-      ) => Promise<{
-        readonly result: Result;
-        readonly confirm?: ((answer: string, signal: AbortSignal) => Promise<Result>) | undefined;
-      }>;
+      ) => Promise<HostPairingPreview<Result>>;
       readonly beforePreview?: ((request: Request, ui: HostPairingUi) => void) | undefined;
       readonly format: (result: Result) => string;
       readonly readRecovery: (
@@ -85,8 +87,23 @@ export class TerminalHostPairingController<
     this.operation = operation;
     this.ui.setPrompt('');
     this.ui.print('Reading pairing preview. Escape, Ctrl-C or Ctrl-D cancels.');
-    this.policy.beforePreview?.(request, this.ui);
-    const preview = await this.policy.preview(request, operation.abort.signal);
+    let preview: HostPairingPreview<Result>;
+    try {
+      this.policy.beforePreview?.(request, this.ui);
+      preview = await this.policy.preview(request, operation.abort.signal);
+    } catch (error) {
+      // A preview that fails must not leave the operation in `preview`: that
+      // keeps ownsInput true and swallows every keystroke until Esc. A cancel
+      // that raced the failure has already said what it had to.
+      if (this.current(operation)) {
+        this.finish(operation);
+        const reason = error instanceof Error ? error.message : String(error);
+        this.ui.print(
+          `Pairing preview failed: ${reason.replace(/[\x00-\x1f\x7f]/g, ' ').trim() || 'unknown error'}. No pairing request was made.`,
+        );
+      }
+      return;
+    }
     if (!this.current(operation)) return;
     if (!this.ui.canPresent() || this.promptReplaced(operation)) {
       this.cancelForTakeover(this.promptReplaced(operation));

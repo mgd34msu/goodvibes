@@ -636,7 +636,9 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
         clearTimeout(reconnectTimer);
       }
       closeSocket();
-      emitConnectionState('disconnected');
+      // 'failed' is final (see ConnectionState): disposing a connection that has
+      // already given up must not relabel it 'disconnected'.
+      if (lastConnectionState !== 'failed') emitConnectionState('disconnected');
       // reset the outbound buffer on disposal so a future reconnect
       // releases queued messages when the connector is explicitly disposed.
       outboundQueue.length = 0;

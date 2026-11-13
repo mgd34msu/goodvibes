@@ -42,3 +42,40 @@ test('asynchronous startup reserves the configured slot and transfers it to the 
     } finally { release(); start.mockRestore(); }
   } finally { await f.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+const internals = (manager: unknown) => manager as { running: boolean; reconcileTimer: unknown };
+
+test('a start that is still loading when the manager is stopped does not start it afterwards', async () => {
+  const dir = makeProjectTempDir('automation-stop-during-start');
+  const f = automationMutationFixture(dir);
+  let release!: () => void;
+  const blocked = new Promise<void>(yes => { release = yes; });
+  const load = f.store.load.bind(f.store);
+  const tap = spyOn(f.store, 'load').mockImplementation(async () => { await blocked; return load(); });
+  try {
+    const starting = f.manager.start();
+    f.manager.stop();
+    release();
+    await starting;
+    expect(internals(f.manager).running).toBe(false);
+    expect(internals(f.manager).reconcileTimer).toBeNull();
+  } finally { release(); tap.mockRestore(); await f.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a start made after that stop runs under its own lifetime', async () => {
+  const dir = makeProjectTempDir('automation-restart-during-start');
+  const f = automationMutationFixture(dir);
+  let release!: () => void;
+  const blocked = new Promise<void>(yes => { release = yes; });
+  const load = f.store.load.bind(f.store);
+  const tap = spyOn(f.store, 'load').mockImplementation(async () => { await blocked; return load(); });
+  try {
+    const stale = f.manager.start();
+    f.manager.stop();
+    const restarted = f.manager.start();
+    release();
+    await Promise.all([stale, restarted]);
+    expect(internals(f.manager).running).toBe(true);
+    expect(internals(f.manager).reconcileTimer).not.toBeNull();
+  } finally { release(); tap.mockRestore(); await f.close(); rmSync(dir, { recursive: true, force: true }); }
+});

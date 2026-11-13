@@ -16,7 +16,7 @@ import { createDomainDispatch } from '../store/index.js';
 import type { RuntimeStore, DomainDispatch } from '../store/index.js';
 import type { TaskLifecycleState } from '../store/domains/tasks.js';
 import type { AgentLifecycleState } from '../store/domains/agents.js';
-import { canTransition } from '../tasks/lifecycle.js';
+import { canRetry, canTransition } from '../tasks/lifecycle.js';
 import {
   emitOpsTaskCancelled,
   emitOpsTaskPaused,
@@ -69,11 +69,6 @@ export class OpsTargetNotFoundError extends GoodVibesError {
 // ---------------------------------------------------------------------------
 // OpsControlPlane
 // ---------------------------------------------------------------------------
-
-/**
- * Task states from which a retry is permitted.
- */
-const RETRYABLE_STATES: ReadonlySet<TaskLifecycleState> = new Set(['failed', 'cancelled']);
 
 /**
  * Terminal agent lifecycle states, agents in these states cannot be cancelled.
@@ -247,7 +242,7 @@ export class OpsControlPlane {
       throw new OpsTargetNotFoundError(taskId, 'task');
     }
 
-    if (!RETRYABLE_STATES.has(task.status)) {
+    if (!canRetry(task.status)) {
       const err = new OpsIllegalActionError(taskId, 'retry', task.status);
       emitOpsTaskRetried(this._bus, this._makeCtx(taskId), {
         taskId,

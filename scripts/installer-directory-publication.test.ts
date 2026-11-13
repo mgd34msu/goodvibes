@@ -15,15 +15,18 @@ beforeEach(() => {
   writeFileSync(join(install, 'goodvibes-daemon'), '#!/bin/sh\nprintf "http://127.0.0.1:3421\\n"\n', { mode: 0o755 });
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
-function run(kind: 'driver' | 'webui', injection = '') {
+function run(kind: 'driver' | 'webui', injection = '', afterInstall = '') {
   return spawnSync('sh', ['-c', `set -eu
     . "$FIXTURE_INSTALLER"
     VERSION=v3.1.2; WORKDIR=$FIXTURE_WORK
     os_tag=linux; arch_tag=x64; VEC_OS=linux; VEC_SUFFIX=so; PLATFORM_SUFFIX=linux-x64
     claim_release_install
     INSTALL_SWAP_BEGUN=1
+    INSTALL_JOURNAL=$FIXTURE_WORK/swap-journal; : > "$INSTALL_JOURNAL"
     ${injection}
     ${kind === 'driver' ? 'install_browser_driver' : 'install_webui'}
+    ${afterInstall}
+    INSTALL_SWAP_FINISHED=1; commit_install_journal
     release_install_claims
   `], { encoding: 'utf8', timeout: 10_000, env: { ...process.env, HOME: root,
     GOODVIBES_INSTALL_SH_LIB: '1', GOODVIBES_INSTALL_DIR: install,
@@ -45,6 +48,43 @@ test('driver publication preserves the original installed tree and an unrelated 
   expect(readFileSync(join(previous, 'custom.txt'), 'utf8')).toBe('Previously retained custom bytes');
   expect(existsSync(target + '.directory-update.lock')).toBe(false);
   expect(result.stdout).toContain('retained');
+});
+
+test('a superseded previous driver tree is removed only at the commit step, after the whole swap finished', () => {
+  const target = oldDriver(); writeFileSync(join(target, '.goodvibes-release.json'), '{"schema":1,"version":"3.0.0"}\n');
+  // The swap fails after the driver was published: nothing may have been deleted.
+  const failed = run('driver', '', 'rollback_install_swap; exit 9'); expect(failed.status).toBe(9);
+  expect(readdirSync(install).some(name => name.startsWith('.goodvibes-directory-install.'))).toBe(true);
+  expect(outgoingFile(install, 'owner.txt')).toBeDefined();
+});
+
+test('a superseded previous driver tree is removed after a successful update, leaving no staging directory', () => {
+  const target = oldDriver(); writeFileSync(join(target, '.goodvibes-release.json'), '{"schema":1,"version":"3.0.0"}\n');
+  const result = run('driver'); expect(result.status, result.stderr).toBe(0);
+  expect(readFileSync(join(target, 'index.js'), 'utf8')).toBe('New released driver');
+  expect(readdirSync(install).filter(name => name.startsWith('.goodvibes-directory-install.'))).toEqual([]);
+  expect(existsSync(target + '.directory-update.lock')).toBe(false);
+});
+
+test('the same release reinstalled keeps the previous driver tree', () => {
+  const target = oldDriver(); writeFileSync(join(target, '.goodvibes-release.json'), '{"schema":1,"version":"3.1.2"}\n');
+  const result = run('driver'); expect(result.status, result.stderr).toBe(0);
+  expect(outgoingFile(install, 'owner.txt')).toBeDefined();
+});
+
+test('a WebUI tree is never deleted by an update, even one carrying another release marker', () => {
+  const webui = join(install, 'webui'), old = join(webui, '3.1.2'); mkdirSync(old, { recursive: true });
+  writeFileSync(join(old, 'owner.txt'), 'Original configured bundle'); writeFileSync(join(old, '.goodvibes-release.json'), '{"schema":1,"version":"3.0.0"}\n');
+  const result = run('webui'); expect(result.status, result.stderr).toBe(0);
+  expect(outgoingFile(webui, 'owner.txt')).toBeDefined();
+});
+
+test('a failed update still retains the parked previous tree, even one carrying a release marker', () => {
+  const target = oldDriver(); writeFileSync(join(target, '.goodvibes-release.json'), '{"schema":1,"version":"3.0.0"}\n');
+  const result = run('driver', `mv() { case "$1" in */incoming) return 71 ;; esac; command mv "$@"; }`);
+  expect(result.status).not.toBe(0);
+  expect(readFileSync(join(target, 'owner.txt'), 'utf8')).toBe('Original owner driver content');
+  expect(readdirSync(install).some(name => name.startsWith('.goodvibes-directory-install.'))).toBe(true);
 });
 
 test('a fixed incoming tree and native directory claim are never deleted or adopted', () => {

@@ -33,7 +33,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } fr
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { sweepStaleTmpDirs } from './stale-tmp-sweep.ts';
+import { sweepStaleTmpDirs } from '../toolchain/src/test-runner/temp.ts';
 
 function arg(name: string, fallback: string): string {
   const idx = process.argv.indexOf(`--${name}`);

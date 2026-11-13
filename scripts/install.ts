@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { COMMANDS, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, isReleaseInUse, plainPath, present, quote, readDataId, readInstallation, receiptPath, run, stopService, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
+import { COMMANDS, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, isReleaseInUse, plainPath, present, quote, readDataId, readInstallation, receiptPath, releaseHeldLocks, run, stopService, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
 
 export interface Options extends Layout { port: number; service: boolean; runtimeDir: string; nodePath?: string; workspace?: string; decisionPolicy?: DecisionModelPolicy }
 const ROOT = resolve(import.meta.dir, '..');
@@ -153,6 +153,22 @@ export interface InstallHooks {
   stage?: typeof stage;
   ready?: typeof ready;
   renderUnit?: (options: Options) => Promise<string>;
+  /** Replaces the installed-host pairing step (the real one needs a live daemon). */
+  pairHost?: Run;
+}
+/** Exit status of pair-installed-host.ts meaning "pairing deferred to the owner; nothing else is wrong". Keep in sync with that script. */
+export const PAIRING_DEFERRED_EXIT = 75;
+/** Recovery for the install currently in flight; the failure path and the signal path both run exactly this. */
+let activeRecovery: (() => void) | undefined;
+/** Roll the interrupted install back, release every lock, and return the conventional exit code (128 + signal). */
+export function interruptInstall(signal: 'SIGINT' | 'SIGTERM'): number {
+  const recover = activeRecovery; activeRecovery = undefined;
+  try { recover?.(); }
+  catch (error) {
+    console.error(`Install interrupted and automatic recovery was incomplete; inspect ${SERVICE} before retrying. ${error instanceof Error ? error.message : String(error)}`);
+  }
+  releaseHeldLocks();
+  return signal === 'SIGINT' ? 130 : 143;
 }
 export async function install(options: Options, hooks: InstallHooks = {}): Promise<void> {
   const execute = hooks.execute ?? run;
@@ -177,6 +193,50 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
     const previousSettings = new Map<string, string | undefined>();
     const previousUnit = present(unitPath(options)) ? readFileSync(unitPath(options), 'utf8') : undefined;
     const previousWrappers = new Map(COMMANDS.map(name => [name, old && present(join(options.prefix, 'commands', name)) ? readFileSync(join(options.prefix, 'commands', name), 'utf8') : undefined]));
+    // One recovery, used by both a failure and an interrupt. It runs at most once.
+    let recovered = false;
+    const recover = (): void => {
+      if (recovered) return;
+      recovered = true;
+      // Do not delete binaries that a failed service stop might still be using.
+      if (serviceAttempted) {
+        execute('systemctl', ['--user', 'stop', SERVICE]);
+        const state = execute('systemctl', ['--user', 'show', SERVICE, '--property=ActiveState', '--value'], { capture: true });
+        if (!['inactive', 'failed'].includes(state)) throw new Error('Replacement service did not stop.');
+        if (!old?.service) execute('systemctl', ['--user', 'disable', SERVICE]);
+      }
+      if (published) {
+        if (old) switchRelease(options.prefix, old.release);
+        else rmSync(join(options.prefix, 'current'), { force: true });
+        for (const name of COMMANDS) {
+          const previous = previousWrappers.get(name);
+          if (previous !== undefined) atomicWrite(join(options.prefix, 'commands', name), previous, 0o755);
+          else { rmSync(join(options.prefix, 'commands', name), { force: true }); rmSync(join(options.binDir, name), { force: true }); }
+        }
+        for (const [path, contents] of previousSettings) {
+          if (contents !== undefined) atomicWrite(path, contents);
+          else rmSync(path, { force: true });
+        }
+      }
+      if (metadataTouched) {
+        for (const [path, contents] of previousMetadata) {
+          // A failed first launch can already have created user data. Preserve
+          // its new ownership so a retry can adopt it; restore existing owners.
+          if (published && previousMetadata.get(dataOwner(options)) === undefined && contents === undefined) continue;
+          if (contents !== undefined) atomicWrite(path, contents);
+          else rmSync(path, { force: true });
+        }
+      }
+      if (options.service || old?.service) {
+        if (previousUnit !== undefined) atomicWrite(unitPath(options), previousUnit, 0o644);
+        else rmSync(unitPath(options), { force: true });
+        execute('systemctl', ['--user', 'daemon-reload']);
+        if (stopAttempted && wasRunning && old?.service) { execute('systemctl', ['--user', 'enable', SERVICE]); execute('systemctl', ['--user', 'start', SERVICE]); }
+      }
+      if (old) rmSync(release, { recursive: true, force: true });
+      else rmSync(options.prefix, { recursive: true, force: true });
+    };
+    activeRecovery = recover;
     try {
       await (hooks.stage ?? stage)(ROOT, release, options, commit, execute);
       let unit = '';
@@ -238,7 +298,18 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         execute('systemctl', ['--user', 'enable', SERVICE]);
         execute('systemctl', ['--user', 'restart', SERVICE]);
         await (hooks.ready ?? ready)(options, readFileSync(join(release, 'webui/index.html'), 'utf8'), execute);
-        if (!hooks.stage) execute(join(release, 'runtime/bun'), [join(ROOT, 'products/tui/scripts/pair-installed-host.ts'), options.prefix, options.dataDir, String(options.port), options.workspace ?? ROOT], { cwd: options.dataDir });
+        if (hooks.pairHost || !hooks.stage) {
+          const pairArguments = [join(ROOT, 'products/tui/scripts/pair-installed-host.ts'), options.prefix, options.dataDir, String(options.port), options.workspace ?? ROOT];
+          try { (hooks.pairHost ?? execute)(join(release, 'runtime/bun'), pairArguments, { cwd: options.dataDir }); }
+          catch (error) {
+            // Exit 75 means a pairing attempt was recorded and left unresolved. The store has no reset (a token may
+            // already be minted), so a retry cannot succeed until the owner clears it, and failing here would roll
+            // back an install that is otherwise complete and running. The pairing script has already printed what
+            // happened and how to clear it; finish the install and name the one command that pairs later.
+            if (!(error instanceof Error) || !error.message.endsWith(` failed (${PAIRING_DEFERRED_EXIT})`)) throw error;
+            console.warn(`TUI pairing was skipped (it needs the owner's attention, see above); the installation itself is complete and the daemon is running.\nAfter clearing the recorded attempt, pair with: ${[quote(join(options.prefix, 'current/runtime/bun')), ...pairArguments.map(quote)].join(' ')}`);
+          }
+        }
       } else if (old?.service) {
         execute('systemctl', ['--user', 'disable', SERVICE]);
         rmSync(unitPath(options)); execute('systemctl', ['--user', 'daemon-reload']);
@@ -263,48 +334,12 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       if (!(process.env.PATH ?? '').split(':').includes(options.binDir)) console.log(`Add commands to your shell PATH: export PATH=${quote(options.binDir)}:"$PATH"`);
       if (options.service) console.log('For startup before login and after logout: loginctl enable-linger "$USER"');
     } catch (error) {
-      // Do not delete binaries that a failed service stop might still be using.
-      try {
-        if (serviceAttempted) {
-          execute('systemctl', ['--user', 'stop', SERVICE]);
-          const state = execute('systemctl', ['--user', 'show', SERVICE, '--property=ActiveState', '--value'], { capture: true });
-          if (!['inactive', 'failed'].includes(state)) throw new Error('Replacement service did not stop.');
-          if (!old?.service) execute('systemctl', ['--user', 'disable', SERVICE]);
-        }
-        if (published) {
-          if (old) switchRelease(options.prefix, old.release);
-          else rmSync(join(options.prefix, 'current'), { force: true });
-          for (const name of COMMANDS) {
-            const previous = previousWrappers.get(name);
-            if (previous !== undefined) atomicWrite(join(options.prefix, 'commands', name), previous, 0o755);
-            else { rmSync(join(options.prefix, 'commands', name), { force: true }); rmSync(join(options.binDir, name), { force: true }); }
-          }
-          for (const [path, contents] of previousSettings) {
-            if (contents !== undefined) atomicWrite(path, contents);
-            else rmSync(path, { force: true });
-          }
-        }
-        if (metadataTouched) {
-          for (const [path, contents] of previousMetadata) {
-            // A failed first launch can already have created user data. Preserve
-            // its new ownership so a retry can adopt it; restore existing owners.
-            if (published && previousMetadata.get(dataOwner(options)) === undefined && contents === undefined) continue;
-            if (contents !== undefined) atomicWrite(path, contents);
-            else rmSync(path, { force: true });
-          }
-        }
-        if (options.service || old?.service) {
-          if (previousUnit !== undefined) atomicWrite(unitPath(options), previousUnit, 0o644);
-          else rmSync(unitPath(options), { force: true });
-          execute('systemctl', ['--user', 'daemon-reload']);
-          if (stopAttempted && wasRunning && old?.service) { execute('systemctl', ['--user', 'enable', SERVICE]); execute('systemctl', ['--user', 'start', SERVICE]); }
-        }
-        if (old) rmSync(release, { recursive: true, force: true });
-        else rmSync(options.prefix, { recursive: true, force: true });
-      } catch (rollbackError) {
+      try { recover(); } catch (rollbackError) {
         throw new AggregateError([error, rollbackError], `Install failed and automatic recovery was incomplete. Files retained at ${options.prefix}; inspect ${SERVICE} before retrying.`);
       }
       throw error;
+    } finally {
+      if (activeRecovery === recover) activeRecovery = undefined;
     }
   }));
 }
@@ -312,6 +347,7 @@ if (import.meta.main) {
   try {
     if (process.platform !== 'linux' || !['x64', 'arm64'].includes(process.arch)) throw new Error('Supported hosts: Linux x64/arm64.');
     if (process.getuid?.() === 0) throw new Error('Run as your regular user, without sudo.');
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { process.exit(interruptInstall(signal)); });
     await install(parseOptions(process.argv.slice(2)));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

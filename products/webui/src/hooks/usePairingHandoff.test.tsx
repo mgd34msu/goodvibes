@@ -259,4 +259,75 @@ describe('usePairingHandoff', () => {
     expect(postureCalls).toHaveLength(0);
     unmount();
   });
+
+  describe('a consumed hand-off is single-use', () => {
+    /** Mount over ONE shared client so a remount's side effects are countable. */
+    function renderCounting(client: QueryClient): () => void {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      flushSync(() => {
+        root.render(React.createElement(QueryClientProvider, { client }, React.createElement(Probe)));
+      });
+      return () => {
+        flushSync(() => root.unmount());
+        container.remove();
+      };
+    }
+
+    function countingClient(): { client: QueryClient; invalidations: () => number } {
+      const client = new QueryClient();
+      let invalidations = 0;
+      const real = client.invalidateQueries.bind(client);
+      (client as unknown as { invalidateQueries: unknown }).invalidateQueries = (...args: Parameters<typeof real>) => {
+        invalidations += 1;
+        return real(...args);
+      };
+      return { client, invalidations: () => invalidations };
+    }
+
+    test('a remount after success is idle at once, invalidates nothing and does not bring dismissed offers back', async () => {
+      window.history.replaceState(null, '', '/#pair=tok_live&offers=relay');
+      const { client, invalidations } = countingClient();
+      const first = renderCounting(client);
+      await postureDone();
+      expect(lastOffers).toEqual(['relay']);
+      flushSync(() => dismiss?.());
+      first();
+      const invalidationsAfterFirst = invalidations();
+      expect(invalidationsAfterFirst).toBeGreaterThan(0);
+      postureCalls.length = 0;
+
+      const second = renderCounting(client);
+      // Not the neutral "pairing" splash again.
+      expect(lastStatus).toBe('idle');
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      flushSync(() => {});
+      expect(lastStatus).toBe('idle');
+      expect(lastOffers).toEqual([]);
+      expect(invalidations()).toBe(invalidationsAfterFirst);
+      expect(tokenCalls).toEqual(['tok_live']);
+      expect(postureCalls).toHaveLength(0);
+      second();
+    });
+
+    test('a remount after rejection reports the rejection that happened, without validating again', async () => {
+      tokenShouldReject = true;
+      window.history.replaceState(null, '', '/#pair=bad');
+      const { client, invalidations } = countingClient();
+      const first = renderCounting(client);
+      await until(() => lastStatus !== 'pending');
+      const rejection = lastError;
+      first();
+      lastStatus = '';
+
+      const second = renderCounting(client);
+      expect(lastStatus).toBe('error');
+      expect(lastError).toBe(rejection);
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      expect(tokenCalls).toEqual(['bad']);
+      expect(invalidations()).toBe(0);
+      second();
+    });
+  });
 });

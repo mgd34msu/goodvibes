@@ -112,6 +112,11 @@ export function provideCapturedBunRuntime(options: ProvideCapturedBunRuntimeOpti
       for (const artifact of options.artifacts) {
         const compiled = join(outputRoot, artifact);
         const dest = `${compiled}.bun`;
+        // The provenance hash must never describe a different binary than the one beside it.
+        // Withdraw the old record before the binary changes and publish the new one last: an
+        // interruption leaves a binary with no provenance (refused downstream, repaired by
+        // re-running the build), never a new binary with an old hash.
+        rmSync(`${dest}.json`, { force: true });
         copyFileSync(runtime, join(staging, 'next')); chmodSync(join(staging, 'next'), 0o755); renameSync(join(staging, 'next'), dest);
         // Artifact admission requires canonical modes even when a private
         // installer checkout inherits umask 077. Keep staging directories private.

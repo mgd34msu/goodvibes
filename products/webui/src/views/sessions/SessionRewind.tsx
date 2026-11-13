@@ -115,6 +115,7 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
               value={scope}
               onChange={(next) => { setScope(next); resetFlow(); }}
               aria-label="Rewind scope"
+              disabled={apply.isPending}
               options={SCOPES}
             />
           </Field>
@@ -123,7 +124,7 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
               value={anchorTurnId}
               onChange={(next) => { setAnchorTurnId(next); resetFlow(); }}
               aria-label="Rewind turn anchor"
-              disabled={messages.isPending}
+              disabled={messages.isPending || apply.isPending}
               options={[
                 { value: '', label: 'Most recent checkpoint (no turn)' },
                 ...anchors.map((a) => ({ value: a.turnId, label: a.label || a.turnId })),
@@ -141,7 +142,7 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
 
         <Button
           className="session-rewind__preview-btn"
-          disabled={plan.isPending}
+          disabled={plan.isPending || apply.isPending}
           onClick={() => { setReceipt(null); apply.reset(); plan.mutate(); }}
         >
           {plan.isPending ? 'Previewing…' : 'Preview rewind'}
@@ -179,6 +180,9 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
               variant="danger"
               className="session-rewind__apply-btn"
               icon={<Undo2 size={16} aria-hidden="true" />}
+              // Locked while an apply is in flight, and after a refusal: the token is
+              // spent, so the operator previews again to mint a fresh one.
+              disabled={apply.isPending || Boolean(applyRefused)}
               onClick={() => setConfirmApply(true)}
             >
               Rewind to this point…
@@ -263,6 +267,7 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
           confirmLabel="Rewind"
           onConfirm={() => {
             setConfirmApply(false);
+            if (apply.isPending || applyRefused) return;
             if (planData.token) apply.mutate(planData.token);
           }}
           onCancel={() => setConfirmApply(false)}

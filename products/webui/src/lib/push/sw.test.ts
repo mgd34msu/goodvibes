@@ -181,3 +181,36 @@ test('notification URLs cannot change origin through slash, backslash or control
     expect(linkForNotification({ url })).toBe('/');
   }
 });
+
+describe('sw.js install', () => {
+  function runInstall(addAll: () => Promise<void>): { waited: Promise<unknown>[]; skipped: number } {
+    const source = readFileSync(SW_PATH, 'utf8');
+    const handlers: Record<string, (event: unknown) => void> = {};
+    const fakeSelf = {
+      addEventListener: (type: string, handler: (event: unknown) => void) => { handlers[type] = handler; },
+      skipWaiting: () => { result.skipped += 1; return Promise.resolve(); },
+      clients: { claim: () => Promise.resolve() },
+    };
+    const fakeCaches = { open: () => Promise.resolve({ addAll }) };
+    new Function('self', 'caches', source)(fakeSelf, fakeCaches);
+    const result = { waited: [] as Promise<unknown>[], skipped: 0 };
+    handlers.install?.({ waitUntil: (promise: Promise<unknown>) => { result.waited.push(promise); } });
+    return result;
+  }
+
+  test('a precache failure is logged, and the install still completes and activates', async () => {
+    const original = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    try {
+      const result = runInstall(() => Promise.reject(new Error('precache 404')));
+      await Promise.all(result.waited);
+      expect(result.skipped).toBe(1);
+      expect(warnings.length).toBe(1);
+      expect(String(warnings[0]?.[0])).toContain('precache');
+      expect(String(warnings[0]?.[1])).toContain('precache 404');
+    } finally {
+      console.warn = original;
+    }
+  });
+});

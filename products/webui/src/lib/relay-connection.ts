@@ -85,6 +85,8 @@ function pairingKey(pairing: RelayPairingPayload): string {
 export function getRelayClient(): RelayClient | null {
   const pairing = getStoredRelayPairing();
   if (!pairing) {
+    // The pairing is gone: close the client rather than orphaning its socket.
+    if (client) client.close();
     client = null;
     clientForPairingKey = null;
     return null;

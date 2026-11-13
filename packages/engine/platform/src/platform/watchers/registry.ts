@@ -2,11 +2,12 @@ import { existsSync, statSync } from 'node:fs';
 import { createDomainDispatch } from '../runtime/store/index.js';
 import type { DomainDispatch, RuntimeStore } from '../runtime/store/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
-import type { WatcherKind, WatcherRecord, WatcherSourceStatus } from '../runtime/store/domains/watchers.js';
+import type { WatcherKind, WatcherRecord, WatcherSourceStatus, WatcherState } from '../runtime/store/domains/watchers.js';
 import type { AutomationSourceRecord } from '../automation/sources.js';
 import type { WatcherSourceKind } from '../../events/watchers.js';
 import { readFailureTransience } from '../integrations/delivery.js';
 import { summarizeError } from '../utils/error-display.js';
+import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { logger } from '../utils/logger.js';
 import {
   emitWatcherFailed,
@@ -53,6 +54,35 @@ export interface WatcherRegistryOptions {
    * process start instead of the next restore.
    */
   readonly recoveryWindowMinutes?: (() => number) | undefined;
+}
+
+/**
+ * The watcher lifecycle, declared from the moves this registry makes:
+ * start (stopped/failed -> running), a run outcome (-> running | failed),
+ * freshness (running -> degraded, derived in `sourceStatusFor`), stop (-> stopped).
+ * A run on a stopped manual watcher may also end failed.
+ *
+ * `starting` is declared but never assigned: `startWatcher` is synchronous and
+ * goes straight to running, so no start is ever in flight. It is still read
+ * from persisted records and treated as live.
+ */
+export const watcherLifecycle = defineLifecycle<WatcherState>('watcher', {
+  stopped: ['starting', 'running', 'failed'],
+  starting: ['running', 'degraded', 'failed', 'stopped'],
+  running: ['degraded', 'failed', 'stopped'],
+  degraded: ['running', 'failed', 'stopped'],
+  failed: ['running', 'degraded', 'stopped'],
+});
+
+/**
+ * Whether the outcome of a run that began while the watcher was `ranFrom` may
+ * still be written to the record it finds now. A watcher stopped during its run
+ * stays stopped; one that was already stopped when the run began (a manual
+ * run-now) keeps recording its outcome. The move itself must be in the table.
+ */
+function runOutcomeApplies(ranFrom: WatcherState, now: WatcherState, outcome: WatcherState): boolean {
+  if (now === 'stopped' && ranFrom !== 'stopped') return false;
+  return now === outcome || watcherLifecycle.can(now, outcome);
 }
 
 /** The shipped `watchers.recoveryWindowMinutes` default, for hosts that pass none. */
@@ -504,8 +534,11 @@ export class WatcherRegistry {
     this.inFlight.add(id);
     try {
       const checkpoint = await watcher.run();
+      // Re-read: the watcher may have been stopped, removed or re-registered while it ran.
+      const current = this.watchers.get(id);
+      if (!current || !runOutcomeApplies(watcher.record.state, current.record.state, 'running')) return;
       const updated: WatcherRecord = this.normalizeRecord({
-        ...watcher.record,
+        ...current.record,
         state: 'running',
         lastHeartbeatAt: now(),
         lastCheckpoint: checkpoint ? String(checkpoint) : watcher.record.lastCheckpoint,
@@ -514,7 +547,7 @@ export class WatcherRegistry {
         sourceLagMs: 0,
         degradedReason: undefined,
       });
-      this.watchers.set(id, { ...watcher, record: updated });
+      this.watchers.set(id, { ...current, record: updated });
       this.persist();
       this.runtimeDispatch?.syncWatcher(updated, 'watchers.heartbeat');
       if (this.runtimeBus) {
@@ -530,14 +563,19 @@ export class WatcherRegistry {
         });
       }
     } catch (error) {
+      const current = this.watchers.get(id);
+      if (!current || !runOutcomeApplies(watcher.record.state, current.record.state, 'failed')) {
+        logger.warn('Watcher run failed after the watcher was stopped or removed; outcome discarded', { watcherId: id, error: summarizeError(error) });
+        return;
+      }
       const failed: WatcherRecord = this.normalizeRecord({
-        ...watcher.record,
+        ...current.record,
         state: 'failed',
         lastError: summarizeError(error),
         sourceStatus: 'failed',
         degradedReason: summarizeError(error),
       });
-      this.watchers.set(id, { ...watcher, record: failed });
+      this.watchers.set(id, { ...current, record: failed });
       this.persist();
       this.runtimeDispatch?.syncWatcher(failed, 'watchers.failed');
       if (this.runtimeBus) {

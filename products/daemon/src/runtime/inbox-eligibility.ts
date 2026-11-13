@@ -1,6 +1,7 @@
 /** Account eligibility owns election membership; content dispositions never do. */
 import { createSystemClusterClock, type ClusterClock } from '@goodvibes-jev/engine/platform/platform/cluster';
 import type { InboxPollingControl } from '@goodvibes-jev/engine/platform/platform/intake';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
 interface Eligibility {
   readonly signal: AbortSignal;
@@ -11,6 +12,8 @@ interface EligibilityOptions {
   readonly control: InboxPollingControl;
   readonly register: (control: InboxPollingControl) => () => void | Promise<void>;
   readonly clock?: ClusterClock;
+  /** Where a failed probe step or a permanent stop is reported; defaults to the daemon activity log. */
+  readonly log?: (message: string, detail: Record<string, unknown>) => void;
 }
 
 /**
@@ -18,6 +21,12 @@ interface EligibilityOptions {
  * after completion. There is no content retry here and no time-based authority
  * expiry: transport uncertainty preserves a still-current proof. Explicit local
  * or provider invalidation withdraws immediately, even while a probe is pending.
+ *
+ * A failed probe step (for example the registry refusing a registration) is
+ * logged and the next scheduled probe tries again; nothing was left half
+ * registered. Only a failed RETIREMENT stops probing for good: the owned
+ * coordinator could not prove it drained, so registering again could overlap
+ * the old owner. That stop is logged once and close() reports it.
  */
 export function ownInboxEligibility(options: EligibilityOptions): { ready: Promise<void>; close(): Promise<void> } {
   const clock = options.clock ?? createSystemClusterClock();
@@ -29,13 +38,21 @@ export function ownInboxEligibility(options: EligibilityOptions): { ready: Promi
   let transition: Promise<void> = Promise.resolve();
   let closing: Promise<void> | undefined;
   let failed = false;
+  const log = options.log ?? ((message: string, detail: Record<string, unknown>) => { logger.warn(message, detail); });
+  const reported = new WeakSet<object>();
+  const report = (message: string, error: unknown): void => {
+    if (typeof error === 'object' && error !== null) reported.add(error);
+    try { log(message, { error: error instanceof Error ? error.name : 'non-error rejection' }); }
+    catch { /* Reporting cannot change what the prober does. */ }
+  };
   const valid = (value: Eligibility | undefined): value is Eligibility => {
     try { if (!value || value.signal.aborted) return false; value.assertCurrent(); return true; }
     catch { return false; }
   };
   const serialize = (action: () => Promise<void>): Promise<void> => {
     const next = transition.then(action);
-    transition = next.catch(() => { failed = true; });
+    // A step's own failure does not poison later steps; retire() latches `failed` itself.
+    transition = next.catch(() => {});
     return next;
   };
   const retire = async (): Promise<void> => {
@@ -45,7 +62,13 @@ export function ownInboxEligibility(options: EligibilityOptions): { ready: Promi
     // exact retiring gate until its accepted polls drain before RESIGN/reentry.
     // A failure remains sticky and retains the enclosing lifetime storage lock.
     const cleanup = unregister;
-    await Promise.all([cleanup?.(), options.control.stop()]);
+    try {
+      await Promise.all([cleanup?.(), options.control.stop()]);
+    } catch (error) {
+      failed = true;
+      report('Inbox eligibility probing stopped: the account could not be withdrawn cleanly; restart the daemon to probe again', error);
+      throw error;
+    }
     unregister = undefined;
   };
   const revoked = (): void => {
@@ -71,13 +94,20 @@ export function ownInboxEligibility(options: EligibilityOptions): { ready: Promi
       proof = accepted;
       accepted.signal.addEventListener('abort', revoked, { once: true });
       unlisten = () => accepted.signal.removeEventListener('abort', revoked);
-      unregister = options.register({
-        async start() {
-          if (closed || failed || proof !== accepted || !valid(accepted)) throw new Error('Inbox account is not eligible');
-          await options.control.start();
-        },
-        stop: () => options.control.stop(),
-      });
+      try {
+        unregister = options.register({
+          async start() {
+            if (closed || failed || proof !== accepted || !valid(accepted)) throw new Error('Inbox account is not eligible');
+            await options.control.start();
+          },
+          stop: () => options.control.stop(),
+        });
+      } catch (error) {
+        // Nothing was registered, so forget this proof; the next probe verifies and registers afresh.
+        proof = undefined; unlisten?.(); unlisten = undefined;
+        report('Inbox eligibility registration failed; it will be retried at the next scheduled probe', error);
+        throw error;
+      }
       if (closed || !valid(accepted)) await retire();
     });
   };
@@ -85,7 +115,10 @@ export function ownInboxEligibility(options: EligibilityOptions): { ready: Promi
     if (closed || failed) return;
     cancelTimer = clock.setTimer(() => {
       cancelTimer = undefined;
-      probing = probe().catch(() => { failed = true; }).finally(schedule);
+      probing = probe().catch(error => {
+        // Registration and retirement failures were reported where they happened; anything else is retried at the next probe.
+        if (!(typeof error === 'object' && error !== null && reported.has(error))) report('Inbox eligibility probe failed; it will be retried at the next scheduled probe', error);
+      }).finally(schedule);
     }, 30_000);
   };
   let probing = Promise.resolve().then(probe);
@@ -97,8 +130,9 @@ export function ownInboxEligibility(options: EligibilityOptions): { ready: Promi
       // Start drainage without waiting for an uncooperative metadata request.
       // The factory closes its provider concurrently to abort owned I/O.
       const retirement = serialize(retire);
-      closing = Promise.allSettled([probing, retirement]).then(results => {
-        if (failed || results.some(result => result.status === 'rejected')) throw new Error('Inbox eligibility did not retire cleanly');
+      closing = Promise.allSettled([probing, retirement]).then(([, retired]) => {
+        // A probe that failed and was retried says nothing about retirement; only retirement failures are fatal here.
+        if (failed || retired.status === 'rejected') throw new Error('Inbox eligibility did not retire cleanly');
       });
     }
     return closing;

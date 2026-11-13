@@ -296,6 +296,9 @@ export class PhasedToolExecutor {
     error: string,
     denial?: import('../../types/tools.js').ToolDenial | undefined,
   ): ToolResult {
+    // First terminal outcome wins: cancel() ran before this failure surfaced, so
+    // the record ends cancelled rather than as cancelled === true with phase failed.
+    if (record.cancelled) return this._cancel(record, call, context, emitterCtx, record.cancelledReason);
     record.currentPhase = 'failed';
     const durationMs = performance.now() - record.startedAt;
     record.completedAt = Date.now();

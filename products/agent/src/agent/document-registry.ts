@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreFile } from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
@@ -42,6 +43,26 @@ interface DocumentStoreFile {
 }
 
 type AgentDocumentStorePaths = Pick<ShellPathService, 'resolveProjectPath'>;
+
+/** Document status is a label the owner may set freely (including un-archiving); no move is illegal. */
+export const agentDocumentLifecycle = defineLifecycle<AgentDocumentStatus>('document', {
+  draft: ['draft', 'reviewed', 'archived'],
+  reviewed: ['draft', 'reviewed', 'archived'],
+  archived: ['draft', 'reviewed', 'archived'],
+});
+
+/** A comment is resolved once; resolveComment re-stamping an already resolved comment is not a lifecycle move. */
+export const agentDocumentCommentLifecycle = defineLifecycle<AgentDocumentCommentStatus>('document comment', {
+  open: ['resolved'],
+  resolved: [],
+});
+
+/** A suggestion is decided once: accepted and rejected are final. */
+export const agentDocumentSuggestionLifecycle = defineLifecycle<AgentDocumentSuggestionStatus>('document suggestion', {
+  proposed: ['accepted', 'rejected'],
+  accepted: [],
+  rejected: [],
+});
 
 const STORE_VERSION = 1;
 const MAX_VERSIONS = 50;
@@ -556,7 +577,8 @@ export class AgentDocumentRegistry {
     const target = this.findSuggestion(existing, suggestionId);
     if (!target) throw new Error(`Unknown document suggestion ${suggestionId}`);
     if (target.status === 'accepted') return existing;
-    if (target.status === 'rejected') throw new Error(`Document suggestion ${target.id} is already rejected.`);
+    const move = agentDocumentSuggestionLifecycle.check(target.status, 'accepted');
+    if (!move.ok) throw new Error(`Document suggestion ${target.id}: ${move.reason}.`);
     const timestamp = nowIso();
     const version: AgentDocumentVersion = {
       id: `v${existing.versions.length + 1}`,
@@ -590,8 +612,9 @@ export class AgentDocumentRegistry {
     if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
     const target = this.findSuggestion(existing, suggestionId);
     if (!target) throw new Error(`Unknown document suggestion ${suggestionId}`);
-    if (target.status === 'accepted') throw new Error(`Document suggestion ${target.id} is already accepted.`);
     if (target.status === 'rejected') return existing;
+    const move = agentDocumentSuggestionLifecycle.check(target.status, 'rejected');
+    if (!move.ok) throw new Error(`Document suggestion ${target.id}: ${move.reason}.`);
     const timestamp = nowIso();
     const updated: AgentDocumentRecord = {
       ...existing,

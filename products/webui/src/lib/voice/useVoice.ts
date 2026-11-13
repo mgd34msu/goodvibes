@@ -248,6 +248,10 @@ export function useVoiceInput(onTranscript: (text: string) => void): UseVoiceInp
   const sessionRef = useRef<PushToTalkSession | null>(null);
   /** The arbiter lease held while this press owns the device. */
   const leaseRef = useRef<MicLease | null>(null);
+  /** Bumped by every start, cancel and unmount: a start still holding an older value is no longer wanted. */
+  const epochRef = useRef(0);
+  /** True from start() until its lease and session are settled; blocks a second overlapping start. */
+  const startingRef = useRef(false);
 
   const ready = support === 'ok' && availability.sttAvailable;
 
@@ -291,41 +295,71 @@ export function useVoiceInput(onTranscript: (text: string) => void): UseVoiceInp
   }, [availability.defaultSttProviderId, onTranscript]);
 
   const start = useCallback(async () => {
-    setError(null);
-    setPhase('requesting');
-    // Take the device before opening anything: this stands the wake listener down
-    // and waits for it to release, so the press never races it for the microphone.
-    leaseRef.current = await micArbiter.acquireExclusive();
-    const session = new PushToTalkSession({
-      openCapture: micArbiter.openCapture,
-      capture: {
-        device: captureOptions.device,
-        backend: captureOptions.backend,
-        noiseSuppression: captureOptions.noiseSuppression,
-        frameSamples: captureOptions.frameSamples,
-      },
-      captureMaxSeconds: captureOptions.captureMaxSeconds,
-      silenceStopMs: 0,
-      // The ceiling firing is capture ending itself, not a failure: the audio is
-      // real and goes to transcription exactly as a released button's would.
-      onAutoStop: (utterance) => {
-        sessionRef.current = null;
-        void releaseLease().then(() => transcribe(utterance));
-      },
-    });
+    // A second press while one is acquiring or recording would queue behind (and
+    // never get) the first press's own lease.
+    if (startingRef.current || sessionRef.current) return;
+    startingRef.current = true;
+    const epoch = ++epochRef.current;
+    const wanted = (): boolean => epoch === epochRef.current;
     try {
-      await session.start();
-      sessionRef.current = session;
-      setPhase('recording');
-    } catch (e) {
-      sessionRef.current = null;
-      await releaseLease();
-      const reason = e instanceof AudioCaptureError ? e.reason : 'unsupported';
-      const message = e instanceof Error ? e.message : 'Could not start recording.';
-      setError({ reason, message });
-      setPhase('error');
+      setError(null);
+      setPhase('requesting');
+      // Take the device before opening anything: this stands the wake listener down
+      // and waits for it to release, so the press never races it for the microphone.
+      const lease = await micArbiter.acquireExclusive();
+      // cancel() or an unmount may have landed while the acquire was pending; they
+      // saw no lease to release, so this start must hand it back itself and must
+      // not open the microphone.
+      if (!wanted()) {
+        await lease();
+        return;
+      }
+      leaseRef.current = lease;
+      const releaseOwn = async (): Promise<void> => {
+        if (leaseRef.current === lease) leaseRef.current = null;
+        await lease();
+      };
+      const session = new PushToTalkSession({
+        openCapture: micArbiter.openCapture,
+        capture: {
+          device: captureOptions.device,
+          backend: captureOptions.backend,
+          noiseSuppression: captureOptions.noiseSuppression,
+          frameSamples: captureOptions.frameSamples,
+        },
+        captureMaxSeconds: captureOptions.captureMaxSeconds,
+        silenceStopMs: 0,
+        // The ceiling firing is capture ending itself, not a failure: the audio is
+        // real and goes to transcription exactly as a released button's would.
+        onAutoStop: (utterance) => {
+          sessionRef.current = null;
+          void releaseOwn().then(() => transcribe(utterance));
+        },
+      });
+      try {
+        await session.start();
+        if (!wanted()) {
+          // Cancelled while the device was opening; cancel() already released the lease.
+          await session.cancel();
+          await releaseOwn();
+          return;
+        }
+        sessionRef.current = session;
+        setPhase('recording');
+      } catch (e) {
+        await releaseOwn();
+        if (!wanted()) return;
+        sessionRef.current = null;
+        const reason = e instanceof AudioCaptureError ? e.reason : 'unsupported';
+        const message = e instanceof Error ? e.message : 'Could not start recording.';
+        setError({ reason, message });
+        setPhase('error');
+      }
+    } finally {
+      // A newer start (after a cancel) owns the flag now.
+      if (wanted()) startingRef.current = false;
     }
-  }, [captureOptions, releaseLease, transcribe]);
+  }, [captureOptions, transcribe]);
 
   const stopAndTranscribe = useCallback(async () => {
     const session = sessionRef.current;
@@ -352,6 +386,8 @@ export function useVoiceInput(onTranscript: (text: string) => void): UseVoiceInp
   }, [releaseLease, transcribe]);
 
   const cancel = useCallback(() => {
+    epochRef.current += 1;
+    startingRef.current = false;
     const session = sessionRef.current;
     sessionRef.current = null;
     void (async () => {
@@ -365,6 +401,7 @@ export function useVoiceInput(onTranscript: (text: string) => void): UseVoiceInp
   // A component unmounting mid-recording must not leave the microphone open, nor
   // the wake listener stood down forever waiting for a lease nobody will release.
   useEffect(() => () => {
+    epochRef.current += 1;
     const session = sessionRef.current;
     sessionRef.current = null;
     void (async () => {

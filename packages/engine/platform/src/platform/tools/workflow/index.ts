@@ -125,9 +125,19 @@ export class WorkflowManager {
     return { success: true };
   }
 
+  /** Why this workflow cannot be cancelled (it already ended), or undefined when it can be or does not exist. */
+  cancelRefusal(id: string): string | undefined {
+    const instance = this.workflows.get(id);
+    if (!instance) return undefined;
+    if (instance.cancelled) return `Workflow ${id} is already cancelled; there is nothing left to cancel`;
+    if (instance.completedAt !== undefined) return `Workflow ${id} already finished (${instance.currentState}); a finished workflow cannot be cancelled`;
+    return undefined;
+  }
+
   cancel(id: string): boolean {
     const instance = this.workflows.get(id);
     if (!instance) return false;
+    if (this.cancelRefusal(id) !== undefined) return false;
     instance.cancelled = true;
     instance.completedAt = Date.now();
     return true;
@@ -569,6 +579,8 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
           if (!input.workflowId) {
             return { success: false, error: 'mode "cancel" requires "workflowId"' };
           }
+          const refusal = wm.cancelRefusal(input.workflowId);
+          if (refusal) return { success: false, error: refusal };
           const cancelled = wm.cancel(input.workflowId);
           if (!cancelled) {
             return { success: false, error: `Workflow not found: ${input.workflowId}` };

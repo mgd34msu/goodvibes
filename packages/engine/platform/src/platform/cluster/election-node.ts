@@ -144,15 +144,29 @@ export class ClusterElection {
     this.startMonotonic = this.options.clock.monotonicNow();
     this.lastTickWall = this.options.clock.now();
     this.lastTickMono = this.startMonotonic ?? 0;
-    await this.options.transport.start((raw) => this.receive(raw));
-    this.armWatchdog();
-    this.unsubscribeRegistry = this.options.registry.onChange((surfaceId) => {
-      return this.syncSurface(surfaceId);
-    });
-    if (this.options.registry.size === 0) {
-      this.options.logger.debug('cluster: this node serves no inbound surfaces, so it contests none');
+    try {
+      await this.options.transport.start((raw) => this.receive(raw));
+      this.armWatchdog();
+      this.unsubscribeRegistry = this.options.registry.onChange((surfaceId) => {
+        return this.syncSurface(surfaceId);
+      });
+      if (this.options.registry.size === 0) {
+        this.options.logger.debug('cluster: this node serves no inbound surfaces, so it contests none');
+      }
+      await Promise.all(this.options.registry.list().map((surface) => this.syncSurface(surface.surfaceId)));
+    } catch (error) {
+      // A start that failed part-way must not leave `running` set: nothing is
+      // listening, and every later start() would return at the guard above, so
+      // the node could never join. Undo whatever was set up and let the caller retry.
+      try {
+        await this.stop('start failed');
+      } catch (cleanupError) {
+        this.options.logger.warn('cluster: cleanup after a failed start also failed', {
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        });
+      }
+      throw error;
     }
-    await Promise.all(this.options.registry.list().map((surface) => this.syncSurface(surface.surfaceId)));
   }
 
   /** Leave every election cleanly, then close the socket. */

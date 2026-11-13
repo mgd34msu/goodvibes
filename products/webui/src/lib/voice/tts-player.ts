@@ -278,7 +278,16 @@ export class TtsEngine {
           continue;
         }
         this.set({ id: request.id, phase: 'playing', skipped, error: null });
-        await sink.enqueue(result.audio);
+        try {
+          await sink.enqueue(result.audio);
+        } catch {
+          // decodeAudioData rejects on bytes the browser cannot decode. Without this the
+          // state would stay `playing` for a message with nothing playing.
+          if (this.token !== token) return;
+          run.cancel();
+          this.set({ id: null, phase: null, skipped, error: 'The audio for this reply could not be played.' });
+          return;
+        }
         played += 1;
         if (this.token !== token) return;
       }

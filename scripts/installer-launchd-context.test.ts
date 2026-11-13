@@ -130,3 +130,51 @@ test.each(['decode-failure', 'empty', 'trailing-newline', 'tab', 'wrong-type'])(
   expect(readFileSync(plist, 'utf8')).toBe(previous);
   expect(readdirSync(dirname(plist))).toEqual(['sh.goodvibes.daemon.plist']);
 });
+
+// A38: a failed reload restores the previous plist and loads it. launchctl is a shell function here.
+function staleLoadedPlist() {
+  const generated = run('write_launchd_plist "$FIXTURE_PLIST"');
+  expect(generated.status, generated.stderr).toBe(0);
+  const previous = readFileSync(plist, 'utf8').replace(/  <key>WorkingDirectory<\/key>\n  <string>[^\n]*<\/string>\n/, '');
+  writeFileSync(plist, previous);
+  return previous;
+}
+const fakeLaunchctl = (bootstrapOk: string) => `launchctl() {
+  printf '%s %s\\n' "$1" "$(grep -c WorkingDirectory "$FIXTURE_PLIST" || true)" >> "$FIXTURE_ROOT/launchctl-calls"
+  case "$1" in
+    print|bootout) return 0 ;;
+    bootstrap|load) ${bootstrapOk} ;;
+  esac
+  return 1
+}`;
+
+test('a failed bootstrap of the rewritten plist restores the previous file and loads it again', () => {
+  const previous = staleLoadedPlist();
+  // Loading succeeds only for the previous file (no WorkingDirectory key), not for the rewritten one.
+  const result = run(`${fakeLaunchctl('[ "$(grep -c WorkingDirectory "$FIXTURE_PLIST" || true)" = 0 ] && return 0')}\nmigrate_one_launchd_plist "$FIXTURE_PLIST" "$LAUNCHD_DAEMON_LABEL"`);
+  expect(result.status, result.stderr).toBe(0);
+  expect(readFileSync(plist, 'utf8')).toBe(previous);
+  expect(result.stdout).toContain('previous');
+  expect(result.stdout).toContain('running as before');
+  const calls = readFileSync(join(root, 'launchctl-calls'), 'utf8').trim().split('\n');
+  expect(calls.filter(call => call.startsWith('bootstrap'))).toEqual(['bootstrap 1', 'bootstrap 0']);
+  expect(readdirSync(dirname(plist)).filter(name => name.includes('.bak.'))).toHaveLength(1);
+});
+
+test('if even the restored plist cannot be loaded, it is still restored and the exact command is printed', () => {
+  const previous = staleLoadedPlist();
+  const result = run(`${fakeLaunchctl('return 1')}\nmigrate_one_launchd_plist "$FIXTURE_PLIST" "$LAUNCHD_DAEMON_LABEL"`);
+  expect(result.status, result.stderr).toBe(0);
+  expect(readFileSync(plist, 'utf8')).toBe(previous);
+  expect(result.stdout).toContain(`launchctl bootstrap gui/`);
+  expect(result.stdout).toContain('could not be loaded either');
+});
+
+test('a successful reload is unchanged: the rewritten plist stays and no restore happens', () => {
+  const previous = staleLoadedPlist();
+  const result = run(`${fakeLaunchctl('return 0')}\nmigrate_one_launchd_plist "$FIXTURE_PLIST" "$LAUNCHD_DAEMON_LABEL"`);
+  expect(result.status, result.stderr).toBe(0);
+  expect(readFileSync(plist, 'utf8')).not.toBe(previous);
+  expect(result.stdout).toContain('reloaded');
+  expectContext();
+});

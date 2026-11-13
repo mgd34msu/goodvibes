@@ -1,8 +1,5 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { RUNNER_ENV_FLAG } from './test-run-tmp.js';
-
-export const NETWORK_VIOLATIONS_ENV = 'GOODVIBES_TEST_NETWORK_VIOLATIONS';
 
 // Inherit execution/display/test controls, never the user's provider keys,
 // subscriptions, proxies, preload hooks or application configuration paths.
@@ -10,7 +7,8 @@ const INHERITED = new Set([
   'PATH', 'Path', 'PATHEXT', 'SYSTEMROOT', 'SystemRoot', 'WINDIR', 'COMSPEC',
   'SHELL', 'TERM', 'COLORTERM', 'LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE', 'TZ',
   'CI', 'GITHUB_ACTIONS', 'NO_COLOR', 'FORCE_COLOR', 'TMPDIR', 'TMP', 'TEMP',
-  RUNNER_ENV_FLAG,
+  // Set by scripts/test.ts; fixture children refuse to run outside it.
+  'GOODVIBES_ENGINE_TEST_RUNNER',
   'GOODVIBES_ENGINE_DEV_ROUNDTRIP_TEST', 'GOODVIBES_UPDATE_GOLDENS',
   // Existing compiled E2E artifact selector; not application config or auth.
   'GOODVIBES_E2E_BINARY',

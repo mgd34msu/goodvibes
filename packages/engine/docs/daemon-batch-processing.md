@@ -53,7 +53,7 @@ All routes require the same daemon auth as other daemon APIs.
 | `/api/batch/jobs` | `POST` | Queues a chat batch job. Returns `202` with the job record. |
 | `/api/batch/jobs` | `GET` | Lists recent jobs. Supports `?limit=100`. |
 | `/api/batch/jobs/{jobId}` | `GET` | Reads one job. |
-| `/api/batch/jobs/{jobId}/cancel` | `POST` | Cancels a queued job. Submitted jobs are provider-batch scoped and cannot be cancelled per job. |
+| `/api/batch/jobs/{jobId}/cancel` | `POST` | Cancels a queued job. A job cancelled while its batch is being submitted to the provider stays cancelled. Submitted jobs are provider-batch scoped and cannot be cancelled per job. |
 | `/api/batch/tick` | `POST` | Submits eligible queued jobs and polls submitted provider batches. Body may include `{ "force": true }`. |
 
 Example:

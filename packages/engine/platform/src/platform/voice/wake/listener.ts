@@ -261,10 +261,28 @@ export class WakeListener {
     this.#engine = null;
     this.#discardRecording();
     this.#supervisor.noteStopped();
-    if (stream !== null) await stream.stop();
-    if (generation !== this.#captureGeneration) return;
-    this.#setPhase('stopped');
-    this.#stopping = false;
+    let stopError: unknown = null;
+    try {
+      if (stream !== null) await stream.stop();
+    } catch (error) {
+      stopError = error;
+    } finally {
+      // A rejecting stop() must not leave `#stopping` set (start() would answer
+      // already-running forever) or the phase short of `stopped`. A newer stop()
+      // owns the reset when it superseded this one.
+      if (generation === this.#captureGeneration) {
+        this.#setPhase('stopped');
+        this.#stopping = false;
+      }
+    }
+    if (stopError !== null) {
+      const detail = stopError instanceof Error ? stopError.message : String(stopError);
+      this.#options.handlers?.onFailure?.(
+        new AudioCaptureError('stream-ended', `the capture device did not release cleanly: ${detail}`),
+        false,
+        `wake capture stopped, but the device did not release cleanly: ${detail}`,
+      );
+    }
   }
 
   /**

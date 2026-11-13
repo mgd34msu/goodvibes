@@ -10,6 +10,7 @@ import { createRuntimeServices, type RuntimeServices, type RuntimeServicesOption
 import { observeNativeStartupPhase } from './startup-observation.js';
 import { createNativeDataWriteOwner, createInstalledReaderCohort } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { drainOwned } from '@goodvibes-jev/judgment';
+import { defineLifecycle, logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export interface DaemonHostBinding {
   readonly host?: string;
@@ -41,10 +42,47 @@ export interface DaemonHostFactories {
   readonly createListener?: (config: ConstructorParameters<typeof HttpListener>[0]) => DaemonHostListener;
 }
 
+export type DaemonHostState = 'idle' | 'starting' | 'ready' | 'degraded' | 'handover' | 'closing' | 'closed' | 'failed';
+
 export interface DaemonHostSnapshot {
-  readonly state: 'idle' | 'starting' | 'ready' | 'degraded' | 'handover' | 'closing' | 'closed' | 'failed';
+  readonly state: DaemonHostState;
   readonly boot?: DaemonBootSnapshot;
 }
+
+/**
+ * Every host state and the states it may move to. `failed` is entered as soon as a start fails,
+ * so a failed host never reads `starting`; close() then drains it (`closing`) and settles it as
+ * `failed` when the start failed or the cleanup did, `closed` otherwise.
+ */
+export const daemonHostLifecycle = defineLifecycle<DaemonHostState>('daemon host', {
+  idle: ['starting', 'closing'],
+  starting: ['ready', 'degraded', 'handover', 'failed', 'closing'],
+  ready: ['closing'],
+  degraded: ['closing'],
+  handover: ['closing'],
+  failed: ['closing'],
+  closing: ['closed', 'failed'],
+  closed: [],
+});
+
+/**
+ * The start phase named in a startup failure ("Daemon host <phase> failed"). These are the
+ * human-readable names of the steps in run(); they are not NativeStartupPhase, whose kebab-case
+ * values are fixed observation tokens for the native execution consumer and cover a different,
+ * finer-grained set (device sweeps, base-runtime sub-steps) that this host does not report.
+ */
+export type DaemonHostPhase =
+  | 'runtime acquisition'
+  | 'provider preload'
+  | 'server construction'
+  | 'HTTP listener construction'
+  | 'cluster startup'
+  | 'device housekeeping'
+  | 'server startup'
+  | 'native startup handover'
+  | 'HTTP listener startup'
+  | 'boot startup'
+  | 'native lifecycle activation';
 
 export interface DaemonHost {
   readonly services: RuntimeServices | undefined;
@@ -90,8 +128,17 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
   let startupFailure: Error | undefined;
   let startupHandover: Exclude<Awaited<ReturnType<DaemonHostServer['start']>>, void> | undefined;
   const cleanupFailures: Error[] = [];
-  let phase = 'runtime acquisition';
+  let phase: DaemonHostPhase = 'runtime acquisition';
 
+  /** The one place `state` changes. A move the table does not allow is logged, never thrown: shutdown must proceed. */
+  const moveTo = (next: DaemonHostState): void => {
+    const move = daemonHostLifecycle.check(state, next);
+    if (!move.ok) {
+      try { logger.warn('Daemon host lifecycle move outside its declared table', { from: move.from, to: move.to }); }
+      catch { /* Reporting cannot change the host's state. */ }
+    }
+    state = next;
+  };
   const snapshot = (): DaemonHostSnapshot => ({ state, ...(services?.bootTasks ? { boot: services.bootTasks.snapshot() } : {}) });
   const fence = (): void => { if (closed) throw INTERRUPTED; };
   const nativeDataWriter = updateArtifact && nativeGuard && nativeExecPath && nativeVersion ? createNativeDataWriteOwner(Object.freeze({
@@ -247,7 +294,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         if (closed) outcome.cancel();
         await outcome.drain;
         fence();
-        state = 'handover';
+        moveTo('handover');
         return;
       }
       fence();
@@ -280,15 +327,17 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         if (closed) activated.cancel();
         await activated.drain;
         fence();
-        state = 'handover';
+        moveTo('handover');
         return;
       }
       fence();
-      state = boot.state === 'ready' ? 'ready' : 'degraded';
+      moveTo(boot.state === 'ready' ? 'ready' : 'degraded');
       observeNativeStartupPhase('foreground-ready');
     } catch (error) {
       if (error === INTERRUPTED) return;
       startupFailure = new Error(`Daemon host ${phase} failed`);
+      // A failed start is reported as failed at once, not as `starting` until close() runs.
+      if (state === 'starting') moveTo('failed');
       throw startupFailure;
     }
   }
@@ -296,7 +345,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
   function close(): Promise<void> {
     if (closing) return closing;
     closed = true;
-    state = 'closing';
+    moveTo('closing');
     let resolve!: () => void;
     let reject!: (error: Error) => void;
     closing = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
@@ -321,14 +370,14 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       // dependencies survive until boot and accepted server startup drain.
       try { await scope.close(); } catch { /* Every callback retains its bounded failures. */ }
       if (cleanupFailures.length) throw new AggregateError([...cleanupFailures], 'Daemon host cleanup failed');
-    })().then(() => { state = startupFailure ? 'failed' : 'closed'; resolve(); }, (error: Error) => { state = 'failed'; reject(error); });
+    })().then(() => { moveTo(startupFailure ? 'failed' : 'closed'); resolve(); }, (error: Error) => { moveTo('failed'); reject(error); });
     return closing;
   }
 
   function start(): Promise<DaemonHostSnapshot> {
     if (closed) return Promise.reject(new Error('Daemon host is closed'));
     if (starting) return starting;
-    state = 'starting';
+    moveTo('starting');
     work = Promise.resolve().then(run);
     starting = work.then(snapshot, () => {
       // Surface failure before drainage: the process runner must be able to

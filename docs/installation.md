@@ -82,9 +82,48 @@ The incoming build must also confirm support for this receipt format before the
 updater writes it.
 
 Installation holds transaction claims beside the three executables while suite
-files are replaced. A competing updater is refused. If replacement is interrupted
-after it begins, retained claims require inspection and recovery before another
-attempt; the installer does not report a complete install or blindly retry it.
+files are replaced. A competing updater is refused. See
+[When installation fails](#when-installation-fails) for what happens when
+replacement does not finish.
+
+## When installation fails
+
+Before the installer replaces a program or one of its companion files, it keeps
+the previous file beside it as `<file>.goodvibes-previous`. If installation
+fails or is interrupted with Ctrl-C or a termination signal after replacement
+has begun, the installer puts the previous files back, removes the files it had
+newly created, releases its transaction claims and prints the command to run
+again. Running services are not touched by this recovery. The backups are
+removed once replacement finishes. The browser driver, WebUI and native vector
+library directories are published as whole directories and are not part of this
+file-level recovery; a directory whose publication fails keeps or regains its
+original content.
+
+If the previous files cannot be put back, the claims and the
+`.goodvibes-previous` backups stay in place. The installer prints one `mv`
+command per file to restore, followed by the command that removes the claims.
+Run those before installing again. An installer that is killed outright cannot
+recover or print anything: its claims and backups also stay in place, and the
+next installation is refused until the retained `*.update-transaction` files
+have been inspected and resolved.
+
+Other failure behavior:
+
+- **Updating a directory.** When an update replaces a directory that an earlier
+  installation published, such as the WebUI or browser driver, the previous
+  directory is removed after the new one is in place. A failed update keeps it.
+- **Processes started by hand.** When a daemon or agent running outside a
+  service has to be restarted and its arguments contain spaces or wildcard
+  characters, the process is left running and the installer prints a fully
+  quoted command for starting the new program yourself.
+- **macOS LaunchAgent.** If a LaunchAgent rewritten with new launch arguments
+  cannot be loaded, the previous file is restored and loaded again. If that
+  also fails, the installer prints the `launchctl bootstrap` command to run.
+- **Uninstall.** An uninstall that stops during its service and process step,
+  before any program file is removed, releases its claims and says what was
+  already done. Every step can be repeated, so run the same uninstall command
+  again. An uninstall that stops while removing programs keeps its claims for
+  inspection.
 
 ## Automatic updates and rollback
 
@@ -114,8 +153,8 @@ periodic updater unless `update.auto` was explicitly enabled. A daemon uses
 directory assets agree on a previous release and its readers support saved data.
 A failed daemon startup can request the same complete-suite rollback. A missing,
 mixed or incompatible previous cohort is refused; retained transaction recovery
-files require inspection. The installer itself preserves partial replacement
-claims rather than promising crash-atomic installation or automatic rollback.
+files require inspection. A failed installation restores the previous programs
+as described in [When installation fails](#when-installation-fails).
 
 ## Uninstall
 
@@ -127,8 +166,8 @@ This removes installer-managed programs, runtime companions, known native librar
 files and managed service files, keeping `~/.goodvibes` settings, sessions and memory.
 Browser-driver, WebUI and retained directory backups are listed and preserved;
 they may contain local additions or serve another deployment. Review those paths
-before removing their contents. An active or interrupted update must be resolved
-before uninstall can remove its programs. A saved installer can perform
+before removing their contents. An active update, or one that left its claims
+behind, must be resolved before uninstall can remove its programs. A saved installer can perform
 this operation without release downloads. `scripts/uninstall.sh` also recognizes
 receipt-owned installations made by the earlier checkout installer and invokes
 their installed uninstaller. Their `--prefix` and `--purge` options remain available.
@@ -139,3 +178,22 @@ their installed uninstaller. Their `--prefix` and `--purge` options remain avail
 requires a clean checkout and the build toolchain. Its receipt-owned program/data
 layout is distinct from release-binary installations. The curl installer does not
 fall back to building source when a release asset is unavailable.
+
+A checkout installation that fails, or is interrupted with Ctrl-C or a
+termination signal, restores the previously installed version, restarts the
+service if it was running before, and releases its locks.
+
+The installer and uninstaller take a lock directory beside each of the program
+and data directories (`<directory>.lock`). The lock records the process that holds it. A lock left by a
+process that is no longer running is reclaimed automatically; a lock held by a
+running process is refused and names its pid. A lock with no owner record is
+refused with the `rmdir` command that removes it once you have confirmed no
+install or uninstall is running. `./scripts/uninstall.sh` can be run again after
+a partial uninstall.
+
+When a service is installed, the checkout installer also pairs the local TUI
+with the daemon. If an earlier pairing attempt is recorded as unfinished, that
+step is skipped: the installation still completes, the daemon keeps running,
+and the installer prints how to clear the recorded attempt and the command that
+pairs afterwards. Any other pairing failure fails the installation and restores
+the previous version.

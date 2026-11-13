@@ -1,3 +1,4 @@
+import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.ts';
 import {isExecutable as canExecute} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
 import { existsSync, readFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
@@ -153,7 +154,7 @@ function parseSkill(value: unknown): AgentSkillRecord | null {
   const description = readString(value.description).trim();
   const procedure = readString(value.procedure).trim();
   if (!id || !name || !description || !procedure) return null;
-  const reviewState = value.reviewState === 'reviewed' || value.reviewState === 'stale' ? value.reviewState : 'fresh';
+  const reviewState = parseAgentReviewState(value.reviewState);
   const source = value.source === 'agent' || value.source === 'imported' || value.source === 'system' ? value.source : 'user';
   const staleReason = readString(value.staleReason).trim();
   const reviewedAt = readString(value.reviewedAt).trim();
@@ -183,7 +184,7 @@ function parseBundle(value: unknown): AgentSkillBundleRecord | null {
   const description = readString(value.description).trim();
   const skillIds = readStringArray(value.skillIds).map(slugify).filter(Boolean);
   if (!id || !name || !description || skillIds.length === 0) return null;
-  const reviewState = value.reviewState === 'reviewed' || value.reviewState === 'stale' ? value.reviewState : 'fresh';
+  const reviewState = parseAgentReviewState(value.reviewState);
   const source = value.source === 'agent' || value.source === 'imported' || value.source === 'system' ? value.source : 'user';
   const staleReason = readString(value.staleReason).trim();
   const reviewedAt = readString(value.reviewedAt).trim();
@@ -372,9 +373,7 @@ export class AgentSkillRegistry {
       tags: input.tags === undefined ? existing.tags : normalizeList(input.tags),
       requirements,
       provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
-      reviewState: 'fresh',
-      staleReason: undefined,
-      reviewedAt: undefined,
+      ...freshReviewPatch(),
       updatedAt: nowIso(),
     };
     this.writeStore({
@@ -401,9 +400,7 @@ export class AgentSkillRegistry {
       description,
       skillIds,
       provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
-      reviewState: 'fresh',
-      staleReason: undefined,
-      reviewedAt: undefined,
+      ...freshReviewPatch(),
       updatedAt: nowIso(),
     };
     this.writeStore({
@@ -443,9 +440,7 @@ export class AgentSkillRegistry {
     if (!existing) throw new Error(`Unknown skill ${idOrName}`);
     const updated: AgentSkillRecord = {
       ...existing,
-      reviewState: 'reviewed',
-      staleReason: undefined,
-      reviewedAt: nowIso(),
+      ...reviewedReviewPatch(),
       updatedAt: nowIso(),
     };
     this.writeStore({
@@ -461,9 +456,7 @@ export class AgentSkillRegistry {
     if (!existing) throw new Error(`Unknown skill bundle ${idOrName}`);
     const updated: AgentSkillBundleRecord = {
       ...existing,
-      reviewState: 'reviewed',
-      staleReason: undefined,
-      reviewedAt: nowIso(),
+      ...reviewedReviewPatch(),
       updatedAt: nowIso(),
     };
     this.writeStore({
@@ -479,8 +472,7 @@ export class AgentSkillRegistry {
     if (!existing) throw new Error(`Unknown skill ${idOrName}`);
     const updated: AgentSkillRecord = {
       ...existing,
-      reviewState: 'stale',
-      staleReason: reason.trim() || 'Marked stale by user.',
+      ...staleReviewPatch(reason),
       updatedAt: nowIso(),
     };
     this.writeStore({
@@ -496,8 +488,7 @@ export class AgentSkillRegistry {
     if (!existing) throw new Error(`Unknown skill bundle ${idOrName}`);
     const updated: AgentSkillBundleRecord = {
       ...existing,
-      reviewState: 'stale',
-      staleReason: reason.trim() || 'Marked stale by user.',
+      ...staleReviewPatch(reason),
       updatedAt: nowIso(),
     };
     this.writeStore({

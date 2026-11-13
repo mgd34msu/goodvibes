@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { installTestNetworkGuard, TestExternalNetworkError } from '../scripts/test-network-guard.ts';
+import { installTestNetworkGuard, TestExternalNetworkError } from '../toolchain/src/test-runner/test-network-guard.ts';
 
 let restore: (() => void) | undefined;
 afterEach(() => { restore?.(); restore = undefined; });

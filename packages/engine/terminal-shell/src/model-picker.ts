@@ -57,8 +57,44 @@ export class ModelPickerModal {
   public targetInfos: ModelPickerTargetInfo[] = [];
   public targetIndex = 0;
   public searchFocused = false;
-  /** Tracks the mode we came from, for back-navigation. */
-  public previousMode: PickerMode | null = null;
+  /**
+   * The levels Esc returns through, innermost last: providers -> models ->
+   * effort leaves ['provider', 'model'], so each Esc pops exactly one level.
+   */
+  private readonly backStack: PickerMode[] = [];
+  /** The level Esc returns to, or null at the top. Reading only looks at the stack; assigning replaces it with that single level. */
+  get previousMode(): PickerMode | null {
+    return this.backStack[this.backStack.length - 1] ?? null;
+  }
+  set previousMode(mode: PickerMode | null) {
+    this.backStack.length = 0;
+    if (mode !== null) this.backStack.push(mode);
+  }
+  /** Enter a deeper level: remember the current one so Esc can return to it. */
+  private pushLevel(): void {
+    this.backStack.push(this.mode);
+  }
+  /**
+   * Leave the current level for the one it was entered from. Returns that
+   * level, or null (changing nothing) when this is the top level. Leaving the
+   * effort or context-cap level drops what it was holding.
+   */
+  popLevel(): PickerMode | null {
+    const back = this.backStack.pop();
+    if (back === undefined) return null;
+    if (this.mode === 'contextCap') {
+      this.contextCapPendingModel = null;
+      this.contextCapQuery = '';
+    } else {
+      if (this.mode === 'effort') {
+        this.pendingModel = null;
+        this.effortPresentation = null;
+      }
+      this.selectedIndex = 0;
+    }
+    this.mode = back;
+    return back;
+  }
   public selectedIndex = 0;
   /** Scroll offset for the visible item window (tracks first visible item index). */
   public scrollOffset = 0;
@@ -232,7 +268,7 @@ export class ModelPickerModal {
 
   /** Enter context window cap input mode for a local model. */
   enterContextCapMode(model: ModelDefinition): void {
-    this.previousMode = 'model';
+    this.pushLevel();
     this.contextCapPendingModel = model;
     this.contextCapQuery = '';
     this.contextCapError = null;
@@ -273,6 +309,7 @@ export class ModelPickerModal {
    */
   openAllModels(models: ModelDefinition[], currentModelId: string): void {
     this.models = models;
+    this.backStack.length = 0;
     this.mode = 'model';
     this.active = true;
     this.pendingModel = null;
@@ -291,7 +328,7 @@ export class ModelPickerModal {
 
   /** Open showing providers first, entry point for /provider. Search starts focused, see openAllModels(). */
   openProviders(providers: string[], currentProvider: string): void {
-    this.previousMode = null;
+    this.backStack.length = 0;
     this.providers = providers;
     this.mode = 'provider';
     this.active = true;
@@ -316,7 +353,7 @@ export class ModelPickerModal {
    * reusing either existing opener would mislabel or drop unrecognized ids.
    */
   openEmbeddingProviders(providers: EmbeddingProviderPickerEntry[], currentId: string): void {
-    this.previousMode = null;
+    this.backStack.length = 0;
     this.embeddingProviders = providers;
     this.mode = 'embeddingProvider';
     this.active = true;
@@ -331,7 +368,7 @@ export class ModelPickerModal {
 
   /** Transition to model list filtered by provider (called from provider mode Enter). */
   showModelsForProvider(models: ModelDefinition[], _provider: string): void {
-    this.previousMode = 'provider';
+    this.pushLevel();
     this.models = models;
     this.mode = 'model';
     this.searchFocused = false;
@@ -347,7 +384,7 @@ export class ModelPickerModal {
 
   /** Transition to effort picker after model is chosen. */
   showEffortPicker(model: ModelDefinition, currentEffort: string): void {
-    this.previousMode = 'model';
+    this.pushLevel();
     this.pendingModel = model;
     this.searchFocused = false;
     // Only this model's real levels: the picker used to read a raw list off
@@ -387,6 +424,7 @@ export class ModelPickerModal {
     this.catalogLoading = false;
     this.catalogTicket++;
     this.active = false;
+    this.backStack.length = 0;
     this.mode = 'model';
     this.target = 'main';
     this.focusRegion = 'items';

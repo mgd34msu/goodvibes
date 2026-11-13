@@ -459,6 +459,9 @@ export function Composer({
   const steerHoldFiredRef = useRef(false);
   const startSteerHold = useCallback(() => {
     steerHoldFiredRef.current = false;
+    // A second press (multi-touch, or a pointerup that never arrived) restarts the
+    // hold: the earlier timer must not stay armed and fire a second steer.
+    if (steerHoldTimerRef.current !== null) window.clearTimeout(steerHoldTimerRef.current);
     steerHoldTimerRef.current = window.setTimeout(() => {
       steerHoldTimerRef.current = null;
       steerHoldFiredRef.current = true;
@@ -466,6 +469,13 @@ export function Composer({
     }, 550);
   }, [onSteer]);
   const cancelSteerHold = useCallback(() => {
+    if (steerHoldTimerRef.current !== null) {
+      window.clearTimeout(steerHoldTimerRef.current);
+      steerHoldTimerRef.current = null;
+    }
+  }, []);
+  // Never fire a steer after the composer is gone.
+  useEffect(() => () => {
     if (steerHoldTimerRef.current !== null) {
       window.clearTimeout(steerHoldTimerRef.current);
       steerHoldTimerRef.current = null;

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { runOwnedTestChild } from '../scripts/owned-test-child.ts';
+import { runBunTest } from '../scripts/test.ts';
 
 describe('lazy native imports', () => {
   test.each(['structural search', 'pattern edit'])('%s starts without the native dependency and reports feature unavailability', async (feature) => {
@@ -42,8 +42,8 @@ describe('lazy native imports', () => {
           expect(nativeLoads).toBeGreaterThan(0);
         });
       `);
-      const result = await runOwnedTestChild({ argv: [fixture], cwd: root, env: process.env });
-      expect(result.exitCode).toBe(0);
+      const exitCode = await runBunTest({ args: [fixture], cwd: root, env: process.env });
+      expect(exitCode).toBe(0);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

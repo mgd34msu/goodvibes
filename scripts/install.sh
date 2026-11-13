@@ -53,6 +53,10 @@ INSTALL_CLAIM_DIR=""
 INSTALL_CLAIM_COUNT=0
 INSTALL_SWAP_BEGUN=0
 INSTALL_SWAP_FINISHED=0
+# One line per file the suite swap replaced (R: backed up, N: newly created), so an
+# unfinished swap can be undone. Backups are hard links named <file>.goodvibes-previous.
+INSTALL_JOURNAL=""
+LAST_UNIT_BACKUP=""
 INSTALL_DAEMON_CLAIM_ID=""
 INSTALL_TUI_CLAIM_ID=""
 INSTALL_AGENT_CLAIM_ID=""
@@ -500,6 +504,22 @@ release_install_claims() {
     _claim_expected=$(expected_install_claim_identity "$_claim_product") || return 1
     [ -n "$_claim_expected" ] || return 1
     install_claim_directories_current || return 1
+    # Re-entrant: an earlier, interrupted release may already have removed this
+    # product's public claim and/or private reference. Releasing something that
+    # is already gone succeeds; anything still present is verified exactly as before.
+    if [ ! -e "$_claim_path" ] && [ ! -L "$_claim_path" ]; then
+      if [ ! -e "$_claim_reference" ] && [ ! -L "$_claim_reference" ]; then continue; fi
+      [ -f "$_claim_reference" ] && [ ! -L "$_claim_reference" ] || return 1
+      exec 3< "$_claim_reference"
+      if ! install_claim_directories_current || [ -L "$_claim_reference" ] || ! installer_open_file_matches 3 "$_claim_reference" \
+        || [ "$(install_claim_file_identity "$_claim_reference")" != "$_claim_expected" ]; then
+        exec 3<&-
+        return 1
+      fi
+      if ! rm -f "$_claim_reference"; then exec 3<&-; return 1; fi
+      exec 3<&-
+      continue
+    fi
     [ -f "$_claim_reference" ] && [ ! -L "$_claim_reference" ] || return 1
     exec 3< "$_claim_reference"
     if ! install_claim_directories_current || [ -L "$_claim_path" ] || ! installer_open_file_matches 3 "$_claim_path" \
@@ -549,9 +569,118 @@ assert_install_claims() {
   done
 }
 
+# Journal a file before the swap replaces or removes it: keep the previous bytes beside it.
+# The restore entry ("R") is written only AFTER the backup is complete, so a target that was never
+# backed up can never be "restored". A hard link is atomic; the copy fallback is made under a
+# temporary name and renamed into place only once it succeeded.
+install_journal_target() {
+  _journal_target=$1
+  [ -n "$INSTALL_JOURNAL" ] || fail 'The installer swap journal is not available.'
+  _journal_backup="$_journal_target.goodvibes-previous"
+  if [ -e "$_journal_target" ] || [ -L "$_journal_target" ]; then
+    [ ! -e "$_journal_backup" ] && [ ! -L "$_journal_backup" ] || fail "A retained previous-program backup requires inspection before installing: $_journal_backup"
+    if ! ln "$_journal_target" "$_journal_backup" 2>/dev/null; then
+      _journal_partial="$_journal_backup.partial"
+      rm -f "$_journal_partial"
+      if ! cp -Pp "$_journal_target" "$_journal_partial" || ! mv -f "$_journal_partial" "$_journal_backup"; then
+        rm -f "$_journal_partial"
+        fail "Could not back up $_journal_target before replacing it."
+      fi
+    fi
+    printf 'R%s\n' "$_journal_target" >> "$INSTALL_JOURNAL" || { rm -f "$_journal_backup"; fail 'Could not record the swap journal.'; }
+  else
+    printf 'N%s\n' "$_journal_target" >> "$INSTALL_JOURNAL" || fail 'Could not record the swap journal.'
+  fi
+}
+
+# Leftover backups (a killed or hung-up earlier run) are never restored automatically: they may be
+# older than what is installed now. List every one in a single refusal, with the command to remove them.
+assert_no_stale_backups() {
+  _stale_list=''
+  _stale_quoted=''
+  for _stale_file in "$INSTALL_DIR"/*.goodvibes-previous "$INSTALL_DIR"/*.goodvibes-previous.partial \
+                     "$INSTALL_DIR"/lib/*/*.goodvibes-previous "$INSTALL_DIR"/lib/*/*.goodvibes-previous.partial; do
+    if [ -e "$_stale_file" ] || [ -L "$_stale_file" ]; then
+      _stale_list="$_stale_list
+  $_stale_file"
+      _stale_quoted="$_stale_quoted $(shadow_quote "$_stale_file")"
+    fi
+  done
+  [ -z "$_stale_list" ] || fail "Leftover previous-program backups from an interrupted earlier install were found; nothing was changed. They are never restored automatically (they may be older than the installed programs):$_stale_list
+Check that the installed programs run, then remove them all and re-run the installer: rm -f --$_stale_quoted
+If an installed program is broken, put its backup back first: mv -f <file>.goodvibes-previous <file>"
+}
+
+# The swap finished: the previous bytes are no longer needed, and a superseded published
+# directory (queued as "O") can now go, because nothing can roll back to it any more.
+commit_install_journal() {
+  [ -n "$INSTALL_JOURNAL" ] && [ -f "$INSTALL_JOURNAL" ] || return 0
+  while IFS= read -r _journal_line; do
+    case "$_journal_line" in
+      R*) rm -f "${_journal_line#R}.goodvibes-previous" ;;
+      O*) _outgoing=${_journal_line#O}
+          case "$_outgoing" in
+            "$INSTALL_DIR"/.goodvibes-directory-install.*/outgoing)
+              if [ -d "$_outgoing" ] && [ ! -L "$_outgoing" ]; then
+                rm -rf "$_outgoing" 2>/dev/null || say "  NOTE: could not remove the superseded previous directory at $_outgoing; it is safe to delete." >&2
+                rmdir "${_outgoing%/outgoing}" 2>/dev/null || :
+              fi ;;
+          esac ;;
+    esac
+  done < "$INSTALL_JOURNAL"
+  : > "$INSTALL_JOURNAL"
+}
+
+# Undo an unfinished swap: restore every backed-up file, delete every file the swap created,
+# and drop staged .incoming files. Returns non-zero if any step failed (the journal is kept).
+rollback_install_swap() {
+  [ -n "$INSTALL_JOURNAL" ] && [ -f "$INSTALL_JOURNAL" ] || return 0
+  _rollback_ok=1
+  while IFS= read -r _journal_line; do
+    _journal_path=${_journal_line#?}
+    case "$_journal_line" in O*) continue ;; esac
+    rm -f "$_journal_path.incoming" || _rollback_ok=0
+    case "$_journal_line" in
+      R*) if [ -e "$_journal_path.goodvibes-previous" ] || [ -L "$_journal_path.goodvibes-previous" ]; then
+            if [ "$_journal_path.goodvibes-previous" -ef "$_journal_path" ]; then
+              # The link was made but the program was not replaced yet: it is already the previous file.
+              rm -f "$_journal_path.goodvibes-previous" || _rollback_ok=0
+            else
+              mv -f "$_journal_path.goodvibes-previous" "$_journal_path" || _rollback_ok=0
+            fi
+          fi ;;
+      N*) rm -f "$_journal_path" || _rollback_ok=0 ;;
+    esac
+  done < "$INSTALL_JOURNAL"
+  [ "$_rollback_ok" = 1 ] || return 1
+  : > "$INSTALL_JOURNAL"
+}
+
+report_unfinished_swap() {
+  say "install.sh: suite replacement did not finish and could not be undone automatically. Inspect retained *.update-transaction files in $INSTALL_CLAIM_DIR before recovery; do not remove them and retry blindly." >&2
+  # Recovery commands are only printed while the original directory is still the one on record.
+  if [ "${1:-}" = commands ] && [ -n "$INSTALL_JOURNAL" ] && [ -s "$INSTALL_JOURNAL" ]; then
+    say 'install.sh: files this run replaced, with the command that puts each previous version back:' >&2
+    while IFS= read -r _journal_line; do
+      _journal_path=${_journal_line#?}
+      case "$_journal_line" in
+        R*) if [ "$_journal_path.goodvibes-previous" -ef "$_journal_path" ]; then
+              say "  already the previous file (not replaced yet), remove the spare link: rm -f $(shadow_quote "$_journal_path.goodvibes-previous")" >&2
+            else
+              say "  restore: mv -f $(shadow_quote "$_journal_path.goodvibes-previous") $(shadow_quote "$_journal_path")" >&2
+            fi ;;
+        N*) say "  new file, remove: rm -f $(shadow_quote "$_journal_path")" >&2 ;;
+      esac
+    done < "$INSTALL_JOURNAL"
+    say "install.sh: once those are done, remove the claims with: rm -f -- $(shadow_quote "$INSTALL_CLAIM_DIR")/*.update-transaction $(shadow_quote "$INSTALL_CLAIM_OWNER")/*; rmdir $(shadow_quote "$INSTALL_CLAIM_OWNER"); then re-run the installer." >&2
+  fi
+}
+
 cleanup_release_install() {
   _install_exit=$?
-  trap - EXIT INT TERM
+  # A second Ctrl-C or hang-up must not cut the rollback short.
+  trap '' INT TERM HUP
+  trap - EXIT
   if [ -n "$INSTALL_CLAIM_OWNER" ]; then
     if [ "$INSTALL_SWAP_BEGUN" = 0 ] || [ "$INSTALL_SWAP_FINISHED" = 1 ]; then
       if ! release_install_claims; then
@@ -559,8 +688,20 @@ cleanup_release_install() {
         _install_exit=1
       fi
     else
-      say "install.sh: suite replacement did not finish. Inspect retained *.update-transaction files in $INSTALL_CLAIM_DIR before recovery; do not remove them and retry blindly." >&2
-      _install_exit=1
+      # Undo the partial swap only while this run still provably owns the directory and its claims.
+      if ! ( assert_install_claims ) >/dev/null 2>&1; then
+        report_unfinished_swap
+      elif rollback_install_swap; then
+        if release_install_claims; then
+          say 'install.sh: installation did not finish. The previous programs were restored and the installation claims were released; running services were not touched.' >&2
+          say "install.sh: to try again, re-run the installer: curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=$VERSION sh" >&2
+        else
+          say 'install.sh: the previous programs were restored, but the installation claims changed; retained ownership evidence requires inspection.' >&2
+        fi
+      else
+        report_unfinished_swap commands
+      fi
+      [ "$_install_exit" != 0 ] || _install_exit=1
     fi
   fi
   rm -rf "$WORKDIR"
@@ -662,10 +803,14 @@ install_release_library_file() {
   assert_install_library_directory "$_library_directory"
   _library_target="$INSTALL_DIR/lib/$_library_directory/$_library_name"
   [ ! -e "$_library_target.incoming" ] && [ ! -L "$_library_target.incoming" ] || fail 'A retained native library stage requires inspection.'
+  # Journal the stage before creating it (the check above proved it is not someone else's), so an
+  # interrupt while it exists is cleaned up by the rollback instead of blocking the retry.
+  printf 'I%s\n' "$_library_target" >> "$INSTALL_JOURNAL" || fail 'Could not record the swap journal.'
   (set -C; cat "$WORKDIR/$_library_asset" > "$_library_target.incoming") || fail 'Could not exclusively stage the native library.'
   chmod 644 "$_library_target.incoming"
   assert_install_claims
   assert_install_library_directory "$_library_directory"
+  install_journal_target "$_library_target"
   mv -f "$_library_target.incoming" "$_library_target"
 }
 
@@ -728,40 +873,70 @@ install_release_binary() {
   _binary=$1
   _binary_asset="$_binary-$PLATFORM_SUFFIX"
   _installed_binary=$_binary
+  _has_readers=0
+  if [ "$_binary" != goodvibes-daemon ] || [ "$os_tag" = macos ]; then _has_readers=1; fi
+  _installed_readers="$INSTALL_DIR/$_installed_binary.readers.json"
+  # Stage every incoming file first. Nothing live changes until all of them exist,
+  # and the main program is renamed last, so an interruption never leaves a new
+  # companion beside an old program that has not yet been replaced.
+  _stage_files=''
   # Linux compiled entrypoints require their adjacent, released ordinary Bun.
   # Keep the filename relationship when installing under the command name.
   if [ "$os_tag" = linux ]; then
     for _binary_suffix in .bun .bun.json .bun.LICENSE.md; do
-      cp "$WORKDIR/$_binary_asset$_binary_suffix" "$INSTALL_DIR/$_installed_binary$_binary_suffix.incoming"
-      case "$_binary_suffix" in .bun) chmod 755 "$INSTALL_DIR/$_installed_binary$_binary_suffix.incoming" ;; *) chmod 644 "$INSTALL_DIR/$_installed_binary$_binary_suffix.incoming" ;; esac
-      assert_install_claims
-      mv -f "$INSTALL_DIR/$_installed_binary$_binary_suffix.incoming" "$INSTALL_DIR/$_installed_binary$_binary_suffix"
+      _stage_target="$INSTALL_DIR/$_installed_binary$_binary_suffix"
+      printf 'I%s\n' "$_stage_target" >> "$INSTALL_JOURNAL" || fail 'Could not record the swap journal.'
+      cp "$WORKDIR/$_binary_asset$_binary_suffix" "$_stage_target.incoming"
+      case "$_binary_suffix" in .bun) chmod 755 "$_stage_target.incoming" ;; *) chmod 644 "$_stage_target.incoming" ;; esac
+      _stage_files="$_stage_files $_binary_suffix"
     done
   fi
-  cp "$WORKDIR/$_binary_asset" "$INSTALL_DIR/$_installed_binary.incoming"
-  chmod 755 "$INSTALL_DIR/$_installed_binary.incoming"
-  assert_install_claims
-  mv -f "$INSTALL_DIR/$_installed_binary.incoming" "$INSTALL_DIR/$_installed_binary"
-  if [ "$_binary" != goodvibes-daemon ] || [ "$os_tag" = macos ]; then
-    _installed_readers="$INSTALL_DIR/$_installed_binary.readers.json"
+  _readers_mode=none
+  if [ "$_has_readers" = 1 ]; then
     if [ -f "$WORKDIR/$_binary_asset.reader-ci-artifact.json" ]; then
       require_client_reader_evidence "$_binary"
+      printf 'I%s\n' "$_installed_readers" >> "$INSTALL_JOURNAL" || fail 'Could not record the swap journal.'
       cp "$WORKDIR/$_binary_asset.reader-ci-artifact.json" "$_installed_readers.incoming"
       chmod 644 "$_installed_readers.incoming"
-      assert_install_claims
-      mv -f "$_installed_readers.incoming" "$_installed_readers"
+      _readers_mode=publish
     elif [ -e "$_installed_readers" ] || [ -L "$_installed_readers" ]; then
-      # No old descriptor may describe a different newly installed executable.
-      assert_install_claims
-      rm -f "$_installed_readers"
+      _readers_mode=remove
     fi
   fi
   if [ "$_binary" = goodvibes-daemon ] && [ "$os_tag" = linux ]; then
+    printf 'I%s\n' "$INSTALL_DIR/daemon-installation.json" >> "$INSTALL_JOURNAL" || fail 'Could not record the swap journal.'
     cp "$WORKDIR/daemon-installation.json" "$INSTALL_DIR/daemon-installation.json.incoming"
     chmod 644 "$INSTALL_DIR/daemon-installation.json.incoming"
+  fi
+  printf 'I%s\n' "$INSTALL_DIR/$_installed_binary" >> "$INSTALL_JOURNAL" || fail 'Could not record the swap journal.'
+  cp "$WORKDIR/$_binary_asset" "$INSTALL_DIR/$_installed_binary.incoming"
+  chmod 755 "$INSTALL_DIR/$_installed_binary.incoming"
+  # Publish companions, then descriptors, then the program itself.
+  for _binary_suffix in $_stage_files; do
+    _stage_target="$INSTALL_DIR/$_installed_binary$_binary_suffix"
     assert_install_claims
+    install_journal_target "$_stage_target"
+    mv -f "$_stage_target.incoming" "$_stage_target"
+  done
+  case "$_readers_mode" in
+    publish)
+      assert_install_claims
+      install_journal_target "$_installed_readers"
+      mv -f "$_installed_readers.incoming" "$_installed_readers" ;;
+    remove)
+      # No old descriptor may describe a different newly installed executable.
+      assert_install_claims
+      install_journal_target "$_installed_readers"
+      rm -f "$_installed_readers" ;;
+  esac
+  if [ "$_binary" = goodvibes-daemon ] && [ "$os_tag" = linux ]; then
+    assert_install_claims
+    install_journal_target "$INSTALL_DIR/daemon-installation.json"
     mv -f "$INSTALL_DIR/daemon-installation.json.incoming" "$INSTALL_DIR/daemon-installation.json"
   fi
+  assert_install_claims
+  install_journal_target "$INSTALL_DIR/$_installed_binary"
+  mv -f "$INSTALL_DIR/$_installed_binary.incoming" "$INSTALL_DIR/$_installed_binary"
   if [ "$_binary" = goodvibes-daemon ] && [ "$os_tag" = macos ]; then
     install_release_library_file "sqlite-darwin-$arch_tag.dylib" "sqlite-darwin-$arch_tag" libsqlite3.dylib
     install_release_library_file "sqlite-darwin-$arch_tag.dylib.json" "sqlite-darwin-$arch_tag" libsqlite3.dylib.json
@@ -1133,6 +1308,7 @@ backup_unit_file() {
   _bf="$1"
   _bak="$_bf.bak.$(date +%Y%m%d%H%M%S)"
   cp -p "$_bf" "$_bak" 2>/dev/null || cp "$_bf" "$_bak"
+  LAST_UNIT_BACKUP=$_bak
   say "  backed up  $_bf -> $_bak"
 }
 
@@ -1309,6 +1485,32 @@ restart_bare_processes() {
       # No canonical shape known for this binary — recover the original
       # arguments so flags survive.
       if [ -r "/proc/$pid/cmdline" ]; then
+        # The arguments are replayed unquoted below, so an argument with
+        # whitespace or a glob character (or an empty one) would be split,
+        # expanded or dropped. Such a process is left running, untouched, and
+        # the exact command to restart it is printed with every argument quoted.
+        _unsafe_args=$(tr '\0' '\n' < "/proc/$pid/cmdline" | tail -n +2 | grep -Ec '[[:space:]*?[]|^$' || :)
+        # An argument with an embedded newline shows up as extra lines: more lines than NUL terminators.
+        _cmd_nuls=$(( $(tr -cd '\0' < "/proc/$pid/cmdline" | wc -c) ))
+        _cmd_lines=$(( $(tr '\0' '\n' < "/proc/$pid/cmdline" | wc -l) ))
+        _has_newline=0
+        [ "$_cmd_nuls" = "$_cmd_lines" ] || _has_newline=1
+        if [ "${_unsafe_args:-0}" != 0 ] || [ "$_has_newline" = 1 ]; then
+          say ""
+          say "Skipping pid $pid: its arguments contain spaces, wildcard characters or newlines that cannot be replayed safely."
+          if [ "$_has_newline" = 1 ]; then
+            say "  Nothing was touched. An argument contains a newline, so it cannot be shown on one line; read the exact"
+            say "  arguments with: tr '\\0' '\\n' < /proc/$pid/cmdline   then stop pid $pid and start $(shadow_quote "$new_bin") yourself."
+          else
+            # The trailing marker keeps command substitution from dropping a final empty argument.
+            _all_args=$(tr '\0' '\n' < "/proc/$pid/cmdline" | tail -n +2; printf x)
+            _all_args=${_all_args%x}
+            _quoted_args=$(printf '%s' "$_all_args" | while IFS= read -r _one_arg; do printf ' %s' "$(shadow_quote "$_one_arg")"; done)
+            say "  Nothing was touched. To run the new ${new_bin##*/} yourself: stop pid $pid (kill $pid), then run:"
+            say "    nohup $(shadow_quote "$new_bin")$_quoted_args >/dev/null 2>&1 &"
+          fi
+          continue
+        fi
         args=$(tr '\0' '\n' < "/proc/$pid/cmdline" | tail -n +2 | tr '\n' ' ')
       else
         args=$(ps -o args= -p "$pid" 2>/dev/null | sed 's/^[^ ]* *//')
@@ -1826,11 +2028,13 @@ migrate_legacy_systemd_unit() {
     # Platform-managed stale units are re-derived first; a hand-written
     # stale unit refuses the transfer honestly.
     transfer_stale_reason=''
+    transfer_canonical_backup=''
     [ -f "$canonical_path" ] && transfer_stale_reason=$(unit_launch_stale_reason "$canonical_path")
     if [ -n "$transfer_stale_reason" ]; then
       case "$(canonical_unit_provenance "$canonical_path")" in
         managed)
           backup_unit_file "$canonical_path"
+          transfer_canonical_backup=$LAST_UNIT_BACKUP
           write_systemd_unit "$canonical_path"
           say "  rewrote    $canonical_path (it $transfer_stale_reason)"
           ;;
@@ -1865,8 +2069,15 @@ migrate_legacy_systemd_unit() {
     canonical_pre_enabled=$(unit_enabled_state "$SYSTEMD_DAEMON_UNIT")
     systemctl --user daemon-reload 2>/dev/null || true
     if ! systemctl --user stop "$LEGACY_SYSTEMD_DAEMON_UNIT" 2>/dev/null; then
-      say "  NOTE: could not stop $LEGACY_SYSTEMD_DAEMON_UNIT: nothing was changed; the daemon keeps"
-      say "  running under the legacy unit. Migrate later with: goodvibes-daemon migrate-service"
+      if [ -n "$transfer_canonical_backup" ]; then
+        say "  NOTE: could not stop $LEGACY_SYSTEMD_DAEMON_UNIT: the transfer did not run and the daemon keeps"
+        say "  running under the legacy unit. The only change made is the corrected launch form already written to"
+        say "  $canonical_path (not started); its previous content is kept at $transfer_canonical_backup."
+        say "  Migrate later with: goodvibes-daemon migrate-service"
+      else
+        say "  NOTE: could not stop $LEGACY_SYSTEMD_DAEMON_UNIT: nothing was changed; the daemon keeps"
+        say "  running under the legacy unit. Migrate later with: goodvibes-daemon migrate-service"
+      fi
       [ "$wrote_canonical" = "1" ] && rm -f "$canonical_path"
       return 0
     fi
@@ -1916,6 +2127,13 @@ migrate_legacy_systemd_unit() {
           systemctl --user disable "$SYSTEMD_DAEMON_UNIT" 2>/dev/null || true
         fi
         # Pre-enabled (or unknown): the enablement is the user's — left as found.
+        if [ -n "$transfer_canonical_backup" ]; then
+          # Deliberately not restored: the previous content carried the stale launch arguments that
+          # made the transfer unsafe, and the corrected unit is not running.
+          say "  kept       $canonical_path as rewritten earlier in this run (corrected launch form, now stopped);"
+          say "  its previous content is at $transfer_canonical_backup. To put that file back instead:"
+          say "    mv $transfer_canonical_backup $canonical_path && systemctl --user daemon-reload"
+        fi
       fi
       systemctl --user daemon-reload 2>/dev/null || true
       if systemctl --user start "$LEGACY_SYSTEMD_DAEMON_UNIT" 2>/dev/null; then
@@ -2078,8 +2296,24 @@ migrate_one_launchd_plist() {
      launchctl load "$plist_path" 2>/dev/null; then
     say "  reloaded   $plist_label with the new launch arguments"
   else
-    say "  NOTE: could not reload the LaunchAgent; load it yourself:"
-    say "    launchctl bootstrap gui/$uid $plist_path"
+    # The agent is now unloaded and the rewritten file would not load. Put back the exact
+    # previous file (the backup taken above) and load that, so the agent keeps running as before.
+    _plist_backup=$LAST_UNIT_BACKUP
+    if [ -n "$_plist_backup" ] && [ -f "$_plist_backup" ] && cp -p "$_plist_backup" "$plist_path" 2>/dev/null; then
+      if launchctl bootstrap "gui/$uid" "$plist_path" 2>/dev/null ||
+         launchctl load "$plist_path" 2>/dev/null; then
+        say "  NOTE: the rewritten LaunchAgent could not be loaded, so the previous $plist_path was restored"
+        say "  and reloaded; $plist_label is running as before (the new launch arguments were NOT applied)."
+        say "  The rewritten file is not kept; the backup copy remains at $_plist_backup."
+      else
+        say "  NOTE: the rewritten LaunchAgent could not be loaded; the previous $plist_path was restored"
+        say "  (backup copy at $_plist_backup) but it could not be loaded either. Load it yourself:"
+        say "    launchctl bootstrap gui/$uid $plist_path"
+      fi
+    else
+      say "  NOTE: could not reload the LaunchAgent and the previous file could not be restored; load it yourself:"
+      say "    launchctl bootstrap gui/$uid $plist_path"
+    fi
   fi
 }
 
@@ -2295,7 +2529,7 @@ publish_release_directory() (
   }
   _directory_finish() {
     _directory_exit=$?
-    trap - EXIT INT TERM
+    trap - EXIT INT TERM HUP
     if [ "$_directory_done" != 1 ]; then
       if [ "$_directory_claim_owned" = 1 ] && _directory_compensate && _directory_release_claim; then
         say "install.sh: the original directory was kept or restored; private staging was retained at $_directory_work." >&2
@@ -2307,9 +2541,20 @@ publish_release_directory() (
       say "install.sh: the directory is published, but its changed ownership claim requires inspection at $_directory_work and $_directory_claim." >&2
       _directory_exit=1
     else
-      # Empty removal cannot delete unknown children. Existing trees and any
-      # unexpected siblings remain in their original owned private directory.
+      # The update succeeded and its claim is released, but the suite swap may still fail and roll
+      # back, so the superseded tree is not deleted here: it is queued ("O") for the commit step,
+      # which runs only after the whole swap finished. Only a driver tree published by a DIFFERENT
+      # release is queued; the same release reinstalled, and every WebUI tree, is retained (the
+      # release marker is not a deletion receipt, and WebUI directories are deliberately never pruned).
+      _directory_queued=0
+      if [ "$_directory_had_old" = 1 ] && [ -n "$INSTALL_JOURNAL" ] && [ "$_directory_parent" = "$INSTALL_DIR" ] && _directory_base_current \
+        && [ -d "$_directory_outgoing" ] && [ ! -L "$_directory_outgoing" ] && installer_open_file_matches 6 "$_directory_outgoing" \
+        && [ -f "$_directory_outgoing/.goodvibes-release.json" ] && [ ! -L "$_directory_outgoing/.goodvibes-release.json" ] \
+        && ! grep -qF "\"version\":\"${VERSION#v}\"" "$_directory_outgoing/.goodvibes-release.json" 2>/dev/null; then
+        if printf 'O%s\n' "$_directory_outgoing" >> "$INSTALL_JOURNAL"; then _directory_queued=1; fi
+      fi
       if _directory_base_current && rmdir "$_directory_work" 2>/dev/null; then :
+      elif [ "$_directory_queued" = 1 ]; then say "  retained   $_directory_work (the previous directory is removed when the whole suite install has finished)"
       else say "  retained   $_directory_work (previous directory or additional files)"
       fi
     fi
@@ -2318,6 +2563,7 @@ publish_release_directory() (
   trap _directory_finish EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  trap 'exit 129' HUP
   _directory_base_current || fail 'Original directory staging changed.'
   [ ! -e "$_directory_claim" ] && [ ! -L "$_directory_claim" ] || fail 'Another directory update or interrupted publication owns this target.'
   (set -C; printf 'GoodVibes directory installation %s\n' "$VERSION" > "$_directory_claim") || fail 'Could not claim the original directory target.'
@@ -3318,11 +3564,18 @@ run_uninstall() (
   _uninstall_has_directory=0
   _uninstall_mutation_started=0
   _uninstall_complete=0
+  _uninstall_services_begun=0
   _uninstall_claim_exit() {
     _uninstall_exit=$?
-    trap - EXIT INT TERM
+    trap - EXIT INT TERM HUP
     if [ -n "$INSTALL_CLAIM_OWNER" ]; then
       if [ "$_uninstall_mutation_started" = 0 ] || [ "$_uninstall_complete" = 1 ]; then
+        if [ "$_uninstall_complete" != 1 ] && [ "$_uninstall_services_begun" = 1 ] && [ "$_uninstall_exit" != 0 ]; then
+          # The claims are released here because no program file had been touched, but the
+          # service/process step had already started and its completed parts are not undone.
+          say 'install.sh: uninstall stopped before any program file was removed, after its service and process step had started. Services, units or processes handled by that step stay stopped or removed; no program file was removed and the installation claims were released.' >&2
+          say 'install.sh: each step can be repeated safely; finish the uninstall by running the same uninstall command again (curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_UNINSTALL=1 sh).' >&2
+        fi
         if ! release_install_claims; then
           say "install.sh: original uninstall claims changed; inspect retained transaction files in $INSTALL_CLAIM_DIR before retrying." >&2
           _uninstall_exit=1
@@ -3337,6 +3590,7 @@ run_uninstall() (
   trap _uninstall_claim_exit EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  trap 'exit 129' HUP
   if [ -e "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ]; then
     [ -d "$INSTALL_DIR" ] || fail 'The selected uninstall directory is unavailable; it was preserved.'
     _uninstall_original=$(CDPATH= cd -- "$INSTALL_DIR" && pwd -P) || fail 'Could not retain the original uninstall directory.'
@@ -3349,6 +3603,7 @@ run_uninstall() (
     assert_uninstall_update_idle
     _uninstall_has_directory=1
   fi
+  _uninstall_services_begun=1
   uninstall_services_and_processes
   if [ "$_uninstall_has_directory" = 1 ]; then
   assert_install_claims
@@ -3552,13 +3807,17 @@ main() {
 
   BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
   WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/goodvibes-install.XXXXXX")
+  INSTALL_JOURNAL="$WORKDIR/swap-journal"
+  : > "$INSTALL_JOURNAL"
   trap cleanup_release_install EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  trap 'exit 129' HUP
 
   prepare_release
   claim_release_install
   check_release_reader
+  assert_no_stale_backups
 
   say "Installing GoodVibes $VERSION for $PLATFORM_SUFFIX into $INSTALL_DIR"
   say ""
@@ -3605,6 +3864,7 @@ main() {
   # All program and companion writes are complete before a service may start
   # the new cohort. Startup must not see our own in-flight update claims.
   INSTALL_SWAP_FINISHED=1
+  commit_install_journal
   release_install_claims || fail 'Suite files were installed, but changed transaction claims require inspection before starting services.'
 
   if [ -n "$DECISION_POLICY" ]; then

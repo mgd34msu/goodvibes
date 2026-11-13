@@ -3,7 +3,7 @@ import { describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runOwnedTestChild } from '../scripts/owned-test-child.ts';
+import { runBunTest } from '../scripts/test.ts';
 import {
   scanHosts,
   scanLocalhost,
@@ -54,8 +54,8 @@ describe('platform/discovery: behavior smoke', () => {
           expect(requests).toBe(result.scannedHosts * result.scannedPorts);
         });
       `);
-      const result = await runOwnedTestChild({ argv: [fixture], cwd: directory, env: process.env });
-      expect(result.exitCode).toBe(0);
+      const exitCode = await runBunTest({ args: [fixture], cwd: directory, env: process.env });
+      expect(exitCode).toBe(0);
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 

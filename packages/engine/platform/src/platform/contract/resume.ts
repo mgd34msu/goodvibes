@@ -43,7 +43,7 @@ import type { ContractStore } from './store.js';
 import { acquireSharedTree } from './workstreams.js';
 import { preserveDeclaredReadReceipts } from './private-read-receipts.js';
 import { changedFinalAcceptancePolicy } from './acceptance-policy.js';
-import { isTerminalContractStatus, isTerminalUnitStatus, type Contract, type ContractFailureKind, type ContractStatus, type ContractUnit } from './types.js';
+import { isTerminalContractStatus, isTerminalUnitStatus, reopenFailedRepairPlanning, type Contract, type ContractFailureKind, type ContractStatus, type ContractUnit } from './types.js';
 
 /** The step a resumed contract takes up. */
 export type ResumeStep = 'start' | 'shape' | 'plan' | 'run' | 'judge' | 'commit' | 'await-owner';
@@ -217,13 +217,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
           continue;
         }
       }
-      if (pendingRepair) {
-        contract.status = 'fixing';
-        contract.failureKind = undefined;
-        contract.error = undefined;
-        contract.completedAt = undefined;
-        contract.statusLine = undefined;
-      }
+      if (pendingRepair) reopenFailedRepairPlanning(contract);
       const run = deps.adopt(contract);
       if (pendingRepair) run.decide('resumed', contract.id, 'Recovered a historical repair-planner input refusal with card-shaped observational output. Resume the same unstarted repair round with projected command observations; original request screening and fresh plan, unit and final checks remain required.');
       if (pendingRepair) deps.store.put(contract);

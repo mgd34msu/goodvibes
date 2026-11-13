@@ -258,7 +258,9 @@ export class AcpConnection {
         duration: Date.now() - startedAt,
       };
 
-      this.info.status = result.success ? 'complete' : 'error';
+      // The first terminal outcome wins: a cancel that already settled this run
+      // is not overwritten, and no second terminal event is emitted.
+      if (!this.settle(result.success ? 'complete' : 'error')) return result;
       if (this.runtimeBus) {
         emitAgentCompleted(this.runtimeBus, this.emitterContext(), {
           agentId: this.id,
@@ -272,7 +274,14 @@ export class AcpConnection {
       return result;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(summarizeError(err));
-      this.info.status = 'error';
+      const failureResult = {
+        id: this.id,
+        success: false,
+        output: error.message,
+        toolCallsMade: this.toolCallsMade,
+        duration: Date.now() - startedAt,
+      };
+      if (!this.settle('error')) return failureResult;
       if (this.runtimeBus) {
         emitAgentFailed(this.runtimeBus, this.emitterContext(), {
           agentId: this.id,
@@ -281,13 +290,7 @@ export class AcpConnection {
         });
       }
       this.emitTransportTerminalFailure(error.message);
-      return {
-        id: this.id,
-        success: false,
-        output: error.message,
-        toolCallsMade: this.toolCallsMade,
-        duration: Date.now() - startedAt,
-      };
+      return failureResult;
     } finally {
       this.cleanup();
     }
@@ -295,6 +298,9 @@ export class AcpConnection {
 
   /** Cancel the running subagent. */
   async cancel(): Promise<void> {
+    // Aborting the lifetime makes a parked run() throw; claim the outcome first
+    // so that throw reads as this cancel, not as a separate failure.
+    const won = this.settle('cancelled');
     this.lifetime.abort();
     this.permissionWire?.close();
     if (this.conn && this.sessionId) {
@@ -305,15 +311,23 @@ export class AcpConnection {
         logger.error('AcpConnection.cancel: failed to send cancel to subagent', { id: this.id, err: summarizeError(err) });
       }
     }
-    this.info.status = 'cancelled';
-    if (this.runtimeBus) {
-      emitAgentCancelled(this.runtimeBus, this.emitterContext(), {
-        agentId: this.id,
-        reason: 'ACP session cancelled',
-      });
+    if (won) {
+      if (this.runtimeBus) {
+        emitAgentCancelled(this.runtimeBus, this.emitterContext(), {
+          agentId: this.id,
+          reason: 'ACP session cancelled',
+        });
+      }
+      this.emitTransportDisconnected('ACP session cancelled', false);
     }
-    this.emitTransportDisconnected('ACP session cancelled', false);
     this.cleanup();
+  }
+
+  /** Record a terminal status unless one is already recorded. Returns whether this call set it. */
+  private settle(status: 'complete' | 'error' | 'cancelled'): boolean {
+    if (this.info.status === 'complete' || this.info.status === 'error' || this.info.status === 'cancelled') return false;
+    this.info.status = status;
+    return true;
   }
 
   private emitterContext(): import('../runtime/emitters/index.js').EmitterContext {

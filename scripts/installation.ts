@@ -148,12 +148,66 @@ export function assertOwnedFiles(receipt: Installation): void {
   plainPath(join(receipt.prefix, 'releases', receipt.release));
   if (readDataId(receipt) !== receipt.id) throw new Error('User data does not belong to this installation.');
 }
+export function processStartTime(pid: number): string | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const value = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+    return value && /^[0-9]+$/.test(value) ? value : undefined;
+  } catch { return undefined; }
+}
+interface LockOwner { pid: number; startTime?: string }
+function readLockOwner(lock: string): LockOwner | undefined {
+  try {
+    const value: unknown = JSON.parse(readFileSync(join(lock, 'owner.json'), 'utf8'));
+    if (!value || typeof value !== 'object') return undefined;
+    const { pid, startTime } = value as { pid?: unknown; startTime?: unknown };
+    if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0) return undefined;
+    return { pid, ...(typeof startTime === 'string' ? { startTime } : {}) };
+  } catch { return undefined; }
+}
+/** True only when the recorded process is provably gone (or its pid now belongs to a different process). */
+function ownerIsDead(owner: LockOwner): boolean {
+  try { process.kill(owner.pid, 0); }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+  if (owner.startTime === undefined) return false;
+  const current = processStartTime(owner.pid);
+  return current !== undefined && current !== owner.startTime;
+}
+const heldLocks = new Set<string>();
+/** Remove every lock this process still holds. Used by signal handling, where the work cannot unwind. */
+export function releaseHeldLocks(): void {
+  for (const lock of heldLocks) rmSync(lock, { recursive: true, force: true });
+  heldLocks.clear();
+}
+function acquireLock(lock: string): void {
+  const refuse = (detail: string): never => { throw new Error(`Another install/uninstall may be running (${lock}). ${detail}`); };
+  try { mkdirSync(lock, { mode: 0o700 }); }
+  catch {
+    const owner = readLockOwner(lock);
+    if (!owner) refuse(`This lock has no owner record (created by an older version, or being created right now). Check that no install or uninstall is running, then remove it with: rmdir '${lock}'`);
+    else if (!ownerIsDead(owner!)) refuse(`It is held by running process ${owner!.pid}. Wait for it to finish, or stop it first.`);
+    // The owner is gone. Move the lock aside atomically so only one contender reclaims it,
+    // and confirm that what we moved is still the dead owner's record before deleting it.
+    const aside = `${lock}.stale-${process.pid}`;
+    try { renameSync(lock, aside); } catch { refuse('Another process is reclaiming it; retry in a moment.'); }
+    const moved = readLockOwner(aside);
+    if (moved?.pid !== owner!.pid || moved?.startTime !== owner!.startTime) {
+      try { renameSync(aside, lock); } catch { /* a new lock now exists; leave the moved one for inspection */ }
+      refuse('The lock changed while it was being reclaimed; retry in a moment.');
+    }
+    rmSync(aside, { recursive: true, force: true });
+    try { mkdirSync(lock, { mode: 0o700 }); } catch { refuse('Another process took it first; retry in a moment.'); }
+  }
+  const startTime = processStartTime(process.pid);
+  writeFileSync(join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, ...(startTime ? { startTime } : {}) }), { mode: 0o600 });
+  heldLocks.add(lock);
+}
 export function withLock<T>(prefix: string, work: () => Promise<T>): Promise<T> {
   plainPath(prefix); mkdirSync(dirname(prefix), { recursive: true, mode: 0o700 });
   const lock = `${prefix}.lock`;
-  try { mkdirSync(lock, { mode: 0o700 }); }
-  catch { throw new Error(`Another install/uninstall may be running (${lock}). If an earlier process was killed, remove this empty lock directory after checking it has stopped.`); }
-  return work().finally(() => rmSync(lock, { recursive: true }));
+  acquireLock(lock);
+  // Release only a lock this process still holds: a signal handler may already have released it.
+  return work().finally(() => { if (heldLocks.delete(lock)) rmSync(lock, { recursive: true, force: true }); });
 }
 export function assertServiceLocation(receipt: Installation, execute: Run): void {
   const fragment = execute('systemctl', ['--user', 'show', SERVICE, '--property=FragmentPath', '--value'], { capture: true });
@@ -165,6 +219,11 @@ export function stopService(receipt: Installation, execute: Run): void {
   const state = execute('systemctl', ['--user', 'show', SERVICE, '--property=ActiveState', '--value'], { capture: true });
   if (state !== 'inactive' && state !== 'failed') throw new Error('The daemon has not stopped; keeping the installation intact.');
 }
+function serviceAlreadyRemoved(receipt: Installation, execute: Run): boolean {
+  if (present(unitPath(receipt))) return false;
+  const state = execute('systemctl', ['--user', 'show', SERVICE, '--property=ActiveState', '--value'], { capture: true });
+  return state === 'inactive' || state === 'failed';
+}
 export async function uninstall(prefix: string, purge: boolean, execute: Run = run): Promise<void> {
   await withLock(prefix, async () => {
     const receipt = readInstallation(prefix);
@@ -173,8 +232,11 @@ export async function uninstall(prefix: string, purge: boolean, execute: Run = r
       if (realpathSync(process.env.HOME ?? '') !== receipt.home) throw new Error('Run uninstall as the user who owns this installation.');
       assertOwnedFiles(receipt);
       if (receipt.service) {
-        stopService(receipt, execute);
-        execute('systemctl', ['--user', 'disable', SERVICE]);
+        // A re-run after a failure that came after the unit was removed: nothing is left to stop or disable.
+        if (!serviceAlreadyRemoved(receipt, execute)) {
+          stopService(receipt, execute);
+          execute('systemctl', ['--user', 'disable', SERVICE]);
+        }
         rmSync(unitPath(receipt), { force: true });
         execute('systemctl', ['--user', 'daemon-reload']);
       }

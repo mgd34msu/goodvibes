@@ -25,3 +25,18 @@ export function defaultTestArgs(engineRoot: string): readonly string[] {
   visit(testRoot, 'test');
   return found.sort();
 }
+
+/** Every test file under `root` (any product), relative to it, sorted. */
+export function discoverTestFiles(root: string): string[] {
+  const found: string[] = [];
+  const visit = (directory: string, relative: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = relative ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (!IGNORED_DIRECTORIES.has(entry.name) && entry.name !== '.test-tmp' && entry.name !== 'coverage') visit(join(directory, entry.name), path);
+      } else if (entry.isFile() && TEST_FILE.test(entry.name)) found.push(path);
+    }
+  };
+  visit(root, '');
+  return found.sort();
+}

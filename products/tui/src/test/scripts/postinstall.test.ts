@@ -1,7 +1,8 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 
 import { join } from 'node:path';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import * as fs from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as crypto from 'node:crypto';
 import {
@@ -152,6 +153,23 @@ describe('the actual postinstall download-verify operation', () => {
       expect(hash).toHaveBeenCalledTimes(2); expect(readFileSync(destination)).toEqual(bytes);
       expect(existsSync(destination + '.download')).toBe(false);
     } finally { fetch.mockRestore(); hash.mockRestore(); rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test('replacing an installed binary never removes it first, so an interruption cannot leave none', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'tui-postinstall-replace-'));
+    const destination = join(root, 'goodvibes-linux-x64');
+    writeFileSync(destination, 'previous binary');
+    const bytes = Buffer.from('replacement binary bytes');
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(
+      async () => new Response(Uint8Array.from(bytes)), { preconnect() {} },
+    ));
+    const removed = spyOn(fs, 'rmSync');
+    try {
+      await postinstall.installVerifiedReleaseBinary('goodvibes-linux-x64', new Map([['goodvibes-linux-x64', sha256(bytes)]]), 'https://owned.test', destination);
+      expect(removed.mock.calls.map(call => String(call[0]))).not.toContain(destination);
+      expect(readFileSync(destination)).toEqual(bytes);
+      expect(fs.readdirSync(root)).toEqual(['goodvibes-linux-x64']);
+    } finally { fetch.mockRestore(); removed.mockRestore(); rmSync(root, { recursive: true, force: true }); }
   });
 });
 

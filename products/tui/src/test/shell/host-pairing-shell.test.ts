@@ -171,7 +171,7 @@ describe('host pairing shell over the real InputHandler', () => {
       const phrase = s.phrase();
       s.input.feed('P');
       const concealed: string[] = [];
-      if (surface === 'modal stack') s.input.modalStack.push('synthetic-prompt');
+      if (surface === 'modal stack') s.input.modalStack.push('help');
       if (surface === 'search') s.input.searchManager.open();
       if (surface === 'history search') s.input.historySearch.open('');
       if (surface === 'concealed field') s.input.concealedInput = { onSubmit: value => concealed.push(value) };

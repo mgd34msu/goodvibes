@@ -31,7 +31,7 @@ async function fixture(hold: ResponseHold = 'none') {
   mkdirSync(join(root, 'tmp'));
   writeFileSync(join(home, '.goodvibes', 'agent', 'settings.json'), JSON.stringify({ update: { auto: false, autoUpdateAtLaunch: false } }));
   const networkViolations = join(root, 'network-violations.log');
-  const guard = resolve(import.meta.dir, '../../../../../packages/engine/scripts/test-network-preload.ts');
+  const guard = resolve(import.meta.dir, '../../../../../packages/engine/toolchain/src/test-runner/test-network-preload.ts');
   writeFileSync(join(workspace, 'bunfig.toml'), `preload = [${JSON.stringify(guard)}]\n`);
   const daemon = await startDaemonFixture({
     root: join(root, 'daemon'), token: 'synthetic-terminal-pairing-bootstrap', hostSessions: false,

@@ -50,16 +50,21 @@ interface CaptureSpy {
   /** Deliver one buffer of Web Audio samples into the live graph. */
   pump: (samples: Float32Array) => void;
   contextsClosed: () => number;
+  /** Fire the browser's track-ended event on every opened track. */
+  endStreams: () => void;
 }
 
 function captureSpy(): CaptureSpy {
-  const tracks: { stopped: boolean; stop(): void; label: string }[] = [];
+  const tracks: { stopped: boolean; stop(): void; label: string; onended?: (() => void) | null }[] = [];
   const processors: { onaudioprocess: ((e: { inputBuffer: { getChannelData(c: number): Float32Array } }) => void) | null }[] = [];
   let closed = 0;
   const spy: CaptureSpy = {
     getUserMediaCalls: 0,
     tracksStopped: () => tracks.length > 0 && tracks.every((track) => track.stopped),
     contextsClosed: () => closed,
+    endStreams: () => {
+      for (const track of tracks) track.onended?.();
+    },
     pump: (samples) => {
       for (const processor of processors) {
         processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => samples } });
@@ -247,12 +252,15 @@ interface HostHarness {
   warnings: string[];
   released: { count: number };
   loadCalls: number;
+  arbiter: MicArbiter;
 }
 
 function hostHarness(options: {
   classifier: WakeInferenceSession;
   transcript?: string;
   transcribeError?: Error;
+  /** Holds every transcription open until the test resolves it. */
+  transcribeGate?: Promise<string>;
   arbiter?: MicArbiter;
   /** A speech gate in the model set, as a provisioned tab would have. */
   vad?: { session: WakeInferenceSession; threshold: number };
@@ -274,6 +282,7 @@ function hostHarness(options: {
     warnings,
     released,
     loadCalls: 0,
+    arbiter,
     host: createWakeHost({
       openCapture: arbiter.openCapture,
       loadModelSet: () => {
@@ -283,6 +292,7 @@ function hostHarness(options: {
       ...(options.suppression !== undefined ? { createNoiseSuppression: options.suppression.create } : {}),
       transcribe: (artifact) => {
         sttRequests.push(artifact);
+        if (options.transcribeGate) return options.transcribeGate;
         if (options.transcribeError) return Promise.reject(options.transcribeError);
         return Promise.resolve(options.transcript ?? 'open the fleet view');
       },
@@ -584,6 +594,58 @@ describe('push-to-talk and the wake listener share one device', () => {
   });
 });
 
+
+describe('phase changes made outside the serialised chain', () => {
+  const FIRE = [0.1, 0.2, 0.95, 0.97, ...(Array(40).fill(0.1) as number[])];
+
+  async function toTranscribing(gate: Promise<string>): Promise<{ harness: HostHarness; arbiter: MicArbiter }> {
+    const harness = hostHarness({ classifier: scriptedClassifier(FIRE), transcribeGate: gate });
+    await harness.host.applySettings(settingsFor());
+    await pushFrames(harness, loudFrame(), WARMUP_FRAMES + 4);
+    await pushFrames(harness, loudFrame(), 6);
+    await pushFrames(harness, quietFrame(), 6);
+    await settle(40);
+    expect(harness.host.getState().phase).toBe('transcribing');
+    return { harness, arbiter: harness.arbiter };
+  }
+
+  test('a transcript finishing while push-to-talk holds the mic does not overwrite suspended', async () => {
+    let release!: (text: string) => void;
+    const gate = new Promise<string>((resolve) => { release = resolve; });
+    const { harness, arbiter } = await toTranscribing(gate);
+    const lease = await arbiter.acquireExclusive();
+    expect(harness.host.getState().phase).toBe('suspended');
+
+    release('open the fleet view');
+    await settle(40);
+
+    expect(harness.host.getState().phase).toBe('suspended');
+    // The words are still delivered and recorded.
+    expect(harness.sink).toEqual([{ text: 'open the fleet view', autoSubmit: false }]);
+    await lease();
+    await settle(20);
+    expect(harness.host.getState().phase).toBe('listening');
+  });
+
+  test('clearLatch leaves the latched phase and refusal and listens again', async () => {
+    const harness = hostHarness({ classifier: scriptedClassifier([]) });
+    await harness.host.applySettings(settingsFor({ maxRestarts: 0 }));
+    expect(harness.host.getState().phase).toBe('listening');
+    harness.spy.endStreams();
+    await settle(40);
+    expect(harness.host.getState().phase).toBe('latched');
+    expect(harness.host.getState().refusal?.kind).toBe('blocked');
+
+    harness.host.clearLatch();
+    await settle(40);
+
+    const state = harness.host.getState();
+    expect(state.phase).toBe('listening');
+    expect(state.refusal).toBeNull();
+    expect(state.error).toBeNull();
+    expect(harness.spy.getUserMediaCalls).toBe(2);
+  });
+});
 
 describe('both browserBackend values run on one engine binary', () => {
   /**

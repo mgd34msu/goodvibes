@@ -15,6 +15,8 @@ const pickCalls: { groupId: string; winnerItemId: string; confirm: boolean }[] =
 const judgeCalls: string[] = [];
 let pickError: unknown = null;
 let pickApplied = true;
+let judgeGate: Promise<void> | null = null;
+let judgeProposal = 'i-2';
 
 mock.module('../../lib/goodvibes', () => ({
   getCurrentAuth: () => Promise.resolve({}),
@@ -31,9 +33,10 @@ mock.module('../../lib/goodvibes', () => ({
                 applied: pickApplied, groupId, winnerItemId, loserItemIds: ['i-2'], auto: false, requiresConfirm: !pickApplied,
               });
           },
-          judge: (groupId: string) => {
+          judge: async (groupId: string) => {
             judgeCalls.push(groupId);
-            return Promise.resolve({ proposedWinnerItemId: 'i-2', reasons: ['fewer tool calls'], model: 'claude', scoredBy: 'model' });
+            if (judgeGate) await judgeGate;
+            return Promise.resolve({ proposedWinnerItemId: judgeProposal, reasons: ['fewer tool calls'], model: 'claude', scoredBy: 'model' });
           },
         },
       },
@@ -94,6 +97,8 @@ afterEach(() => {
   judgeCalls.length = 0;
   pickError = null;
   pickApplied = true;
+  judgeGate = null;
+  judgeProposal = 'i-2';
 });
 
 describe('AttemptComparison', () => {
@@ -150,6 +155,43 @@ describe('AttemptComparison', () => {
 
     expect(pickCalls).toEqual([{ groupId: 'g-1', winnerItemId: 'i-1', confirm: true }]);
     expect(picked).toBe(false);
+    unmount();
+  });
+
+  test('a late judge result does not overwrite the winner the operator picked by hand', async () => {
+    let release!: () => void;
+    judgeGate = new Promise<void>((resolve) => { release = resolve; });
+    judgeProposal = 'i-1';
+    const { container, unmount } = render();
+    click(Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Ask the judge')) ?? null);
+    await settle(2);
+
+    // While the judge is still thinking the operator picks i-2 by hand (the default was i-1).
+    const radio = (id: string) => container.querySelector<HTMLInputElement>(`input[type="radio"][value="${id}"]`)!;
+    click(radio('i-2'));
+    expect(radio('i-2').checked).toBe(true);
+
+    release();
+    await settle(4);
+
+    // The proposal (i-1) is shown, but the manual choice stands.
+    expect(container.textContent).toContain('fewer tool calls');
+    expect(radio('i-2').checked).toBe(true);
+    expect(radio('i-1').checked).toBe(false);
+
+    click(container.querySelector('.attempt-cmp__pick-btn'));
+    await settle(2);
+    click(container.querySelector('.gv-confirm__confirm'));
+    await settle(3);
+    expect(pickCalls.map((c) => c.winnerItemId)).toEqual(['i-2']);
+    unmount();
+  });
+
+  test('a judge result that arrives with no manual choice still adopts its proposal', async () => {
+    const { container, unmount } = render();
+    click(Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Ask the judge')) ?? null);
+    await settle();
+    expect(container.querySelector<HTMLInputElement>('input[type="radio"][value="i-2"]')!.checked).toBe(true);
     unmount();
   });
 });

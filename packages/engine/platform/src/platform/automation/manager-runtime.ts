@@ -205,6 +205,8 @@ export class AutomationManager {
   private loaded = false;
   private running = false;
   private startPromise: Promise<void> | null = null;
+  /** The mutationLifetime the in-flight startPromise was begun under. */
+  private startLifetime: object | null = null;
   private reconcileTimer: ReturnType<typeof setInterval> | null = null;
   // Jobs already logged as having no reachable failure-notice target (reported once per job).
   private readonly warnedDeliveryGapJobs = new Set<string>();
@@ -402,9 +404,21 @@ export class AutomationManager {
       return;
     }
     if (this.running) return;
-    if (this.startPromise) return await this.startPromise;
+    // stop() replaces mutationLifetime. A start that was still loading when
+    // stop() ran belongs to the lifetime that ended: it must not mark the
+    // manager running or arm its timers afterwards, and a start() made after
+    // that stop() must not mistake the stale load for its own.
+    const lifetime = this.mutationLifetime;
+    if (this.startPromise) {
+      const pending = this.startPromise, pendingLifetime = this.startLifetime;
+      await pending;
+      if (pendingLifetime !== lifetime && this.mutationLifetime === lifetime) return await this.start();
+      return;
+    }
+    this.startLifetime = lifetime;
     this.startPromise = this.load()
       .then(() => {
+        if (this.mutationLifetime !== lifetime) return;
         this.running = true;
         this.reconcileActiveRuns();
         this.reconcileTimer = setInterval(() => {

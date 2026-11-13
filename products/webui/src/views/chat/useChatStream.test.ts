@@ -1338,3 +1338,60 @@ test('failed partial output never becomes the next turn response', async () => {
   expect(renderedLiveText).toBe('new reply');
   ctx.unmount();
 });
+
+describe('useChatStream: stop() races with later stream frames and a late cancel failure', () => {
+  test('delta and tool frames after stop() do not un-stop the turn', () => {
+    turnsCancelBehavior = () => new Promise(() => {});
+    const ctx = renderHookHelper({ activeSessionId: 'session-stop-race', initialTurnState: 'streaming' });
+    const ctrl = activeStreamControl!;
+
+    ctx.result.stop();
+    expect(ctx.turnState).toBe('stopping');
+
+    ctrl.options.onEvent('companion-chat.turn.delta', { sessionId: 'session-stop-race', type: 'turn.delta', delta: 'x' });
+    expect(ctx.turnState).toBe('stopping');
+    ctrl.options.onEvent('companion-chat.turn.tool_call', { sessionId: 'session-stop-race', type: 'turn.tool_call', toolCallId: 'c1', toolName: 'bash' });
+    expect(ctx.turnState).toBe('stopping');
+    ctrl.options.onEvent('companion-chat.turn.tool_result', { sessionId: 'session-stop-race', type: 'turn.tool_result', toolCallId: 'c1' });
+    expect(ctx.turnState).toBe('stopping');
+
+    // The authoritative terminal event still resolves it.
+    ctrl.options.onEvent('companion-chat.turn.cancelled', { sessionId: 'session-stop-race', type: 'turn.cancelled' });
+    expect(ctx.turnState).toBe('stopped');
+    ctx.unmount();
+  });
+
+  test('a cancel request that fails AFTER the turn already stopped does not write error over it', async () => {
+    let rejectCancel!: (error: unknown) => void;
+    turnsCancelBehavior = () => new Promise((_resolve, reject) => { rejectCancel = reject; });
+    const ctx = renderHookHelper({ activeSessionId: 'session-stop-late-error', initialTurnState: 'streaming' });
+    const ctrl = activeStreamControl!;
+
+    ctx.result.stop();
+    ctrl.options.onEvent('companion-chat.turn.cancelled', { sessionId: 'session-stop-late-error', type: 'turn.cancelled' });
+    expect(ctx.turnState).toBe('stopped');
+
+    rejectCancel(new Error('network blip'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(ctx.turnState).toBe('stopped');
+    expect(ctx.turnError).toBe('');
+    ctx.unmount();
+  });
+
+  test('a cancel request that fails while the turn is still stopping still reports the error', async () => {
+    let rejectCancel!: (error: unknown) => void;
+    turnsCancelBehavior = () => new Promise((_resolve, reject) => { rejectCancel = reject; });
+    const ctx = renderHookHelper({ activeSessionId: 'session-stop-real-error', initialTurnState: 'streaming' });
+
+    ctx.result.stop();
+    rejectCancel(new Error('daemon refused'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(ctx.turnState).toBe('error');
+    expect(ctx.turnError).toBe('daemon refused');
+    ctx.unmount();
+  });
+});

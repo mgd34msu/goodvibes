@@ -120,10 +120,9 @@ export default tseslint.config(
     // across the shared OS tmpfs, and a signal-killed test process (CI
     // cancellation, a timeout kill) skips afterAll/finally cleanup entirely,
     // so the directory is never removed. Use makeProjectTempDir from
-    // scripts/helpers/project-temp.ts instead, it registers the directory
-    // for exit-hook cleanup, and the stale sweep
-    // (scripts/sweep-stale-temp.ts, run via the `pretest` script) reaps
-    // anything a killed process still leaves behind. A script that boots a
+    // scripts/helpers/project-temp.ts instead: under the test runner
+    // (packages/engine/scripts/test.ts) TMPDIR is its per-run directory, which
+    // it removes and sweeps. A script that boots a
     // real daemon uses installTestTempRoot from scripts/test-temp-root.ts
     // (a per-run `.test-tmp/run-<pid>` root) rather than either of those.
     //

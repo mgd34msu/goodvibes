@@ -18,6 +18,7 @@ const migrateCalls: unknown[] = [];
 const revokeSharedCalls: unknown[] = [];
 const setExplicitAuthTokenCalls: string[] = [];
 
+let renameGate: Promise<void> | null = null;
 let listData: { tokens: { id: string; name: string; createdAt: number; lastSeenAt?: number }[]; legacySharedRevoked: boolean } = {
   tokens: [
     { id: 'tok-1', name: 'Phone', createdAt: 1_700_000_000_000, lastSeenAt: 1_700_100_000_000 },
@@ -42,9 +43,10 @@ mock.module('../../lib/goodvibes', () => ({
             listCalls.push(null);
             return Promise.resolve(listData);
           },
-          rename: (id: string, name: string) => {
+          rename: async (id: string, name: string) => {
             renameCalls.push({ id, name });
-            return Promise.resolve({ id, renamed: true });
+            if (renameGate) await renameGate;
+            return { id, renamed: true };
           },
           delete: (id: string) => {
             deleteCalls.push(id);
@@ -120,6 +122,7 @@ function revokeActionFor(el: HTMLElement, device: string): HTMLButtonElement | u
 }
 
 afterEach(() => {
+  renameGate = null;
   listCalls.length = 0;
   renameCalls.length = 0;
   deleteCalls.length = 0;
@@ -175,6 +178,38 @@ describe('PairingTokensSettings rename', () => {
     });
     await waitFor(() => renameCalls.length > 0);
     expect(renameCalls[0]).toEqual({ id: 'tok-1', name: 'My Phone' });
+    unmount();
+  });
+});
+
+describe('PairingTokensSettings rename: late results', () => {
+  test('a late rename success does not close the editor of a different device', async () => {
+    let release!: () => void;
+    renameGate = new Promise<void>((resolve) => { release = resolve; });
+    const { el, unmount } = render();
+    await waitFor(() => (el.textContent ?? '').includes('Phone'));
+
+    click(el.querySelector('[aria-label="Rename Phone"]'));
+    const input = el.querySelector('input#pairing-token-rename-tok-1') as HTMLInputElement;
+    flushSync(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'My Phone');
+      input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    });
+    flushSync(() => {
+      input.closest('form')?.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => renameCalls.length === 1);
+
+    // While the first save is in flight the operator opens another device's editor.
+    click(el.querySelector('[aria-label="Rename Laptop"]'));
+    expect(el.querySelector('input#pairing-token-rename-tok-2')).not.toBeNull();
+
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    flushSync(() => {});
+
+    expect(el.querySelector('input#pairing-token-rename-tok-2')).not.toBeNull();
     unmount();
   });
 });

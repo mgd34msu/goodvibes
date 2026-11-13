@@ -10,7 +10,7 @@ async function invoke(args: string[]) {
   const cwd = join(root, 'workspace'); mkdirSync(cwd);
   const env = isolatedTestEnvironment(process.env, join(root, 'isolated'));
   const child = Bun.spawn([
-    process.execPath, '--no-env-file', '--preload', resolve(import.meta.dir, '../../../../../packages/engine/scripts/test-network-preload.ts'),
+    process.execPath, '--no-env-file', '--preload', resolve(import.meta.dir, '../../../../../packages/engine/toolchain/src/test-runner/test-network-preload.ts'),
     resolve(import.meta.dir, '../../main.ts'), ...args,
   ], { cwd: resolve(import.meta.dir, '../../..'), env: { ...env, PATH: dirname(process.execPath), GOODVIBES_HOME: env.HOME, GOODVIBES_WORKING_DIR: cwd, GOODVIBES_DAEMON_HOME: join(root, 'daemon'), NO_COLOR: '1' }, stdout: 'pipe', stderr: 'pipe' });
   const timer = setTimeout(() => child.kill('SIGKILL'), 10_000);

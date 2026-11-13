@@ -528,45 +528,62 @@ export class SlackIntegration {
 export class SlackSocketModeClient {
   private socket: WebSocket | null = null;
   private started = false;
-  /** True while `stop()` is closing the socket, so its close is not a loss. */
-  private stopping = false;
+  /** The one start in progress, shared by every concurrent `start()` caller. */
+  private startInFlight: Promise<SlackSocketModeConnection> | null = null;
+  /** Bumped by `stop()` so a start that was awaiting the API does not open a socket after it. */
+  private epoch = 0;
   private readonly WebSocketImpl: typeof WebSocket;
 
   constructor(private readonly options: SlackSocketModeClientOptions) {
     this.WebSocketImpl = options.WebSocketImpl ?? WebSocket;
   }
 
-  async start(): Promise<SlackSocketModeConnection> {
+  start(): Promise<SlackSocketModeConnection> {
     if (this.started) {
-      return { ok: true, url: undefined };
+      return Promise.resolve({ ok: true, url: undefined });
     }
+    if (this.startInFlight) return this.startInFlight;
+    const inFlight = this.openSocket().finally(() => {
+      if (this.startInFlight === inFlight) this.startInFlight = null;
+    });
+    this.startInFlight = inFlight;
+    return inFlight;
+  }
+
+  private async openSocket(): Promise<SlackSocketModeConnection> {
+    const epoch = this.epoch;
     const connection = await this.options.integration.appsConnectionsOpen(this.options.appToken);
     if (!connection.ok || !connection.url) {
       return connection;
     }
+    // stop() ran while the connection URL was being fetched: do not open a socket nobody wants.
+    if (epoch !== this.epoch) return { ok: false, error: 'stopped before the connection opened' };
     this.started = true;
     const socket = new this.WebSocketImpl(connection.url);
     this.socket = socket;
     socket.addEventListener('message', (event) => {
+      if (this.socket !== socket) return;
       void this.handleMessage(event.data).catch((error: unknown) => {
         logger.warn('[slack] socket message handling failed', { error: summarizeError(error) });
       });
     });
     socket.addEventListener('close', () => {
-      const wasDeliberate = this.stopping;
+      // A socket that is no longer current was either closed on purpose (stop()
+      // detaches it first) or replaced; its close says nothing about the live one.
+      if (this.socket !== socket) return;
       this.started = false;
       this.socket = null;
-      if (!wasDeliberate) this.options.onClosed?.('the Slack Socket Mode connection closed');
+      this.options.onClosed?.('the Slack Socket Mode connection closed');
     });
     return connection;
   }
 
   stop(): void {
-    this.stopping = true;
+    this.epoch += 1;
+    const socket = this.socket;
     this.started = false;
-    this.socket?.close();
     this.socket = null;
-    this.stopping = false;
+    socket?.close();
   }
 
   ack(envelopeId: string, payload?: Record<string, unknown>): void {

@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
   bumpVersion,
+  resumeCommandAfterBump,
   scaffoldChangelogText,
   setManifestVersionText,
 } from '../../../scripts/release-prepare.ts';
@@ -69,4 +70,12 @@ test('actual private workspace preparation refuses before commands or manifest w
   expect(result.exitCode).toBe(1);
   expect(result.stderr.toString()).toContain('refuses a private/workspace package');
   expect(readFileSync(path, 'utf8')).toBe(before);
+});
+
+describe('resumeCommandAfterBump', () => {
+  test('replaces the bump choice with --no-bump and keeps the other options', () => {
+    expect(resumeCommandAfterBump(['--patch', '--no-install'])).toBe('bun run release:prepare --no-bump --no-install');
+    expect(resumeCommandAfterBump(['--version', '2.2.0', '--no-changelog'])).toBe('bun run release:prepare --no-bump --no-changelog');
+    expect(resumeCommandAfterBump(['--minor'])).toBe('bun run release:prepare --no-bump');
+  });
 });

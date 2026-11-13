@@ -68,6 +68,8 @@ let revertResult: unknown = {
   refused: false, refusal: null,
 };
 let revertError: unknown = null;
+/** Per-call overrides for revertHunkPreview, consumed in call order (a pending promise holds that call in flight). */
+const previewQueue: Promise<unknown>[] = [];
 const previewCalls: { path: string; hunk: string; sessionId?: string }[] = [];
 const revertCalls: { path: string; hunk: string; confirmToken?: string; sessionId?: string }[] = [];
 
@@ -88,7 +90,8 @@ mock.module('../../lib/goodvibes', () => ({
         }),
         revertHunkPreview: (input: { path: string; hunk: string; sessionId?: string }) => {
           previewCalls.push(input);
-          return Promise.resolve(previewResult);
+          const gated = previewQueue.shift();
+          return gated ?? Promise.resolve(previewResult);
         },
         revertHunk: (input: { path: string; hunk: string; confirmToken?: string; sessionId?: string }) => {
           revertCalls.push(input);
@@ -176,6 +179,7 @@ afterEach(() => {
   };
   revertError = null;
   previewCalls.length = 0;
+  previewQueue.length = 0;
   revertCalls.length = 0;
 });
 
@@ -376,4 +380,36 @@ describe('SessionChanges', () => {
     unmount();
   });
 
+
+  test('a stale preview result for an abandoned revert does not mark a conflict on the newer one', async () => {
+    let releaseStale!: (value: unknown) => void;
+    previewQueue.push(new Promise((resolve) => { releaseStale = resolve; }));
+    const { container, unmount } = render({ canSteer: true, closed: false });
+    await settle();
+
+    // First revert attempt: its preview hangs. The operator closes the sheet...
+    openHunkAction(container, 'reject');
+    await settle(2);
+    expect(previewCalls).toHaveLength(1);
+    click(container.querySelector('.hunk-sheet__cancel'));
+    await settle(2);
+
+    // ...and starts again on the same hunk; this preview resolves cleanly.
+    openHunkAction(container, 'reject');
+    await settle(3);
+    expect(previewCalls).toHaveLength(2);
+    expect(container.querySelector('.hunk-sheet__send--danger')).not.toBeNull();
+
+    // The abandoned first preview now arrives saying the hunk is stale.
+    releaseStale({
+      path: 'src/foo.ts', applies: false, conflict: 'stale result from the abandoned preview',
+      hunkHeader: '@@ -40,3 +40,4 @@', addedLinesRemoved: 0, removedLinesRestored: 0, matchedAtLine: null,
+      token: null, expiresAt: null,
+    });
+    await settle(3);
+
+    expect(container.textContent).not.toContain('stale result from the abandoned preview');
+    expect(container.querySelector('.hunk-sheet__send--danger')).not.toBeNull();
+    unmount();
+  });
 });

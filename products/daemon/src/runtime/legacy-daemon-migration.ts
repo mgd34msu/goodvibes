@@ -518,9 +518,17 @@ export async function runLegacyDaemonMigration(
     };
   }
 
+  // Resume: an earlier run installed and started this exact unit and then failed while retiring the
+  // legacy unit. Only a managed unit that is installed, running and byte-identical to what this tool
+  // renders is treated as ours; anything else is still refused below.
+  let resuming = false;
+  if (currentStatus.installed && currentStatus.running) {
+    try { resuming = manager.installedDefinitionMatches(); } catch { resuming = false; }
+  }
+
   // A running target or existing definition belongs to the user. Never
   // replace it or mistake it for a resource this migration may remove.
-  if (currentStatus.installed || currentStatus.running) {
+  if (!resuming && (currentStatus.installed || currentStatus.running)) {
     return {
       ok: false,
       exitCode: 1,
@@ -541,8 +549,12 @@ export async function runLegacyDaemonMigration(
       lines: [
         legacyUnitNote(legacy, resolvedUnitName),
         'migrate-service (dry run, re-run with confirmation to execute): this would',
-        `  1. install and start the new ${resolvedUnitName}.service unit`,
-        '  2. verify it comes up healthy (a fresh, honest systemd is-active check)',
+        resuming
+          ? `  1. skip install: the managed ${resolvedUnitName}.service unit is already installed, running and identical to what this tool renders (an earlier migration stopped before retiring the legacy unit)`
+          : `  1. install and start the new ${resolvedUnitName}.service unit`,
+        resuming
+          ? '  2. skip the health check: the managed unit is already running'
+          : '  2. verify it comes up healthy (a fresh, honest systemd is-active check)',
         `  3. only if that succeeds, stop, disable, and remove the install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit ` +
           'and run `systemctl --user daemon-reload`',
         'Nothing has been changed. Nothing is migrated automatically; re-run with explicit confirmation ' +
@@ -579,32 +591,34 @@ export async function runLegacyDaemonMigration(
     }
   };
 
-  assertUnitIsNotLegacy(currentStatus, legacy, 'install the new unit');
-  let setupError: string | undefined;
-  try {
-    const installed = manager.install();
-    healthCheck = installed;
-    if (installed.actionError) setupError = 'the new unit could not be installed';
-    else {
-      const started = manager.start();
-      healthCheck = manager.status();
-      if (started.actionError || !healthCheck.running) setupError = 'the new unit did not come up healthy';
+  if (!resuming) {
+    assertUnitIsNotLegacy(currentStatus, legacy, 'install the new unit');
+    let setupError: string | undefined;
+    try {
+      const installed = manager.install();
+      healthCheck = installed;
+      if (installed.actionError) setupError = 'the new unit could not be installed';
+      else {
+        const started = manager.start();
+        healthCheck = manager.status();
+        if (started.actionError || !healthCheck.running) setupError = 'the new unit did not come up healthy';
+      }
+    } catch {
+      setupError = 'the new unit setup or health check threw';
     }
-  } catch {
-    setupError = 'the new unit setup or health check threw';
-  }
-  if (setupError) {
-    const rollbackNote = rollbackNewUnit();
-    return {
-      ok: false,
-      exitCode: 1,
-      lines: [
-        `migrate-service aborted: ${setupError}.`,
-        rollbackNote,
-        `The install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit was never touched and should still be running as before.`,
-      ],
-      status: healthCheck,
-    };
+    if (setupError) {
+      const rollbackNote = rollbackNewUnit();
+      return {
+        ok: false,
+        exitCode: 1,
+        lines: [
+          `migrate-service aborted: ${setupError}.`,
+          rollbackNote,
+          `The install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit was never touched and should still be running as before.`,
+        ],
+        status: healthCheck,
+      };
+    }
   }
 
   // New unit verified healthy, now, and only now, retire the legacy unit.
@@ -619,12 +633,14 @@ export async function runLegacyDaemonMigration(
       return status;
     } catch { return undefined; }
   };
+  const RETRY_NOTE = `Retry (resumes only the retirement of ${legacyName}; the healthy managed unit is not reinstalled): goodvibes-daemon migrate-service -y`;
   const retirementRefused = (action: 'stop' | 'disable'): LegacyDaemonMigrationResult => ({
     ok: false, exitCode: 1, status: healthCheck,
     lines: [
       `migration incomplete: the new ${resolvedUnitName}.service unit is healthy, but ${action} of ${legacyName} did not report success.`,
       `The legacy unit definition at ${legacy.path} was not removed. Its running or enabled state is unconfirmed.`,
-      `Verify the legacy unit before retrying: systemctl --user status ${legacyName}`,
+      `Verify the legacy unit: systemctl --user status ${legacyName}`,
+      RETRY_NOTE,
     ],
   });
   if (retirementStatus('stop') !== 0) return retirementRefused('stop');
@@ -641,6 +657,7 @@ export async function runLegacyDaemonMigration(
     return { ok: false, exitCode: 1, status: healthCheck, lines: [
       `migration incomplete: the new ${resolvedUnitName}.service unit is healthy and ${legacyName} was stopped and disabled.`,
       `Removal of the legacy unit definition at ${legacy.path} could not be confirmed; inspect it before retrying.`,
+      RETRY_NOTE,
     ] };
   }
   const reloaded = retirementStatus('daemon-reload') === 0;
@@ -650,5 +667,6 @@ export async function runLegacyDaemonMigration(
     reloaded ? 'ran `systemctl --user daemon-reload`.'
       : 'daemon-reload did not report success; verify with `systemctl --user daemon-reload` before treating the migration as complete.',
   ];
+  if (!reloaded) lines.push('The legacy unit file is already gone, so migrate-service has nothing left to resume; the only remaining step is: systemctl --user daemon-reload');
   return { ok: reloaded, exitCode: reloaded ? 0 : 1, lines, status: healthCheck };
 }

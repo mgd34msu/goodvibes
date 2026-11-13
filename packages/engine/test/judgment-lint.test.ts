@@ -139,11 +139,6 @@ describe('registered use', () => {
     ]);
   });
 
-  test('the actual raw recorder forwards one strict incoming request without defining another decision', () => {
-    const path = resolve(import.meta.dir, '../scripts/static-source-call-recording.ts');
-    expect(sourceFindings(path, readFileSync(path, 'utf8'), registered)).toEqual([]);
-  });
-
   const strictForwarder = `
     import { captureStrictJudgmentJson as capture } from '../platform/src/platform/gate/judgment-result.js';
     function decorate(inner) { return { ask(request) {

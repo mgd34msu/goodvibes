@@ -68,7 +68,7 @@ An agent or a background process can take over the whole terminal. `Enter` on an
 | `agent_review_packet_presets` | Save, list, show, freshness-check, and refresh reusable Document Ops review packet presets without changing drafts, routes, handoffs, archives, or source presets. |
 | `agent_review_packet_share` | Share one confirmed reviewer handoff archive reference through a configured channel target without printing or attaching ZIP bytes. |
 | `agent_artifacts` | Browse, preview, export, package, and archive saved Agent artifacts. |
-| `agent_research_runs` | Create, checkpoint, pause, resume, cancel, complete, fail, list, and show log tails for project-local visible research run records. |
+| `agent_research_runs` | Create, start, checkpoint, pause, resume, cancel, complete, fail, list, and show log tails for project-local visible research run records. `start` begins a planned run, `resume` continues a paused or blocked run, and `pause` applies only to a running run; a refused action names the one that applies. Cancelled, completed and failed runs are final. |
 | `agent_research_sources` | Capture, review, reject, mark used, list, and bundle project-local research source queue records. |
 | `agent_research_report` | Save one confirmed sourced research report artifact with source map, citation coverage metadata, repair hints, and optional visual report packet sections. |
 | `research` | Plan research, inspect runs/sources, bundle reviewed sources, and perform confirmed run/source/report actions through one user-facing route. |

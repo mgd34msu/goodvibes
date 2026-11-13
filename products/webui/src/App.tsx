@@ -250,6 +250,15 @@ export default function App() {
     setDraftChatRequested(!nextSessionId);
   }, [sessionRestored, view, activeChatSessionId, chatSessionItems, chatSessions.isSuccess, setSession]);
 
+  // "New chat" is a request for an EMPTY session, so it cannot outlive a URL that names
+  // one. Back/forward after "New chat" lands on a session without passing through any
+  // handler above; without this the header and sidebar kept reading "New chat" while the
+  // chat showed that session. (Every handler that sets the flag also clears the session
+  // in the same batch, so this never races a genuine new-chat request.)
+  useEffect(() => {
+    if (draftChatRequested && activeChatSessionId) setDraftChatRequested(false);
+  }, [draftChatRequested, activeChatSessionId]);
+
   useEffect(() => {
     if (sessionRestored) writeStoredActiveCompanionSessionId(activeChatSessionId);
   }, [activeChatSessionId, sessionRestored]);

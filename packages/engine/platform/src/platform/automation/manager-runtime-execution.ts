@@ -11,10 +11,13 @@ import type { AutomationSessionTarget } from './session-targets.js';
 import type { AutomationRunTrigger } from './types.js';
 import type { ConfigManager } from '../config/manager.js';
 import { summarizeError } from '../utils/error-display.js';
+import { logger } from '../utils/logger.js';
 import { readAutomationRunTransience } from './manager-runtime-delivery.js';
 import {
   buildAutomationExecutionIntent,
   buildAutomationExecutionContext,
+  canSettleStoredRun,
+  jobEnablement,
 } from './manager-runtime-helpers.js';
 import { executeCheckinJob, type AutomationCheckinEvaluator } from './checkin-execution.js';
 import { markWorkAuthorized } from '../agents/conversation-continuation.js';
@@ -228,6 +231,15 @@ export async function executeAutomationJob(
     return runningRun;
   } catch (error) {
     const message = summarizeError(error);
+    const stored = context.runs.get(run.id);
+    if (!canSettleStoredRun(stored, 'failed')) {
+      // Cancelled (or otherwise settled) while the start was in flight: the
+      // recorded outcome stands; the start failure is still the caller's error.
+      logger.warn('AutomationManager: start failed after the run was already settled; keeping its recorded status', {
+        jobId: job.id, runId: run.id, status: stored?.status, error: message,
+      });
+      throw error;
+    }
     const failedRun: AutomationRun = {
       ...run,
       status: 'failed',
@@ -572,8 +584,7 @@ export function applyFailureToJob(job: AutomationJob, timestamp: number, countRu
     lastRunAt: timestamp,
     runCount: countRun ? job.runCount + 1 : job.runCount,
     failureCount: nextFailureCount,
-    enabled: shouldPause ? false : job.enabled,
-    status: shouldPause ? 'paused' : job.status,
+    ...(shouldPause ? jobEnablement(false) : {}),
     pausedReason: shouldPause ? 'failure-threshold-reached' : job.pausedReason,
     updatedAt: timestamp,
   };

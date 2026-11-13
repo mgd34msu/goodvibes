@@ -56,8 +56,9 @@ export function PairingTokensSettings() {
 
   const rename = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => platformClient.operator.pairing.tokens.rename(id, name),
-    onSuccess: async (result) => {
-      setEditingId(null);
+    onSuccess: async (result, { id }) => {
+      // Close only the editor this save belongs to, never another device's.
+      setEditingId((current) => (current === id ? null : current));
       if (!result.renamed) {
         toast({ title: 'Rename failed', description: 'The daemon reported no such token.', tone: 'danger' });
       }

@@ -33,7 +33,7 @@
     "build:binary": "bun scripts/build.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
-    "test": "bun ../../packages/engine/scripts/test.ts --cwd ../../products/agent src/test",
+    "test": "bun ../../packages/engine/scripts/test.ts --cwd ../../products/agent --jobs=auto src/test",
     "test:e2e": "bun ../../packages/engine/scripts/test.ts --cwd ../../products/agent --timeout=120000 src/test/e2e/startup-first-turn.e2e.test.ts src/test/e2e/first-start-workspace.e2e.test.ts"
   },
   "license": "MIT",

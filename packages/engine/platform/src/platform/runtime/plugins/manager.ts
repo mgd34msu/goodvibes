@@ -174,14 +174,18 @@ export class PluginLifecycleManager {
       const loaded = await loadPlugin({ manifest, pluginDir }, deps, cacheBust);
 
       if (!loaded) {
-        this.transition(name, 'error', 'loadPlugin returned null');
+        const toError = this.transition(name, 'error', 'loadPlugin returned null');
         this.updateRecord(name, { lastError: 'loadPlugin returned null', errorAt: Date.now() });
-        this.emit({
-          type: 'PLUGIN_ERROR',
-          pluginId: name,
-          error: 'loadPlugin returned null',
-          fatal: false,
-        });
+        if (toError.ok) {
+          this.emit({
+            type: 'PLUGIN_ERROR',
+            pluginId: name,
+            error: 'loadPlugin returned null',
+            fatal: false,
+          });
+        } else {
+          logger.warn(`[plugin-lifecycle] ${name}: error state refused, ${toError.reason}`);
+        }
         return false;
       }
 
@@ -209,14 +213,18 @@ export class PluginLifecycleManager {
       return true;
     } catch (err) {
       const errorMsg = summarizeError(err);
-      this.transition(name, 'error', errorMsg);
+      const toError = this.transition(name, 'error', errorMsg);
       this.updateRecord(name, { lastError: errorMsg, errorAt: Date.now() });
-      this.emit({
-        type: 'PLUGIN_ERROR',
-        pluginId: name,
-        error: errorMsg,
-        fatal: false,
-      });
+      if (toError.ok) {
+        this.emit({
+          type: 'PLUGIN_ERROR',
+          pluginId: name,
+          error: errorMsg,
+          fatal: false,
+        });
+      } else {
+        logger.warn(`[plugin-lifecycle] ${name}: error state refused, ${toError.reason}`);
+      }
       logger.error(`[plugin-lifecycle] ${name}: load threw, ${errorMsg}`);
       return false;
     }
@@ -246,11 +254,24 @@ export class PluginLifecycleManager {
 
     // Delegate to the existing unloadPlugin function if a loaded instance is available.
     const loadedPlugin = loaderDeps?.getLoadedPlugin?.(name);
+    // A throwing cleanup must not strand the record in `unloading` (its only exit
+    // is `disabled`): record the error, then still come to rest.
     if (loadedPlugin) {
-      await unloadPlugin(loadedPlugin);
+      try {
+        await unloadPlugin(loadedPlugin);
+      } catch (err) {
+        const errorMsg = summarizeError(err);
+        this.updateRecord(name, { lastError: errorMsg, errorAt: Date.now() });
+        this.emit({ type: 'PLUGIN_ERROR', pluginId: name, error: errorMsg, fatal: false });
+        logger.error(`[plugin-lifecycle] ${name}: unload threw, ${errorMsg}`);
+      }
     }
 
-    this.transition(name, 'disabled', reason);
+    const toDisabled = this.transition(name, 'disabled', reason);
+    if (!toDisabled.ok) {
+      logger.warn(`[plugin-lifecycle] ${name}: disable refused, ${toDisabled.reason}`);
+      return;
+    }
     this.emit({
       type: 'PLUGIN_DISABLED',
       pluginId: name,

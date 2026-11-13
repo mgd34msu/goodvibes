@@ -299,7 +299,7 @@ export async function makeHome(model: StubModel): Promise<E2EHome> {
   mkdirSync(dirname(models), { recursive: true });
   writeFileSync(models, JSON.stringify({ version: 1, fetchedAt: Date.now(), ttlMs: 86_400_000, models: [] }));
   // The compiled process keeps the same strict network guard as source tests.
-  const guard = resolve(REPO_ROOT, '../../packages/engine/scripts/test-network-preload.ts');
+  const guard = resolve(REPO_ROOT, '../../packages/engine/toolchain/src/test-runner/test-network-preload.ts');
   writeFileSync(join(workspace, 'bunfig.toml'), `preload = [${JSON.stringify(guard)}]\n`);
   return e2eHome;
 }

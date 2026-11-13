@@ -124,6 +124,93 @@ test('a symlink to an original claim cannot authorize deleting that public entry
   `);
 });
 
+test('claim release is re-entrant: products already released, or half released, do not block the rest', () => {
+  succeeds(`
+    VERSION=v3.1.2
+    exec 0< "$DIRECTORY"
+    claim_release_install uninstall
+    # An earlier release removed product 1 completely and only the public claim of product 2.
+    rm -f "$DIRECTORY/goodvibes-daemon.update-transaction" "$INSTALL_CLAIM_OWNER/goodvibes-daemon"
+    rm -f "$DIRECTORY/goodvibes.update-transaction"
+    release_install_claims
+    for product in goodvibes-daemon goodvibes goodvibes-agent; do
+      [ ! -e "$DIRECTORY/$product.update-transaction" ]
+    done
+    [ -z "$INSTALL_CLAIM_OWNER" ]
+    # And a second call after full release is a no-op success.
+    release_install_claims
+  `);
+});
+
+test('the program is renamed last: every companion and descriptor is published before it', () => {
+  succeeds(`
+    VERSION=v3.1.2; os_tag=linux; PLATFORM_SUFFIX=linux-x64
+    WORKDIR="$HOME/work"; mkdir "$WORKDIR"; INSTALL_JOURNAL="$WORKDIR/journal"; : > "$INSTALL_JOURNAL"
+    for suffix in "" .bun .bun.json .bun.LICENSE.md; do printf new > "$WORKDIR/goodvibes-daemon-linux-x64$suffix"; done
+    printf new > "$WORKDIR/daemon-installation.json"
+    exec 0< "$DIRECTORY"
+    claim_release_install uninstall
+    mv() { printf 'mv %s\\n' "\${2##*/}" >> "$HOME/order"; command mv "$@"; }
+    install_release_binary goodvibes-daemon
+    unset -f mv
+  `);
+  expect(readFileSync(join(root, 'order'), 'utf8').trim().split('\n')).toEqual(
+    ['goodvibes-daemon.bun', 'goodvibes-daemon.bun.json', 'goodvibes-daemon.bun.LICENSE.md', 'daemon-installation.json', 'goodvibes-daemon'].map(name => `mv ${name}.incoming`));
+});
+
+function journalShell(body: string) {
+  return succeeds(`
+    VERSION=v3.1.2; os_tag=linux
+    INSTALL_JOURNAL="$HOME/journal"; : > "$INSTALL_JOURNAL"
+    TARGET="$DIRECTORY/program"; printf 'ORIGINAL PROGRAM BYTES' > "$TARGET"
+    ${body}
+  `);
+}
+
+test('a backup copy that fails midway never authorises a restore over the intact program', () => {
+  journalShell(`
+    ln() { return 1; }
+    cp() { printf 'TRUNC' > "$3"; return 1; }
+    if ( install_journal_target "$TARGET" ); then exit 91; fi
+    unset -f cp ln
+    [ ! -e "$TARGET.goodvibes-previous" ] && [ ! -e "$TARGET.goodvibes-previous.partial" ]
+    if grep -q . "$INSTALL_JOURNAL"; then exit 92; fi
+    rollback_install_swap
+    [ "$(cat "$TARGET")" = 'ORIGINAL PROGRAM BYTES' ]
+  `);
+});
+
+test('a copy fallback is published under the backup name only once complete', () => {
+  journalShell(`
+    ln() { return 1; }
+    install_journal_target "$TARGET"
+    unset -f ln
+    [ "$(cat "$TARGET.goodvibes-previous")" = 'ORIGINAL PROGRAM BYTES' ]
+    [ ! -e "$TARGET.goodvibes-previous.partial" ]
+    grep -q "^R$TARGET\$" "$INSTALL_JOURNAL"
+  `);
+});
+
+test('rollback of a backup that is still a link to the untouched program just removes the spare link', () => {
+  journalShell(`
+    install_journal_target "$TARGET"
+    [ "$TARGET" -ef "$TARGET.goodvibes-previous" ]
+    rollback_install_swap
+    [ "$(cat "$TARGET")" = 'ORIGINAL PROGRAM BYTES' ]
+    [ ! -e "$TARGET.goodvibes-previous" ]
+  `);
+});
+
+test('the printed manual recovery for an unreplaced program removes the spare link instead of a failing mv', () => {
+  const result = journalShell(`
+    install_journal_target "$TARGET"
+    INSTALL_CLAIM_DIR=$DIRECTORY; INSTALL_CLAIM_OWNER=$DIRECTORY/owner
+    report_unfinished_swap commands 2>&1
+  `);
+  expect(result.stdout).toContain('spare link');
+  expect(result.stdout).not.toContain('restore: mv -f');
+});
+
 const darwinTest = process.platform === 'darwin' ? test : test.skip;
 darwinTest('native Darwin fstat and lstat revisions ignore an incompatible stat selected through PATH', () => {
   const gnubin = join(root, 'gnubin');

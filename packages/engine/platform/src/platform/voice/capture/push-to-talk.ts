@@ -191,8 +191,21 @@ export class PushToTalkSession {
     const stream = this.#stream;
     this.#stream = null;
     this.#recorder = null;
-    if (stream !== null) await stream.stop();
-    if (generation === this.#captureGeneration) this.#setPhase('idle');
+    try {
+      if (stream !== null) await stream.stop();
+    } catch (error) {
+      this.#reportStopFailure(error);
+    } finally {
+      if (generation === this.#captureGeneration) this.#setPhase('idle');
+    }
+  }
+
+  /** A stream that would not stop is reported; it never strands the phase. */
+  #reportStopFailure(error: unknown): void {
+    this.#options.onError?.(new AudioCaptureError(
+      'stream-ended',
+      `the capture device did not release cleanly: ${error instanceof Error ? error.message : String(error)}`,
+    ));
   }
 
   async #endWith(reason: VoiceInputStopReason): Promise<CapturedUtterance> {
@@ -202,7 +215,13 @@ export class PushToTalkSession {
     this.#recorder = null;
     this.#stream = null;
     this.#setPhase('stopping');
-    if (stream !== null) await stream.stop();
+    try {
+      if (stream !== null) await stream.stop();
+    } catch (error) {
+      // The audio already captured is still valid, and an auto-stop has no awaiter
+      // to receive a rejection; report it and carry on to the resting phase.
+      this.#reportStopFailure(error);
+    }
     const utterance = (recorder ?? new VoiceInputRecorder(this.#recorderPolicy(0))).finish(reason);
     if (generation !== this.#captureGeneration) return utterance;
     this.#setPhase('idle');

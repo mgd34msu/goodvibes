@@ -49,7 +49,7 @@ async function fixture(nativeCaptureFailure = false) {
   const tuiDir = join(home.home, '.goodvibes/tui');
   const daemonHome = join(home.home, '.goodvibes/daemon');
   const networkViolations = join(home.root, 'network-violations.log');
-  const guard = resolve(import.meta.dir, '../../../../../packages/engine/scripts/test-network-preload.ts');
+  const guard = resolve(import.meta.dir, '../../../../../packages/engine/toolchain/src/test-runner/test-network-preload.ts');
   writeFileSync(join(home.workspace, 'bunfig.toml'), `preload = [${JSON.stringify(guard)}]\n`);
   const now = Date.now();
   writeFileSync(join(tuiDir, 'onboarding-checked.json'), JSON.stringify({ version: 1, checkedAt: now, updatedAt: now, source: 'e2e' }));

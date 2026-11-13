@@ -9,6 +9,7 @@ import {
   ACTIVE_TURN_STATES,
   assistantContentFromCompletedTurn,
   companionEventType,
+  nextTurnStatus,
   type CompletedToolCall,
 } from './message-utils';
 
@@ -165,9 +166,18 @@ export function useChatStream({
   // having to repeat the input back on the result event.
   const pendingToolInputRef = useRef<Map<string, { toolName: string; toolInput: unknown; startedAt: number }>>(new Map());
 
+  // Latest turn status this hook knows of (the prop each render, plus every plain
+  // write made through syncedSetTurnState), so stop()'s late catch can tell a
+  // turn that already settled from one still in flight.
+  const turnStateRef = useRef(turnState ?? 'idle');
+  useEffect(() => {
+    turnStateRef.current = turnState ?? 'idle';
+  }, [turnState]);
+
   // Forward state updates to the caller's authoritative turnState.
   const syncedSetTurnState: Dispatch<SetStateAction<string>> = useCallback(
     (nextState) => {
+      if (typeof nextState === 'string') turnStateRef.current = nextState;
       setTurnState(nextState);
     },
     [setTurnState],
@@ -186,6 +196,7 @@ export function useChatStream({
     if (!activeSessionId) return;
     const owner = connectionOwner.current;
     const lifetime = getClientLifetime();
+    turnStateRef.current = 'stopping';
     setTurnState('stopping');
     void platformClient.chat.turns.cancel(activeSessionId).catch((error: unknown) => {
       if (!owner || connectionOwner.current !== owner || !isClientLifetimeCurrent(lifetime)) return;
@@ -208,7 +219,11 @@ export function useChatStream({
         );
         return;
       }
-      setTurnState('error');
+      // A terminal outcome (completed/stopped/...) may have arrived while the
+      // cancel request was in flight: a late failure must not overwrite it, nor
+      // leave an error message next to a settled turn.
+      if (nextTurnStatus(turnStateRef.current, 'error') !== 'error') return;
+      setTurnState((current) => nextTurnStatus(current, 'error'));
       setTurnError(error instanceof Error ? error.message : String(error));
     });
     // On success nothing else happens here: the terminal turn.cancelled event
@@ -322,7 +337,7 @@ export function useChatStream({
             liveTextRef.current += delta;
             setLiveText((current) => current + delta);
           }
-          syncedSetTurnState('streaming');
+          syncedSetTurnState((current) => nextTurnStatus(current, 'streaming'));
           return;
         }
 
@@ -340,7 +355,7 @@ export function useChatStream({
             // input back) can still build a full CompletedToolCall for the fold.
             pendingToolInputRef.current.set(toolCallId, { toolName, toolInput: asRecord(payload).toolInput, startedAt: Date.now() });
           }
-          syncedSetTurnState('tooling');
+          syncedSetTurnState((current) => nextTurnStatus(current, 'tooling'));
           return;
         }
 
@@ -367,7 +382,7 @@ export function useChatStream({
               },
             ];
           }
-          syncedSetTurnState('tooling');
+          syncedSetTurnState((current) => nextTurnStatus(current, 'tooling'));
           return;
         }
 

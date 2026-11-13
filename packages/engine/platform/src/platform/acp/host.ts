@@ -408,8 +408,12 @@ export class AcpHostService {
         if (record.operation !== operation) return;
         operation.lifetime.abort();
         if (record.info.state === 'prompting' || record.info.state === 'awaiting-approval') {
-          record.info.state = response.stopReason === 'cancelled' ? 'stopped' : 'idle';
-          if (record.info.state === 'stopped') record.info.completedAt = this.now();
+          // A cancelled turn ends the turn, not the session: the child and the
+          // connection are still alive, so the row goes back to idle (promptable,
+          // not dismissable) rather than 'stopped', which would refuse prompts
+          // while still owning a child and let a later exit rewrite it as 'failed'.
+          // Only stop() or a failure tears the session down.
+          record.info.state = 'idle';
         }
       })
       .catch((error: unknown) => {

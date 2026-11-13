@@ -42,7 +42,8 @@ function writePkgJson(dir: string, contents: Record<string, unknown>): void {
 describe('enumerateWorkspacePackages', () => {
   test('uses the actual public engine and judgment manifests, independently of native release opt-in', () => {
     const packages = enumerateWorkspacePackages(ENGINE_ROOT);
-    expect(packages).toEqual([{ nm: 'engine', dir: '.' }, { nm: 'judgment', dir: '../judgment' }]);
+    // Publish order: the engine depends on judgment, so judgment comes first.
+    expect(packages).toEqual([{ nm: 'judgment', dir: '../judgment' }, { nm: 'engine', dir: '.' }]);
   });
 
   test('excludes private packages and packages without publishConfig.access:"public"', () => {

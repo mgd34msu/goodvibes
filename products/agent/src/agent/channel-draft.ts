@@ -37,6 +37,7 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import { retainChannelStoreSource, type ChannelStoreEffectOptions } from './channel-store-lifetime.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { AgentChannelDeliveryInput } from './channel-delivery.ts';
+import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from './daemon-operator-client.ts';
 
 export const CHANNEL_DRAFTS_LIST_METHOD = 'channels.drafts.list';
@@ -56,6 +57,26 @@ export type ChannelDraftSyncOutcome =
 // ---------------------------------------------------------------------------
 
 export type ChannelDraftStatus = 'draft' | 'queued' | 'sent' | 'failed';
+
+/**
+ * A draft is queued once per delivery attempt: queueDraftToSend hands out the
+ * delivery input only on a move into 'queued', so an already queued draft
+ * cannot be sent twice. 'sent' is final. A failed delivery may be queued again
+ * as a retry. (saveDraft edits a draft's content and may set any status; this
+ * table governs the send-path writers.)
+ */
+/** How long a draft may sit queued with no recorded outcome before it counts as abandoned and may be queued again. */
+export const ABANDONED_QUEUE_MS = 10 * 60_000;
+
+export const channelDraftLifecycle = defineLifecycle<ChannelDraftStatus>('channel draft', {
+  // A delivery outcome is a fact about something that already happened, so it
+  // is recorded from any status except `sent` (a draft can be edited back to
+  // `draft` while its delivery is in flight). `sent` is final.
+  draft: ['queued', 'sent', 'failed'],
+  queued: ['sent', 'failed'],
+  sent: [],
+  failed: ['queued', 'sent', 'failed'],
+});
 
 export interface ChannelDraft {
   readonly wireReference?: string;
@@ -558,6 +579,16 @@ export async function queueDraftToSend(
   const draft = getDraft(shellPaths, draftId);
   if (!draft) throw new Error(`Draft not found: ${draftId}`);
   if (draft.status === 'sent') throw new Error(`Draft ${draftId} is already sent.`);
+  // A draft still queued long after it was handed to delivery was abandoned by
+  // a process that exited before recording an outcome. Without this it could
+  // never be sent: let it be queued again once it is clearly not in flight.
+  const abandoned = draft.status === 'queued' && Date.now() - Date.parse(draft.updatedAt) >= ABANDONED_QUEUE_MS;
+  const move = channelDraftLifecycle.check(draft.status, 'queued');
+  if (!move.ok && !abandoned) {
+    throw new Error(draft.status === 'queued'
+      ? `Draft ${draftId} is already queued and being delivered; it can be queued again if no outcome is recorded within ${ABANDONED_QUEUE_MS / 60_000} minutes.`
+      : `Draft ${draftId}: ${move.reason}.`);
+  }
 
   const deliveryInput: AgentChannelDeliveryInput = {
     message: draft.message,
@@ -596,6 +627,8 @@ export function markDraftSent(
   const snapshot = writableDraftSnapshot(shellPaths);
   const existing = snapshot.drafts[matchingDraftIndex(snapshot.drafts, draftId)];
   if (!existing) throw new Error(`Draft not found: ${draftId}`);
+  const move = channelDraftLifecycle.check(existing.status, 'sent');
+  if (!move.ok) throw new Error(`Draft ${draftId}: ${move.reason}.`);
   const now = new Date().toISOString();
   const patched: ChannelDraft = {
     ...existing,
@@ -621,6 +654,8 @@ export function markDraftFailed(
   const snapshot = writableDraftSnapshot(shellPaths);
   const existing = snapshot.drafts[matchingDraftIndex(snapshot.drafts, draftId)];
   if (!existing) throw new Error(`Draft not found: ${draftId}`);
+  const move = channelDraftLifecycle.check(existing.status, 'failed');
+  if (!move.ok) throw new Error(`Draft ${draftId}: ${move.reason}.`);
   const now = new Date().toISOString();
   const patched: ChannelDraft = {
     ...existing,

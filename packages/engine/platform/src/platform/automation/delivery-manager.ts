@@ -223,7 +223,13 @@ export class AutomationDeliveryManager {
           startedAt: Date.now(),
           error: undefined,
         };
-        this.syncAttempt(attempt, run, 'started');
+        // The stored attempt carries what is really happening, so it is never
+        // left `pending` while a send is in flight or after one settles.
+        attempts[attempts.length - 1] = attempt;
+        // Reporting the start is observability: if it throws the send still
+        // goes ahead, and the sent/failed report that follows settles the state.
+        try { this.syncAttempt(attempt, run, 'started'); }
+        catch (error) { logger.warn('Delivery started but its start could not be reported', { deliveryId, error: summarizeError(error) }); }
         try {
           const responseId = await this.sendTarget(resolved, body, job, run);
           if (resolved.binding?.id && responseId) {
@@ -277,17 +283,6 @@ export class AutomationDeliveryManager {
           );
           await sleep(delayMs);
         }
-      }
-
-      if (lastError && attempts[attempts.length - 1]?.status === 'sending') {
-        const failedAttempt: AutomationDeliveryAttempt = {
-          ...attempts[attempts.length - 1]!,
-          status: 'failed',
-          endedAt: Date.now(),
-          error: lastError,
-        };
-        attempts[attempts.length - 1] = failedAttempt;
-        this.syncAttempt(failedAttempt, run, 'failed', lastError, true);
       }
     }
 

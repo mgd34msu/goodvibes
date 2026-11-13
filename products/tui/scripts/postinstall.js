@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { isPrivateWorkspaceSource } from '../src/cli/workspace-source.ts';
 import { homedir } from 'node:os';
@@ -29,6 +29,24 @@ function isSourceCheckout() {
 function prepareBinary(path) {
   if (process.platform !== 'win32') {
     chmodSync(path, 0o755);
+  }
+}
+
+/**
+ * Place `source` at `destination` without a window in which the destination is
+ * missing or partial: copy beside it, make it runnable, then rename over it
+ * (atomic within one directory). An interrupted run leaves the previous binary
+ * and, at worst, one stray `.partial` file that the next run overwrites.
+ */
+function placeBinary(source, destination) {
+  const staged = `${destination}.partial`;
+  try {
+    copyFileSync(source, staged);
+    prepareBinary(staged);
+    renameSync(staged, destination);
+  } catch (error) {
+    rmSync(staged, { force: true });
+    throw error;
   }
 }
 
@@ -90,9 +108,7 @@ function installFromPlatformPackage(artifacts, vendorDir) {
   }
 
   const destination = join(vendorDir, artifacts.app);
-  rmSync(destination, { force: true });
-  copyFileSync(app, destination);
-  prepareBinary(destination);
+  placeBinary(app, destination);
 
   // Carry the sqlite-vec native addon (bin/lib/...) beside the vendored binary
   // so semantic memory keeps working (resolved as <execDir>/lib/...).
@@ -132,8 +148,7 @@ async function installPlatformBinaries() {
       throw new Error(`missing local release artifact for postinstall smoke: ${sourcePath}`);
     }
     const destination = join(vendorDir, artifacts.app);
-    copyFileSync(sourcePath, destination);
-    prepareBinary(destination);
+    placeBinary(sourcePath, destination);
     console.log(`postinstall: installed the local smoke-test binary for ${process.platform}-${process.arch}`);
     return;
   }
@@ -173,10 +188,14 @@ export async function installVerifiedReleaseBinary(artifactName, checksums, rele
     rmSync(tempDestination, { force: true });
     throw error;
   }
-  rmSync(destination, { force: true });
-  copyFileSync(tempDestination, destination);
-  rmSync(tempDestination, { force: true });
-  prepareBinary(destination);
+  // The verified download already sits beside the destination: rename it over the old binary.
+  try {
+    prepareBinary(tempDestination);
+    renameSync(tempDestination, destination);
+  } catch (error) {
+    rmSync(tempDestination, { force: true });
+    throw error;
+  }
 }
 
 function deployBundledFiles() {

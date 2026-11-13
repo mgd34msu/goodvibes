@@ -50,7 +50,7 @@ async function fixture(withoutInspection = false) {
   try {
     const ready = await host.ready();
     const networkViolations = join(home.root, 'network-violations.log');
-    const guard = resolve(import.meta.dir, '../../../../../packages/engine/scripts/test-network-preload.ts');
+    const guard = resolve(import.meta.dir, '../../../../../packages/engine/toolchain/src/test-runner/test-network-preload.ts');
     writeFileSync(join(home.workspace, 'bunfig.toml'), `preload = [${JSON.stringify(guard)}]\n`);
     const tuiDir = join(home.home, '.goodvibes/tui');
     const now = Date.now();

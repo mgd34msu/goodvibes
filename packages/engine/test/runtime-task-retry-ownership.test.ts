@@ -29,7 +29,7 @@ interface Harness {
   readonly spawned: string[];
 }
 
-function makeHarness(taskId: string, initial: TaskRecord): Harness {
+function makeHarness(taskId: string, initial: TaskRecord, options: { readonly withRetryGate?: boolean } = { withRetryGate: true }): Harness {
   const tasks = new Map<string, TaskRecord>([[taskId, initial]]);
   const cancelled: string[] = [];
   const spawned: string[] = [];
@@ -60,8 +60,16 @@ function makeHarness(taskId: string, initial: TaskRecord): Harness {
       transitionRuntimeTask: (id: string, status: string, patch: Record<string, unknown>) => {
         const existing = tasks.get(id);
         if (!existing) return;
+        // Mirrors the store: queued is reachable only from a retryable status.
+        if (status === 'queued' && !['failed', 'cancelled', 'queued'].includes(existing.status)) return;
         tasks.set(id, { ...existing, ...patch, status } as TaskRecord);
       },
+      ...(options.withRetryGate === false ? {} : {
+        canRetryRuntimeTask: (id: string) => {
+          const existing = tasks.get(id);
+          return existing !== undefined && ['failed', 'cancelled'].includes(existing.status);
+        },
+      }),
     },
     publishConversationFollowup: () => {},
     openSessionEventStream: () => new Response('stream', { status: 200 }),
@@ -110,5 +118,30 @@ describe('retrying a runtime task moves ownership to the agent that is actually 
     const cancel = await harness.handlers.runtimeTaskAction(taskId, 'cancel', actionRequest(taskId, 'cancel'));
     expect(cancel.status).toBe(200);
     expect(harness.cancelled).toEqual(['agent-original']);
+  });
+
+  test('retry of a completed task is refused before any agent is spawned', async () => {
+    const taskId = 'task-3';
+    const harness = makeHarness(taskId, { kind: 'agent', owner: 'agent-done', status: 'completed', description: 'x' });
+    const retry = await harness.handlers.runtimeTaskAction(taskId, 'retry', actionRequest(taskId, 'retry'));
+    expect(retry.status).toBe(400);
+    const body = await retry.json() as { error: string; retried?: boolean };
+    expect(body.error).toContain('failed');
+    expect(body.error).toContain('cancelled');
+    expect(body.retried).toBeUndefined();
+    expect(harness.spawned).toEqual([]);
+    expect(harness.tasks.get(taskId)?.owner).toBe('agent-done');
+    expect(harness.tasks.get(taskId)?.status).toBe('completed');
+  });
+
+  test('a refused transition is never reported as retried; the spawned agent is cancelled', async () => {
+    const taskId = 'task-4';
+    const harness = makeHarness(taskId, { kind: 'agent', owner: 'agent-done', status: 'completed', description: 'x' }, { withRetryGate: false });
+    const retry = await harness.handlers.runtimeTaskAction(taskId, 'retry', actionRequest(taskId, 'retry'));
+    expect(retry.status).toBe(400);
+    const body = await retry.json() as { retried?: boolean };
+    expect(body.retried).toBeUndefined();
+    expect(harness.cancelled).toEqual(harness.spawned);
+    expect(harness.tasks.get(taskId)?.owner).toBe('agent-done');
   });
 });

@@ -9,48 +9,11 @@ type Job = { if?: string; needs?: string[]; uses?: string; with?: Record<string,
 type Workflow = { on: Record<string, { inputs: Record<string, { required?: boolean; type?: string; default?: unknown }> }>; jobs: Record<string, Job> };
 const load = (name: string) => Bun.YAML.parse(readFileSync(resolve(import.meta.dir, '../.github/workflows', name), 'utf8')) as Workflow;
 const previousSource = 'a5ddf1f151466590eaed4ab387b2f95be7112a86';
-const matrix = [{ target: 'linux-x64', runner: 'ubuntu-24.04' }, { target: 'linux-arm64', runner: 'ubuntu-22.04-arm' },
-  { target: 'darwin-x64', runner: 'macos-15-intel' }, { target: 'darwin-arm64', runner: 'macos-15' }];
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 for (const mode of ['staged', 'published'] as const) {
   const workflow = load(`reusable-${mode}-install-acceptance.yml`), upgrade = workflow.jobs['previous-release-upgrade']!;
-  test(`${mode} acceptance adds four real previous-suite lanes without replacing fresh or historical evidence`, () => {
-    for (const trigger of ['workflow_call', 'workflow_dispatch']) {
-      for (const input of ['previous-tag', 'previous-source']) {
-        expect(workflow.on[trigger]!.inputs[input]).toEqual(expect.objectContaining({ required: false, type: 'string', default: '' }));
-      }
-    }
-    expect(upgrade.if).toBe("inputs.tag != 'v3.1.2' || inputs.previous-tag != '' || inputs.previous-source != ''");
-    expect(upgrade.strategy?.matrix.include).toEqual(matrix); expect(upgrade.strategy?.['fail-fast']).toBe(false);
-    expect(workflow.jobs['native-install']!.strategy?.matrix.include).toEqual(matrix);
-    expect(workflow.jobs['historical-linux-upgrade']!.if).toBe("inputs.tag == 'v3.1.2'");
-    const oldRun = workflow.jobs['historical-linux-upgrade']!.steps!.find(step => step.run?.includes('upgrade-v3.1.1'));
-    expect(oldRun?.run).toEndWith(' upgrade-v3.1.1');
-    expect(upgrade.needs).toEqual(mode === 'staged' ? ['stage-release-assets'] : undefined);
-    const steps = upgrade.steps!;
-    expect(steps.filter(step => String(step.uses).startsWith('actions/checkout@')).map(step => step.with)).toEqual([
-      { ref: '${{ inputs.tooling-sha }}', 'fetch-depth': 0 }, { ref: '${{ inputs.source }}', path: 'candidate-source' },
-    ]);
-    expect(steps.find(step => String(step.uses).startsWith('actions/setup-node@'))?.with).toEqual({ 'node-version': '22' });
-    expect(steps.find(step => String(step.uses).startsWith('oven-sh/setup-bun@'))?.with).toEqual({ 'bun-version': '1.3.14' });
-    const invoke = steps.find(step => step.name === 'Observe previous-suite automatic upgrade and complete-cohort rollback')!;
-    expect(invoke.env).toEqual({ RELEASE_TAG: '${{ inputs.tag }}', RELEASE_SOURCE: '${{ inputs.source }}', RELEASE_TARGET: '${{ matrix.target }}',
-      PREVIOUS_TAG: '${{ inputs.previous-tag }}', PREVIOUS_SOURCE: '${{ inputs.previous-source }}', CANDIDATE_SOURCE_ROOT: '${{ github.workspace }}/candidate-source',
-      GOODVIBES_ACCEPTANCE_METADATA_TOKEN: '${{ secrets.GITHUB_TOKEN }}' });
-    expect(invoke.run).toBe(`node scripts/accept-${mode}-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET"${mode === 'staged' ? ' "$RUNNER_TEMP/staged-release-assets"' : ''} upgrade-previous "$PREVIOUS_TAG" "$PREVIOUS_SOURCE"`);
-    const commands = steps.map(step => step.run ?? '').join('\n');
-    expect(commands).not.toMatch(/scripts\/build\.ts|build:binary|GOODVIBES_HOME/);
-    expect(steps.filter(step => step.run?.startsWith('bun install'))).toEqual([{ name: 'Install source lifecycle writer dependencies', 'working-directory': 'candidate-source', run: 'bun install --frozen-lockfile' }]);
-    const downloads = steps.filter(step => String(step.uses).startsWith('actions/download-artifact@'));
-    if (mode === 'staged') expect(downloads.map(step => step.with)).toEqual([{ name: 'staged-release-assets', path: '${{ runner.temp }}/staged-release-assets' }]);
-    else expect(downloads).toEqual([]);
-    const upload = steps.find(step => String(step.uses).startsWith('actions/upload-artifact@'))!;
-    expect(upload.if).toBe('always()');
-    expect(upload.with).toMatchObject({ name: `${mode}-upgrade-previous-` + '${{ matrix.target }}', path: '${{ runner.temp }}/goodvibes-published-*/acceptance-result.json' });
-  });
-
   test(`${mode} actual input guard rejects an absent/partial previous identity and wrong checkout owner`, () => {
     const root = mkdtempSync(join(tmpdir(), 'previous-suite-workflow-')); roots.push(root);
     mkdirSync(join(root, 'bin')); mkdirSync(join(root, 'scripts'));
@@ -75,49 +38,3 @@ for (const mode of ['staged', 'published'] as const) {
     }
   });
 }
-
-test('new patch release pins the previous public suite for required prepublication qualification', () => {
-  const release = load('release.yml');
-  for (const job of ['staged-install-acceptance']) {
-    expect(release.jobs[job]?.with).toMatchObject({
-      'previous-tag': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.6' && 'v3.1.5' || needs.verify-tag-version.outputs.tag == 'v3.1.5' && 'v3.1.4' || needs.verify-tag-version.outputs.tag == 'v3.1.4' && 'v3.1.3' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && 'v3.1.2' || '' }}",
-      'previous-source': "${{ needs.verify-tag-version.outputs.tag == 'v3.1.6' && 'b160053d8d934364ec4884df4f6dbb909e963147' || needs.verify-tag-version.outputs.tag == 'v3.1.5' && '9c19f683bf3e19250e64a04ae6c8c8f4a3988522' || needs.verify-tag-version.outputs.tag == 'v3.1.4' && '0065d6726d4d9fe3f800e255711b6cf8d78d0d72' || needs.verify-tag-version.outputs.tag == 'v3.1.3' && '" + previousSource + "' || '' }}",
-    });
-  }
-  expect(release.jobs['github-release']!.needs).toContain('staged-install-acceptance');
-  expect(release.jobs['github-release']!.if).toContain("needs.staged-install-acceptance.result == 'success'");
-  expect(release.jobs['published-install-acceptance']).toBeUndefined();
-  for (const job of Object.values(release.jobs)) expect(job.needs ?? []).not.toContain('github-release');
-});
-
-test('manual suite preparation requires an explicit tag and defaults to no public mutation', () => {
-  const suite = load('suite-release-assets.yml');
-  expect(suite.on.workflow_dispatch!.inputs.tag).toMatchObject({ required: true });
-  expect(suite.on.workflow_dispatch!.inputs.tag?.default).toBeUndefined();
-  expect(suite.on.workflow_dispatch!.inputs.publish_existing?.default).toBe(false);
-  expect(suite.on.workflow_call!.inputs.publish_existing?.default).toBe(false);
-  expect(suite.jobs['published-install-acceptance']!.with).toMatchObject({
-    'previous-tag': "${{ inputs.tag == 'v3.1.3' && 'v3.1.2' || '' }}",
-    'previous-source': "${{ inputs.tag == 'v3.1.3' && '" + previousSource + "' || '' }}",
-  });
-});
-
-test('suite packaging builds the selected source fresh without requiring a previous CI run', () => {
-  const suite = load('suite-release-assets.yml'), packaging = suite.jobs.package!;
-  expect(packaging.strategy?.matrix.include).toEqual(matrix);
-  const steps = packaging.steps!;
-  const checkout = steps.findIndex(step => step.with?.ref === '${{ inputs.candidate-source || inputs.tag }}');
-  const build = steps.findIndex(step => step.name === 'Build publisher tooling and engine');
-  const native = steps.findIndex(step => step.name === 'Package and execute native release binaries');
-  expect(checkout).toBeGreaterThanOrEqual(0);
-  expect(build).toBeGreaterThan(checkout); expect(native).toBeGreaterThan(build);
-  expect(steps[build]?.run).toBe('bun packages/engine/scripts/build.ts');
-  expect(steps[native]?.run).toContain('bun "$RUNNER_TEMP/package-suite-release.mjs" "$TARGET" "$RUNNER_TEMP/release-assets" "$RELEASE_TAG"');
-  expect(steps[native]?.env).toEqual({ TARGET: '${{ matrix.target }}', RELEASE_TAG: '${{ inputs.tag }}' });
-  const commands = steps.map(step => step.run ?? '').join('\n');
-  expect(commands).not.toMatch(/gh api|actions\/workflows\/ci\.yml|ci-runs\.json|ci-jobs\.json|head_sha=/);
-  expect(steps.some(step => step.name === 'Require exact-source successful push CI')).toBe(false);
-  expect(suite.jobs.collect!.needs).toBe('package');
-  expect(suite.jobs['published-install-acceptance']!.needs).toBe('collect');
-  expect(suite.jobs['published-install-acceptance']!.uses).toBe('./.github/workflows/reusable-published-install-acceptance.yml');
-});

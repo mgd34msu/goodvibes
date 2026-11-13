@@ -3,12 +3,28 @@ import { writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
 import { randomUUID } from 'node:crypto';
 import { buildSandboxLaunchPlan, executeSandboxCommand, resolveSandboxCommandPlan, type SandboxCommandResult } from './backend.js';
 import { getSandboxConfigSnapshot, listSandboxProfiles, renderSandboxReview, type ConfigManagerLike } from './manager.js';
+import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import type {
   SandboxProfile,
   SandboxSession,
   SandboxSessionArtifact,
   SandboxSessionKind,
+  SandboxSessionState,
 } from './types.js';
+
+/**
+ * The sandbox session lifecycle, from the moves this registry makes: a start
+ * probe leaves a session running or failed; a command exit moves running <-> failed;
+ * stop ends it from anywhere. `stopped` is final, so a stopped session refuses
+ * commands and a late exit cannot revive or fail it. `planned` is declared in the
+ * session type but never assigned by this registry.
+ */
+export const sandboxSessionLifecycle = defineLifecycle<SandboxSessionState>('sandbox session', {
+  planned: ['running', 'failed', 'stopped'],
+  running: ['failed', 'stopped'],
+  failed: ['running', 'stopped'],
+  stopped: [],
+});
 
 function createSandboxSessionId(): string {
   return `sandbox_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
@@ -91,6 +107,7 @@ export class SandboxSessionRegistry {
   public stop(sessionId: string): SandboxSession | null {
     const existing = this.sessions.get(sessionId);
     if (!existing) return null;
+    if (existing.state === 'stopped') return existing;
     return this.updateSession(sessionId, (session) => ({
       ...session,
       state: 'stopped',
@@ -121,17 +138,21 @@ export class SandboxSessionRegistry {
       throw new Error(`Sandbox session ${sessionId} does not have a launch plan.`);
     }
 
+    if (session.state === 'stopped') {
+      const refusal = sandboxSessionLifecycle.check('stopped', 'running');
+      throw new Error(`Sandbox session ${sessionId} cannot run commands: ${refusal.ok ? 'session is stopped' : refusal.reason}`);
+    }
+
     const resolvedPlan = resolveSandboxCommandPlan(command, args);
     const result = executeSandboxCommand(session.launchPlan, command, args, options);
     const stdoutPreview = (result.stdout || '').trim().slice(0, 200);
     const stderrPreview = (result.stderr || '').trim().slice(0, 200);
-    const nextState: SandboxSession['state'] = result.status === 0
-      ? (session.state === 'stopped' ? 'stopped' : 'running')
-      : 'failed';
+    const exitState: SandboxSession['state'] = result.status === 0 ? 'running' : 'failed';
 
     this.updateSession(sessionId, (current) => ({
       ...current,
-      state: nextState,
+      // A session stopped while the command ran stays stopped; a late exit cannot revive or fail it.
+      state: current.state === exitState || sandboxSessionLifecycle.can(current.state, exitState) ? exitState : current.state,
       lastRunAt: Date.now(),
       lastCommandSummary: resolvedPlan.summary,
       lastExitStatus: result.status,

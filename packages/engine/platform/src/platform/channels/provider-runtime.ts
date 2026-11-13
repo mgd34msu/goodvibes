@@ -87,6 +87,15 @@ export class ChannelProviderRuntimeManager {
   private slackClient: SlackSocketModeClient | null = null;
   private discordClient: DiscordGatewayClient | null = null;
   /**
+   * The start in progress for each socket surface, shared by concurrent callers,
+   * and a generation that `stop()` bumps so a start still resolving tokens or
+   * waiting on the socket knows it was cancelled.
+   */
+  private slackStart: Promise<ProviderRuntimeActionResult> | null = null;
+  private discordStart: Promise<ProviderRuntimeActionResult> | null = null;
+  private slackGeneration = 0;
+  private discordGeneration = 0;
+  /**
    * One live subscription per TOPIC, not one stream carrying all of them.
    *
    * ntfy will happily serve `topic-a,topic-b` down a single connection, and
@@ -170,12 +179,16 @@ export class ChannelProviderRuntimeManager {
 
   stop(surface: ProviderRuntimeSurface): ProviderRuntimeActionResult {
     if (surface === 'slack') {
+      this.slackGeneration += 1;
+      this.slackStart = null;
       this.slackClient?.stop();
       this.slackClient = null;
       this.markStopped('slack');
       return this.result('slack', true, 'Slack Socket Mode runtime stopped.');
     }
     if (surface === 'discord') {
+      this.discordGeneration += 1;
+      this.discordStart = null;
       this.discordClient?.stop();
       this.discordClient = null;
       this.markStopped('discord');
@@ -289,68 +302,99 @@ export class ChannelProviderRuntimeManager {
     };
   }
 
-  private async startSlack(): Promise<ProviderRuntimeActionResult> {
+  private startSlack(): Promise<ProviderRuntimeActionResult> {
     if (this.slackClient?.isStarted) {
-      return this.result('slack', true, 'Slack Socket Mode runtime is already running.');
+      return Promise.resolve(this.result('slack', true, 'Slack Socket Mode runtime is already running.'));
     }
+    // A concurrent start shares the one in flight rather than building a second client.
+    if (this.slackStart) return this.slackStart;
+    const inFlight = this.runSlackStart(this.slackGeneration).finally(() => {
+      if (this.slackStart === inFlight) this.slackStart = null;
+    });
+    this.slackStart = inFlight;
+    return inFlight;
+  }
+
+  private async runSlackStart(generation: number): Promise<ProviderRuntimeActionResult> {
     const appToken = await this.resolveSlackAppToken();
     const botToken = await this.resolveSlackBotToken();
     if (!appToken) {
       this.markError('slack', 'Slack app-level token is required for Socket Mode.');
       return this.result('slack', false, 'Slack app-level token is required for Socket Mode.');
     }
-    const slack = new SlackIntegration(
-      await this.deps.serviceRegistry.resolveSecret('slack', 'webhookUrl') ?? process.env.SLACK_WEBHOOK_URL,
-      botToken ?? undefined,
-    );
-    const client = new SlackSocketModeClient({
+    const webhookUrl = await this.deps.serviceRegistry.resolveSecret('slack', 'webhookUrl') ?? process.env.SLACK_WEBHOOK_URL;
+    if (generation !== this.slackGeneration) return this.result('slack', false, 'Slack Socket Mode start was cancelled by stop().');
+    const slack = new SlackIntegration(webhookUrl, botToken ?? undefined);
+    const client: SlackSocketModeClient = new SlackSocketModeClient({
       appToken,
       integration: slack,
       onEnvelope: (envelope) => this.handleSlackEnvelope(envelope, slack),
-      onClosed: (reason) => this.reportSocketLost('slack', reason),
+      onClosed: (reason) => this.reportSocketLost('slack', reason, client),
     });
+    // Reachable by stop() from here on, not only after start() resolves.
+    this.slackClient = client;
     try {
       const connection = await client.start();
+      if (this.slackClient !== client) {
+        // stop() (or a newer start) took over while the socket was opening.
+        client.stop();
+        return this.result('slack', false, 'Slack Socket Mode start was cancelled by stop().');
+      }
       if (!connection.ok) {
+        this.slackClient = null;
         const message = connection.error ?? 'Slack Socket Mode connection failed.';
         this.markError('slack', message);
         return this.result('slack', false, message);
       }
-      this.slackClient = client;
       this.markStarted('slack', { socketMode: true });
       return this.result('slack', true, 'Slack Socket Mode runtime started.');
     } catch (error) {
+      if (this.slackClient === client) this.slackClient = null;
       const message = summarizeError(error);
       this.markError('slack', message);
       return this.result('slack', false, message);
     }
   }
 
-  private async startDiscord(): Promise<ProviderRuntimeActionResult> {
+  private startDiscord(): Promise<ProviderRuntimeActionResult> {
     if (this.discordClient?.isStarted) {
-      return this.result('discord', true, 'Discord Gateway runtime is already running.');
+      return Promise.resolve(this.result('discord', true, 'Discord Gateway runtime is already running.'));
     }
+    if (this.discordStart) return this.discordStart;
+    const inFlight = this.runDiscordStart(this.discordGeneration).finally(() => {
+      if (this.discordStart === inFlight) this.discordStart = null;
+    });
+    this.discordStart = inFlight;
+    return inFlight;
+  }
+
+  private async runDiscordStart(generation: number): Promise<ProviderRuntimeActionResult> {
     const botToken = await this.resolveDiscordBotToken();
     if (!botToken) {
       this.markError('discord', 'Discord bot token is required for Gateway runtime.');
       return this.result('discord', false, 'Discord bot token is required for Gateway runtime.');
     }
-    const discord = new DiscordIntegration(
-      await this.deps.serviceRegistry.resolveSecret('discord', 'webhookUrl') ?? process.env.DISCORD_WEBHOOK_URL,
-      botToken,
-    );
-    const client = new DiscordGatewayClient({
+    const webhookUrl = await this.deps.serviceRegistry.resolveSecret('discord', 'webhookUrl') ?? process.env.DISCORD_WEBHOOK_URL;
+    if (generation !== this.discordGeneration) return this.result('discord', false, 'Discord Gateway start was cancelled by stop().');
+    const discord = new DiscordIntegration(webhookUrl, botToken);
+    const client: DiscordGatewayClient = new DiscordGatewayClient({
       token: botToken,
       integration: discord,
       onDispatch: (dispatch) => this.handleDiscordDispatch(dispatch, discord),
-      onClosed: (reason) => this.reportSocketLost('discord', reason),
+      onClosed: (reason) => this.reportSocketLost('discord', reason, client),
     });
+    // Reachable by stop() from here on, not only after start() resolves.
+    this.discordClient = client;
     try {
       const gateway = await client.start();
-      this.discordClient = client;
+      if (this.discordClient !== client) {
+        client.stop();
+        return this.result('discord', false, 'Discord Gateway start was cancelled by stop().');
+      }
       this.markStarted('discord', { gatewayUrl: gateway.url, shards: gateway.shards });
       return this.result('discord', true, 'Discord Gateway runtime started.');
     } catch (error) {
+      if (this.discordClient === client) this.discordClient = null;
       const message = summarizeError(error);
       this.markError('discord', message);
       return this.result('discord', false, message);
@@ -560,7 +604,10 @@ export class ChannelProviderRuntimeManager {
    * The state is marked stopped first so a `/status` read during the stand-down
    * says what is true: this node is not reading that surface.
    */
-  private reportSocketLost(kind: 'slack' | 'discord', reason: string): void {
+  private reportSocketLost(kind: 'slack' | 'discord', reason: string, client?: SlackSocketModeClient | DiscordGatewayClient): void {
+    // A stale client's late close must not unseat or mark-stopped a newer one.
+    const current = kind === 'slack' ? this.slackClient : this.discordClient;
+    if (client && current !== client) return;
     if (kind === 'slack') this.slackClient = null;
     else this.discordClient = null;
     this.markStopped(kind);

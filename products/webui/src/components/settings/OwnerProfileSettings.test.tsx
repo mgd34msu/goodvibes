@@ -63,6 +63,8 @@ let mockStatus: QueryLike<ProfileStatus> = idleQuery();
 let mockProvenance: QueryLike<ProfileProvenanceAnswer> = idleQuery();
 let provenanceFieldIds: (string | null)[] = [];
 
+/** When set, set/append mutations settle with this error instead of a result. */
+let writeError: unknown = null;
 let setCalls: { fieldId: string; value: string }[] = [];
 let setResult: WriteResult = { ok: true, changes: [], disclosure: '' };
 let appendCalls: { section: string; text: string }[] = [];
@@ -73,11 +75,17 @@ let undoResult: WriteResult = { ok: true, changes: [], disclosure: '' };
 
 const setMutation: MutationLike<{ fieldId: string; value: string }, WriteResult> = {
   isPending: false,
-  mutate: (vars, options) => { setCalls.push(vars); options?.onSuccess?.(setResult); },
+  mutate: (vars, options) => {
+    setCalls.push(vars);
+    if (writeError) options?.onError?.(writeError); else options?.onSuccess?.(setResult);
+  },
 };
 const appendMutation: MutationLike<{ section: string; text: string }, WriteResult> = {
   isPending: false,
-  mutate: (vars, options) => { appendCalls.push(vars); options?.onSuccess?.({ ok: true, changes: [], disclosure: '' }); },
+  mutate: (vars, options) => {
+    appendCalls.push(vars);
+    if (writeError) options?.onError?.(writeError); else options?.onSuccess?.({ ok: true, changes: [], disclosure: '' });
+  },
 };
 const forgetMutation: MutationLike<ProfileTarget, WriteResult> = {
   isPending: false,
@@ -160,6 +168,7 @@ afterEach(() => {
   mockStatus = idleQuery();
   mockProvenance = idleQuery();
   provenanceFieldIds = [];
+  writeError = null;
   setCalls = [];
   setResult = { ok: true, changes: [], disclosure: '' };
   appendCalls = [];
@@ -541,5 +550,61 @@ describe('OwnerProfileSettings', () => {
     typeInto(input, 'Ken, neighbour');
     submitForm(input);
     expect(appendCalls).toEqual([{ section: 'People', text: 'Ken, neighbour' }]);
+  });
+
+  test('a failed field save keeps the editor open with the typed text; a later success closes it', () => {
+    mockDocument = successQuery(LOADED);
+    writeError = new Error('daemon unreachable');
+    const { el, unmount } = render();
+    cleanup = unmount;
+
+    const rowSelector = '[data-testid="profile-field-contact.phone"]';
+    flushSync(() => { buttonIn(el.querySelector(rowSelector), 'Edit').click(); });
+    const input = el.querySelector<HTMLInputElement>(`${rowSelector} input`);
+    typeInto(input, '+1 517 555 0199');
+    submitForm(input);
+
+    expect(el.textContent).toContain('daemon unreachable');
+    const kept = el.querySelector<HTMLInputElement>(`${rowSelector} input`);
+    expect(kept).not.toBeNull();
+    expect(kept?.value).toBe('+1 517 555 0199');
+
+    writeError = null;
+    submitForm(kept);
+    expect(setCalls).toHaveLength(2);
+    expect(el.querySelector(`${rowSelector} input`)).toBeNull();
+  });
+
+  test('a field save the daemon refuses (ok:false) also keeps the typed text', () => {
+    mockDocument = successQuery(LOADED);
+    setResult = { ok: false, reason: 'not recorded', changes: [], disclosure: '' };
+    const { el, unmount } = render();
+    cleanup = unmount;
+
+    const rowSelector = '[data-testid="profile-field-contact.phone"]';
+    flushSync(() => { buttonIn(el.querySelector(rowSelector), 'Edit').click(); });
+    typeInto(el.querySelector<HTMLInputElement>(`${rowSelector} input`), 'abc');
+    submitForm(el.querySelector<HTMLInputElement>(`${rowSelector} input`));
+
+    expect(el.querySelector<HTMLInputElement>(`${rowSelector} input`)?.value).toBe('abc');
+  });
+
+  test('a failed append keeps the typed line; a successful one clears the form', () => {
+    mockDocument = successQuery(LOADED);
+    writeError = new Error('append failed');
+    const { el, unmount } = render();
+    cleanup = unmount;
+
+    const people = el.querySelector('[data-testid="profile-section-People"]');
+    flushSync(() => { buttonIn(people, 'Add a line to').click(); });
+    typeInto(people?.querySelector<HTMLInputElement>('input'), 'Ken, neighbour');
+    submitForm(people?.querySelector<HTMLInputElement>('input'));
+
+    expect(people?.querySelector<HTMLInputElement>('input')?.value).toBe('Ken, neighbour');
+
+    writeError = null;
+    submitForm(people?.querySelector<HTMLInputElement>('input'));
+    expect(appendCalls).toHaveLength(2);
+    expect(people?.querySelector('input')).toBeNull();
   });
 });

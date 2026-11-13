@@ -559,3 +559,31 @@ describe('App: delete-means-delete, companion chat sidebar delete', () => {
     unmount();
   });
 });
+
+describe('App: the new-chat draft flag follows the URL session', () => {
+  const newChatNav = (container: HTMLElement): HTMLButtonElement => {
+    const button = [...container.querySelectorAll('.shell-nav .shell-nav-item')]
+      .find((b) => b.textContent?.trim() === 'New chat') as HTMLButtonElement | undefined;
+    expect(button).toBeTruthy();
+    return button!;
+  };
+
+  test('Back from "New chat" to a session clears the draft state instead of keeping New chat current', async () => {
+    window.history.pushState({}, '', '/?view=chat&session=c1');
+    const { container, unmount } = render();
+    await flushMicrotasks();
+    expect(newChatNav(container).getAttribute('aria-current')).toBeNull();
+
+    flushSync(() => newChatNav(container).dispatchEvent(new window.MouseEvent('click', { bubbles: true })));
+    await flushMicrotasks();
+    expect(newChatNav(container).getAttribute('aria-current')).toBe('page');
+
+    // Browser Back: the URL returns to the session, the app hears popstate.
+    window.history.replaceState({}, '', '/?view=chat&session=c1');
+    flushSync(() => { window.dispatchEvent(new window.PopStateEvent('popstate')); });
+    await flushMicrotasks();
+
+    expect(newChatNav(container).getAttribute('aria-current')).toBeNull();
+    unmount();
+  });
+});

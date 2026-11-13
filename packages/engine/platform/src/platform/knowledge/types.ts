@@ -1,4 +1,5 @@
 import type { AutomationScheduleDefinition } from '../automation/schedules.js';
+import { defineLifecycle } from '../utils/lifecycle-machine.js';
 
 export type KnowledgeSourceType =
   | 'url'
@@ -70,6 +71,18 @@ export type KnowledgeExtractionFormat =
 export type KnowledgePacketDetail = 'compact' | 'standard' | 'detailed';
 export type KnowledgeJobMode = 'inline' | 'background';
 export type KnowledgeJobStatus = 'queued' | 'running' | 'completed' | 'failed';
+
+/**
+ * A knowledge job run is created `queued`, starts `running`, and settles once as
+ * `completed` or `failed`. A queued run may fail without ever running (its first
+ * write failed, or its process exited first). Settled runs never move again.
+ */
+export const knowledgeJobRunLifecycle = defineLifecycle<KnowledgeJobStatus>('knowledge job run', {
+  queued: ['running', 'failed'],
+  running: ['completed', 'failed'],
+  completed: [],
+  failed: [],
+});
 export type KnowledgeRefinementTaskState =
   | 'detected'
   | 'queued'

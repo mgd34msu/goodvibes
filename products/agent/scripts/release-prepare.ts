@@ -145,6 +145,30 @@ const runPrepareCommand: PrepareCommandRunner = (command, args, options) => {
   return { status: result.status, stdout: result.stdout ?? '' };
 };
 
+/**
+ * The command that continues a run whose version bump already happened: the same
+ * options with the bump choice replaced by `--no-bump`, so the version is not bumped again.
+ */
+export function resumeCommandAfterBump(argv: readonly string[]): string {
+  const kept: string[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]!;
+    if (arg === '--patch' || arg === '--minor' || arg === '--major' || arg === '--no-bump') continue;
+    if (arg === '--version') { i += 1; continue; }
+    kept.push(arg);
+  }
+  return ['bun', 'run', 'release:prepare', '--no-bump', ...kept].join(' ');
+}
+
+function afterBumpFailure(error: unknown, argv: readonly string[], from: string, to: string): Error {
+  const reason = error instanceof Error ? error.message : String(error);
+  return new Error(
+    `${reason}\n[release:prepare] package.json was already bumped ${from} -> ${to} and stays at ${to}; the steps after it are safe to repeat.\n`
+    + `  Resume at ${to} (do NOT repeat the bump option; it would bump again): ${resumeCommandAfterBump(argv)}\n`
+    + `  Or abandon the bump: git checkout -- package.json`,
+  );
+}
+
 function run(root: string, execute: PrepareCommandRunner, label: string, command: string, args: readonly string[]): void {
   console.log(`[release:prepare] ${label}: ${command} ${args.join(' ')}`);
   const result = execute(command, args, { cwd: root, captureOutput: false });
@@ -180,30 +204,34 @@ export async function prepareRelease(
     console.log(`[release:prepare] package.json ${current} -> ${version}`);
   }
 
-  if (args.install) run(root, execute, 'relock', 'bun', ['install']);
-  run(root, execute, 'project surfaces', 'bun', ['run', 'scripts/prebuild.ts']);
-  run(root, execute, 'google setup runbook', 'bun', ['run', 'scripts/generate-google-runbook.ts']);
+  try {
+    if (args.install) run(root, execute, 'relock', 'bun', ['install']);
+    run(root, execute, 'project surfaces', 'bun', ['run', 'scripts/prebuild.ts']);
+    run(root, execute, 'google setup runbook', 'bun', ['run', 'scripts/generate-google-runbook.ts']);
 
-  if (args.changelog) {
-    const date = new Date().toISOString().slice(0, 10);
-    console.log(rewriteFile(root, 'CHANGELOG.md', (text) => scaffoldChangelogText(text, version, date))
-      ? `[release:prepare] CHANGELOG.md: scaffolded ## ${version}; write the notes before pushing.`
-      : `[release:prepare] CHANGELOG.md already has a ## ${version} section.`);
-    console.log(rewriteFile(root, RELEASE_NOTES_PATH, (text) => scaffoldReleaseNotesText(text, version, date))
-      ? `[release:prepare] ${RELEASE_NOTES_PATH}: scaffolded for ${version}; write the notes before pushing.`
-      : `[release:prepare] ${RELEASE_NOTES_PATH} already names ${version}.`);
-  }
+    if (args.changelog) {
+      const date = new Date().toISOString().slice(0, 10);
+      console.log(rewriteFile(root, 'CHANGELOG.md', (text) => scaffoldChangelogText(text, version, date))
+        ? `[release:prepare] CHANGELOG.md: scaffolded ## ${version}; write the notes before pushing.`
+        : `[release:prepare] CHANGELOG.md already has a ## ${version} section.`);
+      console.log(rewriteFile(root, RELEASE_NOTES_PATH, (text) => scaffoldReleaseNotesText(text, version, date))
+        ? `[release:prepare] ${RELEASE_NOTES_PATH}: scaffolded for ${version}; write the notes before pushing.`
+        : `[release:prepare] ${RELEASE_NOTES_PATH} already names ${version}.`);
+    }
 
-  if (args.live) {
-    run(root, execute, 'build', 'bun', ['run', 'build']);
-    run(root, execute, 'live verification report', 'bun', ['run', 'scripts/verify-live.ts', '--strict', '--out', join('release', 'live-verification')]);
-  }
+    if (args.live) {
+      run(root, execute, 'build', 'bun', ['run', 'build']);
+      run(root, execute, 'live verification report', 'bun', ['run', 'scripts/verify-live.ts', '--strict', '--out', join('release', 'live-verification')]);
+    }
 
-  // Imported here, after the relock, so the check reads the files this run wrote.
-  const { verifyPackageFacingText, verifyReleaseStamps } = await import('../src/cli/package-verification.ts');
-  const issues = [...verifyPackageFacingText(root).failures, ...(args.changelog ? verifyReleaseStamps(root) : [])];
-  if (issues.length > 0) {
-    throw new Error(`package-facing text or version stamps need a fix:\n${issues.map((issue) => `  - ${issue}`).join('\n')}`);
+    // Imported here, after the relock, so the check reads the files this run wrote.
+    const { verifyPackageFacingText, verifyReleaseStamps } = await import('../src/cli/package-verification.ts');
+    const issues = [...verifyPackageFacingText(root).failures, ...(args.changelog ? verifyReleaseStamps(root) : [])];
+    if (issues.length > 0) {
+      throw new Error(`package-facing text or version stamps need a fix:\n${issues.map((issue) => `  - ${issue}`).join('\n')}`);
+    }
+  } catch (error) {
+    throw args.bump === null ? error : afterBumpFailure(error, argv, current, version);
   }
   console.log('[release:prepare] done; review `git diff`.');
 }

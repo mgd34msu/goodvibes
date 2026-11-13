@@ -1,3 +1,4 @@
+import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreFile, runStoreFileUpdateSync } from '@/utils/store-file.ts';
@@ -100,7 +101,7 @@ function parseNote(value: unknown): AgentNoteRecord | null {
   const title = normalizeTitle(readString(value.title));
   const body = readString(value.body).trim();
   if (!id || !title || !body) return null;
-  const reviewState = value.reviewState === 'reviewed' || value.reviewState === 'stale' ? value.reviewState : 'fresh';
+  const reviewState = parseAgentReviewState(value.reviewState);
   const source = value.source === 'agent' || value.source === 'imported' || value.source === 'system' ? value.source : 'user';
   const sourceUrl = readString(value.sourceUrl).trim();
   const staleReason = readString(value.staleReason).trim();
@@ -228,9 +229,7 @@ export class AgentNoteRegistry {
         tags: input.tags === undefined ? existing.tags : normalizeList(input.tags),
         sourceUrl,
         provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
-        reviewState: 'fresh',
-        staleReason: undefined,
-        reviewedAt: undefined,
+        ...freshReviewPatch(),
         updatedAt: nowIso(),
       };
       this.writeStore({
@@ -248,9 +247,7 @@ export class AgentNoteRegistry {
       if (!existing) throw new Error(`Unknown note ${idOrTitle}`);
       const updated: AgentNoteRecord = {
         ...existing,
-        reviewState: 'reviewed',
-        staleReason: undefined,
-        reviewedAt: nowIso(),
+        ...reviewedReviewPatch(),
         updatedAt: nowIso(),
       };
       this.writeStore({
@@ -268,8 +265,7 @@ export class AgentNoteRegistry {
       if (!existing) throw new Error(`Unknown note ${idOrTitle}`);
       const updated: AgentNoteRecord = {
         ...existing,
-        reviewState: 'stale',
-        staleReason: reason.trim() || 'Marked stale by user.',
+        ...staleReviewPatch(reason),
         updatedAt: nowIso(),
       };
       this.writeStore({

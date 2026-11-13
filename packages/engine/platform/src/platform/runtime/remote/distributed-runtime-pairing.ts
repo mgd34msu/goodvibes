@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import type {
+  DistributedPairRequestStatus,
   DistributedPeerAuth,
   DistributedPeerKind,
   DistributedPeerRecord,
@@ -83,6 +85,20 @@ export async function requestDistributedPairing(
   return { request: sanitizePairRequest(request), challenge };
 }
 
+/**
+ * The pair-request lifecycle, from the moves in this file and the store:
+ * approve (pending -> approved), verify (approved -> verified), reject
+ * (pending | approved -> rejected), expiry (pending | approved -> expired).
+ * Verified, rejected and expired are final.
+ */
+export const pairRequestLifecycle = defineLifecycle<DistributedPairRequestStatus>('pair request', {
+  pending: ['approved', 'rejected', 'expired'],
+  approved: ['verified', 'rejected', 'expired'],
+  verified: [],
+  rejected: [],
+  expired: [],
+});
+
 export async function approveDistributedPairRequest(
   state: DistributedRuntimeManagerState,
   requestId: string,
@@ -137,8 +153,13 @@ export async function rejectDistributedPairRequest(
   await startDistributedRuntime(state);
   const request = state.pairRequests.get(requestId);
   if (!request) return null;
+  expireDistributedPairRequests(state);
+  const current = state.pairRequests.get(requestId) ?? request;
+  // Same contract as approve on a settled request: hand back the record as it
+  // truly is (verified, expired, already rejected) instead of overwriting it.
+  if (!pairRequestLifecycle.can(current.status, 'rejected')) return sanitizePairRequest(current);
   const updated: StoredPairRequest = {
-    ...request,
+    ...current,
     status: 'rejected',
     rejectedAt: Date.now(),
     updatedAt: Date.now(),

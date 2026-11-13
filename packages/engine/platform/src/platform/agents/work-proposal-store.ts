@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { logger } from '../utils/logger.js';
+import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { summarizeError } from '../utils/error-display.js';
 
 export const WORK_PROPOSAL_SCHEMA_VERSION = 1;
@@ -26,6 +27,21 @@ export const WORK_PROPOSAL_SCHEMA_VERSION = 1;
 export const WORK_PROPOSAL_SWEEP_INTERVAL_MS = 5 * 60_000;
 
 export type WorkProposalStatus = 'pending' | 'accepted' | 'declined' | 'expired';
+
+/**
+ * The proposal lifecycle. A proposal is answered once (accepted or declined);
+ * answered and expired are final. `expired` is never assigned in memory (reap
+ * deletes an unanswered proposal at its expiry rather than keeping an expired
+ * row), but a persisted record can carry it and is accepted on load, so it
+ * stays declared. Orthogonal to this, a proposal is answerable only once
+ * `delivered` is true (see {@link WorkProposalRecord.delivered}).
+ */
+export const workProposalLifecycle = defineLifecycle<WorkProposalStatus>('work proposal', {
+  pending: ['accepted', 'declined', 'expired'],
+  accepted: [],
+  declined: [],
+  expired: [],
+});
 
 export interface WorkProposalRecord {
   readonly id: string;
@@ -353,15 +369,16 @@ export class WorkProposalStore {
   }
 
   /**
-   * Resolve a proposal. Returns null when the id is unknown or the proposal is
-   * no longer pending, an already-answered or expired proposal cannot be
-   * answered a second time.
+   * Resolve a proposal. Returns null when the id is unknown, the proposal is
+   * no longer pending (an already-answered or expired proposal cannot be
+   * answered a second time), or its message was never confirmed delivered (the
+   * owner has not seen it, so there is nothing for them to have answered).
    */
   resolve(id: string, outcome: 'accepted' | 'declined'): WorkProposalRecord | null {
     if (!this.sweepEnabled) return null;
     this.reap();
     const record = this.proposals.get(id);
-    if (!record || record.status !== 'pending') return null;
+    if (!record || !record.delivered || !workProposalLifecycle.can(record.status, outcome)) return null;
     const resolved: WorkProposalRecord = { ...record, status: outcome };
     this.proposals.set(id, resolved);
     void this.persist();

@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync,
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { GitService } from '../../git/service.js';
 import { logger } from '../../utils/logger.js';
+import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { resolveScopedDirectory } from '../surface-root.js';
 import type { WorktreeSetupResult } from './setup.js';
@@ -60,6 +61,24 @@ const WORKTREE_KINDS: ReadonlySet<string> = new Set<ManagedWorktreeKind>(['agent
 
 export type ManagedWorktreeState = 'active' | 'paused' | 'kept' | 'discard' | 'pending-cleanup';
 export type ManagedWorktreeKind = 'agent' | 'orchestrator' | 'manual';
+
+/**
+ * Worktree state is operator metadata, not a workflow: any state may be set to
+ * any state. The one external writer is `setState` (the TUI `/worktree
+ * pause|resume|keep`), and `/worktree recover` advertises `keep`/`resume` for
+ * every record it lists, including ones persisted as `discard` or
+ * `pending-cleanup`, which this registry never assigns itself (the record is
+ * removed by `discard()` instead) but accepts on load. Nothing is final, so no
+ * move is refused; the table records that. `setState` asserts against it so
+ * narrowing it takes effect there.
+ */
+export const worktreeStateLifecycle = defineLifecycle<ManagedWorktreeState>('worktree', {
+  active: ['active', 'paused', 'kept', 'discard', 'pending-cleanup'],
+  paused: ['active', 'paused', 'kept', 'discard', 'pending-cleanup'],
+  kept: ['active', 'paused', 'kept', 'discard', 'pending-cleanup'],
+  discard: ['active', 'paused', 'kept', 'discard', 'pending-cleanup'],
+  'pending-cleanup': ['active', 'paused', 'kept', 'discard', 'pending-cleanup'],
+});
 
 export interface ManagedWorktreeMeta {
   readonly path: string;
@@ -577,6 +596,7 @@ export class WorktreeRegistry {
       const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot));
       const normalized = normalizePath(path, this.workingDirectory);
       const existing = store.records[normalized]!;
+      if (existing) worktreeStateLifecycle.assert(existing.state, state);
       const classified = classifyWorktreePath(normalized, this.workingDirectory);
       store.records[normalized] = {
         path: normalized,

@@ -152,13 +152,69 @@ bun run build
 | Command | Does |
 | --- | --- |
 | `bun run build` | Build judgment, engine and all four products from the monorepo root |
-| `bun run test` | Run installer, judgment, engine and product tests through their owned runners |
-| `bun run validate` | Run the local integration gate: build/types, API/contracts, exports, packaging and runtime checks; see the full gate reference below |
+| `bun run test` | Run the installer, judgment, engine and product test suites |
+| `bun run validate` | Run the local integration gate: build/types, API/contracts, exports, packaging and runtime checks |
 | `bun run api:extract` / `bun run api:check` | Regenerate / verify the API Extractor reports under `etc/*.api.md` |
 | `bun run refresh:contracts` | Regenerate shared contract artifacts and product snapshots after a contract change |
 | `bun run docs:generate` / `bun run docs:check` | Regenerate / verify API reference docs; the check also verifies required docs and examples exist |
 
-CI (`.github/workflows/ci.yml`) runs `validate`, a standing eval gate scored against a checked-in baseline, a dependency and secret-scan audit, a single `build` that every downstream job restores rather than rebuilding, a `platform-matrix` job (Bun tests plus companion-bundle and Workers runtime legs), a types-resolution check over the packed exports map, `publint`, and a packaged-artifact conformance lane. On a green `main` push, an auto-release job tags and dispatches the release, but only while the repo's `RELEASE_ARMED` variable is set. Full gate reference: docs/testing-and-validation.md.
+### Running tests
+
+Every suite runs through one runner, `packages/engine/scripts/test.ts`, which
+wraps `bun test`. For each run it creates a temporary directory under the
+system temp directory, exports it as `TMPDIR`, and removes it when the run
+ends. Tests run with provider credentials and `HOME` removed from the
+environment, and a run fails if a test attempts outbound network access. The
+default per-test timeout is 60 seconds; set `GOODVIBES_TEST_TIMEOUT_MS` or pass
+`--timeout=<ms>` to change it. Any other flag is passed to `bun test` unchanged.
+
+```bash
+# The whole engine suite
+bun packages/engine/scripts/test.ts
+
+# One file, or several (paths are relative to packages/engine)
+bun packages/engine/scripts/test.ts test/lifecycle-machine.test.ts
+
+# One slice of the engine suite: partition INDEX of COUNT
+bun packages/engine/scripts/test.ts --partition=3/9
+
+# Another workspace: --cwd is relative to packages/engine
+bun packages/engine/scripts/test.ts --cwd ../../products/agent src/test
+```
+
+`--partition` selects its own files and cannot be combined with `--cwd` or
+explicit files. Each product's `bun run test` script calls the same runner with
+its own `--cwd`. TUI and Agent tests create their working directories under
+`<product>/.test-tmp/run-*`, which is ignored by Git.
+
+Plain `bun test <file>` also works for a quick run of one file. It skips the
+runner's environment and network isolation, and the tests that start daemon
+fixture processes refuse to run without the runner.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request
+against it. One `build` job produces the workspace output and the test jobs
+restore it instead of rebuilding.
+
+| Job | Runs |
+| --- | --- |
+| `validate` | `bun run validate` |
+| `eval-gate` | The standing eval suite, scored against a checked-in baseline |
+| `security-audit` | Dependency audit and secret scan |
+| `build` | The single workspace build |
+| `platform-matrix` | Nine engine test partitions, plus the companion-bundle (`rn-bundle`), Workers and Wrangler legs |
+| `product-tests` | The daemon, TUI and WebUI test suites |
+| `daemon-native`, `daemon-native-produce`, `daemon-native-execution` | The native daemon artifact on isolated Linux, then built and executed on Linux ARM and macOS |
+| `agent-tests` | The Agent suite in eight shards |
+| `tui-host-pair-terminal` | TUI host pairing against the compiled binary in a real terminal |
+| `webui-browser` | The WebUI Playwright suite in two shards |
+| `exec-containment-proof` | Live bubblewrap containment fixtures in two lanes |
+| `artifact-lane` | Packaged-artifact conformance (`bun run release:artifact-lane`) |
+
+Workflows install the Bun version named by `engines.bun` in the root
+`package.json` through the `.github/actions/bun` action; change the version
+there. Release workflows derive the previous release tag from Git history.
 
 ---
 

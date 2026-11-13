@@ -962,6 +962,10 @@ export class HostedSessionManager {
       if (!sessionId) return;
       const live = this.sessions.get(sessionId);
       if (!live || live.record.status === 'terminated') return;
+      // A turn ends only once: an end event for a session that is not running
+      // (a second end event for one turn, a stray cancel) counts nothing and
+      // publishes nothing. A start on a running session is a re-assertion.
+      if (status === 'idle' && live.record.status !== 'running') return;
       live.record = {
         ...live.record,
         status,

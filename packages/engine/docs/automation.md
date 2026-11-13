@@ -46,6 +46,9 @@ heartbeat processing, and scheduler capacity.
 | `automation.heartbeat.run` | Process jobs queued for the next heartbeat |
 | `scheduler.capacity` | Return the scheduler capacity snapshot: total slots, in-use slots, queue depth, and oldest queued run age |
 
+A cancelled run stays cancelled. If its evaluator or execution finishes after
+the cancel, that late result does not change the stored run.
+
 `automation.jobs.create` accepts a `kind` of `cron`, `every`, or `at`, and the
 schedule field required alongside it depends on which kind is chosen. It is a cron
 expression for `cron` (also accepted nested as `schedule.expression`), an
@@ -255,6 +258,12 @@ without admitting old actions. The migration receipt binds the original source
 and records completed cutover; missing or corrupt new state cannot silently
 replay the preserved old actions. Changes to the original old source stop the
 new owner instead of being silently imported again.
+
+A trigger that has fired or been cancelled is finished. Reset applies only to
+`idle`, `backoff`, `circuit-open` and `failed` triggers: resetting a running,
+fired or cancelled trigger is refused, and the refusal says to wait, cancel, or
+create a new trigger. Cancelling a trigger that is already fired or cancelled
+returns it unchanged and adds no run to its history.
 
 A one-shot action is durably reserved before invoking its executor. If a crash
 or cancellation prevents the executor's completion acknowledgement, its saved

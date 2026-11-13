@@ -146,6 +146,13 @@ started and verified healthy **before** the old one is stopped or removed; a new
 service that does not come up rolls itself back and leaves the working one alone. A
 process merely listening on the port with no unit behind it is reported, never killed.
 
+If retiring the old unit does not complete, the command exits non-zero, keeps the
+healthy new service and says which step was not confirmed. Run
+`goodvibes-daemon migrate-service -y` again to resume: when the managed unit is
+installed, running and identical to the definition this binary writes, the command
+skips installation and the health check and performs only the remaining retirement of
+the old unit. A managed unit that differs from that definition is still refused.
+
 ### `start-service` / `stop-service` / `restart-service`
 
 ```

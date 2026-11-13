@@ -265,6 +265,12 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
           case 'AGENT_FAILED':
             recordActivity(event.agentId, { state: 'failed', activity: prior?.activity });
             break;
+          case 'AGENT_CANCELLED':
+            // Cancelled is terminal and not a live overlay state: drop the last live
+            // one so it is not shown after the cancel. The record's own cancelled
+            // status (killed / interrupted) is what the adapter reports.
+            activity.delete(event.agentId);
+            break;
           default:
             break;
         }
@@ -277,6 +283,8 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
           const agentId = envelope.agentId;
           if (!agentId) return;
           const prior = activity.get(agentId);
+          // A finished agent is not retrying: done/failed is not overwritten by a late retry.
+          if (prior?.state === 'done' || prior?.state === 'failed') return;
           recordActivity(agentId, { state: 'retrying', activity: prior?.activity });
         },
       ),

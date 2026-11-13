@@ -291,6 +291,15 @@ export function main(argv = process.argv.slice(2), root = process.cwd()): void {
   // This command prepares the version, changelog and tag. The release workflow
   // builds fresh assets and checks their installation before publication.
 
+  // Everything that can refuse a real release without writing is checked before the first
+  // write. A refusal found after the bump would leave a modified tree that the next run
+  // rejects as having uncommitted product changes.
+  const tag = `v${next}`;
+  const releaseNotes = readReleaseNotesFromArgOrEnv(options, root);
+  if (!options.dryRun && runSilent(`git rev-parse -q --verify refs/tags/${tag}`, root).trim()) {
+    exitWithError(`Error: tag ${tag} already exists. Nothing was changed. Delete or rename it (git tag -d ${tag}) before releasing ${next}.`);
+  }
+
   // --- Bump package.json ---
 
   console.log(`\n[2/5] Updating package.json: ${current} -> ${next}`);
@@ -318,7 +327,7 @@ export function main(argv = process.argv.slice(2), root = process.cwd()): void {
   const newSection = [
     `## ${next} - ${today}`,
     '',
-    ...readReleaseNotesFromArgOrEnv(options, root),
+    ...releaseNotes,
   ].join('\n');
 
   if (!options.dryRun) {
@@ -345,7 +354,6 @@ export function main(argv = process.argv.slice(2), root = process.cwd()): void {
     ? `\n[5/5] Previewing git commit and tag v${next}...`
     : `\n[5/5] Creating git commit and tag v${next}...`);
 
-  const tag = `v${next}`;
   const commitMsg = `chore: release ${tag}`;
 
   run(`git add ${releaseMetadataPaths(root).map(shellQuote).join(' ')}`, options, root);

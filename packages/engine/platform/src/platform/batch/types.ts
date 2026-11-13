@@ -1,5 +1,6 @@
 import type { ChatRequest, ChatResponse, ProviderBatchStatus, ProviderMessage } from '../providers/interface.js';
 import type { ToolDefinition } from '../types/tools.js';
+import { defineLifecycle } from '../utils/lifecycle-machine.js';
 
 export type DaemonBatchMode = 'off' | 'explicit' | 'eligible-by-default';
 export type DaemonBatchFallback = 'live' | 'fail';
@@ -14,6 +15,30 @@ export type DaemonBatchJobStatus =
   | 'cancelled'
   | 'expired'
   | 'dead_lettered';
+
+/**
+ * The legal moves of a batch job. Mutation sites in manager.ts:
+ *  - createJob: (new) -> queued
+ *  - cancelJob: queued -> cancelled (a submitted job is refused, 409)
+ *  - submitProviderBatch success: queued -> submitted | running | failed
+ *  - submitProviderBatch retryable failure: queued -> queued (attempts bumped)
+ *  - submitProviderBatch unretryable failure: queued -> dead_lettered
+ *  - pollProviderBatches status sync: submitted | running -> running (or unchanged)
+ *  - pollProviderBatches provider terminal: -> failed | cancelled | expired
+ *  - pollProviderBatches unretryable failure: -> dead_lettered
+ *  - applyProviderResults: -> completed | failed | cancelled | expired
+ * Terminal states never move.
+ */
+export const daemonBatchJobLifecycle = defineLifecycle<DaemonBatchJobStatus>('batch job', {
+  queued: ['queued', 'submitted', 'running', 'failed', 'cancelled', 'dead_lettered'],
+  submitted: ['submitted', 'running', 'completed', 'failed', 'cancelled', 'expired', 'dead_lettered'],
+  running: ['running', 'completed', 'failed', 'cancelled', 'expired', 'dead_lettered'],
+  completed: [],
+  failed: [],
+  cancelled: [],
+  expired: [],
+  dead_lettered: [],
+});
 
 export interface DaemonBatchChatRequest {
   readonly messages: readonly ProviderMessage[];

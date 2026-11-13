@@ -52,3 +52,19 @@ test('each independently failed runtime owner remains visible to exit diagnostic
   );
   expect(failures).toEqual([early, late, audio]);
 });
+
+test('a throwing unsubscribe is reported and does not skip the others', async () => {
+  const { runUnsubscribes } = await import('../../shell/exit-completion.ts');
+  const calls: string[] = [];
+  const errors: unknown[] = [];
+  const boom = new Error('boom');
+  runUnsubscribes([() => calls.push('a'), () => { throw boom; }, () => calls.push('c')], (e) => errors.push(e));
+  expect(calls).toEqual(['a', 'c']);
+  expect(errors).toEqual([boom]);
+});
+
+test('shutdown deadline rejects a hung shutdown and passes a prompt one', async () => {
+  const { withShutdownDeadline } = await import('../../shell/exit-completion.ts');
+  await expect(withShutdownDeadline(new Promise<void>(() => {}), 20)).rejects.toThrow(/did not finish within 20ms/);
+  await expect(withShutdownDeadline(Promise.resolve(), 20)).resolves.toBeUndefined();
+});

@@ -9,7 +9,7 @@
  * the losers. A not-ready/unknown group is an honest 409 CONFLICT (isConflictError), never
  * a partial merge, rendered as "no longer ready, refresh", and the fleet is revalidated.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Trophy } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
@@ -52,11 +52,20 @@ export function AttemptComparison({ open, group, onClose, onPicked }: AttemptCom
   const [confirmPick, setConfirmPick] = useState(false);
   const [conflict, setConflict] = useState<string | null>(null);
 
+  // Bumped whenever the operator takes the selection into their own hands (a radio
+  // choice, or opening the confirm sheet). The judge adopts its proposal only if this
+  // is unchanged since it was asked: a slow judge must never move the winner that feeds
+  // the merge and worktree deletion.
+  const choiceEpochRef = useRef(0);
+
   const judge = useMutation({
     mutationFn: () => platformClient.operator.fleet.attempts.judge(group.groupId),
-    onSuccess: (result) => {
+    onMutate: () => choiceEpochRef.current,
+    onSuccess: (result, _variables, askedAtEpoch) => {
       setJudgment(result);
-      if (result.proposedWinnerItemId) setSelectedId(result.proposedWinnerItemId);
+      if (result.proposedWinnerItemId && askedAtEpoch === choiceEpochRef.current) {
+        setSelectedId(result.proposedWinnerItemId);
+      }
     },
   });
 
@@ -94,7 +103,7 @@ export function AttemptComparison({ open, group, onClose, onPicked }: AttemptCom
           className="attempt-cmp__pick-btn"
           icon={<Trophy size={16} aria-hidden="true" />}
           disabled={!selectedId || pick.isPending || heldCandidates.length === 0}
-          onClick={() => setConfirmPick(true)}
+          onClick={() => { choiceEpochRef.current += 1; setConfirmPick(true); }}
         >
           {pick.isPending ? 'Merging winner…' : 'Pick this winner'}
         </Button>
@@ -163,7 +172,7 @@ export function AttemptComparison({ open, group, onClose, onPicked }: AttemptCom
                     value={candidate.itemId}
                     checked={selectedId === candidate.itemId}
                     disabled={!held}
-                    onChange={() => setSelectedId(candidate.itemId)}
+                    onChange={() => { choiceEpochRef.current += 1; setSelectedId(candidate.itemId); }}
                   >
                     <span className="attempt-cmp__candidate-title">
                       #{candidate.attemptIndex + 1} {candidate.title}

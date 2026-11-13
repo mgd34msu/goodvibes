@@ -170,6 +170,33 @@ export const TURN_STATES = [
 export type TurnState = (typeof TURN_STATES)[number];
 
 /**
+ * Statuses a turn has SETTLED in: nothing live is left to report on, so a late
+ * failure from an earlier operation (e.g. the cancel request's catch) must not
+ * overwrite them with `error`.
+ */
+const SETTLED_TURN_STATES: readonly string[] = ['completed', 'stopped', 'stopped locally', 'session expired'];
+
+/**
+ * The one guarded place for turn-status writes that can RACE with a newer one
+ * (late stream frames, a late request failure). Returns the status that should
+ * result from `current` when `proposed` arrives:
+ *
+ * - once the user pressed Stop (`stopping`), delta/tool frames (`streaming`,
+ *   `tooling`) do not un-stop the turn; only a terminal outcome resolves it;
+ * - a settled turn (`completed`, `stopped`, `stopped locally`, `session expired`)
+ *   is not overwritten by a late `error`.
+ *
+ * Every other transition is taken as proposed. Writes that start a new turn or
+ * report a terminal outcome from the stream itself are intentionally NOT
+ * constrained here.
+ */
+export function nextTurnStatus(current: string, proposed: TurnState): string {
+  if (current === 'stopping' && (proposed === 'streaming' || proposed === 'tooling')) return current;
+  if (proposed === 'error' && SETTLED_TURN_STATES.includes(current)) return current;
+  return proposed;
+}
+
+/**
  * The turn lifecycle's state AND its explanatory message as one value (see
  * ChatView.tsx's `turn` useState and IDLE_TURN_PHASE), so the two can never be
  * independently stale: every mutation, including the reset on session switch,

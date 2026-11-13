@@ -1,0 +1,21 @@
+name: Restore build output
+description: Download the single `workspace-build-output` artifact of this run and unpack it over the checkout.
+
+runs:
+  using: composite
+  steps:
+    - name: Download workspace package output
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      with:
+        name: workspace-build-output
+        path: ${{ runner.temp }}/workspace-build-output
+    - name: Unpack workspace package output
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        tar -xzf "$RUNNER_TEMP/workspace-build-output/workspace-build-output.tgz" -C .
+        # The artifact was built from this very SHA by this run's build job, so it
+        # is fresh by construction. tar keeps build-time mtimes while checkout
+        # stamps sources with checkout time, and the mtime-based dist-freshness
+        # test would misread the restore as staleness.
+        find packages/engine/*/dist packages/judgment/dist -type f -exec touch {} +

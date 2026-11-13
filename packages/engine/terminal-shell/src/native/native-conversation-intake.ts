@@ -60,6 +60,13 @@ export interface NativeConversationIntakeActions {
     close(): void;
 }
 type Mode = 'submit' | 'status' | 'retry' | 'resume' | 'cancel';
+/** The step an intake operation is in; error classification reads it, so a typo here must not compile. */
+type IntakePhase =
+    | 'principal' | 'get' | 'capture' | 'admit' | 'resume' | 'cancel'
+    | 'execution-status' | 'execution-dispatch'
+    | `hosted-${'status' | 'start' | 'cancel'}`
+    | 'journal-read' | 'journal-save' | 'journal-confirm' | 'journal-claim' | 'journal-execution' | 'journal-hosted-source';
+const isJournalPhase = (phase: IntakePhase): boolean => phase.startsWith('journal-');
 const terminal = (result: NativeConversationIntakeResult) => ['turn', 'work', 'blocked', 'refused', 'cancelled'].includes(result.kind);
 const sameCommand = (left: NativeConversationIntakeCaptureRequest, right: NativeConversationIntakeCaptureRequest) => JSON.stringify(left) === JSON.stringify(right);
 /** Persist exact input first. Interrupted processing requires an explicit resume. */
@@ -136,7 +143,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
         let binding: NativeConversationIntakeBinding | undefined;
         let disposed = false;
         let command: NativeConversationIntakeCaptureRequest | undefined;
-        let phase = 'principal';
+        let phase = 'principal' as IntakePhase;
         let delivery: 'hosted' | undefined;
         let observedSource: NativeConversationIntakeSourceRef | undefined;
         const hostedCurrent = (): boolean => { const now = this.selection(); return lifetime === this.selectionLifetime && now.available && now.identity === selected.identity && now.projectId === selected.projectId && now.workspace === selected.workspace; };
@@ -418,7 +425,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
         catch {
             if (!current())
                 return;
-            return { status: command ? 'unknown' : 'unavailable', request: request(), message: phase.startsWith('journal-')
+            return { status: command ? 'unknown' : 'unavailable', request: request(), message: isJournalPhase(phase)
                     ? 'The durable intake journal could not be confirmed. No further request or ordinary turn was sent. The visible original input and dispatch claim are preserved.'
                     : 'Native intake outcome is unknown or unavailable. Inspect /work intake-status before retrying the same input; an interrupted request may already have taken effect.' };
         }

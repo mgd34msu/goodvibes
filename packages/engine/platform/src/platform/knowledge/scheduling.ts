@@ -1,11 +1,14 @@
 import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { getNextAutomationOccurrence, ensureAutomationCronPhase, normalizeCronSchedule, normalizeEverySchedule, type AutomationScheduleDefinition } from '../automation/schedules.js';
 import type { KnowledgeStore } from './store.js';
-import type { KnowledgeJobMode, KnowledgeJobRecord, KnowledgeJobRunRecord, KnowledgeScheduleRecord } from './types.js';
+import { knowledgeJobRunLifecycle, type KnowledgeJobMode, type KnowledgeJobRecord, type KnowledgeJobRunRecord, type KnowledgeJobStatus, type KnowledgeScheduleRecord } from './types.js';
 import { emitKnowledgeJobCompleted, emitKnowledgeJobFailed, emitKnowledgeJobQueued, emitKnowledgeJobStarted } from '../runtime/emitters/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
+
+/** How long a job run must have been outstanding before a starting process may conclude its owner is gone. */
+const INTERRUPTED_RUN_MIN_AGE_MS = 6 * 60 * 60 * 1000;
 
 /** Local health checks and rendering do not infer new semantic facts. */
 function classicJob(kind: KnowledgeJobRecord['kind']): boolean {
@@ -40,6 +43,10 @@ export class KnowledgeScheduleService {
    */
   private disposed = false;
   private readonly initialization: Promise<void>;
+  /** Run ids this process started and has not yet settled; never reconciled as interrupted. */
+  private readonly inFlightRunIds = new Set<string>();
+  /** Runs requested at or after this were requested by this process, whatever the in-flight set says. */
+  private readonly startedAt = Date.now();
 
   constructor(private readonly context: KnowledgeSchedulingContext) {
     this.jobs = [
@@ -170,6 +177,7 @@ export class KnowledgeScheduleService {
         ...(typeof input.limit === 'number' ? { limit: input.limit } : {}),
       },
     });
+    this.inFlightRunIds.add(run.id);
     this.context.emitIfReady((bus, ctx) => emitKnowledgeJobQueued(bus, ctx, {
       jobId: job.id,
       runId: run.id,
@@ -203,6 +211,8 @@ export class KnowledgeScheduleService {
     this.schedulesInitialized = true;
     await this.context.store.init();
     if (this.disposed) return;
+    await this.settleInterruptedRuns();
+    if (this.disposed) return;
     // Retain current due timestamps while adopting a phase for older cron rows.
     // Publish before any timer can use it so reopening cannot choose another phase.
     for (const record of this.context.store.listSchedules(10_000)) {
@@ -214,6 +224,52 @@ export class KnowledgeScheduleService {
     await this.ensureBootstrapSchedule('knowledge-deep-consolidation', 'Weekly Deep Consolidation', normalizeCronSchedule('15 4 * * 0'));
     await this.ensureBootstrapSchedule('knowledge-semantic-self-improvement', 'Continuous Semantic Self-Improvement', normalizeEverySchedule('1h'));
     await this.reconcileSchedules();
+  }
+
+  /**
+   * Runs still `queued`/`running` long after they were requested belong to a
+   * process that exited: nothing can finish them, and pruneJobRuns never drops
+   * active runs, so they would read as running forever. Settle them as failed.
+   */
+  private async settleInterruptedRuns(): Promise<void> {
+    for (const run of this.context.store.listJobRuns(10_000)) {
+      if (run.status !== 'queued' && run.status !== 'running') continue;
+      if (this.inFlightRunIds.has(run.id) || run.requestedAt >= this.startedAt) continue;
+      // The store is not owned by one process: another running instance may
+      // still be working on a recent run. Only a run too old to be in flight
+      // anywhere is treated as orphaned.
+      if (this.startedAt - Math.max(run.requestedAt, run.startedAt ?? 0) < INTERRUPTED_RUN_MIN_AGE_MS) continue;
+      await this.settleRun(run.id, 'failed', 'interrupted: the process exited before this job finished');
+      if (this.disposed) return;
+    }
+  }
+
+  /**
+   * Moves a run to `status` only when the lifecycle allows it from the store's
+   * current state, so a late write can never put a settled run back. Never
+   * throws: a store that cannot be written is logged, the caller's own error wins.
+   */
+  private async settleRun(runId: string, status: KnowledgeJobStatus, error: string): Promise<KnowledgeJobRunRecord | null> {
+    try {
+      const current = this.context.store.getJobRun(runId);
+      if (!current) return null;
+      const move = knowledgeJobRunLifecycle.check(current.status, status);
+      if (!move.ok) {
+        logger.warn('Knowledge job run left as is', { runId, reason: move.reason });
+        return current;
+      }
+      return await this.context.store.upsertJobRun({
+        id: current.id,
+        jobId: current.jobId,
+        status,
+        mode: current.mode,
+        completedAt: Date.now(),
+        error,
+      });
+    } catch (settleError) {
+      logger.warn('Knowledge job run could not be settled', { runId, status, error: summarizeError(settleError) });
+      return null;
+    }
   }
 
   private async ensureBootstrapSchedule(
@@ -309,14 +365,33 @@ export class KnowledgeScheduleService {
     runId: string,
     input: { readonly sourceIds?: readonly string[] | undefined; readonly limit?: number | undefined; readonly mode?: KnowledgeJobMode | undefined },
   ): Promise<KnowledgeJobRunRecord> {
+    try {
+      return await this.executeSettledJobRun(job, runId, input);
+    } finally {
+      this.inFlightRunIds.delete(runId);
+    }
+  }
+
+  private async executeSettledJobRun(
+    job: KnowledgeJobRecord,
+    runId: string,
+    input: { readonly sourceIds?: readonly string[] | undefined; readonly limit?: number | undefined; readonly mode?: KnowledgeJobMode | undefined },
+  ): Promise<KnowledgeJobRunRecord> {
     const startedAt = Date.now();
-    let run = await this.context.store.upsertJobRun({
-      id: runId,
-      jobId: job.id,
-      status: 'running',
-      mode: input.mode ?? job.defaultMode,
-      startedAt,
-    });
+    let run: KnowledgeJobRunRecord;
+    try {
+      run = await this.context.store.upsertJobRun({
+        id: runId,
+        jobId: job.id,
+        status: 'running',
+        mode: input.mode ?? job.defaultMode,
+        startedAt,
+      });
+    } catch (error) {
+      // The run was written `queued`; without this it stays queued forever.
+      await this.settleRun(runId, 'failed', summarizeError(error));
+      throw error;
+    }
     this.context.emitIfReady((bus, ctx) => emitKnowledgeJobStarted(bus, ctx, {
       jobId: job.id,
       runId: run.id,
@@ -344,6 +419,12 @@ export class KnowledgeScheduleService {
       return run;
     } catch (error) {
       const completedAt = Date.now();
+      const current = this.context.store.getJobRun(run.id);
+      if (current && !knowledgeJobRunLifecycle.can(current.status, 'failed')) {
+        // Already settled (e.g. the completed write landed before it threw): do not overwrite.
+        logger.warn('Knowledge job run already settled; failure not recorded over it', { runId: run.id, status: current.status, error: summarizeError(error) });
+        return current;
+      }
       run = await this.context.store.upsertJobRun({
         id: run.id,
         jobId: run.jobId,

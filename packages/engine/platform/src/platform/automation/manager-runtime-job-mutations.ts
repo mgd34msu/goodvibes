@@ -13,6 +13,7 @@ import {
   assertProviderHasModel,
   buildDefaultSource,
   computeNextRun,
+  jobEnablement,
   normalizeOptionalString,
   normalizeProviderQualifiedModel,
   normalizeProviderQualifiedModelList,
@@ -55,8 +56,7 @@ export async function createAutomationJobRecord(
     ...(input.kind ? { kind: input.kind } : {}),
     name: input.name.trim() || input.prompt.slice(0, 40),
     description: input.description ?? input.prompt,
-    status: enabled ? 'enabled' : 'paused',
-    enabled,
+    ...jobEnablement(enabled),
     schedule,
     execution: buildDefaultExecution(input, context.configManager, context.listModels?.()),
     delivery: buildDefaultDelivery(input.delivery),
@@ -89,8 +89,7 @@ export async function toggleAutomationJobEnabled(
   if (!job) return null;
   const updated: AutomationJob = {
     ...job,
-    enabled,
-    status: enabled ? 'enabled' : 'paused',
+    ...jobEnablement(enabled),
     pausedReason: enabled ? undefined : 'operator-disabled',
     updatedAt: Date.now(),
     nextRunAt: enabled ? computeNextRun(job.schedule, Date.now()) : undefined,
@@ -146,8 +145,7 @@ export async function updateAutomationJobRecord(
     ...(patch.kind ? { kind: patch.kind } : {}),
     name: patch.name ?? job.name,
     description: patch.description ?? (patch.prompt ? patch.prompt : job.description),
-    enabled: nextEnabled,
-    status: nextEnabled ? 'enabled' : 'paused',
+    ...jobEnablement(nextEnabled),
     schedule: nextSchedule,
     execution: {
       ...job.execution,

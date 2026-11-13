@@ -288,7 +288,7 @@ export async function makeHome(model: StubModel): Promise<E2EHome> {
   // Compiled Bun executables honor the workspace preload, too. The existing
   // owned runner's guard blocks every unexpected external request, even if a
   // product catches the fetch error; removeHome verifies its durable log.
-  const guard = resolve(REPO_ROOT, '../../packages/engine/scripts/test-network-preload.ts');
+  const guard = resolve(REPO_ROOT, '../../packages/engine/toolchain/src/test-runner/test-network-preload.ts');
   writeFileSync(join(workspace, 'bunfig.toml'), `preload = [${JSON.stringify(guard)}]\n`);
   return e2eHome;
 }

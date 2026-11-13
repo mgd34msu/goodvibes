@@ -1,11 +1,4 @@
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { makeTestTempDir } from '@goodvibes-jev/engine/toolchain/test-runner';
 
-/** Test fixtures belong to the guarded runner's per-run parent, removed after child exit. */
-export function makeOwnedTempDir(prefix: string): string {
-  if (process.env.GOODVIBES_ENGINE_TEST_RUNNER !== '1') {
-    throw new Error('Run daemon fixture tests through the guarded test script.');
-  }
-  return mkdtempSync(join(tmpdir(), `${prefix}-`));
-}
+/** Test fixtures live under the run's temp directory, removed when the run ends. */
+export const makeOwnedTempDir = makeTestTempDir;

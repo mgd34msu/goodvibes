@@ -1,10 +1,25 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreFile } from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { assertNoSecretLikeText } from './persona-registry.ts';
 
 export type AgentResearchSourceStatus = 'candidate' | 'reviewed' | 'rejected' | 'used';
+/**
+ * Legal status moves of a research source. A source is cited (`used`) only
+ * after review. A rejected source is re-reviewed or re-added, never used
+ * directly; a used source superseded later may still be rejected (the
+ * registry test and the `used` route hints rely on it). Writing the status a
+ * source already has (re-review, attaching another report) is not a move.
+ */
+export const researchSourceLifecycle = defineLifecycle<AgentResearchSourceStatus>('research source', {
+  candidate: ['reviewed', 'rejected'],
+  reviewed: ['rejected', 'used'],
+  rejected: ['reviewed'],
+  used: ['reviewed', 'rejected'],
+});
+
 export type AgentResearchSourceCredibility = 'unreviewed' | 'low' | 'medium' | 'high' | 'mixed';
 
 export interface AgentResearchSourceRecord {
@@ -128,6 +143,12 @@ function credibility(value: unknown): AgentResearchSourceCredibility {
 function status(value: unknown): AgentResearchSourceStatus {
   if (value === 'reviewed' || value === 'rejected' || value === 'used') return value;
   return 'candidate';
+}
+
+function assertSourceMove(source: AgentResearchSourceRecord, to: AgentResearchSourceStatus): void {
+  if (source.status === to) return;
+  const move = researchSourceLifecycle.check(source.status, to);
+  if (!move.ok) throw new Error(`${move.reason} (research source ${source.id}).`);
 }
 
 function boundedScore(value: unknown, fallback = 50): number {
@@ -322,6 +343,7 @@ export class AgentResearchSourceRegistry {
     const store = this.readStore();
     const existing = this.findInStore(store, idOrTitle);
     if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
+    assertSourceMove(existing, 'reviewed');
     const tags = input.tags === undefined ? existing.tags : normalizeList(input.tags);
     const note = input.note === undefined ? existing.note : input.note.trim() || undefined;
     const summary = input.summary === undefined ? existing.summary : input.summary.trim();
@@ -354,6 +376,7 @@ export class AgentResearchSourceRegistry {
     const store = this.readStore();
     const existing = this.findInStore(store, idOrTitle);
     if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
+    assertSourceMove(existing, 'rejected');
     const note = reason.trim() || 'Rejected during source review.';
     assertSourceContentSafe([note]);
     const timestamp = nowIso();
@@ -375,6 +398,7 @@ export class AgentResearchSourceRegistry {
     const store = this.readStore();
     const existing = this.findInStore(store, idOrTitle);
     if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
+    assertSourceMove(existing, 'used');
     const reportArtifactId = input.reportArtifactId?.trim() || existing.usedInReportArtifactId;
     const note = input.note === undefined ? existing.note : input.note.trim() || undefined;
     assertSourceContentSafe([reportArtifactId ?? '', note ?? '']);

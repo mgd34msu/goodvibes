@@ -353,12 +353,19 @@ export class McpLifecycleManager {
       });
       return;
     }
-    this._setState(entry, 'connecting');
-    this._emit({ type: 'MCP_CONNECTING', serverId: serverName });
+    if (this._setState(entry, 'connecting')) this._emit({ type: 'MCP_CONNECTING', serverId: serverName });
 
     try {
       const client = new McpClient(entry.config);
       await client.connect();
+      // A stop (or stop + restart) that landed while connect() was pending found
+      // no client to disconnect, so this one is ours to close: do not register it.
+      if (this.servers.get(serverName) !== entry || entry.state !== 'connecting') {
+        await client.disconnect().catch((err: unknown) => {
+          logger.warn('McpLifecycleManager: disconnect of superseded client failed', { server: serverName, err: summarizeError(err) });
+        });
+        return;
+      }
       this.clients.set(serverName, client);
 
       // Load tool list
@@ -372,7 +379,16 @@ export class McpLifecycleManager {
       entry.reconnectAttempts = 0;
       entry.reconnectPending = false;
 
-      this._setState(entry, 'connected');
+      // A stop that landed while listing tools leaves the entry disconnected and
+      // the table refuses connected from there: do not announce it, and release
+      // the client (only if it is still the one registered) so no process is orphaned.
+      if (!this._setState(entry, 'connected')) {
+        if (this.clients.get(serverName) === client) this.clients.delete(serverName);
+        await client.disconnect().catch((err: unknown) => {
+          logger.warn('McpLifecycleManager: disconnect of superseded client failed', { server: serverName, err: summarizeError(err) });
+        });
+        return;
+      }
       this.freshness.markStale(serverName); // invalidate on (re)connect
 
       this._emit({
@@ -390,7 +406,8 @@ export class McpLifecycleManager {
       const message = summarizeError(err);
       entry.lastError = message;
       logger.error('McpLifecycleManager: connection failed', { server: serverName, err: message });
-      this._scheduleReconnect(serverName);
+      // A server stopped (or replaced) while this connect was pending is not ours to reconnect.
+      if (this.servers.get(serverName) === entry && entry.state === 'connecting') this._scheduleReconnect(serverName);
     }
   }
 
@@ -415,8 +432,9 @@ export class McpLifecycleManager {
 
     entry.disconnectedAt = Date.now();
     entry.lastError = reason;
-    this._setState(entry, 'disconnected');
-    this._emit({ type: 'MCP_DISCONNECTED', serverId: serverName, reason, willRetry: false });
+    if (this._setState(entry, 'disconnected')) {
+      this._emit({ type: 'MCP_DISCONNECTED', serverId: serverName, reason, willRetry: false });
+    }
   }
 
   // ── Private: reconnect ────────────────────────────────────────────────────
@@ -431,13 +449,14 @@ export class McpLifecycleManager {
         attempts: entry.reconnectAttempts,
       });
       entry.disconnectedAt = Date.now();
-      this._setState(entry, 'disconnected');
-      this._emit({
-        type: 'MCP_DISCONNECTED',
-        serverId: serverName,
-        reason: `max reconnect attempts (${this.reconnectConfig.maxAttempts}) exceeded`,
-        willRetry: false,
-      });
+      if (this._setState(entry, 'disconnected')) {
+        this._emit({
+          type: 'MCP_DISCONNECTED',
+          serverId: serverName,
+          reason: `max reconnect attempts (${this.reconnectConfig.maxAttempts}) exceeded`,
+          willRetry: false,
+        });
+      }
       return;
     }
 
@@ -447,7 +466,7 @@ export class McpLifecycleManager {
       this.reconnectConfig.maxDelayMs,
     );
 
-    this._setState(entry, 'reconnecting');
+    if (!this._setState(entry, 'reconnecting')) return;
     entry.reconnectPending = true;
     entry.reconnectAttempts = attempt;
 
@@ -489,7 +508,8 @@ export class McpLifecycleManager {
 
   // ── Private: state helpers ────────────────────────────────────────────────
 
-  private _setState(entry: McpServerEntry, next: McpServerState): void {
+  /** Applies a table-legal move. Returns whether it applied; a refusal is logged and leaves the entry untouched. */
+  private _setState(entry: McpServerEntry, next: McpServerState): boolean {
     const result = applyTransition(entry.state, next);
     if (!result.success) {
       logger.warn('McpLifecycleManager: invalid transition rejected', {
@@ -498,9 +518,10 @@ export class McpLifecycleManager {
         to: next,
         reason: result.reason,
       });
-      return;
+      return false;
     }
     entry.state = next;
+    return true;
   }
 
   // ── Private: event emission ───────────────────────────────────────────────

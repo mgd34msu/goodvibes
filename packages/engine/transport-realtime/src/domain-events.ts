@@ -132,6 +132,11 @@ function createRemoteDomainEventFeed<
   const payloadListeners = new Map<string, Set<(payload: TEvent) => void>>();
   const envelopeListeners = new Map<string, Set<(envelope: EventEnvelope<string, TEvent>) => void>>();
   let disconnect: (() => void) | null = null;
+  // True from the moment a connector resolves until its cleanup (if it gave one)
+  // has run. Tracked apart from `disconnect` because a connector may establish a
+  // live connection and return no cleanup function; without this the next on()
+  // would open a second connection beside the first.
+  let connected = false;
   let connectPromise: Promise<void> | null = null;
   let disconnectPending = false;
 
@@ -141,7 +146,7 @@ function createRemoteDomainEventFeed<
   );
 
   const maybeConnect = (): void => {
-    if (disconnect || connectPromise) return;
+    if (connected || disconnect || connectPromise) return;
     connectPromise = Promise.resolve(connect(domain, (envelope) => {
       const eventType = typeof envelope.type === 'string' ? envelope.type : '';
       if (!eventType) return;
@@ -160,6 +165,7 @@ function createRemoteDomainEventFeed<
       // way to honour a pending disconnect request. Log the gap and bail. Callers
       // must return a cleanup function whenever they establish a real connection.
       if (typeof cleanup !== 'function') {
+        connected = true;
         if (disconnectPending) {
           reportUnexpectedConnectionError(
             new Error('Domain event connector resolved without a cleanup function while a disconnect was pending. The connection cannot be closed.'),
@@ -173,6 +179,7 @@ function createRemoteDomainEventFeed<
         cleanup();
         return;
       }
+      connected = true;
       disconnect = cleanup;
     }).catch((error: unknown) => {
       if (!isExpectedDisconnectError(error)) {
@@ -189,6 +196,7 @@ function createRemoteDomainEventFeed<
     if (disconnect) {
       disconnect();
       disconnect = null;
+      connected = false;
       return;
     }
     if (connectPromise) {

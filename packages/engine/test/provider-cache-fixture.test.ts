@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { loadCatalogCache, isCatalogCacheStale, type CatalogModel } from '../platform/src/platform/providers/model-catalog.ts';
 import { BenchmarkStore, type BenchmarkEntry } from '../platform/src/platform/providers/model-benchmarks.ts';
 import { createProviderCacheFixture, getProviderCachePaths, writeModelCatalogCache, writeBenchmarksCache } from './_helpers/provider-cache.ts';
@@ -30,22 +30,6 @@ test('refuses a caller-supplied directory and preserves its contents', () => {
   const sentinel = join(f.cacheDir, 'sentinel'); writeFileSync(sentinel, 'keep');
   expect(() => createProviderCacheFixture(f.cacheDir)).toThrow(/single nonempty path component/);
   expect(readFileSync(sentinel, 'utf8')).toBe('keep');
-});
-for (const target of ['owner', 'cache'] as const) for (const replacement of ['directory', 'symlink'] as const) test(`cleanup preserves a replaced ${target} (${replacement})`, () => {
-  const f = fixture(); const root = target === 'owner' ? dirname(f.cacheDir) : f.cacheDir; const moved = `${root}-original`;
-  renameSync(root, moved);
-  if (replacement === 'directory') mkdirSync(root);
-  else symlinkSync(moved, root);
-  const sentinel = join(root, 'sentinel'); writeFileSync(sentinel, 'keep');
-  try {
-    expect(() => f.cleanup()).toThrow(/unsafe or surviving/);
-    expect(readFileSync(sentinel, 'utf8')).toBe('keep');
-    expect(existsSync(moved)).toBe(true);
-  } finally {
-    if (replacement === 'symlink') unlinkSync(root);
-    else rmSync(root, { recursive: true, force: true });
-    renameSync(moved, root);
-  }
 });
 test('arbitrary catalog models round-trip through the real current-schema reader with caller TTL', () => {
   const f = fixture();

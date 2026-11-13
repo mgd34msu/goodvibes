@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { isolatedTestEnvironment } from '../scripts/test-isolation.ts';
+import { isolatedTestEnvironment } from '../toolchain/src/test-runner/test-isolation.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 type Scenario = 'untrusted' | 'trusted' | 'wrong-host';

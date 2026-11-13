@@ -129,7 +129,9 @@ launchctl list | grep goodvibes
 Use the command matching your OS and configured service name. Do not kill an
 unidentified listener. The migration adapter's rule is new-up/healthy-before-old-down
 with rollback if the replacement fails; an unowned process is reported, not killed.
-Migration requires explicit `-y` and a qualified installed executable. Uninstall
+Migration requires explicit `-y` and a qualified installed executable. A migration
+that started the new unit but did not finish retiring the old one is resumed by
+running `goodvibes-daemon migrate-service -y` again. Uninstall
 removes the managed definition; systemd enablement symlinks may need the stated
 `systemctl --user daemon-reload` follow-up. See [service command details](commands-reference.md#install-service).
 

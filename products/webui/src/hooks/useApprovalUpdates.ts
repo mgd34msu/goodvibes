@@ -41,6 +41,9 @@ export interface UseApprovalUpdatesResult {
   readonly error: string | null;
 }
 
+/** Fixed copy: `err.message` can be the raw 401 response body and is never shown. */
+const STREAM_ERROR_MESSAGE = 'Live approval updates paused: falling back to periodic refresh.';
+
 export function useApprovalUpdates(enabled: boolean): UseApprovalUpdatesResult {
   const queryClient = useQueryClient();
   const [connected, setConnected] = useState(false);
@@ -78,15 +81,15 @@ export function useApprovalUpdates(enabled: boolean): UseApprovalUpdatesResult {
             if (eventName !== APPROVAL_UPDATE_WIRE_EVENT) return;
             invalidateApprovals();
           },
-          onError: (err: unknown) => {
+          onError: (_err: unknown) => {
             if (disposed) return;
             setConnected(false);
-            setError(err instanceof Error ? err.message : 'Approval update stream error');
+            setError(STREAM_ERROR_MESSAGE);
           },
           onTerminate: () => {
             if (disposed) return;
             setConnected(false);
-            setError('Live approval updates paused: falling back to periodic refresh.');
+            setError(STREAM_ERROR_MESSAGE);
           },
         },
         { reconnect: DEFAULT_SSE_RECONNECT },
@@ -98,10 +101,10 @@ export function useApprovalUpdates(enabled: boolean): UseApprovalUpdatesResult {
         }
         close = dispose;
       })
-      .catch((err: unknown) => {
+      .catch((_err: unknown) => {
         if (disposed) return;
         setConnected(false);
-        setError(err instanceof Error ? err.message : 'Failed to open the approval update stream');
+        setError(STREAM_ERROR_MESSAGE);
       });
 
     return () => {

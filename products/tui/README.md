@@ -315,12 +315,12 @@ Run these commands from `products/tui` after preparing the monorepo:
 | --- | --- |
 | `bun run dev` | Run the TUI from source |
 | `bun run test:changed` | Run the test files your change affects (since `origin/main`) |
-| `bun run test` | Run the whole suite through the parallel per-file runner (CI runs it on every push) |
+| `bun run test` | Run the whole suite except `src/test/e2e/` through the shared runner, `packages/engine/scripts/test.ts` (CI runs it on every push) |
 | `bun run build` | Compile the selected target, such as `dist/goodvibes-linux-x64` |
 
 The compiled binary is the TUI entrypoint. With `daemon.enabled` on (the default) it adopts a running standalone GoodVibes daemon over loopback, and when a daemon is installed as a service but stopped, it starts that service once and waits for it to come online. It never embeds or constructs a daemon of its own. The control plane, HTTP listener (`danger.httpListener`), and web surface are all hosted by the daemon; the TUI configures them and reports their bindings.
 
-Tests live under `src/test/`, mirroring the source tree; byte-exact golden renderer frames are part of that suite. End-to-end tests under `src/test/e2e/` drive the compiled binary in a real terminal against a scripted model. CI also checks import cycles and layer boundaries (`scripts/check-architecture.ts`), and the release gates hold the performance budgets (`scripts/perf-baseline.json`). Testing and validation says what runs where.
+Tests live under `src/test/`, mirroring the source tree; byte-exact golden renderer frames are part of that suite. End-to-end tests under `src/test/e2e/` drive the compiled binary in a real terminal against a scripted model. To run one file, pass it to the runner from the repository root: `bun packages/engine/scripts/test.ts --cwd ../../products/tui src/test/<file>.test.ts`. Test working directories are created under `.test-tmp/run-*`, which Git ignores. `bun run architecture:check` checks import cycles and layer boundaries (`scripts/check-architecture.ts`), and the release gates hold the performance budgets (`scripts/perf-baseline.json`).
 
 Some decisions worth knowing before you read the source:
 

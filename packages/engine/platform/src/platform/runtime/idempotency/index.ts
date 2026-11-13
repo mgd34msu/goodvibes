@@ -19,14 +19,28 @@
  */
 
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import type {
   IdempotencyKeyContext,
   IdempotencyRecord,
+  IdempotencyStatus,
   IdempotencyStoreConfig,
 } from './types.js';
 
 export type { IdempotencyKeyContext, IdempotencyRecord, IdempotencyStoreConfig } from './types.js';
 export type { IdempotencyStatus } from './types.js';
+
+/**
+ * The idempotency record lifecycle. Only an in-flight record is finalized, once:
+ * a completed record keeps its cached result and a failed one stays failed until
+ * `checkAndRecord` deletes it and registers a fresh in-flight record (a new
+ * record, not a transition of the old one).
+ */
+export const idempotencyLifecycle = defineLifecycle<IdempotencyStatus>('idempotency record', {
+  'in-flight': ['completed', 'failed'],
+  completed: [],
+  failed: [],
+});
 
 /** Default TTL: 5 minutes. */
 const DEFAULT_TTL_MS = 5 * 60 * 1_000;
@@ -155,6 +169,8 @@ export class IdempotencyStore {
   markComplete(key: string, result?: unknown): void {
     const record = this.store.get(key);
     if (!record) throw missingRecordError('markComplete', key);
+    // Finalized once: a no-op unless in-flight, so a late call cannot rewrite the outcome.
+    if (!idempotencyLifecycle.can(record.status, 'completed')) return;
     record.status = 'completed';
     record.completedAt = Date.now();
     if (result !== undefined) {
@@ -177,6 +193,8 @@ export class IdempotencyStore {
   markFailed(key: string): void {
     const record = this.store.get(key);
     if (!record) throw missingRecordError('markFailed', key);
+    // A completed record keeps its cached result; only an in-flight record can fail.
+    if (!idempotencyLifecycle.can(record.status, 'failed')) return;
     record.status = 'failed';
     record.completedAt = Date.now();
   }

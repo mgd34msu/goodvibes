@@ -11,7 +11,7 @@
  * polls while a turn is active and refetches explicitly on every mutation
  * success.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Clock, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
@@ -34,6 +34,12 @@ export function QueuedMessagesPanel({ sessionId, active }: QueuedMessagesPanelPr
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState('');
   const [draftText, setDraftText] = useState('');
+  // The row whose editor is open now, readable from a mutation callback that may settle
+  // after the operator moved to another row.
+  const editingIdRef = useRef('');
+  useEffect(() => {
+    editingIdRef.current = editingId;
+  }, [editingId]);
   const confirm = useConfirm();
 
   const list = useQuery({
@@ -49,9 +55,12 @@ export function QueuedMessagesPanel({ sessionId, active }: QueuedMessagesPanelPr
 
   const editMutation = useMutation({
     mutationFn: ({ id, text }: { id: string; text: string }) => platformClient.operator.sessions.queuedMessages.edit(sessionId, id, text),
-    onSuccess: async () => {
-      setEditingId('');
-      setDraftText('');
+    onSuccess: async (_result, { id }) => {
+      // Close only the editor this save belongs to, never another row's.
+      if (editingIdRef.current === id) {
+        setEditingId('');
+        setDraftText('');
+      }
       await invalidate();
     },
   });

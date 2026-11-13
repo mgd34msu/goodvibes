@@ -255,12 +255,3 @@ export function selectProductWorkspaces(products: readonly ProductWorkspace[], n
   // Keep the aggregate's canonical order, independently of selector order.
   return products.filter((product) => names.includes(product.definition.name));
 }
-
-/** CI must cover every inspected workspace exactly once, never an empty matrix. */
-export function productTestMatrix(inspection: ProductInspection): readonly ProductName[] {
-  if (inspection.findings.length > 0) throw new Error(`Product inspection failed: ${inspection.findings.join('; ')}`);
-  const names = inspection.products.map((product) => product.definition.name);
-  if (names.length === 0) throw new Error('No present product workspaces for the CI matrix');
-  selectProductWorkspaces(inspection.products, names);
-  return names;
-}

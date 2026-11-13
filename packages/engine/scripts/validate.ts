@@ -15,7 +15,7 @@ function run(command: string, args: readonly string[], label?: string): void {
   });
 }
 
-// Editorial checks remain opt-in (`docs:check`, `changelog:check`, `todo:check`).
+// Editorial checks remain opt-in (`docs:check`, `changelog:check`).
 // Required validation exercises code, contracts, types and installable artifacts.
 run('bun', ['run', 'error:check'], 'error:check');
 run('bun', ['run', 'products:check'], 'products:check');

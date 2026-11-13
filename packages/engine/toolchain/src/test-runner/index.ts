@@ -1,5 +1,3 @@
-/** Bun-only child ownership, isolation and teardown for product test runners. */
-export { runOwnedTestChild } from './owned-test-child.js';
-export type { OwnedTestChildResult, OwnedTestChildStop } from './owned-test-child.js';
+/** Test-environment isolation and per-run temp directories for the test runner. */
 export { isolatedTestEnvironment } from './test-isolation.js';
-export { withRunTmpDir, RUN_TMP_PREFIX } from './test-run-tmp.js';
+export { makeTestTempDir, testTempRoot, sweepStaleTmpDirs, RUN_TMP_PREFIX, TEST_TMP_ROOT_ENV } from './temp.js';

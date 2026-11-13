@@ -43,7 +43,7 @@ import {
   findCredentialScopeDeclaration,
 } from '../platform/src/platform/config/credential-scope-registry.ts';
 import { daemonSecretKeyFor, listDaemonOwnedSecretKeys } from '../platform/src/platform/config/daemon-secret-keys.ts';
-import { credentialReadingStanding, loadCredentialKeyReadings, undeclaredSchemaKeys } from './credential-key-readings.ts';
+import { looksLikeSecretKey, undeclaredSchemaKeys } from './credential-key-names.ts';
 import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
 import { structuredCredentialConfigSchemaFailures } from '../platform/src/platform/config/structured-credential-config.ts';
 
@@ -359,41 +359,21 @@ function checkFile(path: string, constants: ReadonlyMap<string, string>): Findin
  * Every schema key that holds a credential must be declared.
  *
  * Scalar secrets use the declared list; structured references require their
- * exact canonical schema, validator and default. Whether
- * a schema key the list does not name holds a credential anyway is read
- * through Jev (`config.credential-key`) by `bun run credential-keys:read`,
- * which stores each reading with the description it was read from in
- * etc/credential-key-readings.json. This check is offline: a key with no
- * stored reading, or whose description changed since, must be read; a key
- * whose reading is anything but a settled no must be declared (or described
- * clearly enough to settle).
+ * exact canonical schema, validator and default. A schema key the lists do not
+ * name must not be named like a secret (secret, token, password, apiKey ...):
+ * declare it in SECRET_BEARING_CONFIG_PATHS, or rename it.
  */
 function checkDeclarationsCoverCredentials(): Finding[] {
-  const file = 'etc/credential-key-readings.json';
-  const stored = loadCredentialKeyReadings();
   const findings: Finding[] = structuredCredentialConfigSchemaFailures(CONFIG_SCHEMA).map(({ key, reason }) => ({
     file: 'platform/src/platform/config/structured-credential-config.ts', line: 0, snippet: key, reason,
   }));
-  for (const { key, description } of undeclaredSchemaKeys()) {
-    const reading = stored?.readings[key];
-    if (reading === undefined || reading.description !== description) {
-      findings.push({
-        file,
-        line: 0,
-        snippet: key,
-        reason: `"${key}" has no credential reading for its current description. Run \`bun run credential-keys:read\` and commit the result.`,
-      });
-      continue;
-    }
-    const standing = credentialReadingStanding(reading);
-    if (standing === 'settled-no') continue;
+  for (const { key } of undeclaredSchemaKeys()) {
+    if (!looksLikeSecretKey(key)) continue;
     findings.push({
       file: 'platform/src/platform/config/secret-bearing-config-keys.ts',
       line: 0,
       snippet: key,
-      reason: standing === 'credential'
-        ? `"${key}" reads as a credential (probability ${reading.probability}, ${reading.outcome}) but is not declared in SECRET_BEARING_CONFIG_PATHS; declare it.`
-        : `"${key}" has no settled credential reading (${reading.verdict}, probability ${reading.probability}, ${reading.outcome}); declare it in SECRET_BEARING_CONFIG_PATHS if it holds a credential, or make its schema description say what it holds and run \`bun run credential-keys:read\`.`,
+      reason: `"${key}" is named like a credential but is not declared in SECRET_BEARING_CONFIG_PATHS; declare it.`,
     });
   }
   return findings;

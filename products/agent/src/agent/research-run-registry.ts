@@ -1,10 +1,28 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreFile } from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { assertNoSecretLikeText } from './persona-registry.ts';
 
 export type AgentResearchRunStatus = 'planned' | 'running' | 'paused' | 'blocked' | 'cancelled' | 'completed' | 'failed';
+/**
+ * Legal status moves of a research run. A run begins with `start` (planned
+ * only) and returns from paused/blocked with `resume`; it never goes back to
+ * planned. Only a running run is paused; a blocked run waits for resume or is
+ * ended. completed/cancelled/failed are final. Phase is deliberately not
+ * constrained: it may move backwards (re-search after review).
+ */
+export const researchRunLifecycle = defineLifecycle<AgentResearchRunStatus>('research run', {
+  planned: ['running', 'blocked', 'cancelled', 'completed', 'failed'],
+  running: ['paused', 'blocked', 'completed', 'cancelled', 'failed'],
+  paused: ['running', 'blocked', 'completed', 'cancelled', 'failed'],
+  blocked: ['running', 'completed', 'cancelled', 'failed'],
+  cancelled: [],
+  completed: [],
+  failed: [],
+});
+
 export type AgentResearchRunPhase = 'planning' | 'searching' | 'reading' | 'synthesizing' | 'reviewing' | 'reporting';
 
 export interface AgentResearchRunCheckpoint {
@@ -383,11 +401,14 @@ export class AgentResearchRunRegistry {
   public start(id: string, note?: string): AgentResearchRunRecord {
     return this.update(id, (run) => {
       this.assertMutable(run, 'start');
+      if (run.status === 'paused' || run.status === 'blocked') {
+        throw new Error(`Cannot start ${run.status} research run ${run.id}; use resume to continue a paused or blocked run.`);
+      }
+      this.assertMove(run, 'running');
       const timestamp = nowIso();
       return {
         ...run,
         status: 'running',
-        phase: run.phase === 'planning' && run.progress > 0 ? run.phase : run.phase,
         progress: Math.max(run.progress, run.status === 'planned' ? 1 : run.progress),
         ...(note?.trim() ? { note: note.trim() } : {}),
         startedAt: run.startedAt ?? timestamp,
@@ -399,6 +420,10 @@ export class AgentResearchRunRegistry {
   public resume(id: string, note?: string): AgentResearchRunRecord {
     return this.update(id, (run) => {
       this.assertMutable(run, 'resume');
+      if (run.status === 'planned') {
+        throw new Error(`Cannot resume planned research run ${run.id}; use start to begin a planned run.`);
+      }
+      this.assertMove(run, 'running');
       const timestamp = nowIso();
       return {
         ...run,
@@ -413,6 +438,7 @@ export class AgentResearchRunRegistry {
   public pause(id: string, note?: string): AgentResearchRunRecord {
     return this.update(id, (run) => {
       this.assertMutable(run, 'pause');
+      this.assertMove(run, 'paused');
       const timestamp = nowIso();
       const finalNote = note?.trim();
       if (finalNote) assertRunContentSafe([finalNote]);
@@ -432,6 +458,7 @@ export class AgentResearchRunRegistry {
     assertRunContentSafe([finalNote]);
     return this.update(id, (run) => {
       this.assertMutable(run, 'cancel');
+      this.assertMove(run, 'cancelled');
       const timestamp = nowIso();
       return {
         ...run,
@@ -459,6 +486,7 @@ export class AgentResearchRunRegistry {
       const progress = boundedProgress(input.progress, run.progress);
       const mergedSourceIds = normalizeList([...run.sourceIds, ...sourceIds]);
       const nextStatus = finalStatus ?? (run.status === 'planned' ? 'running' : run.status);
+      this.assertMove(run, nextStatus);
       const checkpoint: AgentResearchRunCheckpoint = {
         id: checkpointId(timestamp, run.checkpoints.length),
         at: timestamp,
@@ -491,6 +519,7 @@ export class AgentResearchRunRegistry {
     assertRunContentSafe([note ?? '', reportArtifactId ?? '', ...sourceIds]);
     return this.update(id, (run) => {
       this.assertMutable(run, 'complete');
+      this.assertMove(run, 'completed');
       const timestamp = nowIso();
       return {
         ...run,
@@ -512,6 +541,7 @@ export class AgentResearchRunRegistry {
     assertRunContentSafe([finalError]);
     return this.update(id, (run) => {
       this.assertMutable(run, 'fail');
+      this.assertMove(run, 'failed');
       const timestamp = nowIso();
       return {
         ...run,
@@ -533,6 +563,13 @@ export class AgentResearchRunRegistry {
 
   private assertMutable(run: AgentResearchRunRecord, action: string): void {
     if (TERMINAL_STATUSES.has(run.status)) throw new Error(`Cannot ${action} ${run.status} research run ${run.id}.`);
+  }
+
+  /** A move to the status the run already has is a no-op the registry has always allowed; any other move must be in the table. */
+  private assertMove(run: AgentResearchRunRecord, to: AgentResearchRunStatus): void {
+    if (run.status === to) return;
+    const move = researchRunLifecycle.check(run.status, to);
+    if (!move.ok) throw new Error(`${move.reason} (research run ${run.id}).`);
   }
 
   private update(id: string, updater: (run: AgentResearchRunRecord) => AgentResearchRunRecord): AgentResearchRunRecord {

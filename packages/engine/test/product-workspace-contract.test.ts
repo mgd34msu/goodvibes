@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { inspectProductWorkspaces, moduleSpecifiers, productCheckCommands, productTestMatrix, PRODUCT_DEFINITIONS, selectProductWorkspaces, type ProductDefinition } from '../scripts/product-workspace-contract.ts';
+import { inspectProductWorkspaces, moduleSpecifiers, productCheckCommands, PRODUCT_DEFINITIONS, selectProductWorkspaces, type ProductDefinition } from '../scripts/product-workspace-contract.ts';
 import { executeProductCommands } from '../scripts/product-workspaces.ts';
 
 const roots: string[] = [];
@@ -35,10 +35,9 @@ function mutate(root: string, file: string, update: (value: Record<string, unkno
   const value = JSON.parse(readFileSync(join(root, file), 'utf8')) as Record<string, unknown>; update(value); write(root, file, value);
 }
 
-test('workspace inspection records absent products without inventing successful CI lanes', () => {
+test('workspace inspection records absent products without inventing successful lanes', () => {
   const root = fixture(false);
   expect(inspectProductWorkspaces(root, [definition])).toEqual({ products: [], missing: ['daemon'], findings: [] });
-  expect(() => productTestMatrix(inspectProductWorkspaces(root, [definition]))).toThrow('No present product');
 });
 
 test('a workspace runs each compiler project once without repeating product aggregates', () => {
@@ -266,7 +265,7 @@ test('real product progress reaches both outer sinks before the command exits', 
 }, 10_000);
 
 
-test('product matrix and explicit lanes cover all present declared suites exactly once', () => {
+test('explicit product lanes cover all present declared suites exactly once', () => {
   const root = fixture();
   const daemon = inspectProductWorkspaces(root, [definition]).products[0]!;
   const products = ['daemon', 'tui', 'agent', 'webui'].map((name) => ({
@@ -275,8 +274,7 @@ test('product matrix and explicit lanes cover all present declared suites exactl
   // Exercise every nonempty subset, including main and the two product branches.
   for (let mask = 1; mask < 16; mask++) {
     const present = products.filter((_, index) => mask & (1 << index));
-    const matrix = productTestMatrix({ products: present, findings: [], missing: [] });
-    expect(matrix).toEqual(present.map((product) => product.definition.name));
+    const matrix = present.map((product) => product.definition.name);
     const aggregate = productCheckCommands(root, present, 'test');
     const lanes = matrix.flatMap((name) => productCheckCommands(root, selectProductWorkspaces(present, [name]), 'test'));
     expect(lanes).toEqual([...aggregate]);
@@ -285,29 +283,12 @@ test('product matrix and explicit lanes cover all present declared suites exactl
   }
 });
 
-test('product selectors and matrix reject omissions disguised as successful selection', () => {
+test('product selectors reject omissions disguised as successful selection', () => {
   const root = fixture();
   const inspection = inspectProductWorkspaces(root, [definition]);
   expect(() => selectProductWorkspaces(inspection.products, ['deamon'])).toThrow('Unknown product selector');
   expect(() => selectProductWorkspaces(inspection.products, ['tui'])).toThrow('Selected product tui is not present');
   expect(() => selectProductWorkspaces(inspection.products, ['daemon', 'daemon'])).toThrow('Duplicate product selector');
-  expect(() => productTestMatrix({ products: [], missing: [], findings: [] })).toThrow('No present product');
-  expect(() => productTestMatrix({ ...inspection, findings: ['unselected product is invalid'] })).toThrow('unselected product is invalid');
-  expect(() => productTestMatrix({ ...inspection, products: [...inspection.products, ...inspection.products] })).toThrow('Duplicate product selector');
-});
-
-
-test('the product matrix CLI emits only complete inspected JSON and refuses selectors', () => {
-  const root = resolve(import.meta.dir, '../../..');
-  const runner = join(root, 'packages/engine/scripts/product-workspaces.ts');
-  const expected = productTestMatrix(inspectProductWorkspaces(root));
-  const run = spawnSync('bun', [runner, 'matrix'], { cwd: root, encoding: 'utf8', timeout: 10_000 });
-  expect(run.error).toBeUndefined();
-  expect(run.status, run.stderr).toBe(0);
-  expect(JSON.parse(run.stdout)).toEqual(expected);
-  const filtered = spawnSync('bun', [runner, 'matrix', 'daemon'], { cwd: root, encoding: 'utf8', timeout: 10_000 });
-  expect(filtered.status).toBe(1);
-  expect(filtered.stderr).toContain('matrix does not accept product selectors');
 });
 
 

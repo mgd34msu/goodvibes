@@ -11,11 +11,14 @@ import type {
   AutomationExecutionIntent,
   AutomationExecutionMode,
   AutomationExecutionTargetKind,
+  AutomationJobStatus,
+  AutomationRunStatus,
   ProviderModelRoutingPolicy,
 } from './types.js';
 import { splitModelRegistryKey } from '../providers/registry-helpers.js';
 import { resolveModelReference, type ModelIdCandidate } from '../providers/model-id-resolution.js';
 import { getNextAutomationOccurrence } from './schedules.js';
+import { defineLifecycle } from '../utils/lifecycle-machine.js';
 
 export interface CreateAutomationJobInput {
   readonly requiresSourceOwner?: boolean | undefined;
@@ -336,6 +339,61 @@ export function buildDefaultFailurePolicy(configManager: ConfigManager, override
   };
 }
 
+/**
+ * The automation run lifecycle, from the moves the manager performs: a run is
+ * created `running` and settles once to completed, failed or cancelled; a
+ * missed run is recorded already final. `queued` is never assigned by this
+ * module but is read by scheduler-capacity and is accepted by the persisted
+ * run schema, so it stays declared (queued -> running is the start, the other
+ * two are an operator or a failed start before it began).
+ */
+export const automationRunLifecycle = defineLifecycle<AutomationRunStatus>('automation run', {
+  queued: ['running', 'cancelled', 'failed'],
+  running: ['completed', 'failed', 'cancelled'],
+  completed: [],
+  failed: [],
+  cancelled: [],
+  missed: [],
+});
+
+/**
+ * The automation job lifecycle. Only `enabled` <-> `paused` is performed today.
+ * `error` and `archived` are never assigned here, but the persisted job schema
+ * and the operator contract accept them (and `archivedAt` is a job field), so a
+ * stored or imported job can carry them; they stay declared. `archived` is final.
+ */
+export const automationJobLifecycle = defineLifecycle<AutomationJobStatus>('automation job', {
+  enabled: ['paused', 'error', 'archived'],
+  paused: ['enabled', 'error', 'archived'],
+  error: ['enabled', 'paused', 'archived'],
+  archived: [],
+});
+
+/**
+ * The single place a job's `enabled` flag and `status` are reconciled. The flag
+ * is the switch the scheduler reads; `status` is its label. When both are
+ * present they are kept as given (so a persisted `error`/`archived` survives);
+ * when one is missing it is derived from the other.
+ */
+export function resolveJobEnablement(job: { readonly enabled?: boolean | undefined; readonly status?: AutomationJobStatus | undefined }): { readonly enabled: boolean; readonly status: AutomationJobStatus } {
+  const enabled = job.enabled ?? job.status === 'enabled';
+  return { enabled, status: job.status ?? (enabled ? 'enabled' : 'paused') };
+}
+
+/** `enabled` and `status` for a job being switched on or off. */
+export function jobEnablement(enabled: boolean): { readonly enabled: boolean; readonly status: AutomationJobStatus } {
+  return { enabled, status: enabled ? 'enabled' : 'paused' };
+}
+
+/**
+ * Whether the stored run may still be settled to `to`. A run that already
+ * reached a terminal state (cancelled by an operator while its work was in
+ * flight, say) must not be rewritten by the late writer.
+ */
+export function canSettleStoredRun(stored: AutomationRun | undefined, to: AutomationRunStatus): boolean {
+  return stored === undefined || automationRunLifecycle.can(stored.status, to);
+}
+
 export function getTerminalAgentState(agent: AgentRecord): Extract<AutomationRun['status'], 'completed' | 'failed' | 'cancelled'> | null {
   switch (agent.status) {
     case 'completed':
@@ -349,7 +407,7 @@ export function getTerminalAgentState(agent: AgentRecord): Extract<AutomationRun
 
 export function normalizeJobRecord(job: AutomationJob, configManager: ConfigManager): AutomationJob {
   const timestamp = job.createdAt ?? Date.now();
-  const enabled = job.enabled ?? job.status === 'enabled';
+  const { enabled, status } = resolveJobEnablement(job);
   const target = job.execution?.target ?? { kind: 'isolated', createIfMissing: true } as AutomationSessionTarget;
   return {
     ...job,
@@ -357,7 +415,7 @@ export function normalizeJobRecord(job: AutomationJob, configManager: ConfigMana
     createdAt: timestamp,
     updatedAt: job.updatedAt ?? timestamp,
     enabled,
-    status: job.status ?? (enabled ? 'enabled' : 'paused'),
+    status,
     execution: {
       prompt: job.execution?.prompt ?? job.description ?? job.name,
       ...job.execution,

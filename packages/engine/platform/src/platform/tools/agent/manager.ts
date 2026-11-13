@@ -27,7 +27,7 @@ import { splitModelRegistryKey } from '../../providers/registry-helpers.js';
 import type { ProviderRegistry } from '../../providers/registry.js';
 import { requireProviderQualifiedModel, normalizeProviderQualifiedModelList } from './model-routing.js';
 import { sameProviderCatalog } from '../../providers/provider-aliases.js';
-import type { AgentRecord } from './record.js';
+import { moveAgentRun, type AgentRecord } from './record.js';
 import { splitContractBinding, startContractOwner, type ContractOwnerBinding, type ContractUnitBinding } from './contract-binding.js';
 
 export type { AgentRecord } from './record.js';
@@ -667,7 +667,12 @@ export class AgentManager {
         };
         const boundary = this.executionBoundaries.get(id);
         begin((boundary === undefined ? execute() : Promise.resolve().then(() => boundary(execute))).catch((error) => {
-          record.status = 'failed';
+          // A late rejection must not relabel a cancelled run, and a run that
+          // already failed keeps its first, more specific error; neither is lost silently.
+          if (!moveAgentRun(record, 'failed')) {
+            logger.warn('Agent run rejected after it had settled', { agentId: record.id, status: record.status, error: summarizeError(error) });
+            return;
+          }
           record.error = summarizeError(error, {
             ...(record.provider ? { provider: record.provider } : {}),
           });
@@ -805,7 +810,13 @@ export class AgentManager {
       running = Promise.reject(error);
     }
     begin(running.catch((error) => {
-      record.status = 'failed';
+      // A woken run that fails before the executor marks it running is still
+      // failed/completed: step through pending (a legal wake move) first.
+      if (record.status === 'failed') moveAgentRun(record, 'pending');
+      if (!moveAgentRun(record, 'failed')) {
+        logger.warn('Agent wake rejected after the run had settled', { agentId: record.id, status: record.status, error: summarizeError(error) });
+        return;
+      }
       record.error = summarizeError(error, {
         ...(record.provider ? { provider: record.provider } : {}),
       });

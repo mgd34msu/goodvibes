@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  ABANDONED_QUEUE_MS,
   deleteDraft,
   formatChannelDraft,
   formatChannelDraftList,
@@ -207,6 +208,7 @@ describe('channel-draft', () => {
     try {
       const shellPaths = makeShellPaths(root);
       const saved = await saveDraft(shellPaths, { message: 'Send me', channel: 'slack:ops' });
+      await queueDraftToSend(shellPaths, saved.draft.id);
       const sent = markDraftSent(shellPaths, saved.draft.id, 'response-abc');
       expect(sent.status).toBe('sent');
       expect(sent.sentResponseId).toBe('response-abc');
@@ -220,9 +222,84 @@ describe('channel-draft', () => {
     try {
       const shellPaths = makeShellPaths(root);
       const saved = await saveDraft(shellPaths, { message: 'Will fail', channel: 'slack:ops' });
+      await queueDraftToSend(shellPaths, saved.draft.id);
       const failed = markDraftFailed(shellPaths, saved.draft.id, 'Connection refused');
       expect(failed.status).toBe('failed');
       expect(failed.sendError).toBe('Connection refused');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a draft being delivered cannot be queued again (no second delivery input)', async () => {
+    const root = makeProjectTempDir('gv-drafts');
+    try {
+      const shellPaths = makeShellPaths(root);
+      const saved = await saveDraft(shellPaths, { message: 'Once only', channel: 'slack:ops' });
+      await queueDraftToSend(shellPaths, saved.draft.id);
+      await expect(queueDraftToSend(shellPaths, saved.draft.id)).rejects.toThrow(/already queued and being delivered/);
+      expect(getDraft(shellPaths, saved.draft.id)?.status).toBe('queued');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a draft left queued with no outcome is not stuck: once abandoned it can be queued again', async () => {
+    const root = makeProjectTempDir('gv-drafts');
+    const realNow = Date.now;
+    try {
+      const shellPaths = makeShellPaths(root);
+      const saved = await saveDraft(shellPaths, { message: 'Survives a crash', channel: 'slack:ops' });
+      await queueDraftToSend(shellPaths, saved.draft.id);
+      Date.now = () => realNow() + ABANDONED_QUEUE_MS + 1_000;
+      const again = await queueDraftToSend(shellPaths, saved.draft.id);
+      expect(again.deliveryInput.message).toBe('Survives a crash');
+      expect(again.draft.status).toBe('queued');
+    } finally {
+      Date.now = realNow;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a failed draft can be queued again for a retry', async () => {
+    const root = makeProjectTempDir('gv-drafts');
+    try {
+      const shellPaths = makeShellPaths(root);
+      const saved = await saveDraft(shellPaths, { message: 'Retry me', channel: 'slack:ops' });
+      await queueDraftToSend(shellPaths, saved.draft.id);
+      markDraftFailed(shellPaths, saved.draft.id, 'boom');
+      const again = await queueDraftToSend(shellPaths, saved.draft.id);
+      expect(again.draft.status).toBe('queued');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a sent draft cannot be overwritten by markDraftFailed or markDraftSent', async () => {
+    const root = makeProjectTempDir('gv-drafts');
+    try {
+      const shellPaths = makeShellPaths(root);
+      const saved = await saveDraft(shellPaths, { message: 'Done', channel: 'slack:ops' });
+      await queueDraftToSend(shellPaths, saved.draft.id);
+      markDraftSent(shellPaths, saved.draft.id, 'r1');
+      expect(() => markDraftFailed(shellPaths, saved.draft.id, 'late')).toThrow(/final/);
+      expect(() => markDraftSent(shellPaths, saved.draft.id, 'r2')).toThrow(/final/);
+      const persisted = getDraft(shellPaths, saved.draft.id);
+      expect(persisted?.status).toBe('sent');
+      expect(persisted?.sentResponseId).toBe('r1');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a delivery outcome is recorded even when the draft was edited back to draft mid-delivery', async () => {
+    const root = makeProjectTempDir('gv-drafts');
+    try {
+      const shellPaths = makeShellPaths(root);
+      const saved = await saveDraft(shellPaths, { message: 'Edited while sending', channel: 'slack:ops' });
+      await queueDraftToSend(shellPaths, saved.draft.id);
+      await saveDraft(shellPaths, { id: saved.draft.id, message: 'Edited while sending', channel: 'slack:ops', status: 'draft' });
+      expect(markDraftSent(shellPaths, saved.draft.id, 'r1').status).toBe('sent');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

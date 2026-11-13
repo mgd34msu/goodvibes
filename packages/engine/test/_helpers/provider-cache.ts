@@ -1,6 +1,5 @@
 import { makeProjectTempDir } from './project-temp.ts';
-import { createTempDirRegistry } from './temp-registry.ts';
-import { lstatSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CatalogModel, loadCatalogCache } from '../../platform/src/platform/providers/model-catalog.ts';
 import type { BenchmarkEntry } from '../../platform/src/platform/providers/model-benchmarks.ts';
@@ -16,28 +15,14 @@ export interface ProviderCachePaths {
   readonly benchmarksPath: string;
 }
 
-/** Fresh runner-owned cache only. A caller path is deliberately not accepted. */
+/** Fresh run-owned cache only. A caller path is deliberately not accepted. */
 export function createProviderCacheFixture(prefix = 'provider-cache'): ProviderCacheFixture {
   const root = makeProjectTempDir(prefix);
-  const registry = createTempDirRegistry(root);
   const cacheDir = join(root, 'cache');
   mkdirSync(cacheDir);
-  registry.register(cacheDir);
-  const identity = lstatSync(cacheDir);
   return {
     cacheDir,
-    cleanup: () => {
-      try {
-        const current = lstatSync(cacheDir);
-        if (current.isSymbolicLink() || current.dev !== identity.dev || current.ino !== identity.ino) {
-          throw new Error('Provider cache cleanup refused an unsafe or surviving owned path');
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-      registry.cleanup();
-      if (registry.entries().length > 0) throw new Error('Provider cache cleanup refused an unsafe or surviving owned path');
-    },
+    cleanup: () => rmSync(root, { recursive: true, force: true }),
     restoreEnv: () => {},
   };
 }

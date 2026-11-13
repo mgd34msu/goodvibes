@@ -88,7 +88,8 @@ for (const violation of ['source', 'reader', 'assets', 'draft'] as const) test(`
   const fixture = previousCatalog('darwin-arm64');
   if (violation === 'source') fixture.annotated.object.sha = nextSource;
   if (violation === 'reader') fixture.readers[0]!.headCommit = nextSource;
-  if (violation === 'assets') fixture.release.assets.pop();
+  // The catalog is validated by required contents, so drop a required member (a reader record), not an arbitrary one.
+  if (violation === 'assets') fixture.release.assets = fixture.release.assets.filter(asset => !asset.name.endsWith('.reader-ci-artifact.json'));
   if (violation === 'draft') fixture.release.draft = true;
   await expect(fixture.load()).rejects.toThrow(); expect(fixture.requests.some(url => url.endsWith('/scripts/install.sh'))).toBe(false);
 });

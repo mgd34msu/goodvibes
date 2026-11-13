@@ -254,4 +254,38 @@ describe('QueuedMessagesPanel', () => {
     }
     expect(listCalls).toBe(1);
   });
+
+  test('a late edit success for one row does not close another row\'s open editor', async () => {
+    listImpl = (sessionId) => Promise.resolve({
+      sessionId,
+      messages: [
+        { id: 'q-1', queuedAt: 1000, text: 'First' },
+        { id: 'q-2', queuedAt: 2000, text: 'Second' },
+      ],
+    });
+    let release!: () => void;
+    editImpl = (sessionId, id, text) => new Promise((resolve) => { release = () => resolve({ sessionId, id, text }); });
+    const { el, unmount } = render();
+    cleanup = unmount;
+    await waitFor(() => el.querySelectorAll('.queued-message__edit').length === 2);
+
+    click(el.querySelectorAll('.queued-message__edit')[0]);
+    await waitFor(() => Boolean(el.querySelector('.queued-message__edit-form')));
+    const form = el.querySelector('.queued-message__edit-form') as HTMLFormElement;
+    flushSync(() => form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+    await waitFor(() => calls.edit.length === 1);
+
+    // While row 1 is saving, the operator opens row 2's editor.
+    click(el.querySelectorAll('.queued-message__edit')[0]); // row 1 is still editing, so its Edit button is gone; row 2's is now first
+    await waitFor(() => Boolean(el.querySelector('textarea')));
+    const textarea = () => el.querySelector('textarea') as HTMLTextAreaElement;
+    expect(textarea().value).toBe('Second');
+
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    flushSync(() => {});
+
+    expect(el.querySelector('.queued-message__edit-form')).not.toBeNull();
+    expect(textarea().value).toBe('Second');
+  });
 });

@@ -5,7 +5,6 @@ import { execFileSync } from 'node:child_process';
 import { buildNpmPublishAuthEnv } from './npm-auth.ts';
 import { getPublishedNpmVersion } from './npm-publish-state.ts';
 import { syncProjectSurfaces } from './project-surfaces.ts';
-import { withWorkspaceLock } from './workspace-lock.ts';
 import { isForbiddenPackageTarballPath, packageDocPaths, requiredTarballPaths, verifyPackageFacingText, verifyReleaseMetadata } from '../src/cli/package-verification.ts';
 
 const root = process.cwd();
@@ -106,77 +105,79 @@ function copyEntry(relativePath: string) {
   });
 }
 
-try {
-  withWorkspaceLock('stage publish package', () => {
-    syncProjectSurfaces(root);
-    assertSourcePackagePolicy(root);
-    execFileSync('bun', ['run', 'build:package-runtime'], {
-      cwd: root,
-      stdio: 'inherit',
-    });
+function stageAndPublish(): void {
+  syncProjectSurfaces(root);
+  assertSourcePackagePolicy(root);
+  execFileSync('bun', ['run', 'build:package-runtime'], {
+    cwd: root,
+    stdio: 'inherit',
+  });
 
-    mkdirSync(stageDir, { recursive: true });
+  mkdirSync(stageDir, { recursive: true });
 
-    for (const entry of stagedEntries) {
-      copyEntry(entry);
+  for (const entry of stagedEntries) {
+    copyEntry(entry);
+  }
+
+  for (const docPath of requiredDocs) {
+    const stagedDoc = join(stageDir, docPath);
+    if (!existsSync(stagedDoc)) {
+      throw new Error(`staged package is missing package-facing doc: ${stagedDoc}`);
     }
-
-    for (const docPath of requiredDocs) {
-      const stagedDoc = join(stageDir, docPath);
-      if (!existsSync(stagedDoc)) {
-        throw new Error(`staged package is missing package-facing doc: ${stagedDoc}`);
-      }
-      if (statSync(stagedDoc).size <= 0) {
-        throw new Error(`staged package-facing doc is empty: ${stagedDoc}`);
-      }
+    if (statSync(stagedDoc).size <= 0) {
+      throw new Error(`staged package-facing doc is empty: ${stagedDoc}`);
     }
-    assertNoForbiddenStagedPaths();
-    assertRequiredStagedPaths();
-    assertStagedPackagePolicy(stageDir);
+  }
+  assertNoForbiddenStagedPaths();
+  assertRequiredStagedPaths();
+  assertStagedPackagePolicy(stageDir);
 
-    const publishAuth = buildNpmPublishAuthEnv({
-      env: process.env,
+  const publishAuth = buildNpmPublishAuthEnv({
+    env: process.env,
+    registry,
+    tempRoot,
+  });
+
+  const stagedPackage = JSON.parse(readFileSync(join(stageDir, 'package.json'), 'utf8')) as {
+    readonly name?: unknown;
+    readonly version?: unknown;
+  };
+
+  if (typeof stagedPackage.name !== 'string' || typeof stagedPackage.version !== 'string') {
+    throw new Error('staged package.json is missing string name/version fields');
+  }
+  if (stagedPackage.name !== '@goodvibes-jev/agent') {
+    throw new Error(`staged package.json has unexpected package name: ${stagedPackage.name}`);
+  }
+
+  if (!dryRun) {
+    const publishedVersion = getPublishedNpmVersion({
+      name: stagedPackage.name,
+      version: stagedPackage.version,
       registry,
-      tempRoot,
-    });
-
-    const stagedPackage = JSON.parse(readFileSync(join(stageDir, 'package.json'), 'utf8')) as {
-      readonly name?: unknown;
-      readonly version?: unknown;
-    };
-
-    if (typeof stagedPackage.name !== 'string' || typeof stagedPackage.version !== 'string') {
-      throw new Error('staged package.json is missing string name/version fields');
-    }
-    if (stagedPackage.name !== '@goodvibes-jev/agent') {
-      throw new Error(`staged package.json has unexpected package name: ${stagedPackage.name}`);
-    }
-
-    if (!dryRun) {
-      const publishedVersion = getPublishedNpmVersion({
-        name: stagedPackage.name,
-        version: stagedPackage.version,
-        registry,
-        cwd: stageDir,
-        env: publishAuth.env,
-      });
-
-      if (publishedVersion === stagedPackage.version) {
-        console.log(`${stagedPackage.name}@${stagedPackage.version} is already published; skipping npm publish.`);
-        return;
-      }
-    }
-
-    const args = dryRun
-      ? ['pack', '--json']
-      : ['publish', '--access', 'public', '--registry', registry];
-
-    execFileSync('npm', args, {
       cwd: stageDir,
-      stdio: 'inherit',
       env: publishAuth.env,
     });
+
+    if (publishedVersion === stagedPackage.version) {
+      console.log(`${stagedPackage.name}@${stagedPackage.version} is already published; skipping npm publish.`);
+      return;
+    }
+  }
+
+  const args = dryRun
+    ? ['pack', '--json']
+    : ['publish', '--access', 'public', '--registry', registry];
+
+  execFileSync('npm', args, {
+    cwd: stageDir,
+    stdio: 'inherit',
+    env: publishAuth.env,
   });
+}
+
+try {
+  stageAndPublish();
 } finally {
   rmSync(tempRoot, { recursive: true, force: true });
 }

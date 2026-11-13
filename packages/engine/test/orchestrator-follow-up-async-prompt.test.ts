@@ -60,3 +60,34 @@ test('duplicate event keys do not resume twice and distinct outcomes remain dist
   f.runtime.enqueue({ key: 'a', summary: 'Failed' }); await flush();
   expect(received.map(item => item.key)).toEqual(['a', 'b']);
 });
+
+test('an endlessly failing follow-up is retried a bounded number of times, then dropped with a visible notice', async () => {
+  let calls = 0;
+  const failures: string[] = [];
+  const runtime = new OrchestratorFollowUpRuntime({ getThinkingState: () => ({ isThinking: false, isCompacting: false }),
+    getQueuedUserMessageCount: () => 0, routeLowPriorityMessage: message => failures.push(message),
+    resumeWork: async () => { calls++; throw new Error('provider down'); },
+    retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 4 } });
+  runtimes.push(runtime);
+  runtime.enqueue({ key: 'stuck', summary: 'Review needs recovery' });
+  for (let i = 0; i < 100 && !failures.some(message => message.includes('abandoned')); i++) await new Promise(resolve => setTimeout(resolve, 5));
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(calls).toBe(3);
+  expect(failures.filter(message => message.includes('remains pending'))).toHaveLength(2);
+  expect(failures.filter(message => message.includes('abandoned'))).toHaveLength(1);
+  expect(failures.at(-1)).toContain('Review needs recovery');
+});
+
+test('a follow-up that succeeds after a failure resets its attempt count', async () => {
+  let calls = 0;
+  const failures: string[] = [];
+  const runtime = new OrchestratorFollowUpRuntime({ getThinkingState: () => ({ isThinking: false, isCompacting: false }),
+    getQueuedUserMessageCount: () => 0, routeLowPriorityMessage: message => failures.push(message),
+    resumeWork: async () => { calls++; if (calls === 1) throw new Error('blip'); },
+    retry: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 4 } });
+  runtimes.push(runtime);
+  runtime.enqueue({ key: 'blip', summary: 'Recover' });
+  await new Promise(resolve => setTimeout(resolve, 60));
+  expect(calls).toBe(2);
+  expect(failures.filter(message => message.includes('abandoned'))).toEqual([]);
+});

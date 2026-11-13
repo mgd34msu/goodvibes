@@ -46,7 +46,10 @@ Important pieces:
 - `executeToolCalls()` routes tool calls through the registered tool runtime.
 - `checkContextWindowPreflight()` protects turns that exceed model limits.
 - `OrchestratorFollowUpRuntime` routes follow-up messages back into active
-  sessions.
+  sessions. A follow-up that cannot be delivered is retried up to five times in
+  all, with a delay that starts at 250 ms, doubles per failed attempt and is
+  capped at 30 seconds. After the last attempt it is dropped and the user is
+  told.
 - `ExecutionPlanManager` tracks structured plans with `pending`, `in_progress`,
   `complete`, `failed`, and `skipped` statuses.
 
@@ -282,7 +285,7 @@ The runner reads `contract.*` (`config/schema-domain-contract.ts`,
 | `contract.maxActiveContracts` | `6` | Contracts running at once |
 | `contract.maxParallelUnits` | `64` | Units running at once in one group (worktree mode) |
 | `contract.isolation` | `auto` | `auto`, `worktree` or `shared` |
-| `contract.heartbeatTimeoutMs` | `0` (off) | Silence before a unit agent is restarted |
+| `contract.heartbeatTimeoutMs` | `0` (off) | Silence before a running unit agent is restarted once; a second silence fails the unit |
 | `contract.transportRetryLimit` | `1` | Fresh agents after a network failure |
 | `contract.transportRetryDelayMs` | `5000` | Wait before that retry |
 | `contract.nudgeTtlMs` | `300000` | Lifetime of a mid-run nudge on the message bus |
@@ -474,6 +477,61 @@ The state subsystem supplies SQLite/KV stores, file state cache, file undo,
 file watcher, project index, memory vector store, mode manager, and telemetry
 recorder.
 
+### Lifecycles
+
+A record with a status (a task, a trigger, an MCP server, a query, a research
+run) declares its legal moves once, as a table, in the module that owns the
+record. The table is built with `defineLifecycle` from
+`@goodvibes-jev/engine/platform/platform/utils`. Each row lists the states that state may
+move to; a state with an empty row is final, and a state may move to itself
+only where its row says so. Because the table is typed as
+`Record<State, readonly State[]>`, adding a state without a row is a compile
+error.
+
+The task lifecycle (`runtime/tasks/lifecycle.ts`):
+
+```ts
+import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
+
+export const taskLifecycle = defineLifecycle<TaskLifecycleState>('task', {
+  queued: ['running', 'cancelled'],
+  running: ['blocked', 'completed', 'failed', 'cancelled', 'queued'],
+  blocked: ['running', 'cancelled', 'failed', 'queued'],
+  completed: [],
+  failed: [],
+  cancelled: [],
+});
+
+taskLifecycle.can('queued', 'running');     // true
+taskLifecycle.isTerminal('completed');      // true
+taskLifecycle.check('completed', 'running');
+// { ok: false, from: 'completed', to: 'running', allowed: [],
+//   reason: 'task is completed, which is final; it cannot become running' }
+```
+
+The returned machine is data and pure functions: `can`, `check`, `assert`,
+`next`, `isTerminal`, `isState` and `describe`. It holds no current state; the
+owner of the record still stores the status and decides what a refusal means.
+
+A refused move always names what is legal. From a final state the reason reads
+`<name> is <state>, which is final; it cannot become <target>`. Otherwise it
+reads `<name> is <state> and cannot become <target>; from <state> it can become
+<a>, <b>`. `assert` throws `IllegalLifecycleTransitionError`, which carries
+`machine`, `from`, `to` and `allowed`. Tools return the reason as their error
+text, so a model that attempts an illegal move is told which moves remain.
+Event reducers, late callbacks and shutdown paths log a refused move and leave
+the record unchanged instead of throwing.
+
+Task rules that follow from the table and its two named exceptions:
+
+- `completed`, `failed` and `cancelled` are final. A late report from a runner
+  does not change a finished task or its end time.
+- An explicit retry is the only way out of `failed` or `cancelled`; it moves
+  the task back to `queued` (`canRetry`).
+- A runner bridge may report a `queued` task as `completed` or `failed`
+  directly, and may repeat a non-final status to update progress
+  (`canMirror`).
+
 ## Profiles, bookmarks, and export
 
 Profiles hold named display, provider/model, and behavior overrides that can be
@@ -491,7 +549,10 @@ code-aware runtime features.
 ## ACP and remote runners
 
 ACP manages agent communication protocol envelopes, handshake state,
-connections, and manager lifecycle. Remote runtime support covers runner pools,
+connections, and manager lifecycle. When a hosted ACP agent reports a cancelled
+turn, the agent returns to `idle` and accepts further prompts; only an explicit
+stop or a failure ends the hosted agent. A subagent run emits one terminal
+event: the first of completed, failed or cancelled. Remote runtime support covers runner pools,
 assignment, contracts, artifacts, review, and artifact import. The companion
 surface can use daemon-hosted remote sessions without mutating shared TUI
 provider/model state.

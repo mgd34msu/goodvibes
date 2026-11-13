@@ -10,6 +10,7 @@ import {
   run,
   stagePackages,
 } from './release-shared.ts';
+import { isMissingPublishedVersionError, parseNpmViewString } from './verify-published-packages.ts';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const USE_PROVENANCE = process.argv.includes('--provenance') || process.env.GITHUB_ACTIONS === 'true';
@@ -19,14 +20,17 @@ const SUPPORTS_PROVENANCE = REGISTRY === 'https://registry.npmjs.org';
 /**
  * `authEnv` is null on the dry-run path, which must not consult publish tokens.
  * `npm view` on a public package needs no credentials, so the same question is
- * answerable either way; a network or lookup failure returns false and the
- * caller proceeds exactly as it did before this check existed.
+ * answerable either way. Only a registry answer that says "no such version"
+ * (npm error code E404/ETARGET) means not published. For a real publish any
+ * other failure stops the run: reading "the registry could not be asked" as
+ * "not published" would attempt a publish over a version that may exist. A dry
+ * run keeps proceeding on a lookup failure, since it publishes nothing.
  */
 function isPublished(name: string, version: string, authEnv: AuthEnv | null): boolean {
   try {
     const output = run(
       'npm',
-      ['view', `${name}@${version}`, 'version', '--registry', REGISTRY],
+      ['view', `${name}@${version}`, 'version', '--json', '--registry', REGISTRY],
       process.cwd(),
       {
         auth: authEnv !== null,
@@ -35,10 +39,16 @@ function isPublished(name: string, version: string, authEnv: AuthEnv | null): bo
         stdio: 'pipe',
         ...(authEnv ? { authEnv } : {}),
       },
-    ).trim();
-    return output === version;
-  } catch {
-    return false;
+    );
+    return parseNpmViewString(output) === version;
+  } catch (error) {
+    if (isMissingPublishedVersionError(error)) return false;
+    if (authEnv === null) return false;
+    throw new Error(
+      `[publish] Could not read ${name}@${version} from ${REGISTRY}; refusing to treat the registry as empty. `
+      + `Nothing was published for this package. Re-run the same publish command once the registry is reachable; packages already published are skipped. `
+      + `(${error instanceof Error ? error.message : String(error)})`,
+    );
   }
 }
 

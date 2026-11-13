@@ -32,7 +32,7 @@
     "smoke:binary": "bun scripts/run-toolchain.ts smoke",
     "verify:binary": "node scripts/verify-binary.mjs",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
-    "test": "bun run build && bun ../../packages/engine/scripts/daemon-test-partitions.ts run",
+    "test": "bun run build && bun ../../packages/engine/scripts/test.ts --cwd ../../products/daemon --jobs=auto src/test",
     "start": "bun dist/cli/entrypoint.js",
     "native:package": "bun scripts/package-native.ts"
   },

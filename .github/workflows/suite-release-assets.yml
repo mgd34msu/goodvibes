@@ -130,9 +130,36 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: python3 .github/scripts/publish-missing-suite-assets.py "$RUNNER_TEMP/suite-assets" "$RELEASE_TAG"
 
+  previous-release:
+    # The release being upgraded from is the nearest earlier version tag in this
+    # release's history; empty for the first release.
+    needs: collect
+    if: inputs.publish_existing && inputs.candidate-source == '' && needs.collect.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.previous.outputs.tag }}
+      source: ${{ steps.previous.outputs.source }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Resolve the previous published release
+        id: previous
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "refs/tags/$RELEASE_TAG^" 2>/dev/null || true)
+          if [ -n "$previous" ] && [ "$previous" != "$RELEASE_TAG" ]; then
+            echo "tag=$previous" >> "$GITHUB_OUTPUT"
+            echo "source=$(git rev-parse "$previous^{commit}")" >> "$GITHUB_OUTPUT"
+          fi
+
   published-install-acceptance:
     # Packaging-only callers have not published anything and must not run this.
-    needs: collect
+    needs: [collect, previous-release]
     if: inputs.publish_existing && inputs.candidate-source == '' && needs.collect.result == 'success'
     permissions:
       contents: read
@@ -141,5 +168,5 @@ jobs:
       tag: ${{ inputs.tag }}
       source: ${{ needs.collect.outputs.source }}
       tooling-sha: ${{ github.sha }}
-      previous-tag: ${{ inputs.tag == 'v3.1.3' && 'v3.1.2' || '' }}
-      previous-source: ${{ inputs.tag == 'v3.1.3' && 'a5ddf1f151466590eaed4ab387b2f95be7112a86' || '' }}
+      previous-tag: ${{ needs.previous-release.outputs.tag }}
+      previous-source: ${{ needs.previous-release.outputs.source }}

@@ -77,6 +77,18 @@ test.each(['darwin-arm64', 'windows-x64', 'linux-riscv64'])('explicit unsupporte
   expect(existsSync(join(root, 'missing'))).toBe(false);
 });
 
+test.skipIf(!supportedHost)('an interrupted replacement never leaves a new binary beside a provenance hash of the old one', () => {
+  const root = fixture();
+  const stale = join(root, 'dist', 'app.bun');
+  writeFileSync(stale, elf(native.key === 'linux-arm64' ? 183 : 62), { mode: 0o755 });
+  writeFileSync(`${stale}.json`, JSON.stringify({ version: '1.3.14', sha256: createHash('sha256').update(readFileSync(stale)).digest('hex') }));
+  // A non-empty directory where the notice belongs makes the notice rename fail after the binary was replaced.
+  mkdirSync(`${stale}.LICENSE.md`); writeFileSync(join(`${stale}.LICENSE.md`, 'blocker'), 'x');
+  expect(() => provideCapturedBunRuntime({ root, outDir: 'dist', target: native, artifacts: ['app'] })).toThrow();
+  const binaryHash = createHash('sha256').update(readFileSync(stale)).digest('hex');
+  if (existsSync(`${stale}.json`)) expect(JSON.parse(readFileSync(`${stale}.json`, 'utf8')).sha256).toBe(binaryHash);
+});
+
 test('an undeclared runtime does not stage or fetch, and compile-target mismatches fail closed', () => {
   const root = fixture();
   provideCapturedBunRuntime({ root, outDir: 'missing', target: { key: 'darwin-x64', bunTarget: 'bun-darwin-x64', appArtifact: 'app' }, artifacts: ['app'], exec() { throw new Error('must not execute'); } });

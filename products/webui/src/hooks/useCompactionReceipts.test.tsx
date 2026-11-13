@@ -71,6 +71,15 @@ afterEach(() => {
 });
 
 describe('useCompactionReceipts', () => {
+  test('a transport error body (raw 401 JSON) never reaches the returned error', () => {
+    const { unmount } = renderHook('s-1');
+    flushSync(() => capturedHandlers?.onError?.(new Error('{"error":"Authentication required","code":"AUTH_REQUIRED","status":401}')));
+    expect(latestState?.error).not.toBeNull();
+    expect(latestState?.error).not.toContain('AUTH_REQUIRED');
+    expect(latestState?.error).not.toContain('{');
+    unmount();
+  });
+
   test('opens the raw control-plane stream scoped to the compaction domain', () => {
     const { unmount } = renderHook('s-1');
     expect(openCalls.length).toBe(1);

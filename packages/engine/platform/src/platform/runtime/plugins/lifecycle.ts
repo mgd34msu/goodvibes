@@ -18,16 +18,10 @@
 
 import type { PluginLifecycleState } from '../store/domains/plugins.js';
 import type { TransitionResult } from './types.js';
+import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 
-/**
- * Adjacency map: from state → set of valid target states.
- *
- * Encoded as a plain Record so it is safe to evaluate at module load time
- * with no external dependencies.
- */
-export const VALID_TRANSITIONS: Readonly<
-  Record<PluginLifecycleState, ReadonlyArray<PluginLifecycleState>>
-> = {
+/** The plugin lifecycle: for each state, the states reachable from it. */
+export const pluginLifecycle = defineLifecycle<PluginLifecycleState>('plugin', {
   discovered: ['loading'],
   loading:    ['loaded', 'error'],
   loaded:     ['active', 'error', 'unloading'],
@@ -36,7 +30,12 @@ export const VALID_TRANSITIONS: Readonly<
   error:      ['unloading', 'disabled', 'loading'],
   unloading:  ['disabled'],
   disabled:   ['loading'],
-} as const;
+});
+
+/** Adjacency map: from state → valid target states. The same table as {@link pluginLifecycle}. */
+export const VALID_TRANSITIONS: Readonly<
+  Record<PluginLifecycleState, ReadonlyArray<PluginLifecycleState>>
+> = pluginLifecycle.transitions;
 
 /**
  * Returns whether a transition from `from` → `to` is permitted by the
@@ -46,7 +45,7 @@ export function canTransition(
   from: PluginLifecycleState,
   to: PluginLifecycleState,
 ): boolean {
-  return (VALID_TRANSITIONS[from] as ReadonlyArray<PluginLifecycleState>).includes(to);
+  return pluginLifecycle.can(from, to);
 }
 
 /**

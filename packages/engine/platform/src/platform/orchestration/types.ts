@@ -15,6 +15,7 @@
  * shift or invalidate.
  */
 
+import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import type { QualityGateResult } from '../contract/gates.js';
 import type { ContractCommitScope } from '../contract/config.js';
 import type { UnitRoute } from '../contract/types.js';
@@ -116,6 +117,33 @@ export type WorkItemState =
    * claimable set (computeClaims excludes it), so it is never re-run.
    */
   | 'held-merge';
+
+/**
+ * The work-item lifecycle, declared from every assignment of `item.state`
+ * (engine.ts, dependency-gate.ts, attempts.ts).
+ *
+ * - pending -> in-phase: claimed; awaiting-capacity/blocked-budget reach in-phase the same way.
+ * - in-phase -> awaiting-capacity | passed (routeItem), pending (bounded auto-retry, or restart
+ *   reconciliation), blocked-bookkeeping, failed.
+ * - -> blocked-dependency and back to pending: the per-tick dependency gate.
+ * - failed -> pending: retryItem only. A failed item is never auto-retried again.
+ * - passed -> held-merge: a best-of-N attempt parks after routeItem passed it; held-merge -> passed
+ *   when picked or not selected. held-merge -> pending is requeueItem (a contract unit sent back for a fix).
+ * - blocked-bookkeeping is an unresolved repository reading, deliberately not finished; it leaves
+ *   only by requeueItem or kill.
+ * - kill/failItem fails any item that is not already passed or failed.
+ */
+export const workItemLifecycle = defineLifecycle<WorkItemState>('work item', {
+  pending: ['awaiting-capacity', 'in-phase', 'blocked-budget', 'blocked-dependency', 'pending', 'failed'],
+  'awaiting-capacity': ['awaiting-capacity', 'in-phase', 'blocked-budget', 'blocked-dependency', 'pending', 'failed'],
+  'in-phase': ['awaiting-capacity', 'passed', 'pending', 'blocked-bookkeeping', 'failed'],
+  passed: ['held-merge'],
+  failed: ['pending'],
+  'blocked-budget': ['awaiting-capacity', 'in-phase', 'blocked-budget', 'pending', 'failed'],
+  'blocked-dependency': ['blocked-dependency', 'pending', 'failed'],
+  'blocked-bookkeeping': ['pending', 'failed'],
+  'held-merge': ['passed', 'pending', 'failed'],
+});
 
 /**
  * Where a usage rollup's priced dollars came from: 'user' (manual/registration

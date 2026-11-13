@@ -34,7 +34,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { fileMatches } from '../provisioning/download-verified.js';
+import { fileMatchesCached } from '../provisioning/download-verified.js';
 import { resolveWakeWordModel, WAKE_VAD_MODEL, WAKE_WORD_FRONT_END, WAKE_WORD_MODELS } from '../provisioning/wake-word-manifest.js';
 import { resolveManagedWakePaths } from './provisioning.js';
 
@@ -190,13 +190,13 @@ function sweepPinnedArtifacts(
     }
   }
   if (current !== null) {
-    if (existsSync(paths.classifierPath) && !fileMatches(paths.classifierPath, current.onnx)) {
+    if (existsSync(paths.classifierPath) && !fileMatchesCached(paths.classifierPath, current.onnx)) {
       remove(paths.classifierPath, 'failed-verification');
     }
-    if (existsSync(paths.mobileClassifierPath) && !fileMatches(paths.mobileClassifierPath, current.tflite)) {
+    if (existsSync(paths.mobileClassifierPath) && !fileMatchesCached(paths.mobileClassifierPath, current.tflite)) {
       remove(paths.mobileClassifierPath, 'failed-verification');
     }
-    if (existsSync(paths.noticePath) && !fileMatches(paths.noticePath, current.notice)) {
+    if (existsSync(paths.noticePath) && !fileMatchesCached(paths.noticePath, current.notice)) {
       remove(paths.noticePath, 'failed-verification');
     }
   }
@@ -220,16 +220,16 @@ function sweepPinnedArtifacts(
       remove(entry.path, 'unpinned-version');
     }
   }
-  if (existsSync(paths.embeddingPath) && !fileMatches(paths.embeddingPath, embeddingSpec)) {
+  if (existsSync(paths.embeddingPath) && !fileMatchesCached(paths.embeddingPath, embeddingSpec)) {
     remove(paths.embeddingPath, 'failed-verification');
   }
-  if (existsSync(paths.embeddingNoticePath) && !fileMatches(paths.embeddingNoticePath, WAKE_WORD_FRONT_END.embedding.notice)) {
+  if (existsSync(paths.embeddingNoticePath) && !fileMatchesCached(paths.embeddingNoticePath, WAKE_WORD_FRONT_END.embedding.notice)) {
     remove(paths.embeddingNoticePath, 'failed-verification');
   }
-  if (existsSync(paths.vadPath) && !fileMatches(paths.vadPath, WAKE_VAD_MODEL.onnx)) {
+  if (existsSync(paths.vadPath) && !fileMatchesCached(paths.vadPath, WAKE_VAD_MODEL.onnx)) {
     remove(paths.vadPath, 'failed-verification');
   }
-  if (existsSync(paths.vadNoticePath) && !fileMatches(paths.vadNoticePath, WAKE_VAD_MODEL.notice)) {
+  if (existsSync(paths.vadNoticePath) && !fileMatchesCached(paths.vadNoticePath, WAKE_VAD_MODEL.notice)) {
     remove(paths.vadNoticePath, 'failed-verification');
   }
 }

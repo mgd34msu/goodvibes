@@ -26,7 +26,7 @@ import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
 
 /**
  * The work-note marker word, assembled at run time: this fixture data needs
- * the word to mean what it tests, and the source scan (todo:check) forbids
+ * the word to mean what it tests, and the internal-id:check marker scan forbids
  * the literal in published source, where it would read as a deferred-work note.
  */
 const WORK_MARKER = ['TO', 'DO'].join('');

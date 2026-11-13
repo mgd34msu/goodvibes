@@ -14,22 +14,13 @@ import type {
   DaemonBatchStoreData,
   DaemonBatchTickResult,
 } from './types.js';
-import { DaemonBatchError } from './types.js';
+import { DaemonBatchError, daemonBatchJobLifecycle } from './types.js';
 import { isRecord } from '../utils/record-coerce.js';
 
-const TERMINAL_JOB_STATUSES = new Set<DaemonBatchJob['status']>([
-  'completed',
-  'failed',
-  'cancelled',
-  'expired',
-  'dead_lettered',
-]);
-const BATCH_JOB_STATUSES = new Set<DaemonBatchJob['status']>([
-  'queued',
-  'submitted',
-  'running',
-  ...TERMINAL_JOB_STATUSES,
-]);
+const TERMINAL_JOB_STATUSES = new Set<DaemonBatchJob['status']>(
+  daemonBatchJobLifecycle.states.filter((status) => daemonBatchJobLifecycle.isTerminal(status)),
+);
+const BATCH_JOB_STATUSES = new Set<DaemonBatchJob['status']>(daemonBatchJobLifecycle.states);
 
 /**
  * Submissions a job gets before a failure that could clear is given up on.
@@ -316,10 +307,13 @@ export class DaemonBatchManager {
 
   private async submitProviderBatch(
     data: DaemonBatchStoreData,
-    jobs: readonly DaemonBatchJob[],
+    snapshot: readonly DaemonBatchJob[],
     result: DaemonBatchTickResult,
   ): Promise<void> {
-    const first = jobs[0]!;
+    // The slice was snapshotted before earlier slices awaited the provider; a job
+    // cancelled since then must not be sent (a paid request the operator called off).
+    const jobs = snapshot.filter((job) => data.jobs[job.id]?.status === 'queued');
+    const first = jobs[0];
     if (!first) return;
     try {
       const provider = this.getBatchProvider(first.model, first.provider);
@@ -345,10 +339,21 @@ export class DaemonBatchManager {
         completionWindow: '24h',
       });
       const timestamp = now();
-      for (const job of jobs) {
+      const target = created.status === 'completed' ? 'running' : created.status === 'failed' ? 'failed' : 'submitted';
+      const superseded: string[] = [];
+      let written = 0;
+      for (const snap of jobs) {
+        // cancelJob ran while the provider call was in flight: re-read, never
+        // write the pre-await snapshot over what the operator did.
+        const job = data.jobs[snap.id];
+        if (!job || !daemonBatchJobLifecycle.check(job.status, target).ok || job.status !== 'queued') {
+          superseded.push(snap.id);
+          continue;
+        }
+        written += 1;
         data.jobs[job.id] = {
           ...job,
-          status: created.status === 'completed' ? 'running' : created.status === 'failed' ? 'failed' : 'submitted',
+          status: target,
           updatedAt: timestamp,
           attempts: job.attempts + 1,
           providerBatchId: created.providerBatchId,
@@ -360,7 +365,17 @@ export class DaemonBatchManager {
         };
       }
       result.submittedProviderBatches += 1;
-      result.submittedJobs += jobs.length;
+      result.submittedJobs += written;
+      if (superseded.length > 0) {
+        // cancelJob has no provider-side cancel (per-job cancel is queued-only), so the
+        // provider batch keeps these requests; their results are ignored (terminal jobs
+        // are skipped in applyProviderResults).
+        logger.warn('Batch jobs were cancelled while their provider batch was being created; the provider batch still holds them and their results will be ignored', {
+          providerBatchId: created.providerBatchId,
+          provider: first.provider,
+          jobIds: superseded,
+        });
+      }
     } catch (error: unknown) {
       // Whether another submission could succeed: the error's structure
       // first, then Jev's reading of its wording (a provider's 429 is also
@@ -368,7 +383,10 @@ export class DaemonBatchManager {
       // and fails the tick, leaving these jobs as they were.
       const transience = await readFailureTransience(error, 'batch.submit', { fromProvider: true });
       const timestamp = now();
-      for (const job of jobs) {
+      for (const snap of jobs) {
+        // Same re-read as the success path: a job cancelled mid-submission stays cancelled.
+        const job = data.jobs[snap.id];
+        if (!job || job.status !== 'queued') continue;
         const attempts = job.attempts + 1;
         const retry = transience.failureClass === 'retryable' && attempts < MAX_BATCH_SUBMIT_ATTEMPTS;
         data.jobs[job.id] = retry

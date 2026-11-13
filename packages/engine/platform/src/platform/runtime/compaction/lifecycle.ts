@@ -10,31 +10,27 @@
  */
 
 import type { CompactionLifecycleState, CompactionStrategy, CompactionTrigger } from './types.js';
+import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 
 // ---------------------------------------------------------------------------
 // Transition map
 // ---------------------------------------------------------------------------
 
-/**
- * Valid state transitions for the compaction lifecycle machine.
- *
- * Key   = current state
- * Value = set of states reachable from current
- */
-const VALID_TRANSITIONS: ReadonlyMap<
-  CompactionLifecycleState,
-  ReadonlySet<CompactionLifecycleState>
-> = new Map([
-  ['idle',               new Set<CompactionLifecycleState>(['checking_threshold'])],
-  ['checking_threshold', new Set<CompactionLifecycleState>(['microcompact', 'collapse', 'autocompact', 'reactive_compact', 'done', 'failed'])],
-  ['microcompact',       new Set<CompactionLifecycleState>(['boundary_commit', 'failed'])],
-  ['collapse',           new Set<CompactionLifecycleState>(['boundary_commit', 'failed'])],
-  ['autocompact',        new Set<CompactionLifecycleState>(['boundary_commit', 'failed'])],
-  ['reactive_compact',   new Set<CompactionLifecycleState>(['boundary_commit', 'failed'])],
-  ['boundary_commit',    new Set<CompactionLifecycleState>(['done', 'failed'])],
-  ['done',               new Set<CompactionLifecycleState>(['idle'])],
-  ['failed',             new Set<CompactionLifecycleState>(['idle'])],
-]);
+/** The compaction lifecycle: for each state, the states reachable from it. */
+export const compactionLifecycle = defineLifecycle<CompactionLifecycleState>('compaction', {
+  idle:               ['checking_threshold'],
+  checking_threshold: ['microcompact', 'collapse', 'autocompact', 'reactive_compact', 'done', 'failed'],
+  // A low-quality result is re-run with an escalated strategy, and an escalated
+  // run that fails reverts to the original one: both are strategy-to-strategy
+  // moves the manager really performs, so they are declared here.
+  microcompact:       ['collapse', 'autocompact', 'reactive_compact', 'boundary_commit', 'failed'],
+  collapse:           ['microcompact', 'autocompact', 'reactive_compact', 'boundary_commit', 'failed'],
+  autocompact:        ['microcompact', 'collapse', 'reactive_compact', 'boundary_commit', 'failed'],
+  reactive_compact:   ['microcompact', 'collapse', 'autocompact', 'boundary_commit', 'failed'],
+  boundary_commit:    ['done', 'failed'],
+  done:               ['idle'],
+  failed:             ['idle'],
+});
 
 // ---------------------------------------------------------------------------
 // Transition helpers
@@ -47,7 +43,7 @@ export function canTransition(
   from: CompactionLifecycleState,
   to: CompactionLifecycleState,
 ): boolean {
-  return VALID_TRANSITIONS.get(from)?.has(to) ?? false;
+  return compactionLifecycle.can(from, to);
 }
 
 /**
@@ -56,7 +52,7 @@ export function canTransition(
 export function reachableFrom(
   from: CompactionLifecycleState,
 ): ReadonlySet<CompactionLifecycleState> {
-  return VALID_TRANSITIONS.get(from) ?? new Set();
+  return new Set(compactionLifecycle.next(from));
 }
 
 /** Discriminated result of `applyTransition`. */

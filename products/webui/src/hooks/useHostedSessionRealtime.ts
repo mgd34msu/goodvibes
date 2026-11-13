@@ -36,6 +36,16 @@ export interface UseHostedSessionRealtimeResult {
   readonly error: string | null;
 }
 
+/** Fixed copy for transport failures; `err.message` can be the raw 401 body, so it is never shown. */
+const STREAM_ERROR_MESSAGE = 'Live session output paused: the event stream reported an error.';
+const STREAM_OPEN_FAILED_MESSAGE = 'Live session output paused: the event stream could not be opened.';
+/**
+ * onTerminate fires only after the transport's reconnect attempts are exhausted, and
+ * nothing here reopens the stream until the route or client identity changes, so this
+ * must not say "reconnecting".
+ */
+const STREAM_ENDED_MESSAGE = 'Live session output stopped: reconnect attempts ran out. Reload the page to resume it.';
+
 export function useHostedSessionRealtime(options: UseHostedSessionRealtimeOptions): UseHostedSessionRealtimeResult {
   const { enabled } = options;
   const queryClient = useQueryClient();
@@ -103,13 +113,13 @@ export function useHostedSessionRealtime(options: UseHostedSessionRealtimeOption
             // this feature renders, ignored, matching useRealtimeInvalidation's
             // "unknown key, no-op" idiom for a frame outside this hook's scope.
           },
-          onError: (err: unknown) => {
+          onError: (_err: unknown) => {
             if (!current()) return;
-            setState({ connection, connected: false, error: err instanceof Error ? err.message : 'Hosted session event stream error' });
+            setState({ connection, connected: false, error: STREAM_ERROR_MESSAGE });
           },
           onTerminate: () => {
             if (!current()) return;
-            setState({ connection, connected: false, error: 'Live session output paused: reconnecting.' });
+            setState({ connection, connected: false, error: STREAM_ENDED_MESSAGE });
           },
         },
         { reconnect: DEFAULT_SSE_RECONNECT, signal: controller.signal },
@@ -121,9 +131,9 @@ export function useHostedSessionRealtime(options: UseHostedSessionRealtimeOption
         }
         close = dispose;
       })
-      .catch((err: unknown) => {
+      .catch((_err: unknown) => {
         if (!current()) return;
-        setState({ connection, connected: false, error: err instanceof Error ? err.message : 'Failed to open the hosted session event stream' });
+        setState({ connection, connected: false, error: STREAM_OPEN_FAILED_MESSAGE });
       });
 
     return () => {

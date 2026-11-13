@@ -8,6 +8,8 @@ import { flushSync } from 'react-dom';
 import { click, fakeRecord, renderInto, searchResult, waitFor } from './test-harness';
 
 const adds: unknown[] = [];
+let addGate: Promise<void> | null = null;
+let addFails = false;
 const searches: unknown[] = [];
 let memoryServed = true;
 
@@ -36,7 +38,12 @@ mock.module('../../lib/goodvibes', () => ({
             pendingProposals: [{ kind: 'contradiction', ids: ['r2'], route: '', reason: 'Two records disagree' }],
           }),
         },
-        add: (input: unknown) => { adds.push(input); return Promise.resolve({ record: fakeRecord() }); },
+        add: async (input: unknown) => {
+          adds.push(input);
+          if (addGate) await addGate;
+          if (addFails) throw new Error('could not save');
+          return { record: fakeRecord() };
+        },
       },
     },
   },
@@ -46,6 +53,8 @@ const { LibraryView } = await import('./LibraryView');
 
 afterEach(() => {
   adds.length = 0;
+  addGate = null;
+  addFails = false;
   searches.length = 0;
   memoryServed = true;
 });
@@ -91,6 +100,52 @@ describe('LibraryView', () => {
     const addButton = () => [...el.querySelectorAll('button')].find((b) => b.textContent === 'Add memory');
     await waitFor(() => searches.length > 0 && addButton() === undefined);
     expect(addButton()).toBeUndefined();
+    unmount();
+  });
+
+  test('a late add success does not close a dialog the operator reopened meanwhile', async () => {
+    let release!: () => void;
+    addGate = new Promise<void>((resolve) => { release = resolve; });
+    const { el, unmount } = renderInto(React.createElement(LibraryView, { tab: 'memory', onTabChange: () => {} }));
+    const headerAdd = () => [...el.querySelectorAll('button')].find((b) => b.textContent === 'Add memory');
+    const dialog = () => document.body.querySelector('[role="dialog"]');
+    await waitFor(() => headerAdd() !== undefined);
+    click(headerAdd());
+    await waitFor(() => Boolean(dialog()));
+    setValue(document.body.querySelector('input[aria-label="Memory summary"]') as HTMLInputElement, 'First fact');
+    click([...document.body.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent === 'Add memory'));
+    await waitFor(() => adds.length === 1);
+
+    // Cancel while the save is in flight, then open the dialog again.
+    click([...document.body.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent === 'Cancel'));
+    await waitFor(() => !dialog());
+    click(headerAdd());
+    await waitFor(() => Boolean(dialog()));
+
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    flushSync(() => {});
+    expect(dialog()).not.toBeNull();
+    unmount();
+  });
+
+  test('reopening the dialog after a failed save starts without the stale error', async () => {
+    addFails = true;
+    const { el, unmount } = renderInto(React.createElement(LibraryView, { tab: 'memory', onTabChange: () => {} }));
+    const headerAdd = () => [...el.querySelectorAll('button')].find((b) => b.textContent === 'Add memory');
+    const dialog = () => document.body.querySelector('[role="dialog"]');
+    await waitFor(() => headerAdd() !== undefined);
+    click(headerAdd());
+    await waitFor(() => Boolean(dialog()));
+    setValue(document.body.querySelector('input[aria-label="Memory summary"]') as HTMLInputElement, 'Fact');
+    click([...document.body.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent === 'Add memory'));
+    await waitFor(() => (dialog()?.textContent ?? '').includes('could not save'));
+
+    click([...document.body.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent === 'Cancel'));
+    await waitFor(() => !dialog());
+    click(headerAdd());
+    await waitFor(() => Boolean(dialog()));
+    expect(dialog()?.textContent ?? '').not.toContain('could not save');
     unmount();
   });
 });

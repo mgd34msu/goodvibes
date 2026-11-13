@@ -37,6 +37,7 @@ import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.j
 import {
   emitAgentAwaitingMessage,
   emitAgentAwaitingTool,
+  emitAgentCancelled,
   emitAgentCompleted,
   emitAgentFailed,
   emitAgentProgress,
@@ -1396,4 +1397,42 @@ test('fleet timer reports an unavailable original source without an empty snapsh
     unavailable = false; harness.fire(); expect(seen).toHaveLength(2);
     registry.dispose(); harness.fire(); expect(seen).toHaveLength(2);
   } finally { warning.mockRestore(); registry.dispose(); }
+});
+
+describe('fleet registry: overlay keeps terminal and cancelled agents out of live states', () => {
+  function setup(agent: AgentRecord): { registry: ReturnType<typeof createProcessRegistry>; bus: RuntimeEventBus } {
+    const bus = new RuntimeEventBus();
+    const registry = createProcessRegistry(makeDeps({
+      agentManager: { list: () => [agent], cancel: () => false },
+      runtimeBus: bus,
+      now: () => T0 + 1_000,
+    }));
+    return { registry, bus };
+  }
+  const flush = async (): Promise<void> => { for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0)); };
+
+  test('STREAM_RETRY does not overwrite a failed agent with retrying', async () => {
+    const agent = makeAgent({ id: 'ag-f' });
+    const { registry, bus } = setup(agent);
+    emitAgentFailed(bus, emitterCtx, { agentId: 'ag-f', error: 'x', durationMs: 1 });
+    await flush();
+    emitStreamRetry(bus, { ...emitterCtx, agentId: 'ag-f' }, {
+      turnId: 't1', provider: 'anthropic', attempt: 1, maxAttempts: 3, delayMs: 100, reason: 'overloaded',
+    });
+    await flush();
+    expect(nodeById(registry, 'ag-f').state).not.toBe('retrying');
+    registry.dispose();
+  });
+
+  test('AGENT_CANCELLED drops the last live overlay state', async () => {
+    const agent = makeAgent({ id: 'ag-c' });
+    const { registry, bus } = setup(agent);
+    emitAgentStreamDelta(bus, emitterCtx, { agentId: 'ag-c', content: 'a', accumulated: 'a' });
+    await flush();
+    expect(nodeById(registry, 'ag-c').state).toBe('streaming');
+    emitAgentCancelled(bus, emitterCtx, { agentId: 'ag-c' });
+    await flush();
+    expect(nodeById(registry, 'ag-c').state).not.toBe('streaming');
+    registry.dispose();
+  });
 });

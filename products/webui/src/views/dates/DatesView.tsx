@@ -31,7 +31,7 @@
  * read answers 404/501 the whole tab is one empty state that says so and offers
  * the daemon update; when a later read fails the group it feeds says so in place.
  */
-import { useState, type ReactNode, type SyntheticEvent } from 'react';
+import { useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, Cake, Plane, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
@@ -251,10 +251,15 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   const [occasionOpen, setOccasionOpen] = useState(false);
   const [occasion, setOccasion] = useState<OccasionDraft>(EMPTY_OCCASION);
   const [occasionProposal, setOccasionProposal] = useState<OperatorMethodOutput<'occasions.propose'> | null>(null);
+  // Bumped on every edit of the draft. A preview answers only the draft it was asked for:
+  // its result is dropped when the draft has moved on, so Confirm can never be enabled
+  // for text the operator never previewed.
+  const occasionDraftEpochRef = useRef(0);
 
   const [planOpen, setPlanOpen] = useState(false);
   const [plan, setPlan] = useState<PlanDraft>(EMPTY_PLAN);
   const [planProposal, setPlanProposal] = useState<OperatorMethodOutput<'occasions.plans.propose'> | null>(null);
+  const planDraftEpochRef = useRef(0);
 
   const [interviewDrafts, setInterviewDrafts] = useState<Record<string, Record<string, string>>>({});
   const [landedOnDrafts, setLandedOnDrafts] = useState<Record<string, string>>({});
@@ -391,7 +396,10 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
         recurrence: occasion.recurrence,
         ...(occasion.leadDays.trim() ? { leadDays: Number(occasion.leadDays) } : {}),
       }),
-    onSuccess: (result) => setOccasionProposal(result),
+    onMutate: () => occasionDraftEpochRef.current,
+    onSuccess: (result, _variables, askedAtEpoch) => {
+      if (askedAtEpoch === occasionDraftEpochRef.current) setOccasionProposal(result);
+    },
     onError: (error: unknown) => toast({ title: 'Preview failed', description: formatError(error), tone: 'danger' }),
   });
 
@@ -414,6 +422,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
         toast({ title: 'Not saved', description: result.reason ?? undefined, tone: 'danger' });
         return;
       }
+      occasionDraftEpochRef.current += 1;
       setOccasion(EMPTY_OCCASION);
       setOccasionProposal(null);
       setOccasionOpen(false);
@@ -431,7 +440,10 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
         away: plan.away,
         ...(plan.destination.trim() ? { destination: plan.destination.trim() } : {}),
       }),
-    onSuccess: (result) => setPlanProposal(result),
+    onMutate: () => planDraftEpochRef.current,
+    onSuccess: (result, _variables, askedAtEpoch) => {
+      if (askedAtEpoch === planDraftEpochRef.current) setPlanProposal(result);
+    },
     onError: (error: unknown) => toast({ title: 'Preview failed', description: formatError(error), tone: 'danger' }),
   });
 
@@ -453,6 +465,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
         toast({ title: 'Not saved', description: result.reason ?? undefined, tone: 'danger' });
         return;
       }
+      planDraftEpochRef.current += 1;
       setPlan(EMPTY_PLAN);
       setPlanProposal(null);
       setPlanOpen(false);
@@ -463,11 +476,13 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
 
   /** Editing any field makes an earlier preview stale, so it is dropped. */
   function editOccasion(patch: Partial<OccasionDraft>): void {
+    occasionDraftEpochRef.current += 1;
     setOccasion((current) => ({ ...current, ...patch }));
     setOccasionProposal(null);
   }
 
   function editPlan(patch: Partial<PlanDraft>): void {
+    planDraftEpochRef.current += 1;
     setPlan((current) => ({ ...current, ...patch }));
     setPlanProposal(null);
   }

@@ -6,7 +6,7 @@ import { Client } from 'undici/index.js';
 import * as directClient from '../platform/src/platform/security/source-screening/direct-client.ts';
 import { createSlackInboxHttpOwner } from '../platform/src/platform/intake/providers/slack-http.ts';
 import type { SlackInboxHttp } from '../platform/src/platform/intake/providers/slack.ts';
-import { isolatedTestEnvironment } from '../scripts/test-isolation.ts';
+import { isolatedTestEnvironment } from '../toolchain/src/test-runner/test-isolation.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const cleanups: (() => unknown | Promise<unknown>)[] = [];

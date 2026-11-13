@@ -383,3 +383,31 @@ test('selected Decision Router shows category-owned effort without a misleading 
     expect(menuItem(menu, 'Max')).toBeUndefined(); expect(menuItem(menu, 'X-high')).toBeUndefined();
   } finally { unmount(); }
 });
+
+describe('press-and-hold steer', () => {
+  const pointer = (el: Element, type: string) => flushSync(() => {
+    el.dispatchEvent(new window.Event(type, { bubbles: true }));
+  });
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  test('a second press restarts the hold instead of leaving the first timer to fire too', async () => {
+    let steers = 0;
+    const { container, unmount } = mountComposer(makeProps({ draft: 'hi', onSteer: () => { steers += 1; } }));
+    const send = container.querySelector('.send-button')!;
+    pointer(send, 'pointerdown');
+    await sleep(300);
+    pointer(send, 'pointerdown');
+    await sleep(900);
+    expect(steers).toBe(1);
+    unmount();
+  });
+
+  test('unmounting during a hold never fires the steer afterwards', async () => {
+    let steers = 0;
+    const { container, unmount } = mountComposer(makeProps({ draft: 'hi', onSteer: () => { steers += 1; } }));
+    pointer(container.querySelector('.send-button')!, 'pointerdown');
+    unmount();
+    await sleep(700);
+    expect(steers).toBe(0);
+  });
+});

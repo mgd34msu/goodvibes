@@ -267,6 +267,7 @@ export interface DaemonRuntimeRouteContext extends Omit<
       patch: Record<string, unknown>,
       source: string,
     ): void;
+    canRetryRuntimeTask?(taskId: string): boolean;
   } | null;
 }
 

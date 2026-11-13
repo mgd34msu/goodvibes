@@ -46,8 +46,7 @@ import {
 } from '../helpers/runtime-services.ts';
 import { trackDisposables } from '../helpers/disposables.ts';
 import { makeTestShellViews } from '../helpers/shell-views.ts';
-import { makeProjectTempDir, PROJECT_TEST_TMP_ROOT } from '../helpers/project-temp.ts';
-import { registeredTempDirs } from '../helpers/temp-registry.ts';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 // Stop the shared test runtime graph when this file ends. Called here, not
 // registered inside the helper, for the reason its doc comment gives.
@@ -157,11 +156,6 @@ describe('product breadth commands', () => {
         delete process.env[key];
       }
     }
-  });
-
-  test('the fixture root belongs to post-teardown owned cleanup', () => {
-    expect(dirname(root)).toBe(PROJECT_TEST_TMP_ROOT);
-    expect(registeredTempDirs()).toContain(root);
   });
 
   function makeContext(out: string[]): CommandContext {

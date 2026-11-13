@@ -22,7 +22,7 @@
  *     hunk (preview applies:false, or a 409 CONFLICT on apply) renders the honest conflict
  *     state and refreshes the diff, NEVER a partial apply.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, RefreshCw } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
@@ -79,6 +79,10 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
   const [commentTarget, setCommentTarget] = useState<(HunkTarget & { capturedLabel: string; selection: SessionHunkCommentSelection }) | null>(null);
   const [revertTarget, setRevertTarget] = useState<HunkTarget | null>(null);
   const [revertConflict, setRevertConflict] = useState<string | null>(null);
+  // The revert the sheet is on right now. A preview/apply result only touches the
+  // sheet's state when it belongs to this target: an abandoned or superseded attempt's
+  // late result must not mark a conflict on a newer one.
+  const revertTargetRef = useRef<HunkTarget | null>(null);
 
   const [sendState, setSendState] = useState<SendState>('idle');
   const [sendError, setSendError] = useState<string | null>(null);
@@ -204,6 +208,7 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
     mutationFn: (target: HunkTarget) =>
       platformClient.operator.checkpoints.revertHunkPreview({ path: target.file.path, hunk: hunkToPatch(target.hunk), sessionId }),
     onSuccess: (result, target) => {
+      if (revertTargetRef.current !== target) return;
       if (!(result.applies && result.token)) {
         setRevertConflict(result.conflict ?? 'this hunk no longer applies cleanly');
         setConflictKeys((s) => withKey(s, hunkReviewKey(target.file.path, target.hunk), true));
@@ -223,15 +228,19 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
       const key = hunkReviewKey(input.target.file.path, input.target.hunk);
       if (result.receipt?.reverted) {
         setRevertedKeys((s) => withKey(s, key, true));
-        setRevertTarget(null);
+        if (revertTargetRef.current === input.target) {
+          revertTargetRef.current = null;
+          setRevertTarget(null);
+        }
         await refreshActiveDiff();
-      } else {
+      } else if (revertTargetRef.current === input.target) {
         // A confirmed call should not be refused; if it somehow is, surface it honestly.
         setRevertConflict(result.refusal?.reason ?? 'the revert was refused');
         setConflictKeys((s) => withKey(s, key, true));
       }
     },
     onError: (error, input) => {
+      if (revertTargetRef.current !== input.target) return;
       if (isConflictError(error)) {
         setRevertConflict(formatError(error));
         setConflictKeys((s) => withKey(s, hunkReviewKey(input.target.file.path, input.target.hunk), true));
@@ -300,6 +309,7 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
     setRevertConflict(null);
     preview.reset();
     apply.reset();
+    revertTargetRef.current = target;
     setRevertTarget(target);
     preview.mutate(target);
   }
@@ -310,6 +320,7 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
   }
 
   function cancelRevert(): void {
+    revertTargetRef.current = null;
     setRevertTarget(null);
     setRevertConflict(null);
     preview.reset();

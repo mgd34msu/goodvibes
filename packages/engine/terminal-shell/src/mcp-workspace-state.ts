@@ -42,6 +42,8 @@ export abstract class McpWorkspaceState<Context, Form extends McpWorkspaceFormBa
   public editingServerName: string | null = null;
   public tools: readonly RegisteredTool[] = [];
   public loadingTools = false;
+  /** Which tool refresh is the live one; close() and every new refresh move it on. */
+  private refreshGeneration = 0;
   public lastError: string | null = null;
   public query = '';
   protected context: Context | null = null;
@@ -95,6 +97,10 @@ export abstract class McpWorkspaceState<Context, Form extends McpWorkspaceFormBa
   close(): void {
     this.active = false;
     this.mode = 'browse';
+    // A refresh still in flight is retired: it must not publish into a closed
+    // modal, and nothing else would ever clear the spinner it started.
+    this.refreshGeneration += 1;
+    this.loadingTools = false;
   }
   requestReload(): void | Promise<void> {
     return this.reloadRuntime();
@@ -184,18 +190,28 @@ export abstract class McpWorkspaceState<Context, Form extends McpWorkspaceFormBa
   }
   async refreshTools(updateStatus = true): Promise<void> {
     if (!this.context) return;
+    const generation = ++this.refreshGeneration;
+    const live = (): boolean => generation === this.refreshGeneration;
     this.loadingTools = true;
     this.lastError = null;
     try {
       const api = this.ports.api(this.context);
-      this.tools = await api.listAllTools();
+      const tools = await api.listAllTools();
+      // Only the latest refresh owns the result: an older one that finished
+      // late would overwrite fresher tools, and one that outlived close() or a
+      // newer refresh has nothing left to report.
+      if (!live()) return;
+      this.tools = tools;
       if (updateStatus) this.publishStatus(`Tool list refreshed: ${this.tools.length} tool(s) available.`);
     } catch (error) {
+      if (!live()) return;
       this.lastError = summarizeError(error);
       this.publishStatus(`Tool refresh failed: ${this.lastError}`, 'error');
     } finally {
-      this.loadingTools = false;
-      this.context && this.ports.requestRender(this.context);
+      if (live()) {
+        this.loadingTools = false;
+        this.context && this.ports.requestRender(this.context);
+      }
     }
   }
   abstract saveForm(): Promise<void>;

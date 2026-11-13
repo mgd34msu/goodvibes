@@ -522,10 +522,27 @@ export class ProcessManager {
       logger.warn('Background process output collection failed', { processId: id, error: summarizeError(error) });
       clearTimeout(timeoutHandle);
       drain.abort();
-      entry.done = !ownsGroup;
-      if (entry.done) entry.completedAt = Date.now();
       this._inputs.delete(id);
-      this.pruneCompletedProcesses();
+      if (!ownsGroup) {
+        entry.done = true;
+        entry.completedAt = Date.now();
+        this.pruneCompletedProcesses();
+        return;
+      }
+      // The group's release was not confirmed (the failure may be the group
+      // check itself), so the entry stays running, never claimed finished on a
+      // guess. owner.stop() replays the same failed group termination, so
+      // nothing else would finish it: terminate the group afresh and mark the
+      // entry done only once it is confirmed gone.
+      void terminateOwnedGroup(proc.pid, sigtermGraceMs).then(() => {
+        entry.exitCode = proc.exitCode ?? null; entry.signal = readSignalCode(proc) ?? (proc.exitCode === null ? 'SIGKILL' : null);
+        entry.done = true;
+        entry.completedAt = Date.now();
+        if (this._shutdowns.get(id) === owner) this._shutdowns.delete(id);
+        this.pruneCompletedProcesses();
+      }).catch((error: unknown) => {
+        logger.error('Background process group could not be confirmed gone after output collection failed; it stays listed as running', { processId: id, pid: entry.pid, error: summarizeError(error) });
+      });
     });
 
     // Clear the timeout watchdog once the process completes naturally

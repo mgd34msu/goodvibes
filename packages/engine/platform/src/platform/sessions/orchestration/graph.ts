@@ -20,11 +20,25 @@ import type {
 import { makeRefKey } from './types.js';
 import type { TaskLifecycleState } from '../../runtime/store/domains/tasks.js';
 import { logger } from '../../utils/logger.js';
+import { taskLifecycle } from '../../runtime/tasks/lifecycle.js';
 
 // ── Module-level constants ────────────────────────────────────────────────────
 
 /** Terminal states that cannot be cancelled or transitioned further. */
 const TERMINAL_STATES: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled']);
+
+/** Whether `to` is reachable from `from` by one or more declared task lifecycle moves. */
+function lifecycleReaches(from: TaskLifecycleState, to: TaskLifecycleState): boolean {
+  const seen = new Set<TaskLifecycleState>([from]);
+  const queue: TaskLifecycleState[] = [from];
+  while (queue.length > 0) {
+    for (const next of taskLifecycle.next(queue.shift()!)) {
+      if (next === to) return true;
+      if (!seen.has(next)) { seen.add(next); queue.push(next); }
+    }
+  }
+  return false;
+}
 
 // ── SessionTaskGraph ──────────────────────────────────────────────────────────
 
@@ -123,7 +137,10 @@ export class SessionTaskGraph {
   /**
    * Propagate a status update to a ref.
    *
-   * Idempotent: updating to the same status is a no-op.
+   * Idempotent: updating to the same status is a no-op. A move the task
+   * lifecycle cannot reach (a settled task changing state) is refused as a no-op
+   * too; skipping unobserved intermediate states (queued -> completed) is allowed; failed/cancelled -> queued is allowed
+   * as the retry re-queue.
    *
    * @param sessionId - Owning session.
    * @param taskId - Target task.
@@ -138,6 +155,15 @@ export class SessionTaskGraph {
     const ref = this.getRef(sessionId, taskId);
     if (!ref) return false;
     if (ref.status === status) return false;
+    const retry = (ref.status === 'failed' || ref.status === 'cancelled') && status === 'queued';
+    const verdict = taskLifecycle.check(ref.status, status);
+    // The graph only sees the updates it is sent, so a live task may legitimately
+    // skip states it never observed (queued -> completed passes through running).
+    // A move is allowed when the lifecycle can reach the target from here at all.
+    if (!verdict.ok && !retry && !lifecycleReaches(ref.status, status)) {
+      logger.debug('SessionTaskGraph.propagateStatus refused', { sessionId, taskId, status, reason: verdict.reason });
+      return false;
+    }
     const key = makeRefKey(sessionId, taskId);
     const updated = { ...ref, status, updatedAt: Date.now() };
     this._refs.set(key, updated);

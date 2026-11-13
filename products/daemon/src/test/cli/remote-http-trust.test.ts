@@ -11,7 +11,7 @@ import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 const entrypoint = fileURLToPath(new URL('../../../dist/cli/entrypoint.js', import.meta.url));
 const emittedRun = new URL('../../../dist/cli/run.js', import.meta.url).href;
-const guard = fileURLToPath(new URL('../../../../../packages/engine/scripts/test-network-preload.ts', import.meta.url));
+const guard = fileURLToPath(new URL('../../../../../packages/engine/toolchain/src/test-runner/test-network-preload.ts', import.meta.url));
 const TOKEN = 'owned-https-synthetic-operator-token';
 const RELATIVE_CA = 'certs/owned-ca.pem';
 type TrustMode = 'custom' | 'bundled+custom' | 'bundled';

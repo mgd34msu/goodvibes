@@ -259,3 +259,19 @@ describe('cost quote provenance', () => {
     expect(tracker.agentsCost()).toBe(4);
   });
 });
+
+describe('terminal agent cost status is first-outcome-wins', () => {
+  test('done and failed do not overwrite each other, and a wake reopens the row', () => {
+    const current = record('first');
+    const tracker = new CostTracker({ price, getAgentStatus: () => ({ ...current }) });
+    tracker.agentSpawned(current.id, current.task);
+    tracker.agentCompleted(current.id);
+    tracker.agentFailed(current.id);
+    expect(tracker.agents()[0]?.status).toBe('done');
+    tracker.agentRunning(current.id);
+    expect(tracker.agents()[0]?.status).toBe('running');
+    tracker.agentFailed(current.id);
+    tracker.agentCompleted(current.id);
+    expect(tracker.agents()[0]?.status).toBe('failed');
+  });
+});

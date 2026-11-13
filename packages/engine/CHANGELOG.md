@@ -1,5 +1,195 @@
 # Changelog
 
+## [3.2.0] - 2026-11-13
+
+### Added
+
+- Add `defineLifecycle` to `platform/utils`, with `LifecycleMachine`,
+  `LifecycleTransitions`, `LifecycleCheck` and
+  `IllegalLifecycleTransitionError`. A lifecycle declares the legal moves of a
+  status once; a refused move reports the current state and the moves that
+  remain.
+- Export lifecycle tables from the modules that own each record, including
+  tasks, agent runs, triggers, work items, MCP servers, plugins, compaction,
+  automation runs and jobs, batch jobs, knowledge job runs, work proposals,
+  watchers, sandbox sessions, pair requests, idempotency records, cost rows,
+  worktrees, work-plan tasks and native conversation turns.
+- Export `canRetry`, `canMirror`, `RETRYABLE_TASK_STATES`, `derivePlanStatus`,
+  `checkReset`, `TriggerManager.resetRefusal`, `WorkflowManager.cancelRefusal`
+  and `reopenFailedRepairPlanning`.
+- Add `registrationTimeoutMs` (default 15 seconds) to relay daemon
+  registration and an optional retry policy to the follow-up runtime.
+- Export `MODAL_NAMES`, `ModalName`, `isModalName`, `isModalActive`,
+  `HostPairingPreview` and `ModelPickerModal.popLevel()` from the terminal
+  shell.
+- Back up every file the release installer replaces and restore it when
+  installation fails or is interrupted by Ctrl-C, a termination signal or a
+  closed terminal. Claims are released and the retry command is printed. When
+  a file cannot be restored, the installer prints one restore command per file.
+- Roll back a checkout installation interrupted by Ctrl-C or a termination
+  signal: restore the previous version, restart the service, release the locks
+  and exit with status 130 or 143.
+- Record the owning process in install and uninstall locks. A lock left by a
+  dead process is reclaimed; a lock held by a running process is refused with
+  its pid.
+- Resume `goodvibes-daemon migrate-service -y` when the managed unit is already
+  installed, running and identical, so only the retirement of the old unit
+  remains.
+- Show a "Retry connection" button on the WebUI native intake form after a
+  failed connection.
+- Add `--jobs=N` to the shared test runner for per-file parallel runs.
+
+### Changed
+
+- Refuse status moves that a record's lifecycle does not allow, and name the
+  current status and the legal moves in the refusal. Affected actions: answer
+  or close on a closed query, publish on a published packet, cancel on a
+  finished workflow, reset on a running, fired or cancelled trigger, commands
+  in a stopped sandbox session, resolving an undelivered work proposal,
+  queueing an already queued channel draft, `start` and `pause` on research
+  runs in the wrong status, marking an unreviewed research source as used, and
+  reversing a decided document suggestion.
+- Refuse a daemon API retry of a task that is not failed or cancelled with
+  status 400, before any agent is started.
+- Return a hosted ACP agent to `idle` after a cancelled turn instead of
+  `stopped`, and emit one terminal event per ACP subagent run.
+- Treat `failed` as final in the realtime transport: disposing a failed
+  connector no longer emits `disconnected`.
+- Report audio stream release errors from wake-listener and push-to-talk stops
+  through the failure callback instead of rejecting the stop call.
+- Give up on an MCP stdio server that exits before completing negotiation
+  after three restart attempts instead of restarting it indefinitely.
+- Retry an undeliverable follow-up at most five times with doubling delay,
+  then drop it and notify the user.
+- Close and retry a relay connection that has not registered within the
+  registration deadline or that receives an error before registering.
+- Bound Agent shutdown at 10 seconds. When the deadline is reached the
+  recovery snapshot is kept and a restart onto an updated program is skipped.
+- Complete a checkout installation when the TUI pairing helper exits with
+  status 75 for an unfinished earlier attempt, and print the pairing command.
+- Stop the release installer before any change when leftover
+  `.goodvibes-previous` backups exist, listing all of them with the command
+  that removes them.
+- Publish companion files before the main program in the release installer,
+  and remove a replaced WebUI or browser-driver directory once installation
+  has finished.
+- Leave a hand-started daemon or agent running when its arguments contain
+  spaces or wildcard characters, and print a quoted restart command.
+- Narrow `closeModalByName`, `reopenModalByName`, `getActiveModalName` and
+  `TerminalInputHandlerState.modalStack` to `ModalName`; `reopenModalByName`
+  returns a boolean.
+- Reuse SHA-256 digests for response-completion contract listings while the
+  value is unchanged, and reuse the verified hash of an installed wake-word
+  model file while its device, inode, size and timestamps are unchanged.
+- Replace the test runner with one small shared runner that gives each run its
+  own temporary directory and takes no repository-wide lock. Reduce push CI
+  from about 106 jobs to about 40 and the workflow count from 17 to 9.
+
+### Fixed
+
+- Keep cancelled agent runs cancelled when their executor rejects afterwards,
+  and keep the first error of a run that already failed.
+- Keep finished tasks final: late runner reports no longer change a task or
+  its end time, and the session task graph ignores updates for settled tasks.
+- Return an execution plan to active when unfinished work reappears after it
+  was marked complete or failed.
+- Keep finished tool calls, cancelled tool executions, cancelled cost rows and
+  completed idempotent requests from being overwritten by later events.
+- Finish a background process entry whose output collection failed once its
+  process group is confirmed gone.
+- Stop re-running a killed work item whose run throws afterwards, and ignore a
+  turn-end event for a hosted session that is not running.
+- Remove cancelled agents from the fleet overlay and stop stream retries from
+  reviving finished entries.
+- Keep a watcher stopped or removed when a run that was in progress finishes.
+- Return the stored compaction status to idle after a below-threshold check
+  and after a completed run.
+- Record the error and disable a plugin whose unload throws instead of leaving
+  it `unloading`.
+- Prevent an automation start that was still loading when stop ran from
+  marking the manager running, and keep cancelled check-in and job runs
+  cancelled when their work finishes.
+- Send an automation delivery even when recording the start of the attempt
+  fails.
+- Leave a fired or cancelled trigger unchanged on cancel, without adding
+  skipped runs to its history.
+- Keep a batch job cancelled when it is cancelled during provider submission.
+- Stop reporting deliberate Slack and Discord stops as lost connections,
+  ignore events from superseded sockets, share concurrent starts and cancel a
+  start when stop is called during it.
+- Close an MCP connection that completes after its server was stopped, without
+  announcing it or scheduling a reconnect, and stop treating a process ended
+  by a signal as connected.
+- Return a delegated Telegram request to the owner when its decision step
+  fails, and keep its recorded state when a cancel or denial arrives late.
+- Connect a realtime connector once when it returns no cleanup function.
+- Allow a cluster node to start again after its transport failed to start.
+- Report a daemon host whose startup failed as `failed` before it closes.
+- Retry inbox eligibility probing after a failed registration instead of
+  stopping silently.
+- Leave a verified, expired or rejected pair request unchanged on reject.
+- Record knowledge job runs left `queued` or `running` for more than six hours
+  by an exited process as `failed`, and record a run as `failed` when its
+  start cannot be written.
+- Accept the permission tightening that saving a secret applies to the project
+  `.goodvibes` directory, so the project planning registry keeps opening in
+  the same process.
+- Always finish wake-listener and push-to-talk stops in a stopped or idle
+  state, and return the captured push-to-talk utterance when the stream fails
+  to release.
+- Recover terminal wake listening after the detector fails while starting.
+- Keep the WebUI wake host suspended while push-to-talk holds the microphone,
+  restart listening when a latch is cleared, release a microphone lease when a
+  start is cancelled and stop playback with a message when reply audio cannot
+  be queued.
+- Keep the WebUI "stopping" status until the turn ends, keep a finished turn's
+  outcome against a late error, and stop counting earlier replies as the reply
+  of a turn started by another client.
+- Show fixed messages instead of raw daemon error responses on WebUI live
+  update streams, and say when reconnect attempts have run out.
+- Report the recorded outcome of a WebUI pairing link when a view is reopened
+  instead of repeating the hand-off, and keep a phone node connected when a
+  re-pair fails while a valid pairing is stored.
+- Ignore late results in WebUI views after the operator has moved on: hosted
+  session kill, dates preview, chat search, attempt comparison, hunk revert,
+  queued message edit, pairing token rename and the library add-memory dialog.
+- Keep typed text in the WebUI owner profile when a save is refused, block
+  session rewind controls while a rewind is applied, keep the hunk comment
+  sheet open while sending, clear the "New chat" label after navigating back
+  to a session and clear the composer press-and-hold timer.
+- Close a WebUI relay client that is dropped for lack of a stored pairing, and
+  log a failed service worker precache.
+- Step back one level per Escape in the terminal model picker, and stop
+  leaving dead entries on the terminal dialog stack.
+- Release keyboard input and print a message when a terminal host pairing
+  preview fails, clear the pending line of a work submission that ends without
+  a result, and apply only the most recent MCP workspace refresh.
+- Run every subscription clean-up on Agent exit so one failure cannot skip
+  saving the session.
+- Prevent a queued Agent channel draft from being delivered twice, keep sent
+  drafts final and allow a draft queued for 10 minutes without an outcome to
+  be queued again.
+- Restore the previous macOS LaunchAgent when a rewritten one cannot be
+  loaded, state what an interrupted uninstall already did, and allow the
+  checkout uninstaller to run again after a partial uninstall.
+- Stage the TUI package postinstall binary beside its destination and rename
+  it into place, so an interrupted run keeps the previous binary.
+
+### Removed
+
+- Remove `suiteWorkflowProblems` from the toolchain package and
+  `runOwnedTestChild`, `withRunTmpDir`, `OwnedTestChildResult` and
+  `OwnedTestChildStop` from the toolchain test-runner entry point.
+- Remove about 65 MB of recorded readings fixtures and the scripts that read
+  them. `internal-id:check`, `credential-scope:check` and `error:check` are
+  now rule checks with no stored state.
+- Remove the root scripts `todo:check`, `types:resolution-check`,
+  `package-readmes:read`, `credential-keys:read`, `error-kinds:read` and
+  `static-source:read`.
+- Remove the diagnostic and one-off verification workflows, their scripts, the
+  unused reusable workflows and the test runner's lock, watchdog, ceiling and
+  temp-registry layers.
+
 ## [3.1.6] - 2026-11-12
 
 ### Fixed

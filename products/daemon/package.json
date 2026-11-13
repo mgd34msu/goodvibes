@@ -1,6 +1,6 @@
 {
   "name": "@goodvibes-jev/daemon",
-  "version": "3.1.6",
+  "version": "3.2.0",
   "private": true,
   "type": "module",
   "description": "Partial daemon command executable and explicitly composed, owned runtime host.",

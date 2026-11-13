@@ -29,7 +29,7 @@
     },
     "packages/engine": {
       "name": "@goodvibes-jev/engine",
-      "version": "3.1.6",
+      "version": "3.2.0",
       "bin": {
         "goodvibes-toolchain": "./toolchain/dist/bin/toolchain.js",
         "goodvibes-engine-pin-gate": "./toolchain/dist/bin/engine-pin-gate.js",
@@ -96,14 +96,14 @@
     },
     "packages/judgment": {
       "name": "@goodvibes-jev/judgment",
-      "version": "3.1.6",
+      "version": "3.2.0",
       "dependencies": {
         "@typesafe-ai/sdk": "0.6.0",
       },
     },
     "products/agent": {
       "name": "@goodvibes-jev/agent",
-      "version": "3.1.6",
+      "version": "3.2.0",
       "bin": {
         "goodvibes-agent": "bin/goodvibes-agent.ts",
       },
@@ -123,7 +123,7 @@
     },
     "products/daemon": {
       "name": "@goodvibes-jev/daemon",
-      "version": "3.1.6",
+      "version": "3.2.0",
       "bin": {
         "goodvibes-daemon": "./bin/goodvibes-daemon",
       },
@@ -137,7 +137,7 @@
     },
     "products/tui": {
       "name": "@goodvibes-jev/tui",
-      "version": "3.1.6",
+      "version": "3.2.0",
       "bin": {
         "goodvibes": "bin/goodvibes",
       },
@@ -155,7 +155,7 @@
     },
     "products/webui": {
       "name": "@goodvibes-jev/webui",
-      "version": "3.1.6",
+      "version": "3.2.0",
       "dependencies": {
         "@fontsource/geist-mono": "5.3.0",
         "@fontsource/geist-sans": "5.3.0",

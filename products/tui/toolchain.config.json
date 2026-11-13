@@ -15,13 +15,7 @@
     "compileDriver": "scripts/compile.ts",
     "outDir": "dist",
     "addonOutDir": "dist/lib",
-    "prebuild": [
-      [
-        "bun",
-        "run",
-        "scripts/prebuild.ts"
-      ]
-    ],
+    "prebuild": [],
     "targets": [
       {
         "key": "linux-x64",

@@ -1,8 +1,7 @@
 <!-- GENERATED FILE: DO NOT EDIT BY HAND.
      Regenerate with `bun run docs:commands`.
      Source of truth: the slash-command registry (src/input/commands.ts).
-     Every build (scripts/prebuild.ts) and `bun run release:prepare`
-     rewrite it, so it is current at each version bump. -->
+     `bun run release:prepare` rewrites it at each version bump. -->
 
 # Command Reference
 

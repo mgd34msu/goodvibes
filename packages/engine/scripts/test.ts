@@ -109,13 +109,16 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
     return () => process.off(name, relay);
   });
   /** One `bun test` child; with `capture`, its output is returned instead of inherited. */
-  const spawnBun = async (testArgs: readonly string[], capture: boolean): Promise<{ code: number; output: string }> => {
+  // `home` gives a child its own HOME and XDG directories: files run side by side
+  // must not see each other's writes there (a store that watches its parent
+  // directory treats a neighbour's new file as its own source changing).
+  const spawnBun = async (testArgs: readonly string[], capture: boolean, home?: string): Promise<{ code: number; output: string }> => {
     const child = Bun.spawn([process.execPath, '--no-env-file', 'test', '--preload', NETWORK_PRELOAD, ...testArgs], {
       cwd,
       detached: process.platform !== 'win32',
       stdio: ['inherit', capture ? 'pipe' : 'inherit', capture ? 'pipe' : 'inherit'],
       env: {
-        ...env,
+        ...(home === undefined ? env : isolatedTestEnvironment({ ...(run.env ?? process.env) }, join(root, home), run.fixtureEnv)),
         TMPDIR: root, TMP: root, TEMP: root,
         [TEST_TMP_ROOT_ENV]: root,
         GIT_CEILING_DIRECTORIES: [...ceilings].join(delimiter),
@@ -142,9 +145,9 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
       let next = 0;
       const worker = async (): Promise<void> => {
         while (!signalled && next < files.length) {
-          const file = files[next++]!;
+          const index = next++, file = files[index]!;
           const started = Date.now();
-          const { code, output } = await spawnBun([...flags, `./${file}`], true);
+          const { code, output } = await spawnBun([...flags, `./${file}`], true, `isolated-${index}`);
           if (code !== 0 || signalled) failed.push(file);
           process.stdout.write(`\n==> ${file} (${((Date.now() - started) / 1000).toFixed(1)}s)${code !== 0 ? `  [FAIL: exit ${code}]` : ''}\n${output}`);
         }

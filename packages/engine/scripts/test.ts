@@ -1,10 +1,10 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isolatedTestEnvironment } from '../toolchain/src/test-runner/test-isolation.ts';
-import { RUN_TMP_PREFIX, sweepStaleTmpDirs, TEST_TMP_ROOT_ENV } from '../toolchain/src/test-runner/temp.ts';
+import { RUN_TMP_PREFIX, sweepStaleTmpDirs, TEST_PROJECT_TMP_ENV, TEST_TMP_ROOT_ENV } from '../toolchain/src/test-runner/temp.ts';
 import { defaultTestArgs, discoverTestFiles } from './test-discovery.ts';
 import { selectPartition } from './test-partitions.ts';
 
@@ -109,18 +109,21 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
     return () => process.off(name, relay);
   });
   /** One `bun test` child; with `capture`, its output is returned instead of inherited. */
-  // `home` gives a child its own HOME and XDG directories: files run side by side
-  // must not see each other's writes there (a store that watches its parent
-  // directory treats a neighbour's new file as its own source changing).
-  const spawnBun = async (testArgs: readonly string[], capture: boolean, home?: string): Promise<{ code: number; output: string }> => {
+  // `own` gives a child its own temp root, HOME and in-checkout temp directory.
+  // Files run side by side must not create entries in a directory another file's
+  // code is watching: a store that observes its ancestor directories treats a
+  // neighbour's new directory as its own source changing.
+  const spawnBun = async (testArgs: readonly string[], capture: boolean, own?: { tmp: string; projectTmp?: string }): Promise<{ code: number; output: string }> => {
+    const tmp = own?.tmp ?? root;
     const child = Bun.spawn([process.execPath, '--no-env-file', 'test', '--preload', NETWORK_PRELOAD, ...testArgs], {
       cwd,
       detached: process.platform !== 'win32',
       stdio: ['inherit', capture ? 'pipe' : 'inherit', capture ? 'pipe' : 'inherit'],
       env: {
-        ...(home === undefined ? env : isolatedTestEnvironment({ ...(run.env ?? process.env) }, join(root, home), run.fixtureEnv)),
-        TMPDIR: root, TMP: root, TEMP: root,
-        [TEST_TMP_ROOT_ENV]: root,
+        ...(own === undefined ? env : isolatedTestEnvironment({ ...(run.env ?? process.env) }, join(tmp, 'isolated'), run.fixtureEnv)),
+        TMPDIR: tmp, TMP: tmp, TEMP: tmp,
+        [TEST_TMP_ROOT_ENV]: tmp,
+        ...(own?.projectTmp ? { [TEST_PROJECT_TMP_ENV]: own.projectTmp } : {}),
         GIT_CEILING_DIRECTORIES: [...ceilings].join(delimiter),
         GOODVIBES_ENGINE_TEST_RUNNER: '1',
         GOODVIBES_TEST_NETWORK_VIOLATIONS: violations,
@@ -142,12 +145,19 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
       // One child per file, at most `jobs` at a time; output is printed as each finishes.
       const files = expandFiles(cwd, filters, flags);
       const failed: string[] = [];
+      // Every file's directories exist before the first file starts.
+      const projectRun = cwd === ENGINE_ROOT ? undefined : join(cwd, '.test-tmp', `run-${basename(root)}`);
+      const own = files.map((_, index) => {
+        const tmp = join(root, `f${index}`), projectTmp = projectRun && join(projectRun, `f${index}`);
+        mkdirSync(tmp); if (projectTmp) mkdirSync(projectTmp, { recursive: true });
+        return projectTmp ? { tmp, projectTmp } : { tmp };
+      });
       let next = 0;
       const worker = async (): Promise<void> => {
         while (!signalled && next < files.length) {
           const index = next++, file = files[index]!;
           const started = Date.now();
-          const { code, output } = await spawnBun([...flags, `./${file}`], true, `isolated-${index}`);
+          const { code, output } = await spawnBun([...flags, `./${file}`], true, own[index]);
           if (code !== 0 || signalled) failed.push(file);
           process.stdout.write(`\n==> ${file} (${((Date.now() - started) / 1000).toFixed(1)}s)${code !== 0 ? `  [FAIL: exit ${code}]` : ''}\n${output}`);
         }

@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { basename, delimiter, join } from 'node:path';
-import { sweepStaleTmpDirs, testTempRoot } from '@goodvibes-jev/engine/toolchain/test-runner';
+import { sweepStaleTmpDirs, TEST_PROJECT_TMP_ENV, testTempRoot } from '@goodvibes-jev/engine/toolchain/test-runner';
 
 /**
  * These directories live inside the checkout (`<product>/.test-tmp/run-…`), not
@@ -14,7 +14,7 @@ function projectRoot(): string {
     const parent = join(process.cwd(), '.test-tmp');
     mkdirSync(parent, { recursive: true });
     sweepStaleTmpDirs(parent, 'run-');
-    projectRunRoot = join(parent, `run-${basename(testTempRoot())}`);
+    projectRunRoot = process.env[TEST_PROJECT_TMP_ENV] || join(parent, `run-${basename(testTempRoot())}`);
     mkdirSync(projectRunRoot, { recursive: true });
     // A scratch git repository made in here must not discover the real one.
     const ceilings = new Set((process.env.GIT_CEILING_DIRECTORIES ?? '').split(delimiter).filter(Boolean));

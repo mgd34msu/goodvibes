@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export const TEST_TMP_ROOT_ENV = 'GOODVIBES_TEST_TMP_ROOT';
+/** Set by the runner when a test file has its own in-checkout temp directory. */
+export const TEST_PROJECT_TMP_ENV = 'GOODVIBES_TEST_PROJECT_TMP';
 export const RUN_TMP_PREFIX = 'goodvibes-testrun-';
 export const PLAIN_TMP_PREFIX = 'goodvibes-plaintest-';
 export const STALE_RUN_MS = 60 * 60 * 1000;

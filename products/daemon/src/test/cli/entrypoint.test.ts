@@ -88,10 +88,10 @@ async function oneShot(args: string[], root?: string) {
 test('emitted staged-reader command refuses incompatible data without initializing the selected home', async () => {
   const root = makeOwnedTempDir('daemon-built-reader-inspection');
   const floor = join(root, NATIVE_READER_REQUIREMENT_FILE);
-  const original = JSON.stringify({ schema: 1, minimumReader: '3.2.0', formats: ['payment-retained-holds-v2'] });
+  const original = JSON.stringify({ schema: 1, minimumReader: '99.0.0', formats: ['payment-retained-holds-v2'] });
   writeFileSync(floor, original);
   const result = await oneShot(['check-install-reader', join(root, 'goodvibes-daemon')], root);
-  expect(result.code).toBe(2); expect(result.stdout).toBe(''); expect(result.stderr).toContain('requires GoodVibes 3.2.0');
+  expect(result.code).toBe(2); expect(result.stdout).toBe(''); expect(result.stderr).toContain('requires GoodVibes 99.0.0');
   expect(readFileSync(floor, 'utf8')).toBe(original); expect(existsSync(join(root, 'daemon'))).toBe(false);
   expect(existsSync(join(result.home, '.goodvibes'))).toBe(false);
 });

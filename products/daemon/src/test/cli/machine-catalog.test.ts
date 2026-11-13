@@ -80,13 +80,13 @@ describe('release reader inspection never initializes settings or a runtime', ()
     expect(files(root)).toEqual(before); expect(readdirSync(root)).toEqual([]);
   });
 
-  test.each([['3.1.2', 0], ['3.2.0', 2]] as const)('the actual reader checks floor %s and emits no false success', async (minimumReader, code) => {
+  test.each([['3.1.2', 0], ['99.0.0', 2]] as const)('the actual reader checks floor %s and emits no false success', async (minimumReader, code) => {
     const root = makeOwnedTempDir('daemon-reader-inspect-floor');
     writeFileSync(join(root, NATIVE_READER_REQUIREMENT_FILE), JSON.stringify({ schema: 1, minimumReader, formats: ['payment-retained-holds-v2'] }));
     const before = files(root); const output = await invoke(['check-install-reader', join(root, 'goodvibes-daemon')], { HOME: root }, root);
     expect(output.code).toBe(code); expect(files(root)).toEqual(before);
     if (code === 0) expect(JSON.parse(output.stdout[0] ?? '{}')).toMatchObject({ readerVersion: VERSION });
-    else { expect(output.stdout).toEqual([]); expect(output.stderr.join('')).toContain('requires GoodVibes 3.2.0'); }
+    else { expect(output.stdout).toEqual([]); expect(output.stderr.join('')).toContain('requires GoodVibes 99.0.0'); }
   });
 
   test('malformed stored content stays private and intact', async () => {

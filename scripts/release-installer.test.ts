@@ -206,8 +206,8 @@ test('saved reader requirements reject an incompatible release before replacing 
   const programs = ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent', 'goodvibes-daemon.bun', 'daemon-installation.json'];
   const before = programs.map(name => readFileSync(join(home, 'bin', name)));
   const floor = join(home, 'bin/.goodvibes-reader-requirements.json');
-  const saved = JSON.stringify({ schema: 1, minimumReader: '3.2.0', formats: ['payment-retained-holds-v2'] }); writeFileSync(floor, saved);
-  const result = run(); expect(result.status).not.toBe(0); expect(result.stderr).toContain('requires GoodVibes 3.2.0');
+  const saved = JSON.stringify({ schema: 1, minimumReader: '99.0.0', formats: ['payment-retained-holds-v2'] }); writeFileSync(floor, saved);
+  const result = run(); expect(result.status).not.toBe(0); expect(result.stderr).toContain('requires GoodVibes 99.0.0');
   for (const [index, name] of programs.entries()) expect(readFileSync(join(home, 'bin', name))).toEqual(before[index]);
   expect(readFileSync(floor, 'utf8')).toBe(saved);
   expect(readdirSync(join(home, 'bin')).filter(name => /update-transaction|install-claim/.test(name))).toEqual([]);

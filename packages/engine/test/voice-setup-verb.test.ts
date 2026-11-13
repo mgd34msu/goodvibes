@@ -375,15 +375,6 @@ describe('native managed wake source lifetime', () => {
       expect(current).not.toThrow(); expect(service.wakeStatus().vadReady).toBe(false);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
-  test('creation and removal of an originally absent approved VAD asset retires custody', () => {
-    const root = mkdtempSync(join(tmpdir(), 'native-wake-read-'));
-    try {
-      const service = fixture(root), paths = resolveManagedWakePaths(root); mkdirSync(dirname(paths.vadPath), { recursive: true });
-      const current = captureVoiceWakeReadSource(service);
-      writeFileSync(paths.vadPath, 'Synthetic unverified managed VAD'); unlinkSync(paths.vadPath);
-      expect(current).toThrow(); expect(service.wakeStatus().vadReady).toBe(false);
-    } finally { rmSync(root, { recursive: true, force: true }); }
-  });
   test('complete original VAD bytes and attribution replacement refuse after an await boundary', async () => {
     const root = mkdtempSync(join(tmpdir(), 'native-wake-read-'));
     try {

@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isolatedTestEnvironment } from '../toolchain/src/test-runner/test-isolation.ts';
-import { RUN_TMP_PREFIX, sweepStaleTmpDirs, TEST_PROJECT_TMP_ENV, TEST_TMP_ROOT_ENV } from '../toolchain/src/test-runner/temp.ts';
+import { RUN_TMP_PREFIX, sweepStaleTmpDirs, TEST_TMP_ROOT_ENV } from '../toolchain/src/test-runner/temp.ts';
 import { defaultTestArgs, discoverTestFiles } from './test-discovery.ts';
 import { selectPartition } from './test-partitions.ts';
 
@@ -109,12 +109,11 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
     return () => process.off(name, relay);
   });
   /** One `bun test` child; with `capture`, its output is returned instead of inherited. */
-  // `own` gives a child its own temp root, HOME and in-checkout temp directory.
-  // Files run side by side must not create entries in a directory another file's
-  // code is watching: a store that observes its ancestor directories treats a
-  // neighbour's new directory as its own source changing.
-  const spawnBun = async (testArgs: readonly string[], capture: boolean, own?: { tmp: string; projectTmp?: string }): Promise<{ code: number; output: string }> => {
-    const tmp = own?.tmp ?? root;
+  // `own` is a child's private temp root and HOME: files run side by side must
+  // not share a home directory.
+  const spawnBun = async (testArgs: readonly string[], capture: boolean, own?: string): Promise<{ code: number; output: string }> => {
+    const tmp = own ?? root;
+    if (own) mkdirSync(own);
     const child = Bun.spawn([process.execPath, '--no-env-file', 'test', '--preload', NETWORK_PRELOAD, ...testArgs], {
       cwd,
       detached: process.platform !== 'win32',
@@ -123,7 +122,6 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
         ...(own === undefined ? env : isolatedTestEnvironment({ ...(run.env ?? process.env) }, join(tmp, 'isolated'), run.fixtureEnv)),
         TMPDIR: tmp, TMP: tmp, TEMP: tmp,
         [TEST_TMP_ROOT_ENV]: tmp,
-        ...(own?.projectTmp ? { [TEST_PROJECT_TMP_ENV]: own.projectTmp } : {}),
         GIT_CEILING_DIRECTORIES: [...ceilings].join(delimiter),
         GOODVIBES_ENGINE_TEST_RUNNER: '1',
         GOODVIBES_TEST_NETWORK_VIOLATIONS: violations,
@@ -145,19 +143,12 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
       // One child per file, at most `jobs` at a time; output is printed as each finishes.
       const files = expandFiles(cwd, filters, flags);
       const failed: string[] = [];
-      // Every file's directories exist before the first file starts.
-      const projectRun = cwd === ENGINE_ROOT ? undefined : join(cwd, '.test-tmp', `run-${basename(root)}`);
-      const own = files.map((_, index) => {
-        const tmp = join(root, `f${index}`), projectTmp = projectRun && join(projectRun, `f${index}`);
-        mkdirSync(tmp); if (projectTmp) mkdirSync(projectTmp, { recursive: true });
-        return projectTmp ? { tmp, projectTmp } : { tmp };
-      });
       let next = 0;
       const worker = async (): Promise<void> => {
         while (!signalled && next < files.length) {
           const index = next++, file = files[index]!;
           const started = Date.now();
-          const { code, output } = await spawnBun([...flags, `./${file}`], true, own[index]);
+          const { code, output } = await spawnBun([...flags, `./${file}`], true, join(root, `${basename(root)}-f${index}`));
           if (code !== 0 || signalled) failed.push(file);
           process.stdout.write(`\n==> ${file} (${((Date.now() - started) / 1000).toFixed(1)}s)${code !== 0 ? `  [FAIL: exit ${code}]` : ''}\n${output}`);
         }
@@ -176,7 +167,9 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
     // Twice, a moment apart: a detached daemon may still flush into the directory it just lost.
     for (const pass of [0, 1]) {
       if (pass === 1) await new Promise((done) => setTimeout(done, 300));
-      for (const path of [root, ...(cwd === ENGINE_ROOT ? [] : [join(cwd, '.test-tmp', `run-${basename(root)}`)])]) {
+      const projectTmp = cwd === ENGINE_ROOT ? undefined : join(cwd, '.test-tmp');
+      const projectRuns = projectTmp && existsSync(projectTmp) ? readdirSync(projectTmp).filter((name) => name.startsWith(`run-${basename(root)}`)).map((name) => join(projectTmp, name)) : [];
+      for (const path of [root, ...projectRuns]) {
         try { rmSync(path, { recursive: true, force: true }); } catch (error) { if (pass === 1) console.error(`goodvibes: could not remove ${path}: ${String(error)}`); }
       }
     }

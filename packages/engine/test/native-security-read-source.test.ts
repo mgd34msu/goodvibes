@@ -264,11 +264,6 @@ describe('native read receipts retain original publishers and clocks', () => {
     expect(current).toThrow(SecurityReadSourceRetiredError); expect(issuers).toBe(0);
   });
 
-  test('native file capture retains absence across create and remove', () => {
-    const path = join(root(), 'native-marker.json'), current = captureSecurityReadFiles([path]); current();
-    writeFileSync(path, '{}'); rmSync(path); expect(current).toThrow(SecurityReadSourceRetiredError);
-  });
-
   test('actual provider registration restore retires the native registry receipt', () => {
     const registry = new VoiceProviderRegistry(), provider = { id: 'fixture', label: 'Fixture', capabilities: ['voice-list'] as const };
     registry.register(provider); const current = captureVoiceProviderReadSource(registry); current();

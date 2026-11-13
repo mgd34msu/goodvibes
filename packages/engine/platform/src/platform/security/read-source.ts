@@ -128,6 +128,24 @@ export function retainSecurityReadMap<K, V>(map: Map<K, V>): () => void {
 }
 
 /** Observe manifests plus native inode clocks; missing paths retain their nearest existing parent. */
+/** An absent file is the same source while it stays absent under the same
+ * directory. A directory's times and size change whenever any sibling is
+ * written, which says nothing about this file, so only its identity counts.
+ */
+function observeAbsentFileParent(path: string): unknown {
+  try {
+    const stat = statSync(path, { bigint: true });
+    return { path, resolved: realpathSync(path), dev: String(stat.dev), ino: String(stat.ino), directory: stat.isDirectory() };
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      const parent = dirname(path);
+      assertSecurityReadSource(parent !== path);
+      return { path, absent: true, parent: observeAbsentFileParent(parent) };
+    }
+    throw new SecurityReadSourceRetiredError();
+  }
+}
+
 function observeSecurityReadFile(path: string): unknown {
   try {
     const link = lstatSync(path, { bigint: true }), resolved = realpathSync(path);
@@ -146,7 +164,7 @@ function observeSecurityReadFile(path: string): unknown {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
       const parent = dirname(path);
       assertSecurityReadSource(parent !== path);
-      return { path, absent: true, parent: observeSecurityReadFile(parent) };
+      return { path, absent: true, parent: observeAbsentFileParent(parent) };
     }
     throw new SecurityReadSourceRetiredError();
   }

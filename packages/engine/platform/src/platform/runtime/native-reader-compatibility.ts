@@ -206,8 +206,14 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
       if (failed) throw new NativeDataCompatibilityError('unavailable');
       if (!Object.hasOwn(requirements, format)) throw new Error();
       physicalCurrent();
-      release = tryAcquireCrossProcessLock(`${path}.lock`, { assertCurrent: physicalCurrent });
-      if (!release) throw new NativeDataCompatibilityError('busy');
+      // Another process starting at the same moment holds this for one short
+      // write; wait for it rather than refusing to start.
+      const deadline = Date.now() + 5_000, pause = new Int32Array(new SharedArrayBuffer(4));
+      while (!(release = tryAcquireCrossProcessLock(`${path}.lock`, { assertCurrent: physicalCurrent }))) {
+        if (Date.now() >= deadline) throw new NativeDataCompatibilityError('busy');
+        Atomics.wait(pause, 0, 0, 25);
+        physicalCurrent();
+      }
       physicalCurrent();
       const lease = readFileObservation(`${path}.lock`);
       const assertLease = () => {

@@ -460,18 +460,7 @@ jobs:
             | awk -v shard="$SHARD" 'NR % 8 == shard' | sed 's|^|./|')
           echo "Agent shard $SHARD: ${#files[@]} files"
           test "${#files[@]}" -gt 0
-          # The terminal e2e files all drive the one compiled binary and its
-          # install metadata, so they run one at a time after the parallel batch.
-          e2e=(); rest=()
-          for file in "${files[@]}"; do case "$file" in */e2e/*) e2e+=("$file") ;; *) rest+=("$file") ;; esac; done
-          status=0
-          if [ "${#rest[@]}" -gt 0 ]; then
-            bun packages/engine/scripts/test.ts --cwd ../../products/agent --jobs=2 --timeout=180000 "${rest[@]}" || status=$?
-          fi
-          if [ "${#e2e[@]}" -gt 0 ]; then
-            bun packages/engine/scripts/test.ts --cwd ../../products/agent --timeout=180000 "${e2e[@]}" || status=$?
-          fi
-          exit "$status"
+          bun packages/engine/scripts/test.ts --cwd ../../products/agent --jobs=2 --timeout=180000 "${files[@]}"
       - name: Run the isolated native catalog fixtures
         if: ${{ !cancelled() && matrix.shard == 0 }}
         run: bun packages/engine/scripts/test.ts --cwd ../../products/agent --jobs=2 --timeout=180000 ./src/test/tools/agent-harness-tool.test.ts ./src/test/tools/agent-harness-semantic-record-catalogs.test.ts

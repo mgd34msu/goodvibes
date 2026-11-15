@@ -9,7 +9,18 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GoodVibesError, installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import {
+  classifyFailure,
+  createHttpStatusError,
+  formatRefusal,
+  GoodVibesError,
+  installJudgmentPort,
+  JudgmentPortMissingError,
+  readRefusal,
+  refusal,
+  RefusalError,
+  toRefusal,
+} from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
 import {
   buildErrorResponseBody,
@@ -69,6 +80,54 @@ describe('answering an error never rejects', () => {
     const body = buildErrorResponseBody({ error: 'slow down', status: 429, retryAfterMs: 5, requestId: 'r-1' });
     expect(body.retryAfterMs).toBe(5);
     expect(body.requestId).toBe('r-1');
+  });
+});
+
+describe('one refusal shape from the daemon to the client', () => {
+  test('a refusal crosses the wire with state, reason and next intact, and asks no model', async () => {
+    const { port, touches } = countingPort();
+    withPort(port);
+    const refused = refusal({
+      code: 'SESSION_CLOSED',
+      state: 'the session is closed',
+      reason: 'Messages cannot be added to a closed session',
+      next: ['Start a new session with /new', 'Reopen it with /resume'],
+      status: 409,
+    });
+    const response = await readJsonErrorResponse(new RefusalError(refused));
+    expect(touches()).toBe(0);
+    expect(response.status).toBe(409);
+    const body = await response.json() as Json;
+    expect(body).toMatchObject({ error: refused.reason, code: 'SESSION_CLOSED', state: refused.state, next: refused.next, hint: refused.next[0], recoverable: false });
+    const received = readRefusal(createHttpStatusError(409, 'http://daemon.test/x', 'POST', body));
+    expect(received).toEqual(refused);
+    expect(formatRefusal(received!)).toBe('Messages cannot be added to a closed session. Start a new session with /new');
+  });
+
+  test('a daemon error that names its own category asks no model, with or without a status', async () => {
+    const { port, touches } = countingPort();
+    withPort(port);
+    await readErrorResponseBody(new GoodVibesError('The knowledge store is still opening.', { category: 'service', source: 'runtime' }));
+    await readErrorResponseBody(Object.assign(new Error('upstream closed'), { code: 'ECONNRESET' }));
+    await readErrorResponseBody({ message: 'already exists', status: 409 });
+    expect(touches()).toBe(0);
+  });
+
+  test('classifyFailure decides from fields and tables only', () => {
+    expect(classifyFailure(new Error('no fields'))).toBeUndefined();
+    expect(classifyFailure({ status: 503 })).toEqual({ category: 'service', retryable: true });
+    expect(classifyFailure({ status: 404 })).toEqual({ category: 'not_found', retryable: false });
+    expect(classifyFailure({ status: 429, retryAfterMs: 2000 })).toEqual({ category: 'rate_limit', retryable: true, retryAfterMs: 2000 });
+    expect(classifyFailure(Object.assign(new Error('x'), { cause: { code: 'ETIMEDOUT' } }))).toEqual({ category: 'timeout', retryable: true });
+    expect(classifyFailure(new GoodVibesError('bad', { category: 'config' }))).toEqual({ category: 'config', retryable: false });
+  });
+
+  test('a failure that carries no refusal becomes one with the caller\'s state and next', () => {
+    const made = toRefusal(Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:3421'), { code: 'ECONNREFUSED' }), {
+      state: 'no daemon is running',
+      next: ['Start it with goodvibes-daemon start'],
+    });
+    expect(made).toMatchObject({ code: 'ECONNREFUSED', state: 'no daemon is running', retryable: true, next: ['Start it with goodvibes-daemon start'] });
   });
 });
 

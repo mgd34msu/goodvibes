@@ -63,7 +63,13 @@ export type DaemonErrorSource =
 export const MEMORY_RECORD_NOT_FOUND_CODE = 'MEMORY_RECORD_NOT_FOUND';
 
 export interface StructuredDaemonErrorBody {
+  /** Why the request was not carried out (a refusal's `reason`). */
   readonly error: string;
+  /** What is true now, in product terms, when the daemon refused rather than failed. */
+  readonly state?: string | undefined;
+  /** Steps that would get past the refusal, most useful first. */
+  readonly next?: readonly string[] | undefined;
+  /** `next[0]` when `next` is present; kept for clients that read only this field. */
   readonly hint?: string | undefined;
   readonly code?: string | undefined;
   readonly category?: DaemonErrorCategory | undefined;

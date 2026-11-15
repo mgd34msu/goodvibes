@@ -1,5 +1,6 @@
 import { TRANSIENT_STATUS_CODES } from './failure-transience.js';
 import { categoryForStatus } from './failure-reading.js';
+import { readNextSteps, type Refusal } from './refusal.js';
 import type {
   DaemonErrorCategory,
   DaemonErrorSource,
@@ -131,6 +132,10 @@ export interface GoodVibesErrorOptions {
   readonly method?: string | undefined;
   readonly body?: unknown | undefined;
   readonly hint?: string | undefined;
+  /** What is true now, when the failure is a refusal (see {@link Refusal}). */
+  readonly state?: string | undefined;
+  /** Steps that would get past the refusal; `hint` defaults to the first. */
+  readonly next?: readonly string[] | undefined;
   readonly provider?: string | undefined;
   readonly operation?: string | undefined;
   readonly phase?: string | undefined;
@@ -288,6 +293,8 @@ export class GoodVibesError extends Error {
   public readonly method?: string | undefined;
   public readonly body?: unknown | undefined;
   public readonly hint?: string | undefined;
+  public readonly state?: string | undefined;
+  public readonly next?: readonly string[] | undefined;
   public readonly provider?: string | undefined;
   public readonly operation?: string | undefined;
   public readonly phase?: string | undefined;
@@ -332,7 +339,9 @@ export class GoodVibesError extends Error {
     this.url = options.url;
     this.method = options.method;
     this.body = options.body;
-    this.hint = options.hint;
+    this.state = options.state;
+    this.next = options.next === undefined ? undefined : Object.freeze([...options.next]);
+    this.hint = options.hint ?? options.next?.[0];
     this.provider = options.provider;
     this.operation = options.operation;
     this.phase = options.phase;
@@ -357,6 +366,8 @@ export class GoodVibesError extends Error {
       method: this.method,
       body: this.body,
       hint: this.hint,
+      state: this.state,
+      next: this.next,
       provider: this.provider,
       operation: this.operation,
       phase: this.phase,
@@ -652,6 +663,8 @@ export function createHttpStatusError(
       method,
       body,
       hint: text(body.hint) ?? fallbackHint,
+      state: text(body.state),
+      next: readNextSteps(body.next),
       provider: text(body.provider),
       operation: text(body.operation),
       phase: text(body.phase),
@@ -686,6 +699,42 @@ export function createHttpStatusError(
   });
 }
 
+/**
+ * A failure that is a {@link Refusal}: thrown where the code that refuses is
+ * not the code that answers (a route handler, a tool, a command). It is a
+ * `GoodVibesError` with `state` and `next` set, so the daemon's error body,
+ * `toJSON` and `readRefusal` carry the three fields without reading wording.
+ */
+export class RefusalError extends GoodVibesError {
+  public readonly refusal: Refusal;
+  public readonly retryable: boolean;
+
+  static override [Symbol.hasInstance](value: unknown): boolean {
+    if (this !== RefusalError) return typeof value === 'object' && value !== null && this.prototype.isPrototypeOf(value);
+    if (!GoodVibesError[Symbol.hasInstance](value)) return false;
+    const refusal = (value as { readonly refusal?: unknown }).refusal;
+    return typeof refusal === 'object' && refusal !== null;
+  }
+
+  constructor(refusal: Refusal, options: Pick<GoodVibesErrorOptions, 'category' | 'source' | 'cause'> = {}) {
+    super(refusal.reason, {
+      ...options,
+      code: refusal.code,
+      status: refusal.status,
+      recoverable: refusal.retryable,
+      state: refusal.state,
+      next: refusal.next,
+      retryAfterMs: refusal.retryAfterMs,
+    });
+    this.refusal = refusal;
+    this.retryable = refusal.retryable;
+  }
+}
+
+export {
+  commandOk, commandRefused, formatRefusal, isRefusal, readNextSteps, readRefusal, refusal, refusalErrorBody, toRefusal,
+  type CommandResult, type Refusal, type RefusalInit,
+} from './refusal.js';
 export { installJudgmentPort, judgmentPort, restoreJudgmentPort, JudgmentPortMissingError } from './judgment-port.js';
 export { assertDecisionModelsEnabled, decisionModelPolicyState, installDecisionModelPolicyObserver, DecisionModelsDisabledError,
   tryClassicDecisionFallback, runDecisionOrClassic, DECISION_MODEL_POLICIES, parseDecisionModelPolicy, DECISION_MODEL_POLICY_HEADER,
@@ -711,12 +760,14 @@ export {
   type FailureQuestion,
 } from './failure-reading.js';
 export {
+  classifyFailure,
   httpStatusOf,
   readFailureTransience,
   structuredTransience,
   transienceFromReading,
   TRANSIENT_STATUS_CODES,
   type FailureClass,
+  type FailureClassification,
   type FailureTransience,
   type TransienceBasis,
   type TransienceOptions,

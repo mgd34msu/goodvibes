@@ -1,6 +1,8 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { DaemonErrorCategory } from './daemon-error-contract.js';
 import {
   categoryForCode,
+  categoryForStatus,
   readFailure,
   type FailureCategory,
   type FailureConclusions,
@@ -109,6 +111,53 @@ export function structuredTransience(error: unknown): FailureTransience | undefi
     return { failureClass: 'retryable', basis: 'error-type', detail: name };
   }
   return undefined;
+}
+
+/** What structure alone says about a failure: its category, whether a retry can clear it, and any wait the server named. */
+export interface FailureClassification {
+  readonly category: DaemonErrorCategory;
+  readonly retryable: boolean;
+  readonly retryAfterMs?: number | undefined;
+}
+
+const WIRE_CATEGORIES: ReadonlySet<string> = new Set(Object.values(DaemonErrorCategory));
+const RETRYABLE_CATEGORIES: ReadonlySet<DaemonErrorCategory> = new Set(['rate_limit', 'timeout', 'network', 'service', 'protocol']);
+
+/**
+ * Classifies a failure from its fields and the status, errno and error-class
+ * tables, with no model and no I/O; undefined when the failure carries none
+ * of them (no category, status, Retry-After, errno code or timeout class), the
+ * one case where its wording is all there is to read. Category: the error's
+ * own category, then its HTTP status, then an errno code on it or its cause,
+ * then a timeout or abort class; a status outside the status table is
+ * `unknown`. Retryable: an explicit `retryable` field, a `recoverable: true`,
+ * a Retry-After, the transient-status table, a connection errno or timeout
+ * class, then the category.
+ */
+export function classifyFailure(error: unknown): FailureClassification | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const explicit = stringField(error, 'category');
+  const ownCategory = explicit !== undefined && explicit !== 'unknown' && WIRE_CATEGORIES.has(explicit) ? explicit as DaemonErrorCategory : undefined;
+  const status = httpStatusOf(error);
+  const delay = numberField(error, 'retryAfterMs');
+  const retryAfterMs = delay !== undefined && delay >= 0 ? delay : undefined;
+  const cause = (error as { readonly cause?: unknown }).cause;
+  const errnoCategory = categoryForCode(stringField(error, 'code')) ?? categoryForCode(stringField(cause, 'code'));
+  const name = stringField(error, 'name');
+  const timeoutClass = name !== undefined && TIMEOUT_ERROR_NAMES.has(name);
+  const category = ownCategory
+    ?? categoryForStatus(status)
+    ?? errnoCategory
+    ?? (timeoutClass ? 'timeout' : undefined)
+    ?? (status !== undefined || retryAfterMs !== undefined ? 'unknown' : undefined);
+  if (category === undefined) return undefined;
+  const flag = (error as { readonly retryable?: unknown }).retryable;
+  const retryable = typeof flag === 'boolean' ? flag
+    : (error as { readonly recoverable?: unknown }).recoverable === true || retryAfterMs !== undefined ? true
+    : status !== undefined ? TRANSIENT_STATUSES.has(status)
+    : errnoCategory !== undefined || timeoutClass ? true
+    : RETRYABLE_CATEGORIES.has(category);
+  return retryAfterMs === undefined ? { category, retryable } : { category, retryable, retryAfterMs };
 }
 
 function describeFallback(error: unknown): string {

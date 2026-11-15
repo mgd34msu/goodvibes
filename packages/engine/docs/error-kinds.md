@@ -340,7 +340,7 @@ Subclass codes do **not** share one naming convention. `PERMISSION_DENIED` has n
 
 ## Useful fields on every `GoodVibesError`
 
-The class exposes 18 structured fields; `toJSON()` serializes them with `undefined` values omitted.
+The class exposes 20 structured fields; `toJSON()` serializes them with `undefined` values omitted.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -353,7 +353,9 @@ The class exposes 18 structured fields; `toJSON()` serializes them with `undefin
 | `url` | `string \| undefined` | Request URL for transport failures. |
 | `method` | `string \| undefined` | HTTP method for transport failures. |
 | `body` | `unknown` | Parsed response body, when available. |
-| `hint` | `string \| undefined` | Human-readable remediation hint from the server. |
+| `hint` | `string \| undefined` | Human-readable remediation hint from the server; defaults to `next[0]`. |
+| `state` | `string \| undefined` | For a refusal: what is true now, in product terms. |
+| `next` | `readonly string[] \| undefined` | For a refusal: steps that would get past it, most useful first. |
 | `provider` | `string \| undefined` | Provider name if the error originated in a provider call. |
 | `operation` | `string \| undefined` | Operation/method name in progress when the error occurred. |
 | `phase` | `string \| undefined` | Lifecycle phase in which the failure happened. |

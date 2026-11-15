@@ -30,6 +30,9 @@ which file defines it.
 | Config error | `ConfigurationError` | `index.ts` |
 | Contract error | `ContractError` | `index.ts` |
 | HTTP error | `HttpStatusError` | `index.ts` |
+| Refusal error | `RefusalError` | `index.ts` |
+| Refusal and command result shapes | `Refusal`, `CommandResult`, `refusal`, `toRefusal`, `readRefusal`, `formatRefusal`, `refusalErrorBody` | `refusal.ts` |
+| Failure classification from fields and tables | `classifyFailure` | `failure-transience.ts` |
 
 ## Important rules
 
@@ -42,6 +45,12 @@ which file defines it.
 - A daemon 404 whose body carries `code: 'MEMORY_RECORD_NOT_FOUND'` means the addressed memory record genuinely does not exist, and the memory-spine wire layer folds that specific 404 to `null`. Any other 404 (a route that does not exist at all, or a bare legacy 404 with no code) means the daemon does not serve that verb and must be rejected honestly rather than folded to `null`.
 
 Do not introduce parallel error taxonomies in extension packages.
+
+## Refusals
+
+A refusal says three things: the `state` things are in, the `reason` the request was not carried out, and the `next` steps that would get past it. `Refusal` is that shape; the daemon error body carries it as `state`, `error` and `next` (with `hint` set to `next[0]` for clients that read only `hint`), `RefusalError` throws it, and `CommandResult` returns it from a command (`{ ok: true, lines }` or `{ ok: false, refusal }`). A terminal prints `formatRefusal(r)`, which is `reason. next[0]`.
+
+`classifyFailure(error)` is the first step for every failure: category, retryable and Retry-After from the error's own category, its HTTP status, an errno code on it or its cause, or a timeout class. It returns `undefined` only when the failure carries none of these, and only then does the daemon's error answer read the wording with the decision model. A refusal is never read.
 
 ## Constructing and serializing errors
 

@@ -61,6 +61,7 @@ Use the structured fields instead of fragile message parsing:
 - HTTP status (`status`)
 - error category (`category`) and source (`source`)
 - recovery hints (`recoverable`, `hint`, `retryAfterMs`)
+- for a refusal, what is true now (`state`) and what to do next (`next`); `readRefusal(err)` returns all of it as one `Refusal`
 - request correlation (`requestId`)
 - typed code (`code`): match it with `isErrorCode(err, EngineErrorCodes.RATE_LIMITED)`
 

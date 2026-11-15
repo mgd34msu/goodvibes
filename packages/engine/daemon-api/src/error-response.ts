@@ -2,14 +2,15 @@ import {
   categoryDependsOnWording,
   categoryForCode,
   categoryForStatus,
+  classifyFailure,
   type DaemonErrorCategory,
   type DaemonErrorSource,
   type FailureConclusions,
   GoodVibesError,
   isStructuredDaemonErrorBody,
   readFailure,
+  readNextSteps,
   settleCategory,
-  summaryDependsOnWording,
   type StructuredDaemonErrorBody,
 } from '@goodvibes-jev/engine/errors';
 
@@ -45,6 +46,8 @@ interface StructuredErrorLike {
   readonly statusCode?: number | undefined;
   readonly hint?: string | undefined;
   readonly guidance?: string | undefined;
+  readonly state?: unknown;
+  readonly next?: unknown;
   readonly source?: string | undefined;
   readonly category?: string | undefined;
   readonly provider?: string | undefined;
@@ -64,6 +67,8 @@ interface ErrorPropertyLike {
   readonly statusCode?: number | undefined;
   readonly hint?: string | undefined;
   readonly guidance?: string | undefined;
+  readonly state?: unknown;
+  readonly next?: unknown;
   readonly source?: string | undefined;
   readonly category?: string | undefined;
   readonly provider?: string | undefined;
@@ -123,7 +128,9 @@ function readMessage(error: unknown, fallbackMessage?: string): string {
 
 /**
  * The category structure fixes: an explicit category, the HTTP status, a
- * structured errno code, or a message that is exactly an errno code. 400 and 429 stay provisional: providers report a
+ * structured errno code, or a message that is exactly an errno code, then
+ * the rest of the failure table (an errno code on the cause, a timeout or
+ * abort class). 400 and 429 stay provisional: providers report a
  * spent account under both, and `rate_limit` reads as retryable, so a caller
  * would wait out a condition that never clears. Whether one is really billing
  * is read from the wording (see settleCategory in the errors package).
@@ -133,8 +140,20 @@ function fixedCategory(
   status: number | undefined,
   code: string | undefined,
   message: string,
+  error?: unknown,
 ): DaemonErrorCategory | undefined {
-  return explicit ?? categoryForStatus(status) ?? categoryForCode(code) ?? categoryForCode(message);
+  const fixed = (explicit === 'unknown' ? undefined : explicit)
+    ?? categoryForStatus(status) ?? categoryForCode(code) ?? categoryForCode(message);
+  if (fixed !== undefined) return fixed;
+  const classified = classifyFailure(error)?.category;
+  return classified === undefined || classified === 'unknown' ? explicit : classified;
+}
+
+/** The refusal fields an error carries: `state`, and `next` with `next[0]` as the hint when the error names none. */
+function refusalFields(error: { readonly state?: unknown; readonly next?: unknown }): { readonly state?: string; readonly next?: readonly string[] } {
+  const state = readStringProperty(error.state);
+  const next = readNextSteps(error.next);
+  return { ...(state !== undefined ? { state } : {}), ...(next !== undefined ? { next } : {}) };
 }
 
 /**
@@ -226,6 +245,7 @@ function isStructuredErrorLike(error: unknown): error is StructuredErrorLike {
       || typeof (error as { provider?: unknown }).provider === 'string'
       || typeof (error as { source?: unknown }).source === 'string'
       || typeof (error as { category?: unknown }).category === 'string'
+      || typeof (error as { state?: unknown }).state === 'string'
     )
   );
 }
@@ -291,6 +311,8 @@ function captureErrorBodyFields(input: StructuredDaemonErrorBody): StructuredDae
   const category = value('category'); const source = value('source');
   if (typeof category === 'string' && normalizeCategory(category) !== undefined) out.category = category;
   if (typeof source === 'string' && normalizeSource(source) !== undefined) out.source = source;
+  const state = value('state'); if (typeof state === 'string' && state.trim().length > 0) out.state = state;
+  const next = readNextSteps(value('next')); if (next !== undefined) out.next = Object.freeze([...next]);
   const recoverable = value('recoverable'); if (typeof recoverable === 'boolean') out.recoverable = recoverable;
   const status = value('status'); if (typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599) out.status = status;
   const retry = value('retryAfterMs'); if (typeof retry === 'number' && Number.isFinite(retry) && retry >= 0) out.retryAfterMs = retry;
@@ -305,6 +327,8 @@ function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorRe
     // strip pipeline-internal fields before returning to unprivileged callers.
     const safe: StructuredDaemonErrorBody = {
       error: captured.error,
+      ...(captured.state !== undefined ? { state: captured.state } : {}),
+      ...(captured.next !== undefined ? { next: captured.next } : {}),
       ...(captured.hint !== undefined ? { hint: captured.hint } : {}),
       ...(captured.code !== undefined ? { code: captured.code } : {}),
       ...(captured.category !== undefined ? { category: captured.category } : {}),
@@ -328,7 +352,8 @@ function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorRe
     const providerCode = error.providerCode;
     const phase = error.phase;
     const requestId = error.requestId;
-    const fixed = fixedCategory(normalizeCategory(error.category), status, error.code ?? providerCode, message);
+    const fixed = fixedCategory(normalizeCategory(error.category), status, error.code ?? providerCode, message, error);
+    const refused = refusalFields(error);
     const providerAttributed = isProviderAttributed({
       source: normalizeSource(error.source) ?? options.source,
       provider,
@@ -338,7 +363,7 @@ function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorRe
     const category = settleCategory(fixed, status, providerAttributed, options.failure);
     // A reading that turned a provisional category into billing replaces the
     // hint the error carried for that provisional category.
-    const ownHint = category === fixed ? (error instanceof GoodVibesError ? error.hint : error.hint ?? error.guidance) : undefined;
+    const ownHint = category === fixed ? (error instanceof GoodVibesError ? error.hint : error.hint ?? error.guidance) ?? refused.next?.[0] : undefined;
     const hint = ownHint ?? inferHint(category, status, providerAttributed);
     const summary = buildSummary(message, {
       requestId,
@@ -347,6 +372,7 @@ function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorRe
     });
     return {
       error: summary,
+      ...refused,
       ...(hint ? { hint } : {}),
       ...(error.code ? { code: error.code } : {}),
       category,
@@ -379,13 +405,15 @@ function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorRe
     const providerType = readStringProperty(error.providerType);
     const retryAfterMs = readNumberProperty(error.retryAfterMs);
     const message = error.error.trim() || options.fallbackMessage || 'Unexpected error';
-    const fixed = fixedCategory(normalizeCategory(readStringProperty(error.category)), status, code ?? providerCode, message);
+    const fixed = fixedCategory(normalizeCategory(readStringProperty(error.category)), status, code ?? providerCode, message, error);
+    const refused = refusalFields(error);
     const providerAttributed = isProviderAttributed({ source: source ?? options.source, provider, providerCode, providerType });
     const category = settleCategory(fixed, status, providerAttributed, options.failure);
-    const ownHint = category === fixed ? readStringProperty(error.hint) ?? readStringProperty(error.guidance) : undefined;
+    const ownHint = category === fixed ? readStringProperty(error.hint) ?? readStringProperty(error.guidance) ?? refused.next?.[0] : undefined;
     const hint = ownHint ?? inferHint(category, status, providerAttributed);
     return {
       error: buildSummary(message, { requestId, providerCode, phase }),
+      ...refused,
       ...(hint ? { hint } : {}),
       ...(code ? { code } : {}),
       category,
@@ -403,7 +431,7 @@ function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorRe
     };
   }
   const message = readMessage(error, options.fallbackMessage);
-  const category = settleCategory(fixedCategory(undefined, options.status, undefined, message), options.status, options.source === 'provider', options.failure);
+  const category = settleCategory(fixedCategory(undefined, options.status, undefined, message, error), options.status, options.source === 'provider', options.failure);
   const hint = inferHint(category, options.status, options.source === 'provider');
   return {
     error: message,
@@ -416,9 +444,7 @@ function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorRe
 
 /**
  * What a reading of the error would be about, and whether structure leaves
- * the category or the summary open: the category when nothing structural
- * fixes it (or a provider's 400 or 429 may be billing), the summary when no
- * HTTP response came back, so it may be a connection failure.
+ * the category open.
  */
 interface Wording {
   readonly message: string;
@@ -428,51 +454,63 @@ interface Wording {
   readonly open: boolean;
 }
 
+/**
+ * Whether the wording can change the body: only when the error carries no
+ * category, status, errno code or timeout class at all ({@link classifyFailure}
+ * is the first step), or when it is a provider's 400 or 429 that may be a spent
+ * account. A daemon's own error that says what it is costs no model request.
+ */
+function wordingDecides(fixed: DaemonErrorCategory | undefined, status: number | undefined, fromProvider: boolean): boolean {
+  if (fixed !== undefined && fixed !== 'unknown') return categoryDependsOnWording(fixed, status, fromProvider);
+  return status === undefined;
+}
+
 function wordingOf(error: unknown, options: JsonErrorResponseOptions): Wording | undefined {
   if (isStructuredDaemonErrorBody(error)) return undefined;
+  // A refusal states what it is; its wording is never read.
+  if (error !== null && typeof error === 'object' && refusalFields(error).state !== undefined) return undefined;
   if (error instanceof GoodVibesError || isStructuredErrorLike(error)) {
     const status = (error instanceof GoodVibesError ? error.status : error.status ?? error.statusCode) ?? options.status;
     const code = error.code ?? error.providerCode;
-    const fixed = fixedCategory(normalizeCategory(error.category), status, code, error.message);
+    const fixed = fixedCategory(normalizeCategory(error.category), status, code, error.message, error);
     const fromProvider = isProviderAttributed({
       source: normalizeSource(error.source) ?? options.source,
       provider: error.provider,
       providerCode: error.providerCode,
       providerType: error.providerType,
     });
-    return { message: error.message, status, code, errorName: error instanceof Error ? error.name : undefined, open: categoryDependsOnWording(fixed, status, fromProvider) || summaryDependsOnWording(status) };
+    return { message: error.message, status, code, errorName: error instanceof Error ? error.name : undefined, open: wordingDecides(fixed, status, fromProvider) };
   }
   if (isErrorPropertyLike(error)) {
     const rawStatus = readNumberProperty(error.status) ?? readNumberProperty(error.statusCode);
     const status = rawStatus !== undefined && rawStatus >= 100 && rawStatus <= 599 ? rawStatus : options.status;
     const code = readStringProperty(error.code) ?? readStringProperty(error.providerCode);
     const message = error.error.trim() || options.fallbackMessage || 'Unexpected error';
-    const fixed = fixedCategory(normalizeCategory(readStringProperty(error.category)), status, code, message);
+    const fixed = fixedCategory(normalizeCategory(readStringProperty(error.category)), status, code, message, error);
     const fromProvider = isProviderAttributed({
       source: normalizeSource(readStringProperty(error.source)) ?? options.source,
       provider: readStringProperty(error.provider),
       providerCode: readStringProperty(error.providerCode),
       providerType: readStringProperty(error.providerType),
     });
-    return { message, status, code, errorName: undefined, open: categoryDependsOnWording(fixed, status, fromProvider) || summaryDependsOnWording(status) };
+    return { message, status, code, errorName: undefined, open: wordingDecides(fixed, status, fromProvider) };
   }
   const message = readMessage(error, options.fallbackMessage);
-  const fixed = fixedCategory(undefined, options.status, undefined, message);
+  const fixed = fixedCategory(undefined, options.status, undefined, message, error);
   return {
     message,
     status: options.status,
     code: undefined,
     errorName: error instanceof Error ? error.name : undefined,
-    open: categoryDependsOnWording(fixed, options.status, options.source === 'provider') || summaryDependsOnWording(options.status),
+    open: wordingDecides(fixed, options.status, options.source === 'provider'),
   };
 }
 
 /**
- * {@link buildErrorResponseBody} with the error's wording read by Jev when
- * structure leaves the category open (no category from status, code or the
- * error itself, or a 400 or 429 that may be a spent account) or the error has
- * no HTTP status, so its summary may be a connection failure's. Otherwise no
- * request is made.
+ * {@link buildErrorResponseBody} with the error's wording read by Jev only
+ * when the error carries no category, status, errno code or timeout class, or
+ * is a provider's 400 or 429 that may be a spent account. Otherwise, and for
+ * every refusal, no request is made.
  */
 export async function readErrorResponseBody(
   error: unknown,

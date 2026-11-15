@@ -17,6 +17,7 @@ import { createGeneratedProjectionIdentityIndex } from './store-generated-projec
 import { createArtifactReferenceIndexes } from './store-artifact-references.js';
 import { prepareNativeKnowledgeSchemaReadPlan } from '../state/knowledge-schema-read-plan.js';
 import { createNativeCiContinuationTable, validateNativeCiContinuationTable } from './store-native-ci-continuation.js';
+import { pruneSettledNativeWork, validateNativeWorkRows } from './store-native-work-tables.js';
 import { createNativeConversationStorage, validateNativeConversationCaptureTable, migrateNativeConversationCaptureTable } from './store-native-intake.js';
 import type { NativeConversationStorage } from '../workflow/work-ledger/native-intake-types.js';
 import { migrateNativeWorkSettlementTable, validateNativeWorkSettlementTable, createNativeWorkSettlementTargetIndex, createNativeWorkExecutionStorage, createNativeWorkExecutionTable, validateNativeWorkExecutionTable, createNativeWorkExecutionIntentTable, validateNativeWorkExecutionIntentTable } from './store-native-work-execution.js';
@@ -2073,7 +2074,9 @@ export class KnowledgeStore {
       // Retention is an initialization mutation, never a side effect of adopting
       // another writer's current image during a guarded source action. Publish
       // it through the same baseline check before admitting caller mutations.
-      const pruned = this.pruneJobRuns(MAX_RETAINED_JOB_RUNS) + trimKnowledgeEdgeChanges(this.sqlite) + pruneOrphanScopeVerdicts(this.sqlite, this.scopeVerdicts);
+      validateNativeWorkRows(this.sqlite);
+      const pruned = this.pruneJobRuns(MAX_RETAINED_JOB_RUNS) + trimKnowledgeEdgeChanges(this.sqlite) + pruneOrphanScopeVerdicts(this.sqlite, this.scopeVerdicts)
+        + pruneSettledNativeWork(this.sqlite);
       if (pruned > 0 || verdictTableCreated) {
         await this.sqlite.save();
         this.imageIdentity = savedImageIdentity(this.dbPath);

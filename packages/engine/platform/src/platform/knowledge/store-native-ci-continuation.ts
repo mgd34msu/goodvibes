@@ -12,12 +12,14 @@ type Reader = Pick<SqlDatabase, 'exec'>;
 export function createNativeCiContinuationTable(db: Pick<SqlDatabase, 'run'>): void {
   db.run('CREATE TABLE IF NOT EXISTS native_ci_continuations (project_id TEXT NOT NULL, continuation_id TEXT NOT NULL, format_version INTEGER NOT NULL, state_json TEXT NOT NULL, PRIMARY KEY(project_id, continuation_id))');
 }
-export function validateNativeCiContinuationTable(db: Reader): void {
+/** `rows` parses every continuation; only migrations ask for it, since each read checks the row it loads. */
+export function validateNativeCiContinuationTable(db: Reader, rows = true): void {
   const columns = db.exec('PRAGMA table_info(native_ci_continuations)')[0]?.values;
   const expected = knowledgeSchemaColumns.continuation;
   if (!columns || columns.length !== expected.length || expected.some(([name, type, required, primary]) => {
     const row = columns.find(value => value[1] === name); return !row || row[2] !== type || row[3] !== required || row[5] !== primary;
   })) throw new Error('Invalid native CI continuation table');
+  if (!rows) return;
   for (const row of db.exec('SELECT project_id, continuation_id, format_version, state_json FROM native_ci_continuations')[0]?.values ?? []) {
     const record = parseNativeCiContinuationJson(String(row[3]));
     if (record.issue.projectId !== row[0] || record.id !== row[1] || row[2] !== record.version) throw new Error('Invalid native CI continuation row');

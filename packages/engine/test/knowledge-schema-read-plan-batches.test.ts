@@ -128,13 +128,14 @@ test.each(['missing', 'changed'] as const)('a %s edge trigger still requires the
 });
 
 const populatedCases = [
-  // These two schema validators defer row parsing to their typed consumers.
+  // Only conversation captures are parsed by the current-schema check; the
+  // others defer row parsing to the typed reads and writes that use each row.
   ['work_ledgers', "INSERT INTO work_ledgers VALUES('synthetic',2,0,'{}')", false],
   ['native_work_executions', "INSERT INTO native_work_executions VALUES('synthetic','key',1,'{}','attempt')", false],
-  ['native_work_execution_intents', "INSERT INTO native_work_execution_intents VALUES('synthetic','attempt',1,'{}')", true],
+  ['native_work_execution_intents', "INSERT INTO native_work_execution_intents VALUES('synthetic','attempt',1,'{}')", false],
   ['native_conversation_captures', "INSERT INTO native_conversation_captures VALUES('synthetic','principal','input','request',1,'{}')", true],
-  ['native_work_execution_settlements', "INSERT INTO native_work_execution_settlements VALUES('synthetic','key',1,'{}')", true],
-  ['native_ci_continuations', "INSERT INTO native_ci_continuations VALUES('synthetic','continuation',1,'{}')", true],
+  ['native_work_execution_settlements', "INSERT INTO native_work_execution_settlements VALUES('synthetic','key',1,'{}')", false],
+  ['native_ci_continuations', "INSERT INTO native_ci_continuations VALUES('synthetic','continuation',1,'{}')", false],
 ] as const;
 test.each(populatedCases)('a nonempty %s always refuses the empty-authority plan', async (_table, insert, rejectsMalformedRow) => {
   const db = await database();

@@ -202,46 +202,34 @@ test('copied or getter-bearing records cannot inherit original settlement proof,
   expect(readFileSync(f.file).equals(bytes)).toBe(true);
 });
 
-test('unchanged native images validate unselected settlements once, and every acknowledged write requires fresh full validation', async () => {
+test('a read of one attempt validates no unrelated settlement, before or after a write', async () => {
   const f = await fixture();
   await f.storage.settle!(f.key, () => currentPublication(f), () => {});
   const missing = { ...f.key, attemptId: 'unrelated-missing-attempt' };
   const hash = spyOn(crypto, 'createHash');
   const calls = () => hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
   try {
-    // The requested attempt is absent, so every digest here comes from the
-    // real full-schema validation of an actual unrelated saved settlement.
+    // The requested attempt is absent, so any digest here would come from
+    // checking the unrelated saved settlement.
     expect(f.storage.current(missing).record).toBeNull();
-    const adopted = calls(); expect(adopted).toBeGreaterThan(0);
-    for (let count = 0; count < 6; count++) {
-      expect(f.storage.current(missing).settlement).toBeNull();
-      expect(f.storage.currentByAttempt(missing.attemptId).record).toBeNull();
-    }
-    expect(calls()).toBe(adopted);
+    expect(f.storage.currentByAttempt(missing.attemptId).record).toBeNull();
+    expect(calls()).toBe(0);
     await f.store.upsertSource({ id: 'changed-baseline', connectorId: 'owned-fixture', sourceType: 'manual', status: 'indexed' });
     hash.mockClear();
     expect(f.storage.current(missing).record).toBeNull();
-    const readmitted = calls(); expect(readmitted).toBeGreaterThan(0);
-    expect(f.storage.current(missing).record).toBeNull(); expect(calls()).toBe(readmitted);
+    expect(calls()).toBe(0);
     await assertImage(f.file, 4, 1);
   } finally { hash.mockRestore(); }
 });
 
-test('byte-identical foreign images never inherit native validation proof, and later saved corruption still refuses', async () => {
+test('a replaced physical file is read as found, and saved settlement corruption still refuses its reads and restart', async () => {
   const f = await fixture();
   await f.storage.settle!(f.key, () => currentPublication(f), () => {});
   const missing = { ...f.key, attemptId: 'unrelated-missing-attempt' };
   expect(f.storage.current(missing).record).toBeNull();
   const before = readFileSync(f.file);
   renameSync(f.file, `${f.file}.original`); writeFileSync(f.file, before, { mode: 0o600 });
-  const hash = spyOn(crypto, 'createHash');
-  const calls = () => hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
-  try {
-    expect(f.storage.current(missing).record).toBeNull();
-    const first = calls(); expect(first).toBeGreaterThan(0);
-    // A read does not acknowledge this independently replaced physical file.
-    expect(f.storage.current(missing).record).toBeNull(); expect(calls()).toBeGreaterThan(first);
-  } finally { hash.mockRestore(); }
+  expect(f.storage.current(missing).record).toBeNull();
   expect(readFileSync(`${f.file}.original`).equals(before)).toBe(true);
   await mutateImage(f.file, db => {
     const row = db.exec('SELECT state_json FROM native_work_execution_settlements')[0]!.values[0]!;
@@ -249,8 +237,9 @@ test('byte-identical foreign images never inherit native validation proof, and l
     db.run('UPDATE native_work_execution_settlements SET state_json = ?', [JSON.stringify({ ...receipt, publicationDigest: '0'.repeat(64) })]);
   });
   const corrupt = readFileSync(f.file);
-  expect(() => f.storage.current(missing)).toThrow('invalid');
-  expect(() => f.storage.currentByAttempt(missing.attemptId)).toThrow('invalid');
+  expect(() => f.storage.current(f.key)).toThrow('invalid');
+  expect(() => f.storage.currentByAttempt(f.key.attemptId)).toThrow('invalid');
+  await expect(open(f.file)).rejects.toThrow();
   expect(readFileSync(f.file).equals(corrupt)).toBe(true);
 });
 
@@ -500,7 +489,9 @@ for (const corruption of ['missing-table', 'missing-execution', 'misindexed-key'
     } else db.run('UPDATE native_work_execution_settlements SET state_json = ?', [JSON.stringify({ ...receipt, target: { ...receipt.target, attemptId: 'unassociated-attempt' } })]);
   });
   const bytes = readFileSync(f.file);
-  expect(() => f.storage.current(f.key)).toThrow(); expect(() => f.storage.currentByAttempt(f.key.attemptId)).toThrow();
+  // A read checks the rows it loads; a settlement left without its execution is found when the store opens.
+  if (corruption === 'missing-execution') expect(f.storage.current(f.key).record).toBeNull();
+  else { expect(() => f.storage.current(f.key)).toThrow(); expect(() => f.storage.currentByAttempt(f.key.attemptId)).toThrow(); }
   await expect(open(f.file)).rejects.toThrow(); expect(readFileSync(f.file)).toEqual(bytes);
 });
 

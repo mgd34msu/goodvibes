@@ -119,10 +119,7 @@ test('a populated execution table retains the complete validator and private clo
 });
 
 test.each([
-  "INSERT INTO native_work_execution_intents VALUES('project','attempt',1,'{}')",
   "INSERT INTO native_conversation_captures VALUES('project','principal','input','request',1,'{}')",
-  "INSERT INTO native_work_execution_settlements VALUES('project','key',1,'{}')",
-  "INSERT INTO native_ci_continuations VALUES('project','continuation',1,'{}')",
 ])('native row validation stays complete after empty-profile admission: %s', async statement => {
   const sqlite = await fixture();
   sqlite.assertPersistedReadFrame(() => { read(sqlite); });

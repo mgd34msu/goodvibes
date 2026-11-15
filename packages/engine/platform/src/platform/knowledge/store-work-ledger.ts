@@ -5,7 +5,7 @@ import { readKnowledgeSourceSnapshot } from './store-source-generation.js';
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { createEmptyWorkLedgerState, readWorkLedgerState, migrateLegacyWorkLedgerState } from '../workflow/work-ledger/service.js';
+import { createEmptyWorkLedgerState, migrateLegacyWorkLedgerState } from '../workflow/work-ledger/service.js';
 import { workLedgerStateSchema, type WorkLedgerDecision, type WorkLedgerState, type WorkLedgerStorage, type WorkLedgerTransactionContext } from '../workflow/work-ledger/types.js';
 
 export interface KnowledgeWorkLedgerStorage extends WorkLedgerStorage {
@@ -142,8 +142,11 @@ export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId:
         }
         if (!decision || !('next' in decision)) throw new TypeError('Invalid work ledger decision');
         if (decision.next !== null) {
-          const next = readWorkLedgerState(decision.next, projectId);
+          // The service's reducer produced `next` from the validated `current`;
+          // it owns that fact, so only the identity and the append are checked here.
+          const next = decision.next;
           if (next.projectId !== projectId) throw new Error('Work ledger project mismatch');
+          if (next.revision <= current.revision || next.history.length !== next.revision || next.receipts.length !== next.revision) throw new Error('Work ledger commit does not extend the current history');
           if (next.history.slice(current.history.length).some(event => event.type === 'submit_native' && event.work.source?.version === 2) && !hooks) {
             throw new Error('Extracted conversation sources require atomic capture publication');
           }

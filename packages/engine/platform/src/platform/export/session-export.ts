@@ -2,14 +2,21 @@ import { join } from 'node:path';
 import type { ContentPart } from '../providers/interface.js';
 import { exportToMarkdown, extractText, type ExportMessage, type ExportMetadata } from './markdown.js';
 import { redactSensitiveDataAsync, redactStructuredDataAsync, type RedactionOptions } from '../utils/redaction.js';
-import { captureOwnedJson } from '../gate/judgment-input.js';
-import { types } from 'node:util';
 
 // ── Public Types ─────────────────────────────────────────────────────────────
 
 export type { ExportMessage, ExportMetadata };
 
-export interface ExportOptions extends RedactionOptions {
+/**
+ * An export is of the session as it was when the call began: the messages,
+ * metadata and secret list are copied once at entry, so a turn that appends to
+ * a still-active session neither changes nor refuses the export. `signal`
+ * cancels it.
+ */
+export interface ExportOptions {
+  readonly signal?: AbortSignal | undefined;
+  /** Literal values already known to the caller as secrets. They never enter a reading. */
+  readonly secretValues?: readonly string[] | undefined;
   /** Redact API keys, absolute file paths, and other sensitive data. */
   redact?: boolean | undefined;
 }
@@ -26,13 +33,15 @@ export interface SessionExportData {
 // ── Message redaction helper ─────────────────────────────────────────────────
 
 /**
- * redactMessage - Deep-clone a message and redact all string fields that may
- * contain sensitive data (content, reasoning, tool arguments).
+ * redactMessage - Copy a message's declared export fields and redact every
+ * string that may contain sensitive data (content, reasoning, tool arguments).
+ * Undeclared source properties are withheld.
  */
-export async function redactMessage(msg: ExportMessage, options: RedactionOptions = {}): Promise<ExportMessage> {
-  const source = captureExportSource(msg, options);
-  const captured = source.value;
-  const reading = { ...options, purpose: 'export' as const, assertCurrent: source.assertCurrent };
+export async function redactMessage(msg: ExportMessage, options: ExportOptions = {}): Promise<ExportMessage> {
+  return redactSnapshotMessage(freezeSnapshot(structuredClone(msg)), redactionReading(options));
+}
+
+async function redactSnapshotMessage(captured: ExportMessage, reading: RedactionOptions): Promise<ExportMessage> {
   const clone: ExportMessage = { role: captured.role, content: typeof captured.content === 'string'
     ? await redactSensitiveDataAsync(captured.content, reading)
     : await Promise.all(captured.content.map(async (part): Promise<ContentPart> => ({ type: 'text',
@@ -52,25 +61,36 @@ export async function redactMessage(msg: ExportMessage, options: RedactionOption
     ...(captured.usage.cacheWriteTokens !== undefined ? { cacheWriteTokens: captured.usage.cacheWriteTokens } : {}),
   };
   if (captured.cancelled !== undefined) clone.cancelled = captured.cancelled;
-  source.assertCurrent();
   return clone;
 }
 
-/** Capture every consumed field before awaiting, and bind reads to that exact source. */
-function captureExportSource<T>(input: T, options: RedactionOptions) {
-  const original = JSON.stringify(captureOwnedJson(input, types.isProxy));
-  const value = structuredClone(input);
-  if (JSON.stringify(captureOwnedJson(value, types.isProxy)) !== original) throw new Error('Export source changed during capture');
-  const signal = options.signal, ownerCurrent = options.assertCurrent;
-  const purpose = options.purpose, secrets = JSON.stringify(captureOwnedJson(options.secretValues ?? []));
-  const assertCurrent = () => {
-    if (signal?.aborted || options.signal !== signal || options.assertCurrent !== ownerCurrent
-      || options.purpose !== purpose || JSON.stringify(captureOwnedJson(options.secretValues ?? [])) !== secrets
-      || JSON.stringify(captureOwnedJson(input, types.isProxy)) !== original) throw new Error('Export source is no longer current');
-    ownerCurrent?.();
+/** The one snapshot an export works from; nothing after this reads the caller's objects. */
+function captureExport(messages: ExportMessage[], metadata: ExportMetadata | undefined, options: ExportOptions) {
+  options.signal?.throwIfAborted();
+  const snapshot = structuredClone({ messages, metadata });
+  // Frozen so the structured redactor treats tool arguments as immutable and
+  // walks each one once instead of re-checking it at every reading.
+  if (options.redact) freezeSnapshot(snapshot);
+  return { messages: snapshot.messages, metadata: snapshot.metadata, reading: redactionReading(options) };
+}
+
+function redactionReading(options: ExportOptions): RedactionOptions {
+  return {
+    purpose: 'export',
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.secretValues ? { secretValues: Object.freeze([...options.secretValues]) } : {}),
   };
-  assertCurrent();
-  return { value, assertCurrent };
+}
+
+function freezeSnapshot<T>(value: T): T {
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const entry = pending.pop();
+    if (entry === null || typeof entry !== 'object' || Object.isFrozen(entry)) continue;
+    Object.freeze(entry);
+    for (const child of Object.values(entry)) pending.push(child);
+  }
+  return value;
 }
 
 // ── JSON export ───────────────────────────────────────────────────────────────
@@ -80,16 +100,17 @@ function captureExportSource<T>(input: T, options: RedactionOptions) {
  *
  * Output includes metadata (model, provider, session ID, timestamp, token
  * usage totals, cost), then the message array. Redacted messages contain only
- * declared export fields; undeclared source properties are withheld.
+ * declared export fields; undeclared source properties are withheld. Messages
+ * are redacted concurrently; one pass over the snapshot taken at entry.
  */
 export async function exportToJSON(
   messages: ExportMessage[],
   metadata?: ExportMetadata,
   options: ExportOptions & { cost?: number } = {},
 ): Promise<string> {
-  const source = captureExportSource({ messages, metadata }, options);
-  messages = source.value.messages; metadata = source.value.metadata;
-  const reading = { ...options, purpose: 'export' as const, assertCurrent: source.assertCurrent };
+  const source = captureExport(messages, metadata, options);
+  messages = source.messages; metadata = source.metadata;
+  const reading = source.reading;
   const { redact = false, cost } = options;
 
   let totalInput = 0;
@@ -106,7 +127,7 @@ export async function exportToJSON(
     }
 
     if (!redact) return msg;
-    return redactMessage(msg, reading);
+    return redactSnapshotMessage(msg, reading);
   }));
 
   const usage = {
@@ -128,7 +149,6 @@ export async function exportToJSON(
     messages: processedMessages,
   };
 
-  source.assertCurrent();
   return JSON.stringify(payload, null, 2);
 }
 
@@ -161,15 +181,14 @@ export async function exportToMarkdownExtended(
   metadata?: ExportMetadata,
   options: ExportOptions & { cost?: number } = {},
 ): Promise<string> {
-  const source = captureExportSource({ messages, metadata }, options);
-  messages = source.value.messages; metadata = source.value.metadata;
-  const reading = { ...options, purpose: 'export' as const, assertCurrent: source.assertCurrent };
+  const source = captureExport(messages, metadata, options);
+  messages = source.messages; metadata = source.metadata;
+  const reading = source.reading;
   const { redact = false, cost } = options;
 
-  const processedMessages = redact ? await Promise.all(messages.map((message) => redactMessage(message, reading))) : messages;
+  const processedMessages = redact ? await Promise.all(messages.map((message) => redactSnapshotMessage(message, reading))) : messages;
 
   const md = exportToMarkdown(processedMessages, redact ? await redactMetadata(metadata, reading) : metadata);
-  source.assertCurrent();
 
   // Append cost if provided
   if (cost !== undefined && cost > 0) {
@@ -207,9 +226,9 @@ export async function exportToHTML(
   metadata?: ExportMetadata,
   options: ExportOptions & { cost?: number } = {},
 ): Promise<string> {
-  const source = captureExportSource({ messages, metadata }, options);
-  messages = source.value.messages; metadata = source.value.metadata;
-  const reading = { ...options, purpose: 'export' as const, assertCurrent: source.assertCurrent };
+  const source = captureExport(messages, metadata, options);
+  messages = source.messages; metadata = source.metadata;
+  const reading = source.reading;
   const { redact = false, cost } = options;
 
   let totalInput = 0;
@@ -223,7 +242,7 @@ export async function exportToHTML(
   const title = shown?.title || shown?.sessionId || 'Conversation';
 
   const sections: string[] = [];
-  const processedMessages = redact ? await Promise.all(messages.map((message) => redactMessage(message, reading))) : messages;
+  const processedMessages = redact ? await Promise.all(messages.map((message) => redactSnapshotMessage(message, reading))) : messages;
 
   for (const msg of processedMessages) {
     if (msg.role === 'system') continue; // skip system messages in HTML
@@ -342,7 +361,6 @@ export async function exportToHTML(
     ? `<section class="usage"><h2>Usage</h2><table>${usageRows.join('')}</table></section>`
     : '';
 
-  source.assertCurrent();
   return `<!DOCTYPE html>
 <html lang="en">
 <head>

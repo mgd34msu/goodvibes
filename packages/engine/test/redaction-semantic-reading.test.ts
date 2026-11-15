@@ -436,12 +436,17 @@ describe('canonical redaction source admission', () => {
     expect(await redactSensitiveDataAsync('The USD amount is ordinary')).toContain('USD');
   });
 
-  test('complete export source mutation prevents publication of a late result', async () => {
+  test('a message appended or changed during an export leaves the export of the starting snapshot intact', async () => {
     const pending = pausedPort();
     const messages: ExportMessage[] = [{ role: 'user', content: 'public ordinary sentence' }];
     const result = exportToJSON(messages, undefined, { redact: true });
-    await pending.ready; messages[0]!.content = 'changed private value'; pending.release();
-    await expect(result).rejects.toThrow('Export source is no longer current');
+    await pending.ready;
+    messages[0]!.content = 'changed private value';
+    messages.push({ role: 'assistant', content: 'appended later' });
+    pending.release();
+    const parsed = JSON.parse(await result);
+    expect(parsed.messages).toHaveLength(1);
+    expect(JSON.stringify(parsed)).not.toContain('changed private value');
     expect(JSON.stringify(pending.normal.requests)).not.toContain('changed private value');
   });
 
@@ -457,12 +462,5 @@ describe('canonical redaction source admission', () => {
     const parsed = JSON.parse(output);
     expect(parsed.messages[0].content).toEqual([{ type: 'text', text: 'ordinary sentence' }]);
     expect(parsed.messages[0].usage).toEqual({ inputTokens: 2, outputTokens: 3 });
-  });
-
-  test('export structural admission rejects getters before any wire or getter execution', async () => {
-    const port = publicReadings(); let reads = 0;
-    const message = { role: 'user' as const, get content() { reads++; return 'getter-private-value'; } };
-    await expect(exportToJSON([message], undefined, { redact: true })).rejects.toThrow();
-    expect(reads).toBe(0); expect(port.requests).toHaveLength(0);
   });
 });

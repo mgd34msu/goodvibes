@@ -536,9 +536,11 @@ function operationFieldReadings(options: JudgmentReadingOptions): OperationField
 /** Captures the complete source locally, then reads only its protected projection. */
 export function redactSensitiveDataAsync(text: string, options: RedactionOptions = {}): Promise<string> {
   if (isClassicOperation()) {
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
+    // Synchronous: nothing can change between the start and the end, so the
+    // caller's own check runs once, before the result is handed back.
+    options.signal?.throwIfAborted();
     const result = redactClassicText(text, options.secretValues);
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
+    options.assertCurrent?.();
     return Promise.resolve(result);
   }
   return redactTextSource(text, options);
@@ -571,8 +573,8 @@ export function redactDiagnosticText(text: string): string {
 }
 
 function redactClassicStructure(value: unknown, options: StructuredRedactionOptions): unknown {
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const retained = retainOwnedJson(value);
+  options.signal?.throwIfAborted();
+  const snapshot = captureOwnedJson(value);
   const visit = (entry: unknown): unknown => {
     if (typeof entry === 'string') return redactClassicText(entry, options.secretValues);
     if (Array.isArray(entry)) return entry.map(visit);
@@ -585,8 +587,8 @@ function redactClassicStructure(value: unknown, options: StructuredRedactionOpti
     }
     return result;
   };
-  const result = visit(retained.snapshot);
-  retained.assertCurrent(); options.signal?.throwIfAborted(); options.assertCurrent?.();
+  const result = visit(snapshot);
+  options.assertCurrent?.();
   return result;
 }
 
@@ -642,8 +644,10 @@ async function redactTextSource(text: string, options: RedactionOptions,
     readingOwner = captureJudgmentPort(purpose === 'export' ? 'engine.export.credential' : 'engine.redaction.credential',
       { ...(signal ? { signal } : {}), assertCurrent: assertSource });
     const output: string[] = [];
+    // Each reading below checks the operation's owner at its own boundary; the
+    // loop only stops early when the caller cancels.
     for (const { line, spans, parts } of lines) {
-      assertCurrent();
+      signal?.throwIfAborted();
       if (line.length === 0) { output.push(line); continue; }
       const replacements: { start: number; end: number; replacement: string }[] = [];
       if (spans.length === 0) {
@@ -674,7 +678,6 @@ async function redactTextSource(text: string, options: RedactionOptions,
             }
           }
           hasProtectedSpan ||= replacement !== span.value;
-          assertCurrent();
           replacements.push({ start: span.start, end: span.end, replacement });
         }
         // A benign target cannot certify unrelated prose. Read every residual

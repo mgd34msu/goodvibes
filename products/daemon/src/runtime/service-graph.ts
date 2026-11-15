@@ -7,7 +7,7 @@ import { createNativeWorkSubmissionHost } from '@goodvibes-jev/engine/platform/p
 import { createNativeConversationIntakeHost, createNativeRequirementProposer, type NativeConversationContinuationOwner } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake';
 import { createLocalWorkLedgerReadBinding } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods, registerWorkLedgerGatewayMethods, registerWorkLedgerImportGatewayMethods, registerNativeWorkExecutionGatewayMethods, registerNativeWorkSubmissionGatewayMethods, registerNativeConversationIntakeGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { join } from 'node:path';
 import { ServiceRegistry, SubscriptionManager, ToolLLM, resolveSecretInput, sharedSubscriptionsPath } from '@goodvibes-jev/engine/platform/platform/config';
 import { AutomationDeliveryManager, AutomationManager, automationActionBinding } from '@goodvibes-jev/engine/platform/platform/automation';
@@ -40,7 +40,7 @@ import { operations } from '@goodvibes-jev/engine/platform/platform/runtime';
 const {
   applyProviderOptimizerConfigMode, bindProviderOptimizerFeatureFlag, codeIndexDbPath,
   createAgentExecutionGraph, createChannelComposition, createCodeIndexServices, composeJudgment,
-  createRemoteExecutionServices, createSessionStorageServices, createStoreRerooter,
+  createRemoteExecutionServices, createSessionStorageServices,
   isCodeInjectionSettingEnabled, wireIdlePowerAndLiveTurn, wireVoiceSetup,
 } = operations;
 const { WorkspaceTrustManager } = operations;
@@ -732,7 +732,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       execContainment: CONVERSATIONAL_CONTAINMENT,
     };
     agentOrchestrator.setDependencies(agentToolDependencies);
-    const nativeScopes = new WorkspaceRegistrationStore({ path: sharedWorkspaceRegisterPath(shellPaths),
+    // The same store instance the workspaces.* verbs write through, so this process orders its own readers and writers.
+    const nativeScopes = openWorkspaceRegistrationStore({ path: sharedWorkspaceRegisterPath(shellPaths),
       fallbackReadPath: legacyWorkspaceRegisterPath(shellPaths), homeDir: homeDirectory,
       daemonStateDir: shellPaths.resolveUserPath() });
     const nativeImport = registerWorkLedgerImportGatewayMethods(gatewayMethods, {
@@ -932,7 +933,6 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       workspaceCheckpointManager,
       checkpointsCurrentlyAllowed: checkpointing.currentlyAllowed,
       integrationHelpers,
-      rerootStores: createStoreRerooter({ codeIndexStore, projectIndex, fileWatcher, surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT }),
       // Cancel hosted calls before their runtime dependencies close; the shared
       // poller registry places this ahead of runner, fleet and process teardown.
       cancelHostedAgentRuns: () => cancelAllAgentRuns(agentManager),

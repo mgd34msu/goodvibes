@@ -131,8 +131,6 @@ describe('POST /config runtime.workingDir: HTTP integration', () => {
     const swapManager = new WorkspaceSwapManager(workingDir, {
       runtimeBus: null,
       daemonHomeDir: daemonHome,
-      getBusySessionCount: () => 0,
-      rerootStores: async () => {},
     });
 
     const ctx = makeSystemContext(daemonHome, workingDir, swapManager);
@@ -152,8 +150,6 @@ describe('POST /config runtime.workingDir: HTTP integration', () => {
     const swapManager = new WorkspaceSwapManager(workingDir, {
       runtimeBus: null,
       daemonHomeDir: daemonHome,
-      getBusySessionCount: () => 0,
-      rerootStores: async () => {},
     });
     const ctx = makeSystemContext(daemonHome, workingDir, swapManager);
     const req = makeRequest('/api/config', { key: 'runtime.workingDir', value: '' });
@@ -172,8 +168,6 @@ describe('POST /config runtime.workingDir: HTTP integration', () => {
     const swapManager = new WorkspaceSwapManager(workingDir, {
       runtimeBus: null,
       daemonHomeDir: daemonHome,
-      getBusySessionCount: () => 0,
-      rerootStores: async () => {},
     });
     const ctx = makeSystemContext(daemonHome, workingDir, swapManager);
     // request a subdir of a file, mkdir will fail
@@ -185,13 +179,11 @@ describe('POST /config runtime.workingDir: HTTP integration', () => {
     expect(body['code']).toBe('INVALID_PATH');
   });
 
-  test('POST /config reports that some subsystems keep the previous root until restart', async () => {
+  test('POST /config saves the change for the next start and names what moves then', async () => {
     const newDir = tempDir('newwork');
     const swapManager = new WorkspaceSwapManager(workingDir, {
       runtimeBus: null,
       daemonHomeDir: daemonHome,
-      getBusySessionCount: () => 0,
-      rerootStores: async () => ({ requiresRestart: ['code index'] }),
     });
     const ctx = makeSystemContext(daemonHome, workingDir, swapManager);
     const handlers = createDaemonSystemRouteHandlers(ctx as unknown as Parameters<typeof createDaemonSystemRouteHandlers>[0]);
@@ -199,50 +191,33 @@ describe('POST /config runtime.workingDir: HTTP integration', () => {
     expect(response.status).toBe(200);
     const body = await response.json() as Record<string, unknown>;
     expect(body['persisted']).toBe(true);
-    expect(body['requiresRestart']).toEqual(['code index']);
-    cleanup(newDir);
-  });
-
-  test('POST /config answers 500 REROOT_FAILED when the stores could not move, not a bad-request 400', async () => {
-    const newDir = tempDir('newwork');
-    const swapManager = new WorkspaceSwapManager(workingDir, {
-      runtimeBus: null,
-      daemonHomeDir: daemonHome,
-      getBusySessionCount: () => 0,
-      rerootStores: async () => { throw new Error('store could not be reopened'); },
-    });
-    const ctx = makeSystemContext(daemonHome, workingDir, swapManager);
-    const handlers = createDaemonSystemRouteHandlers(ctx as unknown as Parameters<typeof createDaemonSystemRouteHandlers>[0]);
-    const response = await handlers.postConfig(makeRequest('/api/config', { key: 'runtime.workingDir', value: newDir }));
-    expect(response.status).toBe(500);
-    expect((await response.json() as Record<string, unknown>)['code']).toBe('REROOT_FAILED');
+    expect(body['requiresRestart']).toContain('sessions');
+    // The running process stays whole on its start root.
+    expect(swapManager.getCurrentWorkingDir()).toBe(workingDir);
+    expect(swapManager.getPendingWorkingDir()).toBe(newDir);
     cleanup(newDir);
   });
 
   describe('a caller that is not an admin', () => {
     async function postWithAdmin(requireAdmin: (req: Request) => Response | null) {
       const newDir = tempDir('newwork');
-      let reroots = 0;
       const swapManager = new WorkspaceSwapManager(workingDir, {
         runtimeBus: null,
         daemonHomeDir: daemonHome,
-        getBusySessionCount: () => 0,
-        rerootStores: async () => { reroots += 1; },
       });
       const requestSwap = spyOn(swapManager, 'requestSwap');
       const ctx = { ...makeSystemContext(daemonHome, workingDir, swapManager), requireAdmin };
       const handlers = createDaemonSystemRouteHandlers(ctx as unknown as Parameters<typeof createDaemonSystemRouteHandlers>[0]);
       const response = await handlers.postConfig(makeRequest('/api/config', { key: 'runtime.workingDir', value: newDir }));
-      const outcome = { response, swaps: requestSwap.mock.calls.length, reroots, settingsWritten: existsSync(join(daemonHome, 'daemon-settings.json')) };
+      const outcome = { response, swaps: requestSwap.mock.calls.length, settingsWritten: existsSync(join(daemonHome, 'daemon-settings.json')) };
       cleanup(newDir);
       return outcome;
     }
 
-    test('is refused with 403 before the workspace is moved', async () => {
+    test('is refused with 403 before the working directory is saved', async () => {
       const outcome = await postWithAdmin(() => Response.json({ error: 'Forbidden' }, { status: 403 }));
       expect(outcome.response.status).toBe(403);
       expect(outcome.swaps).toBe(0);
-      expect(outcome.reroots).toBe(0);
       expect(outcome.settingsWritten).toBe(false);
     });
 
@@ -252,7 +227,6 @@ describe('POST /config runtime.workingDir: HTTP integration', () => {
       expect(calls).toBe(2);
       expect(outcome.response.status).toBe(403);
       expect(outcome.swaps).toBe(0);
-      expect(outcome.reroots).toBe(0);
       expect(outcome.settingsWritten).toBe(false);
     });
   });

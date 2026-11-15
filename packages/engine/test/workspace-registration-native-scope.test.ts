@@ -37,15 +37,24 @@ describe('native workspace scope ownership', () => {
     await store.add(f.root);
     expect(store.currentScope(f.root)).toEqual(scope);
   });
-  test('legacy registration stays readable and native-ineligible through provenance upgrades', async () => {
+  test('a legacy registration is readable, has no native scope, and registering it again grants one', async () => {
     const f = fixture();
     f.seed({ version: 1, workspaces: [{ root: f.root, registeredAt: '2026-01-01' }], declines: [] });
     const store = f.make();
     expect((await store.resolve(f.root)).status).toBe('covered');
     expect(() => store.currentScope(f.root)).toThrow('unmigrated');
-    await store.add(f.root, { checkpointEligible: true });
-    expect(() => store.currentScope(f.root)).toThrow('unmigrated');
-    expect(JSON.parse(readFileSync(f.path, 'utf8')).workspaces[0].nativeScope).toBeUndefined();
+    const again = await store.add(f.root, { checkpointEligible: true });
+    expect(again).toMatchObject({ alreadyRegistered: true, nativeScopeGranted: true });
+    expect(store.currentScope(f.root).scopeId).toBe(again.record.nativeScope!.id);
+  });
+
+  test('legacy rows the strict format would refuse cannot block a new registration', async () => {
+    const f = fixture();
+    f.seed({ version: 1, workspaces: [{ root: `${f.child}/` }, { root: f.child, registeredAt: '2026-01-01' }], declines: [{ root: `${f.child}/` }] });
+    const store = f.make();
+    expect((await store.add(f.root)).alreadyRegistered).toBe(false);
+    expect((await store.decline(join(f.root, 'elsewhere'))).alreadyDeclined).toBe(false);
+    expect((await store.remove(f.child)).removed).toBe(true);
   });
   test('native reads never use fallback, repair corruption, or cache removed authority', async () => {
     const f = fixture(); const store = f.make();
@@ -62,16 +71,14 @@ describe('native workspace scope ownership', () => {
     expect(() => store.currentScope(f.root)).toThrow('unavailable');
     expect(readFileSync(f.path, 'utf8')).toBe('{broken');
   });
-  test('remove/readd retains a tombstone and cannot revive the previous incarnation', async () => {
+  test('remove then add is a new incarnation and cannot revive the previous one', async () => {
     const f = fixture(); const store = f.make();
     await store.add(f.root); const old = store.currentScope(f.root);
     await store.remove(f.root);
     expect(() => f.make().currentScope(f.root)).toThrow('unavailable');
     await f.make().add(f.root);
     expect(store.currentScope(f.root).scopeId).not.toBe(old.scopeId);
-    expect(JSON.parse(readFileSync(f.path, 'utf8')).scopeTombstones).toEqual([
-      expect.objectContaining({ root: f.root, scopeId: old.scopeId }),
-    ]);
+    expect(JSON.parse(readFileSync(f.path, 'utf8'))).not.toHaveProperty('scopeTombstones');
     let launched = false;
     await expect(store.withCurrentScope(old, () => { launched = true; })).rejects.toThrow('changed');
     expect(launched).toBe(false);
@@ -119,18 +126,27 @@ describe('native workspace scope ownership', () => {
     try { await expect(store.remove(f.root)).rejects.toThrow('fixture persistence failure'); } finally { fail.mockRestore(); }
     expect(f.make().currentScope(f.root)).toEqual(scope);
   });
-  test('legacy fold refuses v2 without erasing incarnations or resurrecting tombstones', async () => {
+  test('legacy fold refuses v2 without erasing incarnations or resurrecting removed roots', async () => {
     const f = fixture(); const store = f.make(); await store.add(f.root); await store.remove(f.root);
     const before = readFileSync(f.path, 'utf8'); const legacy = join(f.home, 'legacy.json');
     writeFileSync(legacy, JSON.stringify({ version: 1, workspaces: [{ root: f.root, registeredAt: '2099-01-01' }], declines: [] }));
     await expect(foldLegacyWorkspaceRegister({ legacyPath: legacy, sharedPath: f.path })).rejects.toThrow('refuses');
     expect(readFileSync(f.path, 'utf8')).toBe(before); expect(() => store.currentScope(f.root)).toThrow('unavailable');
   });
-  test('malformed generations and active tombstoned incarnations fail closed', async () => {
+  test('malformed generations fail closed as an unreadable register; tombstones of earlier builds are ignored', async () => {
     const f = fixture(); const store = f.make(); await store.add(f.root); const doc = JSON.parse(readFileSync(f.path, 'utf8'));
-    f.seed({ ...doc, scopeGeneration: 0 }); expect(() => store.currentScope(f.root)).toThrow('unavailable');
-    f.seed({ ...doc, scopeTombstones: [{ root: f.root, scopeId: doc.workspaces[0].nativeScope.id, generation: 1 }] });
-    expect(() => store.currentScope(f.root)).toThrow('unavailable');
+    f.seed({ ...doc, scopeGeneration: 0 }); expect(() => store.currentScope(f.root)).toThrow('registry-unreadable');
+    f.seed({ ...doc, scopeTombstones: [{ root: f.root, scopeId: 'anything', generation: 1 }] });
+    expect(store.currentScope(f.root).scopeId).toBe(doc.workspaces[0].nativeScope.id);
+  });
+
+  test('each refusal names its reason and a next step', async () => {
+    const f = fixture(); const store = f.make();
+    const reason = (path: string): unknown => { try { store.currentScope(path); } catch (error) { return error; } return null; };
+    expect(reason(f.root)).toMatchObject({ reason: 'not-registered', refusal: { next: [expect.stringContaining('Register')] } });
+    await store.add(f.root); await store.decline(f.child);
+    expect(reason(f.child)).toMatchObject({ reason: 'declined' });
+    expect(reason(join(f.home, 'missing'))).toMatchObject({ reason: 'root-missing' });
   });
 
   test('v1 copied native-looking fields never become attested during a later registration', async () => {

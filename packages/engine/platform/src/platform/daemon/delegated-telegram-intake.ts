@@ -104,33 +104,21 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
   private readonly workspaceRevision: string;
   private closed = false;
   private lifecycleGeneration = 0;
-  private workspaceInvalidated = false;
   private accountUnsubscribe?: (() => void) | undefined;
-  private workspaceUnsubscribe?: (() => void) | undefined;
   constructor(private readonly deps: {
     readonly broker: SharedSessionBroker; readonly approvals: ApprovalBroker; readonly routes: Pick<RouteBindingManager, 'getBinding' | 'getBindingIncarnation'>;
     readonly accounts: TelegramSourceAccountReader; readonly workspaceRoot: string;
-    readonly isWorkspaceCurrent?: (() => boolean) | undefined;
-    readonly subscribeWorkspaceInvalidation?: ((invalidate: () => void) => () => void) | undefined;
     readonly selectionPath: string; readonly receiptPath: string; readonly beforeReviewOwnerWrite?: () => void;
   }) {
     this.selectionStore = new PersistentStore(deps.selectionPath);
     this.receiver = new DelegatedInboundReviewReceiver(deps.receiptPath, deps.beforeReviewOwnerWrite);
     this.workspaceRevision = randomUUID();
-    this.watchWorkspace();
+    this.watchAccount();
   }
-  private watchWorkspace(): void {
+  private watchAccount(): void {
     if (!this.accountUnsubscribe) this.accountUnsubscribe = this.deps.accounts.subscribeIdentityChange(account => {
       for (const config of this.configurations.values()) if (config.account.id !== account.id || config.account.revision !== account.revision) { config.controller.abort(); clearTimeout(config.timer); }
     });
-    if (!this.workspaceUnsubscribe && !this.workspaceInvalidated) this.workspaceUnsubscribe = this.deps.subscribeWorkspaceInvalidation?.(() => {
-      this.workspaceInvalidated = true; this.close();
-    });
-  }
-  private assertWorkspace(): void {
-    if (this.workspaceInvalidated || this.deps.isWorkspaceCurrent?.() === false) {
-      this.workspaceInvalidated = true; this.close(); throw new DelegatedIntakeRefusal('workspace-changed');
-    }
   }
   private start(): Promise<void> {
     return this.loading ??= (async () => {
@@ -140,7 +128,6 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
   }
   async selects(chatId: string, threadId?: string): Promise<boolean> { await this.start(); return this.selected.has(routeKey(chatId, threadId)); }
   private assertConfiguration(config: Configuration, requireAdmissionAccount = true): void {
-    this.assertWorkspace();
     const current = config.owner.current();
     if (this.closed || config.controller.signal.aborted || Date.now() >= config.expiresAt
       || !sameDelegatedOwner(current, config.expected)
@@ -171,7 +158,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     } finally { if (timer) clearTimeout(timer); if (onAbort) signal?.removeEventListener('abort', onAbort); }
   }
   async selectConfiguration(choice: DelegatedTelegramConfiguration, owner: NativeExecutionAuthority): Promise<string> {
-    const generation = this.lifecycleGeneration; this.assertWorkspace(); await this.start();
+    const generation = this.lifecycleGeneration; await this.start();
     const initialOwner = owner.current(); if (!initialOwner || this.closed || generation !== this.lifecycleGeneration) throw new DelegatedIntakeRefusal(initialOwner ? 'lifecycle-changed' : 'owner-changed');
     const expected = captureDelegatedOwner(initialOwner);
     const key = routeKey(choice.chatId, choice.threadId); const attempt = randomUUID();
@@ -179,17 +166,17 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     this.selected.set(key, { chatId: choice.chatId, ...(choice.threadId ? { threadId: choice.threadId } : {}) });
     const selection = { selected: [...this.selected.values()] };
     await this.selectionWrites.run(() => this.selectionStore.persist(selection, { durable: true }));
-    this.assertWorkspace(); const current = owner.current(); if (this.closed || generation !== this.lifecycleGeneration) throw new DelegatedIntakeRefusal('lifecycle-changed');
+    const current = owner.current(); if (this.closed || generation !== this.lifecycleGeneration) throw new DelegatedIntakeRefusal('lifecycle-changed');
     if (!sameDelegatedOwner(current, expected)) throw new DelegatedIntakeRefusal('owner-changed');
     return attempt;
   }
   async configure(choice: DelegatedTelegramConfiguration, owner: NativeExecutionAuthority, prepared?: TelegramSourceAccountHandle | null, selectedAttempt?: string): Promise<DelegatedTelegramResult<'configure'>> {
-    const generation = this.lifecycleGeneration; this.assertWorkspace();
+    const generation = this.lifecycleGeneration;
     const attempt = selectedAttempt ?? await this.selectConfiguration(choice, owner);
     const initialOwner = owner.current(); if (!initialOwner) throw new DelegatedIntakeRefusal('owner-changed');
     const expected = captureDelegatedOwner(initialOwner);
     const key = routeKey(choice.chatId, choice.threadId);
-    const assertOwner = () => { this.assertWorkspace(); if (this.closed || generation !== this.lifecycleGeneration || this.selectionAttempts.get(key) !== attempt) throw new DelegatedIntakeRefusal('lifecycle-changed');
+    const assertOwner = () => { if (this.closed || generation !== this.lifecycleGeneration || this.selectionAttempts.get(key) !== attempt) throw new DelegatedIntakeRefusal('lifecycle-changed');
       const current = owner.current(); if (!sameDelegatedOwner(current, expected)) throw new DelegatedIntakeRefusal('owner-changed'); };
     assertOwner();
     const handle = prepared === undefined ? await this.prepareAccount() : prepared;
@@ -209,7 +196,6 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
   }
   async accept(input: DelegatedTelegramIngress): Promise<DelegatedTelegramAcceptance> {
     const generation = this.lifecycleGeneration; await this.start();
-    try { this.assertWorkspace(); } catch { return delegatedHold('workspace-changed'); }
     if (this.closed || generation !== this.lifecycleGeneration) return delegatedHold('lifecycle-changed');
     if (!input.account) return delegatedHold('account-proof-required');
     const account = await this.deps.accounts.read(input.account);
@@ -345,12 +331,11 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     if (this.findInput(ref.sessionId, ref.inputId)?.state === 'queued') await this.deps.broker.cancelInput(ref.sessionId, ref.inputId);
   }
   async decide(input: DelegatedTelegramDecision, authority: NativeExecutionAuthority, prepared?: TelegramSourceAccountHandle | null): Promise<DelegatedTelegramResult<'decide'>> {
-    this.assertWorkspace();
     const pending = this.pending.get(input.ref.requestId);
     if (!pending || !sameNativeInboundSourceRef(pending.ref, input.ref) || pending.approval.approval.id !== input.approvalId) throw new DelegatedIntakeRefusal('source-unavailable');
     const current = authority.current(); if (!sameDelegatedOwner(current, pending.configuration.expected)) throw new DelegatedIntakeRefusal('not-owner');
     const expectedOwner = pending.configuration.expected;
-    const assertOwner = () => { this.assertWorkspace(); const active = authority.current(); if (!sameDelegatedOwner(active, expectedOwner)) throw new DelegatedIntakeRefusal('owner-changed'); };
+    const assertOwner = () => { const active = authority.current(); if (!sameDelegatedOwner(active, expectedOwner)) throw new DelegatedIntakeRefusal('owner-changed'); };
     {
       if (input.approved) {
         const handle = prepared === undefined ? await this.prepareAccount() : prepared; const account = handle ? this.deps.accounts.assertCurrent(handle) : null;
@@ -402,12 +387,11 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     }
   }
   private captureOwner(authority: NativeExecutionAuthority): { owner: DelegatedReviewOwner; assertCurrent: () => void } {
-    this.assertWorkspace();
     if (this.closed) throw new DelegatedIntakeRefusal('lifecycle-changed');
     const initial = authority.current(); if (!initial) throw new DelegatedIntakeRefusal('owner-changed');
     const owner = captureDelegatedOwner(initial), generation = this.lifecycleGeneration;
     return { owner, assertCurrent: () => {
-      this.assertWorkspace(); const current = authority.current();
+      const current = authority.current();
       if (this.closed || generation !== this.lifecycleGeneration) throw new DelegatedIntakeRefusal('lifecycle-changed');
       if (!sameDelegatedOwner(current, owner)) throw new DelegatedIntakeRefusal('owner-changed');
     } };
@@ -490,6 +474,6 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     return { outcome: 'released', route: 'normal-handling-resumes' };
   }
   /** A new daemon lifecycle restores commands, never previous source/grant lifetimes. */
-  startLifecycle(): void { if (this.workspaceInvalidated || this.deps.isWorkspaceCurrent?.() === false) return; this.closed = false; this.watchWorkspace(); this.receiver.reopen(); }
-  close(): void { this.ingresses.clear(); this.pending.clear(); this.selectionAttempts.clear(); this.accountUnsubscribe?.(); this.accountUnsubscribe = undefined; this.workspaceUnsubscribe?.(); this.workspaceUnsubscribe = undefined; this.lifecycleGeneration++; this.closed = true; for (const config of this.configurations.values()) { config.controller.abort(); clearTimeout(config.timer); } this.receiver.close(); }
+  startLifecycle(): void { this.closed = false; this.watchAccount(); this.receiver.reopen(); }
+  close(): void { this.ingresses.clear(); this.pending.clear(); this.selectionAttempts.clear(); this.accountUnsubscribe?.(); this.accountUnsubscribe = undefined; this.lifecycleGeneration++; this.closed = true; for (const config of this.configurations.values()) { config.controller.abort(); clearTimeout(config.timer); } this.receiver.close(); }
 }

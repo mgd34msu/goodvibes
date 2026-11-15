@@ -43,6 +43,14 @@ function sanitizeMemoryKey(key: string): string | null {
   return key;
 }
 
+/** The slice of the workspace swap manager the state tool uses. */
+export interface StateSwapManager {
+  requestSwap(newDir: string): Promise<{
+    ok: boolean; reason?: string; code?: string; current?: string; previous?: string;
+    restartRequired?: boolean; requiresRestart?: readonly string[] | undefined; note?: string;
+  }>;
+}
+
 /** A change to the registered hooks, shown to the approval gate before it is made. */
 export interface HookChangeRequest {
   readonly action: 'add' | 'enable' | 'disable' | 'remove';
@@ -69,7 +77,7 @@ export interface StateToolOptions {
   /**
    * Current working directory at session start. Exposed as the well-known
    * read-only key `runtime.workingDir` via `mode=get`.
-   * Updated dynamically via WorkspaceSwapManager on workspace swap.
+   * The directory this host runs in; a saved change applies at the next start.
    */
   readonly workingDir?: string | (() => string | undefined) | undefined;
   /**
@@ -79,10 +87,10 @@ export interface StateToolOptions {
   readonly daemonHomeDir?: string | (() => string | undefined) | undefined;
   /**
    * Workspace swap manager. When provided, `set({values: {'runtime.workingDir': '/new/path'}})`
-   * will trigger a real workspace swap via `requestSwap()` instead of returning an error.
-   * Swap failures are surfaced as `success: false` with the error reason.
+   * saves the new working directory for the next start via `requestSwap()` instead of
+   * returning an error. Failures are surfaced as `success: false` with the error reason.
    */
-  readonly swapManager?: { requestSwap(newDir: string): Promise<{ ok: boolean; reason?: string; code?: string; persisted?: boolean | undefined; requiresRestart?: readonly string[] | undefined }> };
+  readonly swapManager?: StateSwapManager;
   /**
    * Project memory registry. When provided, `mode=memory action=set` mirrors the written
    * preference into a retrievable `memory_records` row (deduped per key) so passive per-turn
@@ -122,7 +130,7 @@ export function createStateTool(
   const hookGate = options.hookGate;
   const modeManager = options.modeManager;
   const telemetryDB = options.telemetryDB;
-  // A getter follows a workspace swap; a plain string is a fixed answer.
+  // A getter reads the host's working directory each call; a plain string is a fixed answer.
   const workingDir = (): string | undefined => typeof options.workingDir === 'function' ? options.workingDir() : options.workingDir;
   const daemonHomeDir = (): string | undefined => typeof options.daemonHomeDir === 'function' ? options.daemonHomeDir() : options.daemonHomeDir;
   const swapManager = options.swapManager;
@@ -619,7 +627,7 @@ async function runGet(
 async function runSet(
   input: StateInput,
   kvState: KVState,
-  swapManager?: { requestSwap(newDir: string): Promise<{ ok: boolean; reason?: string; code?: string; persisted?: boolean | undefined; requiresRestart?: readonly string[] | undefined }> },
+  swapManager?: StateSwapManager,
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const values = input.values;
   if (!values || typeof values !== 'object') {
@@ -632,7 +640,7 @@ async function runSet(
     if (others.length > 0) {
       return {
         success: false,
-        error: `runtime.workingDir switches the workspace and must be set on its own; it was sent together with ${others.join(', ')}. Nothing was changed. Send the working directory in one call and the other keys in another.`,
+        error: `runtime.workingDir changes the workspace and must be set on its own; it was sent together with ${others.join(', ')}. Nothing was changed. Send the working directory in one call and the other keys in another.`,
       };
     }
     const newDir = values['runtime.workingDir'];
@@ -647,16 +655,15 @@ async function runSet(
     }
     const result = await swapManager.requestSwap(newDir);
     if (!result.ok) {
-      const next = result.code === 'REROOT_FAILED'
-        ? ' Some of the workspace may already have moved; read runtime.workingDir to see which root is in effect before changing anything else.'
-        : '';
-      return { success: false, error: `Workspace swap failed (${result.code ?? 'UNKNOWN'}): ${result.reason ?? 'unknown error'}${next}` };
+      return { success: false, error: `Working directory not changed (${result.code ?? 'UNKNOWN'}): ${result.reason ?? 'unknown error'}` };
     }
-    const requiresRestart = result.requiresRestart?.length ? result.requiresRestart : undefined;
+    // Saved for the next start; this host keeps working in its current directory until then.
     return { success: true, output: JSON.stringify({
-      mode: 'set', swapped: true, newWorkingDir: newDir,
-      ...(result.persisted === false ? { persisted: false, note: 'The new working directory is active now but could not be saved, so it is lost when the host restarts.' } : {}),
-      ...(requiresRestart ? { requiresRestart, restartNote: `These keep using the previous working directory until the host restarts: ${requiresRestart.join(', ')}.` } : {}),
+      mode: 'set', saved: true,
+      workingDir: result.previous, savedWorkingDir: result.current ?? newDir,
+      restartRequired: result.restartRequired ?? false,
+      ...(result.requiresRestart?.length ? { movesOnRestart: result.requiresRestart } : {}),
+      ...(result.note ? { note: result.note } : {}),
     }) };
   }
 

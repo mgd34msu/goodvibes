@@ -91,19 +91,15 @@ export function registerDelegatedTelegramCommands(catalog: GatewayMethodCatalog,
     }, { replace: true });
   }
 }
-export function composeDelegatedTelegramIntake(runtime: ResolvedDaemonFacadeRuntime, accounts: TelegramSourceAccountReader, swapManager: WorkspaceSwapManagerLike | null = null): DelegatedTelegramIntake {
-  const workspaceRevision = swapManager?.getWorkspaceRevision?.();
+/**
+ * A working-directory change is saved for the next start and moves nothing in
+ * this process, so the intake's workspace stays current for its whole life; the
+ * swap manager argument is accepted and not needed.
+ */
+export function composeDelegatedTelegramIntake(runtime: ResolvedDaemonFacadeRuntime, accounts: TelegramSourceAccountReader, _swapManager: WorkspaceSwapManagerLike | null = null): DelegatedTelegramIntake {
   const host = new DelegatedTelegramIntake({ broker: runtime.sessionBroker, approvals: runtime.approvalBroker, routes: runtime.routeBindings,
     accounts, workspaceRoot: runtime.runtimeServices.workingDirectory,
     beforeReviewOwnerWrite: () => runtime.runtimeServices.nativeDataWriter?.declare('delegated-review-owner-v2'),
-    isWorkspaceCurrent: () => !swapManager || (typeof swapManager.subscribeBeforeSwap === 'function'
-      && typeof swapManager.getWorkspaceRevision === 'function' && swapManager.getWorkspaceRevision() === workspaceRevision
-      && swapManager.getCurrentWorkingDir() === runtime.runtimeServices.workingDirectory),
-    subscribeWorkspaceInvalidation: invalidate => {
-      const beforeSwap = swapManager?.subscribeBeforeSwap?.(invalidate);
-      const notice = runtime.runtimeBus.on('WORKSPACE_SWAP_STARTED', invalidate);
-      return () => { beforeSwap?.(); notice(); };
-    },
     selectionPath: runtime.runtimeServices.shellPaths.resolveProjectPath('goodvibes', 'channels', 'telegram-delegated-selection.json'),
     receiptPath: runtime.runtimeServices.shellPaths.resolveProjectPath('goodvibes', 'channels', 'telegram-delegated-review.json'),
   });

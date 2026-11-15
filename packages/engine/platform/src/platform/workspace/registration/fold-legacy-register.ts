@@ -28,6 +28,7 @@
 
 import { PersistentStore } from '../../state/persistent-store.js';
 import { acquireCrossProcessLock } from '../checkpoint/cross-process-lock.js';
+import { normalizeLegacyRegisterRows } from './store.js';
 import type { DeclinedWorkspaceRecord, RegisteredWorkspaceRecord } from './types.js';
 
 interface PersistedRegistry extends Record<string, unknown> {
@@ -45,15 +46,12 @@ export interface FoldLegacyRegisterResult {
   readonly total: number;
 }
 
+/** Legacy rows pass the store's one definition of a valid row on the way in, so the first write's promotion cannot fail on them. */
 function readRows(snapshot: PersistedRegistry | null): PersistedRegistry {
   if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.workspaces)) {
     return { version: 1, workspaces: [], declines: [] };
   }
-  return {
-    version: 1,
-    workspaces: snapshot.workspaces,
-    declines: Array.isArray(snapshot.declines) ? snapshot.declines : [],
-  };
+  return { version: 1, ...normalizeLegacyRegisterRows(snapshot.workspaces, snapshot.declines) };
 }
 
 /**
@@ -62,8 +60,9 @@ function readRows(snapshot: PersistedRegistry | null): PersistedRegistry {
  * The timestamp field differs between the two halves of the document,
  * `registeredAt` on a registration, `declinedAt` on a decline, so the caller
  * names it rather than this guessing. ISO-8601 strings compare correctly with
- * `>`; a missing timestamp sorts as oldest, which is the right default for a
- * record written before the field existed.
+ * `>`; rows arrive normalized, so a timestamp that was missing reads as the
+ * epoch and sorts as oldest, the right default for a record written before the
+ * field existed.
  */
 function mergeKeyed<T extends { readonly root: string }>(
   destination: readonly T[],
@@ -91,8 +90,8 @@ function mergeKeyed<T extends { readonly root: string }>(
 
 /**
  * Legacy roots with no trace in a migrated (version 2) register as a registration or a decline. A root that
- * was removed since (a tombstone) is not accounted for: the legacy copy might be a later re-registration,
- * so it is left for the operator rather than retired.
+ * was removed since is not accounted for: the legacy copy might be a later re-registration, so it is left
+ * for the operator rather than retired.
  */
 function unaccountedRoots(legacy: PersistedRegistry, destination: PersistedRegistry): string[] {
   const known = new Set<string>();
@@ -116,7 +115,7 @@ export async function foldLegacyWorkspaceRegister(input: {
   const legacyStore = new PersistentStore<PersistedRegistry>(input.legacyPath);
   const sharedStore = new PersistentStore<PersistedRegistry>(input.sharedPath);
   const release = sharedStore.lockPath
-    ? await acquireCrossProcessLock(sharedStore.lockPath, { strictOwnership: true }) : () => {};
+    ? await acquireCrossProcessLock(sharedStore.lockPath) : () => {};
   try {
     const rawLegacy = await legacyStore.load();
     if (rawLegacy !== null && rawLegacy.version !== 1) {
@@ -124,8 +123,8 @@ export async function foldLegacyWorkspaceRegister(input: {
     }
     const legacy = readRows(rawLegacy);
     const rawDestination = await sharedStore.load();
-    // A legacy union has no authority history. Never erase native incarnations,
-    // overwrite tombstones, or silently stamp the imported rows as new grants.
+    // A legacy union has no authority history. Never erase native incarnations
+    // or silently stamp the imported rows as new grants.
     if (rawDestination !== null && rawDestination.version !== 1) {
       // Once any registration wrote the migrated register, the daemon's copy of
       // the rows is already in it. Retiring the legacy file is safe exactly
@@ -133,7 +132,7 @@ export async function foldLegacyWorkspaceRegister(input: {
       // refused by name so it is never silently dropped.
       const missing = unaccountedRoots(legacy, rawDestination);
       if (missing.length > 0) {
-        throw new Error(`Legacy workspace fold refuses a migrated native scope registry that lacks ${missing.length} legacy root(s): ${missing.join(', ')}. Register them with \`goodvibes register\`, then the legacy file is retired on the next start.`);
+        throw new Error(`Legacy workspace fold refuses a migrated native scope registry that lacks ${missing.length} legacy root(s): ${missing.join(', ')}. Register each one (workspaces.registrations.add, or \`goodvibes-agent workspaces register --yes\` in that directory), then the legacy file is retired on the next start.`);
       }
       const rows = (rawDestination.workspaces?.length ?? 0) + (rawDestination.declines?.length ?? 0);
       return { added: 0, updated: 0, total: rows };

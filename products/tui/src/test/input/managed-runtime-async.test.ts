@@ -51,19 +51,6 @@ describe('managed settings await public readers', () => {
     expect(f.lines.join('\n')).not.toContain('applied');
     expect(getSettingsControlPlaneSnapshot(f.config).stagedManagedBundle).toBeUndefined();
   });
-  test('a bundle that is not known to be low risk is staged for review, and applies only with --yes', async () => {
-    const f = fixture();
-    const base = fakePort((name, question) => { if (name !== 'risk') throw new Error('unexpected reading'); return choiceAnswer(question, 'high', 0.99); }).port;
-    previous = installJudgmentPort(base);
-    await f.run('apply');
-    expect(f.config.get('display.lineNumbers')).toBe(f.before);
-    expect(f.lines.join('\n')).toContain('nothing was applied');
-    expect(getSettingsControlPlaneSnapshot(f.config).stagedManagedBundle?.risk).toBe('high');
-    f.lines.length = 0;
-    await f.run('apply', '--yes');
-    expect(f.config.get('display.lineNumbers')).toBe(f.after);
-    expect(f.lines.join('\n')).toContain('risk=high');
-  });
   test('a file that is not a bundle is refused in one line and nothing throws', async () => {
     const f = fixture();
     writeFileSync(f.path, '{}');

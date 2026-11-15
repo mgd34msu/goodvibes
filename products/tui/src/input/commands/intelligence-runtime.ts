@@ -48,8 +48,14 @@ function ensureExistingFile(pathArg: string | undefined, ctx: CommandContext): s
 
 type IntelligenceFacade = Pick<
   CodeIntelligence,
-  'initialize' | 'dispose' | 'getDocumentSymbols' | 'getOutline' | 'hasTreeSitter' | 'lookupDefinition' | 'lookupReferences' | 'lookupHover' | 'installLanguageServer'
+  'getDocumentSymbols' | 'getOutline' | 'hasTreeSitter' | 'lookupDefinition' | 'lookupReferences' | 'lookupHover' | 'installLanguageServer'
 >;
+
+/** A facade to ask and the call that ends this command's hold on it. */
+interface IntelligenceHold {
+  readonly intelligence: IntelligenceFacade;
+  release(): Promise<void>;
+}
 
 /** The lines that say why a lookup has nothing, or nothing when it answered. */
 function lookupStatusLines(result: LookupResult<unknown>): string[] {
@@ -57,14 +63,11 @@ function lookupStatusLines(result: LookupResult<unknown>): string[] {
   return [`  ${result.status}: ${result.reason}`, ...result.next.map((step) => `  next: ${step}`)];
 }
 
-type IntelligenceState = ReturnType<ReturnType<typeof requireReadModels>['intelligence']['getSnapshot']>;
-
 async function handleIntelligenceQuery(
   sub: 'symbols' | 'outline' | 'definition' | 'references' | 'hover',
   args: string[],
   ctx: CommandContext,
   intelligence: IntelligenceFacade,
-  state: IntelligenceState,
 ): Promise<void> {
   if (sub === 'symbols' || sub === 'outline') {
     const targetPath = ensureExistingFile(args[1], ctx);
@@ -73,10 +76,10 @@ async function handleIntelligenceQuery(
     if (sub === 'symbols') {
       const symbols = await intelligence.getDocumentSymbols(targetPath, content);
       const entries = symbols.slice(0, 12).map((symbol) => ('selectionRange' in symbol ? formatDocumentSymbol(symbol) : formatTreeSitterSymbol(symbol)));
+      const fromServer = symbols.length > 0 && 'selectionRange' in symbols[0]!;
       ctx.print([
         `Intelligence Symbols: ${targetPath}`,
-        `  source: ${state.symbolSearchStatus === 'ready' ? 'LSP/tree-sitter' : 'best-effort tree-sitter/LSP fallback'}`,
-        `  status: ${state.symbolSearchStatus}`,
+        `  source: ${fromServer ? 'language server' : 'tree-sitter (the language server gave none or is not set up)'}`,
         `  results: ${symbols.length}`,
         ...(entries.length > 0 ? entries : ['  No symbols available for this file.']),
         '  next: /health intelligence',
@@ -159,18 +162,21 @@ async function handleIntelligenceQuery(
 }
 
 export interface IntelligenceRuntimeOptions {
-  /** Builds the facade one command call uses. Defaults to a workspace-aware CodeIntelligence. */
-  readonly createIntelligence?: (ctx: CommandContext) => IntelligenceFacade;
+  /** The facade one command call asks. Defaults to the workspace's shared CodeIntelligence. */
+  readonly holdIntelligence?: (ctx: CommandContext) => IntelligenceHold;
 }
 
-function createWorkspaceIntelligence(ctx: CommandContext): IntelligenceFacade {
-  // Without shell paths the facade has no language-server service at all, so
-  // definition, references and hover could never return anything.
-  return new CodeIntelligence({ shellPaths: requireShellPaths(ctx) });
+/**
+ * The workspace's one facade, the same object the model's read and find tools
+ * hold, so a language server the session already started answers at once and
+ * stays running after the command.
+ */
+function holdWorkspaceIntelligence(ctx: CommandContext): IntelligenceHold {
+  return CodeIntelligence.holdForWorkspace(requireShellPaths(ctx));
 }
 
 export function registerIntelligenceRuntimeCommands(registry: CommandRegistry, options: IntelligenceRuntimeOptions = {}): void {
-  const createIntelligence = options.createIntelligence ?? createWorkspaceIntelligence;
+  const holdIntelligence = options.holdIntelligence ?? holdWorkspaceIntelligence;
   registry.register({
     name: 'intelligence',
     aliases: ['intel'],
@@ -190,15 +196,12 @@ export function registerIntelligenceRuntimeCommands(registry: CommandRegistry, o
         return;
       }
 
-      const state = requireReadModels(ctx).intelligence.getSnapshot();
       if (sub === 'symbols' || sub === 'outline' || sub === 'definition' || sub === 'references' || sub === 'hover') {
-        const intelligence = createIntelligence(ctx);
-        // Language servers started for this call are shut down with it.
+        const hold = holdIntelligence(ctx);
         try {
-          await intelligence.initialize();
-          await handleIntelligenceQuery(sub, args, ctx, intelligence, state);
+          await handleIntelligenceQuery(sub, args, ctx, hold.intelligence);
         } finally {
-          await intelligence.dispose();
+          await hold.release();
         }
         return;
       }
@@ -209,11 +212,11 @@ export function registerIntelligenceRuntimeCommands(registry: CommandRegistry, o
           ctx.print('Intelligence Install\n  Usage: /intelligence install <file|language>  (installs the language server for that language into your GoodVibes bin directory)');
           return;
         }
-        const intelligence = createIntelligence(ctx);
+        const hold = holdIntelligence(ctx);
         try {
           const subject = target.includes('.') || target.includes('/') ? resolveTargetPath(target, ctx) : target;
           ctx.print(`Intelligence Install: ${target}\n  installing (up to 3 minutes)...`);
-          const outcome = await intelligence.installLanguageServer(subject);
+          const outcome = await hold.intelligence.installLanguageServer(subject);
           ctx.print([
             `Intelligence Install: ${outcome.langId}`,
             `  ${outcome.status}: ${outcome.reason}`,
@@ -222,11 +225,12 @@ export function registerIntelligenceRuntimeCommands(registry: CommandRegistry, o
               ? ['  next: /intelligence references <file> <line> <column>'] : []),
           ].join('\n'));
         } finally {
-          await intelligence.dispose();
+          await hold.release();
         }
         return;
       }
 
+      const state = requireReadModels(ctx).intelligence.getSnapshot();
       if (sub === 'diagnostics') {
         // Tracked diagnostics are keyed by absolute path, like every other subcommand's target.
         const file = args[1] ? resolveTargetPath(args[1], ctx) : undefined;

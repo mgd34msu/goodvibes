@@ -156,7 +156,9 @@ export function registerPlatformSandboxRuntimeCommands(registry: CommandRegistry
           return;
         }
         ctx.platform.configManager.setDynamic('sandbox.mcpIsolation', mode);
-        ctx.print(`Sandbox MCP isolation set to ${mode}.`);
+        ctx.print(mode === 'disabled'
+          ? 'Sandbox MCP isolation set to disabled.'
+          : `Sandbox MCP isolation recorded as ${mode}. This release has no VM guest: MCP servers still run as separate host processes, and nothing is refused because of this setting.`);
         return;
       }
       if (sub === 'set-windows') {

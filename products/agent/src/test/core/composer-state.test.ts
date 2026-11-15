@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { deriveComposerState } from '../../core/composer-state.ts';
 
 describe('composer state', () => {
-  test('exposes command mode and approval wait flags', () => {
+  test('an approval wait is one tag: risk approval-wait, no approval flag and no turn state', () => {
     const state = deriveComposerState({
       text: '/review current branch',
       commandMode: true,
@@ -10,8 +10,8 @@ describe('composer state', () => {
       turnState: 'preflight',
     });
     expect(state.modeLabel).toBe('delegation');
-    expect(state.statusLabel).toBe('preflight');
-    expect(state.flags).toContain('approval');
+    expect(state.statusLabel).toBe('idle');
+    expect(state.flags).not.toContain('approval');
     expect(state.flags).toContain('delegation');
     expect(state.pendingRisk).toBe('approval-wait');
   });

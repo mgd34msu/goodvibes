@@ -3,6 +3,7 @@ import { createAuthReviewHandler } from '@goodvibes-jev/engine/terminal-shell/au
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
+import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/pairing';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { VERSION } from '../../version.ts';
 import '@goodvibes-jev/engine/platform/platform/config';
@@ -68,12 +69,43 @@ function inspectAuthBundle(bundle: AuthReviewBundle): string {
 
 const AUTH_LOGIN_TIMEOUT_MS = 15_000;
 
+type ServiceTarget = 'daemon' | 'listener';
+
+/** The secret-store key a service session token is kept under unless the owner names another. */
+function sessionTokenKey(target: ServiceTarget, override: string | undefined): string {
+  return override ?? `${target.toUpperCase()}_SESSION_TOKEN`;
+}
+
+/**
+ * The service URL a password or session token may be sent to, or why not:
+ * plain http carries them readable by anyone on the path, so it is accepted
+ * only for this machine.
+ */
+function serviceBaseUrl(ctx: CommandContext, raw: string, action: string): URL | null {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    ctx.print(`${action}: "${raw}" is not a URL. Give the service's base URL, for example https://host.example:3421. Nothing was sent.`);
+    return null;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    ctx.print(`${action}: ${url.protocol} is not a web address. Use https:// (or http:// for this machine). Nothing was sent.`);
+    return null;
+  }
+  if (url.protocol === 'http:' && !isLoopbackHost(url.hostname)) {
+    ctx.print(`${action}: ${url.host} is another machine and http:// would send the credential unencrypted. Use https://${url.host}${url.pathname === '/' ? '' : url.pathname}. Nothing was sent.`);
+    return null;
+  }
+  return url;
+}
+
 async function exchangeServiceLogin(
   ctx: CommandContext,
-  input: { target: 'daemon' | 'listener'; baseUrl: string; username: string; password: string; secretKey: string },
+  input: { target: ServiceTarget; baseUrl: URL; username: string; password: string; secretKey: string },
 ): Promise<void> {
   try {
-    const url = buildUrl(input.baseUrl, '/login');
+    const url = buildUrl(input.baseUrl.href, '/login');
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -91,15 +123,57 @@ async function exchangeServiceLogin(
       return;
     }
     await requireSecretsManager(ctx).set(input.secretKey, body.token);
-    ctx.print(`Stored ${input.target} session token in secure storage as ${input.secretKey}.`);
+    ctx.print([
+      `Signed in to the ${input.target} at ${input.baseUrl.origin} as ${input.username}; the session token is in secure storage as ${input.secretKey}.`,
+      `  The session stays valid on the ${input.target} until it expires or you run /auth logout ${input.target} ${input.baseUrl.origin}${input.secretKey === sessionTokenKey(input.target, undefined) ? '' : ` ${input.secretKey}`}.`,
+    ].join('\n'));
   } catch (error) {
     const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
     ctx.print(
       timedOut
-        ? `Auth login timed out after ${AUTH_LOGIN_TIMEOUT_MS / 1000}s waiting for ${input.baseUrl}. Nothing was stored.`
+        ? `Auth login timed out after ${AUTH_LOGIN_TIMEOUT_MS / 1000}s waiting for ${input.baseUrl.origin}. Nothing was stored.`
         : `Auth login failed: ${error instanceof Error ? error.message : String(error)}. Nothing was stored.`,
     );
   }
+}
+
+/**
+ * Ends a service session: the daemon revokes it (its local-auth session route,
+ * authorised by the session itself), and the token is removed from secure
+ * storage either way. The listener has no revoke route, so its session can
+ * only be forgotten here and lapses at its expiry.
+ */
+async function endServiceSession(
+  ctx: CommandContext,
+  input: { target: ServiceTarget; baseUrl: URL; secretKey: string },
+): Promise<void> {
+  const secrets = requireSecretsManager(ctx);
+  const token = await secrets.get(input.secretKey);
+  if (!token) {
+    ctx.print(`No ${input.target} session is stored as ${input.secretKey}; nothing to sign out of. /auth login ${input.target} <baseUrl> <username> signs in.`);
+    return;
+  }
+  let revoked: string;
+  if (input.target === 'listener') {
+    revoked = 'The listener has no sign-out route, so the session lapses at its expiry.';
+  } else {
+    try {
+      const response = await fetch(buildUrl(input.baseUrl.href, `/api/local-auth/sessions/${encodeURIComponent(token)}`), {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(AUTH_LOGIN_TIMEOUT_MS),
+      });
+      revoked = response.ok
+        ? 'The daemon revoked the session.'
+        : response.status === 401 || response.status === 404
+          ? 'The daemon no longer knows the session (it expired or was revoked already).'
+          : `The daemon did not revoke the session (HTTP ${response.status}${response.status === 403 ? ': only an admin may revoke sessions there' : ''}); it lapses at its expiry, or an admin revokes it with /local-auth revoke-session.`;
+    } catch (error) {
+      revoked = `The daemon could not be reached (${error instanceof Error ? error.message : String(error)}); the session lapses at its expiry.`;
+    }
+  }
+  await secrets.delete(input.secretKey);
+  ctx.print(`Signed out of the ${input.target} at ${input.baseUrl.origin}: ${revoked} The stored token ${input.secretKey} was removed.`);
 }
 
 export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry): void {
@@ -141,11 +215,19 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
   registry.register({
     name: 'logout',
     description: 'Front-door logout flow for provider subscription sessions and supported overrides',
-    usage: 'provider <name>',
+    usage: '[provider <name>|service <daemon|listener> <baseUrl> [secretKey]]',
     async handler(args, ctx) {
       const target = (args[0] ?? '').toLowerCase();
+      if (target === 'service') {
+        if (ctx.executeCommand) {
+          await ctx.executeCommand('auth', ['logout', ...args.slice(1)]);
+          return;
+        }
+        ctx.print('Use /auth logout <daemon|listener> <baseUrl> [secretKey]');
+        return;
+      }
       if (target !== 'provider' || !args[1]) {
-        ctx.print('Usage: /logout provider <name>');
+        ctx.print('Usage: /logout provider <name> | /logout service <daemon|listener> <baseUrl> [secretKey]');
         return;
       }
       if (ctx.executeCommand) {
@@ -172,7 +254,6 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
             `  version: ${VERSION}`,
             `  profiles: ${profiles.length}`,
             `  secret keys: ${secretKeys.length}`,
-            `  setup links: 4`,
           ].join('\n'),
         );
         return;
@@ -217,9 +298,9 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
 
   registry.register({
     name: 'auth',
-    description: 'Review auth posture and exchange session login tokens with local services',
+    description: 'Review auth posture, and sign in to or out of a daemon or listener session',
     usage:
-      '[review|show <provider>|repair <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> [password] [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]',
+      '[review|show <provider>|repair <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> [password] [secretKey]|logout <daemon|listener> <baseUrl> [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]',
     async handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
       const sub = args[0] ?? 'review';
@@ -244,14 +325,15 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
 
       if (sub === 'login') {
         const target = args[1];
-        const baseUrl = args[2];
         const username = args[3];
         const password = args[4];
-        const secretKey = args[5] ?? `${target?.toUpperCase() ?? 'SERVICE'}_SESSION_TOKEN`;
-        if ((target !== 'daemon' && target !== 'listener') || !baseUrl || !username) {
+        if ((target !== 'daemon' && target !== 'listener') || !args[2] || !username) {
           ctx.print('Usage: /auth login <daemon|listener> <baseUrl> <username> [password] [secretKey]  (omit the password to be asked for it with masked input)');
           return;
         }
+        const baseUrl = serviceBaseUrl(ctx, args[2], 'Auth login');
+        if (!baseUrl) return;
+        const secretKey = sessionTokenKey(target, args[5]);
         const exchange = (secret: string): Promise<void> =>
           exchangeServiceLogin(ctx, { target, baseUrl, username, password: secret, secretKey });
         if (password) {
@@ -278,8 +360,20 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
         return;
       }
 
+      if (sub === 'logout') {
+        const target = args[1];
+        if ((target !== 'daemon' && target !== 'listener') || !args[2]) {
+          ctx.print('Usage: /auth logout <daemon|listener> <baseUrl> [secretKey]');
+          return;
+        }
+        const baseUrl = serviceBaseUrl(ctx, args[2], 'Auth logout');
+        if (!baseUrl) return;
+        await endServiceSession(ctx, { target, baseUrl, secretKey: sessionTokenKey(target, args[3]) });
+        return;
+      }
+
       ctx.print(
-        'Usage: /auth [review|show <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> [password] [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]',
+        'Usage: /auth [review|show <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> [password] [secretKey]|logout <daemon|listener> <baseUrl> [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]',
       );
     },
   });

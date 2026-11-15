@@ -10,8 +10,6 @@ function setup(dir: string, diagnostics: Map<string, unknown[]> = new Map()) {
   const printed: string[] = [];
   const events: string[] = [];
   const facade = {
-    initialize: async () => { events.push('initialize'); },
-    dispose: async () => { events.push('dispose'); },
     getDocumentSymbols: async () => [],
     getOutline: async () => [],
     hasTreeSitter: () => false,
@@ -38,7 +36,9 @@ function setup(dir: string, diagnostics: Map<string, unknown[]> = new Map()) {
     },
   } as unknown as CommandContext;
   const registry = new CommandRegistry();
-  registerIntelligenceRuntimeCommands(registry, { createIntelligence: () => facade });
+  registerIntelligenceRuntimeCommands(registry, {
+    holdIntelligence: () => { events.push('hold'); return { intelligence: facade, release: async () => { events.push('release'); } }; },
+  });
   const run = async (args: string[]) => {
     printed.length = 0;
     await registry.execute('intelligence', args, ctx);
@@ -48,7 +48,7 @@ function setup(dir: string, diagnostics: Map<string, unknown[]> = new Map()) {
 }
 
 describe('/intelligence', () => {
-  test('definition prints the location the language server returned, and shuts the facade down', async () => {
+  test('definition prints the location the language server returned, and ends its hold on the shared facade', async () => {
     const dir = makeProjectTempDir('gv-intel');
     try {
       writeFileSync(join(dir, 'a.ts'), 'const a = 1;\n');
@@ -57,7 +57,7 @@ describe('/intelligence', () => {
       expect(text).toContain('target: file:///workspace/target.ts');
       expect(text).toContain('line: 10');
       expect(text).not.toContain('no-server');
-      expect(events).toEqual(['initialize', 'dispose']);
+      expect(events).toEqual(['hold', 'release']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

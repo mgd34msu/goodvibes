@@ -1,24 +1,59 @@
 import { directOwnerPlanningInput, type CommandRegistry } from '../command-registry.ts';
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
+import { captureNativeConversationInput } from '../../runtime/native-conversation-input.ts';
 import { openModalCommand, requirePlanManager } from './runtime-services.ts';
 import { isPlanMode, togglePlanMode, permissionModeLabel, type PermissionModeValue } from '../../core/permission-mode.ts';
 import { parsePlanningActionTarget } from './planning-action-target.ts';
-import { readPlanningGoal } from '@goodvibes-jev/engine/platform/platform/agents';
-import { beginCommandReading } from './command-reading-lifetime.ts';
+
+/**
+ * The closed set of /project-plan subcommands and how many words each takes
+ * after its name. Anything else is a goal; `--` makes the rest a goal even when
+ * it starts with one of these words.
+ */
+const PLANNING_SUBCOMMANDS: ReadonlyMap<string, { readonly min: number; readonly max: number; readonly usage: string }> = new Map([
+  ['panel', { min: 0, max: 0, usage: 'panel' }],
+  ['history', { min: 0, max: 0, usage: 'history' }],
+  ['approve', { min: 0, max: 0, usage: 'approve' }],
+  ['answer', { min: 2, max: Number.POSITIVE_INFINITY, usage: 'answer <n> <text>' }],
+  ['list', { min: 0, max: 0, usage: 'list' }],
+  ['show', { min: 1, max: 1, usage: 'show <plan-id>' }],
+  ['dismiss', { min: 0, max: 0, usage: 'dismiss' }],
+  ['mode', { min: 0, max: 1, usage: 'mode [strategy]' }],
+  ['explain', { min: 0, max: 0, usage: 'explain' }],
+  ['override', { min: 1, max: 1, usage: 'override <strategy>' }],
+  ['status', { min: 0, max: 0, usage: 'status' }],
+  ['clear', { min: 0, max: 0, usage: 'clear' }],
+]);
+const PLANNER_RUNTIME_SUBCOMMANDS = new Set(['mode', 'explain', 'override', 'status', 'clear']);
 
 export function registerPlanningRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'project-plan',
     aliases: ['planning'],
     description: 'Submit a native work request, inspect recovery, or review historical planning',
-    usage: '[panel | history | approve | dismiss | answer <n> <text> | list | show <id> | mode | explain | override <strategy> | status | clear | <planning goal>]',
-    argsHint: '[panel|history|<goal>]',
-    async handler(args, ctx) {
-      ctx.planningReading?.cancel();
-      const plannerSubs = ['mode', 'explain', 'override', 'status', 'clear'];
-      if (args.length > 0 && plannerSubs.includes(args[0].toLowerCase())) {
+    usage: '[panel | history | approve | dismiss | answer <n> <text> | list | show <id> | mode | explain | override <strategy> | status | clear | <planning goal> | -- <goal that starts with one of these words>]',
+    argsHint: '[panel|history|<goal>|-- <goal>]',
+    async handler(rawArgs, ctx) {
+      const first = rawArgs[0]?.toLowerCase();
+      const explicitGoal = first === '--';
+      const subcommand = !explicitGoal && first !== undefined ? PLANNING_SUBCOMMANDS.get(first) : undefined;
+      if (subcommand) {
+        // A selected-revision target (the flag and its three values) comes from the history view, not typed text.
+        const extra = rawArgs.length - 1 - (rawArgs[1] === '--selected-revision' ? 4 : 0);
+        if (extra < subcommand.min || extra > subcommand.max) {
+          const words = rawArgs.join(' ');
+          ctx.print([
+            `"/project-plan ${first}" takes ${subcommand.max === 0 ? 'no further words' : `the form /project-plan ${subcommand.usage}`}, so nothing was run.`,
+            `  To run the subcommand: /project-plan ${subcommand.usage}`,
+            `  To submit this text as a goal: /project-plan -- ${words}`,
+          ].join('\n'));
+          return;
+        }
+      }
+      const args = subcommand ? [first!, ...rawArgs.slice(1)] : rawArgs;
+      if (subcommand && PLANNER_RUNTIME_SUBCOMMANDS.has(first!)) {
         const result = ctx.ops.planRuntime
-          ? ctx.ops.planRuntime(args[0], args.slice(1))
+          ? ctx.ops.planRuntime(first!, args.slice(1))
           : { ok: false, output: 'Plan runtime bridge is not available in this runtime.' };
         ctx.print(result.output);
         return;
@@ -28,19 +63,19 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
       const projectId = ctx.workspace.projectPlanningProjectId;
       const openProjectPlanningModal = () => openModalCommand(ctx, 'planning-modal');
 
-      if (args.length === 0 || args[0] === 'panel') {
+      if (args.length === 0 || (subcommand && args[0] === 'panel')) {
         openModalCommand(ctx, 'native-work-ledger-modal');
         ctx.print('Opened native work and recovery. Saved historical planning is available with /project-plan history.');
         return;
       }
 
-      if (args[0] === 'history') {
+      if (subcommand && args[0] === 'history') {
         openProjectPlanningModal();
         ctx.print('Opened saved historical project planning. The planning interview is retired; saved answers and approvals do not authorize native work.');
         return;
       }
 
-      if (args[0] === 'approve') {
+      if (subcommand && args[0] === 'approve') {
         if (!projectPlanningService || !projectId) {
           ctx.print('Project planning service is not available in this runtime.');
           return;
@@ -62,7 +97,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
         return;
       }
 
-      if (args[0] === 'list') {
+      if (subcommand && args[0] === 'list') {
         const planManager = requirePlanManager(ctx);
         const plans = planManager.list();
         if (plans.length === 0) {
@@ -76,7 +111,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
         return;
       }
 
-      if (args[0] === 'show') {
+      if (subcommand && args[0] === 'show') {
         const planManager = requirePlanManager(ctx);
         const id = args[1];
         if (!id) {
@@ -95,7 +130,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
 
       // Explicit historical archival only. The current native request and its
       // retained recovery source are untouched; mid-execution is refused.
-      if (args[0] === 'dismiss') {
+      if (subcommand && args[0] === 'dismiss') {
         const planManager = requirePlanManager(ctx);
         const dismissal = planManager.dismiss(ctx.session.runtime.sessionId);
         if (dismissal.outcome === 'requires-cancel') {
@@ -137,7 +172,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
 
       // Explicit historical record editing only. The platform guards the selected
       // source revision; its evaluation hints never reopen an interview here.
-      if (args[0] === 'answer') {
+      if (subcommand && args[0] === 'answer') {
         if (!projectPlanningService || !projectId) {
           ctx.print('Project planning service is not available in this runtime.');
           return;
@@ -185,45 +220,29 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
         return;
       }
 
-      const source = directOwnerPlanningInput(ctx);
-      if (!source) {
+      // Everything that is not a subcommand is the goal, taken as typed. The owner
+      // typing the command is the fact that it is a goal: no model is asked.
+      const typed = directOwnerPlanningInput(ctx);
+      if (!typed) {
         ctx.print('Submit a new request from the terminal with /project-plan <goal> or /planning <goal>. Original owner input is required.');
         return;
       }
-      if (!source.text.trim()) { ctx.print('Usage: /project-plan <goal>'); return; }
+      const source = explicitGoal ? captureNativeConversationInput(typed.text.replace(/^\s*--(?:\r\n|\s|$)/, '')) : typed;
+      if (!source.text.trim()) { ctx.print('Usage: /project-plan <goal>  (or /project-plan -- <goal> for a goal that starts with a subcommand word)'); return; }
       if (!ctx.dispatchNativeIntakeTurn) {
         ctx.print('Native conversation intake is unavailable. No ordinary turn or historical planning state was started.');
         return;
       }
-      let submission: ReturnType<typeof beginCommandReading> | undefined;
-      let enteredNativeIntake = false;
       try {
-        submission = beginCommandReading(ctx, args, 'planningReading');
-        const reading = await readPlanningGoal(source, { signal: submission.signal, assertCurrent: submission.assertCurrent });
-        reading.assertCurrent(); submission.assertCurrent();
-        // This command already carries the original authenticated owner's
-        // explicit planning request. Classic does not need to reinterpret it.
-        if (reading.provenance !== 'classic' && reading.conclusion !== 'goal') {
-          ctx.print(reading.conclusion === 'command'
-            ? 'This text does not state a planning goal. Use /project-plan <a change to make>, or an explicit planning command.'
-            : 'Planning goal reading is unsettled. No native request was submitted.');
-          return;
-        }
-        // Reading ownership ends at the exact native handoff. The existing
-        // durable intake owns admission, cancellation, retries and recovery.
-        reading.assertCurrent(); submission.assertCurrent();
-        submission.finish();
-        enteredNativeIntake = true;
+        // The durable native intake owns admission, cancellation, retries and recovery.
         const state = await routeNativeConversationInput({ intake: ctx.nativeConversationIntake, source,
           notify: line => ctx.print(line), dispatch: ctx.dispatchNativeIntakeTurn });
         // Refused because another input is still being admitted: nothing was sent.
-        if (state?.status === 'pending') ctx.restoreDraft?.(`/project-plan ${source.text}`);
+        if (state?.status === 'pending') ctx.restoreDraft?.(`/project-plan ${typed.text}`);
         ctx.renderRequest();
       } catch {
-        if (!submission?.signal.aborted) ctx.print(enteredNativeIntake
-          ? 'Planning submission requires inspection. Use /work intake-status to inspect any durable native input.'
-          : 'Planning goal reading is unavailable or retired. No native request was submitted.');
-      } finally { submission?.finish(); }
+        ctx.print('Planning submission requires inspection. Use /work intake-status to inspect any durable native input.');
+      }
     },
   });
 

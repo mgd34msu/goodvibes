@@ -32,14 +32,20 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
     readonly confirmMutations: boolean;
     readonly maskUrls: boolean;
     readonly allowSend: boolean;
-    readonly emptyList: string;
-    readonly emptyTest: string;
-    readonly listSeparator: string;
-    readonly failureSeparator: string;
-    readonly message: (label: string, value: string) => string;
   },
 ) {
   const suffix = policy.confirmMutations ? ' --yes' : '';
+  const emptyList = `No webhook URLs configured. Add one with /notify add <url>${suffix}`;
+  /** A stored URL as the transcript shows it: the path holds the secret topic or token, so a masked policy shows only the origin. */
+  const shownUrl = (url: string): string => {
+    if (!policy.maskUrls) return url;
+    try {
+      const parsedUrl = new URL(url);
+      return parsedUrl.pathname === '/' && !parsedUrl.search ? parsedUrl.origin : `${parsedUrl.origin}/…`;
+    } catch {
+      return '(invalid URL)';
+    }
+  };
   function registerNotifyRuntimeCommands(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
     registry.register({
       name: 'notify',
@@ -57,20 +63,14 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
 
         if (!sub || sub === 'list') {
           const showFull = !policy.maskUrls || (commandArgs.includes('--show') && parsed.yes);
-          if (urls.length === 0) ctx.print(policy.emptyList);
+          if (urls.length === 0) ctx.print(emptyList);
           else {
-            const display = urls.map((u, i) => {
-              if (showFull) return `  ${i + 1}. ${u}`;
-              try {
-                const parsedUrl = new URL(u);
-                const origin = parsedUrl.origin;
-                const truncPath = parsedUrl.pathname.length > 12 ? `${parsedUrl.pathname.slice(0, 12)}…` : parsedUrl.pathname;
-                return `  ${i + 1}. ${origin}${truncPath} (use /notify list --show --yes to reveal full URL)`;
-              } catch {
-                return `  ${i + 1}. (invalid URL)`;
-              }
-            });
-            ctx.print(`Webhook URLs (${urls.length})${policy.listSeparator}\n${display.join('\n')}`);
+            const display = urls.map((u, i) => `  ${i + 1}. ${showFull ? u : shownUrl(u)}`);
+            ctx.print([
+              `Webhook URLs (${urls.length}):`,
+              ...display,
+              ...(showFull ? [] : [`Remove one by its number: /notify remove <n>${suffix}. Reveal the full URLs: /notify list --show${suffix}.`]),
+            ].join('\n'));
           }
           return;
         }
@@ -89,49 +89,56 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           try {
             target = new URL(url);
           } catch {
-            ctx.print(policy.message('Invalid URL', url));
+            ctx.print(`Invalid URL: ${url}`);
             return;
           }
           if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-            ctx.print(policy.message('Invalid URL (only http and https webhooks can be delivered)', url));
+            ctx.print(`Invalid URL (only http and https webhooks can be delivered): ${url}`);
             return;
           }
           // Delivery refuses these hosts, so a stored URL for one would only ever fail silently.
           const hostname = extractHostname(url);
           const trust = hostname === null ? null : classifyHostTrustTier(hostname);
           if (trust !== null && (trust.tier === 'blocked' || trust.tier === 'localhost')) {
-            ctx.print(policy.message(`Refusing to add a webhook that delivery would block (${trust.reason})`, url));
+            ctx.print(`Refusing to add a webhook that delivery would block (${trust.reason}): ${url}`);
             return;
           }
           if (urls.includes(url)) {
-            ctx.print(policy.message('Already configured', url));
+            ctx.print(`Already configured: ${shownUrl(url)}`);
             return;
           }
           urls.push(url);
           ctx.platform.configManager.mergeCategory('notifications', { webhookUrls: urls });
           notifier.setUrls(urls);
-          ctx.print(`Webhook added: ${url}`);
+          ctx.print(`Webhook added: ${shownUrl(url)}`);
           return;
         }
 
         if (sub === 'remove') {
-          const url = commandArgs[1];
-          if (!url) {
-            ctx.print(`Usage: /notify remove <url>${suffix}`);
+          const given = commandArgs[1];
+          if (!given) {
+            ctx.print(`Usage: /notify remove <n|url>${suffix}  (n is the number /notify list shows)`);
+            return;
+          }
+          // The list number names a stored URL without printing its secret topic to remove it.
+          const position = /^\d+$/.test(given) ? Number(given) : undefined;
+          const url = position !== undefined ? urls[position - 1] : given;
+          if (url === undefined) {
+            ctx.print(`No webhook has the number ${given}; /notify list shows ${urls.length === 0 ? 'none configured' : `1 to ${urls.length}`}.`);
             return;
           }
           if (!parsed.yes) {
-            requireYesFlag(ctx, `remove webhook notification URL ${url}`, `/notify remove <url>${suffix}`);
+            requireYesFlag(ctx, `remove webhook notification URL ${shownUrl(url)}`, `/notify remove <n|url>${suffix}`);
             return;
           }
           const next = urls.filter((u) => u !== url);
           if (next.length === urls.length) {
-            ctx.print(`Not found: ${url}`);
+            ctx.print(`Not found: ${shownUrl(url)}. /notify list shows the stored URLs by number.`);
             return;
           }
           ctx.platform.configManager.mergeCategory('notifications', { webhookUrls: next });
           notifier.setUrls(next);
-          ctx.print(`Webhook removed: ${url}`);
+          ctx.print(`Webhook removed: ${shownUrl(url)}`);
           return;
         }
 
@@ -152,7 +159,7 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
             return;
           }
           if (urls.length === 0) {
-            ctx.print(policy.emptyTest);
+            ctx.print(emptyList);
             return;
           }
           ctx.print(`Testing ${urls.length} webhook${urls.length !== 1 ? 's' : ''}...`);
@@ -161,12 +168,8 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           ctx.print(
             results
               .map((r) => {
-                // The stored URL carries the secret topic or token, so a masked policy names only the host here.
-                let shown = r.url;
-                if (policy.maskUrls) {
-                  try { shown = `${new URL(r.url).origin}/…`; } catch { shown = '(invalid URL)'; }
-                }
-                return r.ok ? `  [ok] ${shown}` : `  [fail] ${shown}${policy.failureSeparator}${r.error ?? 'unknown error'}`;
+                const shown = shownUrl(r.url);
+                return r.ok ? `  [ok] ${shown}` : `  [fail] ${shown}: ${r.error ?? 'unknown error'}`;
               })
               .join('\n'),
           );
@@ -184,7 +187,7 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
             return;
           }
           if (urls.length === 0) {
-            ctx.print('No webhook URLs configured. Use /notify add <url>');
+            ctx.print(emptyList);
             return;
           }
           notifier.setUrls(urls);

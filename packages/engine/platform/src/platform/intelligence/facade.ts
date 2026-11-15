@@ -126,7 +126,45 @@ export function uriToPath(uri: string): string {
 
 type ShellPaths = Pick<ShellPathService, 'workingDirectory' | 'homeDirectory' | 'resolveProjectPath' | 'resolveUserPath'>;
 
+/** A hold on a workspace's one code-intelligence facade. */
+export interface WorkspaceCodeIntelligenceHold {
+  readonly intelligence: CodeIntelligence;
+  /** Ends this hold; the last one shuts the workspace's language servers down. A second call does nothing. */
+  release(): Promise<void>;
+}
+
+const workspaceFacades = new Map<string, { readonly intelligence: CodeIntelligence; holders: number }>();
+
 export class CodeIntelligence {
+  /**
+   * The one facade of a workspace in this process, shared by everything that
+   * works on it (the model's tools, worker agents in the same directory, the
+   * /intelligence command), so each language server starts once and stays warm
+   * for every asker until the last hold is released.
+   */
+  static holdForWorkspace(shellPaths: ShellPaths): WorkspaceCodeIntelligenceHold {
+    const key = `${resolve(shellPaths.workingDirectory)}\0${resolve(shellPaths.homeDirectory)}`;
+    let entry = workspaceFacades.get(key);
+    if (!entry) {
+      entry = { intelligence: new CodeIntelligence({ shellPaths }), holders: 0 };
+      workspaceFacades.set(key, entry);
+    }
+    entry.holders += 1;
+    const held = entry;
+    let released = false;
+    return {
+      intelligence: held.intelligence,
+      async release() {
+        if (released) return;
+        released = true;
+        held.holders -= 1;
+        if (held.holders > 0 || workspaceFacades.get(key) !== held) return;
+        workspaceFacades.delete(key);
+        await held.intelligence.dispose();
+      },
+    };
+  }
+
   private treeSitter: TreeSitterService;
   private readonly ownsTreeSitter: boolean;
   private lsp: LspService | null;

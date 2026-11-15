@@ -12,14 +12,10 @@ export interface ComposerStateInput extends SubmissionRouterInput {
     readonly pendingApproval?: boolean | undefined;
     readonly turnState?: TurnState | undefined;
 }
-export interface ComposerPresentation {
-    readonly approvalFlag: boolean;
-    readonly approvalSuppressesTurn: boolean;
+export function createComposerStateReader(routeSubmissionIntent: (input: SubmissionRouterInput) => SubmissionIntent): (input: ComposerStateInput) => ComposerState {
+    return input => deriveComposerState(input, routeSubmissionIntent);
 }
-export function createComposerStateReader(routeSubmissionIntent: (input: SubmissionRouterInput) => SubmissionIntent, presentation: ComposerPresentation): (input: ComposerStateInput) => ComposerState {
-    return input => deriveComposerState(input, routeSubmissionIntent, presentation);
-}
-export function deriveComposerState(input: ComposerStateInput, routeSubmissionIntent: (input: SubmissionRouterInput) => SubmissionIntent, presentation: ComposerPresentation): ComposerState {
+export function deriveComposerState(input: ComposerStateInput, routeSubmissionIntent: (input: SubmissionRouterInput) => SubmissionIntent): ComposerState {
     const intent = routeSubmissionIntent(input);
     const flags: string[] = [];
     let pendingRisk: ComposerState['pendingRisk'] = 'none';
@@ -29,11 +25,8 @@ export function deriveComposerState(input: ComposerStateInput, routeSubmissionIn
     // the turn is blocked on the user, not really streaming. Precedence:
     // approval-wait > live turn state. (item 4.)
     const approvalWait = input.pendingApproval === true;
-    if (approvalWait) {
-        if (presentation.approvalFlag)
-            flags.push('approval');
+    if (approvalWait)
         pendingRisk = 'approval-wait';
-    }
     if (intent.kind === 'shell') {
         flags.push('shell');
         if (pendingRisk === 'none')
@@ -69,7 +62,7 @@ export function deriveComposerState(input: ComposerStateInput, routeSubmissionIn
     })();
     // 'idle' is suppressed by the footer renderer, so an approval wait shows only
     // `risk:approval-wait`, one honest tag, not three spellings of the wait.
-    const statusLabel = approvalWait && presentation.approvalSuppressesTurn ? 'idle' : turnStatus;
+    const statusLabel = approvalWait ? 'idle' : turnStatus;
     return {
         intent,
         modeLabel: intent.label,

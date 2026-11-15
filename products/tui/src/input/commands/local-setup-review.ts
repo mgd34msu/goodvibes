@@ -6,7 +6,7 @@ import { discoverSkills } from '../../views/skills-discovery.ts';
 import { buildSandboxReview } from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
 import '@goodvibes-jev/engine/platform/platform/plugins';
 import '@goodvibes-jev/engine/platform/platform/config';
-import type { SetupReviewSnapshot } from './local-setup-transfer.ts';
+import { maskLiteralSecrets, type SetupReviewSnapshot } from './local-setup-transfer.ts';
 import {
   requireProviderApi,
   requireReadModels,
@@ -15,15 +15,13 @@ import {
   requireSubscriptionManager,
 } from './runtime-services.ts';
 
-export function renderSetupSandboxReview(ctx: CommandContext, snapshot: SetupReviewSnapshot): string {
+export function renderSetupSandboxReview(ctx: CommandContext): string {
   const review = buildSandboxReview(ctx.platform.configManager);
   return [
     'Setup Sandbox Review',
     `  backend: ${review.backendProbe?.resolvedBackend ?? review.config.vmBackend}`,
-    `  repl isolation: ${snapshot.sandboxReplIsolation}`,
-    `  mcp isolation: ${snapshot.sandboxMcpIsolation}`,
-    `  host secure mode readiness: ${snapshot.sandboxSecureModeReady ? 'yes' : 'no'}`,
-    '  execution: host-local processes; no VM guest',
+    // The isolation settings (repl, mcp) refuse nothing yet, so they are not listed as protection here.
+    '  isolation: MCP servers and evaluation runtimes run as separate host processes; no VM guest',
     ...review.host.warnings.map((warning) => `  warning: ${warning}`),
     '',
     '  next:',
@@ -33,20 +31,29 @@ export function renderSetupSandboxReview(ctx: CommandContext, snapshot: SetupRev
   ].join('\n');
 }
 
-export function exportSetupSupportBundle(targetDirArg: string, snapshot: SetupReviewSnapshot, ctx: CommandContext): string {
+/**
+ * Writes a bundle for a support thread: the startup review plus the service
+ * registry and managed hooks with every literal credential masked by the
+ * shared redaction rule. Returns the directory and how many values were masked.
+ */
+export function exportSetupSupportBundle(targetDirArg: string, snapshot: SetupReviewSnapshot, ctx: CommandContext): { readonly targetDir: string; readonly masked: number } {
   const shellPaths = requireShellPaths(ctx);
   const targetDir = shellPaths.resolveWorkspacePath(targetDirArg);
   mkdirSync(targetDir, { recursive: true });
-  writeFileSync(join(targetDir, 'startup-review.json'), JSON.stringify(snapshot, null, 2) + '\n', 'utf-8');
-  const servicesPath = shellPaths.resolveProjectPath('tui', 'services.json');
-  if (existsSync(servicesPath)) {
-    writeFileSync(join(targetDir, 'services.json'), readFileSync(servicesPath, 'utf-8'), 'utf-8');
+  const masked: string[] = [];
+  writeFileSync(join(targetDir, 'startup-review.json'), JSON.stringify(maskLiteralSecrets(snapshot, masked), null, 2) + '\n', 'utf-8');
+  const copies: ReadonlyArray<readonly [string, string]> = [
+    [shellPaths.resolveProjectPath('tui', 'services.json'), 'services.json'],
+    [shellPaths.resolveProjectPath('hooks.managed.json'), 'hooks.managed.json'],
+  ];
+  for (const [source, name] of copies) {
+    if (!existsSync(source)) continue;
+    const text = readFileSync(source, 'utf-8');
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); } catch { parsed = { unreadable: `${name} is not valid JSON; its text is not included.` }; }
+    writeFileSync(join(targetDir, name), JSON.stringify(maskLiteralSecrets(parsed, masked, name), null, 2) + '\n', 'utf-8');
   }
-  const hooksPath = shellPaths.resolveProjectPath('hooks.managed.json');
-  if (existsSync(hooksPath)) {
-    writeFileSync(join(targetDir, 'hooks.managed.json'), readFileSync(hooksPath, 'utf-8'), 'utf-8');
-  }
-  return targetDir;
+  return { targetDir, masked: masked.length };
 }
 
 const collectSetupReview = createSetupReviewCollector<
@@ -80,7 +87,7 @@ const collectSetupReview = createSetupReviewCollector<
       {
         severity: 'pass',
         area: 'sandbox',
-        message: 'local backend: REPL=' + snapshot.sandboxReplIsolation + ', MCP=' + snapshot.sandboxMcpIsolation + '; no VM guest',
+        message: 'local backend: separate host processes; no VM guest',
       },
     ],
   },

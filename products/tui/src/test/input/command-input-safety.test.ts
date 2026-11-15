@@ -127,6 +127,15 @@ describe('/auth login', () => {
     expect(out.join('\n')).not.toContain('hunter2-secret');
   });
 
+  test('a password is never sent over plain http to another machine', async () => {
+    const urls: string[] = [];
+    globalThis.fetch = fakeFetch(async (url: unknown) => { urls.push(String(url)); return new Response('{}', { status: 200 }); });
+    const { ctx, isAsking } = authCtx(new Map());
+    await command(registerPlatformAccessRuntimeCommands, 'auth').handler(['login', 'daemon', 'http://daemon.example:3421', 'owner'], ctx);
+    expect(isAsking()).toBe(false);
+    expect(urls).toEqual([]);
+  });
+
   test('a rejected login does not echo the response body, which may reflect the credentials', async () => {
     globalThis.fetch = fakeFetch(async () => new Response('bad password hunter2-secret for owner', { status: 401 }));
     const stored = new Map<string, string>();
@@ -296,34 +305,42 @@ describe('/plugin capabilities', () => {
 });
 
 describe('/plugin trust', () => {
-  function pluginCtx(trustSigned: () => { ok: boolean; error?: string }) {
+  function pluginCtx(signatureValid: boolean, answer: boolean) {
     const trust = mock((_name: string, _tier: string, _note?: string) => ({ ok: true }));
-    const { ctx, out } = makeCtx({ extensions: { pluginManager: { trustSigned, trust } } });
-    return { ctx, out, trust };
+    const asked: string[] = [];
+    const { ctx, out } = makeCtx({
+      extensions: { pluginManager: {
+        verify: () => ({ ok: signatureValid, valid: signatureValid, reason: signatureValid ? undefined : 'signature mismatch' }),
+        trustSigned: () => (signatureValid ? { ok: true } : { ok: false, error: 'signature mismatch' }),
+        trust,
+      } },
+      confirm: async (options: { title: string }) => { asked.push(options.title); return answer; },
+    });
+    return { ctx, out, trust, asked };
   }
   const plugin = () => command(registerPluginRuntimeCommands, 'plugin');
 
-  test('a failed signature check does not grant the trusted tier without --override', async () => {
-    const { ctx, out, trust } = pluginCtx(() => ({ ok: false, error: 'signature mismatch' }));
+  test('a failed signature check asks the owner, and a declined question grants nothing', async () => {
+    const { ctx, trust, asked } = pluginCtx(false, false);
     await plugin().handler(['trust', 'evil', 'trusted'], ctx);
+    expect(asked).toHaveLength(1);
     expect(trust).not.toHaveBeenCalled();
-    expect(out.join('\n')).toContain('--override');
   });
 
-  test('--override grants it and records the override in the trust note', async () => {
-    const { ctx, trust } = pluginCtx(() => ({ ok: false, error: 'signature mismatch' }));
-    await plugin().handler(['trust', 'mine', 'trusted', '--override', 'reviewed', 'by', 'me'], ctx);
+  test('a confirmed override grants it and records the failed check in the trust note', async () => {
+    const { ctx, trust } = pluginCtx(false, true);
+    await plugin().handler(['trust', 'mine', 'trusted', 'reviewed', 'by', 'me'], ctx);
     expect(trust).toHaveBeenCalledTimes(1);
     const [, tier, note] = trust.mock.calls[0]!;
     expect(tier).toBe('trusted');
     expect(note).toContain('failed signature check');
     expect(note).toContain('reviewed by me');
-    expect(note).not.toContain('--override');
   });
 
-  test('a valid signature needs no override', async () => {
-    const { ctx, trust } = pluginCtx(() => ({ ok: true }));
+  test('a valid signature is trusted without a question', async () => {
+    const { ctx, trust, asked } = pluginCtx(true, false);
     await plugin().handler(['trust', 'signed', 'trusted'], ctx);
+    expect(asked).toHaveLength(0);
     expect(trust).not.toHaveBeenCalled();
   });
 });

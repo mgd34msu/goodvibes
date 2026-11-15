@@ -72,6 +72,7 @@ describe('websocket connector: a connection that cannot work says so', () => {
     const errors: Array<{ code?: string }> = [];
     let ended = 0;
     const connector = createWebSocketConnector('http://127.0.0.1:3210', () => null, Impl, {
+      reconnect: { enabled: false },
       onConnectionStateChange: (s) => states.push(s),
       onError: (e) => errors.push(e as { code?: string }),
     });
@@ -114,6 +115,7 @@ describe('websocket connector: a connection that cannot work says so', () => {
     let ended = 0;
     class Throwing { static get OPEN(): number { return 1; } constructor() { throw new Error('blocked port'); } }
     const connector = createWebSocketConnector('http://127.0.0.1:3210', 'tok', Throwing as unknown as typeof WebSocket, {
+      reconnect: { enabled: false },
       onConnectionStateChange: (s) => states.push(s),
       onError: (e) => errors.push(e),
     });
@@ -131,6 +133,7 @@ describe('websocket connector: a connection that cannot work says so', () => {
     const states: ConnectionState[] = [];
     let ended = 0;
     const connector = createWebSocketConnector('http://127.0.0.1:3210', 'tok', Impl, {
+      reconnect: { enabled: false },
       onConnectionStateChange: (s) => states.push(s),
       onError: () => {},
     });
@@ -207,25 +210,47 @@ describe('domain feed: a connection that ended on its own is not treated as stil
   type Envelope = SerializedEventEnvelope;
   const noop = (_envelope: Envelope): void => {};
 
-  test('the next listener opens a new connection and the loss is reported', async () => {
+  test('a connection that ended on its own is reopened while the feed has listeners', async () => {
     const endings: Array<() => void> = [];
-    const errors: Error[] = [];
     let connects = 0;
     let cleanups = 0;
-    const events = createRemoteDomainEvents(['turn'] as const, async (_domain, _onEnvelope, onEnded) => {
+    const delivered: string[] = [];
+    const events = createRemoteDomainEvents(['turn'] as const, async (_domain, onEnvelope, onEnded) => {
       connects += 1;
+      const connection = connects;
       endings.push(() => onEnded?.());
+      if (connection === 2) queueMicrotask(() => onEnvelope({ type: 'TURN_SUBMITTED', payload: { type: 'TURN_SUBMITTED' } } as never));
       return () => { cleanups += 1; };
-    }, { onConnectionError: (e) => errors.push(e) });
+    }, { onConnectionError: () => {} });
 
-    events.turn.on('TURN_SUBMITTED' as never, noop as never);
+    events.turn.on('TURN_SUBMITTED' as never, ((payload: { type: string }) => { delivered.push(payload.type); }) as never);
     await flush();
     expect(connects).toBe(1);
 
     endings[0]!();
     expect(cleanups).toBe(1);
+    await flush();
+    expect(connects).toBe(2);
+    expect(delivered).toEqual(['TURN_SUBMITTED']);
+  });
+
+  test('a final end (a refused credential) is reported and not reopened until a listener registers again', async () => {
+    const endings: Array<() => void> = [];
+    const errors: Error[] = [];
+    let connects = 0;
+    const events = createRemoteDomainEvents(['turn'] as const, async (_domain, _onEnvelope, onEnded) => {
+      connects += 1;
+      endings.push(() => onEnded?.({ final: true }));
+      return () => {};
+    }, { onConnectionError: (e) => errors.push(e) });
+
+    events.turn.on('TURN_SUBMITTED' as never, noop as never);
+    await flush();
+    endings[0]!();
+    await flush();
+    expect(connects).toBe(1);
     expect(errors).toHaveLength(1);
-    expect(errors[0]!.message).toContain('ended');
+    expect(errors[0]!.message).toContain('not reopened');
 
     events.turn.on('TURN_COMPLETED' as never, noop as never);
     await flush();
@@ -237,16 +262,13 @@ describe('domain feed: a connection that ended on its own is not treated as stil
     let cleanups = 0;
     const events = createRemoteDomainEvents(['turn'] as const, async (_domain, _onEnvelope, onEnded) => {
       connects += 1;
-      onEnded?.();
+      if (connects === 1) onEnded?.();
       return () => { cleanups += 1; };
     }, { onConnectionError: () => {} });
 
     events.turn.on('TURN_SUBMITTED' as never, noop as never);
     await flush();
     expect(cleanups).toBe(1);
-
-    events.turn.on('TURN_COMPLETED' as never, noop as never);
-    await flush();
     expect(connects).toBe(2);
   });
 
@@ -357,7 +379,7 @@ describe('SSE connector: lost-event notices', () => {
     expect(errors[0]!.message).toContain('dropped');
   });
 
-  test('a stream that closes with reconnect off tells the feed, so the next listener reopens it', async () => {
+  test('a stream that closes with reconnect off tells the feed, which reopens it for its listener', async () => {
     let opens = 0;
     const events = createRemoteDomainEvents(['turn'] as const, createEventSourceConnector(
       'http://127.0.0.1:3210',
@@ -366,12 +388,29 @@ describe('SSE connector: lost-event notices', () => {
       { reconnect: { enabled: false } },
     ), { onConnectionError: () => {} });
 
-    events.turn.on('TURN_SUBMITTED' as never, (() => {}) as never);
-    await flush();
-    expect(opens).toBe(1);
-
-    events.turn.on('TURN_COMPLETED' as never, (() => {}) as never);
+    const off = events.turn.on('TURN_SUBMITTED' as never, (() => {}) as never);
     await flush();
     expect(opens).toBe(2);
+    off();
+  });
+
+  test('a stream refused for its credential ends the feed instead of reconnecting', async () => {
+    let opens = 0;
+    const errors: Error[] = [];
+    const events = createRemoteDomainEvents(['turn'] as const, createEventSourceConnector(
+      'http://127.0.0.1:3210',
+      'expired',
+      (async () => {
+        opens += 1;
+        // Connects once, then the daemon refuses the credential on the reconnect.
+        return opens === 1 ? sse([]) : new Response('unauthorized', { status: 401 });
+      }) as unknown as typeof fetch,
+      { reconnect: { baseDelayMs: 0, maxDelayMs: 0 } },
+    ), { onConnectionError: (e) => errors.push(e) });
+
+    events.turn.on('TURN_SUBMITTED' as never, (() => {}) as never);
+    for (let i = 0; i < 4; i += 1) await flush();
+    expect(opens).toBe(2);
+    expect(errors.some((e) => e.message.includes('not reopened'))).toBe(true);
   });
 });

@@ -127,26 +127,20 @@ describe('which replies a retry policy repeats', () => {
     expect(calls).toHaveLength(3);
   });
 
-  test('a mutation with a perMethodPolicy entry is retried only once its verb is in retryOnMethods', async () => {
-    const run = async (retryOnMethods?: string[]): Promise<number> => {
+  test('a mutation is retried only when marked idempotent, whatever retryOnMethods lists', async () => {
+    const run = async (idempotent: boolean): Promise<number> => {
       const { fetch, calls } = capture(() => json({ error: 'down' }, 503));
       const transport = createHttpJsonTransport({
         baseUrl: 'http://127.0.0.1:3210',
         fetch,
-        retry: {
-          maxAttempts: 2,
-          baseDelayMs: 0,
-          maxDelayMs: 0,
-          perMethodPolicy: { 'things.create': {} },
-          ...(retryOnMethods ? { retryOnMethods } : {}),
-        },
+        retry: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0, retryOnMethods: ['GET', 'POST'] },
       });
-      await expect(transport.requestJson('/things', { method: 'POST', body: {}, methodId: 'things.create' })).rejects.toThrow();
+      await expect(transport.requestJson('/things', { method: 'POST', body: {}, idempotent })).rejects.toThrow();
       return calls.length;
     };
 
-    expect(await run()).toBe(1);
-    expect(await run(['GET', 'POST'])).toBe(2);
+    expect(await run(false)).toBe(1);
+    expect(await run(true)).toBe(2);
   });
 });
 

@@ -352,51 +352,6 @@ describe('transport realtime', () => {
     expect(payloads).toEqual([{ id: 'a1' }]);
   });
 
-  test('WebSocket connector: DEFAULT_WS_MAX_ATTEMPTS is finite and positive', () => {
-    expect(DEFAULT_WS_MAX_ATTEMPTS).toBe(10);
-  });
-
-  test('WebSocket connector: omitting maxAttempts uses DEFAULT_WS_MAX_ATTEMPTS, not POSITIVE_INFINITY', async () => {
-    const { MockWebSocket, instances } = createMockWebSocketClass();
-    const attempts: number[] = [];
-    const states: string[] = [];
-
-    // Connect with reconnect enabled but no explicit maxAttempts.
-    const connector = createWebSocketConnector(
-      'http://127.0.0.1:3210',
-      'token-abc',
-      MockWebSocket,
-      {
-        reconnect: { enabled: true, baseDelayMs: 0, maxDelayMs: 0 },
-        onReconnectAttempt: (info) => { attempts.push(info.attempt); },
-        onConnectionStateChange: (state) => { states.push(state); },
-      },
-    );
-
-    const stop = await connector('agents', () => {});
-    expect(typeof stop).toBe('function');
-    if (typeof stop !== 'function') throw new Error('expected connector to return a stop function');
-    expect(instances).toHaveLength(1);
-
-    // Each drop reconnects until the default budget is spent; wait for every new socket by count.
-    for (let drop = 1; drop <= DEFAULT_WS_MAX_ATTEMPTS; drop++) {
-      const ws = instances[instances.length - 1]!;
-      ws.simulateOpen();
-      ws.simulateClose();
-      await waitFor(() => instances.length === drop + 1);
-    }
-    expect(attempts).toEqual(Array.from({ length: DEFAULT_WS_MAX_ATTEMPTS }, (_, i) => i + 1));
-
-    // The next drop finds the budget empty: it gives up synchronously instead of scheduling another socket.
-    instances[instances.length - 1]!.simulateOpen();
-    instances[instances.length - 1]!.simulateClose();
-    expect(attempts).toHaveLength(DEFAULT_WS_MAX_ATTEMPTS);
-    expect(states[states.length - 1]).toBe('failed');
-    expect(instances).toHaveLength(DEFAULT_WS_MAX_ATTEMPTS + 1);
-
-    stop();
-  });
-
   test('WebSocket connector: reconnectAttempt resets on first successful message, not just open', async () => {
     const { MockWebSocket, instances } = createMockWebSocketClass();
 

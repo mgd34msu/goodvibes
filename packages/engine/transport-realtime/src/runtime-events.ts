@@ -91,8 +91,12 @@ export type {
 export { buildEventSourceUrl, createEventSourceConnector } from './event-source-connector.js';
 type TimeoutHandle = ReturnType<typeof setTimeout> & { unref?: () => void };
 
-/** Default max reconnect attempts for WebSocket connections (finite to prevent infinite auth loops). */
-export const DEFAULT_WS_MAX_ATTEMPTS = 10;
+/**
+ * Default reconnect attempts for WebSocket connections: none, as for SSE
+ * (`DEFAULT_STREAM_MAX_ATTEMPTS`). A refused or revoked credential ends the
+ * connection without a retry, so an unlimited budget cannot loop on it.
+ */
+export const DEFAULT_WS_MAX_ATTEMPTS = Number.POSITIVE_INFINITY;
 
 
 function getSocketOpenState(WebSocketImpl: typeof WebSocket): number {
@@ -329,9 +333,10 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
   return async (domain, onEnvelope, onEnded) => {
     const url = buildWebSocketUrl(baseUrl, [domain]);
     const reconnect = options.reconnect;
-    const enabled = reconnect?.enabled ?? false;
-    // Normalize reconnect policy, defaulting maxAttempts to a finite value to prevent
-    // infinite auth-failure loops. Callers can opt-in to a higher limit explicitly.
+    // On unless the caller turns it off, with no attempt limit by default: a
+    // refused credential ends the connection at once (see onMessage), so the
+    // only thing retried is a daemon or network that is coming back.
+    const enabled = reconnect?.enabled ?? true;
     const reconnectPolicy = normalizeStreamReconnectPolicy({
       ...reconnect,
       maxAttempts: reconnect?.maxAttempts ?? DEFAULT_WS_MAX_ATTEMPTS,
@@ -360,10 +365,11 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       options.onTransportEvent?.({ type: 'TRANSPORT_CONNECTION_STATE', transportId, state });
     };
     // The connection is over and will not recover without a new connect: say so on the
-    // state channel and tell the feed, so a later on() opens a fresh one.
-    const terminate = (state: 'failed' | 'disconnected'): void => {
+    // state channel and tell the feed, which opens a fresh one unless `final` (the
+    // daemon refused or revoked the credential).
+    const terminate = (state: 'failed' | 'disconnected', final = false): void => {
       emitConnectionState(state);
-      onEnded?.();
+      onEnded?.({ final });
     };
     // Retain pending logical messages across reconnects. Native writes use backpressure.
     const outboundQueue: string[] = [];
@@ -564,7 +570,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
           invokeTransportObserver(() => observer?.onError?.(authError), observer?.onObserverError);
           options.onError?.(authError);
           closeSocket();
-          terminate('failed');
+          terminate('failed', true);
           return;
         }
         if (frame.type === 'closed') {
@@ -581,7 +587,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
           invokeTransportObserver(() => observer?.onError?.(revokedError), observer?.onObserverError);
           options.onError?.(revokedError);
           closeSocket();
-          terminate('failed');
+          terminate('failed', true);
           return;
         }
         if (frame.type === 'auth' && frame.ok === true && socket) { authenticated = true; flushOutboundQueue(socket); }

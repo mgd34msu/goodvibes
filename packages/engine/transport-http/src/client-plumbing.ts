@@ -1,8 +1,7 @@
 import type { OmitNamed, RequiredNamedKeys } from '@goodvibes-jev/engine/contracts';
-import { ContractError, admitRegex, compileLegacyRegex, type RegexAdmissionOptions } from '@goodvibes-jev/engine/errors';
+import { ContractError, admitRegex } from '@goodvibes-jev/engine/errors';
 
 const MAX_SCHEMA_PATTERN_CHARS = 512;
-const MAX_SCHEMA_PATTERN_INPUT_CHARS = Number.MAX_SAFE_INTEGER;
 
 /**
  * The required keys of a contract input.
@@ -110,59 +109,67 @@ export interface JsonSchemaValidationFailure {
   readonly received: string;
 }
 
-/** Exact checked-in wire grammars, not a trusted-schema or safe-pattern heuristic.
- * These literals have fixed bounded repeats or a single-character linear scan.
- * Native literal evaluation preserves ECMAScript anchor/Unicode semantics.
- */
-function fixedSchemaGrammar(source: string, value: string): boolean | undefined {
-  if (source === '\\S') return value.trim().length > 0;
-  if (source !== '^[a-f0-9]{64}$' && source !== '^[!-~][ -~]{0,255}$' && source !== '[^!-~]') return undefined;
-  if (value.length > MAX_SCHEMA_PATTERN_INPUT_CHARS) throw new ContractError(`Contract schema pattern input exceeds ${MAX_SCHEMA_PATTERN_INPUT_CHARS} characters.`);
-  switch (source) {
-    case '^[a-f0-9]{64}$': return /^[a-f0-9]{64}$/.test(value);
-    case '^[!-~][ -~]{0,255}$': return /^[!-~][ -~]{0,255}$/.test(value);
-    case '[^!-~]': return /[^!-~]/.test(value);
-  }
+/** Options for {@link firstJsonSchemaFailureAsync}. */
+export interface JsonSchemaValidationOptions {
+  readonly signal?: AbortSignal | undefined;
+  /** Called after each isolated pattern test; throws to stop the validation. */
+  readonly assertCurrent?: (() => void) | undefined;
 }
 
-
-/** @deprecated Synchronous compatibility only. Production callers use firstJsonSchemaFailureAsync. */
+/**
+ * Validate a value against a JSON Schema synchronously. Gives the same result
+ * as {@link firstJsonSchemaFailureAsync} for every schema whose patterns run
+ * natively (every pattern in the shipped contracts); a pattern that needs the
+ * isolated executor cannot be evaluated here and is reported as a failure of
+ * that field instead.
+ */
 export function firstJsonSchemaFailure(
   schema: Record<string, unknown>, value: unknown, path = '$', root: Record<string, unknown> = schema, _depth = 0,
 ): JsonSchemaValidationFailure | undefined {
   const walk = walkJsonSchema(schema, value, path, root, _depth);
   let next = walk.next();
-  while (!next.done) next = walk.next(contractPatternMatches(compileContractPattern(next.value.source), next.value.value));
+  while (!next.done) {
+    const pattern = schemaPattern(next.value.source);
+    if (!pattern) {
+      return { path: next.value.path, expected: `pattern ${next.value.source}`, received: 'a pattern that only the asynchronous validator can evaluate' };
+    }
+    pattern.lastIndex = 0;
+    next = walk.next(pattern.test(next.value.value));
+  }
   return next.value;
 }
 
 /**
- * Validate a value against a JSON Schema, running non-fixed `pattern` tests in
- * the isolated regex executor. The schema is the caller's settled value (a
- * contract manifest is frozen once where it is loaded) and the value belongs to
- * the call, so neither is copied or re-scanned. Between awaited pattern tests
- * only the call's signal and the caller's own `assertCurrent` are consulted.
+ * Validate a value against a JSON Schema. A pattern that runs natively (see
+ * `schemaPattern`) is tested in place; any other pattern, which only an
+ * untrusted schema such as a third-party tool definition carries, runs in the
+ * isolated regex executor, one per call. The schema and the value are the
+ * caller's settled values, so neither is copied or re-scanned.
  */
 export async function firstJsonSchemaFailureAsync(
   schema: Record<string, unknown>, value: unknown,
-  options: Omit<RegexAdmissionOptions, 'operation'> = {},
+  options: JsonSchemaValidationOptions = {},
 ): Promise<JsonSchemaValidationFailure | undefined> {
   const signal = options.signal, assertOwnerCurrent = options.assertCurrent;
   signal?.throwIfAborted();
-  const current = () => { signal?.throwIfAborted(); assertOwnerCurrent?.(); };
   const walk = walkJsonSchema(schema, value);
   let next = walk.next();
-  if (next.done) return next.value;
-  // Reuse only within this exact invocation, not by source across requests.
-  const handles = new Map<string, Awaited<ReturnType<typeof admitRegex>>>();
+  let isolated: Map<string, Awaited<ReturnType<typeof admitRegex>>> | undefined;
   try {
     while (!next.done) {
       const { source, value: input } = next.value;
-      if (input.length > MAX_SCHEMA_PATTERN_INPUT_CHARS) throw new ContractError(`Contract schema pattern input exceeds ${MAX_SCHEMA_PATTERN_INPUT_CHARS} characters.`);
-      let handle = handles.get(source);
+      const pattern = schemaPattern(source);
+      if (pattern) {
+        pattern.lastIndex = 0;
+        next = walk.next(pattern.test(input));
+        continue;
+      }
+      const current = () => { signal?.throwIfAborted(); assertOwnerCurrent?.(); };
+      isolated ??= new Map();
+      let handle = isolated.get(source);
       if (!handle) {
-        handle = await admitRegex(source, '', { ...options, operation: 'contract schema pattern', maxInputChars: MAX_SCHEMA_PATTERN_INPUT_CHARS, assertCurrent: current });
-        handles.set(source, handle);
+        handle = await admitRegex(source, '', { operation: 'schema pattern', signal, assertCurrent: current });
+        isolated.set(source, handle);
       }
       const matches = await handle.test(input);
       current();
@@ -170,11 +177,107 @@ export async function firstJsonSchemaFailureAsync(
     }
     return next.value;
   } finally {
-    for (const handle of handles.values()) await handle[Symbol.asyncDispose]();
+    if (isolated) for (const handle of isolated.values()) await handle[Symbol.asyncDispose]();
   }
 }
 
-type PatternRequest = { source: string; value: string };
+// Compiled schema patterns by source, for the life of the process. A contract
+// carries about ten distinct patterns, so the bound only matters for a caller
+// that validates against many untrusted schemas.
+const MAX_CACHED_SCHEMA_PATTERNS = 512;
+const schemaPatterns = new Map<string, RegExp | null>();
+
+/**
+ * The compiled pattern when it is safe to run on this thread, or null when it
+ * must run in the isolated executor. Decided once per distinct source.
+ * Throws a SyntaxError for a pattern that is not a valid regular expression.
+ */
+function schemaPattern(source: string): RegExp | null {
+  const known = schemaPatterns.get(source);
+  if (known !== undefined) return known;
+  const compiled = new RegExp(source);
+  const pattern = source.length <= MAX_SCHEMA_PATTERN_CHARS && isLinearSchemaPattern(source) ? compiled : null;
+  if (schemaPatterns.size >= MAX_CACHED_SCHEMA_PATTERNS) schemaPatterns.clear();
+  schemaPatterns.set(source, pattern);
+  return pattern;
+}
+
+const QUANTIFIER = /^(?:([*+?])|\{(\d+)(?:(,)(\d*))?\})\??/;
+
+/**
+ * True when a regular expression cannot backtrack without bound: no
+ * backreference or lookaround, at most one unbounded repeat, and every group
+ * repeated more than once has a fixed width with no alternation. A group made
+ * optional with `?` may have any width. This admits every pattern the shipped
+ * contracts use (fixed-width ids, `\S`, bounded runs, one trailing `+`) and
+ * refuses nested or overlapping repetition such as `(a+)+` or `(a|aa)*`.
+ */
+export function isLinearSchemaPattern(source: string): boolean {
+  interface Frame { variable: boolean; alternation: boolean }
+  const frames: Frame[] = [{ variable: false, alternation: false }];
+  let last: 'atom' | Frame | null = null;
+  let unbounded = 0;
+  let index = 0;
+  const markVariable = () => { for (const frame of frames) frame.variable = true; };
+  while (index < source.length) {
+    const char = source[index]!;
+    if (char === '\\') {
+      const escaped = source[index + 1] ?? '';
+      if (/[1-9k]/.test(escaped)) return false;
+      index += 2;
+      last = 'atom';
+      continue;
+    }
+    if (char === '[') {
+      index += 1;
+      if (source[index] === '^') index += 1;
+      if (source[index] === ']') index += 1;
+      while (index < source.length && source[index] !== ']') index += source[index] === '\\' ? 2 : 1;
+      index += 1;
+      last = 'atom';
+      continue;
+    }
+    if (char === '(') {
+      if (/^\(\?<?[=!]/.test(source.slice(index, index + 4))) return false;
+      frames.push({ variable: false, alternation: false });
+      const named = /^\(\?(?::|<[^>]*>)/.exec(source.slice(index));
+      index += named ? named[0].length : 1;
+      last = null;
+      continue;
+    }
+    if (char === ')') {
+      if (frames.length < 2) return false;
+      const frame = frames.pop()!;
+      if (frame.variable || frame.alternation) markVariable();
+      index += 1;
+      last = frame;
+      continue;
+    }
+    if (char === '|') {
+      frames[frames.length - 1]!.alternation = true;
+      index += 1;
+      last = null;
+      continue;
+    }
+    const quantifier = QUANTIFIER.exec(source.slice(index));
+    if (quantifier && last !== null) {
+      const [, symbol, min, comma, max] = quantifier;
+      const upper = symbol === '?' ? 1 : symbol ? Infinity : comma === undefined ? Number(min) : max ? Number(max) : Infinity;
+      const lower = symbol === '+' ? 1 : symbol ? 0 : Number(min);
+      if (last !== 'atom' && upper > 1 && (last.variable || last.alternation)) return false;
+      if (upper === Infinity && ++unbounded > 1) return false;
+      if (upper !== lower) markVariable();
+      index += quantifier[0].length;
+      last = null;
+      continue;
+    }
+    index += 1;
+    last = 'atom';
+  }
+  return frames.length === 1;
+}
+
+type PatternRequest = { source: string; value: string; path: string };
 type SchemaArguments = [schema: Record<string, unknown>, value: unknown, path: string, root: Record<string, unknown>, depth: number];
 type SchemaStep = Generator<PatternRequest | { walk: SchemaArguments }, JsonSchemaValidationFailure | undefined, boolean | JsonSchemaValidationFailure | undefined>;
 function* requestSchema(...walk: SchemaArguments): SchemaStep {
@@ -278,10 +381,7 @@ function* walkJsonSchemaStep(
     return { path, expected: `length <= ${maxLength}`, received: `length ${stringLength}` };
   }
   if (typeof value === 'string' && typeof schema.pattern === 'string') {
-    // The canonical nonblank-text pattern has a bounded linear equivalent.
-    // Native goals have no length ceiling; do not send them through the generic
-    // regex input guard or relax that guard for arbitrary expressions.
-    const matches = fixedSchemaGrammar(schema.pattern, value) ?? (yield { source: schema.pattern, value });
+    const matches = yield { source: schema.pattern, value, path };
     if (!matches) return { path, expected: `pattern ${schema.pattern}`, received: 'non-matching string' };
   }
   if (typeof value === 'string' && typeof schema.format === 'string' && !stringMatchesJsonSchemaFormat(value, schema.format)) {
@@ -382,22 +482,6 @@ function readSchemaTypes(type: unknown): string[] {
   if (typeof type === 'string') return [type];
   if (Array.isArray(type)) return type.filter((entry): entry is string => typeof entry === 'string');
   return [];
-}
-
-function compileContractPattern(source: string): RegExp {
-  if (source.length > MAX_SCHEMA_PATTERN_CHARS) {
-    throw new ContractError(`Contract schema pattern exceeds ${MAX_SCHEMA_PATTERN_CHARS} characters.`);
-  }
-  try { return compileLegacyRegex(source, '', { operation: 'contract schema pattern' }, true); }
-  catch (error) { if (error instanceof SyntaxError) throw error; throw new ContractError('Contract schema pattern is too expensive to evaluate safely.'); }
-}
-
-function contractPatternMatches(pattern: RegExp, value: string): boolean {
-  if (value.length > MAX_SCHEMA_PATTERN_INPUT_CHARS) {
-    throw new ContractError(`Contract schema pattern input exceeds ${MAX_SCHEMA_PATTERN_INPUT_CHARS} characters.`);
-  }
-  pattern.lastIndex = 0;
-  return pattern.test(value);
 }
 
 function valueMatchesJsonType(value: unknown, type: string): boolean {

@@ -6,8 +6,10 @@
  * `dispatch` calls `contracts.start` with the task as the ask (and the
  * request's `metadata.sessionId`, `metadata.workspaceRoot` and
  * `metadata.isolation` when given: a hosted session's id starts the contract
- * in that session; `metadata.idempotencyKey` is sent as the `Idempotency-Key`
- * header so a daemon that honours it can recognise a replayed dispatch), `status` reads `contracts.get` into a snapshot, `cancel`
+ * in that session; `metadata.idempotencyKey` is the call's `Idempotency-Key`,
+ * so a replayed dispatch gets the contract the first one started, and without
+ * one the client generates a key per call, which its own retries reuse),
+ * `status` reads `contracts.get` into a snapshot, `cancel`
  * calls `contracts.cancel`, and `result` reads `contracts.get` into the
  * contract's answer and status line. The external task id is the contract
  * id. The mapping is the contracts package's, shared with the in-process
@@ -47,7 +49,7 @@ export function createOperatorContractWorkAdapter(client: Pick<OperatorRemoteCli
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
         ...(isolation === undefined ? {} : { isolation }),
-      }, idempotencyKey === undefined ? {} : { headers: { 'Idempotency-Key': idempotencyKey } });
+      }, idempotencyKey === undefined ? {} : { idempotencyKey });
       return contractWorkHandle(started.contract, {
         ...(request.contractId === undefined ? {} : { requestingContractId: request.contractId }),
         ...(request.status === undefined ? {} : { requestingStatus: request.status }),

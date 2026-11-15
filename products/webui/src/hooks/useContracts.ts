@@ -49,7 +49,10 @@ export async function readInContractScope<T>(
 }
 
 /** The public engine schema is snapshotted and checked before every build.
- * Invalid nested evidence must fail the query, never crash during rendering. */
+ * Invalid nested evidence must fail the query, never crash during rendering.
+ * Contract reads go through the web UI's own fetch (`readContractMethod`), not
+ * the operator client, so this is the one check a record gets; the schema is
+ * the same as the contract's `contracts.get` output schema. */
 function assertContractTree(value: ContractRecord): void {
   const failure = firstJsonSchemaFailure(contractSchema, value);
   if (failure) throw new Error(`The daemon returned an unreadable contract record (${failure.path}).`);

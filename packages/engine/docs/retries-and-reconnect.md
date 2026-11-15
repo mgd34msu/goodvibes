@@ -45,9 +45,13 @@ const platformClient = createBrowserGoodVibesPlatform({
 });
 ```
 
+Runtime-event feeds (the `platform.events` domains, over SSE or WebSocket) reconnect on their own: reconnect is on unless you set `enabled: false`, and there is no attempt limit unless you set `maxAttempts`. The delay grows from `baseDelayMs` to `maxDelayMs` and then stays there, so a daemon that restarts, updates or sleeps is picked up again whenever it comes back, for as long as the feed has listeners. Removing the last listener is how a client stops. Only an answer no retry can change ends the feed: a refused or revoked credential (401, 403) or another final status. Sign in again and register a listener to reopen it.
+
 The platform preserves `Last-Event-ID` and sends it on reconnect so the server can replay missed events when supported.
 
-The retry budget refills only after a connection delivers a real event: the `ready` greeting does not count, so a stream the daemon greets and drops at once still runs out of attempts. When a reconnect is refused with a `Retry-After` (429, 503), the next attempt waits at least that long, capped at 10 minutes.
+A stream whose path dies without a reset (a laptop that slept, a phone that changed networks, a proxy that dropped an idle mapping) is noticed by its silence: the daemon sends a `heartbeat` frame on open and every 15 seconds, and a stream that has sent one and then stays silent for 35 seconds (two intervals plus slack, the same deadline the daemon's own idle timeout uses) is dropped and reconnected from its last event id. Set `idleTimeoutMs` on a raw stream to change the deadline, or `0` to turn it off; a server that never sends a heartbeat is never cut off.
+
+The delay restarts from `baseDelayMs` once a connection delivers a real event: the `ready` greeting does not count. When a reconnect is refused with a `Retry-After` (429, 503), the next attempt waits at least that long, capped at 10 minutes.
 
 ## WebSocket reconnect
 
@@ -70,25 +74,15 @@ const platformClient = createReactNativeGoodVibesPlatform({
 
 ## Idempotency keys
 
-For non-GET mutations, the platform injects an `Idempotency-Key` header when the call has a `perMethodPolicy` entry or the contract marks the route `idempotent: true`. The same UUID is sent on every attempt of one call.
+A call is retried when one rule holds: the call is marked idempotent, whatever its verb, **or** it is a safe verb listed in `retryOnMethods` (default `GET`, `HEAD`, `OPTIONS`); and the failure is retryable (a status in `retryOnStatuses`: 408, 429, 500, 502, 503, 504, 529, or a connection failure with no response) and attempts remain. A reply whose body says `recoverable: false`, or whose category is `billing`, is never retried, whatever its status.
 
-**The header is advisory, except on `POST /api/contracts` (`contracts.start`), the one route where the daemon reads it (see below). Everywhere else it does not deduplicate retried requests.** Otherwise only the methods that carry a replay key in their request body deduplicate: sending the same body key again returns the original result instead of repeating the work. The operator OpenAPI marks each such method with `x-replay-key` and names the field. Retrying any other mutation can repeat its side effect (a second session, a second message) when the first response was lost after the daemon acted.
+The operator client marks a method idempotent from the contract: a method the contract marks `idempotent: true`, a method whose replay key is the `Idempotency-Key` header (`contracts.start`), or a method whose replay key is a body field every call must carry. A mutating idempotent call gets one `Idempotency-Key`, generated once and sent on every attempt, so the daemon recognises a repeat. When neither the transport nor the call sets `maxAttempts`, an idempotent call gets 3 attempts (`DEFAULT_IDEMPOTENT_MAX_ATTEMPTS`), so a lost response or a transient 503 does not fail it and does not start the work twice. Safe methods are retried once you raise `maxAttempts`.
 
-**When a mutation is retried (all must hold):**
+`perMethodPolicy` entries tune how a call is retried (attempts and delays per method id); they do not decide whether it may be.
 
-1. The call has a `perMethodPolicy[methodId]` entry, or the contract marks the route `idempotent: true`. No method in the current catalog sets `idempotent: true`, so in practice this means a `perMethodPolicy` entry.
-2. The verb is listed in `retryOnMethods`. The default is `['GET', 'HEAD', 'OPTIONS']`, so add the mutation verb (for example `'POST'`) or the call fails on its first error.
-3. The attempt budget allows it (`maxAttempts` above 1) and the failure is retryable: a status in `retryOnStatuses` (408, 429, 500, 502, 503, 504, 529), or a connection failure with no response.
+To keep your own key across calls (a dispatcher that may send the same work again later), pass it as the `idempotencyKey` call option; a caller-set `Idempotency-Key` header also wins over a generated one.
 
-Safe methods (`GET`, `HEAD`, `OPTIONS`) are retried by default once `maxAttempts` is raised. A reply whose body says `recoverable: false`, or whose category is `billing`, is never retried, whatever its status.
-
-There is no per-call `idempotencyKey` request option. The per-call options accepted by the transport layer (`ContractInvokeOptions`) are `signal`, `headers`, and `responseSchema` only. The `Idempotency-Key` is generated internally (`generateIdempotencyKey`) and is attached only when the resolved method is a mutation (POST/PUT/PATCH/DELETE) **and** either the contract marks the route `idempotent: true` or a `perMethodPolicy` entry exists for that method ID.
-
-The daemon acts on the key for `POST /api/contracts` (`contracts.start`): a repeat with the same key from the same caller returns the first contract (header `Idempotent-Replayed: true`) instead of starting another, the same key with a different request is refused with 409 `IDEMPOTENCY_KEY_REUSED`, and a start that failed is not remembered so it can be retried. The daemon keeps keys in memory (up to 1000), so a retry that crosses a daemon restart starts a new contract.
-
-To retry a mutation that has a body replay key (or `contracts.start`, which honours the header), register a `perMethodPolicy` entry for its method ID and add its verb to `retryOnMethods`, and send the same replay key value on every attempt. For a mutation without one, do not enable retries: the daemon cannot tell a repeat from a new request.
-
-Never retry unsafe mutations blindly. Only operations whose repeat is harmless, because the body replay key deduplicates it or because the operation is naturally idempotent, are safe to retry.
+The daemon acts on the header for `POST /api/contracts` (`contracts.start`): a repeat with the same key from the same caller returns the first contract (header `Idempotent-Replayed: true`) instead of starting another, the same key with a different request is refused with 409 `IDEMPOTENCY_KEY_REUSED`, and a start that failed is not remembered so it can be retried. The daemon keeps keys in memory (up to 1000), so a retry that crosses a daemon restart starts a new contract. Other methods that replay safely do so on a field of the request body; the operator OpenAPI marks each with `x-replay-key` and names the field. Retrying any other mutation could repeat its side effect (a second session, a second message) when the first response was lost after the daemon acted, so a mutation that is not marked idempotent is never retried, even with its verb in `retryOnMethods`.
 
 ## Token rotation
 
@@ -96,11 +90,9 @@ If a long-lived client can rotate tokens, prefer `tokenStore` or `getAuthToken` 
 
 ## Default behavior
 
-Out of the box the platform is conservative. Retries and reconnect are **off** by default and must be opted into:
-
-- **HTTP retry is off.** `DEFAULT_HTTP_RETRY_POLICY.maxAttempts` is `1` (one attempt, no retries). When you enable retries, only safe methods are retried by default (`retryOnMethods: ['GET', 'HEAD', 'OPTIONS']`) and `retryOnNetworkError` is `true`; default delays are `baseDelayMs: 250`, `maxDelayMs: 2000`, `backoffFactor: 2`. A server-sent `Retry-After` header on a retryable response raises the computed delay to at least that value, but the result is still capped at 10 minutes so a hostile or misconfigured server cannot park a client indefinitely.
-- **Stream / SSE reconnect is off.** `DEFAULT_STREAM_RECONNECT_POLICY.enabled` is `false`. When enabled, `maxAttempts` defaults to `10` (`DEFAULT_STREAM_MAX_ATTEMPTS`), with `baseDelayMs: 500` and `maxDelayMs: 30000`.
-- **WebSocket reconnect** likewise defaults to a finite `maxAttempts` of `10` (`DEFAULT_WS_MAX_ATTEMPTS`) when enabled, to prevent infinite auth-failure loops.
+- **HTTP retry of safe methods is off.** `DEFAULT_HTTP_RETRY_POLICY.maxAttempts` is `1` (one attempt, no retries). When you raise it, safe methods are retried (`retryOnMethods: ['GET', 'HEAD', 'OPTIONS']`) and `retryOnNetworkError` is `true`; default delays are `baseDelayMs: 250`, `maxDelayMs: 2000`, `backoffFactor: 2`. A server-sent `Retry-After` header on a retryable response raises the computed delay to at least that value, but the result is still capped at 10 minutes so a hostile or misconfigured server cannot park a client indefinitely.
+- **Idempotent calls are retried.** A call marked idempotent gets 3 attempts unless `maxAttempts` is set (see above).
+- **Runtime-event feeds reconnect.** The SSE and WebSocket runtime-event connectors reconnect unless `enabled: false` is set, with no attempt limit (`DEFAULT_STREAM_MAX_ATTEMPTS` and `DEFAULT_WS_MAX_ATTEMPTS` are unlimited), `baseDelayMs: 500` and `maxDelayMs: 30000`. A refused credential ends them at once. A raw stream opened directly with `openRawServerSentEventStream` reconnects only when you pass `reconnect: { enabled: true }`.
 
 ## Recommended defaults
 

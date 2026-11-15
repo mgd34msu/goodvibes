@@ -9,8 +9,8 @@ export {
   openContractRouteStream,
   requireContractRoute,
 } from './contract-client.js';
-export type { JsonSchemaValidationFailure, MethodArgs, RequiredKeys, WithoutKeys } from './client-plumbing.js';
-export { clientInputRecord, firstJsonSchemaFailure, firstJsonSchemaFailureAsync, mergeClientInput, splitClientArgs } from './client-plumbing.js';
+export type { JsonSchemaValidationFailure, JsonSchemaValidationOptions, MethodArgs, RequiredKeys, WithoutKeys } from './client-plumbing.js';
+export { clientInputRecord, firstJsonSchemaFailure, firstJsonSchemaFailureAsync, isLinearSchemaPattern, mergeClientInput, splitClientArgs } from './client-plumbing.js';
 export { retainJsonSchemaSource } from './retained-schema-source.js';
 export type {
   HttpJsonRequestOptions,
@@ -35,13 +35,13 @@ export { generateIdempotencyKey } from './http-core.js';
 export type { ServerSentEventHandlers, ServerSentEventOptions } from './sse.js';
 export { openServerSentEventStream } from './sse.js';
 export type { ServerSentEventHandlers as RawServerSentEventHandlers, ServerSentEventOptions as RawServerSentEventOptions, ServerSentEventStreamHandle } from './sse-stream.js';
-export { openRawServerSentEventStream } from './sse-stream.js';
+export { SSE_HEARTBEAT_INTERVAL_MS, openRawServerSentEventStream, sseIdleDeadlineMs } from './sse-stream.js';
 export type { AuthTokenInput, AuthTokenResolver, HeaderResolver, MaybePromise } from './auth.js';
 export { mergeHeaderRecord, mergeHeaders, normalizeAuthToken, resolveAuthToken, resolveHeaders } from './auth.js';
 export type { BackoffPolicy, ResolvedBackoffPolicy } from './backoff.js';
 export { computeBackoffDelay, normalizeBackoffPolicy, sleepWithSignal } from './backoff.js';
 export type { HttpRetryPolicy, PerMethodRetryPolicy, ResolvedHttpRetryPolicy } from './retry.js';
-export { DEFAULT_HTTP_RETRY_POLICY, applyPerMethodPolicy, getHttpRetryDelay, isRetryableHttpStatus, isRetryableNetworkError, normalizeHttpRetryPolicy, resolveHttpRetryPolicy } from './retry.js';
+export { DEFAULT_HTTP_RETRY_POLICY, DEFAULT_IDEMPOTENT_MAX_ATTEMPTS, applyPerMethodPolicy, getHttpRetryDelay, isRetryableCall, isRetryableHttpStatus, isRetryableNetworkError, normalizeHttpRetryPolicy, resolveHttpRetryPolicy } from './retry.js';
 export type { StreamReconnectPolicy, ResolvedStreamReconnectPolicy } from './reconnect.js';
 export { DEFAULT_STREAM_RECONNECT_POLICY, getStreamReconnectDelay, normalizeStreamReconnectPolicy } from './reconnect.js';
 export type { TransportPaths } from './paths.js';

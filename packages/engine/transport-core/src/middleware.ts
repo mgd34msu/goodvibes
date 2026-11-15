@@ -38,7 +38,11 @@ export interface TransportContext {
   };
   /** AbortSignal for the request. Propagated from caller options. */
   signal?: AbortSignal | undefined;
-  /** The HTTP response object, set after `next()` resolves successfully. */
+  /**
+   * The HTTP response, readable after `next()` resolves successfully. The HTTP
+   * transport builds it from `parsedBody` on first read, so read
+   * `parsedBody` when the body is all you need.
+   */
   response?: Response | undefined;
   /** Round-trip duration in milliseconds, set after `next()` resolves. */
   durationMs?: number | undefined;
@@ -56,10 +60,9 @@ export interface TransportContext {
    */
   activeMiddlewareName?: string | undefined;
   /**
-   * the already-parsed response body, stashed by innerFetch after
-   * the real fetch resolves. If set, middleware callers should read this
-   * field directly instead of calling `ctx.response.json()` to avoid an
-   * unnecessary JSON stringify → parse round-trip.
+   * The parsed response body, set when the real fetch resolves: the result the
+   * transport returns. A middleware that produces the result itself (a retry,
+   * a cache hit) sets this; `null` stands for an empty body.
    */
   parsedBody?: unknown | undefined;
 }
@@ -87,11 +90,13 @@ const MAX_MIDDLEWARE_DEPTH = 128;
  *  3. Sets `ctx.response`, `ctx.durationMs`, or `ctx.error` on the context.
  *
  * @param middleware - Ordered list of middleware functions.
- * @param innerFetch - The real fetch call wrapped at the end of the chain.
+ * @param innerFetch - The real fetch call wrapped at the end of the chain. A
+ *   Response it returns becomes `ctx.response`; one that returns nothing has
+ *   set the context itself.
  */
 export function composeMiddleware(
   middleware: readonly TransportMiddleware[],
-  innerFetch: (ctx: TransportContext) => Promise<Response>,
+  innerFetch: (ctx: TransportContext) => Promise<Response | void>,
 ): (ctx: TransportContext) => Promise<void> {
   if (middleware.length > MAX_MIDDLEWARE_DEPTH) {
     throw new GoodVibesError(`Transport middleware chain exceeds the maximum depth of ${MAX_MIDDLEWARE_DEPTH}.`, {
@@ -154,7 +159,8 @@ export function composeMiddleware(
         // End of chain, execute the real fetch.
         const sendAt = Date.now();
         try {
-          ctx.response = await innerFetch(ctx);
+          const response = await innerFetch(ctx);
+          if (response) ctx.response = response;
           ctx.durationMs = Date.now() - sendAt;
         } catch (err) {
           ctx.error = err;

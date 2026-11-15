@@ -1,4 +1,5 @@
 import type { EventEnvelope } from '@goodvibes-jev/engine/transport-core';
+import { DEFAULT_STREAM_RECONNECT_POLICY, getStreamReconnectDelay } from '@goodvibes-jev/engine/transport-http';
 import {
   createRuntimeEventFeeds,
   isAbortError,
@@ -26,12 +27,20 @@ export type DomainEventConnector<
   /**
    * Call once when the connection ends on its own and will not come back
    * without a new connect (the stream closed with reconnect off or spent, the
-   * socket was refused or gave up). The feed then forgets the connection, so
-   * the next `on()` opens a new one. Not called for the cleanup function the
-   * feed itself invoked.
+   * socket was closed cleanly, refused or gave up). `final` is true when a new
+   * connect cannot help either (the daemon refused the credential): the feed
+   * then stops until a listener registers again. Otherwise the feed opens a
+   * new connection itself, after a capped backoff, while it has listeners.
+   * Not called for the cleanup function the feed itself invoked.
    */
-  onEnded?: () => void,
+  onEnded?: (end?: DomainEventConnectionEnd) => void,
 ) => void | Promise<() => void>;
+
+/** How a connection ended, as its connector reports it. */
+export interface DomainEventConnectionEnd {
+  /** True when connecting again cannot help (a refused credential). */
+  readonly final: boolean;
+}
 
 export type DomainEvents<
   TDomain extends string,
@@ -155,15 +164,37 @@ function createRemoteDomainEventFeed<
 
   // The connection the feed currently believes in. A late onEnded from a
   // connection the feed already let go of must not tear down its successor.
-  let activeAttempt: { ended: boolean; handedOver: boolean } | null = null;
+  let activeAttempt: { ended: boolean; handedOver: boolean; final: boolean } | null = null;
+  // Reopening after a connection that ended or could not be made: one timer,
+  // a capped backoff, and a count that resets once an event arrives.
+  let reopenTimer: ReturnType<typeof setTimeout> | null = null;
+  let reopenAttempt = 0;
+
+  const scheduleReopen = (): void => {
+    if (reopenTimer || !hasListeners()) return;
+    reopenAttempt += 1;
+    // The first reopen is immediate (the connector already waited before it
+    // gave up); later ones back off from 500 ms to 30 s.
+    reopenTimer = setTimeout(() => {
+      reopenTimer = null;
+      if (hasListeners()) maybeConnect();
+    }, getStreamReconnectDelay(reopenAttempt - 1, DEFAULT_STREAM_RECONNECT_POLICY));
+    (reopenTimer as { unref?: () => void }).unref?.();
+  };
+
+  const cancelReopen = (): void => {
+    if (reopenTimer) clearTimeout(reopenTimer);
+    reopenTimer = null;
+  };
 
   const maybeConnect = (): void => {
-    if (connected || disconnect || connectPromise) return;
-    const attempt = { ended: false, handedOver: false };
+    if (connected || disconnect || connectPromise || reopenTimer) return;
+    const attempt = { ended: false, handedOver: false, final: false };
     activeAttempt = attempt;
-    const onEnded = (): void => {
+    const onEnded = (end?: DomainEventConnectionEnd): void => {
       if (attempt.ended) return;
       attempt.ended = true;
+      attempt.final = end?.final === true;
       // Still being handed over: the then-handler below settles it.
       if (!attempt.handedOver) return;
       forgetConnection(attempt);
@@ -171,6 +202,7 @@ function createRemoteDomainEventFeed<
     connectPromise = Promise.resolve(connect(domain, (envelope) => {
       const eventType = typeof envelope.type === 'string' ? envelope.type : '';
       if (!eventType) return;
+      reopenAttempt = 0;
       const payload = envelope.payload;
       const typedEnvelope = toEventEnvelope(envelope);
       // snapshot Sets before iterating to prevent skipped listeners
@@ -215,17 +247,24 @@ function createRemoteDomainEventFeed<
       disconnect = cleanup;
     }).catch((error: unknown) => {
       if (activeAttempt === attempt) activeAttempt = null;
-      if (!isExpectedDisconnectError(error)) {
-        reportUnexpectedConnectionError(error, domain, options);
-      }
+      if (isExpectedDisconnectError(error)) return;
+      reportUnexpectedConnectionError(error, domain, options);
+      // A connection that could not be made (the daemon is restarting or the
+      // network is down) is tried again; a refusal no retry can clear is not.
+      if ((error as { recoverable?: unknown } | null)?.recoverable !== false) scheduleReopenAfterSettle = true;
     }).finally(() => {
       connectPromise = null;
       disconnectPending = false;
+      if (scheduleReopenAfterSettle) {
+        scheduleReopenAfterSettle = false;
+        scheduleReopen();
+      }
     });
   };
+  let scheduleReopenAfterSettle = false;
 
-  /** The connection ended by itself: let go of it and say so, the next on() reconnects. */
-  const forgetConnection = (attempt: { ended: boolean; handedOver: boolean }, cleanup: (() => void) | null = disconnect): void => {
+  /** The connection ended by itself: let go of it, and open a new one unless that cannot help. */
+  const forgetConnection = (attempt: { ended: boolean; handedOver: boolean; final: boolean }, cleanup: (() => void) | null = disconnect): void => {
     if (activeAttempt !== attempt) return;
     activeAttempt = null;
     disconnect = null;
@@ -235,8 +274,12 @@ function createRemoteDomainEventFeed<
     } catch (error) {
       reportUnexpectedConnectionError(error, domain, options);
     }
+    if (!attempt.final) {
+      scheduleReopen();
+      return;
+    }
     reportUnexpectedConnectionError(
-      new Error(`Remote event stream for "${domain}" ended and will not reconnect on its own. Registering a listener again opens a new connection.`),
+      new Error(`Remote event stream for "${domain}" ended with an answer reconnecting cannot change (such as a refused credential), so it is not reopened. Sign in again or fix the cause; registering a listener afterwards opens a new connection.`),
       domain,
       options,
     );
@@ -244,6 +287,8 @@ function createRemoteDomainEventFeed<
 
   const maybeDisconnect = (): void => {
     if (hasListeners()) return;
+    cancelReopen();
+    reopenAttempt = 0;
     if (disconnect) {
       activeAttempt = null;
       disconnect();

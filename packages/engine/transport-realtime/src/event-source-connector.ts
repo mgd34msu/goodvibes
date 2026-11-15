@@ -172,12 +172,16 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
         onError: (err) => {
           reportStreamFailure(transportErrorFromUnknown(err, 'SSE runtime event stream error'));
         },
-        // The stream ended and is not coming back (closed with reconnect off,
-        // or the reconnect budget spent). Tell the feed so a later on() reopens.
-        onClose: () => onEnded?.(),
-        onTerminate: () => onEnded?.(),
+        // The stream ended and is not coming back by itself (closed with
+        // reconnect off, or a failure no reconnect clears). Tell the feed,
+        // which opens a new one unless the daemon's answer was final (a
+        // refused credential).
+        onClose: () => onEnded?.({ final: false }),
+        onTerminate: ({ final }) => onEnded?.({ final: final === true }),
       }, {
-        reconnect: options.reconnect,
+        // On unless the caller turns it off, with no attempt limit by default:
+        // a daemon restart or a sleep must not end the feed.
+        reconnect: { ...options.reconnect, enabled: options.reconnect?.enabled ?? true },
         getAuthToken,
         headers: Object.keys(sseHeaders).length > 0 ? sseHeaders : undefined,
         lastEventId: resumePositions.get(url) ?? null,

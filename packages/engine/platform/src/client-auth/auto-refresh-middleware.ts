@@ -10,7 +10,7 @@
  *      request. Updates `ctx.headers.Authorization` with the fresh token so
  *      consumer middleware (which runs after this one) sees the current token.
  *   2. Reactive 401: if `next()` throws a 401-shaped error, trigger a refresh
- *      via `coordinator.refreshAndRetryOnce()` and set `ctx.response` to the
+ *      via `coordinator.refreshAndRetryOnce()` and set `ctx.parsedBody` to the
  *      retry result so the transport can return it to the caller.
  *   3. Loop prevention: retry requests carry `__gv_ar_attempted: true` in their
  *      options. The middleware recognises this flag and passes through without
@@ -200,27 +200,12 @@ export function createAutoRefreshMiddleware(
       return;
     }
 
-    // Put the retry result back onto ctx.response so the transport's outer
-    // requestJson can resolve it via `await ctx.response.json()`.
-    //
-    // status: 200, transport.requestJson throws on non-2xx, so a non-throwing
-    //   return means the retry succeeded. The transport layer only inspects the
-    //   JSON body; the status is not forwarded to callers by HttpJsonTransport.
-    //
-    // headers: Content-Type only, the transport reads `ctx.response.json()` and
-    //   does not forward response headers to callers. If header forwarding is
-    //   needed in the future, use the lower-level fetch path here instead.
-    //
-    // Also clear ctx.error: the innerFetch path sets it when it throws (before
-    // re-throwing), so it reflects the original 401. Since we handled the 401
-    // successfully, we must clear it so the transport's `if (ctx.error) throw`
-    // guard does not re-raise the already-resolved error.
+    // The retry result is the call's result: the transport returns
+    // `ctx.parsedBody`, so nothing is serialised and parsed again. An empty
+    // result stays the transport's empty result (null). Clear ctx.error, which
+    // innerFetch set to the original 401 before rethrowing it.
     ctx.error = undefined;
-    // An empty result (undefined) is sent as JSON null so `.json()` still parses.
-    ctx.response = new Response(JSON.stringify(retryResult ?? null), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    ctx.parsedBody = retryResult === undefined ? null : retryResult;
   };
 }
 

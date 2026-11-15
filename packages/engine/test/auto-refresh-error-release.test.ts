@@ -82,8 +82,8 @@ describe('auto-refresh reactive-401 error release', () => {
     releaseRefresh();
     await run;
     // Post-retry semantics preserved: successful retry leaves ctx.error clear
-    // and ctx.response populated.
+    // and the retry's result is the call's result.
     expect(ctx.error).toBeUndefined();
-    expect(ctx.response).toBeDefined();
+    expect(ctx.parsedBody).toEqual({ ok: true });
   });
 });

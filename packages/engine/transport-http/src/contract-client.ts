@@ -16,13 +16,22 @@ export interface ContractRouteDefinition {
 
 export interface ContractRouteLike {
   readonly id: string;
-  /** When true, this route is safe to retry on 5xx even for mutating HTTP verbs. */
+  /**
+   * When true, the server deduplicates repeats of this route by their
+   * `Idempotency-Key`, so a call is retried on a retryable status or a
+   * network failure whatever its verb, with one key for all its attempts.
+   */
   readonly idempotent?: boolean | undefined;
 }
 
 export interface ContractInvokeOptions {
   readonly signal?: AbortSignal | undefined;
   readonly headers?: HeadersInit | undefined;
+  /**
+   * The `Idempotency-Key` for a mutating call, when the caller keeps its own
+   * key across calls; an idempotent route otherwise gets one generated per call.
+   */
+  readonly idempotencyKey?: string | undefined;
   /**
    * Optional Zod v4 schema to validate the parsed response body against.
    * When provided, a failed parse throws a {@link ContractError} with
@@ -62,6 +71,7 @@ export async function invokeContractRoute<T = unknown>(
     signal: options.signal,
     methodId: route.id,
     idempotent: route.idempotent === true,
+    idempotencyKey: options.idempotencyKey,
   });
   if (options.responseSchema) {
     const result = options.responseSchema.safeParse(body);

@@ -213,8 +213,23 @@ function methodHttpRoute(method: OperatorMethodContract): ContractRouteDefinitio
   return {
     ...method.http,
     id: method.id,
-    idempotent: method.idempotent,
+    idempotent: replaysSafely(method),
   };
+}
+
+/**
+ * Whether a repeat of this method is recognised as the same request, so the
+ * transport may retry it with one key: the contract marks it idempotent, it
+ * replays on the `Idempotency-Key` header (the transport sends one key on
+ * every attempt), or it replays on a body field every call must carry.
+ */
+function replaysSafely(method: OperatorMethodContract): boolean {
+  if (method.idempotent === true) return true;
+  const replay = method.replay;
+  if (!replay) return false;
+  if (replay.in === 'header') return replay.name.toLowerCase() === 'idempotency-key';
+  const required = method.inputSchema?.['required'];
+  return Array.isArray(required) && required.includes(replay.name);
 }
 
 /**

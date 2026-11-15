@@ -15,7 +15,12 @@ export interface ServerSentEventHandlers {
   readonly onError?: ((error: unknown) => void) | undefined;
   readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number }) => void;
   readonly onClose?: (() => void) | undefined;
-  readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number }) => void;
+  /**
+   * The stream ended on a failure and will not reconnect. `final` is true when
+   * no reconnect could clear it (a refused credential or another answer the
+   * server gives on purpose), false when reconnect was off or its attempts ran out.
+   */
+  readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined }) => void;
   /**
    * The `id:` of each complete frame, when the frame is delivered.
    *
@@ -51,6 +56,37 @@ export interface ServerSentEventOptions {
   readonly getAuthToken?: AuthTokenResolver | undefined;
   readonly lastEventId?: string | null | undefined;
   readonly reconnect?: StreamReconnectPolicy | undefined;
+  /**
+   * Silence (ms) after which a stream whose server has sent a `heartbeat`
+   * frame is treated as lost: the connection is dropped and, with reconnect
+   * on, reopened from its last event id. Armed only once a heartbeat arrives,
+   * so a server that sends none is never cut off. Defaults to
+   * {@link sseIdleDeadlineMs}; 0 turns it off.
+   */
+  readonly idleTimeoutMs?: number | undefined;
+}
+
+/** The daemon's SSE heartbeat interval (ms): one frame on open, then one per interval. */
+export const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
+
+/**
+ * How long a heartbeating stream may stay silent before either end treats it
+ * as gone: two intervals plus slack, so one late or lost heartbeat is not
+ * enough. The daemon derives its own idle timeout from the same number.
+ */
+export function sseIdleDeadlineMs(heartbeatIntervalMs: number = SSE_HEARTBEAT_INTERVAL_MS): number {
+  return heartbeatIntervalMs * 2 + 5_000;
+}
+
+/**
+ * Whether reconnecting can clear a stream failure: a connection that could not
+ * be made or was lost, a stream that ended, or a status a retry can clear. A
+ * refused credential (401, 403) or any other answer from the server is final.
+ */
+function isRetryableStreamFailure(error: unknown): boolean {
+  const status = (error as { transport?: { status?: unknown } } | null)?.transport?.status;
+  if (typeof status !== 'number') return true;
+  return status === 0 || (status >= 200 && status < 300) || RETRYABLE_STATUS_CODES.includes(status);
 }
 
 function readEventPayload(data: string): unknown {
@@ -142,6 +178,7 @@ export async function openRawServerSentEventStream(
   options.signal?.throwIfAborted();
   const outerController = new AbortController();
   const reconnectPolicy = normalizeStreamReconnectPolicy(options.reconnect);
+  const idleTimeoutMs = Math.max(0, options.idleTimeoutMs ?? sseIdleDeadlineMs());
   let lastEventId = options.lastEventId ?? null;
   let activeController: AbortController | null = null;
   let stopped = false;
@@ -217,6 +254,25 @@ export async function openRawServerSentEventStream(
       let data = '';
       let pendingEventId: string | undefined;
 
+      // Liveness: once the server has shown it heartbeats, a silence longer
+      // than the deadline means the path died without a reset (sleep, a new
+      // network, a dropped NAT mapping). Drop the connection so the reconnect
+      // below resumes from the last event id instead of reading forever.
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      let heartbeating = false;
+      let stalled: Error | undefined;
+      const onStalled = (): void => {
+        stalled = createStreamError(0, url, `No event or heartbeat arrived for ${Math.round(idleTimeoutMs / 1000)}s; the connection is treated as lost`);
+        void reader.cancel(stalled).catch(() => undefined);
+        controller.abort(stalled);
+      };
+      const armIdleTimer = (): void => {
+        if (!heartbeating || idleTimeoutMs <= 0) return;
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(onStalled, idleTimeoutMs);
+        (idleTimer as { unref?: () => void }).unref?.();
+      };
+
       const flush = (): void => {
         if (pendingEventId !== undefined) {
           lastEventId = pendingEventId;
@@ -233,6 +289,10 @@ export async function openRawServerSentEventStream(
         // the `ready` greeting the daemon sends on every connect: a stream the
         // server accepts, greets and closes at once must still run out of attempts.
         if (eventName !== 'ready') reconnectAttempts = 0;
+        if (eventName === 'heartbeat' && !heartbeating) {
+          heartbeating = true;
+          armIdleTimer();
+        }
         const payload = readEventPayload(data);
         if (eventName === 'ready') {
           handlers.onReady?.(payload);
@@ -266,8 +326,10 @@ export async function openRawServerSentEventStream(
       try {
         while (true) {
           const { done, value } = await reader.read();
+          if (stalled) throw stalled;
           signal.throwIfAborted();
           if (done) break;
+          armIdleTimer();
           buffer += decoder.decode(value, { stream: true });
           let newlineIndex = buffer.indexOf('\n');
           while (newlineIndex >= 0) {
@@ -290,12 +352,13 @@ export async function openRawServerSentEventStream(
         return true;
       } catch (error) {
         // A read error (reset, idle timeout, sleep/wake) after a long-lived connection is a drop, not a failed connect.
-        if (!controller.signal.aborted && !outerController.signal.aborted && !stopped
+        if ((stalled || !controller.signal.aborted) && !outerController.signal.aborted && !stopped
           && Date.now() - connectedAt >= CONNECTION_STABILITY_MS) {
           reconnectAttempts = 0;
         }
-        throw error;
+        throw stalled ?? error;
       } finally {
+        clearTimeout(idleTimer);
         controller.abort();
         if (activeController === controller) {
           activeController = null;
@@ -315,10 +378,11 @@ export async function openRawServerSentEventStream(
             return;
           }
           const nextAttempt = reconnectAttempts + 1;
-          const shouldReconnect = reconnectPolicy.enabled && nextAttempt <= reconnectPolicy.maxAttempts;
+          const retryable = isRetryableStreamFailure(error);
+          const shouldReconnect = reconnectPolicy.enabled && nextAttempt <= reconnectPolicy.maxAttempts && retryable;
           if (!shouldReconnect) {
             settleReady(error);
-            handlers.onTerminate?.({ error, reconnectAttempts: nextAttempt });
+            handlers.onTerminate?.({ error, reconnectAttempts: nextAttempt, final: !retryable });
             reportStreamError(error, handlers);
             return;
           }

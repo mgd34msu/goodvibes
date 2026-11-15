@@ -50,14 +50,18 @@ describe('canonical JSON schema container constraints', () => {
     expect(firstJsonSchemaFailure(JEV_DECISION_SCHEMA, { ...receipt, summary: '🙂'.repeat(2001) })).toBeDefined();
   });
 
-  test('schema text has no implicit regex input ceiling; synchronous compatibility still rejects expensive patterns', () => {
+  test('schema text has no implicit regex input ceiling; the synchronous validator fails a pattern only the isolated executor may run', () => {
     const schema = { type: 'string', pattern: '\\S' };
     expect(firstJsonSchemaFailure(schema, ' '.repeat(60_000))).toBeDefined();
     expect(firstJsonSchemaFailure(schema, '\n\t\u00a0')).toBeDefined();
     expect(firstJsonSchemaFailure(schema, ' '.repeat(60_000) + '🙂')).toBeUndefined();
     expect(firstJsonSchemaFailure(schema, 'long goal '.repeat(10_000))).toBeUndefined();
     expect(firstJsonSchemaFailure({ type: 'string', pattern: '^a+$' }, 'a'.repeat(60_000))).toBeUndefined();
-    expect(() => firstJsonSchemaFailure({ type: 'string', pattern: '(a+)+$' }, 'aaa')).toThrow('too expensive');
+    expect(firstJsonSchemaFailure({ type: 'string', pattern: '(a+)+$' }, 'aaa')).toBeDefined();
+    // The contract's id pattern repeats a fixed-width group: it runs natively and gives a result.
+    const idPattern = { type: 'string', pattern: '^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$' };
+    expect(firstJsonSchemaFailure(idPattern, 'x')).toBeDefined();
+    expect(firstJsonSchemaFailure(idPattern, 'abcdefgh-abcd-abcd-abcd-abcdefghijkl')).toBeUndefined();
   });
 
   test('canonical Jev receipt constraints reject duplicate lineage/evidence and non-reference bindings', () => {

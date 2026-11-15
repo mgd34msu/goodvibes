@@ -12,7 +12,11 @@ export interface HttpRetryPolicy extends BackoffPolicy {
   readonly retryOnStatuses?: readonly number[] | undefined;
   readonly retryOnMethods?: readonly string[] | undefined;
   readonly retryOnNetworkError?: boolean | undefined;
-  /** Per-method retry policy overrides keyed by method ID. */
+  /**
+   * Attempt and delay overrides keyed by method ID. They tune how a call that
+   * may be retried is retried; whether it may be retried at all is decided by
+   * its verb or its idempotent mark.
+   */
   readonly perMethodPolicy?: Readonly<Record<string, PerMethodRetryPolicy>> | undefined;
 }
 
@@ -23,6 +27,13 @@ export interface ResolvedHttpRetryPolicy extends ResolvedBackoffPolicy {
   /** Per-method retry policy overrides keyed by method ID. */
   readonly perMethodPolicy: Readonly<Record<string, PerMethodRetryPolicy>>;
 }
+
+/**
+ * Attempts for a call marked idempotent when neither the transport nor the
+ * call sets `maxAttempts`: its idempotency key makes a repeat safe, so a lost
+ * response or a transient failure is retried instead of failing the call.
+ */
+export const DEFAULT_IDEMPOTENT_MAX_ATTEMPTS = 3;
 
 export const DEFAULT_HTTP_RETRY_POLICY: ResolvedHttpRetryPolicy = {
   maxAttempts: 1,
@@ -93,18 +104,38 @@ export function getHttpRetryDelay(
   return computeBackoffDelay(attempt, policy);
 }
 
+const MUTATING_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * Whether a call may be repeated at all, the one rule: a call marked
+ * idempotent (the server recognises a repeat by its idempotency key or replay
+ * field) may be, whatever its verb; otherwise only a safe verb listed in
+ * `retryOnMethods`. A mutation that is not marked idempotent never is, since
+ * a repeat after a lost response would act twice.
+ */
+export function isRetryableCall(
+  method: string,
+  policy: ResolvedHttpRetryPolicy,
+  idempotent = false,
+): boolean {
+  if (idempotent) return true;
+  const verb = method.toUpperCase();
+  return !MUTATING_METHODS.has(verb) && policy.retryOnMethods.includes(verb);
+}
+
 export function isRetryableHttpStatus(
   method: string,
   status: number,
   policy: ResolvedHttpRetryPolicy,
+  idempotent = false,
 ): boolean {
-  return policy.retryOnMethods.includes(method.toUpperCase())
-    && policy.retryOnStatuses.includes(status);
+  return isRetryableCall(method, policy, idempotent) && policy.retryOnStatuses.includes(status);
 }
 
 export function isRetryableNetworkError(
   method: string,
   policy: ResolvedHttpRetryPolicy,
+  idempotent = false,
 ): boolean {
-  return policy.retryOnMethods.includes(method.toUpperCase()) && policy.retryOnNetworkError;
+  return isRetryableCall(method, policy, idempotent) && policy.retryOnNetworkError;
 }

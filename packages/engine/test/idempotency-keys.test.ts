@@ -3,15 +3,14 @@
  *
  * Covers:
  * 1. Idempotency-Key header present on POST/PUT/PATCH/DELETE when the call is
- *    marked idempotent or has a per-method retry policy, and ABSENT on a
- *    mutation that is neither (a key on a call the platform never retries could
- *    let a proxy retry be deduplicated)
+ *    marked idempotent, and ABSENT on a mutation that is not (a key on a call
+ *    the platform never retries could let a proxy retry be deduplicated)
  * 2. Idempotency-Key NOT present on GET/HEAD
  * 3. Header value is a valid UUID v4
  * 4. A fresh key is generated per request (no reuse)
- * 5. Non-idempotent mutations (POST without perMethodPolicy) NOT retried on 5xx
+ * 5. Non-idempotent mutations NOT retried on 5xx, even with the verb in retryOnMethods
  * 6. Idempotent GET methods ARE retried on 5xx per default policy
- * 7. perMethodPolicy allows retry for a specific mutating method
+ * 7. perMethodPolicy tunes the attempts of a call that may be retried
  * 8. generateIdempotencyKey() produces RFC 4122 v4 UUIDs
  */
 
@@ -138,22 +137,6 @@ describe('Idempotency-Key header: mutations not marked idempotent', () => {
     });
   }
 
-  test('a POST whose methodId has a perMethodPolicy sends a key, one without does not', async () => {
-    const { fetch, requests } = createCapturingFetch(() =>
-      new Response(JSON.stringify({ ok: true }), { status: 200 }),
-    );
-    const transport = createHttpJsonTransport({
-      baseUrl: 'https://api.example.com',
-      fetch,
-      retry: { maxAttempts: 1, perMethodPolicy: { 'sessions.create': { maxAttempts: 3 } } },
-    });
-    await transport.requestJson('/v1/a', { method: 'POST', body: {}, methodId: 'sessions.create' });
-    await transport.requestJson('/v1/b', { method: 'POST', body: {}, methodId: 'sessions.other' });
-    const withPolicy = requests[0]!.headers['idempotency-key'];
-    expect(typeof withPolicy).toBe('string');
-    expect(UUID_V4_RE.test(withPolicy!)).toBe(true);
-    expect(requests[1]!.headers['idempotency-key']).toBeUndefined();
-  });
 });
 
 describe('Idempotency-Key header: idempotent-by-nature methods', () => {
@@ -279,7 +262,7 @@ describe('perMethodPolicy override', () => {
 // ---------------------------------------------------------------------------
 
 describe('perMethodPolicy end-to-end via contract route', () => {
-  test('accounts.snapshot with perMethodPolicy retries 3 times on 503', async () => {
+  test('an idempotent call with a perMethodPolicy entry retries as many times as the entry says', async () => {
     let callCount = 0;
     const { fetch } = createCapturingFetch(() => {
       callCount += 1;
@@ -295,7 +278,6 @@ describe('perMethodPolicy end-to-end via contract route', () => {
         maxAttempts: 1,
         baseDelayMs: 0,
         retryOnStatuses: [503],
-        retryOnMethods: ['GET', 'POST'], // POST included, perMethodPolicy gating controls safety
         perMethodPolicy: {
           'accounts.snapshot': { maxAttempts: 3 },
         },
@@ -306,6 +288,7 @@ describe('perMethodPolicy end-to-end via contract route', () => {
       method: 'POST',
       body: {},
       methodId: 'accounts.snapshot',
+      idempotent: true,
     });
     expect(result.ok).toBe(true);
     expect(callCount).toBe(3);

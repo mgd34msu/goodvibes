@@ -2,8 +2,10 @@ import { ConfigurationError, ContractError, GoodVibesError, HttpStatusError, cre
 import { sleepWithSignal } from './backoff.js';
 import { mergeHeaderRecord, normalizeAuthToken, resolveHeaders, type AuthTokenResolver, type HeaderResolver } from './auth.js';
 import {
+  DEFAULT_IDEMPOTENT_MAX_ATTEMPTS,
   applyPerMethodPolicy,
   getHttpRetryDelay,
+  isRetryableCall,
   isRetryableHttpStatus,
   isRetryableNetworkError,
   resolveHttpRetryPolicy,
@@ -41,7 +43,7 @@ export function generateIdempotencyKey(): string {
   return createUuidV4();
 }
 
-/** Methods that are safe to send idempotency keys for (all non-GET requests). */
+/** Verbs that change state; only these carry an idempotency key. */
 const IDEMPOTENCY_KEY_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export interface HttpJsonTransportOptions {
@@ -75,18 +77,25 @@ export interface HttpJsonRequestOptions {
   readonly signal?: AbortSignal | undefined;
   readonly retry?: false | HttpRetryPolicy | undefined;
   /**
-   * Contract method / endpoint ID used to look up per-method retry policy overrides.
-   * Populated automatically by `invokeContractRoute`; callers outside the contract
-   * layer may also set this to opt into `perMethodPolicy` overrides.
+   * Contract method / endpoint ID used to look up `perMethodPolicy` attempt and
+   * delay overrides. Populated automatically by `invokeContractRoute`.
    */
   readonly methodId?: string | undefined;
   /**
-   * When `true`, this call is considered idempotent even if the HTTP verb is a
-   * mutating method (POST/PUT/PATCH/DELETE). Enables retry-on-5xx for the call.
-   * Populated automatically from `contract.idempotent`; takes lower precedence
-   * than an explicit `perMethodPolicy` override.
+   * When `true`, the server deduplicates repeats of this call by its
+   * `Idempotency-Key`, so the call is retried on a retryable status or a
+   * network failure whatever its verb: up to `maxAttempts` when the transport
+   * or the call sets one, else {@link DEFAULT_IDEMPOTENT_MAX_ATTEMPTS}. A
+   * mutating call gets one key, generated once and sent on every attempt.
+   * Populated automatically from the contract's `idempotent` mark.
    */
   readonly idempotent?: boolean | undefined;
+  /**
+   * The `Idempotency-Key` to send on a mutating call, for a caller that keeps
+   * its own key across calls (a dispatcher retrying the same work). Without
+   * it an idempotent call gets a generated key.
+   */
+  readonly idempotencyKey?: string | undefined;
 }
 
 export interface ResolvedContractRequest {
@@ -369,6 +378,27 @@ export async function requestJsonRaw<T>(
   return await readSuccessBody(response, url, init.method ?? 'GET') as T;
 }
 
+/**
+ * Gives `ctx.response` a Response built from the parsed body on first read, so
+ * a request whose middleware never reads it never serialises its body again.
+ * Assigning `ctx.response` replaces it as before.
+ */
+function defineLazyResponse(ctx: TransportContext, response: Response, body: unknown): void {
+  let built: Response | undefined;
+  Object.defineProperty(ctx, 'response', {
+    configurable: true,
+    enumerable: true,
+    get: () => built ??= new Response(response.status === 204 || response.status === 205 ? null : JSON.stringify(body), {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    }),
+    set: (value: Response | undefined) => {
+      Object.defineProperty(ctx, 'response', { configurable: true, enumerable: true, writable: true, value });
+    },
+  });
+}
+
 export function createHttpJsonTransport(options: HttpJsonTransportOptions): HttpJsonTransport {
   const baseUrl = options.baseUrl.trim();
   const fetchImpl = createFetch(options.fetchImpl, options.fetch);
@@ -390,25 +420,27 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
       : buildUrl(baseUrl, pathOrUrl);
     const method = requestOptions.method ?? (requestOptions.body === undefined ? 'GET' : 'POST');
     const methodId = requestOptions.methodId;
-    // Resolve idempotent flag from request options (set by contract-client from contract.idempotent).
-    const contractIdempotent = requestOptions.idempotent === true;
-    // Apply per-method retry policy override if a methodId is provided.
+    const idempotent = requestOptions.idempotent === true;
     const baseRetry = resolveHttpRetryPolicy(retryPolicy, requestOptions.retry);
-    const resolvedRetry = methodId ? applyPerMethodPolicy(baseRetry, methodId) : baseRetry;
-
-    // Determine idempotency: non-GET mutations without an explicit idempotent flag do NOT retry.
-    // This is enforced below by gating the retry check on method type.
-    const isMutatingMethod = IDEMPOTENCY_KEY_METHODS.has(method.toUpperCase());
+    const methodRetry = methodId ? applyPerMethodPolicy(baseRetry, methodId) : baseRetry;
+    // One rule decides whether a call may be repeated (isRetryableCall: a safe
+    // verb, or an idempotent mark); an idempotent call nobody gave an attempt
+    // count to gets a small default so a lost response does not fail it.
+    const attemptsUnset = retryPolicy?.maxAttempts === undefined
+      && requestOptions.retry === undefined
+      && (methodId === undefined || baseRetry.perMethodPolicy[methodId]?.maxAttempts === undefined);
+    const resolvedRetry = idempotent && attemptsUnset
+      ? { ...methodRetry, maxAttempts: DEFAULT_IDEMPOTENT_MAX_ATTEMPTS }
+      : methodRetry;
+    const mayRetry = isRetryableCall(method, resolvedRetry, idempotent);
     // pin traceparent once before the retry loop so all retries share one trace span.
     const pinnedTraceHeaders: Record<string, string> = {};
     await injectTraceparentAsync(pinnedTraceHeaders);
-    // only generate an idempotency key when the call is actually idempotent
-    // (contract-marked or has a per-method policy override). Sending keys on all
-    // mutating methods could cause duplicate suppression for a non-retried request
-    // if a proxy retries it outside the platform's control.
-    const hasPerMethodOverride = methodId !== undefined && baseRetry.perMethodPolicy[methodId] !== undefined;
-    const idempotencyKey = isMutatingMethod && (contractIdempotent || hasPerMethodOverride)
-      ? generateIdempotencyKey()
+    // A key goes only on a mutating call the server deduplicates (or one whose
+    // caller brought its own key): sending keys on every mutation could make a
+    // proxy's own retry of a non-idempotent request look like a replay.
+    const idempotencyKey = IDEMPOTENCY_KEY_METHODS.has(method.toUpperCase())
+      ? requestOptions.idempotencyKey ?? (idempotent ? generateIdempotencyKey() : undefined)
       : undefined;
 
     let attempt = 0;
@@ -435,7 +467,7 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
         mergedHeaders[k] = v;
       }
 
-      // Inject idempotency key for mutating methods.
+      // The same key on every attempt of this call; a caller-set header wins.
       if (idempotencyKey && !hasHeader(mergedHeaders, 'Idempotency-Key')) {
         mergedHeaders['Idempotency-Key'] = idempotencyKey;
       }
@@ -454,11 +486,10 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
         signal: requestOptions.signal,
       };
 
-      // stash parsed body here so the no-middleware fast path avoids re-parsing.
-      let _parsedBodyCache: unknown = undefined;
-
-      // Build the inner fetch that middleware wraps (and also used directly without middleware).
-      const innerFetch = async (c: TransportContext): Promise<Response> => {
+      // The fetch that middleware wraps, also called directly without middleware.
+      // The parsed body on `ctx.parsedBody` is the one carrier of the result;
+      // `ctx.response` is built from it only if a middleware reads it.
+      const innerFetch = async (c: TransportContext): Promise<void> => {
         const init: RequestInit = {
           method: c.method,
           credentials: 'include',
@@ -477,17 +508,8 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
           throw createTransportError(response.status, c.url, c.method, await readJsonBody(response), retryAfterMs);
         }
         const body = await readSuccessBody(response, c.url, c.method);
-        // stash the already-parsed body so the no-middleware fast path can
-        // read it directly without a JSON.stringify → JSON.parse round-trip.
-        _parsedBodyCache = body;
-        // Also expose on ctx so middleware callers can read parsedBody directly.
         ctx.parsedBody = body;
-        // Return synthetic Response carrying parsed body so callers (middleware) can .json().
-        return new Response(response.status === 204 || response.status === 205 ? null : JSON.stringify(body), {
-          status: response.status,
-          statusText: response.statusText,
-          headers: response.headers,
-        });
+        if (middlewareChain.length > 0) defineLazyResponse(ctx, response, body);
       };
 
       try {
@@ -496,7 +518,14 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
           const composed = composeMiddleware(middlewareChain, innerFetch);
           await composed(ctx);
           if (ctx.error) throw ctx.error;
-          if (!ctx.response) {
+          // The parsed body when the real fetch (or a middleware) set one; a
+          // middleware that answered with its own Response is read from it.
+          let result: T;
+          if (ctx.parsedBody !== undefined) {
+            result = ctx.parsedBody as T;
+          } else if (ctx.response) {
+            result = await ctx.response.json() as T;
+          } else {
             throw new GoodVibesError('HTTP middleware chain completed without producing a response.', {
               category: 'protocol',
               source: 'transport',
@@ -505,8 +534,6 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
               method,
             });
           }
-          // use parsedBody stashed by innerFetch to avoid a JSON round-trip.
-          const result = (ctx.parsedBody !== undefined ? ctx.parsedBody : await ctx.response.json()) as T;
           invokeTransportObserver(() => observer?.onTransportActivity?.({
             direction: 'recv',
             url,
@@ -516,10 +543,9 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
           return result;
         }
 
-        // No-middleware fast path, directly invoke innerFetch with ctx.
+        // No middleware: the parsed body is the result, nothing else is built.
         await innerFetch(ctx);
-        // use the cached parsed body (set by innerFetch) to avoid JSON round-trip.
-        const result = _parsedBodyCache as T;
+        const result = ctx.parsedBody as T;
         // Notify observer after a successful response.
         invokeTransportObserver(() => observer?.onTransportActivity?.({
           direction: 'recv',
@@ -561,11 +587,6 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
         const recoverable = typeof wrappedError === 'object' && wrappedError !== null && 'recoverable' in wrappedError
           ? (wrappedError as { readonly recoverable?: unknown }).recoverable
           : undefined;
-        // Mutating methods (POST/PUT/PATCH/DELETE) without idempotent contract mark:
-        // do NOT retry on 5xx to avoid duplicate side effects.
-        // Precedence: explicit perMethodPolicy > contract.idempotent flag > HTTP-verb default.
-        const hasPerMethodOverride = methodId !== undefined && baseRetry.perMethodPolicy[methodId] !== undefined;
-        const canRetry = !isMutatingMethod || hasPerMethodOverride || contractIdempotent;
         // A reply whose own body says it is final (`recoverable: false`, or a billing
         // limit) is not retried however transient its status looks: a 429 for an
         // exhausted budget will not clear by asking again. Only the body counts here,
@@ -576,9 +597,9 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
         const declaredFinal = typeof replyBody === 'object' && replyBody !== null
           && ((replyBody as { readonly recoverable?: unknown }).recoverable === false
             || (replyBody as { readonly category?: unknown }).category === 'billing');
-        const shouldRetry = canRetry && !declaredFinal && attempt < resolvedRetry.maxAttempts && (
-          (typeof status === 'number' && status > 0 && isRetryableHttpStatus(method, status, resolvedRetry))
-          || (typeof status === 'number' && status === 0 && recoverable !== false && isRetryableNetworkError(method, resolvedRetry))
+        const shouldRetry = mayRetry && !declaredFinal && attempt < resolvedRetry.maxAttempts && (
+          (typeof status === 'number' && status > 0 && isRetryableHttpStatus(method, status, resolvedRetry, idempotent))
+          || (typeof status === 'number' && status === 0 && recoverable !== false && isRetryableNetworkError(method, resolvedRetry, idempotent))
         );
         if (!shouldRetry) {
           throw wrappedError;

@@ -24,6 +24,7 @@ import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes-j
 import { getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveNativeHostCredential } from './client/native-host-credential.ts';
+import { pairLocalTuiHostAutomatically } from './tui-host-pairing.ts';
 import '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/operator-read-client';
 import type { NativeWorkLedgerSelectionReader } from './native-work-ledger.ts';
 import type { CommandRegistry } from '../input/command-registry.ts';
@@ -44,6 +45,10 @@ export function createNativeWorkLedgerHost(deps: {
   let generation = 0;
   let selectedLocation = '';
   let discoveryReason = '';
+  // Why the automatic local pairing did not give this terminal a credential, shown
+  // in place of the generic "no device credential" until a credential exists.
+  let localPairingReason = '';
+  let localPairing: Promise<void> | undefined;
   // Capture endpoint, home, store generation and token together. Never combine
   // a selection from one credential with a second independent token read.
   const captureConnection = () => {
@@ -81,7 +86,7 @@ export function createNativeWorkLedgerHost(deps: {
   };
   const unavailable = (capture: ReturnType<typeof captureSelection>) =>
     !capture.credential.available
-      ? { available: false as const, identity: capture.identity, reason: capture.credential.reason }
+      ? { available: false as const, identity: capture.identity, reason: localPairingReason || capture.credential.reason }
       : !capture.projectId
         ? {
             available: false as const,
@@ -214,7 +219,16 @@ export function createNativeWorkLedgerHost(deps: {
       capture?.(readSelection().identity);
       return true;
     };
+    if (!captureSelection().credential.available) {
+      // The owner's own machine needs no pairing step: the first native action creates
+      // this terminal's device credential (one request), then every later one uses it.
+      localPairing ??= pairLocalTuiHostAutomatically({ configManager: deps.configManager, homeDirectory: deps.homeDirectory })
+        .then((result) => { localPairingReason = result && result.status !== 'paired' ? result.message : ''; })
+        .finally(() => { localPairing = undefined; });
+      await localPairing;
+    }
     const before = captureSelection();
+    if (before.credential.available) localPairingReason = '';
     if (before.projectId || !before.credential.available) return ready();
     const controller = new AbortController();
     const operator = createOperatorApiClient({

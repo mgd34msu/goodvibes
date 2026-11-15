@@ -504,10 +504,6 @@ export function normalizeChannelRenderEventFromRuntime(
         toolOutcome: 'failed',
         summary: payload.error,
       })];
-    case 'PLAN_STRATEGY_SELECTED':
-      return [renderEvent('plan', 'progress', envelope, {
-        text: `Selected ${payload.selected} (${payload.reasonCode})${payload.inputs.taskDescription ? ` for ${payload.inputs.taskDescription}` : ''}`,
-      })];
     case 'PLAN_STRATEGY_OVERRIDDEN':
       return [renderEvent('plan', 'progress', envelope, {
         text: payload.strategy ? `Overridden to ${payload.strategy}` : 'Planner override cleared',
@@ -544,9 +540,6 @@ export function normalizeChannelRenderEventFromRuntime(
     case 'COMPACTION_REACTIVE':
     case 'COMPACTION_DONE':
     case 'COMPACTION_FAILED':
-    case 'COMPACTION_RESUME_REPAIR':
-    case 'COMPACTION_QUALITY_SCORE':
-    case 'COMPACTION_STRATEGY_SWITCH':
       return [renderEvent(payload.type === 'COMPACTION_FAILED' ? 'error' : 'compaction', 'progress', envelope, {
         ...(payload.type === 'COMPACTION_FAILED' ? { audience: 'operator' as const } : {}),
         text: payload.type.replace(/^COMPACTION_/, '').toLowerCase().replace(/_/g, ' '),

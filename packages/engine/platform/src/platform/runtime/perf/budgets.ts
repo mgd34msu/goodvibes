@@ -88,16 +88,6 @@ export const DEFAULT_BUDGETS: PerfBudget[] = [
       'Sustained violations indicate the cancellation path is blocked or too slow.',
   },
   {
-    name: 'SLO: Reconnect Recovery (p95)',
-    metric: 'slo.reconnect_recovery.p95',
-    threshold: 10000,
-    unit: 'ms',
-    tolerance: 3,
-    description:
-      'p95 duration from TRANSPORT_RECONNECTING to TRANSPORT_CONNECTED must be under 10000ms. ' +
-      'Sustained violations indicate degraded transport reliability.',
-  },
-  {
     name: 'SLO: Gate Decision (p95)',
     metric: 'slo.permission_decision.p95',
     threshold: 2500,

@@ -16,7 +16,7 @@
  *
  * This test drives REAL envelopes through a REAL RuntimeEventBus, using the
  * real typed emitters (emitTurnSubmitted, emitAgentSpawning/Completed,
- * emitAutomationRunQueued/Completed) exactly as the orchestrator/agents/
+ * emitAutomationRunStarted/Completed) exactly as the orchestrator/agents/
  * automation subsystems call them, never a hand-shaped `{ event: ... }`
  * stub, which would pass against the bug just as happily as against the fix.
  */
@@ -25,7 +25,7 @@ import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.t
 import type { EmitterContext } from '../platform/src/platform/runtime/emitters/index.ts';
 import { emitTurnSubmitted, emitTurnCompleted } from '../platform/src/platform/runtime/emitters/turn.ts';
 import { emitAgentSpawning, emitAgentCompleted } from '../platform/src/platform/runtime/emitters/agents.ts';
-import { emitAutomationRunQueued, emitAutomationRunCompleted } from '../platform/src/platform/runtime/emitters/automation.ts';
+import { emitAutomationRunStarted, emitAutomationRunCompleted } from '../platform/src/platform/runtime/emitters/automation.ts';
 import { bindPowerWorkSignals, type PowerWorkSignalBus } from '../platform/src/platform/power/work-signals.ts';
 import type { PowerManager } from '../platform/src/platform/power/manager.ts';
 
@@ -98,14 +98,14 @@ describe('bindPowerWorkSignals over a REAL RuntimeEventBus + REAL envelopes', ()
     expect(releases).toEqual(['agentId:a-9']);
   });
 
-  test('a real AUTOMATION_RUN_QUEUED/AUTOMATION_RUN_COMPLETED pair holds and releases by runId', async () => {
+  test('a real AUTOMATION_RUN_STARTED/AUTOMATION_RUN_COMPLETED pair holds and releases by runId', async () => {
     const bus = new RuntimeEventBus();
     const { manager, holds, releases } = fakeManager();
     bindOverRealBus(bus, manager);
 
-    emitAutomationRunQueued(bus, ctx, { jobId: 'job-1', runId: 'run-7', scheduledAt: Date.now(), forced: false });
+    emitAutomationRunStarted(bus, ctx, { jobId: 'job-1', runId: 'run-7', startedAt: Date.now(), attempt: 1 });
     await settle();
-    expect(holds).toEqual([{ id: 'runId:run-7', reason: 'scheduled run run-7 is due' }]);
+    expect(holds).toEqual([{ id: 'runId:run-7', reason: 'scheduled run run-7 is running' }]);
 
     emitAutomationRunCompleted(bus, ctx, {
       jobId: 'job-1', runId: 'run-7', startedAt: Date.now(), completedAt: Date.now(), durationMs: 5, outcome: 'success',

@@ -25,15 +25,7 @@ function permissionMachineStateForEvent(
     case 'GATE_REQUESTED':
       return 'check_boundary';
     case 'BOUNDARY_CHECKED':
-      return event.passed ? 'collect_rules' : 'decision_emitted';
-    case 'RULES_COLLECTED':
-      return 'normalize_input';
-    case 'INPUT_NORMALIZED':
-      return 'evaluate_policy';
-    case 'POLICY_EVALUATED':
-      return 'evaluate_session_override';
-    case 'SESSION_OVERRIDE_EVALUATED':
-      return 'read_stakes';
+      return event.passed ? 'read_stakes' : 'decision_emitted';
     case 'STAKES_READ':
       return 'evaluate_preset';
     case 'PRESET_EVALUATED':
@@ -72,8 +64,6 @@ export function updateSessionState(
       return { ...base, compactionState: 'idle', lastCompactedAt: now(), compactionError: undefined };
     case 'COMPACTION_FAILED':
       return { ...base, compactionState: 'failed', compactionError: event.error };
-    case 'COMPACTION_RESUME_REPAIR':
-      return { ...base, wasRepaired: event.repaired, recoveryState: event.safeToResume ? 'ready' : domain.recoveryState };
     case 'COMPACTION_RECEIPT':
       // Mandatory receipt: record the completed compaction only when the
       // compacted context was actually applied; a kept-original/failed receipt
@@ -81,9 +71,6 @@ export function updateSessionState(
       return event.outcome === 'applied'
         ? { ...base, compactionState: 'idle', lastCompactedAt: now(), compactionError: undefined }
         : base;
-    case 'COMPACTION_QUALITY_SCORE':
-    case 'COMPACTION_STRATEGY_SWITCH':
-      return base;
   }
 }
 
@@ -103,10 +90,6 @@ export function updatePermissionState(
       const inFlightCallIds = withInFlightCall(domain, event.callId);
       return { ...base, inFlightCallIds, awaitingDecision: true, decisionMachineState: permissionMachineStateForEvent(event), totalChecks: domain.totalChecks + 1 };
     }
-    case 'RULES_COLLECTED':
-    case 'INPUT_NORMALIZED':
-    case 'POLICY_EVALUATED':
-    case 'SESSION_OVERRIDE_EVALUATED':
     case 'BOUNDARY_CHECKED':
     case 'STAKES_READ':
     case 'PRESET_EVALUATED': {
@@ -231,9 +214,6 @@ export function updateTaskState(domain: TaskDomainState, event: TaskEvent): Task
     case 'TASK_BLOCKED':
       tasks.set(event.taskId, { ...task, status: 'blocked', error: event.reason });
       break;
-    case 'TASK_PROGRESS':
-      tasks.set(event.taskId, { ...task, progress: event.message ?? task.progress });
-      break;
     case 'TASK_COMPLETED':
       tasks.set(event.taskId, { ...task, status: 'completed', endedAt: timestamp, error: undefined, result: { durationMs: event.durationMs } });
       break;
@@ -303,8 +283,6 @@ function agentStatusForEvent(event: AgentEvent, existing?: AgentLifecycleState):
       return 'awaiting_message';
     case 'AGENT_AWAITING_TOOL':
       return 'awaiting_tool';
-    case 'AGENT_FINALIZING':
-      return 'finalizing';
     case 'AGENT_COMPLETED':
       return 'completed';
     case 'AGENT_FAILED':

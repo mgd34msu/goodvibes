@@ -3,7 +3,6 @@
  *
  * Tracks the full agent state machine:
  * AGENT_SPAWNING → AGENT_RUNNING → AGENT_AWAITING_MESSAGE → AGENT_AWAITING_TOOL
- * → AGENT_FINALIZING
  * Terminal states: AGENT_COMPLETED | AGENT_FAILED | AGENT_CANCELLED
  *
  * Agent spans are root spans (new trace per agent) or child of a turn span

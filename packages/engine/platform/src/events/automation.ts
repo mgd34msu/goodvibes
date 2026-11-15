@@ -34,13 +34,6 @@ export type AutomationEvent =
       reason: string;
     }
   | {
-      type: 'AUTOMATION_RUN_QUEUED';
-      jobId: string;
-      runId: string;
-      scheduledAt: number;
-      forced: boolean;
-    }
-  | {
       type: 'AUTOMATION_RUN_STARTED';
       jobId: string;
       runId: string;
@@ -74,19 +67,6 @@ export type AutomationEvent =
       failedAt: number;
       error: string;
       retryable: boolean;
-    }
-  | {
-      type: 'AUTOMATION_RUN_CANCELLED';
-      jobId: string;
-      runId: string;
-      cancelledAt: number;
-      reason: string;
-    }
-  | {
-      type: 'AUTOMATION_SCHEDULE_ERROR';
-      jobId: string;
-      scheduleText: string;
-      error: string;
     }
   | {
       type: 'AUTOMATION_JOB_AUTO_DISABLED';

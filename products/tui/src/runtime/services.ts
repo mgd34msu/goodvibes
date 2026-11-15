@@ -92,7 +92,8 @@ import { createViewPanelAdapter } from '../views/view-panel-adapter.ts';
 import { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
 import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
 import { SessionChangeTracker } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { ApiTokenAuditor, UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { createConfiguredTokenAuditor, startPairingTokenAudit } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { createContractIntake, createContractOperatorService } from '@goodvibes-jev/engine/platform/platform/contract';
 import { KeybindingsManager } from '../input/keybindings.ts';
@@ -114,6 +115,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { WorkspaceTrustManager, trustGatedApprovalRaiser, type WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { ensureConfiguredModelIsRoutable } from '@goodvibes-jev/engine/platform/platform/providers';
+import { join } from 'node:path';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { createDaemonVerbCaller } from './client/operator-endpoint.ts';
 import { createTerminalApprovalUpdateSubscriber } from './client/approval-updates.ts';
@@ -509,7 +511,10 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // MCP tools without either and hide sandbox sessions from the workflow.
   const remoteRunnerRegistry = new RemoteRunnerRegistry(agentManager, workingDirectory);
   const remoteSupervisor = new RemoteSupervisor(remoteRunnerRegistry);
-  const tokenAuditor = new ApiTokenAuditor({ managed: false, featureFlags });
+  // Audits the paired devices under the security.tokenAudit settings; findings reach the
+  // security domain, and the Security screen reads the last audit of record.
+  const tokenAuditor = createConfiguredTokenAuditor({ configManager, featureFlags, runtimeBus: options.runtimeBus });
+  disposalScope.registry.add('pairing token audit', startPairingTokenAudit(pairingTokens, tokenAuditor));
   const componentHealthMonitor = new ComponentHealthMonitor();
   const healthSystem = createWiredHealthSystem(options.runtimeBus);
   disposalScope.registry.add('runtime health event bridge', bindHealthDomainEvents(options.runtimeBus, healthSystem.wiring));
@@ -595,7 +600,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // Started on adoption (bootstrap.ts), released on disposal.
   const conversationRewindHost = createConversationRewindHost({
     verbs,
-    port: createSessionConversationRewindPort(),
+    // Undo snapshots beside the sessions, so a rewind can still be undone after a restart.
+    port: createSessionConversationRewindPort({ undoDir: join(surface.sessionsDir, 'rewind-undo') }),
     hosts: hasSessionConversation,
     label: 'the terminal app',
     surface,
@@ -621,9 +627,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       !pauseController.isPaused('memory-consolidation') &&
       admitExpensiveWork('memory consolidation').allowed,
     snapshotTick: () => storeSnapshotScheduler.tick(),
-    heartbeat: async () => {
-      await automationManager.triggerHeartbeat({ source: 'wake-catchup' });
-    },
+    // Routines are kept and run by the daemon (/schedule is its client), so a
+    // wake has no local routine to catch up.
+    heartbeat: async () => {},
     powerSeam: options.powerSeam,
   });
 
@@ -634,8 +640,6 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     pauseController,
     jobIds: MEMORY_BACKGROUND_JOB_IDS,
     receiptPath: shellPaths.resolveProjectPath('tui', 'memory', 'tripwire-receipt.json'),
-    knowledgeStores: [knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore],
-    sessionBroker,
     onTripwireShutdown: async () => {
       await storeSnapshotScheduler.snapshotAllAsync('tripwire');
     },

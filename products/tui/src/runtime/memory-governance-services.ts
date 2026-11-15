@@ -39,13 +39,6 @@ export interface MemoryGovernanceServicesDeps {
   readonly jobIds: readonly string[];
   /** Where the tripwire receipt is written, so the pressure can be read after the fact. */
   readonly receiptPath: string;
-  /**
-   * Not trimmed: the knowledge job-run history is already capped on write and
-   * trimming it frees no resident memory. Accepted until the caller stops passing it.
-   */
-  readonly knowledgeStores?: unknown;
-  /** Not trimmed: the broker's trim only retires abandoned inputs and frees nothing. */
-  readonly sessionBroker?: unknown;
   /** Store snapshots taken when the tripwire fires, so a leak that ends in a kill loses nothing. */
   readonly onTripwireShutdown?: (() => Promise<void> | void) | undefined;
 }

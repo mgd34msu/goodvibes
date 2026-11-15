@@ -99,55 +99,6 @@ export function emitCompactionDone(
   );
 }
 
-/** Emit COMPACTION_RESUME_REPAIR after a session resume repair pipeline run. */
-export function emitCompactionResumeRepair(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { sessionId: string; repaired: boolean; actionsCount: number; safeToResume: boolean },
-): void {
-  bus.emit(
-    'compaction',
-    createEventEnvelope(
-      'COMPACTION_RESUME_REPAIR',
-      { type: 'COMPACTION_RESUME_REPAIR', ...data },
-      ctx,
-    ),
-  );
-}
-
-/** Emit COMPACTION_QUALITY_SCORE after scoring a strategy run. */
-export function emitCompactionQualityScore(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: {
-    sessionId: string;
-    strategy: string;
-    score: number;
-    grade: string;
-    compressionRatio: number;
-    retentionScore: number;
-    isLowQuality: boolean;
-    description: string;
-  },
-): void {
-  bus.emit(
-    'compaction',
-    createEventEnvelope('COMPACTION_QUALITY_SCORE', { type: 'COMPACTION_QUALITY_SCORE', ...data }, ctx),
-  );
-}
-
-/** Emit COMPACTION_STRATEGY_SWITCH when auto-escalation changes strategy due to low quality. */
-export function emitCompactionStrategySwitch(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { sessionId: string; fromStrategy: string; toStrategy: string; reason: string; score: number },
-): void {
-  bus.emit(
-    'compaction',
-    createEventEnvelope('COMPACTION_STRATEGY_SWITCH', { type: 'COMPACTION_STRATEGY_SWITCH', ...data }, ctx),
-  );
-}
-
 /** Emit COMPACTION_FAILED when a compaction lifecycle run fails. */
 export function emitCompactionFailed(
   bus: RuntimeEventBus,

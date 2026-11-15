@@ -323,10 +323,6 @@ function transportStateForEvent(event: TransportEvent): AcpTransportState | Daem
       return 'connected';
     case 'TRANSPORT_SYNCING':
       return 'syncing';
-    case 'TRANSPORT_DEGRADED':
-      return 'degraded';
-    case 'TRANSPORT_RECONNECTING':
-      return 'reconnecting';
     case 'TRANSPORT_DISCONNECTED':
       return 'disconnected';
     case 'TRANSPORT_TERMINAL_FAILURE':
@@ -411,16 +407,14 @@ export function updateTransportState(
             : event.type === 'TRANSPORT_DISCONNECTED' || event.type === 'TRANSPORT_TERMINAL_FAILURE'
               ? false
               : daemon.isRunning,
-        reconnectAttempts: event.type === 'TRANSPORT_RECONNECTING' ? event.attempt : daemon.reconnectAttempts,
+        reconnectAttempts: daemon.reconnectAttempts,
         lastConnectedAt: event.type === 'TRANSPORT_CONNECTED' ? now() : daemon.lastConnectedAt,
         lastError:
-          event.type === 'TRANSPORT_DEGRADED'
+          event.type === 'TRANSPORT_DISCONNECTED'
             ? event.reason
-            : event.type === 'TRANSPORT_DISCONNECTED'
-              ? event.reason
-              : event.type === 'TRANSPORT_TERMINAL_FAILURE'
-                ? event.error
-                : daemon.lastError,
+            : event.type === 'TRANSPORT_TERMINAL_FAILURE'
+              ? event.error
+              : daemon.lastError,
       }
     : daemon;
   return { acp: nextAcp, daemon: nextDaemon };

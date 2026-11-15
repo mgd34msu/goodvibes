@@ -61,7 +61,7 @@ describe('severity and error-ness by name', () => {
   });
 
   test('degraded, blocked, refused and over-budget states warn', () => {
-    for (const type of ['MCP_DEGRADED', 'TASK_BLOCKED', 'CONTROL_PLANE_AUTH_REJECTED', 'WORKSPACE_SWAP_REFUSED', 'BUDGET_EXCEEDED_TOKENS', 'CONTRACT_STALLED']) {
+    for (const type of ['MCP_DEGRADED', 'TASK_BLOCKED', 'WORKSPACE_SWAP_REFUSED', 'BUDGET_EXCEEDED_TOKENS', 'CONTRACT_STALLED']) {
       expect({ type, error: isErrorEventType(type), severity: inferSeverity(type) }).toEqual({ type, error: false, severity: 'warn' });
     }
   });

@@ -193,13 +193,6 @@ export function updateConversationState(
         currentTurnId: event.turnId,
         turnState: 'post_hooks',
       };
-    case 'POST_HOOKS_DONE':
-      if (!isCurrentTurnEvent(domain, event.turnId) || domain.turnState !== 'post_hooks') return domain;
-      return {
-        ...updateDomainMetadata(domain, source),
-        currentTurnId: event.turnId,
-        turnState: 'post_hooks',
-      };
     case 'TOOL_RECONCILED':
       if (!isCurrentTurnEvent(domain, event.turnId) || isTerminalTurnState(domain.turnState)) return domain;
       return {

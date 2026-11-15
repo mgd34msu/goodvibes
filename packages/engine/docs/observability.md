@@ -316,13 +316,12 @@ const providerStatus = selectDomainHealth(state, 'providerHealth');
 
 ### SLO collector
 
-`SloCollector` measures four end-to-end SLO metrics from the runtime event stream:
+`SloCollector` measures three end-to-end SLO metrics from the runtime event stream:
 
 | SLO Metric | Key |
 |---|---|
 | Turn start latency | `slo.turn_start.p95` |
 | Cancel latency | `slo.cancel.p95` |
-| Reconnect recovery | `slo.reconnect_recovery.p95` |
 | Permission decision | `slo.permission_decision.p95` |
 
 Metrics are computed as p95 over a rolling 200-sample window.

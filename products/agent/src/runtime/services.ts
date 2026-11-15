@@ -190,7 +190,8 @@ import { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmar
 import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { CrossSessionTaskRegistry } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { ApiTokenAuditor } from '@goodvibes-jev/engine/platform/platform/security';
+import type { ApiTokenAuditor } from '@goodvibes-jev/engine/platform/platform/security';
+import { createConfiguredTokenAuditor } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
@@ -1510,18 +1511,10 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   });
   const remoteRunnerRegistry = new RemoteRunnerRegistry(agentManager);
   const remoteSupervisor = new RemoteSupervisor(remoteRunnerRegistry);
-  // featureFlags is REQUIRED here in practice, even though the platform types it
-  // optional. isFeatureGateEnabled(null, ...) is permissive by design, so
-  // omitting it did not disable managed blocking when
-  // security.tokenAudit.enabled is turned off. Threading it preserves current
-  // effective behaviour rather than changing it: managed is hardcoded false
-  // here (advisory reporting only; excess-scope/overdue tokens are reported,
-  // never blocked, regardless of this flag, see isBlocked()'s
-  // `this._config.managed && this._managedBlockingEnabled()` guard), the
-  // config default for security.tokenAudit.enabled is true, and the
-  // token-scope-rotation-audit flag's own defaultState is 'enabled', so with
-  // nothing configured the gate reads exactly as before either way.
-  const tokenAuditor = new ApiTokenAuditor({ managed: false, featureFlags });
+  // Built like every product's auditor: managed mode and rotation cadence from the
+  // security.tokenAudit settings, findings on the security domain. The paired devices
+  // are the daemon's and are audited there; this one audits what is registered here.
+  const tokenAuditor = createConfiguredTokenAuditor({ configManager, featureFlags, runtimeBus: options.runtimeBus });
   const componentHealthMonitor = new ComponentHealthMonitor();
   const healthSystem = createWiredHealthSystem(options.runtimeBus);
   disposalScope.registry.add('runtime health event bridge', bindHealthDomainEvents(options.runtimeBus, healthSystem.wiring));

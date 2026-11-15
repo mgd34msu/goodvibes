@@ -11,8 +11,6 @@ export type TaskEvent =
   | { type: 'TASK_STARTED'; taskId: string; agentId?: string }
   /** Task is blocked waiting on a dependency or resource. */
   | { type: 'TASK_BLOCKED'; taskId: string; agentId?: string; reason: string }
-  /** Task has made measurable progress. */
-  | { type: 'TASK_PROGRESS'; taskId: string; agentId?: string; progress: number; message?: string }
   /** Task completed successfully. */
   | { type: 'TASK_COMPLETED'; taskId: string; agentId?: string; durationMs: number }
   /** Task failed with an error. */

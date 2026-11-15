@@ -96,15 +96,6 @@ export function emitCompanionPairVerified(
   bus.emit('security', securityEvent('COMPANION_PAIR_VERIFIED', data, ctx));
 }
 
-/** Emit COMPANION_TOKEN_ROTATED when a companion token is rotated. */
-export function emitCompanionTokenRotated(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { newTokenId: string; clientIp: string },
-): void {
-  bus.emit('security', securityEvent('COMPANION_TOKEN_ROTATED', data, ctx));
-}
-
 /** Emit COMPANION_TOKEN_REVOKED when a companion token is revoked. */
 export function emitCompanionTokenRevoked(
   bus: Pick<RuntimeEventBus, 'emit'>,

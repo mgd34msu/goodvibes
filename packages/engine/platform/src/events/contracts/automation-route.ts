@@ -59,15 +59,6 @@ export function validateAutomationJobDisabled(v: unknown): ContractResult {
   ]);
 }
 
-export function validateAutomationRunQueued(v: unknown): ContractResult {
-  return validateEventFields('AUTOMATION_RUN_QUEUED', v, [
-    { key: 'jobId', kind: 'string' },
-    { key: 'runId', kind: 'string' },
-    { key: 'scheduledAt', kind: 'number' },
-    { key: 'forced', kind: 'boolean' },
-  ]);
-}
-
 export function validateAutomationRunStarted(v: unknown): ContractResult {
   return validateEventFields('AUTOMATION_RUN_STARTED', v, [
     { key: 'jobId', kind: 'string' },
@@ -96,23 +87,6 @@ export function validateAutomationRunFailed(v: unknown): ContractResult {
     { key: 'failedAt', kind: 'number' },
     { key: 'error', kind: 'string' },
     { key: 'retryable', kind: 'boolean' },
-  ]);
-}
-
-export function validateAutomationRunCancelled(v: unknown): ContractResult {
-  return validateEventFields('AUTOMATION_RUN_CANCELLED', v, [
-    { key: 'jobId', kind: 'string' },
-    { key: 'runId', kind: 'string' },
-    { key: 'cancelledAt', kind: 'number' },
-    { key: 'reason', kind: 'string' },
-  ]);
-}
-
-export function validateAutomationScheduleError(v: unknown): ContractResult {
-  return validateEventFields('AUTOMATION_SCHEDULE_ERROR', v, [
-    { key: 'jobId', kind: 'string' },
-    { key: 'scheduleText', kind: 'string' },
-    { key: 'error', kind: 'string' },
   ]);
 }
 
@@ -214,14 +188,6 @@ export function validateControlPlaneAuthGranted(v: unknown): ContractResult {
     { key: 'principalId', kind: 'string' },
     { key: 'principalKind', kind: 'enum', values: CONTROL_PLANE_PRINCIPAL_KINDS },
     { key: 'scopes', kind: 'string[]' },
-  ]);
-}
-
-export function validateControlPlaneAuthRejected(v: unknown): ContractResult {
-  return validateEventFields('CONTROL_PLANE_AUTH_REJECTED', v, [
-    { key: 'clientId', kind: 'string' },
-    { key: 'principalId', kind: 'string' },
-    { key: 'reason', kind: 'string' },
   ]);
 }
 

@@ -2,9 +2,8 @@
  * Gate decision span helpers.
  *
  * Tracks the gate's pipeline for one call:
- * GATE_REQUESTED, BOUNDARY_CHECKED, RULES_COLLECTED, INPUT_NORMALIZED,
- * POLICY_EVALUATED, SESSION_OVERRIDE_EVALUATED, STAKES_READ,
- * PRESET_EVALUATED, DECISION_EMITTED.
+ * GATE_REQUESTED, BOUNDARY_CHECKED, STAKES_READ, PRESET_EVALUATED,
+ * DECISION_EMITTED.
  *
  * One span per gate decision. Child of the active tool span
  * when a parentSpanId is supplied.

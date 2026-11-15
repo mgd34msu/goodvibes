@@ -162,15 +162,6 @@ export function emitToolsDone(
   bus.emit('turn', createEventEnvelope('TOOLS_DONE', { type: 'TOOLS_DONE', ...data }, ctx));
 }
 
-/** Emit POST_HOOKS_DONE when post-processing hooks have completed. */
-export function emitPostHooksDone(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { turnId: string }
-): void {
-  bus.emit('turn', createEventEnvelope('POST_HOOKS_DONE', { type: 'POST_HOOKS_DONE', ...data }, ctx));
-}
-
 /**
  * Emit TURN_COMPLETED when the turn finishes successfully.
  *

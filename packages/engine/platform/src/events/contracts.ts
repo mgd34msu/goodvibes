@@ -106,15 +106,12 @@ const EVENT_RULES: ReadonlyArray<readonly [EventTypeName, readonly FieldSpec[]]>
   rules('AUTOMATION_JOB_UPDATED', { jobId: str, changedFields: strs }),
   rules('AUTOMATION_JOB_ENABLED', { jobId: str }),
   rules('AUTOMATION_JOB_DISABLED', { jobId: str, reason: str }),
-  rules('AUTOMATION_RUN_QUEUED', { jobId: str, runId: str, scheduledAt: num, forced: bool }),
   rules('AUTOMATION_RUN_STARTED', { jobId: str, runId: str, startedAt: num, attempt: num }),
   rules('AUTOMATION_RUN_COMPLETED', {
     jobId: str, runId: str, startedAt: num, completedAt: num, durationMs: num,
     outcome: oneOf(AUTOMATION_RUN_OUTCOMES), error: optStr, retryable: optBool,
   }),
   rules('AUTOMATION_RUN_FAILED', { jobId: str, runId: str, startedAt: num, failedAt: num, error: str, retryable: bool }),
-  rules('AUTOMATION_RUN_CANCELLED', { jobId: str, runId: str, cancelledAt: num, reason: str }),
-  rules('AUTOMATION_SCHEDULE_ERROR', { jobId: str, scheduleText: str, error: str }),
   rules('AUTOMATION_JOB_AUTO_DISABLED', { jobId: str, reason: str, consecutiveFailures: num }),
   // route
   rules('ROUTE_BINDING_CREATED', { bindingId: str, surfaceKind: routeSurface, externalId: str, targetKind: oneOf(ROUTE_TARGET_KINDS), targetId: str }),
@@ -129,7 +126,6 @@ const EVENT_RULES: ReadonlyArray<readonly [EventTypeName, readonly FieldSpec[]]>
   rules('CONTROL_PLANE_SUBSCRIPTION_CREATED', { clientId: str, subscriptionId: str, topics: strs }),
   rules('CONTROL_PLANE_SUBSCRIPTION_DROPPED', { clientId: str, subscriptionId: str, reason: str }),
   rules('CONTROL_PLANE_AUTH_GRANTED', { clientId: str, principalId: str, principalKind: oneOf(CONTROL_PLANE_PRINCIPAL_KINDS), scopes: strs }),
-  rules('CONTROL_PLANE_AUTH_REJECTED', { clientId: str, principalId: str, reason: str }),
   // delivery
   rules('DELIVERY_QUEUED', { ...delivery, deliveryKind: oneOf(DELIVERY_KINDS) }),
   rules('DELIVERY_STARTED', { ...delivery, startedAt: num }),

@@ -76,13 +76,6 @@ export type SecurityEvent =
       tokenId: string;
       clientIp: string;
     }
-  /** Emitted when a companion token is rotated. */
-  | {
-      type: 'COMPANION_TOKEN_ROTATED';
-      /** New opaque token ID (not the token value). */
-      newTokenId: string;
-      clientIp: string;
-    }
   /** Emitted when a companion token is revoked. */
   | {
       type: 'COMPANION_TOKEN_REVOKED';

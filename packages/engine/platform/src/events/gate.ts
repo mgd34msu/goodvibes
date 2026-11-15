@@ -24,14 +24,6 @@ export type GateEvent =
       summary?: string | undefined;
       reasons?: readonly string[] | undefined;
     }
-  /** Policy rules have been collected from all sources. */
-  | { type: 'RULES_COLLECTED'; callId: string; tool: string; ruleCount: number }
-  /** Tool arguments have been normalised for policy evaluation. */
-  | { type: 'INPUT_NORMALIZED'; callId: string; tool: string }
-  /** User and managed policy rules have been evaluated. */
-  | { type: 'POLICY_EVALUATED'; callId: string; tool: string; result: 'allow' | 'deny' | 'unknown' }
-  /** Remembered approvals (session and durable) have been evaluated. */
-  | { type: 'SESSION_OVERRIDE_EVALUATED'; callId: string; tool: string; overrideApplied: boolean }
   /**
    * The deterministic boundary ran: catastrophic commands, surface authority,
    * card shapes and the outward-effect check. `refusedBy` names the check
@@ -102,10 +94,6 @@ export type GateEventType = GateEvent['type'];
 /** Every gate event type, for validators and consumers that enumerate the domain. */
 export const GATE_EVENT_TYPES: readonly GateEventType[] = [
   'GATE_REQUESTED',
-  'RULES_COLLECTED',
-  'INPUT_NORMALIZED',
-  'POLICY_EVALUATED',
-  'SESSION_OVERRIDE_EVALUATED',
   'BOUNDARY_CHECKED',
   'STAKES_READ',
   'PRESET_EVALUATED',

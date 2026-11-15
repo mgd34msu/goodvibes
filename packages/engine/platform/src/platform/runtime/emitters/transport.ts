@@ -42,24 +42,6 @@ export function emitTransportSyncing(
   bus.emit('transport', createEventEnvelope('TRANSPORT_SYNCING', { type: 'TRANSPORT_SYNCING', ...data }, ctx));
 }
 
-/** Emit TRANSPORT_DEGRADED during reduced-reliability operation. */
-export function emitTransportDegraded(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { transportId: string; reason: string }
-): void {
-  bus.emit('transport', createEventEnvelope('TRANSPORT_DEGRADED', { type: 'TRANSPORT_DEGRADED', ...data }, ctx));
-}
-
-/** Emit TRANSPORT_RECONNECTING when retrying after failure. */
-export function emitTransportReconnecting(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { transportId: string; attempt: number; maxAttempts: number }
-): void {
-  bus.emit('transport', createEventEnvelope('TRANSPORT_RECONNECTING', { type: 'TRANSPORT_RECONNECTING', ...data }, ctx));
-}
-
 /** Emit TRANSPORT_DISCONNECTED when the connection closes. */
 export function emitTransportDisconnected(
   bus: RuntimeEventBus,

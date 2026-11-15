@@ -45,15 +45,6 @@ export function emitQueuedMessagesChanged(
   bus.emit('session', sessionEvent('QUEUED_MESSAGES_CHANGED', data, ctx));
 }
 
-/** Emit SESSION_LOADING when an existing session is being loaded from disk. */
-export function emitSessionLoading(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { sessionId: string; path: string }
-): void {
-  bus.emit('session', sessionEvent('SESSION_LOADING', data, ctx));
-}
-
 /** Emit SESSION_RESUMED when a previously saved session is being resumed. */
 export function emitSessionResumed(
   bus: RuntimeEventBus,
@@ -61,24 +52,6 @@ export function emitSessionResumed(
   data: { sessionId: string; turnCount: number }
 ): void {
   bus.emit('session', sessionEvent('SESSION_RESUMED', data, ctx));
-}
-
-/** Emit SESSION_REPAIRING when session state is being repaired after a detected inconsistency. */
-export function emitSessionRepairing(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { sessionId: string; reason: string }
-): void {
-  bus.emit('session', sessionEvent('SESSION_REPAIRING', data, ctx));
-}
-
-/** Emit SESSION_RECONCILING when context messages are being reconciled with stored state. */
-export function emitSessionReconciling(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { sessionId: string; messageCount: number }
-): void {
-  bus.emit('session', sessionEvent('SESSION_RECONCILING', data, ctx));
 }
 
 /** Emit SESSION_READY when session is fully loaded and ready for input. */

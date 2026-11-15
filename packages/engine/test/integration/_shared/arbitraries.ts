@@ -74,13 +74,13 @@ export const jsonValueArb: fc.Arbitrary<unknown> = fc.letrec((tie) => ({
 /** AnyRuntimeEvent type literals that have a fixture below; the event sources are checked against this set and FIXTURELESS_EVENT_TYPES. */
 export const KNOWN_EVENT_TYPES = new Set<string>([
   // session
-  'SESSION_STARTED', 'SESSION_LOADING', 'SESSION_RESUMED', 'SESSION_REPAIRING',
-  'SESSION_RECONCILING', 'SESSION_READY', 'SESSION_RECOVERY_FAILED',
+  'SESSION_STARTED', 'SESSION_RESUMED',
+  'SESSION_READY', 'SESSION_RECOVERY_FAILED',
   // turn
   'TURN_SUBMITTED', 'PREFLIGHT_OK', 'PREFLIGHT_FAIL', 'STREAM_START', 'STREAM_DELTA',
   'STREAM_RETRY',
   'STREAM_END', 'LLM_RESPONSE_RECEIVED', 'TOOL_BATCH_READY', 'TOOLS_DONE',
-  'POST_HOOKS_DONE', 'TURN_COMPLETED', 'TURN_ERROR', 'TURN_CANCEL',
+  'TURN_COMPLETED', 'TURN_ERROR', 'TURN_CANCEL',
   // providers
   'PROVIDERS_CHANGED', 'PROVIDER_WARNING', 'MODEL_FALLBACK',
   // tools
@@ -89,11 +89,11 @@ export const KNOWN_EVENT_TYPES = new Set<string>([
   'TOOL_FAILED', 'TOOL_RECONCILED', 'TOOL_CANCELLED',
   'BUDGET_EXCEEDED_MS', 'BUDGET_EXCEEDED_TOKENS', 'BUDGET_EXCEEDED_COST',
   // tasks
-  'TASK_CREATED', 'TASK_STARTED', 'TASK_BLOCKED', 'TASK_PROGRESS',
+  'TASK_CREATED', 'TASK_STARTED', 'TASK_BLOCKED',
   'TASK_COMPLETED', 'TASK_FAILED', 'TASK_CANCELLED',
   // agents
   'AGENT_SPAWNING', 'AGENT_RUNNING', 'AGENT_PROGRESS', 'AGENT_STREAM_DELTA',
-  'AGENT_AWAITING_MESSAGE', 'AGENT_AWAITING_TOOL', 'AGENT_FINALIZING',
+  'AGENT_AWAITING_MESSAGE', 'AGENT_AWAITING_TOOL',
   'AGENT_COMPLETED', 'AGENT_FAILED', 'AGENT_CANCELLED',
   // contracts
   ...CONTRACT_EVENT_TYPES,
@@ -102,8 +102,8 @@ export const KNOWN_EVENT_TYPES = new Set<string>([
   // planner
   'PLAN_STRATEGY_SELECTED', 'PLAN_STRATEGY_OVERRIDDEN',
   // permissions
-  'GATE_REQUESTED', 'RULES_COLLECTED', 'INPUT_NORMALIZED', 'POLICY_EVALUATED',
-  'SESSION_OVERRIDE_EVALUATED', 'BOUNDARY_CHECKED', 'STAKES_READ', 'PRESET_EVALUATED',
+  'GATE_REQUESTED',
+  'BOUNDARY_CHECKED', 'STAKES_READ', 'PRESET_EVALUATED',
   'PRESET_CHANGED', 'DECISION_EMITTED',
   // plugins
   'PLUGIN_DISCOVERED', 'PLUGIN_LOADING', 'PLUGIN_LOADED', 'PLUGIN_ACTIVE',
@@ -114,13 +114,12 @@ export const KNOWN_EVENT_TYPES = new Set<string>([
   'MCP_SCHEMA_QUARANTINED', 'MCP_SCHEMA_QUARANTINE_APPROVED', 'MCP_POLICY_UPDATED',
   // transport
   'TRANSPORT_INITIALIZING', 'TRANSPORT_AUTHENTICATING', 'TRANSPORT_CONNECTED',
-  'TRANSPORT_SYNCING', 'TRANSPORT_DEGRADED', 'TRANSPORT_RECONNECTING',
+  'TRANSPORT_SYNCING',
   'TRANSPORT_DISCONNECTED', 'TRANSPORT_TERMINAL_FAILURE',
   // compaction
   'COMPACTION_CHECK', 'COMPACTION_MICROCOMPACT', 'COMPACTION_COLLAPSE',
   'COMPACTION_AUTOCOMPACT', 'COMPACTION_REACTIVE', 'COMPACTION_BOUNDARY_COMMIT',
-  'COMPACTION_DONE', 'COMPACTION_FAILED', 'COMPACTION_RESUME_REPAIR',
-  'COMPACTION_QUALITY_SCORE', 'COMPACTION_STRATEGY_SWITCH',
+  'COMPACTION_DONE', 'COMPACTION_FAILED',
   // ui
   'UI_PANEL_OPEN', 'UI_PANEL_CLOSE', 'UI_PANEL_FOCUS', 'UI_VIEW_CHANGED',
   // ops
@@ -133,16 +132,16 @@ export const KNOWN_EVENT_TYPES = new Set<string>([
   'TOKEN_SCOPE_VIOLATION', 'TOKEN_ROTATION_WARNING', 'TOKEN_ROTATION_EXPIRED', 'TOKEN_BLOCKED',
   // automation
   'AUTOMATION_JOB_CREATED', 'AUTOMATION_JOB_UPDATED', 'AUTOMATION_JOB_ENABLED',
-  'AUTOMATION_JOB_DISABLED', 'AUTOMATION_RUN_QUEUED', 'AUTOMATION_RUN_STARTED',
-  'AUTOMATION_RUN_COMPLETED', 'AUTOMATION_RUN_FAILED', 'AUTOMATION_RUN_CANCELLED',
-  'AUTOMATION_SCHEDULE_ERROR', 'AUTOMATION_JOB_AUTO_DISABLED',
+  'AUTOMATION_JOB_DISABLED', 'AUTOMATION_RUN_STARTED',
+  'AUTOMATION_RUN_COMPLETED', 'AUTOMATION_RUN_FAILED',
+  'AUTOMATION_JOB_AUTO_DISABLED',
   // routes
   'ROUTE_BINDING_CREATED', 'ROUTE_BINDING_UPDATED', 'ROUTE_BINDING_REMOVED', 'ROUTE_BINDING_RESOLVED',
   'ROUTE_REPLY_TARGET_CAPTURED', 'ROUTE_BINDING_FAILED',
   // control-plane
   'CONTROL_PLANE_CLIENT_CONNECTED', 'CONTROL_PLANE_CLIENT_DISCONNECTED',
   'CONTROL_PLANE_SUBSCRIPTION_CREATED', 'CONTROL_PLANE_SUBSCRIPTION_DROPPED',
-  'CONTROL_PLANE_AUTH_GRANTED', 'CONTROL_PLANE_AUTH_REJECTED',
+  'CONTROL_PLANE_AUTH_GRANTED',
   // deliveries
   'DELIVERY_QUEUED', 'DELIVERY_STARTED', 'DELIVERY_SUCCEEDED',
   'DELIVERY_FAILED', 'DELIVERY_DEAD_LETTERED',
@@ -173,7 +172,7 @@ export const FIXTURELESS_EVENT_TYPES: ReadonlySet<string> = new Set<string>([
   'OPS_POWER_STATE_CHANGED', 'OPS_LISTENER_MISBEHAVING', 'OPS_MEMORY_PRESSURE', 'WORK_PLAN_TASK_CREATED',
   'WORK_PLAN_TASK_UPDATED', 'WORK_PLAN_TASK_STATUS_CHANGED', 'WORK_PLAN_TASK_DELETED',
   'WORK_PLAN_SNAPSHOT_INVALIDATED', 'PROVIDER_VOICE_USAGE', 'MODEL_CHANGED', 'AUTH_SUCCEEDED', 'AUTH_FAILED',
-  'COMPANION_PAIR_REQUESTED', 'COMPANION_PAIR_VERIFIED', 'COMPANION_TOKEN_ROTATED',
+  'COMPANION_PAIR_REQUESTED', 'COMPANION_PAIR_VERIFIED',
   'COMPANION_TOKEN_REVOKED', 'QUEUED_MESSAGES_CHANGED', 'COMPANION_MESSAGE_RECEIVED',
   'TRANSPORT_RETRY_SCHEDULED', 'TRANSPORT_RETRY_EXECUTED', 'STREAM_SUBSCRIBER_CONNECTED',
   'STREAM_SUBSCRIBER_DISCONNECTED', 'TRANSPORT_BACKPRESSURE', 'TRANSPORT_CONNECTION_STATE',
@@ -220,10 +219,7 @@ export const REQUIRED_FIELDS_BY_TYPE: {
   [T in AnyRuntimeEvent['type']]?: readonly (keyof EventOfType<T> & string)[];
 } = {
   SESSION_STARTED: ['sessionId', 'profileId', 'workingDir'],
-  SESSION_LOADING: ['sessionId', 'path'],
   SESSION_RESUMED: ['sessionId', 'turnCount'],
-  SESSION_REPAIRING: ['sessionId', 'reason'],
-  SESSION_RECONCILING: ['sessionId', 'messageCount'],
   SESSION_READY: ['sessionId'],
   SESSION_RECOVERY_FAILED: ['sessionId', 'error'],
   TURN_SUBMITTED: ['turnId', 'prompt'],
@@ -240,7 +236,6 @@ export const REQUIRED_FIELDS_BY_TYPE: {
   LLM_RESPONSE_RECEIVED: ['turnId', 'provider', 'model', 'contentSummary', 'toolCallCount', 'inputTokens', 'outputTokens'],
   TOOL_BATCH_READY: ['turnId', 'toolCalls'],
   TOOLS_DONE: ['turnId'],
-  POST_HOOKS_DONE: ['turnId'],
   TURN_COMPLETED: ['turnId', 'response', 'stopReason'],
   TURN_ERROR: ['turnId', 'error', 'stopReason'],
   TURN_CANCEL: ['turnId', 'stopReason'],
@@ -264,7 +259,6 @@ export const REQUIRED_FIELDS_BY_TYPE: {
   TASK_CREATED: ['taskId', 'description', 'priority'],
   TASK_STARTED: ['taskId'],
   TASK_BLOCKED: ['taskId', 'reason'],
-  TASK_PROGRESS: ['taskId', 'progress'],
   TASK_COMPLETED: ['taskId', 'durationMs'],
   TASK_FAILED: ['taskId', 'error', 'durationMs'],
   TASK_CANCELLED: ['taskId'],
@@ -274,7 +268,6 @@ export const REQUIRED_FIELDS_BY_TYPE: {
   AGENT_STREAM_DELTA: ['agentId', 'content', 'accumulated'],
   AGENT_AWAITING_MESSAGE: ['agentId'],
   AGENT_AWAITING_TOOL: ['agentId', 'callId', 'tool'],
-  AGENT_FINALIZING: ['agentId'],
   AGENT_COMPLETED: ['agentId', 'durationMs'],
   AGENT_FAILED: ['agentId', 'error', 'durationMs'],
   AGENT_CANCELLED: ['agentId'],
@@ -282,13 +275,9 @@ export const REQUIRED_FIELDS_BY_TYPE: {
   COMMUNICATION_DELIVERED: ['messageId', 'fromId', 'toId', 'scope', 'kind'],
   COMMUNICATION_BLOCKED: ['messageId', 'fromId', 'toId', 'scope', 'kind', 'reason'],
   GATE_REQUESTED: ['callId', 'tool', 'args', 'category'],
-  RULES_COLLECTED: ['callId', 'tool', 'ruleCount'],
-  INPUT_NORMALIZED: ['callId', 'tool'],
-  POLICY_EVALUATED: ['callId', 'tool', 'result'],
   PRESET_EVALUATED: ['callId', 'tool', 'preset', 'stakes', 'result'],
   PRESET_CHANGED: ['preset', 'previousPreset', 'mode', 'previousMode'],
   STAKES_READ: ['callId', 'tool', 'family', 'stakes', 'mutates', 'outward', 'secrets', 'irreversible', 'beyondProject', 'weakensSecurity', 'obfuscated', 'uncertain'],
-  SESSION_OVERRIDE_EVALUATED: ['callId', 'tool', 'overrideApplied'],
   BOUNDARY_CHECKED: ['callId', 'tool', 'passed', 'checks'],
   DECISION_EMITTED: ['callId', 'tool', 'category', 'approved', 'source'],
   PLUGIN_DISCOVERED: ['pluginId', 'path', 'version'],
@@ -313,8 +302,6 @@ export const REQUIRED_FIELDS_BY_TYPE: {
   TRANSPORT_AUTHENTICATING: ['transportId'],
   TRANSPORT_CONNECTED: ['transportId', 'endpoint'],
   TRANSPORT_SYNCING: ['transportId'],
-  TRANSPORT_DEGRADED: ['transportId', 'reason'],
-  TRANSPORT_RECONNECTING: ['transportId', 'attempt', 'maxAttempts'],
   TRANSPORT_DISCONNECTED: ['transportId', 'willRetry'],
   TRANSPORT_TERMINAL_FAILURE: ['transportId', 'error'],
   COMPACTION_CHECK: ['sessionId', 'tokenCount', 'threshold'],
@@ -325,9 +312,6 @@ export const REQUIRED_FIELDS_BY_TYPE: {
   COMPACTION_BOUNDARY_COMMIT: ['sessionId', 'checkpointId'],
   COMPACTION_DONE: ['sessionId', 'strategy', 'tokensBefore', 'tokensAfter', 'durationMs'],
   COMPACTION_FAILED: ['sessionId', 'strategy', 'error'],
-  COMPACTION_RESUME_REPAIR: ['sessionId', 'repaired', 'actionsCount', 'safeToResume'],
-  COMPACTION_QUALITY_SCORE: ['sessionId', 'strategy', 'score', 'grade', 'compressionRatio', 'retentionScore', 'isLowQuality', 'description'],
-  COMPACTION_STRATEGY_SWITCH: ['sessionId', 'fromStrategy', 'toStrategy', 'reason', 'score'],
   UI_PANEL_OPEN: ['panelId'],
   UI_PANEL_CLOSE: ['panelId'],
   UI_PANEL_FOCUS: ['panelId'],
@@ -350,12 +334,9 @@ export const REQUIRED_FIELDS_BY_TYPE: {
   AUTOMATION_JOB_UPDATED: ['jobId', 'changedFields'],
   AUTOMATION_JOB_ENABLED: ['jobId'],
   AUTOMATION_JOB_DISABLED: ['jobId', 'reason'],
-  AUTOMATION_RUN_QUEUED: ['jobId', 'runId', 'scheduledAt', 'forced'],
   AUTOMATION_RUN_STARTED: ['jobId', 'runId', 'startedAt', 'attempt'],
   AUTOMATION_RUN_COMPLETED: ['jobId', 'runId', 'startedAt', 'completedAt', 'durationMs', 'outcome'],
   AUTOMATION_RUN_FAILED: ['jobId', 'runId', 'startedAt', 'failedAt', 'error', 'retryable'],
-  AUTOMATION_RUN_CANCELLED: ['jobId', 'runId', 'cancelledAt', 'reason'],
-  AUTOMATION_SCHEDULE_ERROR: ['jobId', 'scheduleText', 'error'],
   AUTOMATION_JOB_AUTO_DISABLED: ['jobId', 'reason', 'consecutiveFailures'],
   ROUTE_BINDING_CREATED: ['bindingId', 'surfaceKind', 'externalId', 'targetKind', 'targetId'],
   ROUTE_BINDING_UPDATED: ['bindingId', 'changedFields'],
@@ -368,7 +349,6 @@ export const REQUIRED_FIELDS_BY_TYPE: {
   CONTROL_PLANE_SUBSCRIPTION_CREATED: ['clientId', 'subscriptionId', 'topics'],
   CONTROL_PLANE_SUBSCRIPTION_DROPPED: ['clientId', 'subscriptionId', 'reason'],
   CONTROL_PLANE_AUTH_GRANTED: ['clientId', 'principalId', 'principalKind', 'scopes'],
-  CONTROL_PLANE_AUTH_REJECTED: ['clientId', 'principalId', 'reason'],
   DELIVERY_QUEUED: ['deliveryId', 'jobId', 'runId', 'surfaceKind', 'targetId', 'deliveryKind'],
   DELIVERY_STARTED: ['deliveryId', 'jobId', 'runId', 'surfaceKind', 'targetId', 'startedAt'],
   DELIVERY_SUCCEEDED: ['deliveryId', 'jobId', 'runId', 'surfaceKind', 'targetId', 'completedAt', 'durationMs'],
@@ -409,10 +389,7 @@ export const REQUIRED_FIELDS_BY_TYPE: {
 export const FIXTURE_EVENTS: ReadonlyArray<{ type: string } & Record<string, unknown>> = [
   // session
   { type: 'SESSION_STARTED', sessionId: 's1', profileId: 'p1', workingDir: '/home' } satisfies SessionEvent,
-  { type: 'SESSION_LOADING', sessionId: 's1', path: '/tmp/sess.json' } satisfies SessionEvent,
   { type: 'SESSION_RESUMED', sessionId: 's1', turnCount: 3 } satisfies SessionEvent,
-  { type: 'SESSION_REPAIRING', sessionId: 's1', reason: 'conflict' } satisfies SessionEvent,
-  { type: 'SESSION_RECONCILING', sessionId: 's1', messageCount: 10 } satisfies SessionEvent,
   { type: 'SESSION_READY', sessionId: 's1' } satisfies SessionEvent,
   { type: 'SESSION_RECOVERY_FAILED', sessionId: 's1', error: 'disk full' } satisfies SessionEvent,
   // turn
@@ -426,7 +403,6 @@ export const FIXTURE_EVENTS: ReadonlyArray<{ type: string } & Record<string, unk
   { type: 'LLM_RESPONSE_RECEIVED', turnId: 't1', provider: 'anthropic', model: 'claude-4', contentSummary: 'hi', toolCallCount: 0, inputTokens: 10, outputTokens: 5 } satisfies TurnEvent,
   { type: 'TOOL_BATCH_READY', turnId: 't1', toolCalls: ['bash'] } satisfies TurnEvent,
   { type: 'TOOLS_DONE', turnId: 't1' } satisfies TurnEvent,
-  { type: 'POST_HOOKS_DONE', turnId: 't1' } satisfies TurnEvent,
   { type: 'TURN_COMPLETED', turnId: 't1', response: 'done', stopReason: 'completed' } satisfies TurnEvent,
   { type: 'TURN_ERROR', turnId: 't1', error: 'fail', stopReason: 'provider_error' } satisfies TurnEvent,
   { type: 'TURN_CANCEL', turnId: 't1', stopReason: 'cancelled' } satisfies TurnEvent,
@@ -453,7 +429,6 @@ export const FIXTURE_EVENTS: ReadonlyArray<{ type: string } & Record<string, unk
   { type: 'TASK_CREATED', taskId: 'task1', description: 'build feature', priority: 1 } satisfies TaskEvent,
   { type: 'TASK_STARTED', taskId: 'task1' } satisfies TaskEvent,
   { type: 'TASK_BLOCKED', taskId: 'task1', reason: 'waiting' } satisfies TaskEvent,
-  { type: 'TASK_PROGRESS', taskId: 'task1', progress: 50 } satisfies TaskEvent,
   { type: 'TASK_COMPLETED', taskId: 'task1', durationMs: 200 } satisfies TaskEvent,
   { type: 'TASK_FAILED', taskId: 'task1', error: 'exception', durationMs: 100 } satisfies TaskEvent,
   { type: 'TASK_CANCELLED', taskId: 'task1' } satisfies TaskEvent,
@@ -464,7 +439,6 @@ export const FIXTURE_EVENTS: ReadonlyArray<{ type: string } & Record<string, unk
   { type: 'AGENT_STREAM_DELTA', agentId: 'a1', content: 'hi', accumulated: 'hi' } satisfies AgentEvent,
   { type: 'AGENT_AWAITING_MESSAGE', agentId: 'a1' } satisfies AgentEvent,
   { type: 'AGENT_AWAITING_TOOL', agentId: 'a1', callId: 'c1', tool: 'bash' } satisfies AgentEvent,
-  { type: 'AGENT_FINALIZING', agentId: 'a1' } satisfies AgentEvent,
   { type: 'AGENT_COMPLETED', agentId: 'a1', durationMs: 500 } satisfies AgentEvent,
   { type: 'AGENT_FAILED', agentId: 'a1', error: 'timeout', durationMs: 100 } satisfies AgentEvent,
   { type: 'AGENT_CANCELLED', agentId: 'a1' } satisfies AgentEvent,
@@ -476,13 +450,9 @@ export const FIXTURE_EVENTS: ReadonlyArray<{ type: string } & Record<string, unk
   { type: 'COMMUNICATION_BLOCKED', messageId: 'm1', fromId: 'a1', toId: 'a2', scope: 'direct', kind: 'directive', reason: 'policy' } satisfies CommunicationEvent,
   // permissions
   { type: 'GATE_REQUESTED', callId: 'c1', tool: 'bash', args: {}, category: 'exec' } satisfies GateEvent,
-  { type: 'RULES_COLLECTED', callId: 'c1', tool: 'bash', ruleCount: 3 } satisfies GateEvent,
-  { type: 'INPUT_NORMALIZED', callId: 'c1', tool: 'bash' } satisfies GateEvent,
-  { type: 'POLICY_EVALUATED', callId: 'c1', tool: 'bash', result: 'allow' } satisfies GateEvent,
   { type: 'PRESET_EVALUATED', callId: 'c1', tool: 'bash', preset: 'normal', stakes: 'low', result: 'allow' } satisfies GateEvent,
   { type: 'PRESET_CHANGED', preset: 'plan', previousPreset: 'normal', mode: 'plan', previousMode: 'prompt' } satisfies GateEvent,
   { type: 'STAKES_READ', callId: 'c1', tool: 'bash', family: 'shell-read', stakes: 'low', mutates: false, outward: false, secrets: false, irreversible: false, beyondProject: false, weakensSecurity: false, obfuscated: false, uncertain: [] } satisfies GateEvent,
-  { type: 'SESSION_OVERRIDE_EVALUATED', callId: 'c1', tool: 'bash', overrideApplied: true } satisfies GateEvent,
   { type: 'BOUNDARY_CHECKED', callId: 'c1', tool: 'bash', passed: true, checks: [{ check: 'catastrophic', result: 'pass' }] } satisfies GateEvent,
   { type: 'DECISION_EMITTED', callId: 'c1', tool: 'bash', category: 'execute', approved: true, source: 'policy' } satisfies GateEvent,
   // plugins
@@ -510,8 +480,6 @@ export const FIXTURE_EVENTS: ReadonlyArray<{ type: string } & Record<string, unk
   { type: 'TRANSPORT_AUTHENTICATING', transportId: 'tr1' } satisfies TransportEvent,
   { type: 'TRANSPORT_CONNECTED', transportId: 'tr1', endpoint: 'http://localhost:8080' } satisfies TransportEvent,
   { type: 'TRANSPORT_SYNCING', transportId: 'tr1' } satisfies TransportEvent,
-  { type: 'TRANSPORT_DEGRADED', transportId: 'tr1', reason: 'packet loss' } satisfies TransportEvent,
-  { type: 'TRANSPORT_RECONNECTING', transportId: 'tr1', attempt: 1, maxAttempts: 5 } satisfies TransportEvent,
   { type: 'TRANSPORT_DISCONNECTED', transportId: 'tr1', willRetry: true } satisfies TransportEvent,
   { type: 'TRANSPORT_TERMINAL_FAILURE', transportId: 'tr1', error: 'refused' } satisfies TransportEvent,
   // compaction
@@ -523,9 +491,6 @@ export const FIXTURE_EVENTS: ReadonlyArray<{ type: string } & Record<string, unk
   { type: 'COMPACTION_BOUNDARY_COMMIT', sessionId: 's1', checkpointId: 'cp1' } satisfies CompactionEvent,
   { type: 'COMPACTION_DONE', sessionId: 's1', strategy: 'collapse', tokensBefore: 2000, tokensAfter: 500, durationMs: 50 } satisfies CompactionEvent,
   { type: 'COMPACTION_FAILED', sessionId: 's1', strategy: 'collapse', error: 'oom' } satisfies CompactionEvent,
-  { type: 'COMPACTION_RESUME_REPAIR', sessionId: 's1', repaired: true, actionsCount: 3, safeToResume: true } satisfies CompactionEvent,
-  { type: 'COMPACTION_QUALITY_SCORE', sessionId: 's1', strategy: 'collapse', score: 0.9, grade: 'A', compressionRatio: 0.5, retentionScore: 0.95, isLowQuality: false, description: 'excellent' } satisfies CompactionEvent,
-  { type: 'COMPACTION_STRATEGY_SWITCH', sessionId: 's1', fromStrategy: 'collapse', toStrategy: 'microcompact', reason: 'low quality', score: 0.3 } satisfies CompactionEvent,
   // ui
   { type: 'UI_PANEL_OPEN', panelId: 'tools' } satisfies UIEvent,
   { type: 'UI_PANEL_CLOSE', panelId: 'tools' } satisfies UIEvent,
@@ -553,12 +518,9 @@ export const FIXTURE_EVENTS: ReadonlyArray<{ type: string } & Record<string, unk
   { type: 'AUTOMATION_JOB_UPDATED', jobId: 'j1', changedFields: ['name'] } satisfies AutomationEvent,
   { type: 'AUTOMATION_JOB_ENABLED', jobId: 'j1' } satisfies AutomationEvent,
   { type: 'AUTOMATION_JOB_DISABLED', jobId: 'j1', reason: 'error' } satisfies AutomationEvent,
-  { type: 'AUTOMATION_RUN_QUEUED', jobId: 'j1', runId: 'r1', scheduledAt: Date.now(), forced: false } satisfies AutomationEvent,
   { type: 'AUTOMATION_RUN_STARTED', jobId: 'j1', runId: 'r1', startedAt: Date.now(), attempt: 1 } satisfies AutomationEvent,
   { type: 'AUTOMATION_RUN_COMPLETED', jobId: 'j1', runId: 'r1', startedAt: Date.now() - 100, completedAt: Date.now(), durationMs: 100, outcome: 'success' } satisfies AutomationEvent,
   { type: 'AUTOMATION_RUN_FAILED', jobId: 'j1', runId: 'r1', startedAt: Date.now() - 100, failedAt: Date.now(), error: 'crash', retryable: true } satisfies AutomationEvent,
-  { type: 'AUTOMATION_RUN_CANCELLED', jobId: 'j1', runId: 'r1', cancelledAt: Date.now(), reason: 'user' } satisfies AutomationEvent,
-  { type: 'AUTOMATION_SCHEDULE_ERROR', jobId: 'j1', scheduleText: 'bad cron', error: 'invalid' } satisfies AutomationEvent,
   { type: 'AUTOMATION_JOB_AUTO_DISABLED', jobId: 'j1', reason: 'consecutive failures', consecutiveFailures: 5 } satisfies AutomationEvent,
   // routes
   { type: 'ROUTE_BINDING_CREATED', bindingId: 'b1', surfaceKind: 'slack', externalId: 'C123', targetKind: 'session', targetId: 's1' } satisfies RouteEvent,
@@ -573,7 +535,6 @@ export const FIXTURE_EVENTS: ReadonlyArray<{ type: string } & Record<string, unk
   { type: 'CONTROL_PLANE_SUBSCRIPTION_CREATED', clientId: 'cl1', subscriptionId: 'sub1', topics: ['turn'] } satisfies ControlPlaneEvent,
   { type: 'CONTROL_PLANE_SUBSCRIPTION_DROPPED', clientId: 'cl1', subscriptionId: 'sub1', reason: 'disconnect' } satisfies ControlPlaneEvent,
   { type: 'CONTROL_PLANE_AUTH_GRANTED', clientId: 'cl1', principalId: 'user1', principalKind: 'user', scopes: ['read'] } satisfies ControlPlaneEvent,
-  { type: 'CONTROL_PLANE_AUTH_REJECTED', clientId: 'cl1', principalId: 'user1', reason: 'bad token' } satisfies ControlPlaneEvent,
   // deliveries
   { type: 'DELIVERY_QUEUED', deliveryId: 'd1', jobId: 'j1', runId: 'r1', surfaceKind: 'slack', targetId: 't1', deliveryKind: 'notification' } satisfies DeliveryEvent,
   { type: 'DELIVERY_STARTED', deliveryId: 'd1', jobId: 'j1', runId: 'r1', surfaceKind: 'slack', targetId: 't1', startedAt: Date.now() } satisfies DeliveryEvent,

@@ -307,24 +307,23 @@ browser/RN compatibility checks remain separate required checks.
 | **Tool executor overhead (p95)** | **5 ms** | 3 |
 | Memory growth rate | 50 MiB/hr | 2 |
 | Compaction latency (p95) | 500 ms | 3 |
-| SLO: turn start, cancel, reconnect recovery, permission decision | see the SLO gates table below | 3 each |
+| SLO: turn start, cancel, permission decision | see the SLO gates table below | 3 each |
 | Integration delivery success rate | 95% (over a 100-delivery window) | 3 |
 | Integration dead-letter queue depth | 10 entries | 3 |
 
-Tool executor overhead measures scheduling, dispatch, and teardown phases only, not the tool's own execution time. The four end-to-end SLO gates and the two integration-delivery gates share this same default-budget list and consecutive-violation tolerance mechanism; the SLO gates are broken out separately below because `SloCollector` computes their p95 values from the runtime event stream rather than from a single measured duration per sample.
+Tool executor overhead measures scheduling, dispatch, and teardown phases only, not the tool's own execution time. The three end-to-end SLO gates and the two integration-delivery gates share this same default-budget list and consecutive-violation tolerance mechanism; the SLO gates are broken out separately below because `SloCollector` computes their p95 values from the runtime event stream rather than from a single measured duration per sample.
 
 ### SLO gates
 
-Four end-to-end SLO latency gates are enforced at runtime via `SloCollector`:
+Three end-to-end SLO latency gates are enforced at runtime via `SloCollector`:
 
 | SLO | Target (p95) |
 |---|---|
 | Turn start (TURN_SUBMITTED → first STREAM_DELTA) | 2,000 ms |
 | Cancel latency (TURN_CANCEL → TURN_COMPLETED or TURN_ERROR) | 500 ms |
-| Reconnect recovery (TRANSPORT_RECONNECTING → TRANSPORT_CONNECTED) | 10,000 ms |
 | Permission decision (GATE_REQUESTED → DECISION_EMITTED) | 2,500 ms |
 
-SLO metrics are computed over a rolling window of 200 samples. The permission decision target is wider than the others because the span includes one Jev stakes reading for a side-effecting call. A measurement still waiting for its end event after 60 seconds is dropped by a sweep that runs every 30 seconds, so stale correlation entries cannot distort p95 values. An SLO with no samples yet reads as no data, not as 0 ms. Reconnect recovery only has samples when a host publishes TRANSPORT_RECONNECTING and TRANSPORT_CONNECTED for a reconnecting transport.
+SLO metrics are computed over a rolling window of 200 samples. The permission decision target is wider than the others because the span includes one Jev stakes reading for a side-effecting call. A measurement still waiting for its end event after 60 seconds is dropped by a sweep that runs every 30 seconds, so stale correlation entries cannot distort p95 values. An SLO with no samples yet reads as no data, not as 0 ms.
 
 ---
 

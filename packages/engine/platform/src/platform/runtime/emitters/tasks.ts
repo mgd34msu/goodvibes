@@ -32,15 +32,6 @@ export function emitTaskBlocked(
   bus.emit('tasks', createEventEnvelope('TASK_BLOCKED', { type: 'TASK_BLOCKED', ...data }, ctx));
 }
 
-/** Emit TASK_PROGRESS when a task makes measurable progress. */
-export function emitTaskProgress(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { taskId: string; agentId?: string; progress: number; message?: string }
-): void {
-  bus.emit('tasks', createEventEnvelope('TASK_PROGRESS', { type: 'TASK_PROGRESS', ...data }, ctx));
-}
-
 /** Emit TASK_COMPLETED when a task finishes successfully. */
 export function emitTaskCompleted(
   bus: RuntimeEventBus,

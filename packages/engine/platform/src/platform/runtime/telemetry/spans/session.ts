@@ -2,8 +2,7 @@
  * Session recovery span helpers.
  *
  * Tracks the full session lifecycle:
- * SESSION_STARTED | SESSION_LOADING → SESSION_RESUMED | SESSION_REPAIRING
- * → SESSION_RECONCILING → SESSION_READY
+ * SESSION_STARTED → SESSION_RESUMED → SESSION_READY
  * Terminal error state: SESSION_RECOVERY_FAILED
  *
  * One span per session initialisation / recovery attempt.
@@ -49,7 +48,7 @@ export interface SessionSpanEndContext {
  * Start a session lifecycle span.
  *
  * @param tracer - RuntimeTracer instance.
- * @param ctx - Context from SESSION_STARTED or SESSION_LOADING event.
+ * @param ctx - Context from the SESSION_STARTED event.
  */
 export function startSessionSpan(tracer: RuntimeTracer, ctx: SessionSpanContext): Span {
   const attrs: SpanAttributes = {

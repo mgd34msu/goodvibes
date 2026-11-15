@@ -18,7 +18,6 @@ const DOMAIN_EVENT_HEALTH: Readonly<Partial<Record<AnyRuntimeEvent['type'], { re
   MCP_DEGRADED: { domain: 'mcp', status: 'degraded' },
   MCP_DISCONNECTED: { domain: 'mcp', status: 'failed' },
   TRANSPORT_CONNECTED: { domain: 'transport', status: 'healthy' },
-  TRANSPORT_DEGRADED: { domain: 'transport', status: 'degraded' },
   TRANSPORT_TERMINAL_FAILURE: { domain: 'transport', status: 'failed' },
   COMPACTION_DONE: { domain: 'compaction', status: 'healthy' },
   COMPACTION_FAILED: { domain: 'compaction', status: 'failed' },

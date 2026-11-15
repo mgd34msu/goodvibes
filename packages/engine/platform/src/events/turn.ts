@@ -141,8 +141,6 @@ export type TurnEvent =
   | { type: 'TOOL_BATCH_READY'; turnId: string; toolCalls: string[] }
   /** All tool calls in the current batch have completed. */
   | { type: 'TOOLS_DONE'; turnId: string }
-  /** Post-processing hooks (formatters and the like) have completed. */
-  | { type: 'POST_HOOKS_DONE'; turnId: string }
   /**
    * Turn completed successfully with a final response.
    *

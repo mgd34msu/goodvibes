@@ -2,7 +2,7 @@
  * Task lifecycle span helpers.
  *
  * Tracks the full task state machine:
- * TASK_CREATED → TASK_STARTED → TASK_BLOCKED → TASK_PROGRESS
+ * TASK_CREATED → TASK_STARTED → TASK_BLOCKED
  * Terminal states: TASK_COMPLETED | TASK_FAILED | TASK_CANCELLED
  *
  * One span per task. Optionally parented to an agent span.

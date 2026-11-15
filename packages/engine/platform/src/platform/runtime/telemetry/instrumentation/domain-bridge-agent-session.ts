@@ -58,14 +58,6 @@ export function attachAgentDomain(
   );
 
   unsubs.push(
-    bus.on('AGENT_FINALIZING', (env: Env<Extract<AgentEvent, { type: 'AGENT_FINALIZING' }>>) => {
-      helpers.safe(() => {
-        helpers.withSpan(agentSpans, env.payload.agentId, (span) => recordAgentPhase(span, 'finalizing'));
-      });
-    }),
-  );
-
-  unsubs.push(
     bus.on('AGENT_COMPLETED', (env: Env<Extract<AgentEvent, { type: 'AGENT_COMPLETED' }>>) => {
       helpers.safe(() => {
         helpers.closeSpan(agentSpans, env.payload.agentId, (span) => {
@@ -130,38 +122,6 @@ export function attachPermissionDomain(
   );
 
   unsubs.push(
-    bus.on('RULES_COLLECTED', (env: Env<Extract<GateEvent, { type: 'RULES_COLLECTED' }>>) => {
-      helpers.safe(() => {
-        helpers.withSpan(permissionSpans, env.payload.callId, (span) => {
-          recordPermissionPhase(span, 'rules_collected', {
-            'permission.rule_count': env.payload.ruleCount,
-          });
-        });
-      });
-    }),
-  );
-
-  unsubs.push(
-    bus.on('INPUT_NORMALIZED', (env: Env<Extract<GateEvent, { type: 'INPUT_NORMALIZED' }>>) => {
-      helpers.safe(() => {
-        helpers.withSpan(permissionSpans, env.payload.callId, (span) => recordPermissionPhase(span, 'input_normalized'));
-      });
-    }),
-  );
-
-  unsubs.push(
-    bus.on('POLICY_EVALUATED', (env: Env<Extract<GateEvent, { type: 'POLICY_EVALUATED' }>>) => {
-      helpers.safe(() => {
-        helpers.withSpan(permissionSpans, env.payload.callId, (span) => {
-          recordPermissionPhase(span, 'policy_evaluated', {
-            'permission.policy_result': env.payload.result,
-          });
-        });
-      });
-    }),
-  );
-
-  unsubs.push(
     bus.on('STAKES_READ', (env: Env<Extract<GateEvent, { type: 'STAKES_READ' }>>) => {
       helpers.safe(() => {
         helpers.withSpan(permissionSpans, env.payload.callId, (span) => {
@@ -181,18 +141,6 @@ export function attachPermissionDomain(
           recordPermissionPhase(span, 'preset_evaluated', {
             'gate.preset': env.payload.preset,
             'gate.preset_result': env.payload.result,
-          });
-        });
-      });
-    }),
-  );
-
-  unsubs.push(
-    bus.on('SESSION_OVERRIDE_EVALUATED', (env: Env<Extract<GateEvent, { type: 'SESSION_OVERRIDE_EVALUATED' }>>) => {
-      helpers.safe(() => {
-        helpers.withSpan(permissionSpans, env.payload.callId, (span) => {
-          recordPermissionPhase(span, 'session_override_evaluated', {
-            'permission.override_applied': env.payload.overrideApplied,
           });
         });
       });
@@ -249,52 +197,11 @@ export function attachSessionDomain(
   );
 
   unsubs.push(
-    bus.on('SESSION_LOADING', (env: Env<Extract<SessionEvent, { type: 'SESSION_LOADING' }>>) => {
-      helpers.safe(() => {
-        if (!sessionSpans.has(env.payload.sessionId)) {
-          const span = startSessionSpan(helpers.tracer, {
-            sessionId: env.payload.sessionId,
-            traceId: env.traceId ?? '',
-            path: env.payload.path,
-          });
-          trackSpan(sessionSpans, env.payload.sessionId, span);
-          return;
-        }
-        helpers.withSpan(sessionSpans, env.payload.sessionId, (span) => recordSessionPhase(span, 'loading'));
-      });
-    }),
-  );
-
-  unsubs.push(
     bus.on('SESSION_RESUMED', (env: Env<Extract<SessionEvent, { type: 'SESSION_RESUMED' }>>) => {
       helpers.safe(() => {
         helpers.withSpan(sessionSpans, env.payload.sessionId, (span) => {
           recordSessionPhase(span, 'resumed', {
             'session.turn_count': env.payload.turnCount,
-          });
-        });
-      });
-    }),
-  );
-
-  unsubs.push(
-    bus.on('SESSION_REPAIRING', (env: Env<Extract<SessionEvent, { type: 'SESSION_REPAIRING' }>>) => {
-      helpers.safe(() => {
-        helpers.withSpan(sessionSpans, env.payload.sessionId, (span) => {
-          recordSessionPhase(span, 'repairing', {
-            'session.repair_reason': env.payload.reason,
-          });
-        });
-      });
-    }),
-  );
-
-  unsubs.push(
-    bus.on('SESSION_RECONCILING', (env: Env<Extract<SessionEvent, { type: 'SESSION_RECONCILING' }>>) => {
-      helpers.safe(() => {
-        helpers.withSpan(sessionSpans, env.payload.sessionId, (span) => {
-          recordSessionPhase(span, 'reconciling', {
-            'session.message_count': env.payload.messageCount,
           });
         });
       });

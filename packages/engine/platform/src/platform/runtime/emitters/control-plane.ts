@@ -56,10 +56,3 @@ export function emitControlPlaneAuthGranted(
   bus.emit('control-plane', controlPlaneEvent('CONTROL_PLANE_AUTH_GRANTED', data, ctx));
 }
 
-export function emitControlPlaneAuthRejected(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { clientId: string; principalId: string; reason: string },
-): void {
-  bus.emit('control-plane', controlPlaneEvent('CONTROL_PLANE_AUTH_REJECTED', data, ctx));
-}

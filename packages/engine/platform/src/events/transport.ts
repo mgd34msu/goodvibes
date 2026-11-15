@@ -13,10 +13,6 @@ export type TransportEvent =
   | { type: 'TRANSPORT_CONNECTED'; transportId: string; endpoint: string }
   /** Transport is synchronising state with the remote. */
   | { type: 'TRANSPORT_SYNCING'; transportId: string }
-  /** Transport is operating with reduced reliability or throughput. */
-  | { type: 'TRANSPORT_DEGRADED'; transportId: string; reason: string }
-  /** Transport is attempting to reconnect after a failure. */
-  | { type: 'TRANSPORT_RECONNECTING'; transportId: string; attempt: number; maxAttempts: number }
   /** Transport connection has been closed. */
   | { type: 'TRANSPORT_DISCONNECTED'; transportId: string; reason?: string; willRetry: boolean }
   /** Transport has failed unrecoverably and will not retry. */
@@ -68,9 +64,7 @@ export type TransportEvent =
   /**
    * A realtime transport reconnect attempt is scheduled.
    *
-   * Provides richer reconnect metadata than `TRANSPORT_RECONNECTING` (which only
-   * carries `attempt` and `maxAttempts`). Subscribe to this for detailed backoff
-   * visualisation in diagnostic UIs.
+   * Carries the attempt, the backoff delay and the reason, for diagnostic UIs.
    */
   | {
       type: 'TRANSPORT_RECONNECT_ATTEMPT';

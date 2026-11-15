@@ -276,12 +276,6 @@ export class ForensicsCollector {
         this._transitionPhase(t, 'turn', 'POST_TOOL_BATCH', env.ts, payload.type);
         break;
       }
-      case 'POST_HOOKS_DONE': {
-        const t = this._turns.get(turnId);
-        if (!t) break;
-        this._transitionPhase(t, 'turn', 'POST_HOOKS', env.ts, payload.type);
-        break;
-      }
       case 'TURN_COMPLETED': {
         const t = this._turns.get(turnId);
         if (!t) break;

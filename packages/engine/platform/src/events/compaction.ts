@@ -21,12 +21,6 @@ export type CompactionEvent =
   | { type: 'COMPACTION_DONE'; sessionId: string; strategy: string; tokensBefore: number; tokensAfter: number; durationMs: number }
   /** Compaction failed. */
   | { type: 'COMPACTION_FAILED'; sessionId: string; strategy: string; error: string }
-  /** Session resume repair pipeline completed. */
-  | { type: 'COMPACTION_RESUME_REPAIR'; sessionId: string; repaired: boolean; actionsCount: number; safeToResume: boolean }
-  /** Quality score computed after a strategy run. */
-  | { type: 'COMPACTION_QUALITY_SCORE'; sessionId: string; strategy: string; score: number; grade: string; compressionRatio: number; retentionScore: number; isLowQuality: boolean; description: string }
-  /** Strategy switched automatically due to low quality score. */
-  | { type: 'COMPACTION_STRATEGY_SWITCH'; sessionId: string; fromStrategy: string; toStrategy: string; reason: string; score: number }
   /**
    * Mandatory post-compaction receipt: emitted after every automatic (and the
    * manual) compaction path so a compaction is never silent. Carries what was

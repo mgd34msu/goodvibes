@@ -7,6 +7,7 @@ import '@/runtime/index.ts';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { emitSessionResumed } from '@/runtime/index.ts';
+import { emitSessionRecoveryFailed } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import '@/runtime/index.ts';
@@ -68,6 +69,9 @@ export interface ResumeSessionOptions {
  */
 export function createResumeSessionHandler(options: ResumeSessionOptions): (sessionId: string) => Promise<void> {
   return async (sessionId: string): Promise<void> => {
+    // Set once the refusal checks passed: a failure from here on is the saved session
+    // failing to load or restore, which the ops playbooks read as a recovery failure.
+    let restoring = false;
     try {
       if (options.isGenerating?.()) throw new Error('A turn is still running. Wait before resuming a session.');
       // Multi-instance safety, matching what `/session resume` already does
@@ -83,6 +87,7 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
       // its own load() right after this (SessionManager.load is a cheap JSONL
       // parse; the tiny duplicate read keeps this announcement's meaning
       // unchanged rather than repurposing it to a post-replay count).
+      restoring = true;
       const { messages: rawMessages } = options.sessionManager.load(sessionId);
       // The session this process was running leaves the daemon's live list once a
       // resume replaces it; left open it would keep being kept alive until the
@@ -134,6 +139,13 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
     } catch (error) {
       const reason = summarizeError(error);
       logger.debug('resumeSession failed', { error: reason });
+      if (restoring) {
+        emitSessionRecoveryFailed(options.runtimeBus, {
+          sessionId: options.runtime.sessionId,
+          traceId: `${options.runtime.sessionId}:session-resume:${sessionId}`,
+          source: 'bootstrap',
+        }, { sessionId, error: reason });
+      }
       options.conversation.log(`Failed to resume session: ${reason}`, { fg: activeTokens().error });
     }
     options.requestRender();

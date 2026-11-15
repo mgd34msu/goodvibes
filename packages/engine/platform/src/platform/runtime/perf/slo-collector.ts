@@ -1,10 +1,9 @@
 /**
  * SloCollector, collects SLO duration measurements from runtime events.
  *
- * Listens to the RuntimeEventBus and tracks four critical path latencies:
+ * Listens to the RuntimeEventBus and tracks three critical path latencies:
  * - turn_start_ms: TURN_SUBMITTED → first STREAM_DELTA
  * - cancel_ms: TURN_CANCEL → TURN_COMPLETED or TURN_ERROR
- * - reconnect_recovery_ms: TRANSPORT_RECONNECTING → TRANSPORT_CONNECTED
  * - permission_decision_ms: GATE_REQUESTED → DECISION_EMITTED
  *
  * Maintains a capped rolling window of measurements per SLO and exposes
@@ -18,7 +17,6 @@ import type { PerfMetric } from './types.js';
 export const SLO_METRICS = {
   TURN_START: 'slo.turn_start.p95',
   CANCEL: 'slo.cancel.p95',
-  RECONNECT_RECOVERY: 'slo.reconnect_recovery.p95',
   PERMISSION_DECISION: 'slo.permission_decision.p95',
 } as const;
 
@@ -102,8 +100,6 @@ export class SloCollector {
   private readonly _turnStartSamples: number[] = [];
   /** Rolling window of cancel_ms samples (TURN_CANCEL → TURN_COMPLETED/ERROR). */
   private readonly _cancelSamples: number[] = [];
-  /** Rolling window of reconnect_recovery_ms samples (TRANSPORT_RECONNECTING → TRANSPORT_CONNECTED). */
-  private readonly _reconnectSamples: number[] = [];
   /** Rolling window of permission_decision_ms samples (GATE_REQUESTED → DECISION_EMITTED). */
   private readonly _permissionSamples: number[] = [];
 
@@ -113,8 +109,6 @@ export class SloCollector {
   private readonly _seenFirstDelta = new Map<string, number>();
   /** Pending cancel timestamps keyed by turnId (set on TURN_CANCEL). */
   private readonly _pendingCancel = new Map<string, number>();
-  /** Pending reconnect start timestamp. Only the most recent reconnect attempt is tracked. */
-  private _pendingReconnectAt: number | null = null;
   /** Pending permission request timestamps keyed by callId. */
   private readonly _pendingPermission = new Map<string, number>();
 
@@ -220,35 +214,6 @@ export class SloCollector {
       })
     );
 
-    // ── reconnect_recovery_ms ───────────────────────────────────────────────
-    this._unsubs.push(
-      bus.on('TRANSPORT_RECONNECTING', (env) => {
-        const e = toRaw(env);
-        const attempt = getField<number>(e, 'attempt');
-        // Track start of reconnect sequence; use first attempt timestamp
-        if (attempt === 1 || this._pendingReconnectAt === null) {
-          this._pendingReconnectAt = e.ts;
-        }
-      })
-    );
-
-    this._unsubs.push(
-      bus.on('TRANSPORT_CONNECTED', (env) => {
-        const e = toRaw(env);
-        if (this._pendingReconnectAt !== null) {
-          appendSample(this._reconnectSamples, e.ts - this._pendingReconnectAt);
-          this._pendingReconnectAt = null;
-        }
-      })
-    );
-
-    // Clear pending reconnect on terminal failure
-    this._unsubs.push(
-      bus.on('TRANSPORT_TERMINAL_FAILURE', () => {
-        this._pendingReconnectAt = null;
-      })
-    );
-
     // ── permission_decision_ms ──────────────────────────────────────────────
     this._unsubs.push(
       bus.on('GATE_REQUESTED', (env) => {
@@ -301,10 +266,6 @@ export class SloCollector {
     for (const [key, ts] of this._pendingPermission) {
       if (ts < cutoff) this._pendingPermission.delete(key);
     }
-    // _pendingReconnectAt is a scalar; clear if stale
-    if (this._pendingReconnectAt !== null && this._pendingReconnectAt < cutoff) {
-      this._pendingReconnectAt = null;
-    }
   }
 
   /**
@@ -323,7 +284,6 @@ export class SloCollector {
     const all: Array<{ name: string; samples: readonly number[] }> = [
       { name: SLO_METRICS.TURN_START, samples: this._turnStartSamples },
       { name: SLO_METRICS.CANCEL, samples: this._cancelSamples },
-      { name: SLO_METRICS.RECONNECT_RECOVERY, samples: this._reconnectSamples },
       { name: SLO_METRICS.PERMISSION_DECISION, samples: this._permissionSamples },
     ];
     return all
@@ -339,7 +299,6 @@ export class SloCollector {
     return {
       [SLO_METRICS.TURN_START]: this._turnStartSamples.length,
       [SLO_METRICS.CANCEL]: this._cancelSamples.length,
-      [SLO_METRICS.RECONNECT_RECOVERY]: this._reconnectSamples.length,
       [SLO_METRICS.PERMISSION_DECISION]: this._permissionSamples.length,
     };
   }
@@ -361,6 +320,5 @@ export class SloCollector {
     this._seenFirstDelta.clear();
     this._pendingCancel.clear();
     this._pendingPermission.clear();
-    this._pendingReconnectAt = null;
   }
 }

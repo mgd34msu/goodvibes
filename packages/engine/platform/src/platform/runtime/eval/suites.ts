@@ -87,7 +87,6 @@ const corePerformanceScenarios: EvalScenario[] = [
           'compaction.latency.p95': 100,
           'slo.turn_start.p95': 800,
           'slo.cancel.p95': 150,
-          'slo.reconnect_recovery.p95': 3000,
           'slo.permission_decision.p95': 40,
         },
       });
@@ -123,7 +122,6 @@ const corePerformanceScenarios: EvalScenario[] = [
           'compaction.latency.p95': 200,
           'slo.turn_start.p95': 1200,
           'slo.cancel.p95': 200,
-          'slo.reconnect_recovery.p95': 4000,
           'slo.permission_decision.p95': 60,
         },
       });

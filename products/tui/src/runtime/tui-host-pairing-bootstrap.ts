@@ -3,7 +3,7 @@ import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 
-/** Explicit pairing bootstrap only. Never called by native credential resolution.
+/** Pairing bootstrap only (explicit /host pair and the automatic local pairing). Never called by native credential resolution.
  * Do not create, chmod, repair or adopt another token/home on read failure.
  * Reads the daemon home this process's daemon uses, so a home relocated with
  * `GOODVIBES_DAEMON_HOME` is found.

@@ -278,7 +278,6 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
             break;
           case 'AGENT_RUNNING':
           case 'AGENT_AWAITING_MESSAGE':
-          case 'AGENT_FINALIZING':
             recordActivity(event.agentId, { state: 'thinking', activity: prior?.activity });
             break;
           case 'AGENT_AWAITING_TOOL':

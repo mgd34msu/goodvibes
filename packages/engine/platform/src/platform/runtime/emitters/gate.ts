@@ -17,26 +17,6 @@ export function emitGateRequested(bus: RuntimeEventBus, ctx: EmitterContext, dat
   emitGate(bus, ctx, 'GATE_REQUESTED', data);
 }
 
-/** Emit RULES_COLLECTED after all policy rules are gathered. */
-export function emitRulesCollected(bus: RuntimeEventBus, ctx: EmitterContext, data: Data<'RULES_COLLECTED'>): void {
-  emitGate(bus, ctx, 'RULES_COLLECTED', data);
-}
-
-/** Emit INPUT_NORMALIZED after tool args are normalised for policy evaluation. */
-export function emitInputNormalized(bus: RuntimeEventBus, ctx: EmitterContext, data: Data<'INPUT_NORMALIZED'>): void {
-  emitGate(bus, ctx, 'INPUT_NORMALIZED', data);
-}
-
-/** Emit POLICY_EVALUATED after user and managed policy rules are checked. */
-export function emitPolicyEvaluated(bus: RuntimeEventBus, ctx: EmitterContext, data: Data<'POLICY_EVALUATED'>): void {
-  emitGate(bus, ctx, 'POLICY_EVALUATED', data);
-}
-
-/** Emit SESSION_OVERRIDE_EVALUATED after remembered approvals are checked. */
-export function emitSessionOverrideEvaluated(bus: RuntimeEventBus, ctx: EmitterContext, data: Data<'SESSION_OVERRIDE_EVALUATED'>): void {
-  emitGate(bus, ctx, 'SESSION_OVERRIDE_EVALUATED', data);
-}
-
 /** Emit BOUNDARY_CHECKED after the deterministic boundary runs. */
 export function emitBoundaryChecked(bus: RuntimeEventBus, ctx: EmitterContext, data: Data<'BOUNDARY_CHECKED'>): void {
   emitGate(bus, ctx, 'BOUNDARY_CHECKED', data);

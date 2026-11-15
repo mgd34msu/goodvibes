@@ -38,6 +38,8 @@ import {
   emitStreamStart,
   emitTurnCompleted,
   emitTurnError,
+  emitToolBatchReady,
+  emitToolsDone,
 } from '../runtime/emitters/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { computeUsageCostUsdCents, usageCostSource } from '../providers/model-pricing.js';
@@ -926,6 +928,12 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
           }
         } finally { context.setCompletionActivity?.(null); }
       }
+      if (context.runtimeBus) {
+        emitToolBatchReady(context.runtimeBus, context.emitterContext(context.turnId), {
+          turnId: context.turnId,
+          toolCalls: enrichedResponse.toolCalls.map((call) => call.name),
+        });
+      }
       const results = await handleToolResponseOutcome({
         toolRegistry: context.toolRegistry,
         inputProjection: { signal, assertCurrent: assertActiveTurn },
@@ -960,6 +968,9 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         memoryRecordIds: [...turnMemoryRecordIds],
         contractSession,
       });
+      // The batch's results are in the conversation: the crash snapshot is written now,
+      // so a crash later in the turn loses at most the batch in flight.
+      if (context.runtimeBus) emitToolsDone(context.runtimeBus, context.emitterContext(context.turnId), { turnId: context.turnId });
 
       const allFailed = results.results.length > 0 && results.results.every((result) => result.success === false);
       if (allFailed) {

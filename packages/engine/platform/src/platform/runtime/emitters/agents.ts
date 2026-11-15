@@ -92,15 +92,6 @@ export function emitAgentAwaitingTool(
   bus.emit('agents', createEventEnvelope('AGENT_AWAITING_TOOL', { type: 'AGENT_AWAITING_TOOL', ...data }, ctx));
 }
 
-/** Emit AGENT_FINALIZING when an agent is assembling its final output. */
-export function emitAgentFinalizing(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { agentId: string; taskId?: string }
-): void {
-  bus.emit('agents', createEventEnvelope('AGENT_FINALIZING', { type: 'AGENT_FINALIZING', ...data }, ctx));
-}
-
 /** Emit AGENT_COMPLETED when an agent finishes successfully. */
 export function emitAgentCompleted(
   bus: RuntimeEventBus,

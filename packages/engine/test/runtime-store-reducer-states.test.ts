@@ -135,15 +135,6 @@ describe('task reducer', () => {
     expect(store.getState().tasks.tasks.get('t')?.status).toBe('completed');
   });
 
-  test('progress is kept apart from the description', () => {
-    const { store, dispatch } = fresh();
-    dispatch.dispatchTaskEvent({ type: 'TASK_CREATED', taskId: 't', description: 'Build', priority: 0 });
-    dispatch.dispatchTaskEvent({ type: 'TASK_PROGRESS', taskId: 't', progress: 0.5, message: 'half way' });
-    const task = store.getState().tasks.tasks.get('t');
-    expect(task?.description).toBe('Build');
-    expect(task?.progress).toBe('half way');
-  });
-
   test('ended tasks are bounded and the lifetime totals keep counting', () => {
     const { store, dispatch } = fresh();
     for (let index = 0; index < 1100; index++) {
@@ -211,7 +202,6 @@ describe('conversation reducer', () => {
     dispatch.dispatchTurnEvent({ type: 'STREAM_START', turnId: turn });
     dispatch.dispatchTurnEvent({ type: 'TOOL_BATCH_READY', turnId: turn, toolCalls: ['c'] });
     dispatch.dispatchTurnEvent({ type: 'TOOLS_DONE', turnId: turn });
-    dispatch.dispatchTurnEvent({ type: 'POST_HOOKS_DONE', turnId: turn });
     dispatch.dispatchTurnEvent({ type: 'PREFLIGHT_OK', turnId: turn });
     dispatch.dispatchTurnEvent({ type: 'STREAM_START', turnId: turn });
     dispatch.dispatchTurnEvent({ type: 'STREAM_DELTA', turnId: turn, content: 'x', accumulated: 'x' });

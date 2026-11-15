@@ -126,8 +126,6 @@ function exhaustiveAgentSwitch(event: AgentEvent): string {
       return event.agentId;
     case 'AGENT_AWAITING_TOOL':
       return event.tool;
-    case 'AGENT_FINALIZING':
-      return event.agentId;
     case 'AGENT_COMPLETED':
       return `${event.durationMs}ms`;
     case 'AGENT_FAILED':
@@ -167,8 +165,6 @@ function exhaustiveTurnSwitch(event: TurnEvent): string {
     case 'TOOL_BATCH_READY':
       return String(event.toolCalls.length);
     case 'TOOLS_DONE':
-      return event.turnId;
-    case 'POST_HOOKS_DONE':
       return event.turnId;
     case 'TURN_COMPLETED':
       return event.response;
@@ -293,7 +289,6 @@ describe('discriminated union: AgentEvent', () => {
       AGENT_STREAM_DELTA: { type: 'AGENT_STREAM_DELTA', agentId: 'a1', content: 'chunk', accumulated: 'chunk' },
       AGENT_AWAITING_MESSAGE: { type: 'AGENT_AWAITING_MESSAGE', agentId: 'a1' },
       AGENT_AWAITING_TOOL: { type: 'AGENT_AWAITING_TOOL', agentId: 'a1', callId: 'c1', tool: 'bash' },
-      AGENT_FINALIZING: { type: 'AGENT_FINALIZING', agentId: 'a1' },
       AGENT_COMPLETED: { type: 'AGENT_COMPLETED', agentId: 'a1', durationMs: 100 },
       AGENT_FAILED: { type: 'AGENT_FAILED', agentId: 'a1', error: 'err', durationMs: 50 },
       AGENT_CANCELLED: { type: 'AGENT_CANCELLED', agentId: 'a1' },
@@ -329,7 +324,6 @@ describe('discriminated union: TurnEvent', () => {
       LLM_RESPONSE_RECEIVED: { type: 'LLM_RESPONSE_RECEIVED', turnId: 't1', provider: 'anthropic', model: 'claude-4', contentSummary: 'hi', toolCallCount: 0, inputTokens: 10, outputTokens: 5 },
       TOOL_BATCH_READY: { type: 'TOOL_BATCH_READY', turnId: 't1', toolCalls: ['bash'] },
       TOOLS_DONE: { type: 'TOOLS_DONE', turnId: 't1' },
-      POST_HOOKS_DONE: { type: 'POST_HOOKS_DONE', turnId: 't1' },
       TURN_COMPLETED: { type: 'TURN_COMPLETED', turnId: 't1', response: 'done', stopReason: 'completed' },
       TURN_ERROR: { type: 'TURN_ERROR', turnId: 't1', error: 'fail', stopReason: 'provider_error' },
       TURN_CANCEL: { type: 'TURN_CANCEL', turnId: 't1', stopReason: 'cancelled' },

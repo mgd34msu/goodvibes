@@ -72,8 +72,6 @@ export type AgentEvent =
   | { type: 'AGENT_AWAITING_MESSAGE'; agentId: string; taskId?: string }
   /** Agent is waiting for a tool call to complete. */
   | { type: 'AGENT_AWAITING_TOOL'; agentId: string; taskId?: string; callId: string; tool: string }
-  /** Agent is performing final output assembly. */
-  | { type: 'AGENT_FINALIZING'; agentId: string; taskId?: string }
   /** Agent completed successfully. */
   | {
       type: 'AGENT_COMPLETED';

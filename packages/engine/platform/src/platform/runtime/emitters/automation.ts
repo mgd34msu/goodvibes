@@ -48,14 +48,6 @@ export function emitAutomationJobDisabled(
   bus.emit('automation', automationEvent('AUTOMATION_JOB_DISABLED', data, ctx));
 }
 
-export function emitAutomationRunQueued(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { jobId: string; runId: string; scheduledAt: number; forced: boolean },
-): void {
-  bus.emit('automation', automationEvent('AUTOMATION_RUN_QUEUED', data, ctx));
-}
-
 export function emitAutomationRunStarted(
   bus: RuntimeEventBus,
   ctx: EmitterContext,
@@ -85,22 +77,6 @@ export function emitAutomationRunFailed(
   data: { jobId: string; runId: string; startedAt: number; failedAt: number; error: string; retryable: boolean },
 ): void {
   bus.emit('automation', automationEvent('AUTOMATION_RUN_FAILED', data, ctx));
-}
-
-export function emitAutomationRunCancelled(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { jobId: string; runId: string; cancelledAt: number; reason: string },
-): void {
-  bus.emit('automation', automationEvent('AUTOMATION_RUN_CANCELLED', data, ctx));
-}
-
-export function emitAutomationScheduleError(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { jobId: string; scheduleText: string; error: string },
-): void {
-  bus.emit('automation', automationEvent('AUTOMATION_SCHEDULE_ERROR', data, ctx));
 }
 
 export function emitAutomationJobAutoDisabled(

@@ -141,18 +141,11 @@ export function createInitialSessionState(): SessionDomainState {
 /**
  * The session-domain change a session lifecycle event makes, or undefined for
  * an event that does not move the recovery machine. The machine's state is
- * derived from these events alone: whoever loads a saved session announces
- * LOADING, then REPAIRING or RECONCILING where it repairs or replays, then
- * RESUMED and READY, or RECOVERY_FAILED with the error.
+ * derived from these events alone: a resumed session announces RESUMED and
+ * READY, or RECOVERY_FAILED with the error.
  */
 export function sessionRecoveryPatch(event: SessionEvent): Partial<SessionDomainState> | undefined {
   switch (event.type) {
-    case 'SESSION_LOADING':
-      return { recoveryState: 'loading', recoveryError: undefined };
-    case 'SESSION_REPAIRING':
-      return { recoveryState: 'repairing', wasRepaired: true };
-    case 'SESSION_RECONCILING':
-      return { recoveryState: 'reconciling' };
     case 'SESSION_RESUMED':
       return { isResumed: true, resumedFromId: event.sessionId };
     case 'SESSION_READY':

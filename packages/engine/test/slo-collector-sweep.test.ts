@@ -36,16 +36,5 @@ test('a turn that streamed and never reported a terminal event is forgotten afte
 test('a metric with no samples is left out of getMetrics instead of reading as a passing 0 ms', () => {
   collector = new SloCollector(new RuntimeEventBus());
   expect(collector.getMetrics()).toEqual([]);
-  expect(collector.getSampleCounts()['slo.reconnect_recovery.p95']).toBe(0);
-});
-
-test('reconnect recovery is reported once a reconnect has completed', () => {
-  const bus = new RuntimeEventBus();
-  collector = new SloCollector(bus);
-  const ctx = { sessionId: 's', traceId: 't', source: 'test' };
-  bus.emit('transport', createEventEnvelope('TRANSPORT_RECONNECTING', { type: 'TRANSPORT_RECONNECTING', transportId: 'x', attempt: 1, maxAttempts: 3 } as never, ctx));
-  bus.emit('transport', createEventEnvelope('TRANSPORT_CONNECTED', { type: 'TRANSPORT_CONNECTED', transportId: 'x', endpoint: 'e' } as never, ctx));
-  return Promise.resolve().then(() => Promise.resolve()).then(() => Promise.resolve()).then(() => {
-    expect(collector!.getMetrics().map((m) => m.name)).toEqual(['slo.reconnect_recovery.p95']);
-  });
+  expect(collector.getSampleCounts()['slo.turn_start.p95']).toBe(0);
 });

@@ -54,6 +54,7 @@ import { formatStatusReport } from './shell/status-report.ts';
 import { voiceCaptureDescription } from './renderer/voice-capture-chip.ts';
 import { voiceCaptureRowVisible } from './core/voice-capture-status.ts';
 import { resolveWebSurfaceUrl } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
+import { emitAgentAwaitingMessage, emitAgentAwaitingTool } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { createFailoverTurnState, resolveActiveModelDisplay } from './core/active-model-identity.ts';
 import { computePromptContentWidth } from './renderer/prompt-content-width.ts';
 import { buildConversationViewport, centerViewportContent } from './renderer/conversation-layout.ts';
@@ -269,7 +270,20 @@ async function main() {
       const settled = settledAskDecision(approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER), request.callId, queuedAt);
       if (settled) { resolve(settled); return false; }
       hostPairing?.cancelForTakeover();
-      pendingPermission = { ...request, ...buildPendingPermissionExtras(request, resolve, approvalBroker) };
+      // A delegated agent asking the owner is waiting on them until the card is answered;
+      // the answer settles its call, so it leaves the wait for that tool call.
+      const askingAgent = request.attribution?.kind === 'background-agent' ? request.attribution.agentId : null;
+      let answer = resolve;
+      if (askingAgent !== null) {
+        const bus = uiServices.runtime.runtimeBus;
+        const emitter = { sessionId: runtime.sessionId, traceId: `${runtime.sessionId}:ask:${request.callId}`, source: 'permission-card' };
+        emitAgentAwaitingMessage(bus, emitter, { agentId: askingAgent });
+        answer = (decision) => {
+          emitAgentAwaitingTool(bus, emitter, { agentId: askingAgent, callId: request.callId, tool: request.tool });
+          resolve(decision);
+        };
+      }
+      pendingPermission = { ...request, ...buildPendingPermissionExtras(request, answer, approvalBroker) };
       render();
       return true;
     },

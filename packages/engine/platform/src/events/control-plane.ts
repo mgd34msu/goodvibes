@@ -62,12 +62,6 @@ export type ControlPlaneEvent =
       principalId: string;
       principalKind: ControlPlanePrincipalKind;
       scopes: string[];
-    }
-  | {
-      type: 'CONTROL_PLANE_AUTH_REJECTED';
-      clientId: string;
-      principalId: string;
-      reason: string;
     };
 
 export type ControlPlaneEventType = ControlPlaneEvent['type'];

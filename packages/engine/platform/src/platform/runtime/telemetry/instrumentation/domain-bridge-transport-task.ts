@@ -52,31 +52,6 @@ export function attachTransportDomain(
   );
 
   unsubs.push(
-    bus.on('TRANSPORT_DEGRADED', (env: Env<Extract<TransportEvent, { type: 'TRANSPORT_DEGRADED' }>>) => {
-      helpers.safe(() => {
-        helpers.withSpan(transportSpans, env.payload.transportId, (span) => {
-          recordTransportPhase(span, 'degraded', {
-            'transport.degraded_reason': env.payload.reason,
-          });
-        });
-      });
-    }),
-  );
-
-  unsubs.push(
-    bus.on('TRANSPORT_RECONNECTING', (env: Env<Extract<TransportEvent, { type: 'TRANSPORT_RECONNECTING' }>>) => {
-      helpers.safe(() => {
-        helpers.withSpan(transportSpans, env.payload.transportId, (span) => {
-          recordTransportPhase(span, 'reconnecting', {
-            'transport.reconnect_attempt': env.payload.attempt,
-            'transport.reconnect_max_attempts': env.payload.maxAttempts,
-          });
-        });
-      });
-    }),
-  );
-
-  unsubs.push(
     bus.on('TRANSPORT_DISCONNECTED', (env: Env<Extract<TransportEvent, { type: 'TRANSPORT_DISCONNECTED' }>>) => {
       helpers.safe(() => {
         helpers.closeSpan(transportSpans, env.payload.transportId, (span) => {
@@ -141,18 +116,6 @@ export function attachTaskDomain(
         helpers.withSpan(taskSpans, env.payload.taskId, (span) => {
           recordTaskPhase(span, 'blocked', {
             'task.blocked_reason': env.payload.reason,
-          });
-        });
-      });
-    }),
-  );
-
-  unsubs.push(
-    bus.on('TASK_PROGRESS', (env: Env<Extract<TaskEvent, { type: 'TASK_PROGRESS' }>>) => {
-      helpers.safe(() => {
-        helpers.withSpan(taskSpans, env.payload.taskId, (span) => {
-          recordTaskPhase(span, 'progress', {
-            'task.progress': env.payload.progress,
           });
         });
       });

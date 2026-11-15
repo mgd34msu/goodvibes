@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { isHostPairingBootstrapPrincipal, isNativePairedPrincipal, parseMintedPairingToken, readHostPairingResponse } from '@goodvibes-jev/engine/terminal-shell/native-paired-principal';
 import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
@@ -58,6 +59,97 @@ function clearPreview(home: string, host: string, attemptId: string): TuiHostPai
       return cleared.status === 'conflict' ? changed() : unavailable();
     },
   };
+}
+
+type MintOutcome =
+  | { readonly status: 'paired'; readonly token: string; readonly tokenId: string }
+  | { readonly status: 'refused'; readonly httpStatus: number }
+  | { readonly status: 'unknown' | 'changed' | 'cancelled' | 'unavailable' };
+
+/**
+ * The one migration request: a durable "attempt begun" marker, one POST of
+ * `pairing.tokens.migrate` with the bootstrap token, then the minted device
+ * credential saved for this origin. A refusal (4xx other than 408) releases the
+ * marker; a lost or failed reply after the request leaves it, because the host
+ * may have minted.
+ */
+async function mintTuiDevicePairing(input: {
+  readonly home: string; readonly host: string; readonly token: string; readonly name: string;
+  readonly current: () => boolean; readonly fetchImpl?: typeof fetch | undefined; readonly signal?: AbortSignal | undefined;
+}): Promise<MintOutcome> {
+  const { home, host, token, name, current, signal } = input;
+  const attemptId = randomUUID();
+  const begin = await beginTuiHostPairing(home, host, { attemptId, name, startedAt: Date.now() }, {}, () => !signal?.aborted && current());
+  if (begin.status !== 'begun') return { status: begin.status === 'cancelled' ? signal?.aborted ? 'cancelled' : 'changed' : begin.status === 'conflict' ? 'changed' : 'unavailable' };
+  try {
+    // Durable uncertainty precedes the only request. Cancellation never clears it.
+    const pending = readTuiHostPairing(home, host);
+    if (pending.status !== 'unknown' || pending.attemptId !== attemptId || pending.name !== name) return { status: 'unknown' };
+    if (signal?.aborted || !current()) {
+      // No request was sent, so nothing can have been minted: release the marker so pairing can be previewed again.
+      const released = await clearTuiHostPairingAttempt(home, host, attemptId);
+      if (released.status !== 'cleared') return { status: 'unknown' };
+      return { status: signal?.aborted ? 'cancelled' : 'changed' };
+    }
+    const response = await (input.fetchImpl ?? fetch)(`${host}/api/control-plane/methods/pairing.tokens.migrate/invoke`, {
+      method: 'POST', redirect: 'error', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ body: { name } }), signal: AbortSignal.any([AbortSignal.timeout(5000), ...(signal ? [signal] : [])]),
+    });
+    if (!response.ok) {
+      // A 4xx is the host refusing the request, so no credential was created and the marker is released. A timeout answer (408), a 5xx or a lost response may have followed a mint and stays unknown.
+      if (response.status >= 400 && response.status < 500 && response.status !== 408) {
+        const released = await clearTuiHostPairingAttempt(home, host, attemptId);
+        if (released.status === 'cleared') return { status: 'refused', httpStatus: response.status };
+      }
+      return { status: 'unknown' };
+    }
+    const minted = parseMintedPairingToken(await readHostPairingResponse(response), name);
+    if (!minted) return { status: 'unknown' };
+    const complete = await completeTuiHostPairing(home, host, attemptId, { token: minted.token, tokenId: minted.id, name, createdAt: minted.createdAt });
+    if (complete.status !== 'paired') return { status: 'unknown' };
+    return { status: 'paired', token: minted.token, tokenId: minted.id };
+  } catch { return { status: 'unknown' }; }
+}
+
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const name = new URL(origin).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    return name === 'localhost' || name === '::1' || /^127(\.\d{1,3}){3}$/.test(name);
+  } catch { return false; }
+}
+
+/**
+ * Native work on the owner's own machine needs no pairing step. When the
+ * selected daemon is on loopback, this terminal holds no record for it, and the
+ * daemon's operator token is this user's own private file, the terminal mints
+ * its device credential with that token (one request), saves it for this
+ * origin and uses it from then on. The device shows in the daemon's device list
+ * and is revoked like any other. A daemon on another machine is never sent the
+ * local token; it is paired with /host pair. Returns the outcome when a request
+ * was made, otherwise null (already paired, an earlier attempt to settle, or not
+ * this machine's daemon).
+ */
+export async function pairLocalTuiHostAutomatically(options: TuiHostPairingOptions, signal?: AbortSignal): Promise<TuiHostPairingResult | null> {
+  try {
+    const home = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
+    const host = resolveTuiHostOrigin(options.configManager);
+    if (!host || !isLoopbackOrigin(host) || !resolveDaemonEnabled(options.configManager)) return null;
+    if (readTuiHostPairing(home, host).status !== 'missing') return null;
+    const token = readTuiLegacyPairingBootstrap(home);
+    if (!token) return null;
+    const homeNow = () => typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
+    const current = () => homeNow() === home && resolveDaemonEnabled(options.configManager) && resolveTuiHostOrigin(options.configManager) === host;
+    const name = `GoodVibes TUI on ${hostname()}`.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu, '').slice(0, 80).trim();
+    const outcome = await mintTuiDevicePairing({ home, host, token, name, current, fetchImpl: options.fetchImpl, signal });
+    switch (outcome.status) {
+      case 'paired': return { status: 'paired', host, name, message: 'This terminal created its device credential for the daemon on this machine.' };
+      case 'refused': return refused(host, outcome.httpStatus);
+      case 'unknown': return unknown(host);
+      case 'changed': return changed();
+      case 'cancelled': return cancelled();
+      default: return unavailable();
+    }
+  } catch { return signal?.aborted ? cancelled() : unavailable(); }
 }
 
 /** Read-only preview. Source credentials are used only after explicit bootstrap
@@ -120,7 +212,7 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
         return { result: { status: 'already-paired', host, message: 'This TUI host credential is saved and its expected native principal is verified. No credential will be minted or replaced.' } };
       } catch { return { result: unverified(host) }; }
     }
-    if (!options.bootstrapShared) return { result: { status: 'blocked', host, message: 'No device credential is bound to this origin. Native work on this machine already uses the daemon token this terminal holds; pairing gives the terminal its own revocable device token instead. Select --bootstrap-shared to mint one with that token.' } };
+    if (!options.bootstrapShared) return { result: { status: 'blocked', host, message: 'No device credential is bound to this origin. For the daemon on this machine, /work creates one on first use. Select --bootstrap-shared to create it now with the daemon operator token.' } };
     const token = readTuiLegacyPairingBootstrap(home);
     if (!token) return { result: { status: 'blocked', host, message: 'The selected legacy bootstrap is missing or unsafe. It must be an owned, private regular daemon operator-tokens.json file; this command never creates or repairs it.' } };
     const current = () => sameSelection() && readTuiLegacyPairingBootstrap(home) === token;
@@ -143,36 +235,14 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
         const revalidated = await auth(token, actionSignal, current);
         if (actionSignal?.aborted) return cancelled();
         if (!current() || !isDeepStrictEqual(readTuiHostPairing(home, host), state) || !isHostPairingBootstrapPrincipal(revalidated)) return changed();
-        const attemptId = randomUUID();
-        const begin = await beginTuiHostPairing(home, host, { attemptId, name, startedAt: Date.now() }, {}, () => !actionSignal?.aborted && current());
-        if (begin.status !== 'begun') return begin.status === 'cancelled' ? actionSignal?.aborted ? cancelled() : changed() : begin.status === 'conflict' ? changed() : unavailable();
+        const outcome = await mintTuiDevicePairing({ home, host, token, name, current, fetchImpl: options.fetchImpl, signal: actionSignal });
         attempted = true;
-        // Durable uncertainty precedes the only request. Cancellation never clears it.
-        const pending = readTuiHostPairing(home, host);
-        if (pending.status !== 'unknown' || pending.attemptId !== attemptId || pending.name !== name) return unknown(host);
-        if (actionSignal?.aborted || !current()) {
-          // No request was sent, so nothing can have been minted: release the marker so pairing can be previewed again.
-          const released = await clearTuiHostPairingAttempt(home, host, attemptId);
-          if (released.status !== 'cleared') return unknown(host);
-          return actionSignal?.aborted ? cancelled() : changed();
-        }
-        const response = await (options.fetchImpl ?? fetch)(`${host}/api/control-plane/methods/pairing.tokens.migrate/invoke`, {
-          method: 'POST', redirect: 'error', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ body: { name } }), signal: AbortSignal.any([AbortSignal.timeout(5000), ...(actionSignal ? [actionSignal] : [])]),
-        });
-        if (!response.ok) {
-          // A 4xx is the host refusing the request, so no credential was created and the marker is released. A timeout answer (408), a 5xx or a lost response may have followed a mint and stays unknown.
-          if (response.status >= 400 && response.status < 500 && response.status !== 408) {
-            const released = await clearTuiHostPairingAttempt(home, host, attemptId);
-            if (released.status === 'cleared') return refused(host, response.status);
-          }
-          return unknown(host);
-        }
-        const payload = await readHostPairingResponse(response);
-        const minted = parseMintedPairingToken(payload, name);
-        if (!minted) return unknown(host);
-        const complete = await completeTuiHostPairing(home, host, attemptId, { token: minted.token, tokenId: minted.id, name, createdAt: minted.createdAt });
-        if (complete.status !== 'paired') return unknown(host);
+        if (outcome.status === 'refused') return refused(host, outcome.httpStatus);
+        if (outcome.status === 'cancelled') return cancelled();
+        if (outcome.status === 'changed') return changed();
+        if (outcome.status === 'unavailable') return unavailable();
+        if (outcome.status !== 'paired') return unknown(host);
+        const minted = { token: outcome.token, id: outcome.tokenId };
         // Save the only copy before verification. Late responses may preserve the
         // original host's recovery state, never create a replacement or revoke it.
         if (actionSignal?.aborted || !sameSelection()) return unverified(host);

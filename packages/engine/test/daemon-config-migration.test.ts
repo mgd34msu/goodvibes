@@ -386,7 +386,6 @@ describe('migration against the live machine layout that motivated this change',
       .map((entry) => entry.key)
       .sort();
     expect(conflicts).toEqual([
-      'controlPlane.allowRemote',
       'controlPlane.enabled',
       'controlPlane.host',
       'controlPlane.hostMode',

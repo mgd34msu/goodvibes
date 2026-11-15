@@ -4,7 +4,7 @@ import { prepareDecisionRouterTurn, describeDecisionRoute, chatWithDecisionRoute
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { hasContractPlanConsumer } from '../tools/agent/contract-binding.js';
 import { setTimeout as waitForRetry } from 'node:timers/promises';
-import { prepareProjectFramework, readRepeatedCalls, OrchestratorObservationHeldError, type RetainedToolObservation } from './orchestrator-observations.js';
+import { REPEATED_CALL, findIdenticalRepeat, prepareProjectFramework, readRepeatedCalls, OrchestratorObservationHeldError, type RetainedToolObservation } from './orchestrator-observations.js';
 import { captureAutonomousSource } from '../permissions/autonomous.js';
 // OrchestratorRunner, single-agent turn loop coordinator.
 //
@@ -656,6 +656,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     const LOOP_SYSTEM_THRESHOLD = 3;
     const LOOP_USER_THRESHOLD = 5;
     const CALL_HISTORY_WINDOW = 20;
+    // Identical calls with identical results that end the run, whatever any model reads.
+    const REPEAT_STOP_THRESHOLD = 8;
     const circuitBreaker = new ConsecutiveErrorBreaker();
     let assertVerificationProvider: () => void | Promise<void> = terminal.assertCurrent;
     const completionGuard = new ResponseCompletionGuard({ request: record.task, conversation,
@@ -691,6 +693,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     // Set when the circuit breaker trips: the next turn is the model's last,
     // its tool calls are not run, and the run then ends failed.
     let breakerFinalTurn = false;
+    // Set with the breaker's final turn when the run stops for a repeated call.
+    let repeatStop: { readonly toolName: string; readonly count: number } | undefined;
     // Track which inter-agent messages have already been injected so a single
     // directive/broadcast is appended to the conversation exactly once (getMessages
     // returns all unexpired messages every turn until their TTL elapses).
@@ -1151,8 +1155,13 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
           record.fullOutput = response.content;
         }
         moveAgentRun(record, 'failed');
-        record.error = `Circuit breaker tripped after ${circuitBreaker.consecutiveErrors} consecutive all-error turns`;
-        record.failureReason = CIRCUIT_BREAKER_TRIPPED;
+        if (repeatStop) {
+          record.error = `Stopped: ${repeatStop.toolName} ran ${repeatStop.count} times with the same arguments and the same result`;
+          record.failureReason = REPEATED_CALL;
+        } else {
+          record.error = `Circuit breaker tripped after ${circuitBreaker.consecutiveErrors} consecutive all-error turns`;
+          record.failureReason = CIRCUIT_BREAKER_TRIPPED;
+        }
         continueLoop = false;
         continue;
       }
@@ -1275,7 +1284,16 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             worstSignature = signature;
           }
         }
-        if (continueLoop && response.toolCalls.some(call => (sigCounts.get(`${call.name}::${JSON.stringify(call.arguments)}`)?.count ?? 0) >= 2)) {
+        repeatStop = breakerFinalTurn ? undefined : findIdenticalRepeat(callHistory, REPEAT_STOP_THRESHOLD);
+        if (repeatStop) {
+          logger.warn(`Agent ${record.id}: stopping, ${repeatStop.toolName} returned the same result ${repeatStop.count} times`);
+          appendVerificationObservation(conversation,
+            `REPEATED CALL: ${repeatStop.toolName} has run ${repeatStop.count} times with the same arguments and returned the same result each time, so this run is stopping. `
+            + 'You have one final reply. Tools are no longer available and any tool call in it will not run. '
+            + 'Report what you were trying to do, what the repeated call returned, and what remains undone.',
+          );
+          breakerFinalTurn = true;
+        } else if (continueLoop && response.toolCalls.some(call => (sigCounts.get(`${call.name}::${JSON.stringify(call.arguments)}`)?.count ?? 0) >= 2)) {
           repeatObservation = await readRepeatedCalls(callHistory, context, record, worstSignature);
         }
         if (repeatObservation?.stuck && worstCount >= LOOP_USER_THRESHOLD) {

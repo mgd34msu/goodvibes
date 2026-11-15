@@ -69,7 +69,6 @@ const EXPECTED: { key: string; default: unknown; secret: boolean }[] = [
   { key: 'calendar.microsoft.clientSecretRef', default: '', secret: true },
   { key: 'google.oauth.projectId', default: '', secret: false },
   { key: 'google.oauth.publishingStatus', default: '', secret: false },
-  { key: 'google.oauth.refreshToken', default: '', secret: true },
   { key: 'google.credentials.migratedFrom', default: '', secret: false },
 ];
 
@@ -79,7 +78,6 @@ const FORMERLY_NON_SCHEMA_PATHS = [
   'email.smtpPasswordRef',
   'calendar.google.clientSecretRef',
   'calendar.microsoft.clientSecretRef',
-  'google.oauth.refreshToken',
   'calendar.google.icsUrl',
   'email.enabled',
   'email.imapHost',

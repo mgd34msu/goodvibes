@@ -8,8 +8,8 @@ import { SnapshotSocket } from './_helpers/mail-inbox-snapshot.js';
 
 function fixture(surface: boolean, overrides: Record<string, unknown> = {}) {
   const config: Record<string, unknown> = surface ? {
-    'surfaces.email.imapHost': 'imap.fixture.invalid', 'surfaces.email.imapUser': 'owner@fixture.invalid',
-    'surfaces.email.imapPort': 993, ...overrides,
+    'surfaces.email.imap.host': 'imap.fixture.invalid', 'surfaces.email.user': 'owner@fixture.invalid',
+    'surfaces.email.imap.port': 993, ...overrides,
   } : {
     'email.enabled': true, 'email.imapHost': 'imap.fixture.invalid', 'email.imapPort': 993,
     'email.username': 'owner@fixture.invalid', 'email.passwordRef': 'goodvibes://secrets/goodvibes/SYNTHETIC_MAIL_PASSWORD',
@@ -66,7 +66,7 @@ test.each(['email.imapHost', 'email.username', 'email.passwordRef'])('missing %s
   expect(f.secrets()).toBe(0); expect(f.connections()).toBe(0);
 });
 
-test.each(['surfaces.email.imapHost', 'surfaces.email.imapUser'])('canonical surface missing %s remains disabled for read admission', async key => {
+test.each(['surfaces.email.imap.host', 'surfaces.email.user'])('canonical surface missing %s remains disabled for read admission', async key => {
   const f = fixture(true, { [key]: '' }); expect(f.service.getInboxReadStatus().ready).toBe(false);
   await expect(f.service.readInboxPage()).rejects.toThrow('not enabled');
   expect(f.secrets()).toBe(0); expect(f.connections()).toBe(0);
@@ -93,8 +93,8 @@ test('raw IMAP credentials are still rejected and ordinary listing retains prior
 });
 
 test('read-only projection preserves canonical nested precedence, mailbox/security and references', () => {
-  const config: Record<string, unknown> = { 'surfaces.email.imap.host': 'nested.fixture.invalid', 'surfaces.email.imapHost': 'flat.fixture.invalid',
-    'surfaces.email.user': 'primary@fixture.invalid', 'surfaces.email.imapUser': 'fallback@fixture.invalid',
+  const config: Record<string, unknown> = { 'surfaces.email.imap.host': 'nested.fixture.invalid', 'surfaces.email.host': 'shared.fixture.invalid',
+    'surfaces.email.user': 'primary@fixture.invalid',
     'surfaces.email.imap.port': 1993, 'surfaces.email.imap.mailbox': 'Owned Folder', 'surfaces.email.imap.secure': false };
   const read = createSurfaceEmailInboxConfigReader(key => config[key]);
   const normal = createSurfaceEmailConfigReader(key => config[key]);

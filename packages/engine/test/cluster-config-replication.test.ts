@@ -104,15 +104,15 @@ describe('what may cross the network', () => {
     expect(isReplicatedConfigPath('daemon.enabled')).toBe(false);
   });
 
-  test('no port replicates, wherever it lives', () => {
-    // Ports of a remote mail server are ruled individually: they pair with a replicated host.
-    const ports = listDaemonOwnedConfigPaths().filter((path) => isPortConfigKey(path) && !REPLICATED_CONFIG_KEYS.includes(path));
+  test('no listening port replicates, wherever it lives; a remote server port travels with its host', () => {
+    const ports = listDaemonOwnedConfigPaths().filter((path) => isPortConfigKey(path));
     expect(ports.length).toBeGreaterThan(0);
     for (const path of ports) {
       expect(isReplicatedConfigPath(path), `${path} is a port and must not replicate`).toBe(false);
       expect(classifyDaemonConfigPath(path).reason).toContain('port');
     }
-    for (const path of REPLICATED_CONFIG_KEYS.filter((key) => isPortConfigKey(key))) {
+    for (const path of ['email.imapPort', 'email.smtpPort', 'surfaces.email.imap.port', 'surfaces.email.smtp.port']) {
+      expect(isPortConfigKey(path)).toBe(false);
       expect(isReplicatedConfigPath(path), `${path} addresses a remote server and must replicate`).toBe(true);
     }
     // The live case that motivated the rule.

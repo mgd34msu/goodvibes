@@ -4,7 +4,7 @@ import * as crypto from 'node:crypto';
 import { compareStableRank, compareVersions } from '../platform/src/platform/cluster/ranking.js';
 import { stableSurfaceHash } from '../platform/src/platform/cluster/surface-id.js';
 import { CLUSTER_RANK_FEATURE, CLUSTER_V1_PEER_RANK_FEATURE, clusterProductVersion, clusterRankingWireVersion } from '../platform/src/platform/cluster/ranking-feature.js';
-import { decodeMessage, encodeMessage } from '../platform/src/platform/cluster/protocol.js';
+import { decodeMessage, decodeMessageFields, encodeMessage } from '../platform/src/platform/cluster/protocol.js';
 import { GroupWireRouter } from '../platform/src/platform/cluster/group-transport.js';
 import type { ClusterMessage, ClusterTransport } from '../platform/src/platform/cluster/types.js';
 import { addNode, advance, createWorld, holders, idFor, startNode } from './cluster-harness.js';
@@ -121,7 +121,7 @@ test('invalid or stale old-style announcements cannot downgrade a current electi
 
 
 test('the actual group wrapper preserves and authenticates the election feature declaration', async () => {
-  let receive: ((raw: string) => void) | undefined; const outgoing: string[] = [], delivered: string[] = [];
+  let receive: ((raw: string) => void) | undefined; const outgoing: string[] = [], delivered: Array<string | Readonly<Record<string, unknown>>> = [];
   const inner: ClusterTransport = {
     async start(reader) { receive = reader; }, async send(raw) { outgoing.push(raw); }, async stop() {},
     describe: () => ({ mode: 'in-memory', group: 'memory', port: 0, peers: [] }),
@@ -138,7 +138,11 @@ test('the actual group wrapper preserves and authenticates the election feature 
     await transport.start(raw => delivered.push(raw)); await transport.send(encodeMessage(message(wireVersion), secret));
     const raw = outgoing[0]; if (!raw || !receive) throw new Error('Actual group wrapper did not publish its datagram');
     expect(JSON.parse(raw).nodeVersion).toBe(wireVersion); receive(raw);
-    expect(delivered).toHaveLength(1); expect(decodeMessage(delivered[0]!, secret).message?.nodeVersion).toBe(wireVersion);
+    // The group delivers the fields it authenticated, exactly as the election sent them.
+    const fields = delivered[0]!;
+    expect(typeof fields).toBe('object');
+    expect(decodeMessageFields(fields as Readonly<Record<string, unknown>>, secret).message?.nodeVersion).toBe(wireVersion);
+    expect(delivered).toHaveLength(1);
     receive(JSON.stringify({ ...JSON.parse(raw), nodeVersion: clusterProductVersion(wireVersion) }));
     expect(delivered).toHaveLength(1); expect(router.counters.droppedBadSignature).toBe(1);
   } finally { await router.stop(); }

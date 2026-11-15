@@ -124,7 +124,6 @@ export const runtimeConfigDefaults = {
     port: 3421,
     publicBaseUrl: '',
     streamMode: 'sse',
-    allowRemote: false,
     trustProxy: false,
     openaiCompatible: {
       enabled: true,
@@ -161,7 +160,7 @@ export const runtimeConfigDefaults = {
     hostMode: 'local',
     host: '127.0.0.1',
     port: 3423,
-    publicBaseUrl: 'http://127.0.0.1:3423',
+    publicBaseUrl: '',
     staticAssetsDir: 'dist/web',
   },
   watchers: {
@@ -293,7 +292,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'controlPlane.hostMode',
     type: 'enum',
     default: 'local',
-    description: 'Network binding mode for the control-plane listener: local (127.0.0.1, default port), network (0.0.0.0, default port), custom (the host and port below). This and host decide what the listener binds; controlPlane.allowRemote does not change it.',
+    description: 'Network binding mode for the control-plane listener: local (127.0.0.1, default port), network (0.0.0.0, default port), custom (the host and port below). This and host decide what the listener binds.',
     enumValues: ['local', 'network', 'custom'],
   },
   {
@@ -324,12 +323,6 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     default: 'sse',
     description: 'Informational: the live update stream mode reported to control-plane clients. It is echoed in status; the SSE and WebSocket endpoints are both served whatever it says.',
     enumValues: ['sse', 'websocket', 'both'],
-  },
-  {
-    key: 'controlPlane.allowRemote',
-    type: 'boolean',
-    default: false,
-    description: 'Deprecated: nothing reads this, and the terminal setup no longer writes it. It does not open or close the listener: the bind comes only from controlPlane.hostMode and controlPlane.host, so set those to widen or narrow exposure (authentication still applies either way).',
   },
   {
     key: 'controlPlane.trustProxy',
@@ -474,8 +467,8 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'web.publicBaseUrl',
     type: 'string',
-    default: 'http://127.0.0.1:3423',
-    description: 'Public base URL for web links and ntfy/notification deep links. The default is a placeholder: nothing listens on its port, so set it to the address people actually reach (usually the control-plane address).',
+    default: '',
+    description: 'Public base URL for web links and notification deep links, for a web app served somewhere the daemon cannot describe (a tunnel or reverse proxy). Empty (the default) means links are derived: the daemon\'s own reachable address when it serves the web app (controlPlane.webui.serve), otherwise the web endpoint binding; a link only reachable on this machine is left out of messages read on other devices.',
   },
   {
     key: 'web.staticAssetsDir',

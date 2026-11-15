@@ -16,8 +16,10 @@ function accepts(key: string, value: unknown): boolean {
 }
 
 describe('settings that reach files, processes or other routes', () => {
-  test('the release feed must be a github.com https URL with no credentials; empty turns the loop off', () => {
-    expect(accepts('update.releasesUrl', 'https://github.com/owner/repo/releases/latest')).toBe(true);
+  test('the release feed must be the product repository on github.com with no credentials; empty turns the loop off', () => {
+    expect(accepts('update.releasesUrl', 'https://github.com/mgd34msu/goodvibes/releases/latest')).toBe(true);
+    expect(accepts('update.releasesUrl', 'https://github.com/owner/repo/releases/latest')).toBe(false);
+    expect(accepts('update.releasesUrl', 'https://github.com/mgd34msu/goodvibes-fork/releases/latest')).toBe(false);
     expect(accepts('update.releasesUrl', '')).toBe(true);
     expect(accepts('update.releasesUrl', 'http://attacker.example/x/releases/latest')).toBe(false);
     expect(accepts('update.releasesUrl', 'https://attacker.example/x/releases/latest')).toBe(false);

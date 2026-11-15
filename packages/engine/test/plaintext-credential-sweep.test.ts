@@ -97,7 +97,7 @@ describe('the declared set is the rule, and the name pattern is only a backstop'
   });
 
   test('an ordinary setting is not treated as a credential', () => {
-    for (const key of ['surfaces.email.imapHost', 'surfaces.telegram.botUsername', 'display.theme']) {
+    for (const key of ['surfaces.email.imap.host', 'surfaces.telegram.botUsername', 'display.theme']) {
       expect(isSecretBearingConfigKey(key)).toBe(false);
     }
   });

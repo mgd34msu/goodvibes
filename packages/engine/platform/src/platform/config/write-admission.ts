@@ -5,7 +5,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type { ConfigSetting } from './schema.js';
 import { readDotPath } from './shared-config-tier.js';
-import { resolveEffectiveSystemRamMb } from '../runtime/memory/memory-governor.js';
+import { resolveEffectiveSystemRamMb, validateMemoryPolicy, type MemoryPolicyValues } from '../runtime/memory/memory-governor.js';
 import { ConfigError } from '../types/errors.js';
 import { coerceSchemaValue } from './manager-bootstrap.js';
 import { isProjectRestrictedKey } from './config-key-facts.js';
@@ -59,50 +59,46 @@ export function nonSchemaKeyRefusal(key: string, _value: unknown, config?: unkno
   return 'no such setting; check the spelling against the settings list';
 }
 
-/**
- * The tiers must stay ordered: elevated < high < critical <= 100. The memory
- * governor refuses to start otherwise, so a write that would invert them is
- * refused here with the other two values named.
- */
-export function memoryTierOrderRefusal(key: string, value: unknown, config: unknown): string | null {
-  if (!key.startsWith('memory.tier.') || typeof value !== 'number') return null;
-  const read = (name: string): number => {
-    const path = `memory.tier.${name}`;
+/** The memory settings as they would be with `value` written at `key`. */
+function projectedMemoryPolicy(key: string, value: number, config: unknown): MemoryPolicyValues {
+  const read = (path: string, fallback: number): number => {
     if (path === key) return value;
     const found = readDotPath(config, path).value;
-    return typeof found === 'number' ? found : Number.NaN;
+    return typeof found === 'number' ? found : fallback;
   };
-  const elevated = read('elevatedPct');
-  const high = read('highPct');
-  const critical = read('criticalPct');
-  if (elevated > 0 && elevated < high && high < critical && critical <= 100) return null;
-  return `would leave elevatedPct (${elevated}), highPct (${high}) and criticalPct (${critical}) out of order; each must be above the one before and at most 100, so change the other tier first`;
+  return {
+    budgetMb: read('memory.budgetMb', 0),
+    elevatedPct: read('memory.tier.elevatedPct', Number.NaN),
+    highPct: read('memory.tier.highPct', Number.NaN),
+    criticalPct: read('memory.tier.criticalPct', Number.NaN),
+    hardLimitPct: read('memory.hardLimitPct', 90),
+  };
 }
 
 /**
- * The governor refuses to start when its hard limit (a percent of the kill
- * ceiling) sits at or below the critical tier (a percent of the budget). A
- * budget close to the machine's memory, or a hard limit pulled low, reaches
- * that state, so the write that would cause it is refused with the numbers.
- * `ceilingMb` is injectable so the check is deterministic.
+ * The tiers must stay ordered: elevated < high < critical <= 100. The rule is
+ * the memory governor's own (`validateMemoryPolicy`), so a write is refused
+ * with the same sentence the governor would give.
+ */
+export function memoryTierOrderRefusal(key: string, value: unknown, config: unknown): string | null {
+  if (!key.startsWith('memory.tier.') || typeof value !== 'number') return null;
+  const problem = validateMemoryPolicy(projectedMemoryPolicy(key, value, config), resolveEffectiveSystemRamMb());
+  return problem?.group === 'tiers' ? `would break the memory settings: ${problem.message}` : null;
+}
+
+/**
+ * The hard limit (a percent of the kill ceiling) must sit above the critical
+ * tier (a percent of the budget); the governor's own rule decides it, so the
+ * write that would break it is refused with the numbers. `ceilingMb` is
+ * injectable so the check is deterministic.
  */
 export function memoryBudgetRefusal(
   key: string, value: unknown, config: unknown, ceilingMb: number = resolveEffectiveSystemRamMb(),
 ): string | null {
   if (key !== 'memory.budgetMb' && key !== 'memory.hardLimitPct' && key !== 'memory.tier.criticalPct') return null;
   if (typeof value !== 'number') return null;
-  const read = (name: string, fallback: number): number => {
-    const found = readDotPath(config, name).value;
-    return typeof found === 'number' ? found : fallback;
-  };
-  const pick = (name: string, fallback: number): number => (name === key ? value : read(name, fallback));
-  const budgetMb = pick('memory.budgetMb', 0);
-  if (!(budgetMb > 0)) return null; // auto budget is capped well under the ceiling
-  const criticalMb = budgetMb * (pick('memory.tier.criticalPct', 95) / 100);
-  const hardLimitPct = pick('memory.hardLimitPct', 90);
-  const hardLimitMb = ceilingMb * (hardLimitPct / 100);
-  if (hardLimitMb > criticalMb) return null;
-  return `would put the critical tier (${Math.round(criticalMb)}MB) at or above the hard limit (${Math.round(hardLimitMb)}MB = ${hardLimitPct}% of the ${Math.round(ceilingMb)}MB this machine can use), and the memory governor refuses to start that way; lower memory.budgetMb or memory.tier.criticalPct, or raise memory.hardLimitPct`;
+  const problem = validateMemoryPolicy(projectedMemoryPolicy(key, value, config), ceilingMb);
+  return problem?.group === 'hard-limit' ? `would break the memory settings: ${problem.message}` : null;
 }
 
 /** What {@link admitSettingValue} checks a value against beyond its schema row. */

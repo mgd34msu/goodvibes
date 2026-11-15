@@ -1,25 +1,24 @@
 /**
- * What a project settings file may NOT do.
+ * What a project settings file may do.
  *
  * The project file lives inside the working directory, so it is repository
  * content: whoever authored the repository wrote it, not necessarily the person
- * opening it. Workspace trust only gates the ask layer, so a project value that
- * makes the permission machinery approve on its own, or that points a secret at
- * a command or a destination at a foreign host, would take effect before any
- * trust question is raised.
- *
- * The rule is one-directional: a project file may make the posture stricter than
- * the user's own settings, never looser, and it may not carry the keys declared
- * not project-settable at all. Both facts come from config-key-facts.ts, which
- * the settings writer and the gate read too. A refused value stays in the file
- * untouched and is reported through an ingestion notice; the owner who wants it
- * applies it from their own settings.
+ * opening it, and it is read before any trust question is raised. So the
+ * project layer admits only the keys declared project-settable
+ * (config-key-facts.ts: presentation, behaviour inside the project, contract
+ * and worktree runs, and the permission posture in the stricter direction).
+ * Every other key, including a key the schema does not know and a surface's
+ * own setting not declared for projects (a status-line command), is skipped.
+ * The facts come from the same declarations the settings writer and the gate
+ * read. A skipped value stays in the file untouched and is reported through an
+ * ingestion notice; the owner who wants it applies it from their own settings.
  */
 import { deleteRawDotPath } from './settings-io.js';
 import { readDotPath } from './shared-config-tier.js';
 import { normalizeSecretRef } from './secret-refs.js';
 import type { SettingsIngestionNotice } from './settings-ingestion.js';
 import { configKeyFacts, listProjectUnsettableConfigKeys } from './config-key-facts.js';
+import { CONFIG_KEYS } from './schema.js';
 
 export { isProjectRestrictedKey } from './config-key-facts.js';
 
@@ -41,43 +40,78 @@ function collectLeaves(value: unknown, path: string, out: Array<{ path: string; 
 }
 
 /**
- * Remove from a freshly ingested project layer every value that would loosen the
- * posture already established by `current` (the merged defaults and user file).
- * Mutates and returns the layer.
+ * The setting a leaf of the project file belongs to: the leaf itself when it is
+ * a schema key or a surface's own setting, else the nearest schema key above it
+ * (an object-valued setting such as a price table), else the leaf as written
+ * (a per-tool permission, or a key nothing declares).
+ */
+function settingFor(path: string, isHostSetting: (key: string) => boolean): string {
+  if (CONFIG_KEYS.has(path) || isHostSetting(path)) return path;
+  for (let end = path.lastIndexOf('.'); end > 0; end = path.lastIndexOf('.', end - 1)) {
+    const parent = path.slice(0, end);
+    if (CONFIG_KEYS.has(parent)) return parent;
+  }
+  return path;
+}
+
+/** What the project layer is checked against besides the schema. */
+export interface ProjectLayerHostSettings {
+  /** True for a surface's own registered setting (host-settings.ts). */
+  readonly has: (key: string) => boolean;
+  /** True when that setting is declared settable from a project file. */
+  readonly projectSettable: (key: string) => boolean;
+}
+
+const NO_HOST_SETTINGS: ProjectLayerHostSettings = { has: () => false, projectSettable: () => false };
+
+/**
+ * Keep in a freshly ingested project layer only what a project file may set:
+ * keys declared project-settable, and of those the ones with a loosening rule
+ * only when they are no looser than `current` (the merged defaults and user
+ * file). Mutates and returns the layer.
  */
 export function restrictProjectLayer(
   layer: Record<string, unknown>,
   current: unknown,
   file: string,
+  host: ProjectLayerHostSettings = NO_HOST_SETTINGS,
 ): { readonly layer: Record<string, unknown>; readonly notices: SettingsIngestionNotice[] } {
   const notices: SettingsIngestionNotice[] = [];
-  const refuse = (key: string, reason: string): void => {
+  const refused = new Set<string>();
+  const refuse = (key: string, reason: string, remedy = 'Set it in your own settings file; a project settings file can only make this stricter'): void => {
+    if (refused.has(key)) return;
+    refused.add(key);
     deleteRawDotPath(layer, key);
-    notices.push({
-      file, key, action: 'skipped', reason,
-      remedy: 'Set it in your own settings file; a project settings file can only make this stricter',
-    });
+    notices.push({ file, key, action: 'skipped', reason, remedy });
   };
   const userValue = (key: string): unknown => readDotPath(current, key).value;
+  const elsewhere = 'Set it in your own settings file if you want it; a project settings file is repository content';
 
   for (const key of listProjectUnsettableConfigKeys()) {
-    if (readDotPath(layer, key).present) refuse(key, 'a project settings file cannot set where data or judgment calls are sent');
+    if (readDotPath(layer, key).present) refuse(key, 'a project settings file cannot set where data or judgment calls are sent', elsewhere);
   }
 
   const leaves: Array<{ path: string; value: unknown }> = [];
   collectLeaves(layer, '', leaves);
-  const refused = new Set<string>();
   for (const leaf of leaves) {
     if (!leaf.path) continue;
-    const facts = configKeyFacts(leaf.path);
-    if (facts.loosens?.(userValue(leaf.path), leaf.value)) {
-      refused.add(leaf.path);
-      refuse(leaf.path, `a project settings file cannot ${facts.loosening ?? 'loosen this setting'}`);
+    const key = settingFor(leaf.path, (path) => host.has(path));
+    if (refused.has(key)) continue;
+    if (host.has(key)) {
+      if (!host.projectSettable(key)) refuse(key, `a project settings file cannot set ${key}, a setting of this program that is not declared for projects`, elsewhere);
+      continue;
     }
-  }
-  for (const leaf of leaves) {
-    if (leaf.path && !refused.has(leaf.path) && isExecSecretRef(leaf.value)) {
-      refuse(leaf.path, 'a project settings file cannot reference a secret read by running a command');
+    const facts = configKeyFacts(key);
+    if (!facts.projectSettable) {
+      refuse(key, facts.inSchema
+        ? `a project settings file cannot set ${key}; it can set only display, behaviour, contract, worktree and stricter permission settings`
+        : `${key} is not a setting a project settings file can carry`, elsewhere);
+      continue;
+    }
+    if (facts.loosens?.(userValue(key), readDotPath(layer, key).value)) {
+      refuse(key, `a project settings file cannot ${facts.loosening ?? 'loosen this setting'}`);
+    } else if (isExecSecretRef(leaf.value)) {
+      refuse(key, 'a project settings file cannot reference a secret read by running a command', elsewhere);
     }
   }
   return { layer, notices };

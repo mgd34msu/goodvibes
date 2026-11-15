@@ -658,7 +658,7 @@ export class InboundMailSupervisor {
       // Not part of the mailbox identity, but it decides which source an auto
       // install selects: a non-Google host turns a Gmail mailbox into IMAP.
       this.deps.config.get('surfaces.email.imap.host'),
-      this.deps.config.get('surfaces.email.imapHost'),
+      this.deps.config.get('surfaces.email.host'),
     ]);
   }
 

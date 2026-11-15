@@ -16,9 +16,9 @@ import { INBOX_ADMISSION_ACTIONS, InboxAdmissionRefusal, inboxAdmissionClearsOnI
 // decides how its poller is elected: a write to any of them ends the account's
 // lifetime, and the reacquiring source builds a fresh one.
 const slackKeys = ['cluster.enabled', 'surfaces.slack.enabled', 'surfaces.slack.workspaceId', 'surfaces.slack.inboxUserId'] as const;
-const emailKeys = ['cluster.enabled', 'surfaces.email.imap.host', 'surfaces.email.host', 'surfaces.email.imapHost',
-  'surfaces.email.user', 'surfaces.email.username', 'surfaces.email.imapUser', 'surfaces.email.imap.user', 'surfaces.email.imap.port',
-  'surfaces.email.imapPort', 'surfaces.email.imap.secure', 'surfaces.email.imap.mailbox'] as const;
+const emailKeys = ['cluster.enabled', 'surfaces.email.imap.host', 'surfaces.email.host',
+  'surfaces.email.user', 'surfaces.email.imap.user', 'surfaces.email.imap.port',
+  'surfaces.email.imap.secure', 'surfaces.email.imap.mailbox'] as const;
 const discordKeys = ['cluster.enabled', 'surfaces.discord.enabled', 'surfaces.discord.applicationId', 'surfaces.discord.guildId',
   'surfaces.discord.defaultChannelId', 'surfaces.discord.inboxBotUserId', 'surfaces.discord.inboxChannelIds'] as const;
 type Context = Parameters<DaemonInboxFactory>[0];

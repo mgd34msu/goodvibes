@@ -160,7 +160,6 @@ export type ConfigValue<K extends ConfigKey> =
   K extends 'controlPlane.publicBaseUrl' ? string : K extends 'conversationGate.mode' ? 'propose' | 'confirm-all' | 'off' : K extends 'conversationGate.proposalTtlMs' ? number : K extends 'conversationGate.maxPendingProposals' ? number :
   K extends 'hostedSessions.detachPolicy' ? 'kill' | 'survive' : K extends 'hostedSessions.maxSessions' ? number : K extends 'hostedSessions.maxMessagesPerSession' ? number : K extends 'hostedSessions.terminatedRetentionMs' ? number : K extends 'hostedSessions.attachmentTtlMs' ? number : K extends 'hostedSessions.promoteInboundConversations' ? boolean : K extends 'hostedSessions.routeConversationTurns' ? boolean :
   K extends 'controlPlane.streamMode' ? 'sse' | 'websocket' | 'both' :
-  K extends 'controlPlane.allowRemote' ? boolean :
   K extends 'controlPlane.trustProxy' ? boolean :
   K extends 'controlPlane.openaiCompatible.enabled' ? boolean :
   K extends 'controlPlane.openaiCompatible.pathPrefix' ? string :
@@ -306,13 +305,8 @@ export type ConfigValue<K extends ConfigKey> =
   K extends 'surfaces.matrix.defaultRoomId' ? string :
   K extends 'surfaces.email.host' ? string :
   K extends 'surfaces.email.user' ? string :
-  K extends 'surfaces.email.username' ? string :
   K extends 'surfaces.email.from' ? string :
   K extends 'surfaces.email.password' ? string :
-  K extends 'surfaces.email.imapHost' ? string :
-  K extends 'surfaces.email.imapPort' ? number :
-  K extends 'surfaces.email.imapUser' ? string :
-  K extends 'surfaces.email.imapPassword' ? string :
   K extends 'surfaces.email.imap.host' ? string :
   K extends 'surfaces.email.imap.port' ? number :
   K extends 'surfaces.email.imap.user' ? string :

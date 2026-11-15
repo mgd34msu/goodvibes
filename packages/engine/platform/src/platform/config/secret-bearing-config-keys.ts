@@ -48,7 +48,6 @@
 export const SECRET_BEARING_CONFIG_PATHS: readonly string[] = [
   // The daemon's own mailbox and calendar account.
   'surfaces.email.password',
-  'surfaces.email.imapPassword',
   'surfaces.email.imap.password',
   'surfaces.email.smtp.password',
   'surfaces.calendar.caldavPassword',

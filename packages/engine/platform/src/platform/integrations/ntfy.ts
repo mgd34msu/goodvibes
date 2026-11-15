@@ -1,6 +1,7 @@
 import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import { retireDeliveryResponse } from './delivery-diagnostics.js';
 /** GoodVibes platform notification transport. */
+import { randomBytes } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { connect as http2Connect } from 'node:http2';
 import { request as httpsRequest } from 'node:https';
@@ -13,6 +14,13 @@ import { HttpStatusError } from '@goodvibes-jev/engine/errors';
 export const GOODVIBES_NTFY_ORIGIN = 'goodvibes-platform';
 export const GOODVIBES_NTFY_ORIGIN_HEADER = 'X-Goodvibes-Origin';
 export const GOODVIBES_NTFY_OUTBOUND_TAG = 'goodvibes-platform-outbound';
+/**
+ * The inbound topic names earlier builds shipped as defaults. On a public ntfy
+ * server a topic name is the only secret, and these were the same on every
+ * installation, so anyone could post work into them and read the replies. A
+ * subscription to one of them on the public server is refused; new installs
+ * get generated names (see {@link ensureNtfyTopics}).
+ */
 export const GOODVIBES_NTFY_CHAT_TOPIC = 'goodvibes-chat';
 export const GOODVIBES_NTFY_AGENT_TOPIC = 'goodvibes-agent';
 export const GOODVIBES_NTFY_REMOTE_TOPIC = 'goodvibes-ntfy';
@@ -22,29 +30,112 @@ export const GOODVIBES_NTFY_DEFAULT_TOPICS = [
   GOODVIBES_NTFY_REMOTE_TOPIC,
 ] as const;
 
+/** The three inbound topic settings, by the role each topic plays. */
+export const NTFY_TOPIC_SETTINGS = {
+  chatTopic: 'surfaces.ntfy.chatTopic',
+  agentTopic: 'surfaces.ntfy.agentTopic',
+  remoteTopic: 'surfaces.ntfy.remoteTopic',
+} as const;
+type NtfyTopicRole = keyof typeof NTFY_TOPIC_SETTINGS;
+const NTFY_TOPIC_ROLES = Object.keys(NTFY_TOPIC_SETTINGS) as NtfyTopicRole[];
+
 export interface GoodVibesNtfyTopicConfig {
   readonly chatTopic?: string | null | undefined;
   readonly agentTopic?: string | null | undefined;
   readonly remoteTopic?: string | null | undefined;
+  /** `surfaces.ntfy.baseUrl`; the public server refuses the old shipped names. */
+  readonly baseUrl?: string | null | undefined;
+}
+
+/** A topic that is configured and not subscribed, with the setting to change. */
+export interface RefusedNtfyTopic {
+  readonly setting: string;
+  readonly topic: string;
+  readonly reason: string;
 }
 
 export interface GoodVibesNtfyTopics {
+  /** Empty when the role has no usable topic. */
   readonly chatTopic: string;
   readonly agentTopic: string;
   readonly remoteTopic: string;
+  /** The topics to subscribe to. */
   readonly all: readonly string[];
+  readonly refused: readonly RefusedNtfyTopic[];
 }
 
+/** True for the public ntfy server, where anyone who knows a topic name can publish to it and read it. */
+export function isPublicNtfyServer(baseUrl: string | null | undefined): boolean {
+  try {
+    const host = new URL(String(baseUrl ?? '').trim() || 'https://ntfy.sh').hostname.toLowerCase();
+    return host === 'ntfy.sh' || host.endsWith('.ntfy.sh');
+  } catch {
+    return false;
+  }
+}
+
+/** A topic name nobody can guess: 96 random bits after a readable prefix. */
+export function generateNtfyTopic(role: 'chat' | 'agent' | 'remote'): string {
+  return `goodvibes-${role}-${randomBytes(12).toString('hex')}`;
+}
+
+/**
+ * The inbound topics to subscribe to. An unset role has no topic (earlier
+ * builds fell back to a shipped name); a shipped name on the public server is
+ * refused, naming the setting and what to do.
+ */
 export function resolveGoodVibesNtfyTopics(config: GoodVibesNtfyTopicConfig = {}): GoodVibesNtfyTopics {
-  const chatTopic = normalizeNtfyTopic(config.chatTopic, GOODVIBES_NTFY_CHAT_TOPIC);
-  const agentTopic = normalizeNtfyTopic(config.agentTopic, GOODVIBES_NTFY_AGENT_TOPIC);
-  const remoteTopic = normalizeNtfyTopic(config.remoteTopic, GOODVIBES_NTFY_REMOTE_TOPIC);
+  const publicServer = isPublicNtfyServer(config.baseUrl);
+  const refused: RefusedNtfyTopic[] = [];
+  const topicFor = (role: NtfyTopicRole): string => {
+    const topic = typeof config[role] === 'string' ? config[role]!.trim() : '';
+    if (topic && publicServer && (GOODVIBES_NTFY_DEFAULT_TOPICS as readonly string[]).includes(topic)) {
+      refused.push({
+        setting: NTFY_TOPIC_SETTINGS[role],
+        topic,
+        reason: `${topic} is a name every installation shipped with, so on the public ntfy server anyone can post to it and read the replies; `
+          + `clear ${NTFY_TOPIC_SETTINGS[role]} to have an unguessable name generated, or set a name of your own`,
+      });
+      return '';
+    }
+    return topic;
+  };
+  const chatTopic = topicFor('chatTopic');
+  const agentTopic = topicFor('agentTopic');
+  const remoteTopic = topicFor('remoteTopic');
   return {
     chatTopic,
     agentTopic,
     remoteTopic,
-    all: [...new Set([chatTopic, agentTopic, remoteTopic])],
+    all: [...new Set([chatTopic, agentTopic, remoteTopic].filter(Boolean))],
+    refused,
   };
+}
+
+/** The part of a config manager that topic generation reads and writes. */
+export interface NtfyTopicConfigStore {
+  get(key: string): unknown;
+  set(key: string, value: string): void;
+}
+
+/**
+ * Give every unset inbound topic an unguessable name and save it, the way the
+ * relay picks its rendezvous id the first time it is needed. Returns the
+ * settings written, so the caller can say which names to subscribe to on the
+ * phone. A topic already set, even to an old shipped name, is left to its owner.
+ */
+export function ensureNtfyTopics(config: NtfyTopicConfigStore): readonly { readonly setting: string; readonly topic: string }[] {
+  const written: { setting: string; topic: string }[] = [];
+  const roleNames: Record<NtfyTopicRole, 'chat' | 'agent' | 'remote'> = { chatTopic: 'chat', agentTopic: 'agent', remoteTopic: 'remote' };
+  for (const role of NTFY_TOPIC_ROLES) {
+    const setting = NTFY_TOPIC_SETTINGS[role];
+    const current = config.get(setting);
+    if (typeof current === 'string' && current.trim() !== '') continue;
+    const topic = generateNtfyTopic(roleNames[role]);
+    config.set(setting, topic);
+    written.push({ setting, topic });
+  }
+  return written;
 }
 
 /** The configured default priority, or undefined when it is not a whole number from 1 to 5. */
@@ -472,11 +563,6 @@ export function isGoodVibesNtfyDeliveryEcho(message: Record<string, unknown>): b
   const headers = readRecord(message.headers);
   const originHeader = headers ? readCaseInsensitiveHeader(headers, GOODVIBES_NTFY_ORIGIN_HEADER) : undefined;
   return originHeader === GOODVIBES_NTFY_ORIGIN || originHeader === 'goodvibes-sdk';
-}
-
-function normalizeNtfyTopic(value: string | null | undefined, fallback: string): string {
-  const topic = typeof value === 'string' ? value.trim() : '';
-  return topic || fallback;
 }
 
 const NTFY_STREAM_IDLE_TIMEOUT_MS = 90_000;

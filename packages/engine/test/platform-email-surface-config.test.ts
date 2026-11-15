@@ -2,10 +2,9 @@
  * Tests for driving `EmailService` from the daemon's own `surfaces.email.*`
  * keys, and for the property that no raw mail address reaches a log field.
  *
- * Both config spellings are exercised, the nested one the settings surface
- * writes (`surfaces.email.imap.host`) and the flat one the inbound poller reads
- * (`surfaces.email.imapHost`), because both are live in the field and a
- * machine configured either way has to keep working.
+ * The flat spellings earlier builds read (`surfaces.email.imapHost` and
+ * friends) are moved onto the one spelling at load; the cases below prove a
+ * machine configured either way resolves to the same mailbox.
  *
  * Nothing here opens a socket: the config port is a map, the secret store is a
  * map, and the gateway service is driven through a fake `EmailService`-shaped
@@ -24,6 +23,9 @@ import {
 } from '../platform/src/platform/email/surface-config.ts';
 import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
 import { daemonSecretKeyFor } from '../platform/src/platform/config/daemon-secret-keys.ts';
+import { migrateRetiredSettings } from '../platform/src/platform/config/retired-settings-migration.ts';
+import { writeRawDotPath } from '../platform/src/platform/config/settings-io.ts';
+import { readDotPath } from '../platform/src/platform/config/shared-config-tier.ts';
 import { readEmailConfig, smtpPasswordRefFor } from '../platform/src/platform/email/email-service.ts';
 import { createDaemonEmailGatewayService } from '../platform/src/platform/control-plane/routes/email-composition.ts';
 import { createEmailSendHandler } from '../platform/src/platform/control-plane/routes/email.ts';
@@ -82,13 +84,18 @@ function readerWithSchemaDefaults(values: Record<string, unknown>): (key: string
   };
 }
 
-describe('surfaces.email against the real schema defaults', () => {
-  test('only the flat imapPort set: the inbox connects to that port, not the nested default', () => {
-    expect(readSurfaceEmailSettings(readerWithSchemaDefaults({ 'surfaces.email.imapPort': 1993 })).imapPort).toBe(1993);
-  });
+/** The settings file shape of a dotted map, migrated the way a load migrates it, then read back flat. */
+function migratedReader(values: Record<string, unknown>): (key: string) => unknown {
+  const nested: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(values)) writeRawDotPath(nested, key, value);
+  const migrated = migrateRetiredSettings(nested).config;
+  return (key: string): unknown => readDotPath(migrated, key).value;
+}
 
-  test('an explicit nested port wins over the flat one', () => {
-    expect(readSurfaceEmailSettings(readerWithSchemaDefaults({ 'surfaces.email.imap.port': 1143, 'surfaces.email.imapPort': 1993 })).imapPort).toBe(1143);
+describe('surfaces.email against the real schema defaults', () => {
+  test('only the old flat imapPort set: after the load migration the inbox connects to that port', () => {
+    const migrated = migratedReader({ 'surfaces.email.imapPort': 1993 });
+    expect(readSurfaceEmailSettings(readerWithSchemaDefaults({ 'surfaces.email.imap.port': migrated('surfaces.email.imap.port') })).imapPort).toBe(1993);
   });
 
   test('an explicit port equal to the schema default is kept, and still wins over a later spelling', () => {
@@ -99,8 +106,6 @@ describe('surfaces.email against the real schema defaults', () => {
     });
     const plain = readSurfaceEmailSettings(withOrigins({ 'surfaces.email.smtp.port': 465, 'surfaces.email.smtp.secure': false, 'surfaces.email.imap.port': 993, 'surfaces.email.imap.secure': false }));
     expect([plain.imapPort, plain.smtpPort]).toEqual([993, 465]);
-    const shadowed = readSurfaceEmailSettings(withOrigins({ 'surfaces.email.imap.port': 993, 'surfaces.email.imapPort': 1993 }));
-    expect(shadowed.imapPort).toBe(993);
     const unset = readSurfaceEmailSettings(withOrigins({ 'surfaces.email.imap.secure': false, 'surfaces.email.smtp.secure': false }));
     expect([unset.imapPort, unset.smtpPort]).toEqual([143, 587]);
   });
@@ -147,8 +152,8 @@ describe('surfaces.email config precedence', () => {
     expect(settings.smtpSecure).toBe(true);
   });
 
-  test('the flat spelling is honoured when nothing nested is set', () => {
-    const settings = readSurfaceEmailSettings(reader(FLAT));
+  test('a mailbox configured with the old flat spellings resolves the same after the load migration', () => {
+    const settings = readSurfaceEmailSettings(migratedReader(FLAT));
     expect(settings.imapHost).toBe('imap.flat.example.com');
     expect(settings.imapPort).toBe(1143);
     expect(settings.username).toBe('flat@example.com');
@@ -157,7 +162,7 @@ describe('surfaces.email config precedence', () => {
   test('a machine that resolved through the shared host keeps resolving that way', () => {
     // Both spellings present: the order the mail handlers already used wins, so
     // upgrading cannot silently move a working mailbox to a different server.
-    const settings = readSurfaceEmailSettings(reader({
+    const settings = readSurfaceEmailSettings(migratedReader({
       ...FLAT,
       'surfaces.email.host': 'mail.example.com',
       'surfaces.email.user': 'avery@example.com',
@@ -166,8 +171,8 @@ describe('surfaces.email config precedence', () => {
     expect(settings.username).toBe('avery@example.com');
   });
 
-  test('username falls back to the alternate spelling, and from falls back to the account', () => {
-    const settings = readSurfaceEmailSettings(reader({
+  test('the old username spelling becomes the account, and from falls back to the account', () => {
+    const settings = readSurfaceEmailSettings(migratedReader({
       'surfaces.email.host': 'mail.example.com',
       'surfaces.email.username': 'alt@example.com',
     }));
@@ -286,9 +291,8 @@ describe('mail password resolution', () => {
     expect(await nested.get('GOODVIBES_SURFACES_EMAIL_SMTP_PASSWORD')).toBe('imap-pw');
   });
 
-  test('both spellings of the IMAP password name the same stored secret', () => {
-    // `surfaces.email.imap.password` and `surfaces.email.imapPassword` derive
-    // one secret name, so a password stored through either spelling resolves.
+  test('a password stored under the old imapPassword spelling is the one imap.password names', () => {
+    // The derivation splits camelCase like a dotted path, so the stored secret is found without moving it.
     expect(daemonSecretKeyFor('surfaces.email.imapPassword')).toBe(
       daemonSecretKeyFor('surfaces.email.imap.password'),
     );

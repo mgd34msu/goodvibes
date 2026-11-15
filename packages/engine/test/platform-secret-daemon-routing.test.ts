@@ -56,7 +56,6 @@ import {
 const DAEMON_MAIL_AND_CALENDAR_CREDENTIAL_PATHS: string[] = [
   'surfaces.email.password',
   'surfaces.email.imap.password',
-  'surfaces.email.imapPassword',
   'surfaces.email.smtp.password',
   'surfaces.calendar.caldavPassword',
 ];
@@ -231,11 +230,11 @@ describe('the keys the handlers tell operators to set are declared', () => {
     'surfaces.email.host',
     'surfaces.email.user',
     'surfaces.email.password',
-    // The inbox provider's own documented keys.
-    'surfaces.email.imapHost',
-    'surfaces.email.imapPort',
-    'surfaces.email.imapUser',
-    'surfaces.email.imapPassword',
+    // The inbox provider's keys.
+    'surfaces.email.imap.host',
+    'surfaces.email.imap.port',
+    'surfaces.email.imap.user',
+    'surfaces.email.imap.password',
   ];
 
   const schemaKeys: Set<string> = new Set(CONFIG_SCHEMA.map((setting) => setting.key));

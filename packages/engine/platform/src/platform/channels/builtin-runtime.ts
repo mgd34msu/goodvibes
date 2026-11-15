@@ -288,7 +288,7 @@ export class BuiltinChannelRuntime {
    * Three kinds of change, each with the effect it really has:
    *
    * - What the running source re-reads on every reconnect (host, port,
-   *   account user, under both spellings `readSurfaceEmailSettings` reads):
+   *   account user, the keys `readSurfaceEmailSettings` reads):
    *   `recheckNow()` makes that reconnect now instead of at the next
    *   `capabilityRecheckMinutes`.
    * - What decides which source is built and which mailbox it opens (the
@@ -311,12 +311,10 @@ export class BuiltinChannelRuntime {
     if (this.inboundMailConfigUnsubscribes.length > 0) return;
     const keys = [
       'surfaces.email.imap.host',
-      'surfaces.email.imapHost',
+      'surfaces.email.host',
       'surfaces.email.imap.port',
-      'surfaces.email.imapPort',
       'surfaces.email.imap.user',
       'surfaces.email.user',
-      'surfaces.email.username',
       'surfaces.email.imap.mailbox',
       'surfaces.email.inbound.source',
       'surfaces.email.inbound.accounts',

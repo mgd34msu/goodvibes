@@ -7,9 +7,10 @@
  * rollback, and restarts via the service manager. Default-on per the owner
  * directive; `update.auto` turns it off.
  *
- * `releasesUrl` names the authorized GoodVibes monorepo release line.
- * Only exact historical default feeds migrate. Explicit custom feeds remain
- * unchanged. Release availability is independent of source readiness.
+ * `releasesUrl` names the authorized GoodVibes monorepo release line: the
+ * product's own GitHub repository, or a feed served on this machine. Exact
+ * historical default feeds migrate. Release availability is independent of
+ * source readiness.
  *
  * Like the worktree domain in schema-domain-runtime.ts, `update` is a
  * top-level config section registered via `declare module` here (co-located
@@ -18,6 +19,8 @@
  */
 import { type ConfigSettingDefinition, intRange } from './schema-shared.js';
 export const DAEMON_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases/latest';
+/** The one repository whose releases may replace the installed programs. */
+const RELEASES_PATH_PREFIX = '/mgd34msu/goodvibes/releases';
 const LEGACY_DAEMON_RELEASE_FEEDS = ['https://github.com/mgd34msu/goodvibes-daemon/releases/latest', 'https://github.com/mgd34msu/goodvibes-tui/releases/latest',
   'https://github.com/mgd34msu/goodvibes-jev/releases/latest'];
 /** Exact historical defaults only; near matches and custom channels retain their owner intent. */
@@ -97,21 +100,24 @@ export const updateConfigSettings: ConfigSettingDefinition[] = [
     key: 'update.releasesUrl',
     type: 'string',
     default: DAEMON_RELEASES_LATEST_URL,
-    description: 'GitHub releases/latest URL for a complete GoodVibes monorepo suite. Exact historical default feeds migrate to goodvibes. Native suite updates replace installed sibling programs and configured release WebUI/browser support together. Must be an https://github.com URL, or an http URL on this machine (loopback address) (empty turns the update loop off): the binaries and checksums are downloaded from this origin and are not signed, so any other remote host would let a config write replace the installed programs',
+    description: 'GitHub releases/latest URL for a complete GoodVibes monorepo suite. Exact historical default feeds migrate to goodvibes. Native suite updates replace installed sibling programs and configured release WebUI/browser support together. Must be a release URL of the GoodVibes repository itself (https://github.com/mgd34msu/goodvibes/releases/...), or an http URL on this machine (loopback address) (empty turns the update loop off): the binaries and checksums are downloaded from this origin and are not signed, so any other repository or remote host would let a config write replace the installed programs',
     validate: (v) => {
       if (typeof v !== 'string') return false;
       if (v.trim() === '') return true;
       try {
         const url = new URL(v.trim());
         if (url.username !== '' || url.password !== '') return false;
-        if (url.protocol === 'https:') return url.hostname === 'github.com';
+        // The binaries and checksums are not signed, so only the product's own repository is accepted.
+        if (url.protocol === 'https:') {
+          return url.hostname === 'github.com' && (url.pathname === RELEASES_PATH_PREFIX || url.pathname.startsWith(`${RELEASES_PATH_PREFIX}/`));
+        }
         // A feed on this machine cannot be reached by another host, so plain http is safe there (the acceptance runs serve one).
         return url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]');
       } catch {
         return false;
       }
     },
-    validationHint: 'an https://github.com releases URL (or http on 127.0.0.1, localhost or [::1]) without credentials, or empty to turn the update loop off',
+    validationHint: 'https://github.com/mgd34msu/goodvibes/releases/... (or http on 127.0.0.1, localhost or [::1]) without credentials, or empty to turn the update loop off',
   },
   {
     key: 'update.rollbackAfterFailedStarts',

@@ -21,9 +21,8 @@ export interface ProductionDaemonInboxOptions {
 const fields: Record<Provider, readonly string[]> = {
   slack: ['surfaces.slack.botToken'],
   discord: ['surfaces.discord.botToken'],
-  email: ['surfaces.email.imapHost', 'surfaces.email.imapUser', 'surfaces.email.imapPassword',
-    'surfaces.email.username', 'surfaces.email.password', 'surfaces.email.imap.host',
-    'surfaces.email.host', 'surfaces.email.user', 'surfaces.email.imap.password'],
+  email: ['surfaces.email.password', 'surfaces.email.imap.host', 'surfaces.email.host',
+    'surfaces.email.user', 'surfaces.email.imap.user', 'surfaces.email.imap.password'],
 };
 
 /** No source or provider network request is made while determining absence. */

@@ -59,7 +59,7 @@ test('fresh production membership reports all three unconfigured sources with no
   expect(f.listeners.size).toBe(0); expect(f.ctx.catalog.hasHandler('channels.inbox.list')).toBe(false);
 });
 
-for (const key of ['surfaces.slack.botToken', 'surfaces.discord.botToken', 'surfaces.email.imapPassword']) {
+for (const key of ['surfaces.slack.botToken', 'surfaces.discord.botToken', 'surfaces.email.imap.password']) {
   test(`configured ${key} without trusted account authority refuses and rolls back all owners`, async () => {
     const f = fixture(); f.values.set(key, 'synthetic-configured-secret');
     await expect(initialReady(createProductionDaemonInboxFactory()(f.ctx, routing, f.controls))).rejects.toThrow('requires an admitted account');
@@ -179,7 +179,7 @@ test('external credentials appearing between source reads withhold the entire ea
   const f = fixture(); const surface = await createProductionDaemonInboxFactory()(f.ctx, routing, f.controls);
   const inspect = f.ctx.credentials.inspectConfigSecret!;
   f.ctx.credentials.inspectConfigSecret = key => {
-    if (key === 'surfaces.email.imapHost') f.values.set('surfaces.slack.botToken', 'synthetic-concurrent-account');
+    if (key === 'surfaces.email.imap.host') f.values.set('surfaces.slack.botToken', 'synthetic-concurrent-account');
     return inspect(key);
   };
   try { await expect(f.invoke()).rejects.toThrow(); }
@@ -213,7 +213,7 @@ for (const provider of ['slack', 'discord', 'email'] as const) {
         f.configManager.set('surfaces.discord.enabled', true); f.configManager.set('surfaces.discord.inboxBotUserId', '100000000000000001');
         f.configManager.set('surfaces.discord.inboxChannelIds', '100000000000000002');
       } else {
-        f.configManager.set('surfaces.email.imapHost', 'imap.synthetic.test'); f.configManager.set('surfaces.email.imapUser', 'mailbox@synthetic.test');
+        f.configManager.set('surfaces.email.imap.host', 'imap.synthetic.test'); f.configManager.set('surfaces.email.user', 'mailbox@synthetic.test');
       }
       let admitted = 0;
       const observe = (screening: Parameters<typeof createDiscordInboxOwner>[1]['screening']) => {

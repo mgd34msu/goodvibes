@@ -20,6 +20,7 @@ import {
   migrateWrfcSettings,
 } from './migrations.js';
 import { migrateSandboxQemuRemoval } from './sandbox-qemu-migration.js';
+import { describeRetiredSettingsMigration, migrateRetiredSettings } from './retired-settings-migration.js';
 import { migrateLegacyDaemonReleaseFeed } from './schema-domain-update.js';
 import { isFrozenDefaultDump, stripFrozenDefaults } from './settings-io.js';
 import {
@@ -514,6 +515,32 @@ export function applySandboxQemuMigrationPass(
 }
 
 /**
+ * Removed settings and retired spellings (retired-settings-migration.ts): a
+ * removed setting is dropped, a retired mailbox spelling moves to the one every
+ * mail reader uses, with one receipt. Runs over surface files and the daemon
+ * tier alike, since mailbox keys were written to both before ownership moved.
+ */
+export function applyRetiredSettingsMigrationPass(
+  parsed: Record<string, unknown>,
+  sourcePath: string,
+  receipt: MigrationReceiptSink,
+  ownership: MigrationOwnership = OWNS_FILE,
+): Record<string, unknown> {
+  const result = migrateRetiredSettings(parsed);
+  if (!result.migrated) return parsed;
+  if (!ownership.ownsFile || ownership.beforeWrite?.() === false) return result.config;
+  if (!persistMigratedFile(sourcePath, result.config, 'retired settings migration')) return result.config;
+  const receiptText = describeRetiredSettingsMigration(result, sourcePath);
+  logger.info(receiptText);
+  try {
+    receipt(`settings-migration-retired-settings:${sourcePath}`, receiptText);
+  } catch (err) {
+    logger.warn(`retired settings migration receipt could not be queued: ${summarizeError(err)}`);
+  }
+  return result.config;
+}
+
+/**
  * Every load-time pass over the DAEMON TIER, in order.
  *
  * A separate sequence from {@link runLoadMigrationPasses} because it is a
@@ -539,7 +566,8 @@ export function runDaemonTierMigrationPasses(
 ): Record<string, unknown> {
   const updated = applyDaemonReleaseFeedMigrationPass(parsed, sourcePath, ownership);
   const renamed = applyPaymentsBudgetMigrationPass(updated, sourcePath, receipt, ownership);
-  return applyOccasionsFinalStretchMigrationPass(renamed, sourcePath, receipt, ownership);
+  const retired = applyRetiredSettingsMigrationPass(renamed, sourcePath, receipt, ownership);
+  return applyOccasionsFinalStretchMigrationPass(retired, sourcePath, receipt, ownership);
 }
 
 /**
@@ -575,6 +603,7 @@ export function runLoadMigrationPasses(
   config = applyPaymentsBudgetMigrationPass(config, sourcePath, receipt, ownership);
   config = applyContractSettingsMigrationPass(config, sourcePath, receipt, ownership);
   config = applySandboxQemuMigrationPass(config, sourcePath, receipt, ownership);
+  config = applyRetiredSettingsMigrationPass(config, sourcePath, receipt, ownership);
   return applyDefaultStripMigrationPass(config, sourcePath, receipt, ownership);
 }
 

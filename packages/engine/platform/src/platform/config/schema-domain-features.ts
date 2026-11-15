@@ -349,7 +349,7 @@ export const featureConfigSettings: ConfigSetting[] = [
     type: 'number',
     default: 0,
     description:
-      'Per-agent turn budget. Zero (default) continues until completion or cancellation. A positive value stops the run with a max-turns outcome. A positive agents.maxTurnsCap remains an owner-controlled ceiling.',
+      'Per-agent turn budget. Zero (default) continues until completion, cancellation, or a call that keeps returning the same result (8 identical calls with identical results end the run as repeated_call). A positive value stops the run with a max-turns outcome. A positive agents.maxTurnsCap remains an owner-controlled ceiling.',
     ...intRange(0, Number.MAX_SAFE_INTEGER),
   },
   {

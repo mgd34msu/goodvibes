@@ -205,7 +205,6 @@ export const SETTING_LABELS: Partial<Record<string, string>> = {
   'controlPlane.port': 'CP Port',
   'controlPlane.publicBaseUrl': 'CP Public Base URL',
   'controlPlane.streamMode': 'CP Stream Mode',
-  'controlPlane.allowRemote': 'CP Allow Remote',
   'controlPlane.trustProxy': 'CP Trust Proxy',
   'controlPlane.tls.mode': 'CP TLS Mode',
   'controlPlane.tls.certFile': 'CP TLS Cert',

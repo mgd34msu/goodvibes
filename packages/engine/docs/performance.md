@@ -102,6 +102,13 @@ the model gets one final reply, with any tool call in it left unrun, to report
 what it was trying to do; that reply is kept as the agent's output and the run
 ends failed with the `circuit_breaker` reason.
 
+Successful calls cannot loop forever either. When one call has run 8 times in
+the sub-agent's last 20 calls with the same arguments and the same result each
+time, the run stops the same way, one final reply and then failed, with the
+`repeated_call` reason and a message naming the tool. This is decided from the
+run's own call history; no model is asked. Fewer repeats only add a notice to
+the model.
+
 ---
 
 ## Connection management

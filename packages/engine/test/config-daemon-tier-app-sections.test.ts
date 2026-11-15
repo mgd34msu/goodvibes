@@ -314,7 +314,7 @@ describe('settings ingestion: the keys that refuse instead of skipping', () => {
     // danger.*, behavior.autoApprove and the control-plane exposure switches all
     // ship as false. Falling back to those can only ever close something, so
     // refusing to start over them would trade a safe fallback for a dead daemon.
-    for (const key of ['danger.httpListener', 'behavior.autoApprove', 'controlPlane.allowRemote', 'controlPlane.trustProxy', 'sandbox.enabled']) {
+    for (const key of ['danger.httpListener', 'behavior.autoApprove', 'controlPlane.trustProxy', 'sandbox.enabled']) {
       expect(isSafetyGateConfigKey(key)).toBe(false);
     }
     expect(SAFETY_GATE_CONFIG_PREFIXES.length).toBeGreaterThan(0);

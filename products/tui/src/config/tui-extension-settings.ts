@@ -29,7 +29,7 @@ export const STATUSLINE_COMMAND_SETTING: HostStringSetting = Object.freeze({
   key: 'statusline.command',
   type: 'string',
   default: '',
-  description: 'Shell command run at each turn boundary; the first line it prints shows in the status area. Empty turns the status line off.',
+  description: 'Shell command run at each turn boundary; the first line it prints shows in the status area. Empty turns the status line off. Read only from your own settings file: a project settings file cannot set it.',
 });
 
 export const STATUSLINE_DEFAULT_TIMEOUT_MS = 2000;

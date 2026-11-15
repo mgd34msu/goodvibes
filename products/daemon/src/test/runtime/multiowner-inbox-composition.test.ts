@@ -117,7 +117,7 @@ test('Slack and email source factories preserve independent locks, read proofs, 
   const configManager = new ConfigManager({ workingDir: ctx.workingDirectory, homeDir: ctx.workingDirectory, surfaceRoot: 'daemon' });
   configManager.set('cluster.enabled', false);
   configManager.set('surfaces.slack.enabled', true); configManager.set('surfaces.slack.workspaceId', 'T-SYNTHETIC');
-  configManager.set('surfaces.email.imapHost', 'mail.synthetic.invalid'); configManager.set('surfaces.email.username', 'synthetic@example.invalid');
+  configManager.set('surfaces.email.imap.host', 'mail.synthetic.invalid'); configManager.set('surfaces.email.user', 'synthetic@example.invalid');
   const configured = { ...ctx, configManager };
   const screening = {} as ProtectedSourceOwnerOptions;
   const slackAccount = { workspaceId: 'T-SYNTHETIC', userId: 'U-SYNTHETIC' };

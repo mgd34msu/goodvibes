@@ -220,7 +220,6 @@ export const FEATURE_FLAG_CONFIG: Readonly<Record<string, FeatureFlagConfigAssoc
       'controlPlane.port',
       'controlPlane.publicBaseUrl',
       'controlPlane.streamMode',
-      'controlPlane.allowRemote',
       'controlPlane.trustProxy',
       'controlPlane.openaiCompatible.enabled',
       'controlPlane.openaiCompatible.pathPrefix',

@@ -115,7 +115,6 @@ describe('the credentials derive daemon-owned secret names', () => {
     expect(passwordKeys.sort()).toEqual([
       'surfaces.calendar.caldavPassword',
       'surfaces.email.imap.password',
-      'surfaces.email.imapPassword',
       'surfaces.email.password',
       'surfaces.email.smtp.password',
     ]);

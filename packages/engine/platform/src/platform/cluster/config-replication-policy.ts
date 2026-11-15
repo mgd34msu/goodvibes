@@ -20,8 +20,10 @@
  *     test refuses a daemon-owned domain that nobody has ruled on.
  *
  *  3. Machine-specific values are excluded STRUCTURALLY as well as by name.
- *     Any setting whose schema marks it a port is refused wherever it lives,
- *     because a port is a property of a machine and never of a group.
+ *     Any setting whose schema marks it a listening port is refused wherever
+ *     it lives, because a port this machine binds belongs to the machine and
+ *     never to the group. A remote server's port (`remotePort()`) travels with
+ *     the host it pairs with.
  *
  * Secrets follow the config, and are derived the same way: the only secret that
  * replicates is the one a replicated config path names. Nothing else in the
@@ -37,7 +39,6 @@
  * it, which is why `cluster.*` credentials stay on the machine that made them.
  */
 import { CONFIG_SCHEMA } from '../config/schema.js';
-import { PORT_VALIDATION_HINT } from '../config/schema-shared.js';
 import { listDaemonOwnedConfigPaths } from '../config/config-ownership.js';
 import { daemonSecretKeyFor } from '../config/daemon-secret-keys.js';
 
@@ -201,11 +202,11 @@ export interface ConfigPathClassification {
 
 const portKeyCache = new Set<string>(
   CONFIG_SCHEMA
-    .filter((setting) => setting.validationHint === PORT_VALIDATION_HINT)
+    .filter((setting) => setting.role === 'listen-port')
     .map((setting) => setting.key),
 );
 
-/** True when the schema marks this key a port. Ports never replicate. */
+/** True when the schema marks this key a port this machine listens on. Those never replicate. */
 export function isPortConfigKey(path: string): boolean {
   return portKeyCache.has(path);
 }
@@ -234,14 +235,6 @@ export const REPLICATED_CONFIG_KEYS: readonly string[] = [
   // fresh daily budget or retroactively overspends one, and neither is visible
   // to the operator, who set one zone and was shown one zone.
   'daemon.timezone',
-  // These ports are the remote mail server's, not this machine's. The host they
-  // pair with replicates, so a node taking over with a default port against a
-  // non-default host would fail to read or send as the operator.
-  'email.imapPort',
-  'email.smtpPort',
-  'surfaces.email.imapPort',
-  'surfaces.email.imap.port',
-  'surfaces.email.smtp.port',
 ];
 
 export function classifyDaemonConfigPath(path: string): ConfigPathClassification {
@@ -249,7 +242,7 @@ export function classifyDaemonConfigPath(path: string): ConfigPathClassification
     return { path, replication: 'replicated', ruled: true, reason: 'the group must agree on this key, whatever its domain or schema type says' };
   }
   if (isPortConfigKey(path)) {
-    return { path, replication: 'node-local', ruled: true, reason: 'the schema marks this a port, and a port belongs to a machine' };
+    return { path, replication: 'node-local', ruled: true, reason: 'the schema marks this a listening port, and a port this machine binds belongs to the machine' };
   }
   if (NODE_LOCAL_CONFIG_KEYS.includes(path)) {
     return { path, replication: 'node-local', ruled: true, reason: 'this switch is a property of this installation' };

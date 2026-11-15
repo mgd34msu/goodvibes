@@ -27,6 +27,13 @@ export interface ConfigSettingDefinition {
    * broke them all when the names changed.
    */
   unit?: 'money' | undefined;
+  /**
+   * What a port number addresses. `'listen-port'` is a port this machine binds,
+   * which belongs to the machine and never replicates to cluster peers;
+   * `'remote-port'` is another server's port (a mail server), which travels
+   * with the host it pairs with. Set by `port()` and `remotePort()`.
+   */
+  role?: 'listen-port' | 'remote-port' | undefined;
 }
 
 /**
@@ -103,19 +110,15 @@ export function optionalWorkLimit(): Pick<ConfigSettingDefinition, 'validate' | 
   };
 }
 
-/** Returns validate + validationHint for a TCP port (integer in [1, 65535]). */
-/**
- * The hint every port setting carries.
- *
- * Exported because it is the only structural mark a port has: cluster config
- * replication reads it to refuse to replicate ANY port, and a shared constant
- * is what keeps that refusal true when a new port setting is added.
- */
-export const PORT_VALIDATION_HINT = 'integer port in [1, 65535]';
+const PORT_VALIDATION_HINT = 'integer port in [1, 65535]';
+const isPortNumber = (v: unknown): boolean => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 65535;
 
-export function port(): Pick<ConfigSettingDefinition, 'validate' | 'validationHint'> {
-  return {
-    validate: (v) => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 65535,
-    validationHint: PORT_VALIDATION_HINT,
-  };
+/** A TCP port this machine listens on (integer in [1, 65535]); never replicated to cluster peers. */
+export function port(): Pick<ConfigSettingDefinition, 'validate' | 'validationHint' | 'role'> {
+  return { validate: isPortNumber, validationHint: PORT_VALIDATION_HINT, role: 'listen-port' };
+}
+
+/** A TCP port of a remote server this machine connects to (integer in [1, 65535]). */
+export function remotePort(): Pick<ConfigSettingDefinition, 'validate' | 'validationHint' | 'role'> {
+  return { validate: isPortNumber, validationHint: PORT_VALIDATION_HINT, role: 'remote-port' };
 }

@@ -215,7 +215,7 @@ and set `web.publicBaseUrl` to the tunnel's public HTTPS URL. Or just use
 | `surfaces.telegram.webhookSecret` | `""` | Configured-secret ingress for embedders/external resolvers. Native registration manages its own credential. Webhook mode only. |
 | `surfaces.telegram.botUsername` | `""` | The bot's `@name`, used for mention matching and `/command@bot` handling in groups. |
 | `surfaces.telegram.defaultChatId` | `""` | Chat, group, or channel id used for outbound delivery when no route binding applies. |
-| `web.publicBaseUrl` | `"http://127.0.0.1:3423"` | The daemon's public base URL. Webhook mode builds the delivery URL from it. |
+| `web.publicBaseUrl` | `""` | The daemon's public base URL. Webhook mode builds the delivery URL from it and needs it set to an HTTPS address Telegram can reach. |
 
 Environment fallbacks: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`.
 

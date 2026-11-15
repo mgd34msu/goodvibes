@@ -961,7 +961,7 @@ export class ConfigManager {
         if (hostStores) {
           const values = this.hostSettings.defaults();
           this.hostSettings.overlay(values, hostStores.get(this.configPath)!);
-          if (this.projectConfigPath) this.hostSettings.overlay(values, hostStores.get(this.projectConfigPath)!);
+          if (this.projectConfigPath) this.hostSettings.overlay(values, hostStores.get(this.projectConfigPath)!, this.hostLayerOf(this.projectConfigPath));
           this.hostSettings.apply(staged.nonRuntime, values);
           const hostDefaultOrigins = this.updateHostSources(staged, hostStores);
           this.publishState(staged, staged.compose());
@@ -1750,7 +1750,7 @@ export class ConfigManager {
     const nextHost = this.hostLoadValues && (file === this.configPath || file === this.projectConfigPath)
       ? new Map(this.hostLoadValues) : null;
     const hostSource = nextHost ? structuredClone(parsed) : null;
-    const malformedHostKeys = nextHost ? this.hostSettings.overlay(nextHost, parsed) : [];
+    const malformedHostKeys = nextHost ? this.hostSettings.overlay(nextHost, parsed, this.hostLayerOf(file)) : [];
     const ingested = ingestManagerSettings(parsed, file, this.ingestionSink(), migrate, new Set(this.hostSettings.keys()));
     if (nextHost) {
       this.hostLoadValues = nextHost;
@@ -1794,7 +1794,7 @@ export class ConfigManager {
         try {
           const ingested = this.ingest(JSON.parse(readFileSync(this.projectConfigPath, 'utf-8')) as Record<string, unknown>,
             this.projectConfigPath, parsed => this.applyLoadMigrations(parsed, this.projectConfigPath!));
-          const restricted = restrictProjectLayer(ingested, staged.nonRuntime, this.projectConfigPath);
+          const restricted = restrictProjectLayer(ingested, staged.nonRuntime, this.projectConfigPath, this.hostSettings);
           for (const notice of restricted.notices) { announceIngestionNotice(notice); this.recordIngestionNotice(notice); }
           const migrated = restricted.layer;
           staged.nonRuntime = sanitizeConfigShape(deepMerge(staged.nonRuntime, migrated) as GoodVibesConfig);
@@ -1904,6 +1904,11 @@ export class ConfigManager {
     new FeatureAnnouncementStore(featureAnnouncementsPath(this)).record(id, text);
   }
 
+  /** A surface's own settings are read from the project file (repository content) only where declared for projects. */
+  private hostLayerOf(path: string): 'global' | 'project' {
+    return path === this.projectConfigPath && path !== this.configPath ? 'project' : 'global';
+  }
+
   /** Derive host provenance from the same accepted raw layers that produced its values. */
   private updateHostSources(staged: ConfigRuntimeState, stores: ReadonlyMap<string, Record<string, unknown>>): Set<string> {
     const defaultOrigins = new Set<string>();
@@ -1911,8 +1916,10 @@ export class ConfigManager {
     for (const [path, tier] of [[this.configPath, 'global'], [this.projectConfigPath, 'project']] as const) {
       const raw = path ? stores.get(path) : undefined;
       if (!raw) continue;
-      for (const key of this.hostSettings.overlay(this.hostSettings.defaults(), raw)) defaultOrigins.add(key);
+      const layer = this.hostLayerOf(path);
+      for (const key of this.hostSettings.overlay(this.hostSettings.defaults(), raw, layer)) defaultOrigins.add(key);
       for (const key of this.hostSettings.keys()) {
+        if (layer === 'project' && !this.hostSettings.projectSettable(key)) continue;
         const found = readDotPath(raw, key);
         if (!found.present) continue;
         staged.mark(key, tier);

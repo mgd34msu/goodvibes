@@ -108,10 +108,12 @@ export async function handleNtfySurfacePayload(
 }
 
 function resolveConfiguredNtfyTopics(context: SurfaceAdapterContext) {
+  // A shipped topic name on the public server is not routed: anyone can post to it.
   return resolveGoodVibesNtfyTopics({
     chatTopic: readConfigString(context, 'surfaces.ntfy.chatTopic'),
     agentTopic: readConfigString(context, 'surfaces.ntfy.agentTopic'),
     remoteTopic: readConfigString(context, 'surfaces.ntfy.remoteTopic'),
+    baseUrl: readConfigString(context, 'surfaces.ntfy.baseUrl'),
   });
 }
 

@@ -33,6 +33,10 @@ export {
 export {
   MemoryGovernor,
   resolveEffectiveSystemRamMb,
+  resolveMemoryBudgetMb,
+  validateMemoryPolicy,
+  type MemoryPolicyProblem,
+  type MemoryPolicyValues,
   type MemoryTier,
   type MemorySample,
   type MemorySampler,

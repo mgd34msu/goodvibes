@@ -229,26 +229,18 @@ export interface InboundEmailConfig {
 
 /**
  * The daemon's own mailbox, the account it reads and sends AS, rather than a
- * chat service it talks TO. Both key spellings are declared because both are
- * genuinely read; see schema-domain-daemon-mailbox.ts for which reader uses
- * which, and why declaring one would strand the other.
+ * chat service it talks TO. Each fact has one key; every mail reader resolves
+ * them through readSurfaceEmailSettings (email/surface-config.ts).
  */
 export interface DaemonMailboxConfig {
   /** Host used for both IMAP and SMTP unless the per-protocol section overrides it. */
   host: string;
   user: string;
-  /** Read when `user` is unset. */
-  username: string;
   /** From address on outbound mail; falls back to the account name. */
   from: string;
   /** Held in the daemon secret tier, never written to a settings file. */
   password: string;
-  /** Flat spelling. Both spellings resolve through readSurfaceEmailSettings (email/surface-config.ts) in a fixed order. */
-  imapHost: string;
-  imapPort: number;
-  imapUser: string;
-  imapPassword: string;
-  /** Nested spelling, written by the settings surface; wins over the flat one for host and port. */
+  /** What differs for reading mail; `host` and `user` above apply when unset. */
   imap: {
     host: string;
     port: number;

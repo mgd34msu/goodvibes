@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
+let ownStartTime: string | null = null;
+
 /**
  * A stable identity token for "this pid, started at this moment", so a record
  * naming a pid can tell the process it was written by from an unrelated process
@@ -15,6 +17,14 @@ import { spawnSync } from 'node:child_process';
  */
 export function processStartTime(pid: number): string | null {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+  // This process's own start cannot change, so it is read once; on macOS and
+  // BSD that read is a `ps` child process, which a lock taken per settings
+  // write would otherwise start every time. A failed read is not kept.
+  if (pid === process.pid) return ownStartTime ??= readStartTime(pid);
+  return readStartTime(pid);
+}
+
+function readStartTime(pid: number): string | null {
   if (process.platform === 'linux') {
     try {
       const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');

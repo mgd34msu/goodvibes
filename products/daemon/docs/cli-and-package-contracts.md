@@ -175,8 +175,9 @@ local HTTP binding unless an external public URL is explicitly configured.
 Startup reads the listener owner's captured `boundScheme`, so a TLS setting
 changed during held boot cannot relabel a socket that already bound. This adds
 no TLS live-restart policy. Offline pair uses the declared configuration.
-The exact shipped `http://127.0.0.1:3423` placeholder follows the webui command's
-existing equality rule; this is not evidence about who set a stored value.
+`web.publicBaseUrl` ships empty. A stored value equal to the placeholder earlier
+builds shipped (`http://127.0.0.1:3423`) is treated as unset by the webui command;
+this is not evidence about who set a stored value.
 
 A local reprint can carry its declared nonzero `--port`, but cannot observe
 another process's ephemeral endpoint. Zero or invalid local ports refuse before

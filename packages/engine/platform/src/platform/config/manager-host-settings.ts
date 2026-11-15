@@ -33,7 +33,7 @@ export function readHostSettingValues(
     if (path) {
       const raw = readHostSettingsFile(path);
       const next = new Map(values);
-      host.overlay(next, raw);
+      host.overlay(next, raw, path === projectPath && path !== globalPath ? 'project' : 'global');
       validate?.(raw, path);
       values = next;
     }

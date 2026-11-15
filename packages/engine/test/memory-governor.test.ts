@@ -22,7 +22,7 @@ import {
   type MemoryTripwireReceipt,
 } from '../platform/src/platform/runtime/memory/index.js';
 
-import { TIER_RELEASE_MARGIN_PCT } from '../platform/src/platform/runtime/memory/memory-governor.js';
+import { TIER_RELEASE_MARGIN_PCT, validateMemoryPolicy } from '../platform/src/platform/runtime/memory/memory-governor.js';
 
 const MB = 1024 * 1024;
 
@@ -392,30 +392,27 @@ describe('memory allocation pressure and failure handling', () => {
   const baseConfig = { budgetMb: 100, elevatedPct: 60, highPct: 80, criticalPct: 95, tripwireRateMbPerSec: 25, tripwireSustainSec: 60 };
   const noopDeps = { sampler: () => ({ rssBytes: 0, heapUsedBytes: 0 }) };
 
-  test('inverted tier thresholds are refused loudly at construction (criticalPct=10 typo)', () => {
-    const reg = new CacheRegistry();
-    const pc = new PauseController();
-    expect(() => new MemoryGovernor({ ...baseConfig, criticalPct: 10 }, { caches: reg, pauses: pc, ...noopDeps }))
-      .toThrow(/memory\.tier\.elevatedPct.*memory\.tier\.highPct.*memory\.tier\.criticalPct/s);
-    expect(() => new MemoryGovernor({ ...baseConfig, elevatedPct: 90, highPct: 50 }, { caches: reg, pauses: pc, ...noopDeps }))
-      .toThrow(/must hold/);
-  });
-
-  test('hard-limit validation: pct must be in (0,100], and the ceiling-anchored limit must sit ABOVE the critical tier', () => {
+  test('a configuration that cannot run starts on the shipped values for that group and says so', () => {
     const reg = new CacheRegistry();
     const pc = new PauseController();
     const ceiling = { resolveSystemRamMb: () => 8 * 1024 };
-    // Out-of-range percent refused loudly (it is a percent of the kill ceiling).
-    expect(() => new MemoryGovernor({ ...baseConfig, hardLimitPct: 0 }, { caches: reg, pauses: pc, ...noopDeps, ...ceiling }))
-      .toThrow(/memory\.hardLimitPct.*\(0, 100\]/s);
-    expect(() => new MemoryGovernor({ ...baseConfig, hardLimitPct: 120 }, { caches: reg, pauses: pc, ...noopDeps, ...ceiling }))
-      .toThrow(/memory\.hardLimitPct/);
-    // A budget so close to the ceiling that the hard limit sits at/below the
-    // critical tier would exit before the stay-alive posture, refused loudly.
-    expect(() => new MemoryGovernor({ ...baseConfig, budgetMb: 8 * 1024, hardLimitPct: 90 }, { caches: reg, pauses: pc, ...noopDeps, ...ceiling }))
-      .toThrow(/sits at\/below the critical tier/);
-    // Omitted → defaults to 90% of the ceiling, far above a small budget: fine.
-    expect(() => new MemoryGovernor({ ...baseConfig, budgetMb: 100 }, { caches: reg, pauses: pc, ...noopDeps, ...ceiling })).not.toThrow();
+    const events: unknown[] = [];
+    const inverted = new MemoryGovernor({ ...baseConfig, criticalPct: 10 }, { caches: reg, pauses: pc, ...noopDeps, ...ceiling, emitOps: (event) => { events.push(event); } });
+    expect(inverted.snapshot().thresholds).toEqual({ elevatedPct: 60, highPct: 80, criticalPct: 95 });
+    expect(inverted.policyFallbackReason()).toMatch(/memory\.tier\.criticalPct \(10\)/);
+    expect(events).toHaveLength(1);
+    // A budget so close to the ceiling that the hard limit sits at/below the critical tier: the budget goes back to auto.
+    const tooBig = new MemoryGovernor({ ...baseConfig, budgetMb: 8 * 1024, hardLimitPct: 90 }, { caches: reg, pauses: pc, ...noopDeps, ...ceiling });
+    expect(tooBig.snapshot().budgetMb).toBe(2048);
+    expect(tooBig.policyFallbackReason()).toMatch(/hard limit/);
+    expect(new MemoryGovernor({ ...baseConfig, budgetMb: 100 }, { caches: reg, pauses: pc, ...noopDeps, ...ceiling }).policyFallbackReason()).toBeUndefined();
+  });
+
+  test('one rule decides validity for the writer and the governor', () => {
+    expect(validateMemoryPolicy({ budgetMb: 100, elevatedPct: 60, highPct: 50, criticalPct: 95 }, 8 * 1024)?.group).toBe('tiers');
+    expect(validateMemoryPolicy({ budgetMb: 100, elevatedPct: 60, highPct: 80, criticalPct: 95, hardLimitPct: 0 }, 8 * 1024)?.group).toBe('hard-limit');
+    expect(validateMemoryPolicy({ budgetMb: 16 * 1024, elevatedPct: 60, highPct: 80, criticalPct: 95 }, 16 * 1024)?.group).toBe('hard-limit');
+    expect(validateMemoryPolicy({ budgetMb: 0, elevatedPct: 60, highPct: 80, criticalPct: 95 }, 16 * 1024)).toBeNull();
   });
 
   test('budget auto-resolution honors the cgroup v2/v1 limit below physical RAM', async () => {

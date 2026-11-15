@@ -38,15 +38,15 @@ test('native Slack selection requires a separately configured expected user and 
 
 test('native IMAP-only setup selects the canonical TLS account without SMTP or a password read', () => {
   const f = fixture();
-  f.config.set('surfaces.email.imapHost', 'imap.synthetic.test'); f.config.set('surfaces.email.imapUser', 'mailbox@synthetic.test');
+  f.config.set('surfaces.email.imap.host', 'imap.synthetic.test'); f.config.set('surfaces.email.user', 'mailbox@synthetic.test');
   const selected = selectConfiguredEmailInboxAccount(f.context, f.controls);
   expect(selected.account).toEqual({ host: 'imap.synthetic.test', port: 993, username: 'mailbox@synthetic.test', mailbox: 'INBOX', security: 'tls' });
   expect(f.credentials).toBe(0); selected.operation.assertCurrent(); selected.close(); expect(f.subscriptions).toBe(0);
 });
 
 test('nested mailbox spelling retains canonical precedence and an exact source mutation fences its account', () => {
-  const f = fixture(); f.config.set('surfaces.email.imapHost', 'legacy.synthetic.test');
-  f.config.set('surfaces.email.imapUser', 'legacy@synthetic.test');
+  const f = fixture(); f.config.set('surfaces.email.imap.host', 'legacy.synthetic.test');
+  f.config.set('surfaces.email.user', 'legacy@synthetic.test');
   f.config.set('surfaces.email.imap.host', 'preferred.synthetic.test'); f.config.set('surfaces.email.user', 'preferred@synthetic.test');
   f.config.set('surfaces.email.imap.mailbox', 'Selected mailbox'); f.config.set('surfaces.email.imap.port', 1993);
   const selected = selectConfiguredEmailInboxAccount(f.context, f.controls);
@@ -56,8 +56,8 @@ test('nested mailbox spelling retains canonical precedence and an exact source m
 });
 
 test('plaintext IMAP fails native account admission before acquiring screening credentials', () => {
-  const f = fixture(); f.config.set('surfaces.email.imapHost', 'imap.synthetic.test');
-  f.config.set('surfaces.email.imapUser', 'mailbox@synthetic.test'); f.config.set('surfaces.email.imap.secure', false);
+  const f = fixture(); f.config.set('surfaces.email.imap.host', 'imap.synthetic.test');
+  f.config.set('surfaces.email.user', 'mailbox@synthetic.test'); f.config.set('surfaces.email.imap.secure', false);
   expect(() => selectConfiguredEmailInboxAccount(f.context, f.controls)).toThrow('TLS');
   expect(f.credentials).toBe(0); expect(f.subscriptions).toBe(0);
 });
@@ -180,8 +180,8 @@ test('a failed actual source retirement permanently prevents replacement and rem
 
 test('close aborts native account selection and waits a pending acquisition without publishing its late source', async () => {
   const f = fixture();
-  f.config.set('surfaces.email.imapHost', 'imap.synthetic.test');
-  f.config.set('surfaces.email.imapUser', 'mailbox@synthetic.test');
+  f.config.set('surfaces.email.imap.host', 'imap.synthetic.test');
+  f.config.set('surfaces.email.user', 'mailbox@synthetic.test');
   const acquired = Promise.withResolvers<ReturnType<typeof selectConfiguredEmailInboxAccount>>();
   const releaseAcquisition = Promise.withResolvers<void>();
   let constructed = 0, drained = 0;

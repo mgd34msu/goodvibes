@@ -228,6 +228,8 @@ export interface ConfigSetting {
    * one of these keys to that spelling. See ./money-value.ts.
    */
   unit?: 'money' | undefined;
+  /** What a port number addresses: a port this machine binds, or a remote server's (schema-shared.ts `port()` / `remotePort()`). */
+  role?: 'listen-port' | 'remote-port' | undefined;
 }
 
 /** Dot-path config keys for all settings. */
@@ -347,7 +349,6 @@ export type ConfigKey =
   | 'hostedSessions.promoteInboundConversations'
   | 'hostedSessions.routeConversationTurns'
   | 'controlPlane.streamMode'
-  | 'controlPlane.allowRemote'
   | 'controlPlane.trustProxy'
   | 'controlPlane.openaiCompatible.enabled'
   | 'controlPlane.openaiCompatible.pathPrefix'
@@ -495,13 +496,8 @@ export type ConfigKey =
   // The daemon's own mailbox and calendar (schema-domain-daemon-mailbox.ts).
   | 'surfaces.email.host'
   | 'surfaces.email.user'
-  | 'surfaces.email.username'
   | 'surfaces.email.from'
   | 'surfaces.email.password'
-  | 'surfaces.email.imapHost'
-  | 'surfaces.email.imapPort'
-  | 'surfaces.email.imapUser'
-  | 'surfaces.email.imapPassword'
   | 'surfaces.email.imap.host'
   | 'surfaces.email.imap.port'
   | 'surfaces.email.imap.user'

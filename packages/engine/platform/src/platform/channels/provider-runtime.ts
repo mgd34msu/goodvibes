@@ -1,4 +1,5 @@
 import type { ConfigManager } from '../config/manager.js';
+import type { ConfigKey } from '../config/schema-types.js';
 import type { SecretsManager } from '../config/secrets.js';
 import type { ServiceRegistry } from '../config/service-registry.js';
 import { resolveSurfaceSecret } from './builtin/surface-secrets.js';
@@ -13,6 +14,7 @@ import {
   type DiscordResumeState,
   type NtfyMessage,
   type SlackSocketModeEnvelope,
+  ensureNtfyTopics,
   resolveGoodVibesNtfyTopics,
 } from '../integrations/index.js';
 import {
@@ -622,11 +624,24 @@ export class ChannelProviderRuntimeManager {
   }
 
   private resolveNtfyTopics(): string[] {
-    return [...resolveGoodVibesNtfyTopics({
-      chatTopic: String(this.deps.configManager.get('surfaces.ntfy.chatTopic') || ''),
-      agentTopic: String(this.deps.configManager.get('surfaces.ntfy.agentTopic') || ''),
-      remoteTopic: String(this.deps.configManager.get('surfaces.ntfy.remoteTopic') || ''),
-    }).all];
+    const config = this.deps.configManager;
+    // The surface is on and a topic is unset: give it an unguessable name, as the relay does its rendezvous id.
+    if (config.get('surfaces.ntfy.enabled') === true) try {
+      const generated = ensureNtfyTopics({ get: (key) => config.get(key as ConfigKey), set: (key, value) => config.set(key as 'surfaces.ntfy.chatTopic', value) });
+      if (generated.length > 0) {
+        logger.info('ntfy topics generated; subscribe to these names on your phone', { topics: generated });
+      }
+    } catch (error) {
+      logger.warn('ntfy topics could not be generated and saved', { error: summarizeError(error) });
+    }
+    const topics = resolveGoodVibesNtfyTopics({
+      chatTopic: String(config.get('surfaces.ntfy.chatTopic') || ''),
+      agentTopic: String(config.get('surfaces.ntfy.agentTopic') || ''),
+      remoteTopic: String(config.get('surfaces.ntfy.remoteTopic') || ''),
+      baseUrl: String(config.get('surfaces.ntfy.baseUrl') || ''),
+    });
+    for (const refused of topics.refused) this.failNtfyTopic(refused.topic, refused.reason);
+    return [...topics.all];
   }
 
   /**

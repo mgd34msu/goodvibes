@@ -36,7 +36,7 @@ const CALENDAR_CONFIG_DEFAULTS = {
 
 /** The `google` section: the Cloud project and the OAuth app's state. */
 const GOOGLE_CONFIG_DEFAULTS = {
-  oauth: { projectId: '', publishingStatus: '', refreshToken: '' },
+  oauth: { projectId: '', publishingStatus: '' },
   credentials: { migratedFrom: '' },
 } as const;
 

@@ -12,35 +12,31 @@
  * translation of key names and precedence; no setting is invented here, and
  * `EmailService` is not modified to know about `surfaces.`.
  *
- * Both spellings are live and both are supported
- * ──────────────────────────────────────────────
- * Two spellings of the same mailbox reached the daemon by different routes: a
- * nested one (`surfaces.email.imap.host`) written by the settings surface, and
- * a flat one (`surfaces.email.imapHost`) read by the inbound mail poller.
- * Config in the field uses each. Refusing either would break a working setup,
- * so both resolve, in a fixed order:
+ * One spelling, one resolver
+ * ───────────────────────────
+ * Every mail reader (the mail verbs, the inbox provider, the inbound watcher,
+ * the triage tagger) resolves the mailbox here, from one key per fact:
  *
- *   imap host  imap.host  →  host  →  imapHost
- *   imap port  imap.port  →  imapPort  →  993 (143 when imap.secure is false)
+ *   imap host  imap.host  →  host
+ *   imap port  imap.port  →  993 (143 when imap.secure is false)
  *   smtp host  smtp.host  →  host
  *   smtp port  smtp.port  →  465 (587 when smtp.secure is false)
- *   account    imap.user  →  user  →  username  →  imapUser
- *   from       from       →  user  →  username  →  imapUser (never imap.user)
+ *   account    imap.user  →  user
+ *   from       from       →  user (never imap.user)
  *   mailbox    imap.mailbox        →  INBOX
  *   drafts     imap.draftsMailbox  →  the server's own `\Drafts` folder
  *
- * A port counts as set only when the operator set it: the config manager answers an
- * unset key with its default, so an unset nested port would otherwise hide a flat one and
- * the security answer could never pick the port. A reader that cannot tell (a plain
- * function) treats a value equal to the schema default as unset.
- * The mail server login is one account for reading and sending, so `imap.user`
- * names both; `from` keeps following the plain account chain.
+ * The flat spellings earlier builds also read (`username`, `imapHost`,
+ * `imapPort`, `imapUser`, `imapPassword`) are moved onto these when a settings
+ * file loads (config/retired-settings-migration.ts), so a mailbox configured
+ * either way resolves the same.
  *
- * The nested spelling and the shared `host` come first because that is the
- * order the mail handlers already resolved in: a machine that worked before
- * resolves to exactly the same host afterwards. The flat keys are a last
- * resort, which only ever turns a setup that previously could not send mail
- * into one that can.
+ * A port counts as set only when the operator set it: the config manager answers an
+ * unset key with its default, so the security answer could otherwise never pick
+ * the port. A reader that cannot tell (a plain function) treats a value equal to
+ * the schema default as unset.
+ * The mail server login is one account for reading and sending, so `imap.user`
+ * names both; `from` keeps following the plain account name.
  *
  * Passwords never come from config
  * ────────────────────────────────
@@ -49,7 +45,6 @@
  * fallbacks are the ones the mail handlers used:
  *
  *   IMAP/shared  surfaces.email.password → surfaces.email.imap.password
- *                (which is also where surfaces.email.imapPassword lands)
  *   SMTP         surfaces.email.smtp.password → the shared chain above
  *
  * so a provider that issues one app password works with one setting, and a
@@ -71,13 +66,9 @@ const SHARED_PASSWORD_SECRET_KEY = daemonSecretKeyFor(SHARED_PASSWORD_CONFIG_KEY
 const SMTP_PASSWORD_SECRET_KEY = daemonSecretKeyFor(SMTP_PASSWORD_CONFIG_KEY);
 
 /**
- * Both spellings of the IMAP password land on ONE secret name:
- * `surfaces.email.imap.password` and `surfaces.email.imapPassword` both derive
- * `GOODVIBES_SURFACES_EMAIL_IMAP_PASSWORD`, because the derivation splits
- * camelCase into the same underscore parts a dotted path produces. So the chain
- * is two entries, not three, and a password stored by either spelling is found
- * by the other, which is the behaviour anyone would expect and nobody would
- * think to check.
+ * A password stored under the retired `surfaces.email.imapPassword` is found
+ * here too: it derives the same secret name as `surfaces.email.imap.password`,
+ * because the derivation splits camelCase into the parts a dotted path makes.
  */
 const SHARED_PASSWORD_CHAIN: readonly string[] = [
   SHARED_PASSWORD_SECRET_KEY,
@@ -226,21 +217,17 @@ export interface SurfaceEmailSettings {
 /** Resolve every non-secret mailbox setting, in the precedence documented above. */
 export function readSurfaceEmailSettings(getConfig: ConfigReader): SurfaceEmailSettings {
   const host = readString(getConfig, `${SURFACE_EMAIL_PREFIX}.host`);
-  const account = readString(getConfig, `${SURFACE_EMAIL_PREFIX}.user`)
-    ?? readString(getConfig, `${SURFACE_EMAIL_PREFIX}.username`)
-    ?? readString(getConfig, `${SURFACE_EMAIL_PREFIX}.imapUser`);
+  const account = readString(getConfig, `${SURFACE_EMAIL_PREFIX}.user`);
   const username = readString(getConfig, `${SURFACE_EMAIL_PREFIX}.imap.user`) ?? account;
   const imapSecure = readBoolean(getConfig, `${SURFACE_EMAIL_PREFIX}.imap.secure`, true);
   const smtpSecure = readBoolean(getConfig, `${SURFACE_EMAIL_PREFIX}.smtp.secure`, true);
   return {
-    imapHost: readString(getConfig, `${SURFACE_EMAIL_PREFIX}.imap.host`)
-      ?? host
-      ?? readString(getConfig, `${SURFACE_EMAIL_PREFIX}.imapHost`),
+    imapHost: readString(getConfig, `${SURFACE_EMAIL_PREFIX}.imap.host`) ?? host,
     // An unset port follows the security answer: 993 is implicit TLS, so a plain
     // connection defaults to the IMAP port that carries one (143).
     imapPort: readPort(
       getConfig,
-      [`${SURFACE_EMAIL_PREFIX}.imap.port`, `${SURFACE_EMAIL_PREFIX}.imapPort`],
+      [`${SURFACE_EMAIL_PREFIX}.imap.port`],
       IMAP_PORT_SCHEMA_DEFAULT,
       imapSecure ? 993 : 143,
     ),

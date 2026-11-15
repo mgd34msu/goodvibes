@@ -108,7 +108,7 @@ export class GroupWireRouter {
   };
 
   private readonly lifecycle = new ClusterOwnedLifecycle(
-    async () => { await this.options.inner.start((raw) => this.receive(raw)); },
+    async () => { await this.options.inner.start((raw) => { if (typeof raw === 'string') this.receive(raw); }); },
     async () => {
       this.clearElectionListener();
       try { await this.options.inner.stop(); }
@@ -117,7 +117,7 @@ export class GroupWireRouter {
   );
   /** The reason for holding no key that was last said; null while a key is held. */
   private announcedNoGroup: 'no-group' | 'unreadable-key-material' | null = null;
-  private electionListener: ((raw: string) => void) | null = null;
+  private electionListener: ((datagram: string | Readonly<Record<string, unknown>>) => void) | null = null;
   private electionListenerGeneration = 0;
   private seq = 0;
 
@@ -157,6 +157,8 @@ export class GroupWireRouter {
    */
   electionTransport(nodeVersion: string): ClusterTransport {
     return {
+      // The group key signs every election datagram and receive() checks its clock skew.
+      groupKeyed: true,
       start: async (onMessage) => {
         const generation = ++this.electionListenerGeneration;
         await this.ensureStarted();
@@ -279,16 +281,13 @@ export class GroupWireRouter {
   }
 
   /**
-   * Rebuild the election's own message from a verified envelope.
-   *
-   * Every lifted field goes back under the name the election gave it, and the
-   * body is restored around them. The reconstruction has to be exact: when
-   * `cluster.secret` is also set, the election re-checks its own signature over
-   * `[v, type, surfaceId, nodeId, nodeVersion, seq, ts]`, and a field that came
-   * back under a different name or a different value would fail every datagram.
+   * Rebuild the election's own message from a verified envelope: every lifted
+   * field goes back under the name the election gave it, with the body around
+   * them. Handed over as fields, not re-serialised: the group key already
+   * authenticated it, so the election only validates the shape.
    */
-  private unwrapElectionMessage(envelope: ClusterEnvelope): string {
-    return JSON.stringify({
+  private unwrapElectionMessage(envelope: ClusterEnvelope): Readonly<Record<string, unknown>> {
+    return {
       ...envelope.body,
       type: envelope.type,
       surfaceId: envelope.surfaceId,
@@ -296,7 +295,7 @@ export class GroupWireRouter {
       nodeVersion: envelope.nodeVersion,
       seq: envelope.seq,
       ts: envelope.ts,
-    });
+    };
   }
 
   // ── inbound ───────────────────────────────────────────────────────────────

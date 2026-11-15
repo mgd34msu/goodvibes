@@ -118,7 +118,7 @@ The browser operator surface is controlled separately from the daemon control pl
 | `web.hostMode` | `local` | Bind mode: `local`, `network`, or `custom` |
 | `web.host` | `127.0.0.1` | Bind host for the web surface |
 | `web.port` | `3423` | Bind port for the web surface |
-| `web.publicBaseUrl` | `http://127.0.0.1:3423` | Public base URL for web links and notification deep links |
+| `web.publicBaseUrl` | *(empty)* | Public base URL for web links and notification deep links, for a tunnel or proxy address. Empty derives links from the daemon's reachable address (when it serves the web app) or the web endpoint binding |
 | `web.staticAssetsDir` | `dist/web` | Static asset directory for the embedded web surface |
 
 The daemon/control-plane backend defaults to port `3421`, the webhook/event listener defaults to `3422`, and the browser surface defaults to `3423`.

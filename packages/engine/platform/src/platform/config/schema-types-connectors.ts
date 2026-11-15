@@ -54,7 +54,6 @@ export interface GoogleConnectorConfig {
   oauth: {
     projectId: string;
     publishingStatus: string;
-    refreshToken: string;
   };
   credentials: {
     migratedFrom: string;
@@ -83,7 +82,6 @@ export type ConnectorsConfigKey =
   | 'calendar.microsoft.clientSecretRef'
   | 'google.oauth.projectId'
   | 'google.oauth.publishingStatus'
-  | 'google.oauth.refreshToken'
   | 'google.credentials.migratedFrom';
 
 /**
@@ -116,6 +114,5 @@ export type ConnectorsConfigValue<K extends ConnectorsConfigKey> =
   K extends 'calendar.microsoft.clientSecretRef' ? string :
   K extends 'google.oauth.projectId' ? string :
   K extends 'google.oauth.publishingStatus' ? string :
-  K extends 'google.oauth.refreshToken' ? string :
   K extends 'google.credentials.migratedFrom' ? string :
   never;

@@ -48,26 +48,26 @@ describe('a bulk save writes only what belongs to the destination file', () => {
   test('a project value, a shared value and the reader floor survive a global save unchanged', () => {
     const floor = { minReaderVersion: '1.0.0', setBy: 'test', at: '2026-01-01T00:00:00.000Z' };
     const f = fixture({
-      global: { $goodvibes: floor, provider: { model: 'synthetic:global' } },
-      project: { provider: { model: 'synthetic:project' }, fetch: { allowLocalhost: true } },
+      global: { $goodvibes: floor, display: { theme: 'dracula' } },
+      project: { display: { theme: 'nord' }, fetch: { allowLocalhost: true } },
       shared: { tts: { voice: 'synthetic-voice' } },
     });
-    expect(f.config.get('provider.model')).toBe('synthetic:project');
+    expect(f.config.get('display.theme')).toBe('nord');
     f.config.setDynamic('ui.voiceEnabled', true);
     f.config.save();
     const saved = read(f.global);
     expect(saved['$goodvibes']).toEqual(floor);
-    expect((saved['provider'] as Record<string, unknown>)['model']).toBe('synthetic:global');
+    expect((saved['display'] as Record<string, unknown>)['theme']).toBe('dracula');
     expect(saved['fetch']).toBeUndefined();
     expect(saved['tts']).toBeUndefined();
-    expect(f.config.get('provider.model')).toBe('synthetic:project');
+    expect(f.config.get('display.theme')).toBe('nord');
   });
 
   test('a project save does not copy shared-tier values into the project file', () => {
-    const f = fixture({ project: { provider: { model: 'synthetic:project' } }, shared: { tts: { voice: 'synthetic-voice' } } });
+    const f = fixture({ project: { display: { theme: 'nord' } }, shared: { tts: { voice: 'synthetic-voice' } } });
     f.config.saveProject();
     expect(read(f.project)['tts']).toBeUndefined();
-    expect((read(f.project)['provider'] as Record<string, unknown>)['model']).toBe('synthetic:project');
+    expect((read(f.project)['display'] as Record<string, unknown>)['theme']).toBe('nord');
   });
 
   test('a value the loader could not read is still in the file after a global save', () => {
@@ -81,19 +81,19 @@ describe('a bulk save writes only what belongs to the destination file', () => {
 
 describe('a global write that a project file would override', () => {
   test('set writes the project file so the value survives the next load', () => {
-    const f = fixture({ project: { provider: { model: 'synthetic:project' } } });
-    f.config.setDynamic('provider.model', 'synthetic:new');
+    const f = fixture({ project: { display: { theme: 'nord' } } });
+    f.config.setDynamic('display.theme', 'tokyonight');
     f.config.load();
-    expect(f.config.get('provider.model')).toBe('synthetic:new');
-    expect((read(f.project)['provider'] as Record<string, unknown>)['model']).toBe('synthetic:new');
+    expect(f.config.get('display.theme')).toBe('tokyonight');
+    expect((read(f.project)['display'] as Record<string, unknown>)['theme']).toBe('tokyonight');
   });
 
   test('reset removes the project value too, so the default is what loads', () => {
-    const f = fixture({ project: { provider: { model: 'synthetic:project' } } });
-    f.config.reset('provider.model');
+    const f = fixture({ project: { display: { theme: 'nord' } } });
+    f.config.reset('display.theme');
     f.config.load();
-    expect(f.config.get('provider.model')).not.toBe('synthetic:project');
-    expect(read(f.project)['provider']).toBeUndefined();
+    expect(f.config.get('display.theme')).not.toBe('nord');
+    expect(read(f.project)['display']).toBeUndefined();
   });
 });
 
@@ -138,12 +138,12 @@ describe('a global write that a stricter project value would undo at the next lo
   });
 
   test('a full reset shows the project values that still win, as the next load will', () => {
-    const f = fixture({ project: { permissions: { mode: 'plan' }, provider: { model: 'synthetic:project' } } });
+    const f = fixture({ project: { permissions: { mode: 'plan' }, display: { theme: 'nord' } } });
     f.config.reset();
-    const live = f.config.get('provider.model');
+    const live = f.config.get('display.theme');
     f.config.load();
-    expect(f.config.get('provider.model')).toBe(live);
-    expect(live).toBe('synthetic:project');
+    expect(f.config.get('display.theme')).toBe(live);
+    expect(live).toBe('nord');
   });
 });
 
@@ -190,7 +190,7 @@ describe('a project settings file cannot loosen the posture', () => {
       global: { fetch: { blockedHosts: 'evil.com' } },
       project: {
         danger: { httpListener: true },
-        controlPlane: { allowRemote: true },
+        controlPlane: { trustProxy: true },
         fetch: { allowLocalhost: true, blockedHosts: '' },
         sandbox: { windowsMode: 'require-wsl' },
         conversationGate: { mode: 'off' },
@@ -198,14 +198,14 @@ describe('a project settings file cannot loosen the posture', () => {
       },
     });
     expect(f.config.get('danger.httpListener')).toBe(false);
-    expect(f.config.get('controlPlane.allowRemote')).toBe(false);
+    expect(f.config.get('controlPlane.trustProxy')).toBe(false);
     expect(f.config.get('fetch.allowLocalhost')).toBe(false);
     expect(f.config.get('fetch.blockedHosts')).toBe('evil.com');
     expect(f.config.get('sandbox.windowsMode')).toBe('native-basic');
     expect(f.config.get('conversationGate.mode')).toBe('propose');
     expect(f.config.get('policy.registryEnabled')).toBe(false);
     const skipped = f.config.getIngestionQuarantine().map(notice => notice.key);
-    for (const key of ['danger.httpListener', 'controlPlane.allowRemote', 'fetch.allowLocalhost', 'fetch.blockedHosts', 'sandbox.windowsMode', 'conversationGate.mode', 'policy.registryEnabled']) {
+    for (const key of ['danger.httpListener', 'controlPlane.trustProxy', 'fetch.allowLocalhost', 'fetch.blockedHosts', 'sandbox.windowsMode', 'conversationGate.mode', 'policy.registryEnabled']) {
       expect(skipped).toContain(key);
     }
   });
@@ -274,7 +274,7 @@ describe('writes are checked against the schema before they reach disk', () => {
 
   test('a memory tier write that would invert the tiers is refused, naming the other values', () => {
     const f = fixture();
-    expect(() => f.config.setDynamic('memory.tier.highPct', 50)).toThrow(/out of order/);
+    expect(() => f.config.setDynamic('memory.tier.highPct', 50)).toThrow(/memory\.tier\.elevatedPct \(60\) < memory\.tier\.highPct \(50\)/);
     expect(f.config.get('memory.tier.highPct')).toBe(80);
     f.config.setDynamic('memory.tier.highPct', 85);
     expect(f.config.get('memory.tier.highPct')).toBe(85);
@@ -410,5 +410,28 @@ describe('the governor with a configuration it refuses', () => {
       deps: { sampler: () => ({ rssBytes: 1, heapUsedBytes: 1 }), now: () => 0, gc: () => {}, exit: () => {}, resolveSystemRamMb: () => 8 * 1024 },
     });
     expect(handles.configFallback).toBeUndefined();
+  });
+});
+
+describe('a project file sets only what is declared settable for projects', () => {
+  test('a destination, credential name or model in a repository file is skipped; display and contract settings apply', () => {
+    const f = fixture({
+      project: {
+        update: { releasesUrl: 'https://github.com/mgd34msu/goodvibes/releases/latest' },
+        judgment: { keyName: 'OPENAI_API_KEY' },
+        provider: { model: 'synthetic:project', systemPromptFile: '/etc/passwd' },
+        telemetry: { decisionOtlpEnabled: true },
+        display: { theme: 'nord' },
+        contract: { maxUnits: 3 },
+      },
+    });
+    expect(f.config.get('display.theme')).toBe('nord');
+    expect(f.config.get('contract.maxUnits')).toBe(3);
+    expect(f.config.get('provider.model')).not.toBe('synthetic:project');
+    expect(f.config.get('telemetry.decisionOtlpEnabled')).toBe(false);
+    const skipped = f.config.getIngestionQuarantine().map(notice => notice.key);
+    for (const key of ['update.releasesUrl', 'judgment.keyName', 'provider.model', 'provider.systemPromptFile', 'telemetry.decisionOtlpEnabled']) {
+      expect(skipped).toContain(key);
+    }
   });
 });

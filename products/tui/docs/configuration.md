@@ -10,6 +10,17 @@ Settings are layered, not stored in a single working-directory file. Four layers
 | 4. CLI/runtime overrides | Flags at launch and live changes made during the session | The shared file `~/.goodvibes/goodvibes.json` is reserved for future
 cross-app state; TUI settings do not live there.
 
+A project settings file travels with a repository, so whoever wrote the
+repository wrote it. It can set only what is safe to take from a repository:
+`display.*`, `ui.*`, `behavior.*`, `contract.*` (except `contract.gates`, which
+runs commands), `worktree.setup.carryOverGlobs`, the checkpoint settings other
+than `checkpoints.allowBroadRoot`, `agents.passiveInjection.*` and the context
+window settings, and `permissions.mode`, `permissions.tools.*`,
+`behavior.autoApprove` and `sandbox.enabled` only in the stricter direction.
+Every other key in a project file, including `statusline.*`, provider and model
+choices, judgment settings, destinations and the update feed, is skipped with a
+notice naming it; set those in your own `~/.goodvibes/tui/settings.json`.
+
 Most settings live under the schema owned by the platform config system and
 are editable live from the fullscreen `/config` workspace or `/settings`. See
 [Key settings](#key-settings) below for a curated reference table of the most
@@ -141,13 +152,12 @@ applies.
 | `checkpoints.maxFirstSnapshotFiles` | number | `50000` | Ceiling for the first-ever snapshot's file sweep, a whole number from 1 to 10000000. |
 | `checkpoints.autoRetention` | boolean | `true` | Run a retention sweep automatically after each snapshot and once at startup. Set `false` to drive retention only via manual garbage collection. |
 
-Example (`.goodvibes/tui/settings.json`):
+Example (`.goodvibes/tui/settings.json`; `checkpoints.allowBroadRoot` is taken only from your own settings file):
 
 ```json
 {
   "checkpoints": {
     "preferGitRoot": true,
-    "allowBroadRoot": false,
     "maxFirstSnapshotFiles": 20000
   }
 }
@@ -177,7 +187,10 @@ Behavior notes:
 - If the command exits non-zero, times out, or fails to start, the line is
   cleared rather than left showing stale text.
 
-Example (`.goodvibes/tui/settings.json`):
+The status line runs a command, so it is read only from your own settings file
+(`~/.goodvibes/tui/settings.json`); a project settings file cannot set it.
+
+Example (`~/.goodvibes/tui/settings.json`):
 
 ```json
 {

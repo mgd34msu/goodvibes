@@ -59,7 +59,6 @@ describe('the owner identity comes from configuration and nowhere else', () => {
       'email.username',
       'surfaces.email.from',
       'surfaces.email.user',
-      'surfaces.email.username',
     ]);
   });
 

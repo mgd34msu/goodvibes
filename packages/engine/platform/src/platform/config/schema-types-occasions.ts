@@ -10,32 +10,22 @@
  * merge into `GoodVibesConfig` lives.
  */
 
-/** The proactive occasions feature's operator-editable policy (`occasions.*`). */
+/**
+ * The proactive occasions feature's operator-editable policy (`occasions.*`).
+ * What each key does is stated once, in its settings row's description
+ * (schema-domain-occasions.ts).
+ */
 export interface OccasionsConfig {
-  /** Whether occasions are read, swept and raised at all. */
   enabled: boolean;
-  /** Default runway before an occasion, in days. Per-occasion `lead N` wins. */
   leadDays: number;
-  /** The hours it may speak, `HH:MM-HH:MM`, in `daemon.timezone`. */
   activeHours: string;
-  /**
-   * Where a nudge is delivered: `surfaceKind` or `surfaceKind:address`.
-   * `telegram` by default; empty makes the feature pull-only.
-   */
   nudgeChannel: string;
-  /** Ordinary gap between nudges, in days. */
   cadenceDays: number;
-  /** Whether a plan that takes the owner away moves a nudge earlier. */
   awayAdjust: boolean;
-  /** Whether occasions are written out to a calendar as a mirror. */
   calendarMirror: boolean;
-  /** Whether an occasion already in a calendar is left to the calendar. */
   suppressMirroredNudges: boolean;
-  /** How many questions the gift interview asks. */
   interviewQuestions: number;
-  /** How long the record of what the owner landed on is kept, in years. */
   giftHistoryYears: number;
-  /** How often the approach sweep runs, in minutes. */
   sweepIntervalMinutes: number;
 }
 

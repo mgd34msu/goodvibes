@@ -100,7 +100,15 @@ export function decodeMessage(raw: string, secret: string, now?: number): Cluste
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return { message: null, rejected: 'datagram is not a JSON object' };
   }
-  const candidate = parsed as Record<string, unknown>;
+  return decodeMessageFields(parsed as Record<string, unknown>, secret, now);
+}
+
+/**
+ * Validate and authenticate a datagram already parsed into fields. With an
+ * empty `secret` and no `now` it validates only, which is right for a datagram
+ * the group transport already authenticated and clock-checked.
+ */
+export function decodeMessageFields(candidate: Readonly<Record<string, unknown>>, secret: string, now?: number): ClusterDecodeResult {
   const validated = validateFields(candidate);
   if (!validated.message) return validated;
   const message = validated.message;
@@ -121,7 +129,7 @@ export function decodeMessage(raw: string, secret: string, now?: number): Cluste
   return { message, rejected: null };
 }
 
-function validateFields(candidate: Record<string, unknown>): ClusterDecodeResult {
+function validateFields(candidate: Readonly<Record<string, unknown>>): ClusterDecodeResult {
   const v = candidate['v'];
   const type = candidate['type'];
   const surfaceId = candidate['surfaceId'];

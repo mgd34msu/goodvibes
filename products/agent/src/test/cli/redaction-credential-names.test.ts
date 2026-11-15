@@ -31,7 +31,7 @@ const CREDENTIAL_PATHS: readonly string[] = [
   // Mail.
   'email.passwordRef',
   'email.smtpPasswordRef',
-  'surfaces.email.imapPassword',
+  'surfaces.email.imap.password',
   // Calendar, including the private feed address, which grants calendar read
   // access to anyone holding it.
   'calendar.google.clientSecretRef',

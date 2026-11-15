@@ -331,6 +331,13 @@ or Home Assistant service target before dispatching work.
 - ntfy has configurable chat, agent, and remote-chat topics. Chat-to-TUI routes
   into the active shared session; agent topics submit agent work; remote-chat
   topics use daemon-owned remote chat and inherit the daemon/TUI provider/model.
+  On the public server a topic name is the only thing keeping strangers out,
+  so the topics ship unset: switching ntfy on (`goodvibes surfaces enable ntfy`,
+  or the daemon starting with `surfaces.ntfy.enabled` true) gives each unset
+  topic an unguessable name, saves it and says which names to subscribe to.
+  The names earlier builds shipped (`goodvibes-chat`, `goodvibes-agent`,
+  `goodvibes-ntfy`) are not subscribed on ntfy.sh; `surfaces check ntfy` names
+  the setting to clear or change.
   A message the daemon fails to process is delivered again a few times; if it
   still fails, it is skipped so the messages behind it keep flowing, and the
   owner is told it was skipped. A message refused on purpose (an answer that

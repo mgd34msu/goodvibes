@@ -57,9 +57,13 @@ export {
   GOODVIBES_NTFY_CHAT_TOPIC,
   GOODVIBES_NTFY_DEFAULT_TOPICS,
   GOODVIBES_NTFY_REMOTE_TOPIC,
+  NTFY_TOPIC_SETTINGS,
   NtfyIntegration,
   createNtfyLiveSubscriptionSince,
+  ensureNtfyTopics,
+  generateNtfyTopic,
   isGoodVibesNtfyDeliveryEcho,
+  isPublicNtfyServer,
   resolveGoodVibesNtfyTopics,
   resolveNtfyDefaultPriority,
 } from './ntfy.js';
@@ -75,6 +79,8 @@ export type {
 export type {
   GoodVibesNtfyTopicConfig,
   GoodVibesNtfyTopics,
+  NtfyTopicConfigStore,
+  RefusedNtfyTopic,
   NtfyMessage,
   NtfyPublishOptions,
   NtfyPublishOutcome,

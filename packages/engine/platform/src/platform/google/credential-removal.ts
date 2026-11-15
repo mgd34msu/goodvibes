@@ -206,7 +206,6 @@ export async function removeGoogleCredentials(
     // The config reference is cleared alongside the value it points at, or the
     // machine is left claiming a credential that is no longer there, which is
     // the half-landed state connection-repair.ts exists to clean up after.
-    if (item === 'refresh-token') deps.config.set(GOOGLE_CONFIG_KEYS.oauthRefreshToken, '');
     if (item === 'client-secret') deps.config.set(GOOGLE_CONFIG_KEYS.oauthClientSecretRef, '');
     if (item === 'app-password') deps.config.set(GOOGLE_CONFIG_KEYS.emailPasswordRef, '');
     if (item === 'calendar-address') deps.config.set(GOOGLE_CONFIG_KEYS.calendarIcsUrl, '');

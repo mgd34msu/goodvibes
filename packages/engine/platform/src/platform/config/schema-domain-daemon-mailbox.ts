@@ -23,12 +23,14 @@
  * were telling operators to set keys their settings UI had no row for.
  * Declaring them here is what makes those instructions land somewhere real.
  *
- * ── Why both spellings ────────────────────────────────────────────────────
+ * ── One spelling ──────────────────────────────────────────────────────────
  *
- * Both are genuinely read. The inbox provider reads the flat
- * `imapHost`/`imapPort`/`imapUser`/`imapPassword`; the triage tagger and the
- * settings resolver read the nested `imap.*`/`smtp.*`. Declaring one spelling
- * would have stranded exactly the half a given machine happened to use.
+ * Each fact has one key: `host`, `user`, `from`, `password` for the account,
+ * and `imap.*` / `smtp.*` for what differs per protocol. Every mail reader
+ * resolves them through `readSurfaceEmailSettings` (email/surface-config.ts).
+ * The flat spellings earlier builds also read (`username`, `imapHost`,
+ * `imapPort`, `imapUser`, `imapPassword`) are moved onto these at load by
+ * retired-settings-migration.ts.
  *
  * ── Why this also fixes credential storage ────────────────────────────────
  *
@@ -44,7 +46,7 @@
  * rather than on the non-scalar list in `config-ownership.ts`.
  */
 
-import { type ConfigSettingDefinition, intRange, port } from './schema-shared.js';
+import { type ConfigSettingDefinition, intRange, remotePort } from './schema-shared.js';
 
 /** Validator for a setting that holds JSON text: empty is allowed, anything else must parse and pass `shape`. */
 function jsonText(shape: (parsed: unknown) => boolean, hint: string): Pick<ConfigSettingDefinition, 'validate' | 'validationHint'> {
@@ -63,13 +65,8 @@ export const daemonMailboxConfigDefaults = {
   email: {
     host: '',
     user: '',
-    username: '',
     from: '',
     password: '',
-    imapHost: '',
-    imapPort: 993,
-    imapUser: '',
-    imapPassword: '',
     imap: {
       host: '',
       port: 993,
@@ -136,12 +133,6 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     description: 'Mailbox account name the daemon authenticates as',
   },
   {
-    key: 'surfaces.email.username',
-    type: 'string',
-    default: '',
-    description: 'Alternate spelling of the mailbox account name, read when user is unset',
-  },
-  {
     key: 'surfaces.email.from',
     type: 'string',
     default: '',
@@ -154,42 +145,17 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     description: 'Mailbox password or app password. Stored in the daemon secret tier, never in config',
   },
   {
-    key: 'surfaces.email.imapHost',
-    type: 'string',
-    default: '',
-    description: 'IMAP hostname read by the inbox provider (e.g. imap.gmail.com)',
-  },
-  {
-    key: 'surfaces.email.imapPort',
-    type: 'number',
-    default: 993,
-    description: 'IMAP port read by the inbox provider',
-    ...port(),
-  },
-  {
-    key: 'surfaces.email.imapUser',
-    type: 'string',
-    default: '',
-    description: 'IMAP account name read by the inbox provider',
-  },
-  {
-    key: 'surfaces.email.imapPassword',
-    type: 'string',
-    default: '',
-    description: 'IMAP password read by the inbox provider. Daemon secret tier, never config',
-  },
-  {
     key: 'surfaces.email.imap.host',
     type: 'string',
     default: '',
-    description: 'IMAP hostname, overriding surfaces.email.host',
+    description: 'IMAP hostname (e.g. imap.gmail.com), overriding surfaces.email.host',
   },
   {
     key: 'surfaces.email.imap.port',
     type: 'number',
     default: 993,
     description: 'IMAP port',
-    ...port(),
+    ...remotePort(),
   },
   {
     key: 'surfaces.email.imap.user',
@@ -232,7 +198,7 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 465,
     description: 'SMTP port',
-    ...port(),
+    ...remotePort(),
   },
   {
     key: 'surfaces.email.smtp.password',

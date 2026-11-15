@@ -126,15 +126,13 @@ describe('an inbound-mail setting edit reaches the running source', () => {
     const { calls, supervisor } = fakeSupervisor();
     await runtimeWith(config, supervisor).startInboundMail();
 
-    // Both spellings of host and account, because `readSurfaceEmailSettings`
-    // genuinely reads both and a subscription to the one the owner did not edit
-    // is a subscription that never fires.
+    // Every key `readSurfaceEmailSettings` reads for host, port and account.
     const watched = [
       'surfaces.email.imap.host',
-      'surfaces.email.imapHost',
+      'surfaces.email.host',
       'surfaces.email.imap.port',
+      'surfaces.email.imap.user',
       'surfaces.email.user',
-      'surfaces.email.username',
     ];
     for (const key of watched) expect(config.subscriberCount(key)).toBe(1);
 
@@ -167,8 +165,8 @@ describe('an inbound-mail setting edit reaches the running source', () => {
     config.change('surfaces.email.imap.host');
     config.change('surfaces.email.imap.port');
     config.change('surfaces.email.user');
-    config.change('surfaces.email.username');
-    config.change('surfaces.email.imapHost');
+    config.change('surfaces.email.imap.user');
+    config.change('surfaces.email.host');
     pastCoalesceWindow();
 
     expect(calls.recheckNow).toBe(1);

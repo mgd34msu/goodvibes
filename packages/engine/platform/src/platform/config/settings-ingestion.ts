@@ -143,8 +143,8 @@ export const SAFETY_GATE_CONFIG_PREFIXES: readonly string[] = [
  * Deliberately NOT in the list above, and why, because the omissions are the
  * part someone will want to re-argue:
  *
- *   - `danger.*`, `behavior.autoApprove`, `controlPlane.allowRemote`,
- *     `controlPlane.trustProxy` all ship as `false`, and `sandbox.enabled`
+ *   - `danger.*`, `behavior.autoApprove` and `controlPlane.trustProxy` all
+ *     ship as `false`, and `sandbox.enabled`
  *     ships as `true`. For every one of them the shipped default is the
  *     RESTRICTIVE value, so falling back to it can only ever close something,
  *     never open it. A key whose default is the weaker setting does not belong

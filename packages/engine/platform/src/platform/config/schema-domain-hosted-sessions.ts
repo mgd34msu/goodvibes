@@ -34,18 +34,16 @@ export interface HostedSessionsSettings {
    */
   promoteInboundConversations: boolean;
   /**
-   * Whether this surface's OWN conversation turns run in the connected daemon
-   * rather than in this process. On by default when a connected daemon is
-   * there: the daemon is the loop host, so a turn keeps running when this
-   * process goes away and every surface sees the same conversation.
+   * Whether the agent's OWN conversation turns run in the connected daemon
+   * rather than in the agent process. Off by default: the agent's turn is
+   * composed in the agent process (its prompt, persona, skills, memory and
+   * tools), and work that must outlive the terminal reaches the daemon through
+   * /work, channels and schedules. On: a turn keeps running when the agent
+   * process goes away, with the daemon's own prompt and tools.
    *
    * Distinct from {@link promoteInboundConversations}, which is about messages
    * arriving from a channel. This one is about what happens when the person in
    * front of this surface presses enter.
-   *
-   * Turning it off forces every turn to run locally. With no connected daemon
-   * reachable, turns run locally regardless, and say so, once, in the
-   * transcript.
    */
   routeConversationTurns: boolean;
 }
@@ -64,7 +62,7 @@ export const hostedSessionsConfigDefaults = {
     terminatedRetentionMs: 24 * 60 * 60_000,
     attachmentTtlMs: 10 * 60_000,
     promoteInboundConversations: false,
-    routeConversationTurns: true,
+    routeConversationTurns: false,
   },
 };
 
@@ -113,7 +111,7 @@ export const hostedSessionsConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'hostedSessions.routeConversationTurns',
     type: 'boolean',
-    default: true,
-    description: 'Only goodvibes-agent routes its conversation turns this way; the terminal product (goodvibes) always runs turns in its own process and ignores this setting. Run the agent\'s own conversation turns inside the connected daemon rather than in this process. On (the default) and with a connected daemon reachable: the first message of a conversation creates a daemon-hosted session rooted at this surface\'s working directory, every later message is steered into it, and this surface renders the turn from the daemon\'s event stream, so the turn survives this process closing and every surface sees one conversation. The daemon holds the authoritative transcript; this surface still keeps its own local record of what the stream delivered. Off: every turn runs in this process, as it always did. With no connected daemon reachable the turn runs locally regardless, and the transcript says so in one line naming the reason, it is never silent about where a turn ran. This is about what happens when you press enter; hostedSessions.promoteInboundConversations is the same question for messages arriving from a channel.',
+    default: false,
+    description: 'Only goodvibes-agent reads this; the terminal product (goodvibes) always runs turns in its own process. Off (the default): the agent\'s conversation turns run in the agent process, with the agent\'s own prompt, persona, skills, memory and tools; work that must outlive the terminal goes to the daemon through /work, channels and schedules. On: with a connected daemon reachable, the first message of a conversation creates a daemon-hosted session rooted at this surface\'s working directory and every later message is steered into it, so the turn survives this process closing; that hosted turn runs with the daemon\'s own prompt and tool set, not the agent\'s. With no connected daemon reachable the turn runs locally regardless, and the transcript says so in one line naming the reason.',
   },
 ];

@@ -212,6 +212,12 @@ export const DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS = [
   // node-local in config-replication-policy.ts, and for this key that ruling is
   // load-bearing rather than incidental. See the note there.
   'cluster.groupMaterial',
+  // The Google OAuth refresh token is a secret, never a setting: no settings
+  // row shows it and no file holds it. The path stays here because the
+  // daemon-owned secret name derives from it, and because `google.oauth.` is
+  // ruled replicated, which is what carries the token to a node that takes
+  // over a handover.
+  'google.oauth.refreshToken',
   // NOTE: the mail and calendar connector's `email.*`, `calendar.google.*`,
   // `calendar.microsoft.*` and `google.*` keys, nineteen of them, were
   // listed here for a while, for the same reason `surfaces.email.*` and

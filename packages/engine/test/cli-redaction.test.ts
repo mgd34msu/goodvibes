@@ -33,7 +33,6 @@ import {
 const CREDENTIAL_PATHS: readonly string[] = [
   // Mail and calendar, the ones that used to slip through entirely.
   'surfaces.email.password',
-  'surfaces.email.imapPassword',
   'surfaces.email.imap.password',
   'surfaces.email.smtp.password',
   'surfaces.calendar.caldavPassword',
@@ -76,7 +75,6 @@ const CREDENTIAL_PATHS: readonly string[] = [
 /** The four names the old trailing-word pattern is provably blind to. */
 const MIDDLE_WORD_PATHS: readonly string[] = [
   'surfaces.calendar.caldavPassword',
-  'surfaces.email.imapPassword',
   'surfaces.msteams.appPassword',
   'surfaces.telephony.authToken',
 ];
@@ -156,8 +154,8 @@ describe('isSensitiveConfigPath', () => {
   test('ordinary settings are left alone', async () => {
     for (const path of [
       'surfaces.email.host',
-      'surfaces.email.imapHost',
-      'surfaces.email.imapPort',
+      'surfaces.email.imap.host',
+      'surfaces.email.imap.port',
       'surfaces.calendar.caldavUrl',
       'surfaces.calendar.caldavUser',
       'display.themeMode',
@@ -212,7 +210,6 @@ describe('redactConfig', () => {
     expect([...result.redactedPaths].sort()).toEqual([
       'surfaces.calendar.caldavPassword',
       'surfaces.email.imap.password',
-      'surfaces.email.imapPassword',
       'surfaces.email.password',
       'surfaces.email.smtp.password',
     ].sort());

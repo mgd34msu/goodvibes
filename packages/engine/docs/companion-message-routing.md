@@ -117,7 +117,7 @@ runtime session id.
 
 ## ntfy chat replies
 
-The `goodvibes-chat` ntfy route uses this same companion message path. The platform
+The ntfy chat topic (`surfaces.ntfy.chatTopic`) uses this same companion message path. The platform
 queues a one-shot ntfy reply target before emitting `COMPANION_MESSAGE_RECEIVED`.
 To make reply correlation durable, TUI clients should pass
 `payload.messageId` into `handleUserInput()` as `origin.messageId`; the platform then

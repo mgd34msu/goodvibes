@@ -4,12 +4,14 @@ import type { AddressInfo } from 'node:net';
 import {
   GOODVIBES_NTFY_AGENT_TOPIC,
   GOODVIBES_NTFY_CHAT_TOPIC,
+  GOODVIBES_NTFY_DEFAULT_TOPICS,
   GOODVIBES_NTFY_ORIGIN,
   GOODVIBES_NTFY_ORIGIN_HEADER,
   GOODVIBES_NTFY_OUTBOUND_TAG,
   GOODVIBES_NTFY_REMOTE_TOPIC,
   NtfyIntegration,
   createNtfyLiveSubscriptionSince,
+  ensureNtfyTopics,
   isGoodVibesNtfyDeliveryEcho,
   resolveGoodVibesNtfyTopics,
   type NtfyMessage,
@@ -171,7 +173,7 @@ describe('NtfyIntegration.subscribeJsonStream()', () => {
           get: (key: string) => {
             if (key === 'surfaces.ntfy.enabled') return true;
             if (key === 'surfaces.ntfy.baseUrl') return baseUrl;
-            return '';
+            return TEST_TOPICS[key] ?? '';
           },
         },
         serviceRegistry: { resolveSecret: async () => null },
@@ -194,22 +196,33 @@ describe('NtfyIntegration.subscribeJsonStream()', () => {
 });
 
 describe('ntfy topic routing', () => {
-  test('resolves default and configured inbound route topics', () => {
-    expect(resolveGoodVibesNtfyTopics()).toMatchObject({
-      chatTopic: GOODVIBES_NTFY_CHAT_TOPIC,
-      agentTopic: GOODVIBES_NTFY_AGENT_TOPIC,
-      remoteTopic: GOODVIBES_NTFY_REMOTE_TOPIC,
-    });
+  test('subscribes to no shipped topic on the public server, and to configured topics', () => {
+    const shipped = { chatTopic: GOODVIBES_NTFY_CHAT_TOPIC, agentTopic: GOODVIBES_NTFY_AGENT_TOPIC, remoteTopic: GOODVIBES_NTFY_REMOTE_TOPIC };
+    expect(resolveGoodVibesNtfyTopics().all).toEqual([]);
+    const onPublic = resolveGoodVibesNtfyTopics({ ...shipped, baseUrl: 'https://ntfy.sh' });
+    expect(onPublic.all).toEqual([]);
+    expect(onPublic.refused.map((refused) => refused.setting)).toEqual(['surfaces.ntfy.chatTopic', 'surfaces.ntfy.agentTopic', 'surfaces.ntfy.remoteTopic']);
+    expect(resolveGoodVibesNtfyTopics({ ...shipped, baseUrl: 'http://127.0.0.1:2586' }).all).toEqual([...GOODVIBES_NTFY_DEFAULT_TOPICS]);
     expect(resolveGoodVibesNtfyTopics({
       chatTopic: 'phone-chat',
       agentTopic: 'phone-agent',
       remoteTopic: 'phone-remote',
+      baseUrl: 'https://ntfy.sh',
     })).toEqual({
       chatTopic: 'phone-chat',
       agentTopic: 'phone-agent',
       remoteTopic: 'phone-remote',
       all: ['phone-chat', 'phone-agent', 'phone-remote'],
+      refused: [],
     });
+  });
+
+  test('switching ntfy on gives every unset topic an unguessable name and keeps a set one', () => {
+    const stored = new Map<string, string>([['surfaces.ntfy.chatTopic', 'my-chat']]);
+    const written = ensureNtfyTopics({ get: (key) => stored.get(key) ?? '', set: (key, value) => { stored.set(key, value); } });
+    expect(written.map((entry) => entry.setting)).toEqual(['surfaces.ntfy.agentTopic', 'surfaces.ntfy.remoteTopic']);
+    expect(stored.get('surfaces.ntfy.chatTopic')).toBe('my-chat');
+    for (const { topic } of written) expect(topic).toMatch(/^goodvibes-(agent|remote)-[0-9a-f]{24}$/);
   });
 
   test('goodvibes-chat appends to the active TUI session without spawning an agent', async () => {
@@ -767,13 +780,20 @@ describe('ntfy GoodVibes self-echo marker', () => {
   });
 });
 
+/** The inbound topics these tests configure; nothing is subscribed without them. */
+const TEST_TOPICS: Record<string, string> = {
+  'surfaces.ntfy.chatTopic': GOODVIBES_NTFY_CHAT_TOPIC,
+  'surfaces.ntfy.agentTopic': GOODVIBES_NTFY_AGENT_TOPIC,
+  'surfaces.ntfy.remoteTopic': GOODVIBES_NTFY_REMOTE_TOPIC,
+};
+
 function makeSurfaceAdapterContext(calls: { authorize: number; upsert: number; submit: number; spawn: number; queue: number }): SurfaceAdapterContext {
   return {
     serviceRegistry: {
       resolveSecret: async () => null,
     },
     configManager: {
-      get: () => undefined,
+      get: (key: string) => TEST_TOPICS[key],
     },
     routeBindings: {
       upsertBinding: async () => {
@@ -825,7 +845,7 @@ function makeRoutingContext(options: {
       resolveSecret: async () => null,
     },
     configManager: {
-      get: (key: string) => options.configValues?.[key],
+      get: (key: string) => options.configValues?.[key] ?? TEST_TOPICS[key],
     },
     routeBindings: {
       upsertBinding: async () => ({

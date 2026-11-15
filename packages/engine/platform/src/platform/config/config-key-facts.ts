@@ -29,14 +29,38 @@ interface Loosening {
 }
 
 /**
- * Keys a project settings file may not set at all: each points work, data or a
- * stored credential at a destination. Every other key is settable from a
- * project file, subject to its loosening rule below.
+ * Keys a project settings file may not set at all, named so a filter can find
+ * them at any depth and give the reason: each points work, data or a stored
+ * credential at a destination. They are outside the project allow-list below
+ * as well.
  */
 const PROJECT_UNSETTABLE_KEYS: readonly string[] = [
   'judgment.endpoint', 'notifications.webhookUrls', ...CREDENTIAL_DESTINATION_KEYS,
 ];
-const PROJECT_UNSETTABLE_SET: ReadonlySet<string> = new Set(PROJECT_UNSETTABLE_KEYS);
+
+/**
+ * What a project settings file, which is repository content, may set: how the
+ * session looks and behaves inside that project, how its contracts and
+ * worktrees are run, and (only in the stricter direction, see the loosening
+ * rules below) the permission posture. Nothing here sends data off the
+ * machine, runs a command, names a credential or a model, or changes what is
+ * installed. Every other key in a project file is skipped with a notice.
+ * A trailing dot is a family; anything else is one key.
+ */
+const PROJECT_SETTABLE: readonly string[] = [
+  'display.', 'ui.', 'behavior.',
+  'permissions.mode', 'permissions.tools.', 'sandbox.enabled',
+  'contract.', 'worktree.setup.carryOverGlobs',
+  'checkpoints.preferGitRoot', 'checkpoints.allowLargeFirstSnapshot', 'checkpoints.maxFirstSnapshotFiles', 'checkpoints.autoRetention',
+  'agents.passiveInjection.', 'agents.contextWindowGuard', 'agents.contextCompactThreshold',
+];
+/** Inside an admitted family, the keys that run a command: never from a repository. */
+const PROJECT_COMMAND_KEYS: ReadonlySet<string> = new Set(['contract.gates']);
+
+function isProjectSettable(key: string): boolean {
+  if (PROJECT_COMMAND_KEYS.has(key)) return false;
+  return PROJECT_SETTABLE.some(entry => entry.endsWith('.') ? key.startsWith(entry) : key === entry);
+}
 
 const MODE_RANK: ReadonlyMap<string, number> = new Map([['plan', 0], ['safe-owner', 1], ['safe-jev', 2], ['yolo', 3]]);
 const TOOL_RANK: ReadonlyMap<string, number> = new Map([['deny', 0], ['prompt', 1], ['allow', 2]]);
@@ -88,7 +112,7 @@ const PINNED: Loosening = { loosening: 'change a safety-gate setting', loosens: 
 
 /** Switches that open a listener or a destination; turning one on loosens security. */
 const OPENING_SWITCHES: readonly string[] = [
-  'danger.httpListener', 'controlPlane.allowRemote', 'controlPlane.trustProxy', 'fetch.allowLocalhost',
+  'danger.httpListener', 'controlPlane.trustProxy', 'fetch.allowLocalhost',
 ];
 
 /**
@@ -136,7 +160,7 @@ function computeFacts(key: string): ConfigKeyFacts {
   const loosening = looseningFor(key);
   return Object.freeze({
     owner: configKeyScope(key),
-    projectSettable: !PROJECT_UNSETTABLE_SET.has(key),
+    projectSettable: isProjectSettable(key),
     secret: isSecretBearingConfigKey(key),
     cardMaterial: isPaymentsSyntheticConfigKey(key),
     inSchema: CONFIG_KEYS.has(key),
@@ -157,7 +181,7 @@ export function configKeyFacts(key: string): ConfigKeyFacts {
   return schemaFacts.get(key) ?? computeFacts(key);
 }
 
-/** The keys a project settings file may not set at all, for a filter that must find them at any depth. */
+/** Destination keys a project settings file may not set, for a filter that must find them at any depth. */
 export function listProjectUnsettableConfigKeys(): readonly string[] {
   return PROJECT_UNSETTABLE_KEYS;
 }

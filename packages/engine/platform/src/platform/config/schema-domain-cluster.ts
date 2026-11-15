@@ -122,7 +122,7 @@ const clusterSettingRows: ConfigSettingDefinition[] = [
     type: 'string',
     default: '',
     description:
-      'Optional shared phrase. When set, coordination messages are signed with it and any message that does not verify is ignored, so only nodes that know the phrase can take the responsible role. Leave empty on a network you trust. Every node that should coordinate must use the same value.',
+      'Optional shared phrase for coordinating machines that are not in a group (no `cluster create` or `cluster join`). When set, their coordination messages are signed with it and any message that does not verify is ignored, so only nodes that know the phrase can take the responsible role; every such node must use the same value. Inside a group it is not used: the group key signs every coordination message.',
   },
   {
     key: 'cluster.keyRotationHours',

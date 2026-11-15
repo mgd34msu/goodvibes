@@ -130,7 +130,7 @@ function remote() {
         connectImapTls: refuseTransport('imap-tls'), connectImapPlain: refuseTransport('imap-plain'),
         connectSmtpTls: refuseTransport('smtp-tls'), connectSmtpStartTls: refuseTransport('smtp-starttls'),
       }, async imapSocketFactory(host, port) {
-        expect(host).toBe(configManager.get('surfaces.email.host') || configManager.get('surfaces.email.imapHost')); expect(port).toBe(account.port);
+        expect(host).toBe(configManager.get('surfaces.email.host') || configManager.get('surfaces.email.imap.host')); expect(port).toBe(account.port);
         const socket = new MailSocket({ validity, uids: [...uids], ...(holdGreeting ? { hold: 'greeting' } : {}), closeGate: transportGate }, malformed);
         sockets.push(socket); setImmediate(() => socket.greet()); return socket as unknown as Socket;
       } });
@@ -154,7 +154,7 @@ function fixture(provider = remote(), settings: { root?: string; account?: Email
   const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir, workingDir, homeDir: homeDirectory });
   configManager.set('cluster.enabled', false); configManager.set('relay.enabled', false);
   if (settings.imapOnly) {
-    configManager.set('surfaces.email.imapHost', expected.host); configManager.set('surfaces.email.imapUser', expected.username);
+    configManager.set('surfaces.email.imap.host', expected.host); configManager.set('surfaces.email.user', expected.username);
   } else {
     configManager.set('surfaces.email.host', expected.host); configManager.set('surfaces.email.user', expected.username);
   }

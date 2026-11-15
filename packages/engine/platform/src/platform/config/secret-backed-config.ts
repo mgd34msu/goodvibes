@@ -17,7 +17,6 @@ export const SECRET_CONFIG_KEYS = new Set<ConfigKey>([
     // key buildGoodVibesSecretKey() writes, see
     // daemon/handlers/inbox/providers/email.ts.
     'surfaces.email.password',
-    'surfaces.email.imapPassword',
     'surfaces.email.imap.password',
     'surfaces.email.smtp.password',
     'surfaces.calendar.caldavPassword',

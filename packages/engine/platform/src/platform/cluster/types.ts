@@ -110,8 +110,18 @@ export interface ClusterTransportDescription {
  * socket with loopback enabled; tests use an in-memory bus.
  */
 export interface ClusterTransport {
-  /** Begin delivering datagrams. Called once, before any send. */
-  start(onMessage: (raw: string) => void): Promise<void>;
+  /**
+   * True when the transport authenticates every datagram itself: the group
+   * envelope, signed with the group key and checked for clock skew before
+   * delivery. The election then adds no signature or clock check of its own,
+   * and `cluster.secret` does not apply.
+   */
+  readonly groupKeyed?: boolean;
+  /**
+   * Begin delivering datagrams. Called once, before any send. A transport that
+   * has already parsed a datagram (the group envelope) delivers its fields.
+   */
+  start(onMessage: (datagram: string | Readonly<Record<string, unknown>>) => void): Promise<void>;
   /** Fan a datagram out to the group and to any static unicast peers. */
   send(raw: string): Promise<void>;
   /** Close the socket. Safe to call when never started. */
@@ -241,6 +251,7 @@ export interface ClusterStatus {
   readonly consumersRunning: boolean;
   /** How many surfaces this node currently holds. */
   readonly heldSurfaceCount: number;
+  /** True when election traffic is authenticated: by the group key inside a group, by `cluster.secret` without one. */
   readonly signed: boolean;
   readonly surfaces: readonly ClusterSurfaceStatus[];
   readonly peers: readonly ClusterPeerStatus[];

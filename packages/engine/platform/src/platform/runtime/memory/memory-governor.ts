@@ -163,6 +163,62 @@ export interface MemoryGovernorConfig {
   readonly sampleIntervalMs?: number | undefined;
 }
 
+/** The four settings whose relation decides whether the governor can run. */
+export interface MemoryPolicyValues {
+  readonly budgetMb: number;
+  readonly elevatedPct: number;
+  readonly highPct: number;
+  readonly criticalPct: number;
+  readonly hardLimitPct?: number | undefined;
+}
+
+/** Why a memory configuration cannot run, and which group of settings is at fault. */
+export interface MemoryPolicyProblem {
+  /** `tiers`: memory.tier.*; `hard-limit`: memory.hardLimitPct against memory.budgetMb and the critical tier. */
+  readonly group: 'tiers' | 'hard-limit';
+  readonly message: string;
+}
+
+/** The shipped values the governor falls back to for a group that cannot run. */
+const SHIPPED_TIERS = { elevatedPct: 60, highPct: 80, criticalPct: 95 } as const;
+const SHIPPED_HARD_LIMIT_PCT = 90;
+
+/** The budget in MB a configured value resolves to: 0 or less is auto, min(25% of the ceiling, 4096), at least 256. */
+export function resolveMemoryBudgetMb(budgetMb: number, ceilingMb: number): number {
+  return budgetMb > 0 ? budgetMb : Math.max(256, Math.min(Math.floor(ceilingMb * 0.25), 4096));
+}
+
+/**
+ * The one statement of what a valid memory configuration is: the tiers in
+ * order (elevated < high < critical <= 100), the hard limit in (0, 100], and
+ * the hard limit (a percent of the machine's kill ceiling) above the critical
+ * tier (a percent of the budget). The settings writer refuses a change that
+ * breaks it; the governor falls back for the group that breaks it. Pure:
+ * `ceilingMb` is the caller's reading of the machine.
+ */
+export function validateMemoryPolicy(config: MemoryPolicyValues, ceilingMb: number): MemoryPolicyProblem | null {
+  const { elevatedPct, highPct, criticalPct } = config;
+  if (!(elevatedPct > 0 && elevatedPct < highPct && highPct < criticalPct && criticalPct <= 100)) {
+    return {
+      group: 'tiers',
+      message: `memory.tier.elevatedPct (${elevatedPct}) < memory.tier.highPct (${highPct}) < memory.tier.criticalPct (${criticalPct}) must hold, each in (0, 100]; change the other tier first`,
+    };
+  }
+  const hardLimitPct = config.hardLimitPct ?? SHIPPED_HARD_LIMIT_PCT;
+  if (!(hardLimitPct > 0 && hardLimitPct <= 100)) {
+    return { group: 'hard-limit', message: `memory.hardLimitPct (${hardLimitPct}) must be in (0, 100]; it is a percent of the memory this machine can use` };
+  }
+  const budgetMb = resolveMemoryBudgetMb(config.budgetMb, ceilingMb);
+  const criticalMb = budgetMb * (criticalPct / 100);
+  const hardLimitMb = ceilingMb * (hardLimitPct / 100);
+  if (hardLimitMb > criticalMb) return null;
+  return {
+    group: 'hard-limit',
+    message: `the critical tier (${Math.round(criticalMb)}MB = ${criticalPct}% of the ${budgetMb}MB memory.budgetMb) is at or above the hard limit `
+      + `(${Math.round(hardLimitMb)}MB = ${hardLimitPct}% of the ${Math.round(ceilingMb)}MB this machine can use); lower memory.budgetMb or memory.tier.criticalPct, or raise memory.hardLimitPct`,
+  };
+}
+
 /** Injectable collaborators (all default to real implementations). */
 export interface MemoryGovernorDeps {
   readonly caches: CacheRegistry;
@@ -324,21 +380,10 @@ export class MemoryGovernor {
   private tripwireOverSince: number | null = null;
   private lastRateMbPerSec = 0;
 
-  constructor(config: MemoryGovernorConfig, deps: MemoryGovernorDeps) {
-    // Tier ordering is load-bearing for the whole ladder: an inverted config
-    // (e.g. criticalPct=10 as a typo for 100) would put the daemon in
-    // permanent critical at startup. Refuse it loudly, resolver-style.
-    if (!(config.elevatedPct > 0 && config.elevatedPct < config.highPct && config.highPct < config.criticalPct && config.criticalPct <= 100)) {
-      throw new Error(
-        `invalid memory tier thresholds: memory.tier.elevatedPct (${config.elevatedPct}) < memory.tier.highPct (${config.highPct}) < memory.tier.criticalPct (${config.criticalPct}) must hold, each in (0, 100]. Fix the memory.tier.* settings.`,
-      );
-    }
-    const hardLimitPct = config.hardLimitPct ?? 90;
-    if (!(hardLimitPct > 0 && hardLimitPct <= 100)) {
-      throw new Error(
-        `invalid memory hard limit: memory.hardLimitPct (${hardLimitPct}) must be in (0, 100], it is a percent of the effective kill ceiling (cgroup limit or physical RAM). Fix the memory.hardLimitPct setting.`,
-      );
-    }
+  /** Why the configured values are not the ones running, when they are not. */
+  private readonly policyFallback: string | undefined;
+
+  constructor(configured: MemoryGovernorConfig, deps: MemoryGovernorDeps) {
     this.caches = deps.caches;
     this.pauses = deps.pauses;
     this.pauses.setPressureProbe(() => (TIER_RANK[this.tier] >= TIER_RANK.high ? `memory-pressure:${this.tier}` : undefined));
@@ -349,7 +394,7 @@ export class MemoryGovernor {
     this.writeReceipt = deps.writeReceipt;
     this.shutdown = deps.shutdown;
     this.exit = deps.exit ?? ((): void => { process.exit(1); });
-    this.sampleIntervalMs = Math.max(250, config.sampleIntervalMs ?? 5_000);
+    this.sampleIntervalMs = Math.max(250, configured.sampleIntervalMs ?? 5_000);
 
     const resolveRam = deps.resolveSystemRamMb ?? resolveEffectiveSystemRamMb;
     // The effective kill ceiling: the smaller of the own-cgroup memory limit
@@ -357,26 +402,42 @@ export class MemoryGovernor {
     // killer actually enforces. Both the auto budget and the hard-limit
     // backstop anchor here.
     this.effectiveCeilingMb = resolveRam();
-    this.budgetMb = config.budgetMb > 0
-      ? config.budgetMb
-      : Math.max(256, Math.min(Math.floor(this.effectiveCeilingMb * 0.25), 4096));
+    // A configuration that cannot run (an older settings file, or one moved to
+    // a smaller machine) does not stop the product starting: the offending
+    // group falls back to the shipped values, and status and the ops event say so.
+    let config = configured;
+    const fallbacks: string[] = [];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const problem = validateMemoryPolicy(config, this.effectiveCeilingMb);
+      if (problem === null) break;
+      fallbacks.push(problem.message);
+      config = problem.group === 'tiers'
+        ? { ...config, ...SHIPPED_TIERS }
+        : { ...config, budgetMb: 0, hardLimitPct: SHIPPED_HARD_LIMIT_PCT };
+    }
+    this.policyFallback = fallbacks.length > 0
+      ? `The memory settings could not run, so shipped values are in use for them: ${fallbacks.join('; ')}.`
+      : undefined;
+    if (this.policyFallback) logger.warn(this.policyFallback);
+    const hardLimitPct = config.hardLimitPct ?? SHIPPED_HARD_LIMIT_PCT;
+    this.budgetMb = resolveMemoryBudgetMb(config.budgetMb, this.effectiveCeilingMb);
     const budgetBytes = this.budgetMb * MB;
     this.elevatedBytes = budgetBytes * (config.elevatedPct / 100);
     this.highBytes = budgetBytes * (config.highPct / 100);
     this.criticalBytes = budgetBytes * (config.criticalPct / 100);
     this.hardLimitPct = hardLimitPct;
+    // validateMemoryPolicy above keeps this ABOVE the critical tier, so the
+    // backstop never fires before the critical tier's stay-alive posture.
     this.hardLimitBytes = this.effectiveCeilingMb * MB * (hardLimitPct / 100);
-    // The backstop must sit ABOVE the tier ladder: a hard limit at/below the
-    // critical threshold would exit the daemon before (or instead of) the
-    // critical tier's stay-alive posture. Reachable when the configured budget
-    // approaches the ceiling, refuse it loudly rather than fire spuriously.
-    if (this.hardLimitBytes <= this.criticalBytes) {
-      throw new Error(
-        `invalid memory hard limit: memory.hardLimitPct (${hardLimitPct}% of the ${Math.round(this.effectiveCeilingMb)}MB effective kill ceiling = ${Math.round(this.hardLimitBytes / MB)}MB) sits at/below the critical tier (${config.criticalPct}% of the ${this.budgetMb}MB budget = ${Math.round(this.criticalBytes / MB)}MB). Raise memory.hardLimitPct, or lower memory.budgetMb / memory.tier.criticalPct.`,
-      );
-    }
     this.tripwireRateBytesPerSec = config.tripwireRateMbPerSec * MB;
     this.tripwireSustainMs = config.tripwireSustainSec * 1000;
+    if (this.policyFallback && this.emitOps) {
+      const sample = this.sampler();
+      this.emitOps({
+        tier: 'normal', previousTier: 'normal', rssMb: round1(sample.rssBytes / MB), heapMb: round1(sample.heapUsedBytes / MB),
+        budgetMb: this.budgetMb, usedPct: round1((sample.rssBytes / (this.budgetMb * MB)) * 100), note: this.policyFallback,
+      });
+    }
   }
 
   /** Begin interval sampling. Idempotent. The timer is unref'd so it never pins the loop. */
@@ -455,6 +516,11 @@ export class MemoryGovernor {
         criticalPct: round1((this.criticalBytes / (this.budgetMb * MB)) * 100),
       },
     };
+  }
+
+  /** Why the configured memory settings are not the ones running (shipped values replaced a group that could not run), or undefined. */
+  policyFallbackReason(): string | undefined {
+    return this.policyFallback;
   }
 
   /** Take one sample and apply tier actions + tripwire. Exposed for deterministic tests. */

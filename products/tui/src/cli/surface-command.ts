@@ -1,10 +1,5 @@
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import {
-  GOODVIBES_NTFY_AGENT_TOPIC,
-  GOODVIBES_NTFY_CHAT_TOPIC,
-  GOODVIBES_NTFY_REMOTE_TOPIC,
-  resolveGoodVibesNtfyTopics,
-} from '@goodvibes-jev/engine/platform/platform/integrations';
+import { ensureNtfyTopics, resolveGoodVibesNtfyTopics } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { enableFeatureFlags, getMissingSurfaceFeatureFlags, getServerSurfaceFeatureFlags, surfaceFeatureGateSettingsKeys } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { classifyBindPosture, isNetworkFacing } from '@goodvibes-jev/engine/terminal-shell';
@@ -107,6 +102,7 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
     };
     /** Endpoints this command moved off their previous binding, for the success line. */
     const reached: RuntimeEndpointId[] = [];
+    const generatedNtfyTopics: { readonly setting: string; readonly topic: string }[] = [];
     if (resolved.kind === 'endpoint' && resolved.endpoint === 'web') {
       if (enabled) {
         const webError = applyTargetEndpointFlagsOrDefault(runtime, 'web');
@@ -153,6 +149,13 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
         config.setDynamic('danger.httpListener', true);
       }
       config.setDynamic(`surfaces.${resolved.id}.enabled` as ConfigKey, enabled);
+      if (enabled && resolved.id === 'ntfy') {
+        // On the public server a topic name is the only secret: each unset inbound topic gets an unguessable one.
+        generatedNtfyTopics.push(...ensureNtfyTopics({
+          get: (key) => config.get(key as ConfigKey),
+          set: (key, value) => config.setDynamic(key as ConfigKey, value),
+        }));
+      }
     }
     if (enabled) {
       enableServicePosture(config);
@@ -166,6 +169,9 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
         if (posture.networkFacing) {
           lines.push(`  ${ENDPOINT_LABELS[endpoint]} is reachable from other machines on the network. Pass --hostname 127.0.0.1 to keep it on this machine.`);
         }
+      }
+      for (const { setting, topic } of generatedNtfyTopics) {
+        lines.push(`  ${setting} set to ${topic}; subscribe to that topic in the ntfy app to reach this machine.`);
       }
       if (resolved.kind === 'external') {
         // Enabled is not working: name what the channel still lacks.
@@ -217,9 +223,10 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
   });
   const filteredSurfaces = !target ? externalSurfaces : externalSurfaces.filter((surface) => surface.id === externalTarget);
   const ntfyTopics = resolveGoodVibesNtfyTopics({
-    chatTopic: String(config.get('surfaces.ntfy.chatTopic' as ConfigKey) || GOODVIBES_NTFY_CHAT_TOPIC),
-    agentTopic: String(config.get('surfaces.ntfy.agentTopic' as ConfigKey) || GOODVIBES_NTFY_AGENT_TOPIC),
-    remoteTopic: String(config.get('surfaces.ntfy.remoteTopic' as ConfigKey) || GOODVIBES_NTFY_REMOTE_TOPIC),
+    chatTopic: String(config.get('surfaces.ntfy.chatTopic' as ConfigKey) || ''),
+    agentTopic: String(config.get('surfaces.ntfy.agentTopic' as ConfigKey) || ''),
+    remoteTopic: String(config.get('surfaces.ntfy.remoteTopic' as ConfigKey) || ''),
+    baseUrl: String(config.get('surfaces.ntfy.baseUrl' as ConfigKey) || ''),
   });
   const readinessIssues: string[] = [];
   for (const [endpointLabel, endpointBinding] of [['controlPlane', controlPlane], ['web', web], ['httpListener', httpListener]] as const) {
@@ -292,9 +299,10 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
     ...(filteredSurfaces.some((surface) => surface.id === 'ntfy') ? [
       '',
       'ntfy inbound topics:',
-      `  chat: ${ntfyTopics.chatTopic}`,
-      `  agent: ${ntfyTopics.agentTopic}`,
-      `  daemon-only remote: ${ntfyTopics.remoteTopic}`,
+      `  chat: ${ntfyTopics.chatTopic || '(none)'}`,
+      `  agent: ${ntfyTopics.agentTopic || '(none)'}`,
+      `  daemon-only remote: ${ntfyTopics.remoteTopic || '(none)'}`,
+      ...ntfyTopics.refused.map((refused) => `  not subscribed: ${refused.reason}`),
       `  default delivery topic: ${String(config.get('surfaces.ntfy.topic') || '(none)')}`,
     ] : []),
     ...(includeProbe ? [

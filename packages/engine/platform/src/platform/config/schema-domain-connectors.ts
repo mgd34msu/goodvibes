@@ -68,7 +68,7 @@
  * schema-domain-daemon-mailbox.ts: the value held here is a reference into
  * the secret store, and the secret itself is never held in config.
  */
-import { port, type ConfigSettingDefinition } from './schema-shared.js';
+import { remotePort, type ConfigSettingDefinition } from './schema-shared.js';
 import type {
   CalendarConnectorConfig,
   EmailConnectorConfig,
@@ -117,7 +117,7 @@ const CALENDAR_CONNECTOR_DEFAULTS: CalendarConnectorConfig = {
 
 /** Defaults for the connector's `google` section: the Cloud project and the OAuth app's state. */
 const GOOGLE_CONNECTOR_DEFAULTS: GoogleConnectorConfig = {
-  oauth: { projectId: '', publishingStatus: '', refreshToken: '' },
+  oauth: { projectId: '', publishingStatus: '' },
   credentials: { migratedFrom: '' },
 };
 
@@ -153,7 +153,7 @@ const connectorSettingRows: ConfigSettingDefinition[] = [
     type: 'number',
     default: 993,
     description: 'IMAP port the connector reads from',
-    ...port(),
+    ...remotePort(),
   },
   {
     key: 'email.imapSecurity',
@@ -174,7 +174,7 @@ const connectorSettingRows: ConfigSettingDefinition[] = [
     type: 'number',
     default: 587,
     description: 'SMTP port the connector sends through: 465 for implicit TLS, or 587 (the default) for STARTTLS',
-    ...port(),
+    ...remotePort(),
   },
   {
     key: 'email.smtpSecurity',
@@ -267,13 +267,6 @@ const connectorSettingRows: ConfigSettingDefinition[] = [
     default: '',
     description:
       'The OAuth consent screen\'s last-known publishing status ("testing" or "in-production"), cached after being read from the Cloud Console since it cannot be probed any other way. An app left in "Testing" is issued refresh tokens that expire after seven days; moving it to "In production" (self-certified, no Google review needed) removes that expiry. Empty until a setup or verification run has read it.',
-  },
-  {
-    key: 'google.oauth.refreshToken',
-    type: 'string',
-    default: '',
-    description:
-      'Not read by the calendar connector. The long-lived OAuth refresh token it authenticates with after the one-time authorization lives only in the daemon secret store, under its own secret key; the connector never looks at this setting, so leave it empty.',
   },
   {
     key: 'google.credentials.migratedFrom',

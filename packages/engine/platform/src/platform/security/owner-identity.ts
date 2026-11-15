@@ -64,7 +64,6 @@ export const OWNER_ADDRESS_CONFIG_KEYS: readonly string[] = [
   'email.username',
   'surfaces.email.from',
   'surfaces.email.user',
-  'surfaces.email.username',
 ];
 
 /** Lowercase, strip a display name and angle brackets. No plus-address folding. */

@@ -30,7 +30,6 @@ export interface ControlPlaneConfig {
    */
   publicBaseUrl: string;
   streamMode: 'sse' | 'websocket' | 'both';
-  allowRemote: boolean;
   trustProxy: boolean;
   openaiCompatible: {
     enabled: boolean;

@@ -24,6 +24,8 @@ export interface HostBooleanSetting {
   readonly type: 'boolean';
   readonly default: boolean;
   readonly description: string;
+  /** True when a project settings file (repository content) may set it; otherwise only the owner's own file does. */
+  readonly projectSettable?: boolean;
 }
 
 /** A surface-owned number leaf; `integer`, `min` and `max` bound what is accepted. */
@@ -32,6 +34,8 @@ export interface HostNumberSetting {
   readonly type: 'number';
   readonly default: number;
   readonly description: string;
+  /** True when a project settings file (repository content) may set it; otherwise only the owner's own file does. */
+  readonly projectSettable?: boolean;
   readonly integer?: boolean;
   readonly min?: number;
   readonly max?: number;
@@ -43,6 +47,8 @@ export interface HostStringSetting {
   readonly type: 'string';
   readonly default: string;
   readonly description: string;
+  /** True when a project settings file (repository content) may set it; otherwise only the owner's own file does. */
+  readonly projectSettable?: boolean;
 }
 
 export type HostSetting = HostBooleanSetting | HostNumberSetting | HostStringSetting;
@@ -101,19 +107,20 @@ function freezeDefinition(definition: HostSetting): Readonly<HostSetting> {
   if (typeof description !== 'string' || !description.trim()) {
     throw new ConfigError(`Host setting ${key} requires a description.`);
   }
+  const project = definition.projectSettable === true ? { projectSettable: true } : {};
   switch (definition.type) {
     case 'boolean':
-      if (typeof definition.default === 'boolean') return Object.freeze({ key, type: 'boolean' as const, default: definition.default, description });
+      if (typeof definition.default === 'boolean') return Object.freeze({ key, type: 'boolean' as const, default: definition.default, description, ...project });
       break;
     case 'string':
-      if (typeof definition.default === 'string') return Object.freeze({ key, type: 'string' as const, default: definition.default, description });
+      if (typeof definition.default === 'string') return Object.freeze({ key, type: 'string' as const, default: definition.default, description, ...project });
       break;
     case 'number': {
       const { integer, min, max } = definition;
       const bounds = [min, max].every((bound) => bound === undefined || (typeof bound === 'number' && Number.isFinite(bound)))
         && (min === undefined || max === undefined || min <= max) && (integer === undefined || typeof integer === 'boolean');
       const frozen: HostNumberSetting = Object.freeze({
-        key, type: 'number' as const, default: definition.default, description,
+        key, type: 'number' as const, default: definition.default, description, ...project,
         ...(integer ? { integer } : {}), ...(min !== undefined ? { min } : {}), ...(max !== undefined ? { max } : {}),
       });
       if (bounds && acceptsValue(frozen, definition.default)) return frozen;
@@ -160,6 +167,8 @@ export class HostSettings {
 
   get active(): boolean { return this.definitions.length > 0; }
   has(key: string): boolean { return this.byKey.has(key); }
+  /** True when a project settings file may set this registered key. */
+  projectSettable(key: string): boolean { return this.byKey.get(key)?.projectSettable === true; }
   keys(): IterableIterator<string> { return this.byKey.keys(); }
 
   /** True when `value` is of the registered key's type and within its range. */
@@ -191,11 +200,16 @@ export class HostSettings {
     for (const [key, value] of values) writeRawDotPath(config as unknown as Record<string, unknown>, key, value);
   }
 
-  /** Missing leaves inherit; present malformed leaves/sections override with default. */
-  overlay(values: HostSettingValues, raw: unknown): string[] {
+  /**
+   * Missing leaves inherit; present malformed leaves/sections override with default.
+   * A project file (`layer: 'project'`) is repository content: only settings
+   * declared `projectSettable` are read from it.
+   */
+  overlay(values: HostSettingValues, raw: unknown, layer: 'global' | 'project' = 'global'): string[] {
     if (!isHostSettingsObject(raw)) throw new ConfigError('Host settings could not be read from a JSON object.');
     const malformed: string[] = [];
     for (const definition of this.definitions) {
+      if (layer === 'project' && definition.projectSettable !== true) continue;
       const [root, leaf] = definition.key.split('.') as [string, string];
       if (!Object.hasOwn(raw, root)) continue;
       const category = raw[root];

@@ -24,7 +24,7 @@
 import { clusterProductVersion, clusterRankingWireVersion, hasCurrentClusterRanking } from './ranking-feature.js';
 import { SurfaceElection, type SurfaceElectionHost } from './election.js';
 import { ClusterHoldingsLedger } from './holdings.js';
-import { decodeMessage, encodeMessage } from './protocol.js';
+import { decodeMessage, decodeMessageFields, encodeMessage } from './protocol.js';
 import { deriveClusterTiming, type ClusterTiming } from './timing.js';
 import { CLUSTER_PROTOCOL_VERSION } from './types.js';
 import type { ClusterSurfaceRegistry } from './surface-registry.js';
@@ -230,7 +230,7 @@ export class ClusterElection {
       uptimeMs: this.uptimeMs(),
       consumersRunning: surfaces.some((surface) => surface.consuming),
       heldSurfaceCount: held.length,
-      signed: this.options.settings.secret.length > 0,
+      signed: this.options.transport.groupKeyed === true || this.options.settings.secret.length > 0,
       surfaces,
       peers: [...this.peers.values()].map((peer) => ({
         nodeId: peer.nodeId,
@@ -353,8 +353,20 @@ export class ClusterElection {
 
   // ── inbound datagrams ─────────────────────────────────────────────────────
 
-  private receive(raw: string): void {
-    const { message, rejected } = decodeMessage(raw, this.options.settings.secret, this.options.clock.now());
+  /**
+   * `cluster.secret` signs election traffic only outside a group. Inside one the
+   * group key is the one authentication: a secret set on one member alone would
+   * otherwise split the election while the group looks healthy.
+   */
+  private get electionSecret(): string {
+    return this.options.transport.groupKeyed === true ? '' : this.options.settings.secret;
+  }
+
+  private receive(datagram: string | Readonly<Record<string, unknown>>): void {
+    // A group-keyed datagram was authenticated and clock-checked by the group layer.
+    const { message, rejected } = typeof datagram === 'string'
+      ? decodeMessage(datagram, this.electionSecret, this.options.transport.groupKeyed === true ? undefined : this.options.clock.now())
+      : decodeMessageFields(datagram, '');
     if (!message) {
       this.options.logger.debug('cluster: dropped a datagram', { reason: rejected });
       return;
@@ -494,7 +506,7 @@ export class ClusterElection {
       ts: this.options.clock.now(),
     };
     try {
-      await this.options.transport.send(encodeMessage(message, this.options.settings.secret));
+      await this.options.transport.send(encodeMessage(message, this.electionSecret));
     } catch (error) {
       this.options.logger.debug('cluster: datagram send failed', {
         type,

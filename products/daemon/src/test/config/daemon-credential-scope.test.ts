@@ -90,7 +90,6 @@ describe('SECRET_CONFIG_KEYS', () => {
   test('carries the mail and calendar credentials whose schema says "never in config"', () => {
     for (const key of [
       'surfaces.email.password',
-      'surfaces.email.imapPassword',
       'surfaces.email.imap.password',
       'surfaces.email.smtp.password',
       'surfaces.calendar.caldavPassword',
@@ -244,7 +243,7 @@ describe('configure on one surface, resolve from the daemon', () => {
     await persistSecretBackedConfigValue(
       configManager,
       surfaceSecrets,
-      'surfaces.email.imapPassword' as ConfigKey,
+      'surfaces.email.imap.password' as ConfigKey,
       'imap-app-password',
     );
 
@@ -255,7 +254,7 @@ describe('configure on one surface, resolve from the daemon', () => {
     const daemonSecrets = new SecretsManager({ projectRoot: daemonProjectRoot, globalHome: home });
     const credentials = createDaemonCredentialStore(daemonSecrets);
 
-    expect(await credentials.resolveConfigSecret('surfaces.email.imapPassword')).toBe('imap-app-password');
-    expect(buildGoodVibesSecretKey('surfaces.email.imapPassword')).toBe('GOODVIBES_SURFACES_EMAIL_IMAP_PASSWORD');
+    expect(await credentials.resolveConfigSecret('surfaces.email.imap.password')).toBe('imap-app-password');
+    expect(buildGoodVibesSecretKey('surfaces.email.imap.password')).toBe('GOODVIBES_SURFACES_EMAIL_IMAP_PASSWORD');
   });
 });

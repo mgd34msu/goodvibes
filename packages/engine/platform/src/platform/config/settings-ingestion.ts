@@ -409,14 +409,22 @@ function screenSecretReferences(
  * (settings-unknown-forms.ts), because "ignored in silence" is how a migrated
  * setting became a daemon that looked configured and behaved as if it were not.
  * The test here is exact: the path is neither a known setting nor a known
- * section, and its parent section is known.
+ * section, and its parent section is known. A host setting the reading
+ * manager registered is a known setting, and the sections that hold it are
+ * known sections, so a misspelt leaf beside it is still reported.
  */
 function collectUnknownKeys(
   raw: Record<string, unknown>,
   found: UnknownSettingKey[],
+  hostKeys?: ReadonlySet<string>,
 ): void {
   const known = knownIngestiblePaths();
   const sections = knownSettingNamesBySection();
+  const hostPaths = new Set<string>();
+  for (const key of hostKeys ?? []) {
+    for (let cut = key.length; cut > 0; cut = key.lastIndexOf('.', cut - 1)) hostPaths.add(key.slice(0, cut));
+  }
+  const isKnownSection = (path: string): boolean => sections.has(path) || hostPaths.has(path);
   const walk = (node: Record<string, unknown>, prefix: string): void => {
     for (const [name, value] of Object.entries(node)) {
       const path = prefix ? `${prefix}.${name}` : name;
@@ -424,7 +432,7 @@ function collectUnknownKeys(
       // `clientSecretRef` growing into a `{ ref, … }` record under a newer
       // component. Checking the path BEFORE descending is what catches that;
       // descending first only ever finds the leaves inside it.
-      if (!known.has(path) && !sections.has(path) && sections.has(prefix)) {
+      if (!known.has(path) && !hostPaths.has(path) && !sections.has(path) && isKnownSection(prefix)) {
         found.push({ key: path, section: prefix, name });
         continue;
       }
@@ -451,6 +459,8 @@ export function screenSettingsForIngestion(
   raw: Record<string, unknown>,
   file: string,
   diagnosticMode: 'default' | 'structural' = 'default',
+  /** Host settings the reading manager registered; known, never reported as unknown. */
+  hostKeys?: ReadonlySet<string>,
 ): SettingsIngestionResult {
   const notices: SettingsIngestionNotice[] = [];
   const unknownKeys: UnknownSettingKey[] = [];
@@ -458,7 +468,7 @@ export function screenSettingsForIngestion(
   screenSectionShapes(raw, file, notices);
   screenSchemaValues(raw, file, notices);
   screenSecretReferences(raw, file, notices, diagnosticMode);
-  collectUnknownKeys(raw, unknownKeys);
+  collectUnknownKeys(raw, unknownKeys, hostKeys);
   return { config: raw, notices, unknownKeys };
 }
 
@@ -513,6 +523,8 @@ export interface IngestSettingsOptions {
    * not a key the platform does not understand.
    */
   readonly migrate?: ((raw: Record<string, unknown>) => Record<string, unknown>) | undefined;
+  /** Host settings the reading manager registered; see {@link screenSettingsForIngestion}. */
+  readonly hostKeys?: ReadonlySet<string> | undefined;
 }
 
 /**
@@ -549,7 +561,7 @@ export function ingestSettingsFile(
     throw new SettingsIngestionRefusal(entry);
   }
 
-  const result = screenSettingsForIngestion(options.migrate ? options.migrate(raw) : raw, file, options.diagnosticMode);
+  const result = screenSettingsForIngestion(options.migrate ? options.migrate(raw) : raw, file, options.diagnosticMode, options.hostKeys);
   for (const entry of result.notices) announce(entry);
   const refusal = result.notices.find((entry) => entry.action === 'refused');
   if (refusal) throw new SettingsIngestionRefusal(refusal);

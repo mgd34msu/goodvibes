@@ -1,9 +1,10 @@
 import { describe, expect, test, afterEach } from 'bun:test';
-import { rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { readCheckpointGuardSettings, readUpdateSettings, withCheckpointGuardSettings } from '@/config/tui-extension-settings.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { TuiConfigManager } from '@/config/host-settings.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 // A minimal stand-in for the ConfigManager surface the reader depends on.
@@ -138,24 +139,16 @@ describe('checkpoint root-guard wiring (platform 1.6.1 options are live)', () =>
 });
 
 describe('readUpdateSettings', () => {
-  test('returns empty object when the update namespace is absent or malformed', () => {
-    expect(readUpdateSettings(fakeConfig({}))).toEqual({});
-    expect(readUpdateSettings(fakeConfig({ update: 'nope' }))).toEqual({});
-    expect(readUpdateSettings(fakeConfig({ update: null }))).toEqual({});
-  });
-
-  test('reads an explicit autoUpdateAtLaunch=false (the off switch is a real setting)', () => {
-    expect(readUpdateSettings(fakeConfig({ update: { autoUpdateAtLaunch: false } }))).toEqual({ autoUpdateAtLaunch: false });
-  });
-
-  test('drops a wrong-typed autoUpdateAtLaunch so the consumer default (on) applies', () => {
-    expect(readUpdateSettings(fakeConfig({ update: { autoUpdateAtLaunch: 'yes' } }))).toEqual({});
-  });
-
-  test('clamps launchCheckTimeoutMs into [250, 30000] and drops non-positive values', () => {
-    expect(readUpdateSettings(fakeConfig({ update: { launchCheckTimeoutMs: 5 } }))).toEqual({ launchCheckTimeoutMs: 250 });
-    expect(readUpdateSettings(fakeConfig({ update: { launchCheckTimeoutMs: 120000 } }))).toEqual({ launchCheckTimeoutMs: 30000 });
-    expect(readUpdateSettings(fakeConfig({ update: { launchCheckTimeoutMs: 4000 } }))).toEqual({ launchCheckTimeoutMs: 4000 });
-    expect(readUpdateSettings(fakeConfig({ update: { launchCheckTimeoutMs: -1 } }))).toEqual({});
+  test('the launch-update off switch and check budget are read from the settings file the TUI loads', () => {
+    const root = makeProjectTempDir('tui-update-settings-');
+    const configDir = join(root, 'config');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ update: { autoUpdateAtLaunch: false, launchCheckTimeoutMs: 4000 } }));
+    try {
+      const config = new TuiConfigManager({ homeDir: root, workingDir: root, configDir, surfaceRoot: 'tui' });
+      expect(readUpdateSettings(config)).toEqual({ autoUpdateAtLaunch: false, launchCheckTimeoutMs: 4000 });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

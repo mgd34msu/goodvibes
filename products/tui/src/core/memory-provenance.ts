@@ -10,27 +10,28 @@
 // NOTHING is rendered and the metadata is never even read.
 // ---------------------------------------------------------------------------
 
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager, HostBooleanSetting } from '@goodvibes-jev/engine/platform/platform/config';
 
-/** TUI-local setting key: show the per-turn memory-provenance chip. Default OFF. */
+/** Setting key: show the per-turn memory-provenance chip. Default OFF. */
 export const MEMORY_SHOW_PROVENANCE_CONFIG_KEY = 'memory.showProvenance';
 export const MEMORY_SHOW_PROVENANCE_DEFAULT = false;
-export const MEMORY_SHOW_PROVENANCE_DESCRIPTION =
-  'Show a "used N memories" chip on turns that drew on your standing memories, with a drill-in ' +
-  'listing them (Alt+M to expand). Off by default; when off, nothing is rendered and no metadata is read.';
 
 /**
- * Read the memory-provenance toggle defensively. `memory.*` is a TUI-local
- * section with no platform DEFAULT_CONFIG entry, so ConfigManager.get() throws for
- * it until something has been written, an unset key means the default (OFF),
- * not an error (same pattern as memory.projection.dir).
+ * Registered on the TUI's config manager (see config/host-settings.ts), so the
+ * loader knows the key, Settings lists it under Memory, and every read resolves
+ * to a boolean (the default when unset or malformed).
  */
+export const MEMORY_SHOW_PROVENANCE_SETTING: HostBooleanSetting = Object.freeze({
+  key: MEMORY_SHOW_PROVENANCE_CONFIG_KEY,
+  type: 'boolean',
+  default: MEMORY_SHOW_PROVENANCE_DEFAULT,
+  description: 'Show a "used N memories" chip on turns that drew on your standing memories, with a drill-in '
+    + 'listing them (Alt+M to expand). Off by default; when off, nothing is rendered and no metadata is read.',
+});
+
+/** Whether the memory-provenance chip is on. */
 export function readMemoryShowProvenance(configManager: Pick<ConfigManager, 'get'>): boolean {
-  try {
-    return configManager.get(MEMORY_SHOW_PROVENANCE_CONFIG_KEY as Parameters<ConfigManager['get']>[0]) === true;
-  } catch {
-    return MEMORY_SHOW_PROVENANCE_DEFAULT;
-  }
+  return configManager.get(MEMORY_SHOW_PROVENANCE_CONFIG_KEY as ConfigKey) === true;
 }
 
 /**
@@ -46,22 +47,4 @@ export function memoryRecordIdsFromTurn(turn: unknown): readonly string[] {
   const recordIds = (memory as { recordIds?: unknown } | null | undefined)?.recordIds;
   if (!Array.isArray(recordIds)) return [];
   return recordIds.filter((id): id is string => typeof id === 'string');
-}
-
-/**
- * Build the settings-modal synthetic entry for memory.showProvenance (TUI-local,
- * default OFF). Read defensively, memory.* has no platform DEFAULT_CONFIG entry, so
- * an unset key means the OFF default, not an error.
- */
-export function buildMemoryProvenanceSyntheticEntry(configManager: Pick<ConfigManager, 'get'>): {
-  setting: { key: string; type: 'boolean'; default: boolean; description: string };
-  currentValue: boolean;
-  isDefault: boolean;
-} {
-  const currentValue = readMemoryShowProvenance(configManager);
-  return {
-    setting: { key: MEMORY_SHOW_PROVENANCE_CONFIG_KEY, type: 'boolean', default: MEMORY_SHOW_PROVENANCE_DEFAULT, description: MEMORY_SHOW_PROVENANCE_DESCRIPTION },
-    currentValue,
-    isDefault: currentValue === MEMORY_SHOW_PROVENANCE_DEFAULT,
-  };
 }

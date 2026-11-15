@@ -10,7 +10,10 @@ import { createMemoryProvenanceUi } from '../../runtime/interaction-seams.ts';
 import { configGetStub } from '../helpers/config-manager-stub.ts';
 import { waitFor } from '../helpers/wait-for.ts';
 import { buildSettingGroups } from '../../input/settings-modal-data.ts';
-import { createTestManagers } from '../helpers/test-managers.ts';
+import { TuiConfigManager } from '../../config/host-settings.ts';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // ---------------------------------------------------------------------------
 // STEP 4, the optional "used N memories" turn chip (default OFF), built against
@@ -144,17 +147,26 @@ describe('memory-provenance drill-in resolves ids to summaries (7a)', () => {
 });
 
 describe('memory settings domain (STEP 4)', () => {
-  test('memory.showProvenance surfaces in the memory category, default OFF', () => {
-    const { configManager } = createTestManagers();
-    const groups = buildSettingGroups(configManager);
-    const memory = groups.get('memory') ?? [];
-    // memory.showProvenance is a TUI-local synthetic key, not yet part of the
-    // platform's ConfigKey union, compare as plain strings (see memory-provenance.ts).
-    const entry = memory.find((e) => (e.setting.key as string) === 'memory.showProvenance');
-    expect(entry).toBeDefined();
-    expect(entry!.setting.type).toBe('boolean');
-    expect(entry!.setting.default).toBe(false);
-    expect(entry!.isDefault).toBe(true);
-    expect(readMemoryShowProvenance(configManager)).toBe(false);
+  test('memory.showProvenance is a registered TUI setting in the memory category, default OFF, saved and read back', () => {
+    const root = mkdtempSync(join(tmpdir(), 'tui-memory-provenance-'));
+    try {
+      const workingDir = join(root, 'project');
+      mkdirSync(workingDir);
+      const options = { homeDir: root, workingDir, configDir: join(root, 'config'), surfaceRoot: 'tui' };
+      const configManager = new TuiConfigManager(options);
+      const entry = (buildSettingGroups(configManager).get('memory') ?? []).find((e) => e.setting.key === 'memory.showProvenance');
+      expect(entry?.kind).toBe('host');
+      expect(entry!.setting.default).toBe(false);
+      expect(entry!.isDefault).toBe(true);
+      expect(readMemoryShowProvenance(configManager)).toBe(false);
+      expect(configManager.getIngestionQuarantine().some((notice) => notice.key.startsWith('memory'))).toBe(false);
+
+      configManager.getHostBooleanSetting('memory.showProvenance').set(true);
+      const reopened = new TuiConfigManager(options);
+      expect(readMemoryShowProvenance(reopened)).toBe(true);
+      expect(reopened.getIngestionQuarantine().some((notice) => notice.key.startsWith('memory'))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

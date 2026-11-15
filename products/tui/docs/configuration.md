@@ -237,7 +237,7 @@ Package-manager and from-source runs never self-update at launch.
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `update.autoUpdateAtLaunch` | boolean | `true` | Check for and install a newer release at TUI launch. Set `false` to only update when you run `/update apply` yourself. |
-| `update.launchCheckTimeoutMs` | number | `2500` | Budget for the launch-time version check. Clamped to `[250, 30000]`. A check that outlives it is skipped and the current version starts. |
+| `update.launchCheckTimeoutMs` | number | `2500` | Budget for the launch-time version check, a whole number from 250 to 30000; a value outside that range is reported at start and the default applies. A check that outlives it is skipped and the current version starts. |
 | `update.applyTimeoutMs` | number | `45000` | Budget for the launch-time download, verify, and swap. Clamped to `[5000, 300000]`. An apply that outlives it is deferred to the next launch. |
 
 ```json

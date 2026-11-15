@@ -27,14 +27,17 @@ export function schemaTypeRefusal(schema: Pick<ConfigSetting, 'type'>, value: un
  * Leaves a product writes under a category the platform owns, with no schema row
  * and no default (the settings surface or a feature module owns the editor).
  * A write to any other absent leaf under an existing category is a misspelt key
- * and is refused instead of being saved where nothing reads it.
+ * and is refused instead of being saved where nothing reads it. A key the
+ * writing manager registers as a host setting is admitted by its own
+ * descriptor; a key belongs here only while some manager that does not
+ * register it (the daemon's, for instance) may still write it.
  */
 const PRODUCT_OWNED_LEAVES: ReadonlySet<string> = new Set([
   'behavior.budgetAlertUsd', 'behavior.notifyAfterSeconds', 'behavior.notifyOnAgentFailure',
   'behavior.notifyOnApprovalPending', 'behavior.notifyOnBudgetBreach', 'behavior.notifyOnChainFailure',
   'behavior.notifyOnlyWhenUnfocused', 'behavior.terminalBell', 'behavior.terminalNotifyAgentBlocked',
   'behavior.terminalNotifyApprovalWait', 'behavior.terminalNotifyTurnEnd', 'behavior.notificationsMetadataOnly',
-  'tools.hostedResearchScreening', 'memory.projection.dir', 'memory.showProvenance', 'storage.codeIndexEnabled',
+  'tools.hostedResearchScreening', 'memory.projection.dir', 'storage.codeIndexEnabled',
   'permissions.execEnvScrubAllowlist',
   'payments.cardNumber', 'payments.cardExpiry', 'payments.cardCvv', 'payments.cardholderName',
   'payments.shippingAddress', 'payments.billingAddress',

@@ -27,7 +27,6 @@ import {
 } from './worktree-setup-config.ts';
 import { BUDGET_ALERT_USD_CONFIG_KEY, BUDGET_ALERT_USD_DEFAULT, readBudgetAlertUsd } from '@goodvibes-jev/engine/platform/platform/providers';
 import { MEMORY_PROJECTION_DIR_CONFIG_KEY, buildMemoryProjectionDirSyntheticEntry } from './commands/recall-files-config.ts';
-import { MEMORY_SHOW_PROVENANCE_CONFIG_KEY, buildMemoryProvenanceSyntheticEntry } from '../core/memory-provenance.ts';
 import {
   injectSandboxExecSyntheticEntries,
   isSandboxExecListConfigKey,
@@ -301,12 +300,6 @@ export function buildSettingGroups(
   // settings). Not in the platform ConfigKey union, same rationale as above.
   if (storageEntries && !storageEntries.some((e) => e.setting.key === MEMORY_PROJECTION_DIR_CONFIG_KEY)) {
     storageEntries.push(buildMemoryProjectionDirSyntheticEntry(configManager));
-  }
-
-  // Synthetic memory.showProvenance (TUI-local, default OFF, see memory-provenance.ts).
-  const memoryEntries = groups.get('memory');
-  if (memoryEntries && !memoryEntries.some((e) => e.setting.key === (MEMORY_SHOW_PROVENANCE_CONFIG_KEY as ConfigKey))) {
-    memoryEntries.push(buildMemoryProvenanceSyntheticEntry(configManager) as unknown as SettingEntry);
   }
 
   // Inject the worktree.setup.commands / worktree.setup.carryOverGlobs
@@ -709,12 +702,6 @@ function refreshBuiltinSettingValue(entry: BuiltinSettingEntry, configManager: C
   }
   if (key === MEMORY_PROJECTION_DIR_CONFIG_KEY) {
     const refreshed = buildMemoryProjectionDirSyntheticEntry(configManager);
-    entry.currentValue = refreshed.currentValue;
-    entry.isDefault = refreshed.isDefault;
-    return;
-  }
-  if (key === MEMORY_SHOW_PROVENANCE_CONFIG_KEY) {
-    const refreshed = buildMemoryProvenanceSyntheticEntry(configManager);
     entry.currentValue = refreshed.currentValue;
     entry.isDefault = refreshed.isDefault;
     return;

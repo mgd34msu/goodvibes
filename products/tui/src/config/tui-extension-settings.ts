@@ -1,20 +1,16 @@
 /**
- * TUI-extension settings, config namespaces the TUI reads that are NOT part
- * of the platform's ConfigManager schema.
+ * TUI settings the TUI reads from settings.json.
  *
- * The platform owns settings.json's typed schema (its `ConfigKey` union), but its
- * loader deep-merges user JSON over the defaults and only strips unknown
- * `permissions.tools` keys, every other unknown top-level key survives load
- * and round-trips through `save()`. That lets the TUI keep its own namespaces
- * (e.g. `checkpoints.*`) in the same settings.json file and read them back
- * here via `getRaw()`.
+ * `update.autoUpdateAtLaunch` and `update.launchCheckTimeoutMs` are platform
+ * schema settings: the loader validates them and `get()` returns the value in
+ * effect. The rest are not yet known to the loader (`statusline.*`,
+ * `session.autoTitle`, `checkpoints.*`, `update.applyTimeoutMs`): the loader
+ * keeps unknown keys in the file and in `getRaw()`, so they are read from there.
  *
- * Every reader hand-validates each field and returns a PARTIAL object holding
- * only the keys the user actually set to a well-typed value. A missing or
- * malformed block yields an empty object rather than throwing, so a bad edit
- * degrades to "use the built-in defaults", never a crash. Returning a partial
- * (rather than filling in defaults here) keeps the underlying default values
- * owned by their real consumer instead of being duplicated in the TUI.
+ * Each raw reader validates its fields and returns a PARTIAL object holding
+ * only the keys set to a well-typed value. A missing or malformed block yields
+ * an empty object rather than throwing, so a bad edit degrades to "use the
+ * built-in defaults", never a crash; the defaults stay with their consumer.
  */
 
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -102,37 +98,30 @@ export function readStatuslineSettings(configManager: Pick<ConfigManager, 'getRa
 // ─── update.*, launch-time self-update behavior ─────────────────────────────
 
 /**
- * User-settable launch-time self-update behavior. The feature itself (check at
- * launch, install via the checksum-verified download/verify/swap path, restart
- * onto the new binary) defaults ON for binary installs; the defaults live in
- * the consumer (src/cli/launch-auto-update.ts), matching this file's rule that
- * readers return only what the user actually set.
+ * Launch-time self-update behavior. The feature itself (check at launch,
+ * install via the checksum-verified download/verify/swap path, restart onto the
+ * new binary) defaults ON for binary installs.
  */
 export interface UpdateSettings {
-  /** Check for a newer release at TUI launch and install it before starting. Default: true. */
+  /** Check for a newer release at TUI launch and install it before starting (`update.autoUpdateAtLaunch`, default true). */
   readonly autoUpdateAtLaunch?: boolean;
-  /** How long the launch-time version check may take before it is skipped. Defaults to 2500; clamped to [250, 30000]. */
+  /** How long the launch-time version check may take before it is skipped (`update.launchCheckTimeoutMs`, default 2500, 250 to 30000). */
   readonly launchCheckTimeoutMs?: number;
   /** How long the launch-time download+verify+swap may take before it is deferred to the next launch. Defaults to 45000; clamped to [5000, 300000]. */
   readonly applyTimeoutMs?: number;
 }
 
-const LAUNCH_CHECK_MIN_TIMEOUT_MS = 250;
-const LAUNCH_CHECK_MAX_TIMEOUT_MS = 30_000;
 const LAUNCH_APPLY_MIN_TIMEOUT_MS = 5_000;
 const LAUNCH_APPLY_MAX_TIMEOUT_MS = 300_000;
 
-/** Read `update.*` from settings.json, validating and clamping the timeout. */
-export function readUpdateSettings(configManager: Pick<ConfigManager, 'getRaw'>): UpdateSettings {
+/** The launch-update settings in effect: the two schema settings, plus `update.applyTimeoutMs` when set. */
+export function readUpdateSettings(configManager: Pick<ConfigManager, 'get' | 'getRaw'>): UpdateSettings {
+  const out: { autoUpdateAtLaunch?: boolean; launchCheckTimeoutMs?: number; applyTimeoutMs?: number } = {
+    autoUpdateAtLaunch: configManager.get('update.autoUpdateAtLaunch'),
+    launchCheckTimeoutMs: configManager.get('update.launchCheckTimeoutMs'),
+  };
   const src = readNamespace(configManager, 'update');
-  if (!src) return {};
-  const out: { autoUpdateAtLaunch?: boolean; launchCheckTimeoutMs?: number; applyTimeoutMs?: number } = {};
-  const autoUpdateAtLaunch = readBoolean(src, 'autoUpdateAtLaunch');
-  if (autoUpdateAtLaunch !== undefined) out.autoUpdateAtLaunch = autoUpdateAtLaunch;
-  const launchCheckTimeoutMs = readPositiveInt(src, 'launchCheckTimeoutMs');
-  if (launchCheckTimeoutMs !== undefined) {
-    out.launchCheckTimeoutMs = Math.min(LAUNCH_CHECK_MAX_TIMEOUT_MS, Math.max(LAUNCH_CHECK_MIN_TIMEOUT_MS, launchCheckTimeoutMs));
-  }
+  if (!src) return out;
   const applyTimeoutMs = readPositiveInt(src, 'applyTimeoutMs');
   if (applyTimeoutMs !== undefined) {
     out.applyTimeoutMs = Math.min(LAUNCH_APPLY_MAX_TIMEOUT_MS, Math.max(LAUNCH_APPLY_MIN_TIMEOUT_MS, applyTimeoutMs));

@@ -381,14 +381,23 @@ describe('recording port trust boundary', () => {
     expect(log.query()).toHaveLength(1);
   });
 
-  test.each(['answer', 'failure', 'action', 'readings'])('log-write failure during %s is value-free and unrecorded', async (stage) => {
+  test.each(['answer', 'failure'])('log-write failure during %s is value-free and unrecorded', async (stage) => {
     const broken: DecisionLog = {
       record() { throw new Error(SECRET); }, attach() { throw new Error(SECRET); }, get: () => undefined, query: () => [],
     };
     const port = withDecisionLog(stage === 'failure' ? rejecting(new Error(SECRET)) : borrowed(result()), broken);
-    const error = stage === 'action' || stage === 'readings'
-      ? (() => { try { stage === 'action' ? port.recorder!.recordAction('id', 'act') : port.recorder!.recordReadings('id', {}); } catch (e) { return e; } })()
-      : await port.ask(request).catch((e: unknown) => e);
+    const error = await port.ask(request).catch((e: unknown) => e);
     expect(exposedError(error).kind).toBe('unrecorded');
+  });
+
+  test('a note that cannot be written after the work is done is counted, never thrown', () => {
+    const broken: DecisionLog = {
+      record() { throw new Error(SECRET); }, attach() { throw new Error(SECRET); }, get: () => undefined, query: () => [],
+    };
+    const counts: number[] = [];
+    const port = withDecisionLog(borrowed(result()), broken, { onUnrecordedNote: count => counts.push(count) });
+    expect(() => port.recorder!.recordAction('id', 'act')).not.toThrow();
+    expect(() => port.recorder!.recordReadings('id', {})).not.toThrow();
+    expect(counts).toEqual([1, 2]);
   });
 });

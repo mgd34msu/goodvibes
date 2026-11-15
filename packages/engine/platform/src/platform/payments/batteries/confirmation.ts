@@ -196,7 +196,7 @@ export const SHIP_DATE_ROLE = 'the date the order is expected to be delivered, o
 
 export const shipDate = defineDatePartsReader({
   name: 'engine.payments.ship-date',
-  version: 1,
+  version: 2,
   description: 'When a shop\'s mail says the order ships or is due, as its date parts.',
   accuracyFloor: 0.85,
   band: STAKES_BANDS.low.confidence,

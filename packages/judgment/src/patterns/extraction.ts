@@ -18,7 +18,7 @@ export type Metric = ValueMetric | AbsenceMetric;
 /** The SDE cascade's per-field metrics for a field that holds a value. */
 export const FIELD_METRICS: Readonly<Record<ValueMetric, FieldMetric>> = {
   hallucinated: {
-    question: 'Is the `extracted_field` unsupported by, or absent from, the source text?',
+    question: 'Is the value at `extracted_field` (a path into the state) unsupported by, or absent from, the source text?',
     wrong: 'The value is not supported by, or is absent from, the source text.',
     right: 'The value is supported by the source text.',
   },
@@ -28,12 +28,12 @@ export const FIELD_METRICS: Readonly<Record<ValueMetric, FieldMetric>> = {
     right: 'The source genuinely reports this field.',
   },
   name_mismatch: {
-    question: 'Does the `extracted_field` fail to match the field at `path` or its `description` in the `field_spec`?',
+    question: 'Does the value at `extracted_field` (a path into the state) fail to match the field at `path` or its `description` in the `field_spec`?',
     wrong: 'The value does not match the field name or its description.',
     right: 'The value matches the field name and description.',
   },
   format_violation: {
-    question: 'Does the `extracted_field` violate the format or constraints implied by the `description` and `type` (date format, units, allowed values)?',
+    question: 'Does the value at `extracted_field` (a path into the state) violate the format or constraints implied by the `description` and `type` (date format, units, allowed values)?',
     wrong: 'The value violates the implied format or constraints.',
     right: 'The value satisfies the format and constraints.',
   },
@@ -41,7 +41,7 @@ export const FIELD_METRICS: Readonly<Record<ValueMetric, FieldMetric>> = {
 
 /** The one check for an empty field: did the source hold a value after all? */
 export const ABSENCE_METRIC: FieldMetric = {
-  question: 'The `extracted_field` is empty. Does the source text contain the information the `field_spec` describes, making the empty result wrong?',
+  question: 'The value at `extracted_field` (a path into the state) is empty or missing. Does the source text contain the information the `field_spec` describes, making the empty result wrong?',
   wrong: 'A value was wrongly omitted.',
   right: 'Returning nothing is correct.',
 };
@@ -105,10 +105,13 @@ const toFieldCheck = ([key, p]: [string, number]): FieldCheck => {
   return { field: key.slice(0, at), metric: key.slice(at + SEPARATOR.length) as Metric, p };
 };
 
+// The record sits in the state under `extraction`; each question names its
+// field by path, so a value is sent once and the log keeps no value at all.
 function fieldQuestions(name: string, spec: FieldSpec, value: JsonValue | undefined): [string, NoulQuestion][] {
   const fieldSpec = { path: name, type: spec.type ?? 'unknown', description: spec.description ?? '', required: spec.required ?? false };
+  const extractedField = `extraction[${JSON.stringify(name)}]`;
   const ask = (metric: FieldMetric): NoulQuestion =>
-    noul({ field_spec: fieldSpec, extracted_field: value ?? null, main_question: metric.question } as EntryType, {
+    noul({ field_spec: fieldSpec, extracted_field: extractedField, main_question: metric.question } as EntryType, {
       true: metric.wrong,
       false: metric.right,
     });
@@ -126,7 +129,7 @@ export function defineExtractionVerifier(spec: ExtractionVerifierSpec): Extracti
       // A key the record carries but the fields do not list would go unchecked
       // while the result still reads as a complete verification.
       const unlisted = Object.keys(input.record).filter((key) => !Object.hasOwn(input.fields, key));
-      if (unlisted.length > 0) throw new RangeError(`extraction verifier ${spec.name}: record has keys with no field spec: ${unlisted.join(', ')}`);
+      if (unlisted.length > 0) throw new RangeError(`extraction verifier ${spec.name}: record has keys with no field spec: ${unlisted.join(', ')}; give each a field spec or leave it out of the record`);
       const questions = Object.fromEntries(
         Object.entries(input.fields).flatMap(([name, field]) => fieldQuestions(name, field, input.record[name])),
       );

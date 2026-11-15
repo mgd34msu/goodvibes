@@ -2,7 +2,7 @@ import { checkEachFixture, decisionHeader, fixtureCheck, NONE, type NamedDecisio
 import { askAs, recordAction, recordReadings, type CallOptions, type PatternHeader, type PatternName } from '../batteries/asking.ts';
 import { choice, noul, type EntryType, type JsonValue, type JudgmentPort, type JudgmentResult, type Question } from '../port/types.ts';
 import { estimateTokens, LIMITS } from '../port/limits.ts';
-import { JudgmentContextLimitError } from '../port/errors.ts';
+import { JudgmentContextLimitError, JudgmentError } from '../port/errors.ts';
 import { assertBand, type ConfidenceBand, type Outcome, type YesNoBand } from '../readings/bands.ts';
 import { readChoice, readYesNo, type ChoiceReading, type YesNoReading } from '../readings/readings.ts';
 import type { Candidate } from './rerank.ts';
@@ -47,6 +47,8 @@ export interface Selection {
   readonly pick: ChoiceReading;
   readonly fits: Readonly<Record<string, YesNoReading>>;
   readonly decisionId: string | undefined;
+  /** Candidates too large for any request to carry; they were not offered and cannot be chosen. */
+  readonly omitted?: readonly string[];
   recordAction(action: string): void;
 }
 
@@ -111,10 +113,29 @@ export async function runSelection(port: JudgmentPort, request: SelectionRequest
   return selectCandidates(port, request, true);
 }
 
+/**
+ * A candidate no request can carry even at four characters a token, which
+ * undercounts dense text: asking would only collect a context-limit refusal.
+ * Checked once at entry; the partitions below only ever hold candidates that passed.
+ */
+const tooLargeToAsk = (candidate: Candidate): boolean => Math.ceil(JSON.stringify(candidate).length / 4) > LIMITS.maxLongContextTokens;
+
 async function selectCandidates(port: JudgmentPort, request: SelectionRequest, parallel: boolean): Promise<Selection> {
-  const { header, config, candidates } = request;
-  const ids = candidates.map((candidate) => candidate.id);
-  assertCandidates(header.name, ids);
+  const { header } = request;
+  assertCandidates(header.name, request.candidates.map((candidate) => candidate.id));
+  const omitted = request.candidates.filter(tooLargeToAsk).map(candidate => candidate.id);
+  if (omitted.length === 0) return partitionAndSelect(port, request, parallel);
+  const skipped = new Set(omitted);
+  const candidates = request.candidates.filter(candidate => !skipped.has(candidate.id));
+  if (candidates.length === 0) {
+    throw new JudgmentError('invalid-request', `selector ${header.name}: every candidate is larger than one judgment request can carry; nothing was asked`, { reason: 'candidate-too-large' });
+  }
+  const selection = await partitionAndSelect(port, { ...request, candidates }, parallel);
+  return { ...selection, omitted };
+}
+
+async function partitionAndSelect(port: JudgmentPort, request: SelectionRequest, parallel: boolean): Promise<Selection> {
+  const { config, candidates } = request;
   // Candidate fit questions also consume context. Keep all evidence and all
   // candidates, partitioning by both provider limits rather than choice count alone.
   const groups: Candidate[][] = [];
@@ -143,7 +164,7 @@ async function selectGroups(port: JudgmentPort, request: SelectionRequest, group
   const completed = await mapLimit(groups, parallel ? 4 : 1, async group => {
     try {
       signal.throwIfAborted();
-      return await selectCandidates(port, { ...request, candidates: group, options: { ...request.options, signal } }, false);
+      return await partitionAndSelect(port, { ...request, candidates: group, options: { ...request.options, signal } }, false);
     } catch (error) {
       if (!failed) { failed = true; failure = error; abort.abort(error); }
       return undefined;
@@ -161,7 +182,7 @@ async function selectGroups(port: JudgmentPort, request: SelectionRequest, group
   // cannot reduce this further. Let the endpoint tokenize the final comparison
   // once, rather than recursively repeating an unchanged tournament forever.
   const final = winners.length ? await (winners.length < candidates.length
-    ? selectCandidates(port, { ...request, candidates: winners }, parallel)
+    ? partitionAndSelect(port, { ...request, candidates: winners }, parallel)
     : askSelection(port, { ...request, candidates: winners }, false, parallel)) : rounds.at(-1)!;
   // Every group participates in elimination; unresolved evidence cannot be
   // upgraded by the final comparison between its surviving candidates.

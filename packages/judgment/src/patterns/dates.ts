@@ -1,4 +1,3 @@
-import { assertSynchronousJudgmentGuard } from '../port/attempt-guard.ts';
 import { checkEachFixture, decisionHeader, fixtureCheck, NONE, type FixtureCheck, type NamedDecision } from '../batteries/decision.ts';
 import { choice, type ChoiceQuestion, type JudgmentPort } from '../port/types.ts';
 import { assertBand, outcomeForConfidence, type ConfidenceBand, type Outcome } from '../readings/bands.ts';
@@ -219,30 +218,19 @@ export function defineDatePartsReader(spec: DatePartsSpec): DatePartsReader {
     ...header,
     async extract(port, document, role, today, options = {}) {
       const todayDate = parseDay(today);
+      // Every part is its own closed choice with its own 'none', so all seven
+      // go in one request; code then reads only the parts the mode needs.
       const questions = dateQuestions(role, todayDate.getUTCFullYear());
+      const result = await askAs(port, spec, 'date-parts', document, questions, options);
       const parts: Partial<Record<PartName, Part>> = {};
-      let decisionId: string | undefined;
-      const readParts = async (phase: string, selected: readonly PartName[]) => {
-        const result = await askAs(port, spec, 'date-parts', document, Object.fromEntries(selected.map(name => [name, questions[name]])), options);
-        options.signal?.throwIfAborted();
-        assertSynchronousJudgmentGuard(() => options.beforeAttempt?.());
-        for (const name of selected) {
-          const answer = result.answers[name];
-          if (answer === undefined || answer.type !== 'choice') throw new TypeError('Missing or invalid date part');
-          parts[name] = { choice: answer.choice, confidence: answer.confidence };
-        }
-        recordReadings(port, result, { phase, today, parts });
-        recordAction(port, result.decisionId, `read date ${phase}`);
-        decisionId = result.decisionId;
-      };
-      await readParts('mode', ['mode']);
-      if (parts.mode?.choice === 'absolute') await readParts('calendar parts', ['month', 'day', 'year']);
-      else if (parts.mode?.choice === 'relative') {
-        await readParts('relative anchor', ['day_anchor']);
-        if (parts.day_anchor?.choice === 'weekday') await readParts('weekday parts', ['weekday', 'week_offset']);
+      for (const name of Object.keys(questions) as PartName[]) {
+        const answer = result.answers[name];
+        if (answer === undefined || answer.type !== 'choice') throw new TypeError('Missing or invalid date part');
+        parts[name] = { choice: answer.choice, confidence: answer.confidence };
       }
       const assembled = assembleDate(parts, todayDate, spec.band);
-      recordReadings(port, { decisionId }, { ...assembled, today, parts });
+      const { decisionId } = result;
+      recordReadings(port, result, { ...assembled, today, parts: Object.fromEntries(partsUsed(parts).map(name => [name, parts[name]])) });
       return { ...assembled, decisionId, recordAction: (action) => recordAction(port, decisionId, action) };
     },
     checkFixtures: (port, options = {}) =>

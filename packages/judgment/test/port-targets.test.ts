@@ -22,10 +22,10 @@ describe('judgment targets', () => {
     expect(new Set(hosts)).toEqual(new Set(['primary.test', 'backup.test']));
   });
 
-  test('an availability failure on every target still reports the halt notice', async () => {
+  test('an availability failure on every target names what the last attempt met', async () => {
     const port = createSystemOnePort(config(async () => json(503, {}),
       { fallbacks: [{ endpoint: hosted('https://backup.test'), model: 'jev-latest' }] }));
-    await expect(port.ask(request)).rejects.toMatchObject({ kind: 'unavailable', message: expect.stringContaining('Check API keys') });
+    await expect(port.ask(request)).rejects.toMatchObject({ kind: 'unavailable', reason: 'endpoint-status', status: 503 });
   });
 
   test('a rate-limited single target names the wait on the next ask', async () => {

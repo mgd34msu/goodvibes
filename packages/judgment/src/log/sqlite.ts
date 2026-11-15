@@ -1,7 +1,7 @@
 import type { Database, Statement } from 'bun:sqlite';
 import type { JsonValue } from '../port/types.ts';
 import { opaqueUuid } from '../port/opaque-uuid.ts';
-import type { DecisionEntry, DecisionId, DecisionLog, DecisionNote, DecisionQuery, DecisionTruth, DecisionVolumeEntry, NewDecisionEntry } from './types.ts';
+import type { DecisionEntry, DecisionId, DecisionLog, DecisionNote, DecisionQuery, DecisionRetention, DecisionTruth, DecisionVolumeEntry, NewDecisionEntry } from './types.ts';
 import { decisionVolumeRow, type DecisionVolumeRow } from './volume-row.ts';
 import { COLUMNS, NOTES_TABLE, TABLE, openLog, rowsOf, type Params } from './sqlite-schema.ts';
 
@@ -12,9 +12,9 @@ interface Row {
   readonly notes: string;
 }
 
-/** Latest-value projection columns; the ordered note table retains history. */
+/** The kinds of note; the ordered note table holds every one. */
 type NoteColumn = DecisionNote['kind'];
-/** How a note of one kind is written to its column and read back. */
+/** How a note of one kind is written to the notes table and read back. */
 interface NoteCodec<N extends DecisionNote> {
   write(note: N): string;
   read(text: string): N;
@@ -24,7 +24,6 @@ const NOTE_CODECS: { readonly [K in NoteColumn]: NoteCodec<Extract<DecisionNote,
   action: { write: (note) => note.action, read: (text) => ({ kind: 'action', action: text }) },
   truth: { write: (note) => JSON.stringify(note.truth), read: (text) => ({ kind: 'truth', truth: JSON.parse(text) as DecisionTruth }) },
 };
-const NOTE_COLUMNS = Object.keys(NOTE_CODECS) as NoteColumn[];
 /** A new row stores its id and the entry; SQLite derives the rest, and notes attach later. */
 const INSERT_COLUMNS = ['id', 'entry'] as const satisfies readonly (keyof typeof COLUMNS)[];
 type InsertParams = Readonly<Record<(typeof INSERT_COLUMNS)[number], string>>;
@@ -50,8 +49,17 @@ const matchingWindow = (conditions: readonly string[]) =>
 /** Every statement the log runs. */
 const SQL = {
   insert: `INSERT INTO ${TABLE} (${INSERT_COLUMNS.join(', ')}) VALUES (${INSERT_COLUMNS.map(param).join(', ')})`,
-  attach: (column: NoteColumn) => `UPDATE ${TABLE} SET ${equals(column)} WHERE ${ID_IS} AND status = 'answered'`,
-  append: `INSERT INTO ${NOTES_TABLE} (decision_id, kind, payload) VALUES ($id, $kind, $payload)`,
+  /** A note attaches only to an answered entry; one statement, so it needs no transaction. */
+  append: `INSERT INTO ${NOTES_TABLE} (decision_id, kind, payload)
+    SELECT $id, $kind, $payload WHERE EXISTS (SELECT 1 FROM ${TABLE} WHERE ${ID_IS} AND status = 'answered')`,
+  /** The time of the entry at a position from the newest; the row cap keeps entries from it on. */
+  nthNewest: `SELECT at FROM ${TABLE} ORDER BY at DESC LIMIT 1 OFFSET $offset`,
+  /** Entries the retention rule no longer keeps, oldest first; an entry with a truth note always stays. */
+  expired: `SELECT id FROM ${TABLE} WHERE at < $cutoff
+    AND NOT EXISTS (SELECT 1 FROM ${NOTES_TABLE} WHERE decision_id = ${TABLE}.id AND kind = 'truth')
+    ORDER BY at, id LIMIT $limit`,
+  deleteNotes: `DELETE FROM ${NOTES_TABLE} WHERE decision_id IN (SELECT value FROM json_each($ids))`,
+  deleteEntries: `DELETE FROM ${TABLE} WHERE id IN (SELECT value FROM json_each($ids))`,
   /** Newest first, up to $limit, meeting every condition given. */
   matching: (conditions: readonly string[]) =>
     `SELECT ${TABLE}.id, ${TABLE}.entry,
@@ -113,19 +121,34 @@ function filterFor(query: DecisionQuery): { where: string[]; params: Params } {
   return { where: active.map(({ name }) => FILTERS[name]), params: Object.fromEntries(active.map(({ name, value }) => [name, value])) };
 }
 
-/** A decision log in a SQLite file (or `:memory:`), created on first use. */
+/**
+ * A decision log in a SQLite file (or `:memory:`), created on first use.
+ * An entry commits with the write-ahead log synced, because a caller acts on
+ * the answer it records. A later note and pruning commit at NORMAL: after a
+ * power loss the newest notes can be missing, never an entry, and the file
+ * is never damaged.
+ */
 export class SqliteDecisionLog implements DecisionLog, Disposable {
   readonly #db: Database;
   /** The writing statements, prepared once. */
   readonly #insert: Statement;
-  readonly #attach: Readonly<Record<NoteColumn, Statement>>;
   readonly #append: Statement;
+  readonly #unsynced: Statement;
+  readonly #synced: Statement;
 
   constructor(path: string) {
     this.#db = openLog(path);
     this.#insert = this.#db.prepare(SQL.insert);
-    this.#attach = Object.fromEntries(NOTE_COLUMNS.map((column) => [column, this.#db.prepare(SQL.attach(column))])) as Record<NoteColumn, Statement>;
     this.#append = this.#db.prepare(SQL.append);
+    this.#unsynced = this.#db.prepare('PRAGMA synchronous = NORMAL');
+    this.#synced = this.#db.prepare('PRAGMA synchronous = FULL');
+  }
+
+  /** Runs one write at synchronous NORMAL, then returns the connection to FULL. */
+  #withoutSync<T>(write: () => T): T {
+    this.#unsynced.run();
+    try { return write(); }
+    finally { this.#synced.run(); }
   }
 
   record(entry: NewDecisionEntry): DecisionId {
@@ -144,17 +167,33 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
   }
 
   attach(id: string, note: DecisionNote): void {
-    this.#db.transaction(() => this.#note(id, note)).immediate();
+    this.#withoutSync(() => this.#note(id, note));
   }
 
   #note(id: string, note: DecisionNote): void {
-    const column = note.kind;
-    const payload = codecFor(column).write(note);
-    // Retain latest-value columns for existing SQL consumers, but never use
-    // them as history. Both writes commit together or neither takes effect.
-    const { changes } = this.#attach[column].run({ id, [column]: payload });
-    if (changes !== 1) throw new RangeError(`decision ${id} cannot take a ${column} note`);
-    this.#append.run({ id, kind: column, payload });
+    const { changes } = this.#append.run({ id, kind: note.kind, payload: codecFor(note.kind).write(note) });
+    if (changes !== 1) throw new RangeError(`decision ${id} cannot take a ${note.kind} note`);
+  }
+
+  prune(rule: DecisionRetention): number {
+    if (!Number.isSafeInteger(rule.batch) || rule.batch < 1 || !Number.isSafeInteger(rule.maxEntries) || rule.maxEntries < 1) {
+      throw new RangeError('Decision log retention needs a positive batch and entry cap.');
+    }
+    const capped = rowsOf<{ readonly at: string }>(this.#db, SQL.nthNewest, { offset: rule.maxEntries - 1 })[0]?.at;
+    const cutoff = capped !== undefined && capped > rule.before ? capped : rule.before;
+    return this.#withoutSync(() => this.#db.transaction(() => {
+      const ids = rowsOf<{ readonly id: string }>(this.#db, SQL.expired, { cutoff, limit: rule.batch }).map(row => row.id);
+      if (ids.length === 0) return 0;
+      const list = JSON.stringify(ids);
+      this.#db.query(SQL.deleteNotes).run({ ids: list });
+      this.#db.query(SQL.deleteEntries).run({ ids: list });
+      return ids.length;
+    }).immediate());
+  }
+
+  /** Hands the space freed by pruning back from the write-ahead log. */
+  checkpoint(): void {
+    this.#db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
   }
 
   get(id: string): DecisionEntry | undefined {

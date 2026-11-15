@@ -6,12 +6,16 @@
  * bun packages/engine/scripts/project-calibration.ts --out /tmp/calibration.json --log /tmp/calibration.sqlite
  * Add --inventory-only to enumerate without contacting the service, --only a,b
  * for a repair run, or --provisional while the integrated source is changing.
+ * --gate runs only the decisions the permission gate registers (the run that
+ * decides whether Jev may stand in for the owner by default), and --record
+ * <json> writes the compact calibration record products read to tell whether
+ * those decisions were measured at their current versions.
  */
 import { mkdirSync, renameSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
-  BatteryRegistry, calibrate, createSystemOnePort, formatReport, judgmentConfigFromEnv, readingsOf,
+  BatteryRegistry, calibrate, calibrationRecord, createSystemOnePort, formatReport, judgmentConfigFromEnv, readingsOf,
   SqliteDecisionLog, withDecisionLog,
   type CalibrationReport, type DecisionReport, type NamedDecision,
 } from '@goodvibes-jev/judgment';
@@ -19,6 +23,8 @@ import { ENGINE_ROOT, loadEngineRegistries } from './judgment-registries.ts';
 import { observeProjectSource, sameProjectSource } from './project-source-observation.ts';
 
 const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
+/** The registry of every decision the permission gate makes. */
+const GATE_REGISTRY = 'platform/src/platform/gate/judgment-registry.ts';
 const THIS_SCRIPT = relative(REPO_ROOT, import.meta.path);
 
 function sourceSnapshot() {
@@ -49,6 +55,7 @@ export async function loadProjectCalibration() {
   if (conflicts.size > 0) throw new Error(`Conflicting registered batteries: ${[...conflicts].sort().join(', ')}`);
   const entries = [...byName.values()].sort((a, b) => a.decision.name.localeCompare(b.decision.name));
   return {
+    gate: engine.byFile.find(({ file }) => file === GATE_REGISTRY)?.decisions.map((decision) => decision.name) ?? [],
     decisions: entries.map(({ decision }) => decision),
     inventory: entries.map(({ decision, registries: sources }) => ({
       name: decision.name, version: decision.version, description: decision.description,
@@ -64,6 +71,8 @@ async function main(): Promise<void> {
     out: { type: 'string' }, log: { type: 'string' }, only: { type: 'string' },
     concurrency: { type: 'string', default: '4' },
     'inventory-only': { type: 'boolean', default: false },
+    gate: { type: 'boolean', default: false },
+    record: { type: 'string' },
     provisional: { type: 'boolean', default: false },
     'source-sha': { type: 'string' },
   } });
@@ -74,7 +83,8 @@ async function main(): Promise<void> {
   const source = await sourceSnapshot();
   if (values['source-sha'] !== undefined && values['source-sha'] !== source.sha) throw new Error('HEAD does not match --source-sha');
   const project = await loadProjectCalibration();
-  const names = values.only?.split(',');
+  if (values.gate && project.gate.length === 0) throw new Error(`${GATE_REGISTRY} registers no decisions`);
+  const names = values.only?.split(',') ?? (values.gate ? project.gate : undefined);
   if (names !== undefined) for (const name of names) {
     if (!project.decisions.some((decision) => decision.name === name)) throw new Error(`Unknown battery: ${name}`);
   }
@@ -173,6 +183,12 @@ async function main(): Promise<void> {
     process.removeListener('SIGTERM', cancel);
   }
   const passed = await persist(true);
+  if (values.record !== undefined) {
+    const recordPath = resolve(values.record);
+    mkdirSync(dirname(recordPath), { recursive: true });
+    await Bun.write(recordPath, `${JSON.stringify({ ...calibrationRecord(currentReport(), config.model), passed, source: source.sha }, null, 2)}\n`);
+    console.log(`[project-calibration] record: ${recordPath}`);
+  }
   console.log(formatReport(currentReport()));
   console.log(`[project-calibration] ${passed ? 'PASS' : 'FAIL'}; report: ${outPath}; decision log: ${logPath}`);
   process.exitCode = passed ? 0 : 1;

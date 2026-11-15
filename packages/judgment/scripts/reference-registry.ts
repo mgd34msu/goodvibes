@@ -1,8 +1,10 @@
 /**
  * Reference decisions for the judgment foundation: one per pattern and
  * compound, each with realistic labelled fixtures drawn from the TypeSafe
- * cookbooks. `bun run calibrate` runs them by default and `bun run proof`
- * uses them, so every pattern is exercised live against real examples.
+ * cookbooks. `registry` holds the patterns the products ship with; `bun run
+ * calibrate` and `bun run proof` run it live. `libraryRegistry` holds the
+ * pattern library no product calls yet; it runs only when asked for with
+ * `--library`, so routine calibration spends nothing on it.
  */
 import {
   BatteryRegistry,
@@ -151,6 +153,7 @@ const TOS = [
 
 export const existence = defineExistence({
   ...header('existence', 'Finds the line of a document that answers a question, or says none does.'),
+  version: 2,
   band: { yes: { actAt: 0.7, confirmAt: 0.5 }, no: { actAt: 0.65, confirmAt: 0.55 } },
   fixtures: [
     { name: 'ownership', query: 'who owns the code I upload?', items: TOS, expect: { exists: 'yes', item: 'L001' } },
@@ -276,6 +279,7 @@ export const select = defineSelector({
 
 export const dates = defineDatePartsReader({
   ...header('dates', 'Reads a named date out of a document and resolves it in code.'),
+  version: 2,
   band: { actAt: 0.6, confirmAt: 0.5 },
   fixtures: [
     { name: 'next thursday', document: "Let's schedule the design review for next Thursday.", role: 'the date of the design review', today: '2026-07-30', expect: '2026-08-06' },
@@ -456,6 +460,7 @@ const REGISTRATION_FIELDS = {
 
 export const extraction = defineExtractionVerifier({
   ...header('extraction', 'Verifies each field of an extracted record against its source and escalates on any confident red flag.'),
+  version: 2,
   fireAt: 0.7,
   fixtures: [
     {
@@ -479,6 +484,7 @@ export const extraction = defineExtractionVerifier({
 
 export const structure = defineStructureRecovery({
   ...header('structure', 'Rebuilds the structure of plain text that lost its formatting.'),
+  version: 2,
   joinAfterDangling: 0.2,
   joinAfterTerminal: 0.5,
   fixtures: [
@@ -510,6 +516,7 @@ export const multipleActions = defineBattery({
   ],
 });
 
+/** Patterns a shipped product calls. */
 export const registry = new BatteryRegistry();
 for (const decision of [
   ticketUrgency,
@@ -521,19 +528,26 @@ for (const decision of [
   reply,
   alignment,
   fidelity,
-  policy,
   select,
   dates,
-  skills,
-  productTaxonomy,
   candidateFit,
   counter,
+  extraction,
+]) {
+  registry.register(decision);
+}
+
+/** The pattern library: kept current, calibrated only on request (`--library`). */
+export const libraryRegistry = new BatteryRegistry();
+for (const decision of [
+  policy,
+  skills,
+  productTaxonomy,
   industry,
   passages,
   trading,
-  extraction,
   structure,
   multipleActions,
 ]) {
-  registry.register(decision);
+  libraryRegistry.register(decision);
 }

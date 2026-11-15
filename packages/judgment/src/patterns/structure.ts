@@ -53,14 +53,11 @@ function stitchQuestions(lines: readonly Line[]): Record<string, Question> {
   return Object.fromEntries(
     joinableLines(lines).map((index) => [
       lineId(index),
-      // The two lines are quoted in the question: asked by line id alone, clear continuations read near the join bar.
+      // The lines are tagged with their ids in the state; the question names
+      // the pair by id, so line text is sent once and never kept in the log.
       noul(
-        {
-          question: 'Does `next` continue a sentence that `previous` leaves unfinished, so the line break falls inside one sentence?',
-          previous: lines[index - 1]!.text,
-          next: lines[index]!.text,
-        },
-        { true: 'The line break falls inside one sentence: `next` continues it', false: '`next` starts a new sentence, item, heading, or thought of its own' },
+        `Does line ${lineId(index)} continue a sentence that line ${lineId(index - 1)} leaves unfinished, so the line break between them falls inside one sentence?`,
+        { true: `The line break falls inside one sentence: ${lineId(index)} continues it`, false: `${lineId(index)} starts a new sentence, item, heading, or thought of its own` },
       ),
     ]),
   );

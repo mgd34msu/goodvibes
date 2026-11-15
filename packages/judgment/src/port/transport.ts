@@ -5,7 +5,7 @@ import { toJudgmentError } from './client.ts';
 import { acceptsBackendModel, askBackend, judgmentAdapter, validateBackendInput } from './backends.ts';
 import { validateJudgmentConfig, type JudgmentConfig } from './config.ts';
 import { DEADLINE_COOLDOWN_MS, DEADLINE_MISSES_BEFORE_COOLDOWN } from './deadline.ts';
-import { JudgmentContextLimitError, JudgmentError } from './errors.ts';
+import { JudgmentContextLimitError, JudgmentError, type JudgmentFailureReason } from './errors.ts';
 import { requiresLongContext, validateContextBudget, validateQuestions } from './limits.ts';
 import { withRequestId } from './request-id.ts';
 import { delay, interruptible, retryable, retryDelay, retryPolicy } from './retry.ts';
@@ -26,6 +26,19 @@ function needsContextUpgrade(error: unknown): boolean {
   if (!body || typeof body !== 'object' || !('detail' in body)) return false;
   const detail = body.detail;
   return !!detail && typeof detail === 'object' && 'error_type' in detail && detail.error_type === 'max_tokens_exceeded';
+}
+
+/** The last word on a chain no target answered: what happened to the last attempt, and what to do. */
+function unavailableMessage(reason: JudgmentFailureReason | undefined, status: number | undefined, timeoutMs: number, targets: number): string {
+  const what = reason === 'endpoint-status' && status !== undefined ? `answered HTTP ${status}`
+    : reason === 'endpoint-timeout' ? `did not answer within ${timeoutMs} ms`
+    : reason === 'unreachable' ? 'could not be reached'
+    : reason === 'no-credential' ? 'has no API key' : undefined;
+  if (what === undefined) return DECISION_MODELS_UNAVAILABLE_NOTICE;
+  const next = reason === 'no-credential' ? 'Set the judgment key (judgment.keySource and judgment.keyName, or TYPESAFE_API_KEY), then retry.'
+    : reason === 'unreachable' ? 'Check that the decision endpoint is running and its address is right, then retry.'
+    : 'Retry in a moment.';
+  return targets === 1 ? `The decision endpoint ${what}. ${next}` : `None of the ${targets} decision targets answered; the last ${what}. ${next}`;
 }
 
 /** Each configured target gets one finite attempt; a valid answer ends the chain. */
@@ -74,7 +87,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
       const owners = [...new Set([signal, ownerSignal].filter((owner): owner is AbortSignal => owner !== undefined))];
       const requestedModel = request.model ?? defaultModel;
       const controller = new AbortController();
-      const missedDeadline = new JudgmentError('unavailable', missedDeadlineNotice(deadlineMs));
+      const missedDeadline = new JudgmentError('unavailable', missedDeadlineNotice(deadlineMs), { reason: 'deadline-missed' });
       // An owner aborted by AbortSignal.timeout is a deadline, not a cancellation.
       const cancelled = () => controller.abort(owners.some(owner => owner.aborted && isTimeoutReason(owner.reason))
         ? missedDeadline : new JudgmentError('aborted', 'the judgment call was cancelled'));
@@ -90,13 +103,13 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         if (controller.signal.aborted) throw controller.signal.reason;
       };
       try {
-        if (owners.length === 0) throw new JudgmentError('invalid-request', 'judgment calls require an owning AbortSignal on the request or port');
+        if (owners.length === 0) throw new JudgmentError('invalid-request', 'judgment calls require an owning AbortSignal on the request or port', { reason: 'no-owner-signal' });
         if (typeof requestedModel !== 'string' || !/^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$/.test(requestedModel)) {
-          throw new JudgmentError('invalid-request', 'judgment model overrides must be nonempty model identifiers');
+          throw new JudgmentError('invalid-request', 'judgment model overrides must be nonempty model identifiers', { reason: 'invalid-model' });
         }
-        if ('totalTimeoutMs' in request) throw new JudgmentError('invalid-request', 'judgment total-time limits are set with deadlineMs');
+        if ('totalTimeoutMs' in request) throw new JudgmentError('invalid-request', 'judgment total-time limits are set with deadlineMs', { reason: 'invalid-deadline' });
         if (deadlineMs !== undefined && (!Number.isInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > 2_147_483_647)) {
-          throw new JudgmentError('invalid-request', 'a judgment deadline must be whole positive milliseconds');
+          throw new JudgmentError('invalid-request', 'a judgment deadline must be whole positive milliseconds', { reason: 'invalid-deadline' });
         }
         if (deadlineMs !== undefined) {
           deadlineAt = performance.now() + deadlineMs;
@@ -105,11 +118,13 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         checkCancellation();
         let input: Pick<JudgmentRequest<Q>, 'state' | 'questions'>;
         try { input = captureJudgmentInput(request); }
-        catch { throw new JudgmentError('invalid-request', 'judgment input must be JSON-serializable'); }
+        catch { throw new JudgmentError('invalid-request', 'judgment input must be JSON-serializable', { reason: 'not-serializable' }); }
         const { state, questions } = input;
         validateQuestions(questions);
         validateContextBudget(state, questions);
         let lastFailure: JudgmentError | undefined;
+        // What the last failed attempt ran into, for the terminal message.
+        let lastReason: JudgmentFailureReason | undefined;
         let malformedFailure: JudgmentError | undefined;
         // True while every failed attempt was the request's own size or shape;
         // another target cannot repair that, so it is not an availability problem.
@@ -139,15 +154,15 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
                   }), controller.signal);
                 } catch {
                   checkCancellation();
-                  throw new JudgmentError('rejected', 'the judgment attempt is no longer authorized');
+                  throw new JudgmentError('rejected', 'the judgment attempt is no longer authorized', { reason: 'attempt-refused' });
                 }
                 checkCancellation();
-                if (checked !== undefined) throw new JudgmentError('invalid-request', 'the asynchronous judgment attempt guard must complete without a return value');
+                if (checked !== undefined) throw new JudgmentError('invalid-request', 'the asynchronous judgment attempt guard must complete without a return value', { reason: 'invalid-attempt-guard' });
               }
               assertSynchronousJudgmentGuard(beforeAttempt);
             } catch (error) {
               checkCancellation();
-              throw error instanceof JudgmentError ? error : new JudgmentError('rejected', 'the judgment attempt is no longer authorized');
+              throw error instanceof JudgmentError ? error : new JudgmentError('rejected', 'the judgment attempt is no longer authorized', { reason: 'attempt-refused' });
             }
             checkCancellation();
             attemptCount += 1;
@@ -164,7 +179,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               const body = { state, questions, model: targetModel };
               validateBackendInput(target.endpoint, targetModel, body);
               if (target.endpoint.authentication !== 'none' && !target.endpoint.apiKey.trim()) {
-                throw new JudgmentError('unavailable', 'this judgment target has no resolved credential');
+                throw new JudgmentError('unavailable', 'this judgment target has no resolved credential', { reason: 'no-credential' });
               }
               const { result } = await interruptible(withRequestId(
                 () => askBackend({ ...target, timeoutMs, retry: {}, fetch: (input, init) => { dispatched = true; return fetch ? fetch(input, init) : globalThis.fetch(input, init); } }, body, attemptController.signal, headers),
@@ -173,14 +188,14 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               checkCancellation();
               if (!result || typeof result.model !== 'string' || keys.some((key) => result.model.includes(key)) || !result.answers || !result.usage
                 || ![result.usage.input_tokens, result.usage.output_tokens].every((n) => Number.isFinite(n) && n >= 0)) {
-                throw new JudgmentError('invalid-response', 'System One returned an invalid result envelope');
+                throw new JudgmentError('invalid-response', 'System One returned an invalid result envelope', { reason: 'malformed-response' });
               }
               try { checkAnswers(questions, result.answers, requestId); }
               catch (error) {
                 if (!(error instanceof JudgmentError) || error.kind !== 'invalid-response') throw error;
-                throw new JudgmentError('invalid-response', 'System One returned answers that do not match the requested questions');
+                throw new JudgmentError('invalid-response', 'System One returned answers that do not match the requested questions', { reason: 'malformed-response' });
               }
-              if (!acceptsBackendModel(target.endpoint, targetModel, result.model)) throw new JudgmentError('invalid-response', 'the decision model does not match this configured target or its declared alias');
+              if (!acceptsBackendModel(target.endpoint, targetModel, result.model)) throw new JudgmentError('invalid-response', 'the decision model does not match this configured target or its declared alias', { reason: 'model-mismatch' });
               const attempt: JudgmentAttempt = {
                 attempt: attemptCount, endpointIndex, endpointKind: target.endpoint.kind, requestedModel: targetModel, dispatched,
                 latencyMs: performance.now() - attemptStarted, outcome: 'answered', ...(requestId ? { requestId } : {}),
@@ -197,6 +212,9 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               failure = controller.signal.aborted ? controller.signal.reason : attemptController.signal.aborted ? attemptController.signal.reason : error;
               const last = toJudgmentError(failure);
               lastFailure = last;
+              // Read from the converted error only: the raw thrown value may be hostile.
+              lastReason = last.reason ?? (last.kind !== 'unavailable' ? undefined : attemptTimedOut ? 'endpoint-timeout'
+                : last.status !== undefined ? 'endpoint-status' : 'unreachable');
               if (last.kind === 'invalid-response') malformedFailure = last;
               if (!(last instanceof JudgmentContextLimitError) && last.kind !== 'invalid-request') onlyRequestRefusals = false;
               requestId = last.kind === 'internal' ? undefined : safeId(last.requestId) ?? requestId;
@@ -306,7 +324,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         const waits = cooldowns.map(until => until - now);
         const allCooling = waits.every(wait => wait > 0);
         if (allCooling && cooledForDeadline.some(Boolean)) {
-          throw new JudgmentError('unavailable', slowTargetsNotice(Math.ceil(Math.min(...waits))), {
+          throw new JudgmentError('unavailable', slowTargetsNotice(Math.ceil(Math.min(...waits))), { reason: 'targets-slow',
             ...(last?.status === undefined ? {} : { status: last.status }),
             ...(last?.requestId === undefined ? {} : { requestId: last.requestId }),
           });
@@ -314,12 +332,15 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         const retryAfterMs = allCooling ? Math.ceil(Math.min(...waits)) : undefined;
         if (retryAfterMs !== undefined) {
           throw new JudgmentError('unavailable', rateLimitedNotice(retryAfterMs), {
-            retryAfterMs,
+            retryAfterMs, reason: 'rate-limited',
             ...(last?.status === undefined ? {} : { status: last.status }),
             ...(last?.requestId === undefined ? {} : { requestId: last.requestId }),
           });
         }
-        throw new JudgmentError('unavailable', DECISION_MODELS_UNAVAILABLE_NOTICE, {
+        // Name what happened to the last attempt; the configuration checklist
+        // is only for a failure with nothing more specific to say.
+        throw new JudgmentError('unavailable', unavailableMessage(lastReason, last?.status, timeoutMs, targets.length), {
+          ...(lastReason === undefined ? {} : { reason: lastReason }),
           ...(last?.status === undefined ? {} : { status: last.status }),
           ...(last?.requestId === undefined ? {} : { requestId: last.requestId }),
         });
@@ -332,6 +353,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         });
         throw new JudgmentError(failure.kind, keys.reduce((message, key) => message.replaceAll(key, '[redacted]'), failure.message), {
           ...(failure.status === undefined ? {} : { status: failure.status }), ...(requestId ? { requestId } : {}),
+          ...(failure.reason === undefined ? {} : { reason: failure.reason }),
           ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
           lineage: lineage(),
         });

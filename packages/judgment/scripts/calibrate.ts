@@ -4,11 +4,12 @@ import { judgmentProcessSignal } from './process-owner.ts';
  * band outcomes and confidence against accuracy. Exits non-zero when a
  * decision falls below its accuracy floor.
  *
- *   bun run calibrate [--registry <module>]... [--only a,b] [--log <sqlite>] [--out <json>]
+ *   bun run calibrate [--registry <module>]... [--library] [--only a,b] [--log <sqlite>] [--out <json>]
  *   bun run calibrate sweep <report.json> [decision] [--thresholds 0.6,0.7,0.8]
  *
  * A registry module exports `registry` (a BatteryRegistry). Without
- * --registry the judgment package's reference registry is used. Readings go
+ * --registry the judgment package's reference registry is used; --library
+ * adds the pattern library no product calls yet, which is otherwise not run. Readings go
  * to the decision log at --log; the report goes to --out. `sweep` re-bands a
  * saved report at other thresholds without calling the model.
  */
@@ -40,6 +41,7 @@ const { values, positionals } = parseArgs({
     log: { type: 'string' },
     out: { type: 'string' },
     thresholds: { type: 'string' },
+    library: { type: 'boolean', default: false },
   },
 });
 
@@ -58,9 +60,10 @@ if (positionals[0] === 'sweep') {
 const modules = values.registry ?? [resolve(import.meta.dir, 'reference-registry.ts')];
 const registries: BatteryRegistry[] = [];
 for (const specifier of modules) {
-  const loaded = (await import(resolve(specifier))) as { registry?: unknown };
+  const loaded = (await import(resolve(specifier))) as { registry?: unknown; libraryRegistry?: unknown };
   if (!(loaded.registry instanceof BatteryRegistry)) throw new Error(`${specifier} does not export a BatteryRegistry named "registry"`);
   registries.push(loaded.registry);
+  if (values.library && loaded.libraryRegistry instanceof BatteryRegistry) registries.push(loaded.libraryRegistry);
 }
 const registry = BatteryRegistry.merge(...registries);
 

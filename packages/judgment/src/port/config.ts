@@ -49,7 +49,7 @@ export interface JudgmentConfig {
    * A request bounds its own total time with `deadlineMs`.
    */
   readonly decisionDeadlineMs?: number;
-  /** Cooldown timing for unavailable targets; it never delays independent fallbacks. */
+  /** Timing of the one bounded retry after a transient failure and of a target's cooldown; it never delays independent fallbacks. */
   readonly retry: Partial<JudgmentRetryPolicy>;
   /** Additional System One targets. No discovery or implicit alternate providers. */
   readonly fallbacks?: readonly JudgmentFallback[];

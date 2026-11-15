@@ -79,7 +79,11 @@ export function askAs<const Q extends Questions>(
   });
 }
 
-/** Attaches a decision's conclusions to its call's decision log entry. */
+/**
+ * Attaches a decision's conclusions to its call's decision log entry. The
+ * decision log's recorder never throws here: the work is done, so a note it
+ * cannot write is counted and reported by the composition instead.
+ */
 export function recordReadings<C extends object>(port: JudgmentPort, result: { readonly decisionId?: DecisionIdOf }, conclusions: C): void {
   const { decisionId } = result;
   if (decisionId !== undefined) port.recorder?.recordReadings(decisionId, toJson(conclusions));

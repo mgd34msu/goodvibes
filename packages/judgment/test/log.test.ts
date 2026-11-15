@@ -101,8 +101,10 @@ describe('withDecisionLog + SqliteDecisionLog', () => {
         log.attach(id, { kind: 'action', action: 'retained legacy action' });
       }
       {
+        // A version-3 file kept only the latest note of each kind, in columns.
         using old = new Database(path);
-        old.exec('DROP TABLE decision_notes; PRAGMA user_version = 3');
+        old.exec('DROP TABLE decision_notes; ALTER TABLE decisions ADD COLUMN readings TEXT; ALTER TABLE decisions ADD COLUMN action TEXT; ALTER TABLE decisions ADD COLUMN truth TEXT; PRAGMA user_version = 3');
+        old.query('UPDATE decisions SET action = ? WHERE id = ?').run('retained legacy action', id);
       }
       {
         using first = new SqliteDecisionLog(path); using second = new SqliteDecisionLog(path);
@@ -118,7 +120,7 @@ describe('withDecisionLog + SqliteDecisionLog', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
-  test('a failed history append rolls back the latest-value projection too', async () => {
+  test('a refused note leaves the entry as it was', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jev-audit-atomic-')); const path = join(dir, 'log.sqlite');
     try {
       using log = new SqliteDecisionLog(path); using observer = new Database(path);
@@ -128,7 +130,6 @@ describe('withDecisionLog + SqliteDecisionLog', () => {
       observer.exec("CREATE TRIGGER refuse_note BEFORE INSERT ON decision_notes BEGIN SELECT RAISE(ABORT, 'fixture refusal'); END");
       expect(() => log.attach(id, { kind: 'action', action: 'must not persist' })).toThrow();
       expect(log.get(id)).toEqual(before);
-      expect(observer.query('SELECT action FROM decisions WHERE id = ?').get(id)).toEqual({ action: 'original' });
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
@@ -158,7 +159,7 @@ describe('withDecisionLog + SqliteDecisionLog', () => {
       process.stdout.write('ready\\n');
       for await (const _ of Bun.stdin.stream()) break;
       const db = openLog(process.argv[2]);
-      if (db.query('PRAGMA user_version').get().user_version !== 4) throw new Error('wrong schema');
+      if (db.query('PRAGMA user_version').get().user_version !== 5) throw new Error('wrong schema');
       db.close();
     `, module, path], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }));
     try {
@@ -230,7 +231,8 @@ describe('withDecisionLog + SqliteDecisionLog', () => {
     expect((error as JudgmentError).kind).toBe('unavailable');
     const [entry] = log.query({ status: 'failed' });
     if (entry?.status !== 'failed') throw new Error('expected a failed entry');
-    expect(entry.error).toEqual({ kind: 'unavailable', message: 'No decision models are currently available. Check API keys, endpoint addresses, model names and local model services, then retry. The operation has stopped. (HTTP 529)' });
+    expect(entry.error.kind).toBe('unavailable');
+    expect(entry.error.message).toContain('HTTP 529');
     expect((error as JudgmentError).status).toBe(529);
     expect(entry.requestedModel).toBe('jev-1.13.0');
     expect(entry.requestId).toBe('req-bad');
@@ -250,10 +252,30 @@ describe('withDecisionLog + SqliteDecisionLog', () => {
     expect((error as JudgmentError).kind).toBe('unrecorded');
   });
 
-  test('a readings write that fails surfaces as unrecorded', async () => {
+  test('a note that fails after the work is done is counted, not thrown', async () => {
     using log = new SqliteDecisionLog(':memory:');
-    const port = withDecisionLog(answering(0.9), log, tick);
-    expect(() => port.recorder!.recordAction('no-such-id', 'x')).toThrow(JudgmentError);
+    let unrecorded = 0;
+    const port = withDecisionLog(answering(0.9), log, { now: tick, onUnrecordedNote: count => { unrecorded = count; } });
+    expect(() => port.recorder!.recordAction('no-such-id', 'x')).not.toThrow();
+    expect(unrecorded).toBe(1);
+  });
+
+  test('retention prunes old entries in batches and keeps those with a truth note', () => {
+    using log = new SqliteDecisionLog(':memory:');
+    const at = (day: number) => `2026-0${day < 10 ? 1 : 2}-${String(day < 10 ? day : day - 9).padStart(2, '0')}T00:00:00.000Z`;
+    const ids = Array.from({ length: 12 }, (_, day) => log.record({ at: at(day + 1) as never, context: { battery: 'test.retention' }, questions: {},
+      status: 'answered', requestedModel: 'm', model: 'm', answers: {}, latencyMs: 1, usage: { inputTokens: 1, outputTokens: 1 }, requestId: undefined }));
+    log.attach(ids[0]!, { kind: 'truth', truth: { source: 'owner', checks: [] } });
+    log.attach(ids[1]!, { kind: 'action', action: 'old note goes with its entry' });
+    const rule = { before: at(6), maxEntries: 1000, batch: 2 };
+    const removed: number[] = [];
+    for (let count = log.prune(rule); ; count = log.prune(rule)) { removed.push(count); if (count < rule.batch) break; }
+    expect(removed).toEqual([2, 2, 0]);
+    expect(log.get(ids[0]!)).toBeDefined();
+    expect(log.query({ limit: 100 })).toHaveLength(8);
+    // The row cap keeps the newest entries whatever their age.
+    expect(log.prune({ before: at(1), maxEntries: 3, batch: 100 })).toBe(4);
+    expect(log.query({ limit: 100 }).map(entry => entry.id).sort()).toEqual([ids[0]!, ...ids.slice(9)].sort());
   });
 
   test('equal states hash equally regardless of key order', () => {

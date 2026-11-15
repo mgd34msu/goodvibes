@@ -40,6 +40,49 @@ export interface CalibrationReport {
   readonly passed: boolean;
 }
 
+/**
+ * What a completed calibration run measured, small enough to keep beside the
+ * code: which decisions, at which versions, on which model, and whether each
+ * met its accuracy floor. A product reads it to know whether the decisions it
+ * would hand to Jev were measured as they are now.
+ */
+export interface CalibrationRecord {
+  readonly at: string;
+  /** The model requests named when a decision named none. */
+  readonly model: string;
+  /** The models that actually answered. */
+  readonly observedModels: readonly string[];
+  readonly decisions: readonly {
+    readonly name: string;
+    readonly version: number;
+    readonly accuracy: number;
+    readonly automaticAccuracy: number | null;
+    readonly accuracyFloor: number;
+    readonly checks: number;
+    readonly passed: boolean;
+  }[];
+  readonly passed: boolean;
+}
+
+export function calibrationRecord(report: CalibrationReport, model: string): CalibrationRecord {
+  return {
+    at: report.at,
+    model,
+    observedModels: [...new Set(report.decisions.flatMap((decision) => decision.resolvedModels ?? []))].sort(),
+    decisions: report.decisions.map((decision) => ({
+      name: decision.name, version: decision.version, accuracy: decision.accuracy, automaticAccuracy: decision.automaticAccuracy,
+      accuracyFloor: decision.accuracyFloor, checks: decision.checks.length, passed: decision.passed,
+    })),
+    passed: report.passed,
+  };
+}
+
+/** Whether the record measured every one of these decisions at its current version, and each passed. */
+export function calibrationCovers(record: CalibrationRecord, decisions: readonly Pick<NamedDecision, 'name' | 'version'>[]): boolean {
+  return decisions.length > 0 && decisions.every((decision) => record.decisions.some((measured) =>
+    measured.name === decision.name && measured.version === decision.version && measured.passed));
+}
+
 /** Lower edges of the confidence bins: everything under 0.5 together, then finer steps toward certainty. */
 export const CONFIDENCE_BIN_FLOORS = [0, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95] as const;
 

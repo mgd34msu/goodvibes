@@ -1,5 +1,5 @@
 import type { DecisionContext, EntryType, JsonValue, JudgmentLineage } from '../port/types.ts';
-import type { JudgmentErrorKind } from '../port/errors.ts';
+import type { JudgmentErrorKind, JudgmentFailureReason } from '../port/errors.ts';
 import type { FixtureCheck } from '../batteries/decision.ts';
 
 /** A decision log entry's id. */
@@ -102,7 +102,7 @@ export function truthOf(entry: DecisionEntry): DecisionTruth | undefined {
 /** A call that failed; nothing was read from it. */
 export interface FailedEntry extends CallRecord {
   readonly status: 'failed';
-  readonly error: { readonly kind: JudgmentErrorKind; readonly message: string };
+  readonly error: { readonly kind: JudgmentErrorKind; readonly message: string; readonly reason?: JudgmentFailureReason };
 }
 
 export type DecisionEntry = AnsweredEntry | FailedEntry;
@@ -156,6 +156,27 @@ export interface DecisionLog {
   queryIds?(query?: DecisionQuery): readonly DecisionId[];
   /** Optional on older/custom logs. Native SQLite reads only bounded counters. */
   queryVolume?(query?: DecisionQuery): readonly DecisionVolumeEntry[];
+  /**
+   * Optional on older/custom logs. Deletes up to `rule.batch` entries, with
+   * their notes, that the retention rule no longer keeps, oldest first, and
+   * returns how many went. Call again until it returns less than the batch.
+   */
+  prune?(rule: DecisionRetention): number;
+}
+
+/**
+ * How long the decision log keeps an entry: until it is older than `before`
+ * or falls outside the newest `maxEntries`, whichever comes first. An entry
+ * carrying a truth note is always kept, because calibration and accuracy
+ * reports read accuracy against confidence from those.
+ */
+export interface DecisionRetention {
+  /** Entries recorded before this time go. */
+  readonly before: string;
+  /** Entries beyond the newest this many go. */
+  readonly maxEntries: number;
+  /** Most entries one call deletes. */
+  readonly batch: number;
 }
 
 const isPlainObject = (value: unknown): value is Readonly<Record<string, unknown>> =>

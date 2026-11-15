@@ -82,18 +82,30 @@ const { value, source, why } = await judge({
 });
 ```
 
-Each check is read for what it actually decides: a check whose answer is its own definition (arithmetic, dates, counting, id equality, a grammar a program produced, a value the owner configured) stays code, and a check that answers a question of meaning is asked of the model, whatever its category, security checks included. Every battery keeps its questions and thresholds in one place, and `bun run calibrate --registry <module>` runs its fixtures live against the configured model (by default `jev-latest`) and fails when a battery falls below its floor.
+Each check is read for what it actually decides: a check whose answer is its own definition (arithmetic, dates, counting, id equality, a grammar a program produced, a value the owner configured) stays code, and a check that answers a question of meaning is asked of the model, whatever its category, security checks included. Every battery keeps its questions and thresholds in one place, and `bun run calibrate --registry <module>` runs its fixtures live against the configured model (by default `jev-latest`) and fails when a battery falls below its floor. Without `--registry`, `bun run calibrate` and `bun run proof` run the reference decisions of the patterns the products ship; the rest of the pattern library (policy checklist, coarsening classifier, rule ladder, function caller, structure recovery, rank-recheck, hierarchy walker, features, compound split, verify-then-escalate) runs only with `--library`, so routine calibration spends nothing on decisions no product makes.
 
 The decision log keeps every call with what the decision concluded (a `readings` note), what code did with it (an `action` note) and, once known, what was right (a `truth` note). Calibration records each fixture's expectations as truth on that fixture's call; an owner correction or an observed outcome is attached the same way. The engine's observe subsystem reads accuracy against confidence, threshold sweeps, drift and historical questions stuck in `confirm` or `escalate` from the log alone. Those log values do not prescribe human approval in the autonomous contract.
 
 The log omits the original state. Ordinary audit calls and failed calls also omit its digest. An internal proof consumer can request `inputBinding: 'state'` when it must later match an independently saved answer to its original private input; only an admitted, answered call records that commitment. Existing entries with state digests remain readable alongside unbound entries. A call without a commitment cannot establish a native saved-input proof.
 
-SQLite schema 4 appends notes in recording order. `readingsOf`, `actionOf` and
-`truthOf` return the latest note of their kind; `entry.notes` retains the whole
-sequence. Outcome queries match historical readings too. Existing schema 2/3
-files migrate on open, preserving their last retained notes. Earlier overwritten
-history and its original cross-kind ordering cannot be recovered. Older builds
-refuse schema 4 files; retain a backup before upgrading if rollback is needed.
+SQLite schema 5 appends notes in recording order, each written once to the
+notes table. `readingsOf`, `actionOf` and `truthOf` return the latest note of
+their kind; `entry.notes` retains the whole sequence. Outcome queries match
+historical readings too. Existing schema 2 to 4 files migrate on open,
+preserving their last retained notes; the old latest-value columns stay in
+those files unread. Older builds refuse schema 5 files.
+
+An entry commits with the write-ahead log synced, because callers act on the
+answer it records; notes and pruning commit at `synchronous = NORMAL`, so a
+power loss can drop the newest notes but never an entry. A note written after
+the answer (`recordReadings`, `recordAction`) never throws: the work it
+describes already happened, so a failed note is counted and reported through
+`withDecisionLog`'s `onUnrecordedNote` instead.
+
+`SqliteDecisionLog.prune({ before, maxEntries, batch })` deletes, oldest first
+and at most `batch` at a time, the entries older than `before` or beyond the
+newest `maxEntries`, with their notes; an entry with a `truth` note is always
+kept. The engine applies 30 days and 100,000 entries after start-up and daily.
 
 Decision IDs are opaque exact keys, not timestamps or a UUID-format contract.
 New SQLite IDs preserve every UUIDv7 hex nibble through a one-to-one a–p
@@ -103,18 +115,18 @@ there is no schema change or privacy-screening exemption. Sort by the entry's
 `at` field; equal timestamps have a deterministic ID tie-break, not a promised
 cross-format chronology.
 
-Calibration attributes truth only to newly observed, answered calibration rows
-whose IDs were returned through that fixture execution's port and whose battery
-name, version and fixture match the decision being checked. Final checks on a
-composed result are not recorded as truth about a helper's different question;
-the report retains those checks and reports zero truth rows when no matching
-own call exists. It compares the same newest 100,000-ID window before and after.
-SQLite's optional `queryIds` projection reads no unrelated question, answer or
-note payloads; older/custom logs retain their full-query fallback. Only returned
-IDs present in the current window and absent before are fetched. Custom logs
-must retain append-only immutable entries and stable query ordering. Calls
-outside the window or without a returned recorded ID receive no fixture truth;
-concurrent calls and previously returned IDs are not a fallback source.
+Calibration attributes truth only to the answered calibration calls whose IDs
+were returned through that fixture execution's port and whose battery name,
+version and fixture match the decision being checked; it looks each one up by
+ID, so other calibrations writing to the same log cannot displace them. Final
+checks on a composed result are not recorded as truth about a helper's
+different question; the report retains those checks and reports zero truth rows
+when no matching own call exists.
+
+`calibrationRecord(report, model)` keeps what a run measured (decision names,
+versions, accuracy, floors, pass) and `calibrationCovers(record, decisions)`
+says whether a record measured every given decision at its current version and
+each passed.
 
 ## License
 
@@ -157,7 +169,9 @@ The last target ready to take a call gets one further attempt after a transient
 failure (a timeout, a lost connection, HTTP 408, 429 or 5xx) when the wait,
 `Retry-After` included, fits within `backoffMaxMs` and the remaining deadline;
 `onRetry` reports that wait. Otherwise each chain runs once. An exhausted chain
-fails as `unavailable`; a decision asked through `judge` then takes its fallback.
+fails as `unavailable` with a message naming what happened to the last attempt
+(the endpoint answered HTTP 503, did not answer in time, could not be reached,
+has no API key); a decision asked through `judge` then takes its fallback.
 A single target's terminal protocol/context error retains its precise kind so
 callers can partition complete evidence when supported.
 
@@ -220,9 +234,14 @@ valid. The same validation applies to standalone `readChoice`. This follows the
 is preserved rather than equated with the selected probability or recomputed.
 Malformed distributions are refused, never silently renormalized.
 
-Recorded calls expose a fixed, value-free message for each `JudgmentError.kind`.
-Upstream exception text, stack, cause and extra properties are not preserved in
-the returned error or decision entry. Diagnose failures through the typed kind,
+Recorded calls expose a fixed, value-free message for each `JudgmentError.kind`,
+or, when the failure carries one, for its `JudgmentError.reason`: a code from
+the closed list `JUDGMENT_FAILURE_REASONS` (`too-many-options`, `no-owner-signal`,
+`truncated-evidence`, `no-credential`, `endpoint-status`, `unreachable` and so
+on) set where the failure was found. The reason is kept in the returned error
+and the log entry; the sentence for it is this package's own. Upstream exception
+text, stack, cause and extra properties are not preserved in the returned error
+or decision entry. Diagnose failures through the typed kind,
 validated HTTP status/request ID/attempt lineage when available, and the log's
 decision/site context; do not match provider error text. Inspect configuration
 through the owning setup/settings surface when a provider is unconfigured.

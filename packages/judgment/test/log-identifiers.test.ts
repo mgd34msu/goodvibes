@@ -74,7 +74,7 @@ describe('opaque generated SQLite decision identifiers', () => {
       {
         using log = new SqliteDecisionLog(path);
         using db = new Database(path);
-        expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+        expect(db.query('PRAGMA user_version').get()).toEqual({ user_version: 5 });
         // Equal timestamps use deterministic lexical tie-breaking, not inferred chronology.
         expect(log.query().map((row) => String(row.id))).toEqual([collisionUuid, generated].sort().reverse());
         for (const id of [collisionUuid, generated]) {

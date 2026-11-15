@@ -26,7 +26,7 @@ export const TABLE = 'decisions';
  * MIGRATIONS is brought forward in place; any other version is refused rather
  * than misread.
  */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 export const NOTES_TABLE = 'decision_notes';
 
 const NOTES_SCHEMA = `
@@ -61,7 +61,7 @@ function declaration(role: ColumnRole): string {
   return `TEXT GENERATED ALWAYS AS (json_extract(entry, '$.${role.entryField.join('.')}')) VIRTUAL`;
 }
 
-/** Each row holds the whole entry as JSON; the fields queries filter on are derived from it, and notes attach in columns named for their kind. */
+/** Each row holds the whole entry as JSON; the fields queries filter on are derived from it. Notes live in their own table. */
 export const COLUMNS = {
   id: KEY,
   entry: written(true),
@@ -69,22 +69,23 @@ export const COLUMNS = {
   status: derived('status'),
   battery: derived('context', 'battery'),
   site: derived('context', 'site'),
-  readings: written(false),
-  action: written(false),
-  truth: written(false),
 } as const satisfies Readonly<Record<string, ColumnRole>>;
 
 /**
  * Additive steps from an older version to the next: version 2 had no truth
- * column, and every existing row simply has no truth recorded yet.
+ * column, and every existing row simply has no truth recorded yet. Versions 2
+ * to 4 also carried `readings`, `action` and `truth` columns holding the
+ * latest note of each kind; nothing reads them now, so version 5 stops
+ * writing them and leaves them in place in older files.
  */
 const MIGRATIONS: Readonly<Record<number, string>> = {
-  2: `ALTER TABLE ${TABLE} ADD COLUMN truth ${declaration(COLUMNS.truth)};`,
+  2: `ALTER TABLE ${TABLE} ADD COLUMN truth ${declaration(written(false))};`,
   // Older files retain only the last note of each kind. Preserve those values;
   // their original cross-kind order and any overwritten history are unknowable.
   3: NOTES_SCHEMA + ['readings', 'action', 'truth'].map(kind =>
     `INSERT INTO ${NOTES_TABLE} (decision_id, kind, payload, at)
      SELECT id, '${kind}', ${kind}, NULL FROM ${TABLE} WHERE status = 'answered' AND ${kind} IS NOT NULL;`).join('\n'),
+  4: 'SELECT 1;',
 };
 
 const SCHEMA = `
@@ -113,6 +114,9 @@ export function openLog(path: string): Database {
   // wait for one another instead of discarding an otherwise valid judgment.
   try {
     db.exec('PRAGMA busy_timeout = 1000;');
+    // Entries commit with a synced write-ahead log; notes and pruning switch
+    // to NORMAL for their own statement (see sqlite.ts).
+    db.exec('PRAGMA synchronous = FULL;');
     try { db.exec('PRAGMA journal_mode = WAL;'); }
     catch (error) {
       // Journal-mode changes can bypass SQLite's busy handler during a

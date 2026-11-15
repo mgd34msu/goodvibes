@@ -1,4 +1,4 @@
-export { withDecisionLog, recordedJudgmentInputHash } from './recording-port.ts';
+export { withDecisionLog, recordedJudgmentInputHash, type DecisionLogOptions } from './recording-port.ts';
 export { SqliteDecisionLog } from './sqlite.ts';
 export {
   actionOf,
@@ -20,5 +20,6 @@ export {
   type TokenUsage,
   type DecisionLog,
   type DecisionQuery,
+  type DecisionRetention,
   type NewDecisionEntry,
 } from './types.ts';

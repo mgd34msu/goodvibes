@@ -93,9 +93,11 @@ export interface JudgmentRequest<Q extends Questions> {
    * Omitted keeps the recording decorator's documented-field projection.
    */
   readonly captureResult?: <T extends JudgmentResult<Q>>(result: T) => T;
-  /** Observes temporary unavailability without settling the reading. Async
-   * observers finish before failover; their errors are ignored. Cancellation
-   * interrupts the wait and prevents another endpoint attempt. */
+  /** Observes temporary unavailability without settling the reading: before
+   * the one further attempt on the same target (`nextDelayMs` is the real wait)
+   * and before moving to the next target (`nextDelayMs` 0). Async observers
+   * finish first; their errors are ignored. Cancellation interrupts the wait
+   * and prevents another attempt. */
   readonly onRetry?: (progress: JudgmentRetryProgress) => void;
   /** Attribution for the decision log; never sent to the model. */
   readonly context?: DecisionContext;
@@ -166,7 +168,9 @@ export interface JudgmentResult<Q extends Questions> {
 
 /**
  * Attaches what happened after a call to its decision log entry: the banded
- * readings a battery drew from the answers, and the action code took.
+ * readings a battery drew from the answers, and the action code took. Both
+ * describe work already done, so the decision log's recorder never throws:
+ * a note it could not write is counted and reported by the composition.
  */
 export interface DecisionRecorder {
   recordReadings(decisionId: string, readings: JsonValue): void;

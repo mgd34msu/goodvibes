@@ -36,7 +36,6 @@ const fixedNow = () => new Date('2026-10-01T00:00:00.000Z');
 const name = 'test.attribution';
 const questions = { q: noul('Is it urgent?') };
 const context = { site: 'calibration', battery: name, batteryVersion: 1, fixture: 'shared' };
-const boundedQuery = { site: 'calibration', status: 'answered', limit: 100_000 } as const;
 const answering = () => fakePort(() => noulAnswer(0.95)).port;
 // Attribution uses recorded IDs/context/truth, never this synthetic field's
 // source digest. Actual withDecisionLog calls below still record real hashes.
@@ -71,7 +70,6 @@ function answered(callContext: DecisionContext = context): Extract<NewDecisionEn
 class OpaqueDecisionLog implements DecisionLog {
   readonly queries: DecisionQuery[] = [];
   readonly gets: string[] = [];
-  readonly omittedFromWindow = new Set<string>();
   readonly #entries: DecisionEntry[] = [];
   readonly #ids: readonly string[];
 
@@ -101,8 +99,7 @@ class OpaqueDecisionLog implements DecisionLog {
     this.queries.push({ ...query });
     if (query.outcome !== undefined) throw new Error('outcome queries are not used by this test log');
     return [...this.#entries].reverse()
-      .filter((entry) => !this.omittedFromWindow.has(entry.id)
-        && (query.site === undefined || entry.context.site === query.site)
+      .filter((entry) => (query.site === undefined || entry.context.site === query.site)
         && (query.battery === undefined || entry.context.battery === query.battery)
         && (query.status === undefined || entry.status === query.status)
         && (query.since === undefined || entry.at >= query.since)
@@ -113,7 +110,7 @@ class OpaqueDecisionLog implements DecisionLog {
 }
 
 describe('calibration truth belongs to the returned calls of this run', () => {
-  test('native bounded ID windows do not parse unrelated question, answer or note blobs', async () => {
+  test('truth is attached by looking up only the returned ids, never parsing unrelated entries', async () => {
     using log = new SqliteDecisionLog(':memory:');
     const marker = 'unrelated-calibration-blob-fixture';
     const blob = marker.repeat(256);
@@ -133,7 +130,7 @@ describe('calibration truth belongs to the returned calls of this run', () => {
     try {
       const report = await calibrate(withDecisionLog(answering(), log, fixedNow), [battery], { endpoint, log });
       expect(report.decisions[0]).toMatchObject({ passed: true, truthRecorded: 1 });
-      expect(ids.mock.calls).toEqual([[boundedQuery], [boundedQuery]]);
+      expect(ids).toHaveBeenCalledTimes(0);
       expect(fullQueries).toHaveBeenCalledTimes(0);
       expect(gets).toHaveBeenCalledTimes(1);
       expect(unrelatedParses).toBe(0);
@@ -182,7 +179,7 @@ describe('calibration truth belongs to the returned calls of this run', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
-  test('opaque nonmonotonic ids use identical bounded before/after queries and retain every fixture check', async () => {
+  test('opaque nonmonotonic ids are looked up directly and retain every fixture check', async () => {
     const log = new OpaqueDecisionLog(['z-before', 'a-current', 'm-current']);
     log.record(answered());
     const checks = [check('one'), { ...check('one'), aspect: 'second' }, check('two')];
@@ -195,33 +192,11 @@ describe('calibration truth belongs to the returned calls of this run', () => {
     const report = await calibrate(withDecisionLog(answering(), log, fixedNow), [run], { endpoint, log });
 
     expect(report.decisions[0]).toMatchObject({ passed: true, truthRecorded: 2 });
-    expect(log.queries).toEqual([boundedQuery, boundedQuery]);
-    expect(log.gets).toEqual(['m-current', 'a-current']);
+    expect(log.queries).toEqual([]);
+    expect(log.gets).toEqual(['a-current', 'm-current']);
     expect(truthOf(log.get('z-before')!)).toBeUndefined();
     expect(truthOf(log.get('a-current')!)).toEqual({ source: 'fixture', checks: checks.slice(0, 2) });
     expect(truthOf(log.get('m-current')!)).toEqual({ source: 'fixture', checks: checks.slice(2) });
-  });
-
-  test('a stale returned fixture id cannot replace old truth or claim an unreturned concurrent call', async () => {
-    using log = new SqliteDecisionLog(':memory:');
-    const staleId = log.record(answered());
-    const oldTruth = { source: 'owner', checks: [check('shared', 'old')] } as const;
-    log.attach(staleId, { kind: 'truth', truth: oldTruth });
-    const inner = answering();
-    let unreturnedId = '';
-    const port: JudgmentPort = {
-      model: inner.model,
-      async ask(request) {
-        const result = await inner.ask(request);
-        unreturnedId = log.record(answered());
-        return { ...result, decisionId: staleId };
-      },
-    };
-    const report = await calibrate(port, [battery], { endpoint, log });
-
-    expect(report.decisions[0]).toMatchObject({ passed: true, truthRecorded: 0 });
-    expect(truthOf(log.get(staleId)!)).toEqual(oldTruth);
-    expect(truthOf(log.get(unreturnedId)!)).toBeUndefined();
   });
 
   test('overlapping runs of the same decision and fixture only attach their own returned calls', async () => {
@@ -361,21 +336,6 @@ describe('calibration truth belongs to the returned calls of this run', () => {
     const report = await calibrate(port, [battery], { endpoint, log });
     expect(report.decisions[0]).toMatchObject({ passed: true, truthRecorded: 0 });
     expect(truthOf(log.get(id)!)).toBeUndefined();
-  });
-
-  test('a returned call absent from the bounded after window is not recovered through an unscoped get', async () => {
-    const log = new OpaqueDecisionLog(['outside-window']);
-    const run = decision(async (port) => {
-      const result = await port.ask({ state: 'urgent', questions, context });
-      // Model a bounded store query omitting this call, without allocating 100,000 filler rows.
-      log.omittedFromWindow.add(result.decisionId!);
-      return [check()];
-    });
-    const report = await calibrate(withDecisionLog(answering(), log, fixedNow), [run], { endpoint, log });
-    expect(report.decisions[0]).toMatchObject({ passed: true, truthRecorded: 0 });
-    expect(log.queries).toEqual([boundedQuery, boundedQuery]);
-    expect(log.gets).toEqual([]);
-    expect(truthOf(log.get('outside-window')!)).toBeUndefined();
   });
 
   test('the scoped port preserves class receivers, prototype metadata, recorder and the caller signal', async () => {

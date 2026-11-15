@@ -24,7 +24,8 @@ import {
 import type { JudgmentKeySource } from '../config/schema-types-judgment.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { captureJudgmentFallbackSettings } from '../config/judgment-fallback-settings.js';
-import { openStateDecisionLogWithNotice } from '../state/decision-log.js';
+import { openStateDecisionLogWithNotice, scheduleDecisionLogRetention } from '../state/decision-log.js';
+import { logger } from '../utils/logger.js';
 import { withWebuiAnswerBoundary, type WebuiAnswerBoundaryOptions } from '../judgment-browser/batteries/webui-answers.js';
 import type { DisposalRegistry } from './disposal.js';
 
@@ -229,6 +230,8 @@ export interface JudgmentServices {
   readonly decisionLog: SqliteDecisionLog;
   /** Set when the previous log could not be read: it was kept aside and this one is new. */
   readonly decisionLogNotice?: string;
+  /** Notes (readings, actions) the log could not write since the composition started; the work they describe was done. */
+  readonly unrecordedNotes?: () => number;
   /** The call-volume monitor's last alert (budget breach, unreadable log), for status reads; the log line stays too. */
   readonly volumeMonitor: JudgmentVolumeMonitorHandle;
 }
@@ -278,33 +281,20 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
   input.disposal.add('decision-model policy', restorePolicy);
   const { log: decisionLog, notice: decisionLogNotice } = openStateDecisionLogWithNotice(input.stateRoot);
   const transport = createSettingsJudgmentPort(input);
-  // Publish one completed response per event-loop turn. Each response records
-  // its decision, readings and action synchronously; a burst of responses must
-  // not keep terminal input waiting behind all of those durable writes.
-  const completions: (() => void)[] = [];
-  let closing = false;
-  const publish = (): void => {
-    completions.shift()?.();
-    if (completions.length > 0) setImmediate(publish);
+  const retention = scheduleDecisionLogRetention(decisionLog);
+  let unrecordedNotes = 0;
+  const onUnrecordedNote = (count: number): void => {
+    unrecordedNotes += 1;
+    // One notice for the composition; the count stays readable after it.
+    if (unrecordedNotes === 1) {
+      logger.warn('The decision log could not record a note about a finished judgment; the work itself was done. Check free disk space and that no other process holds the log for long.', { count });
+    }
   };
-  const yieldCompletion = (): Promise<void> => closing ? Promise.resolve() : new Promise(resolve => {
-    completions.push(resolve);
-    if (completions.length === 1) setImmediate(publish);
-  });
   const lifetime = new AbortController();
   const active = new Set<Promise<unknown>>();
   // Both ports share one lifetime, one set of owned calls and one decision log.
   const owned = (base: JudgmentPort): JudgmentPort => {
-    const recorded = withDecisionLog({
-      get model() { return base.model; },
-      get decisionDeadlineMs() { return base.decisionDeadlineMs; },
-      ...(base.health ? { health: () => base.health!() } : {}),
-      ...(base.revision ? { revision: () => base.revision!() } : {}),
-      async ask(request) {
-        try { return await base.ask(request); }
-        finally { await yieldCompletion(); }
-      },
-    }, decisionLog);
+    const recorded = withDecisionLog(base, decisionLog, { onUnrecordedNote });
     return {
       get model() { return recorded.model; },
       get decisionDeadlineMs() { return recorded.decisionDeadlineMs; },
@@ -351,10 +341,7 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
   const previous = installJudgmentPort(port, { alongside: true });
   input.disposal.add('judgment port and decision log', () => {
     retired.add(port);
-    closing = true;
-    // Interactive fairness no longer applies after retirement. Drain queued
-    // completions directly; shutdown must not depend on a later event-loop turn.
-    while (completions.length > 0) completions.shift()!();
+    retention.dispose();
     sourceLifetime.dispose();
     restoreJudgmentPort(port, previous !== undefined && !retired.has(previous) ? previous : undefined);
     lifetime.abort(new JudgmentError('aborted', 'the judgment runtime is shutting down'));
@@ -364,5 +351,6 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
     return Promise.allSettled([...active]).then(() => { decisionLog[Symbol.dispose](); });
   });
   const volumeMonitor = composeJudgmentVolumeMonitor(decisionLog, input.env, input.disposal, input.config);
-  return { port, browserPort, decisionLog, volumeMonitor, ...(decisionLogNotice === undefined ? {} : { decisionLogNotice }) };
+  return { port, browserPort, decisionLog, volumeMonitor, unrecordedNotes: () => unrecordedNotes,
+    ...(decisionLogNotice === undefined ? {} : { decisionLogNotice }) };
 }

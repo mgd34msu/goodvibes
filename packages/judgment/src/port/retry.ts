@@ -1,7 +1,11 @@
 import { APIConnectionError, APIError, APITimeoutError } from '@typesafe-ai/sdk';
 import { JudgmentError } from './errors.ts';
 
-/** Cooldown timing for failed targets; independent backups do not wait for it. */
+/**
+ * Timing for the one further attempt a target gets after a transient failure
+ * (the wait before it never exceeds `backoffMaxMs`), and for how long a target
+ * that asked for a `Retry-After` is skipped. Independent backups do not wait for it.
+ */
 export interface JudgmentRetryPolicy {
   readonly backoffInitialMs: number;
   readonly backoffMaxMs: number;
@@ -26,7 +30,7 @@ export function retryable(error: unknown): boolean {
     || (error instanceof APIError && transientStatus(error.status));
 }
 
-/** Bound provider-controlled cooldowns to five minutes; calls themselves never wait for them. */
+/** The wait a server asked for, or the backoff; bounded to five minutes. A call waits only when it fits within `backoffMaxMs`. */
 export function retryDelay(error: unknown, attempt: number, policy: JudgmentRetryPolicy): number {
   // Clamp the exponent before multiplication: arbitrarily long outages must not overflow.
   const backoff = Math.max(1, Math.round(Math.min(policy.backoffInitialMs * 2 ** Math.min(attempt, 30), policy.backoffMaxMs)

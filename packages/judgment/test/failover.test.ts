@@ -52,7 +52,7 @@ describe('finite configured decision model failover', () => {
     const work = withDecisionLog(port, log).ask({ ...request, onRetry: () => { progress++; } }).then(result => { effects++; return result; });
     const error = await failure(work);
     expect(error.kind).toBe('unavailable');
-    expect(error.message).toContain('No decision models are currently available');
+    expect(error.reason).toBe('unreachable');
     expect(calls).toBe(2); expect(progress).toBe(1); expect(effects).toBe(0);
     expect(log.query()).toHaveLength(1);
     expect(log.query()[0]?.status).toBe('failed');
@@ -83,7 +83,7 @@ describe('finite configured decision model failover', () => {
     expect(error.status).toBe(status);
     expect(error.requestId).toBe('failed-2');
     expect(error.cause).toBeUndefined();
-    expect(error.message).toContain('No decision models are currently available');
+    expect(error.reason).toBe('endpoint-status');
     expect(error.message).toContain(`HTTP ${status}`);
     expect(error.lineage?.attempts.map((attempt) => [attempt.attempt, attempt.endpointIndex, attempt.outcome, attempt.status, attempt.requestId]))
       .toEqual([[1, 0, 'unavailable', status, 'failed-1'], [2, 1, 'unavailable', status, 'failed-2']]);

@@ -6,7 +6,7 @@ import { captureJudgmentInput } from '../port/input-snapshot.ts';
 import { DECISION_MODELS_UNAVAILABLE_NOTICE, rateLimitedNotice } from '../port/availability-notice.ts';
 import { types as nodeTypes } from 'node:util';
 import { checkAnswers, projectAnswers } from '../port/answers.ts';
-import { JudgmentContextLimitError, JudgmentError, type JudgmentErrorKind } from '../port/errors.ts';
+import { isJudgmentFailureReason, JUDGMENT_FAILURE_REASONS, JudgmentContextLimitError, JudgmentError, type JudgmentErrorKind } from '../port/errors.ts';
 import {
   toJson, type JudgmentAttempt, type JudgmentLineage, type JudgmentPort, type JudgmentRequest,
   type JudgmentResult, type Questions,
@@ -140,6 +140,10 @@ function asFailure(error: unknown, overrideKind?: JudgmentErrorKind): JudgmentEr
   const lineage = optional(() => projectLineage(source?.lineage));
   const rawRetryAfter = kind === 'unavailable' ? optional(() => source?.retryAfterMs) : undefined;
   const retryAfterMs = nonnegative(rawRetryAfter) && rawRetryAfter > 0 ? Math.ceil(rawRetryAfter) : undefined;
+  // A reason is a member of a closed list, so it is kept; the sentence shown
+  // for it is this package's own, never the text the port wrote.
+  const rawReason = kind === 'internal' || overrideKind !== undefined ? undefined : optional(() => source?.reason);
+  const reason = isJudgmentFailureReason(rawReason) ? rawReason : undefined;
   if (kind === 'rejected' && status === 400 && optional(() => source instanceof JudgmentContextLimitError)) {
     return new JudgmentContextLimitError({
       ...(requestId === undefined ? {} : { requestId }), ...(lineage === undefined ? {} : { lineage }),
@@ -148,12 +152,16 @@ function asFailure(error: unknown, overrideKind?: JudgmentErrorKind): JudgmentEr
   // HTTP status is validated metadata, not private upstream exception text.
   // Preserve it in the displayed diagnostic as well as the structured error:
   // a billing refusal must not look like Jev rejected the task itself.
+  const sentence = reason === undefined ? FAILURE_MESSAGES[kind] : JUDGMENT_FAILURE_REASONS[reason];
+  const http = status === undefined ? '' : `HTTP ${status}${status === 402 ? ': Payment Required' : ''}`;
   const diagnostic = retryAfterMs !== undefined ? rateLimitedNotice(retryAfterMs)
-    : status === undefined ? FAILURE_MESSAGES[kind]
-    : `${FAILURE_MESSAGES[kind]} (HTTP ${status}${status === 402 ? ': Payment Required' : ''})`;
+    : reason === 'endpoint-status' && status !== undefined ? `The decision endpoint answered ${http}; retry in a moment.`
+    : status === undefined ? sentence
+    : sentence.endsWith('.') ? `${sentence.slice(0, -1)} (${http}).` : `${sentence} (${http})`;
   const message = kind === 'rejected' && (status === 401 || status === 403)
-    ? `${diagnostic}. ${DECISION_MODELS_UNAVAILABLE_NOTICE}` : diagnostic;
+    ? `${diagnostic.replace(/\.$/, '')}. ${DECISION_MODELS_UNAVAILABLE_NOTICE}` : diagnostic;
   return new JudgmentError(kind, message, {
+    ...(reason === undefined ? {} : { reason }),
     ...(status === undefined ? {} : { status }),
     ...(requestId === undefined ? {} : { requestId }),
     ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
@@ -179,6 +187,17 @@ function checkCancellation(signal: AbortSignal | undefined): void {
 function recorded<T>(write: () => T): T {
   try { return write(); }
   catch { throw new JudgmentError('unrecorded', FAILURE_MESSAGES.unrecorded); }
+}
+
+/** What the composition hears about notes the log could not write. */
+export interface DecisionLogOptions {
+  readonly now?: () => Date;
+  /**
+   * Called once per note that could not be written, with the running count.
+   * A note describes something that already happened, so its failure never
+   * fails the caller; the composition raises one notice from this.
+   */
+  readonly onUnrecordedNote?: (count: number) => void;
 }
 
 /** A retention refusal never copies private assertion text or creates a log entry. */
@@ -233,17 +252,29 @@ function projectResult<Q extends Questions>(questions: Q, expectedModel: string,
  * Wraps a port so every admitted call is recorded, answered or failed. An
  * optional current-retention assertion can refuse capture or a later write.
  * When the log cannot record a call, the call fails with `unrecorded`: no
- * decision acts on a reading the log does not hold.
+ * decision acts on a reading the log does not hold. A note written after the
+ * answer (later readings, the action code took) never fails its caller: the
+ * work it describes is done, so a failed note is counted and reported through
+ * `onUnrecordedNote` instead.
  */
-export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () => Date = () => new Date()): JudgmentPort {
+export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, options: DecisionLogOptions | (() => Date) = {}): JudgmentPort {
+  const { now = () => new Date(), onUnrecordedNote } = typeof options === 'function' ? { now: options } : options;
+  let unrecordedNotes = 0;
+  const note = (id: string, value: DecisionNote): void => {
+    try { log.attach(id, value); }
+    catch {
+      unrecordedNotes += 1;
+      try { onUnrecordedNote?.(unrecordedNotes); } catch { /* a listener cannot turn finished work into a failure */ }
+    }
+  };
   return {
     get model() { return inner.model; },
     get decisionDeadlineMs() { return inner.decisionDeadlineMs; },
     ...(inner.revision ? { revision: () => inner.revision!() } : {}),
     ...(inner.health ? { health: () => inner.health!() } : {}),
     recorder: {
-      recordReadings: (id, readings) => recorded(() => log.attach(id, { kind: 'readings', readings })),
-      recordAction: (id, action) => recorded(() => log.attach(id, { kind: 'action', action })),
+      recordReadings: (id, readings) => note(id, { kind: 'readings', readings }),
+      recordAction: (id, action) => note(id, { kind: 'action', action }),
     },
     async ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> {
       const started = performance.now();
@@ -329,7 +360,7 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
           latencyMs: performance.now() - started,
           requestId: failure.requestId,
           lineage: failure.lineage ?? { logicalRequestId: opaqueUuid(), attempts: [] },
-          error: { kind: failure.kind, message: failure.message },
+          error: { kind: failure.kind, message: failure.message, ...(failure.reason === undefined ? {} : { reason: failure.reason }) },
         };
         // Failure projection can itself call borrowed getters. A refused
         // retention assertion escapes this catch without a replacement entry.

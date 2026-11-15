@@ -63,10 +63,12 @@ function assertItems(decision: string, items: readonly Item[]): void {
   if (new Set(items.map((item) => item.id)).size !== items.length) throw new RangeError(`existence ${decision}: item ids must be unique`);
 }
 
-function existenceQuestions(query: string, items: readonly Item[]): Record<string, Question> {
+// The query sits in the state beside the items; the questions name it by
+// path, so they are the same for every call and the log keeps no query text.
+function existenceQuestions(items: readonly Item[]): Record<string, Question> {
   return {
-    where: choice({ question: 'Which item contains the answer to `query`?', query }, Object.fromEntries(items.map((item) => [item.id, null]))),
-    exists: noul({ question: 'Does any item address or answer `query`?', query }, {
+    where: choice('Which item in `items` contains the answer to `query`?', Object.fromEntries(items.map((item) => [item.id, null]))),
+    exists: noul('Does any item in `items` address or answer `query`?', {
       true: 'At least one item states or directly implies the answer.',
       false: 'No item addresses this.',
     }),
@@ -96,8 +98,8 @@ export function defineExistence(spec: ExistenceSpec): Existence {
     ...header,
     async find(port, query, items, options = {}) {
       assertItems(spec.name, items);
-      const state = items.map((item) => `${item.id}| ${item.text}`).join('\n');
-      const result = await askAs(port, spec, 'existence', state, existenceQuestions(query, items), options);
+      const state = { query, items: items.map((item) => `${item.id}| ${item.text}`).join('\n') };
+      const result = await askAs(port, spec, 'existence', state, existenceQuestions(items), options);
       const { where, exists: existsAnswer } = result.answers as { readonly where: ChoiceResponse; readonly exists: NoulResponse };
       const exists = readYesNo(existsAnswer, spec.band);
       const ranked = rankItems(items, where.probabilities);

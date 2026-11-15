@@ -26,7 +26,7 @@ describe('Agent channel delivery', () => {
     const preview = buildAgentChannelDeliveryPreview({
       title: 'Approvals',
       message: 'Review approvals',
-      channel: 'slack:ops:Ops',
+      channel: 'slack:ops | Ops',
     });
 
     expect(preview.request.target).toMatchObject({
@@ -35,6 +35,9 @@ describe('Agent channel delivery', () => {
       routeId: 'ops',
       label: 'Ops',
     });
+    // A route id may hold colons (a Matrix room); only the first colon ends the channel kind.
+    expect(buildAgentChannelDeliveryPreview({ message: 'Hi', channel: 'matrix:!ops:example.org' }).request.target)
+      .toEqual({ kind: 'surface', surfaceKind: 'matrix', routeId: '!ops:example.org' });
     expect(preview.request.body).toBe('Review approvals');
     expect(preview.request.title).toBe('Approvals');
     expect(preview.request.metadata).toMatchObject({

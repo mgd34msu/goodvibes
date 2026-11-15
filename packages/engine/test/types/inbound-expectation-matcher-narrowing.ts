@@ -38,7 +38,7 @@ declare const now: Date;
 // The two verbs the inbound path is entitled to, and they type-check.
 export async function readTheBook(): Promise<VerificationMatch> {
   const match = await matcher.matchCandidate(candidate, now);
-  await matcher.consumeMatch(match);
+  await matcher.consumeMatch(match, candidate);
   return match;
 }
 

@@ -86,11 +86,13 @@
 import {
   MAX_VERIFICATION_WINDOW_MS,
   VerificationExpectationBook,
+  type CandidateEmail,
   type OpenExpectationInput,
   type SurfaceAuthorityProbe,
   type VerificationExpectation,
   type VerificationMatch,
 } from '../../google/verification-expectations.js';
+import { extractVerification } from '../../google/verification-extraction.js';
 import { surfaceHasCommandAuthority } from '../../security/untrusted-content.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -99,6 +101,39 @@ import type { InboundCapabilityReason, InboundCapabilityVerdict } from './ports.
 
 /** How many reported expectation ids the registry remembers to avoid reporting one twice. */
 const MAX_REMEMBERED_REPORTS = 256;
+/** How many ended expectations keep their outcome for a later `wait` or `get`. */
+const MAX_REMEMBERED_OUTCOMES = 64;
+/** The longest one `wait` holds before answering with the state as it is. */
+export const MAX_EXPECTATION_WAIT_MS = 60_000;
+
+/** A link or code a matched message yielded; the one thing a verification mail may hand on. */
+export type ExpectationToken =
+  | { readonly kind: 'link'; readonly url: string; readonly linkHost: string }
+  | { readonly kind: 'code'; readonly code: string };
+
+/** A message that matched an open expectation but yielded no link or code. The window stays open. */
+export interface ExpectationArrival {
+  readonly messageId: string;
+  readonly at: string;
+  /** Why no token was taken from it, in one sentence. */
+  readonly reason: string;
+}
+
+/**
+ * Where one expectation stands, keyed by the id `open()` returned.
+ *
+ *  - `waiting`: open; `arrivals` lists matching messages that held no link or code.
+ *  - `arrived`: a matching message yielded its token; the expectation is closed.
+ *  - `expired` / `capability-lost`: ended without a token; `detail` says which and why.
+ *  - `cancelled`: the workstream closed it.
+ *  - `unknown`: no expectation with this id is open or remembered.
+ */
+export type ExpectationState =
+  | { readonly state: 'waiting'; readonly expectation: DisclosedExpectation; readonly arrivals: readonly ExpectationArrival[] }
+  | { readonly state: 'arrived'; readonly expectation: VerificationExpectation; readonly messageId: string; readonly at: string; readonly token: ExpectationToken }
+  | { readonly state: 'expired' | 'capability-lost'; readonly expectation: VerificationExpectation; readonly detail: string; readonly arrivals: readonly ExpectationArrival[] }
+  | { readonly state: 'cancelled'; readonly expectation: VerificationExpectation }
+  | { readonly state: 'unknown'; readonly id: string };
 
 /**
  * How often the registry re-checks for expectations that have run out, given
@@ -173,7 +208,11 @@ export interface ExpectationMatcher {
    */
   matchCandidate(...args: Parameters<BookMatchCandidate>): Promise<ReturnType<BookMatchCandidate>>;
   /**
-   * Spend the grant a `matched` answer named, and write that through.
+   * Spend the grant a `matched` answer named, and write that through, but only
+   * when `message` yields the verification link or code. A matching message
+   * without one (the welcome note a signup usually sends first, or a message
+   * read without its body) is remembered as an arrival and the window stays
+   * open for the real verification mail.
    *
    * Takes the MATCH, not an id: the caller can only spend the expectation the
    * book itself just handed it, and has no way to name any other. Anything
@@ -186,7 +225,7 @@ export interface ExpectationMatcher {
    * unsolicited. `intake.ts` states why that ordering is the fix rather than a
    * second durable store of matches.
    */
-  consumeMatch(match: VerificationMatch): Promise<void>;
+  consumeMatch(match: VerificationMatch, message: CandidateEmail): Promise<void>;
 }
 
 /**
@@ -331,7 +370,7 @@ export class InboundExpectationRegistry {
         const match = this.book.matchCandidate(...args);
         // The book drops an elapsed expectation when a late message names it.
         // That is the only record of the ending, so it is reported here.
-        if (match.kind === 'expired') this.report([describeExpiry(match.expectation)]);
+        if (match.kind === 'expired') this.report(this.expire([match.expectation]));
         // Written when the book's own live set differs from what was last
         // mirrored, never on a prediction of which match kinds mutate: the
         // answer comes from the book's state, so a question that changed
@@ -339,12 +378,115 @@ export class InboundExpectationRegistry {
         await this.persistIfChanged();
         return match;
       },
-      consumeMatch: async (match) => {
+      consumeMatch: async (match, message) => {
         if (match.kind !== 'matched') return;
+        const at = this.now().toISOString();
+        // Code reads the token; the extractor accepts only a secure link on the
+        // service's own domain, or a labelled code in a verification message.
+        const artifact = extractVerification(message, match.expectation, this.now).artifact;
+        if (artifact.kind !== 'link' && artifact.kind !== 'code') {
+          const reason = message.body.length === 0
+            ? 'it was read without its body, so no link or code could be taken from it'
+            : artifact.kind === 'refused'
+              ? `its link points at ${artifact.linkHost}, not ${artifact.expectedDomain}`
+              : artifact.reason;
+          this.remember(match.expectation.id, { messageId: message.messageId, at, reason });
+          return;
+        }
         if (this.book.closeExpectation(match.expectation.id) === null) return;
+        const token: ExpectationToken = artifact.kind === 'link'
+          ? { kind: 'link', url: artifact.url, linkHost: artifact.linkHost }
+          : { kind: 'code', code: artifact.code };
+        this.settle({ state: 'arrived', expectation: match.expectation, messageId: message.messageId, at, token });
         await this.persist();
       },
     };
+  }
+
+  /** Matching messages that held no token, per open expectation. */
+  private readonly arrivals = new Map<string, ExpectationArrival[]>();
+  /** How recently ended expectations ended, oldest first. */
+  private readonly outcomes = new Map<string, Exclude<ExpectationState, { state: 'waiting' | 'unknown' }>>();
+  private readonly waiters = new Map<string, Set<() => void>>();
+
+  private remember(id: string, arrival: ExpectationArrival): void {
+    const list = this.arrivals.get(id) ?? [];
+    list.push(arrival);
+    this.arrivals.set(id, list.slice(-8));
+    this.wake(id);
+  }
+
+  private settle(outcome: Exclude<ExpectationState, { state: 'waiting' | 'unknown' }>): void {
+    const id = outcome.expectation.id;
+    this.outcomes.delete(id);
+    this.outcomes.set(id, outcome);
+    this.arrivals.delete(id);
+    if (this.outcomes.size > MAX_REMEMBERED_OUTCOMES) {
+      const oldest = this.outcomes.keys().next();
+      if (!oldest.done) this.outcomes.delete(oldest.value);
+    }
+    this.wake(id);
+  }
+
+  private wake(id: string): void {
+    const waiting = this.waiters.get(id);
+    if (!waiting) return;
+    this.waiters.delete(id);
+    for (const resume of waiting) resume();
+  }
+
+  /** Where the expectation with this id stands now. Reads memory; an elapsed window is ended and reported here. */
+  get(id: string): ExpectationState {
+    const known = this.outcomes.get(id);
+    if (known) return known;
+    const now = this.now().getTime();
+    const open = this.book.list(this.now()).find((expectation) => expectation.id === id);
+    if (!open) {
+      // A window that ran out since the last sweep ends now, so the caller is
+      // told "expired" rather than "unknown"; the sweep then finds nothing to repeat.
+      const lapsed = this.book.sweepExpired(this.now());
+      if (lapsed.length > 0) {
+        this.report(this.expire(lapsed));
+        void this.persist().catch((error: unknown) => {
+          logger.error('The inbound-mail expectation store could not be updated after an expiry', { surface: 'email-inbound', detail: summarizeError(error) });
+        });
+      }
+      return this.outcomes.get(id) ?? { state: 'unknown', id };
+    }
+    return {
+      state: 'waiting',
+      expectation: { ...open, remainingMs: Math.max(0, Date.parse(open.expiresAt) - now) },
+      arrivals: [...(this.arrivals.get(id) ?? [])],
+    };
+  }
+
+  /**
+   * Answer as soon as the expectation's state changes (a token arrived, a
+   * matching message without one arrived, it expired, the mailbox was lost, it
+   * was cancelled), or after `timeoutMs` (at most a minute) with the state as
+   * it is. One call replaces a list-then-guess loop over the mailbox.
+   */
+  async wait(id: string, options: { readonly timeoutMs?: number | undefined; readonly signal?: AbortSignal | undefined } = {}): Promise<ExpectationState> {
+    const timeoutMs = Math.max(0, Math.min(MAX_EXPECTATION_WAIT_MS, options.timeoutMs ?? 0));
+    const before = this.get(id);
+    if (before.state !== 'waiting' || timeoutMs === 0 || options.signal?.aborted) return before;
+    await new Promise<void>((resolve) => {
+      const waiting = this.waiters.get(id) ?? new Set<() => void>();
+      this.waiters.set(id, waiting);
+      const done = (): void => {
+        clearTimeout(timer);
+        options.signal?.removeEventListener('abort', done);
+        waiting.delete(done);
+        resolve();
+      };
+      // The window's own end is a change too; `get` then ends it as expired.
+      const until = Math.min(timeoutMs, Math.max(0, before.expectation.remainingMs) + 50);
+      const timer = setTimeout(done, until);
+      timer.unref?.();
+      options.signal?.addEventListener('abort', done, { once: true });
+      waiting.add(done);
+    });
+    return this.get(id);
   }
 
   /**
@@ -400,7 +542,7 @@ export class InboundExpectationRegistry {
     }
     // Windows that ran out while the daemon was down. The store reaped those
     // rows (here or in an earlier recovery sweep) and kept them for this.
-    this.report(this.store.takeExpired().map(describeExpiry));
+    this.report(this.expire(this.store.takeExpired()));
     // The file may have held records the book refused (expired mid-restart,
     // over cap, malformed). Persist what is actually live so disk and memory
     // agree from the first moment rather than at the first mutation.
@@ -457,7 +599,7 @@ export class InboundExpectationRegistry {
     // The book reaps elapsed expectations as it opens one; do that first, here,
     // so each of them is reported rather than dropped without a word.
     const lapsed = this.book.sweepExpired(request.now);
-    this.report(lapsed.map(describeExpiry));
+    this.report(this.expire(lapsed));
     const expectation = this.book.openExpectation(request);
     try {
       await this.persist();
@@ -518,7 +660,10 @@ export class InboundExpectationRegistry {
    */
   async cancel(id: string): Promise<VerificationExpectation | null> {
     const closed = this.book.closeExpectation(id);
-    if (closed !== null) await this.persist();
+    if (closed !== null) {
+      this.settle({ state: 'cancelled', expectation: closed });
+      await this.persist();
+    }
     return closed;
   }
 
@@ -531,7 +676,7 @@ export class InboundExpectationRegistry {
   async sweep(): Promise<readonly ExpectationExpiryReport[]> {
     const now = this.now();
     const expired = this.book.sweepExpired(now);
-    const reports = expired.map((expectation) => describeExpiry(expectation));
+    const reports = this.expire(expired);
     // Reported even when the write fails: the records already left memory, so
     // this is the only moment the outcome can be told, and a full disk is
     // exactly when nobody must be left waiting in silence.
@@ -621,7 +766,11 @@ export class InboundExpectationRegistry {
     const open = this.book.list(now);
     if (open.length === 0) return [];
     const reports = open.map((expectation) => describeCapabilityLoss(expectation, verdict));
-    for (const expectation of open) this.book.closeExpectation(expectation.id);
+    for (const expectation of open) {
+      this.book.closeExpectation(expectation.id);
+      const report = reports.find((candidate) => candidate.id === expectation.id);
+      this.settle({ state: 'capability-lost', expectation, detail: report?.detail ?? '', arrivals: this.arrivals.get(expectation.id) ?? [] });
+    }
     try {
       await this.persist();
     } finally {
@@ -669,6 +818,16 @@ export class InboundExpectationRegistry {
   private readonly openedListeners = new Set<() => void>();
 
   /** Emit each report, never letting one broken route strand the rest. */
+  /** Record each elapsed expectation's ending for `wait`/`get`, and describe it for the report. */
+  private expire(expectations: readonly VerificationExpectation[]): ExpectationExpiryReport[] {
+    return expectations.map((expectation) => {
+      const arrivals = this.arrivals.get(expectation.id) ?? [];
+      const report = describeExpiry(expectation, arrivals);
+      if (!this.outcomes.has(expectation.id)) this.settle({ state: 'expired', expectation, detail: report.detail, arrivals });
+      return report;
+    });
+  }
+
   private report(reports: readonly ExpectationExpiryReport[]): void {
     for (const report of reports) {
       if (this.reportedIds.has(report.id)) continue;
@@ -687,7 +846,23 @@ export class InboundExpectationRegistry {
   }
 }
 
-function describeExpiry(expectation: VerificationExpectation): ExpectationExpiryReport {
+function describeExpiry(expectation: VerificationExpectation, arrivals: readonly ExpectationArrival[] = []): ExpectationExpiryReport {
+  const last = arrivals[arrivals.length - 1];
+  if (last) {
+    return {
+      id: expectation.id,
+      serviceDomain: expectation.serviceDomain,
+      recipientAddress: expectation.recipientAddress,
+      purpose: expectation.purpose,
+      openedAt: expectation.openedAt,
+      expiresAt: expectation.expiresAt,
+      reason: 'window-elapsed',
+      detail:
+        `${arrivals.length} message(s) for ${expectation.purpose} arrived at ${expectation.recipientAddress}, `
+        + `but none held a verification link or code (latest ${last.messageId}: ${last.reason}). The window `
+        + `closed at ${expectation.expiresAt}; read that message to finish the verification by hand.`,
+    };
+  }
   return {
     id: expectation.id,
     serviceDomain: expectation.serviceDomain,

@@ -29,7 +29,6 @@ import {
   editConnectedSchedule,
   enrichScheduleEditPreviewFromConnectedHost,
   parseScheduleEditArgs,
-  resolveScheduleEditConnectedHostConnection,
 } from '../../agent/schedule-edit.ts';
 import {
   formatScheduleEditFailure,
@@ -112,7 +111,7 @@ async function promoteRoutineSchedule(args: readonly string[], ctx: CommandConte
   const parsed = parseRoutineSchedulePromotionArgs(args);
   if (parsed.errors.length > 0) {
     ctx.print([
-      'Usage: /schedule promote-routine <routine-id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route[:label]]>|--delivery-route <route[:label]>|--delivery-webhook <url>|--delivery-link <url>] [--disabled] --yes',
+      'Usage: /schedule promote-routine <routine-id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>|--delivery-link <url>] [--disabled] --yes',
       ...parsed.errors.map((error) => `  ${error}`),
     ].join('\n'));
     return;
@@ -130,7 +129,7 @@ async function createReminder(args: readonly string[], ctx: CommandContext): Pro
   const parsed = parseReminderScheduleArgs(args);
   if (parsed.errors.length > 0) {
     ctx.print([
-      'Usage: /schedule remind (--cron <expr>|--every <interval>|--at <iso-time>) (--message <text>|<text...>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route[:label]]>|--delivery-route <route[:label]>|--delivery-webhook <url>|--delivery-link <url>] [--disabled] --yes',
+      'Usage: /schedule remind (--cron <expr>|--every <interval>|--at <iso-time>) (--message <text>|<text...>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>|--delivery-link <url>] [--disabled] --yes',
       ...parsed.errors.map((error) => `  ${error}`),
     ].join('\n'));
     return;
@@ -148,11 +147,11 @@ async function createReminder(args: readonly string[], ctx: CommandContext): Pro
 
 async function editSchedule(args: readonly string[], ctx: CommandContext): Promise<void> {
   const parsed = parseScheduleEditArgs(args, {
-    defaultExplicitUserRequest: `/schedule edit ${args[0] ?? ''}`.trim(),
+    defaultRequestProvenance: `/schedule edit ${args[0] ?? ''}`.trim(),
   });
   if (parsed.errors.length > 0) {
     ctx.print([
-      'Usage: /schedule edit <schedule-id> [--cron <expr>|--every <interval>|--at <iso-time>] [--timezone <tz>] [--stagger-ms <ms>] [--name <text>] [--prompt <text>|--task <text> --success-criteria <text>] --yes',
+      'Usage: /schedule edit <schedule-id> [--cron <expr>|--every <interval>|--at <iso-time>] [--timezone <tz>] [--stagger-ms <ms>] [--name <text>] [--prompt <text>|--task <text> --success-criteria <text>] [--revision <rev> --yes]',
       ...parsed.errors.map((error) => `  ${error}`),
     ].join('\n'));
     return;
@@ -161,7 +160,7 @@ async function editSchedule(args: readonly string[], ctx: CommandContext): Promi
   if (!parsed.yes) {
     try {
       const shellPaths = requireShellPaths(ctx);
-      const connection = resolveScheduleEditConnectedHostConnection(ctx.platform.configManager, shellPaths.homeDirectory);
+      const connection = resolveAgentConnectedHostConnection(ctx.platform.configManager, shellPaths.homeDirectory);
       preview = await enrichScheduleEditPreviewFromConnectedHost(connection, preview);
     } catch {
       // A basic preview is still safer than blocking confirmation on local path services.
@@ -170,7 +169,7 @@ async function editSchedule(args: readonly string[], ctx: CommandContext): Promi
     return;
   }
   const shellPaths = requireShellPaths(ctx);
-  const connection = resolveScheduleEditConnectedHostConnection(ctx.platform.configManager, shellPaths.homeDirectory);
+  const connection = resolveAgentConnectedHostConnection(ctx.platform.configManager, shellPaths.homeDirectory);
   const result = await editConnectedSchedule(connection, preview);
   ctx.print(result.ok ? formatScheduleEditSuccess(result) : formatScheduleEditFailure(result));
 }

@@ -327,8 +327,8 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
  * Build the skill-draft pass the digest runs: one `agent_harness`
  * `propose_skill_drafts` call through the ordinary tool path, under the
  * configured permission manager. The pass ends with its signal, and is refused
- * as stale when the host, session, configuration or harness it was built for
- * has been replaced (identity and integer compares, nothing re-read).
+ * as stale when the services, session or configuration it was built for have
+ * been replaced (one identity and two value compares, nothing re-read).
  */
 export function buildSkillDraftProposer(
   registry: ToolRegistry,
@@ -336,7 +336,7 @@ export function buildSkillDraftProposer(
 ): (signal: AbortSignal) => Promise<number> {
   const services = host.services, context = host.commandContext;
   const manager = services.permissionManager, config = services.configManager;
-  const session = context.session, runtime = session.runtime, sessionId = runtime.sessionId;
+  const sessionId = context.session.runtime.sessionId;
   const incarnation = config.getConfigurationIncarnation();
   // Looked up per pass, not at construction, so launch never depends on the
   // harness being registered; a missing harness ends that pass only.
@@ -356,12 +356,12 @@ export function buildSkillDraftProposer(
     signal.throwIfAborted();
     const tool = currentHarness();
     if (!tool) throw new ToolInputProjectionError('unavailable');
+    // The four facts that can change under a pass: it was stopped, the runtime
+    // services were rebuilt, the configuration moved on, or the session changed.
     const assertCurrent = () => {
       signal.throwIfAborted();
-      if (host.services !== services || host.commandContext !== context || host.toolRegistry !== registry
-        || services.permissionManager !== manager || services.configManager !== config
-        || config.getConfigurationIncarnation() !== incarnation || context.session !== session
-        || session.runtime !== runtime || runtime.sessionId !== sessionId || currentHarness() !== tool)
+      if (host.services !== services || config.getConfigurationIncarnation() !== incarnation
+        || context.session.runtime.sessionId !== sessionId)
         throw new ToolInputProjectionError('stale');
     };
     assertCurrent();

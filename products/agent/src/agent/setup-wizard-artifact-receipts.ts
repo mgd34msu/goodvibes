@@ -150,11 +150,6 @@ function inferStepIdFromMetadata(metadata: Readonly<Record<string, unknown>>, fi
   return '';
 }
 
-function isSetupReceiptArtifact(artifact: ArtifactDescriptor): boolean {
-  const purpose = metadataString(artifact.metadata, 'purpose');
-  return SETUP_RECEIPT_PURPOSES.has(purpose) || metadataBoolean(artifact.metadata, 'setupReceipt');
-}
-
 function isSetupReceiptRecord(metadata: Readonly<Record<string, unknown>>): boolean {
   const purpose = metadataString(metadata, 'purpose');
   if (SETUP_RECEIPT_PURPOSES.has(purpose) || metadataBoolean(metadata, 'setupReceipt')) return true;
@@ -301,21 +296,17 @@ function buildSetupWizardDurableReceipt(input: SetupReceiptInput): AgentSetupWiz
   };
 }
 
+/**
+ * Setup receipts are never read from stored artifacts. Artifact metadata can
+ * arrive from fetched pages, uploads and media providers, and nothing in the
+ * product writes a setup receipt as an artifact, so a step's status comes from
+ * its live check and the smoke gate from the smoke tool's own evidence. Always
+ * returns no receipts; kept only until its last two callers stop passing artifacts.
+ */
 export function buildSetupWizardDurableReceipts(
-  artifacts: readonly ArtifactDescriptor[],
+  _artifacts: readonly ArtifactDescriptor[],
 ): readonly AgentSetupWizardDurableReceipt[] {
-  return artifacts.flatMap((artifact) => {
-    if (!isSetupReceiptArtifact(artifact)) return [];
-    const receipt = buildSetupWizardDurableReceipt({
-      id: artifact.id,
-      filename: artifact.filename,
-      createdAt: artifact.createdAt,
-      metadata: artifact.metadata,
-      inspectRoute: `agent_artifacts mode:"show" artifactId:"${artifact.id}" includeContent:false`,
-      source: metadataString(artifact.metadata, 'source') || metadataString(artifact.metadata, 'purpose') || undefined,
-    });
-    return receipt ? [receipt] : [];
-  });
+  return [];
 }
 
 function readRecord(value: unknown): Record<string, unknown> {

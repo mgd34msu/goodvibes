@@ -398,25 +398,6 @@ function isVerdictReceipt(receipt: AgentSetupWizardDurableReceipt): boolean {
   return validDurableReceipt(receipt) && receipt.status !== 'unknown';
 }
 
-/**
- * The receipt that currently decides a step: the newest verdict for it. A newer
- * blocked or failed receipt outranks an older ready one, because the latest
- * evidence is what the operator needs to act on. At the same instant the
- * negative one wins, so a tie never reads as ready.
- */
-function currentVerdictReceipt(
-  receipts: readonly AgentSetupWizardDurableReceipt[],
-  stepId: string,
-): AgentSetupWizardDurableReceipt | null {
-  return receipts
-    .filter((receipt) => isVerdictReceipt(receipt) && setupStepMatches(stepId, receipt.stepId))
-    .sort((left, right) => (
-      Date.parse(right.recordedAt) - Date.parse(left.recordedAt)
-      || Number(left.status === 'ready') - Number(right.status === 'ready')
-      || left.receiptId.localeCompare(right.receiptId)
-    ))[0] ?? null;
-}
-
 /** Whether a ready receipt still counts: no blocked or failed receipt for the same step is as new or newer. */
 function durableReceiptSatisfies(
   receipt: AgentSetupWizardDurableReceipt,
@@ -430,39 +411,6 @@ function durableReceiptSatisfies(
     && setupStepMatches(receipt.stepId, other.stepId)
     && Date.parse(other.recordedAt) >= readyAt
   ));
-}
-
-export function setupStepHasSatisfyingReceipt(
-  receipts: readonly AgentSetupWizardDurableReceipt[],
-  stepId: string,
-): boolean {
-  return currentVerdictReceipt(receipts, stepId)?.status === 'ready';
-}
-
-function applyDurableReceiptStatus(
-  items: readonly AgentSetupWizardSourceItem[],
-  receipts: readonly AgentSetupWizardDurableReceipt[],
-): readonly AgentSetupWizardSourceItem[] {
-  if (receipts.length === 0) return items;
-  return items.map((item) => {
-    // Historical receipts are useful history, never fresh host/auth authority.
-    if (['runtime', 'connected-host-readiness', 'connected-host-auth'].includes(item.id)) return item;
-    const receipt = currentVerdictReceipt(receipts, item.id);
-    if (!receipt) return item;
-    if (receipt.status === 'ready') {
-      return {
-        ...item,
-        status: 'ready',
-        detail: `${item.detail} Durable receipt ${receipt.receiptId}: ${receipt.summary}`,
-      };
-    }
-    // The latest evidence says this step is not done, so it cannot stay ready.
-    return {
-      ...item,
-      status: item.status === 'ready' ? 'check' : item.status,
-      detail: `${item.detail} Latest durable receipt ${receipt.receiptId} is ${receipt.status}: ${receipt.summary}`,
-    };
-  });
 }
 
 function buildStepHistory(input: {
@@ -565,21 +513,12 @@ function buildReceiptGaps(input: {
 
 /**
  * What the newest install-smoke evidence says: true when it is ready, false when
- * it is blocked or failed, null when there is none. Saved smoke results and
- * durable receipts are one timeline, so a newer failure cancels an older pass
- * whichever of the two recorded it, and a tie never reads as ready.
+ * it is blocked or failed, null when there is none. Only the evidence the setup
+ * smoke itself saved counts; a receipt cannot stand in for a smoke run.
  */
 function newestSmokeVerdict(stepHistory: readonly AgentSetupWizardStepHistoryEntry[]): boolean | null {
-  const verdicts = stepHistory.filter((entry) => (
-    setupStepMatches('install-smoke', entry.stepId)
-    && (entry.kind === 'setup-smoke'
-      || (entry.kind === 'durable-receipt' && (entry.receiptStatus === 'ready' || entry.receiptStatus === 'blocked' || entry.receiptStatus === 'failed')))
-  ));
-  if (verdicts.length === 0) return null;
-  const newest = Math.max(...verdicts.map((entry) => Date.parse(entry.recordedAt)));
-  return verdicts
-    .filter((entry) => Date.parse(entry.recordedAt) === newest)
-    .every((entry) => entry.kind === 'setup-smoke' ? entry.satisfiesReceipt === true : entry.receiptStatus === 'ready');
+  const latest = stepHistory.find((entry) => entry.kind === 'setup-smoke' && setupStepMatches('install-smoke', entry.stepId));
+  return latest ? latest.satisfiesReceipt === true : null;
 }
 
 function buildCloseout(input: {
@@ -604,7 +543,7 @@ function buildCloseout(input: {
     ?? (input.smokeHistory.status === 'available' && input.smokeHistory.latestResult === 'ready-for-user-run');
   const latestSmoke = input.smokeHistory.status === 'available'
     ? input.smokeHistory.latestResult ?? 'unknown'
-    : input.setupSmokeReceiptReady ? 'durable receipt ready' : input.smokeHistory.status;
+    : input.smokeHistory.status;
   const satisfyingSetupReceipts = input.stepHistory.filter((entry) => entry.kind === 'durable-receipt' && entry.satisfiesReceipt === true);
   const certifiedSetupReceipts = satisfyingSetupReceipts.filter((entry) => entry.schemaStatus === 'certified');
   const eventStreamSetupReceipts = satisfyingSetupReceipts.filter((entry) => entry.eventCursor);
@@ -691,7 +630,8 @@ export function buildAgentSetupWizard(input: BuildAgentSetupWizardInput): AgentS
   const smokeHistory = input.smokeHistory ?? emptyAgentSetupSmokeHistory();
   const inputCheckpoint = input.checkpoint ?? emptyAgentSetupWizardCheckpoint();
   const durableReceipts = input.durableReceipts ?? [];
-  const items = applyDurableReceiptStatus(input.items, durableReceipts);
+  // A step's status is its live check; durable receipts are history beside it.
+  const items = input.items;
   const repeated = itemFromRepeatedBlockers(items, smokeHistory, input.repeatedBlockerAliases ?? {});
   const blocking = firstBlockingItem(items);
   const rawCheckpointItem = itemFromCheckpoint(items, inputCheckpoint);

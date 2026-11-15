@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { buildSetupWizardDurableReceiptsFromReadModel } from '../../agent/setup-wizard-artifact-receipts.ts';
-import { buildAgentSetupWizard, emptyAgentSetupSmokeHistory, setupStepHasSatisfyingReceipt, type AgentSetupWizardCheckpoint, type AgentSetupWizardDurableReceipt, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../../agent/setup-wizard.ts';
+import { buildAgentSetupWizard, emptyAgentSetupSmokeHistory, type AgentSetupWizardCheckpoint, type AgentSetupWizardDurableReceipt, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../../agent/setup-wizard.ts';
 
 const baseItems: readonly AgentSetupWizardSourceItem[] = [
   {
@@ -214,8 +214,6 @@ describe('Agent setup wizard checkpoints', () => {
       durableReceipts: receipts,
     });
 
-    expect(setupStepHasSatisfyingReceipt(receipts, 'runtime')).toBe(true);
-    expect(setupStepHasSatisfyingReceipt(receipts, 'browser-pwa')).toBe(false);
     expect(wizard.steps.find((step) => step.id === 'runtime')?.status).toBe('blocked');
     expect(wizard.steps.find((step) => step.id === 'connected-host-auth')?.status).toBe('current');
     expect(wizard.currentStepId).toBe('connected-host-auth');
@@ -251,7 +249,7 @@ describe('Agent setup wizard checkpoints', () => {
     expect(receipts).toEqual([]);
   });
 
-  test('accepts a ready durable install-smoke receipt for setup closeout', () => {
+  test('a ready install-smoke receipt does not stand in for a smoke run', () => {
     const wizard = buildAgentSetupWizard({
       items: baseItems.map((item) => item.id === 'provider-model' ? { ...item, status: 'ready' as const } : item),
       smokeHistory: emptyAgentSetupSmokeHistory(),
@@ -268,9 +266,8 @@ describe('Agent setup wizard checkpoints', () => {
       }],
     });
 
-    expect(wizard._diagnostic.closeout.status).toBe('ready-to-finish');
-    expect(wizard._diagnostic.closeout.evidence.join('\n')).toContain('setup smoke receipt: ready');
-    expect(wizard._diagnostic.closeout.evidence.join('\n')).toContain('latest setup smoke: durable receipt ready');
+    expect(wizard._diagnostic.closeout.status).toBe('needs-smoke-evidence');
+    expect(wizard._diagnostic.closeout.evidence.join('\n')).toContain('setup smoke receipt: missing');
   });
 
   test('blocks closeout on critical blocked setup rows', () => {
@@ -325,7 +322,7 @@ describe('Agent setup wizard checkpoints', () => {
   });
 });
 
-describe('durable receipts: the latest evidence decides', () => {
+describe('durable receipts are history, the smoke run decides', () => {
   const durable = (status: AgentSetupWizardDurableReceipt['status'], receiptId: string, recordedAt: string): AgentSetupWizardDurableReceipt => ({
     stepId: 'install-smoke',
     stepLabel: 'Install smoke',
@@ -342,23 +339,6 @@ describe('durable receipts: the latest evidence decides', () => {
     closeoutCriticalStepIds: ['runtime', 'provider-model'],
     setupMarkerExists: false,
     durableReceipts,
-  });
-
-  test('a newer failed receipt demotes a step an older ready receipt had satisfied', () => {
-    const receipts = [durable('ready', 'smoke-old', '2026-06-01T10:00:00.000Z'), durable('failed', 'smoke-new', '2026-06-06T10:00:00.000Z')];
-    const wizard = build(receipts);
-
-    expect(setupStepHasSatisfyingReceipt(receipts, 'install-smoke')).toBe(false);
-    expect(wizard.steps.find((step) => step.id === 'install-smoke')?.status).not.toBe('done');
-    expect(wizard._diagnostic.closeout.status).toBe('needs-smoke-evidence');
-  });
-
-  test('a ready receipt newer than a failure restores the step', () => {
-    const receipts = [durable('failed', 'smoke-old', '2026-06-01T10:00:00.000Z'), durable('ready', 'smoke-new', '2026-06-06T10:00:00.000Z')];
-    const wizard = build(receipts);
-
-    expect(setupStepHasSatisfyingReceipt(receipts, 'install-smoke')).toBe(true);
-    expect(wizard._diagnostic.closeout.status).toBe('ready-to-finish');
   });
 
   test('a saved smoke result that is blocked and newer than a ready receipt blocks finishing', () => {
@@ -380,7 +360,6 @@ describe('durable receipts: the latest evidence decides', () => {
 
     expect(receipts.map((receipt) => receipt.status).sort()).toEqual(['failed', 'ready']);
     expect(new Set(receipts.map((receipt) => receipt.receiptId)).size).toBe(2);
-    expect(setupStepHasSatisfyingReceipt(receipts, 'install-smoke')).toBe(false);
   });
 
   test('a well-formed route to an effectful tool or mode is replaced by the generated route', () => {

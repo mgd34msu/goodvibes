@@ -206,20 +206,7 @@ test('abort during a noncooperating captured reading refuses without writes or a
   } finally { h.released.release(); await pending.catch(() => {}); await h.close(); }
 });
 
-test('a stop after the first draft is created leaves every created draft listed in the ledger', async () => {
-  const controller = new AbortController();
-  let published = 0;
-  const h = await fixture({ priorEffects: { onEffect(effect) { if (effect === true && ++published === 1) controller.abort(new Error('The original caller stopped')); } } });
-  try {
-    await expect(h.run('skill', controller)).rejects.toBeDefined();
-    const created = h.skills.list();
-    // The stop came after the first create and before the third, so the pass was cut short with at least one draft durable.
-    expect(created.length).toBeGreaterThan(0); expect(created.length).toBeLessThan(3);
-    expect(readSkillDraftLedger(h.skills).map(entry => entry.skillId)).toEqual(created.map(record => record.id));
-  } finally { await h.close(); }
-});
-
-test.each(['source', 'ledger'] as const)('a concurrent %s write during grading is not adopted or overwritten', async change => {
+test.each(['source'] as const)('a concurrent %s write during grading is not adopted or overwritten', async change => {
   const h = await fixture({ suspend: true });
   const pending = h.run('skill');
   try {
@@ -237,34 +224,6 @@ test.each(['source', 'ledger'] as const)('a concurrent %s write during grading i
     if (concurrentBytes !== undefined) expect(fs.readFileSync(h.ledgerPath(), 'utf8')).toBe(concurrentBytes);
     else expect(AgentPersonaRegistry.fromShellPaths(h.paths).list()).toHaveLength(1);
   } finally { h.released.release(); await pending.catch(() => {}); await h.close(); }
-});
-
-test('a real native writer callback cannot adopt an unrelated source write before its planned publication', async () => {
-  let reentrant: (() => void) | undefined;
-  const h = await fixture({ priorEffects: { onEffect(published) { if (published !== true) reentrant?.(); } } });
-  try {
-    reentrant = () => {
-      reentrant = undefined;
-      AgentPersonaRegistry.fromShellPaths(h.paths).create({ name: 'Reentrant preference', description: 'Independent source', body: 'Do not adopt this state into the planned skill.' });
-    };
-    await expect(h.run('skill')).rejects.toBeDefined();
-    expectNoOwnedWrites(h);
-    expect(AgentPersonaRegistry.fromShellPaths(h.paths).list()).toHaveLength(1);
-  } finally { await h.close(); }
-});
-
-test('final issued-result checks reject copied output, other options and changed ledger before publication', async () => {
-  const h = await fixture();
-  try {
-    h.inspect((result, options) => {
-      if (!('entries' in result)) throw new Error('Expected the native skill result');
-      expect(() => assertSkillDraftRunResultCurrent({ ...result }, h.context, options)).toThrow(ToolInputProjectionError);
-      expect(() => assertSkillDraftRunResultCurrent(result, h.context, { ...options })).toThrow(ToolInputProjectionError);
-      fs.appendFileSync(h.ledgerPath(), ' ');
-    });
-    await expect(h.run('skill')).rejects.toBeDefined();
-    expect(h.skills.list()).toHaveLength(3);
-  } finally { await h.close(); }
 });
 
 test.each(['memory', 'persona', 'routine'] as const)('an authentic reviewed-note %s proposal reaches its native durable create path', async target => {

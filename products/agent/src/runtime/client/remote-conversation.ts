@@ -290,13 +290,22 @@ export function createRemoteConversationRouter(
     turn.renderer?.abandon(reason);
     release(turn);
   };
+  /** In-memory ownership: still the active, unfinished turn of a live router. */
+  const owns = (turn: WatchedTurn): boolean => active === turn && !turn.finished && !disposed;
+  /**
+   * Ownership plus the selection and host the turn was routed through. This
+   * resolves the connected host, so it runs where a change matters: opening the
+   * watch, before a cancellation leaves, and on the turn's selection timer,
+   * which abandons the watch when the selection changes. A streamed frame only
+   * checks ownership; frames come from the host the turn runs on.
+   */
   const isCurrent = (turn: WatchedTurn): boolean => {
-    if (active !== turn || turn.finished || disposed || !turn.nativeCurrent()) return false;
+    if (!owns(turn) || !turn.nativeCurrent()) return false;
     return sameNativeRemoteConnection(options.resolveConnection(), turn.connection);
   };
 
   const sendCancellation = (turn: WatchedTurn): void => {
-    if (!isCurrent(turn) || !turn.cancelQueued || turn.cancelRequest || turn.cancellationAcknowledged) return;
+    if (!turn.cancelQueued || turn.cancelRequest || turn.cancellationAcknowledged || !isCurrent(turn)) return;
     turn.cancelQueued = false;
     turn.cancelRequest = Promise.resolve().then(async () => {
       if (!isCurrent(turn)) return;
@@ -315,7 +324,7 @@ export function createRemoteConversationRouter(
   const watch = async (turn: WatchedTurn, baseUrl: string, token: string, sessionId: string): Promise<HostedFrameRenderer> => {
     const renderer = createHostedFrameRenderer(options.conversation, options.requestRender);
     turn.renderer = renderer;
-    const isCurrentWatch = (): boolean => isCurrent(turn) && turn.renderer === renderer;
+    const ownsWatch = (): boolean => owns(turn) && turn.renderer === renderer;
     const gate = createTurnLifecycleGate(turn.turnId ? { turnId: turn.turnId } : undefined);
     const streamUrl = hostedSessionEventStreamUrl(baseUrl, sessionId);
     const positionKey = turn.nativeKey;
@@ -323,16 +332,16 @@ export function createRemoteConversationRouter(
     const close = await transport.openServerSentEventStream(options.fetchImpl ?? globalThis.fetch, streamUrl, {
       // The platform parses id: before dispatching its event. After terminal release
       // or replacement, buffered frames no longer advance this watch's cursor.
-      onEventId: (id: string) => { if (isCurrentWatch()) streamPositions.set(positionKey, id); },
+      onEventId: (id: string) => { if (ownsWatch()) streamPositions.set(positionKey, id); },
       onEvent: (_domain: string, payload: unknown) => {
         // The first heartbeat follows catch-up replay. A terminal native
         // receipt remains authoritative even when bounded event history can
         // no longer reconstruct its reply; never wait forever or infer a turn.
-        if (isCurrentWatch() && _domain === 'heartbeat' && turn.nativeTerminal && !renderer.isTurnFinished()) {
+        if (ownsWatch() && _domain === 'heartbeat' && turn.nativeTerminal && !renderer.isTurnFinished()) {
           abandon(turn, `The host reports this native turn ${turn.nativeTerminal}, but its complete event history is no longer available. Inspect the hosted conversation; this input was not replayed.`);
           return;
         }
-        if (!isCurrentWatch() || !payload || typeof payload !== 'object') return;
+        if (!ownsWatch() || !payload || typeof payload !== 'object') return;
         const frame = payload as HostedSessionFrame;
         if (typeof frame.type !== 'string') return;
         if (frame.sessionId !== undefined && frame.sessionId !== sessionId) return;
@@ -377,7 +386,7 @@ export function createRemoteConversationRouter(
         try { options.onFrame?.(frame); } catch (error) {
           logger.debug('[remote-conversation] a hosted-frame observer threw', { error: String(error) });
         }
-        if (!isCurrentWatch()) return;
+        if (!ownsWatch()) return;
         try { renderer.apply(frame); } catch (error) {
           logger.debug('[remote-conversation] rendering a hosted frame raised', { error: String(error) });
         }
@@ -385,12 +394,12 @@ export function createRemoteConversationRouter(
         else sendCancellation(turn);
       },
       onTerminate: ({ error }: { readonly error: unknown }) => {
-        if (isCurrentWatch()) abandon(turn, 'The connection to the hosting daemon ended before this turn finished. '
+        if (ownsWatch()) abandon(turn, 'The connection to the hosting daemon ended before this turn finished. '
           + `Cancellation and completion are unconfirmed${error ? `: ${String(error)}` : '.'} `
           + 'The turn may still be running there; reopen this conversation to see how it ended.');
       },
       onClose: () => {
-        if (isCurrentWatch()) abandon(turn, 'The connection to the hosting daemon ended before this turn finished. '
+        if (ownsWatch()) abandon(turn, 'The connection to the hosting daemon ended before this turn finished. '
           + 'The turn may still be running there; reopen this conversation to see how it ended.');
       },
     }, {
@@ -398,7 +407,7 @@ export function createRemoteConversationRouter(
       lastEventId: streamPositions.get(positionKey) ?? null,
       ...(options.reconnect ? { reconnect: options.reconnect } : {}),
     });
-    if (!isCurrentWatch()) close();
+    if (!ownsWatch() || !isCurrent(turn)) close();
     else turn.closeStream = close;
     return renderer;
   };

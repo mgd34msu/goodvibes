@@ -6,8 +6,7 @@ import { memoryRecordTemporalStatus, resolveCanonicalMemoryDbPath } from '@goodv
 import { storeFileChangeStamp } from '../agent/store-change-stamp.ts';
 import { describeMemoryPromptEligibility, isPromptActiveMemory } from '../agent/memory-prompt.ts';
 import { summarizeAgentBehaviorDiscovery } from '../agent/behavior-discovery-summary.ts';
-import { buildSetupWizardDurableReceipts } from '../agent/setup-wizard-artifact-receipts.ts';
-import { mergeSetupWizardDurableReceipts, readSetupWizardLiveDurableReceipts } from './setup-wizard-live-receipts.ts';
+import { readSetupWizardLiveDurableReceipts } from './setup-wizard-live-receipts.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
 import { buildAgentWorkspaceSetupChecklist } from './agent-workspace-setup.ts';
 import { buildAgentWorkspaceVoiceMediaReadiness } from './agent-workspace-voice-media.ts';
@@ -257,10 +256,8 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
   const setupSmokeHistory = buildSetupSmokeHistory(artifactListSnapshot.items, artifactListSnapshot.available);
   const liveSetupReceipts = readSetupWizardLiveDurableReceipts(context);
   if (liveSetupReceipts.unavailable.length > 0) readFailures.set('setup-receipts', `receipts unavailable: ${liveSetupReceipts.unavailable.join(', ')}`);
-  const durableSetupReceipts = mergeSetupWizardDurableReceipts(
-    buildSetupWizardDurableReceipts(artifactListSnapshot.items),
-    liveSetupReceipts.receipts,
-  );
+  // Artifact metadata is not setup evidence; only the live read models publish receipts.
+  const durableSetupReceipts = liveSetupReceipts.receipts;
   const recentReviewerHandoffs = buildAgentWorkspaceRecentReviewerHandoffsSnapshot(artifactListSnapshot.items);
   const documentDrafts = readDocumentDrafts(context, readFailures);
   const artifactListInfo = {

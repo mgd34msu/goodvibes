@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { buildScheduleEditPreview, parseScheduleEditArgs } from '../../agent/schedule-edit.ts';
 import { formatScheduleEditPreview } from '../../agent/schedule-edit-format.ts';
 
-const REQUEST = ['--explicit-user-request', 'Move the morning review'];
+const REQUEST = ['--request-provenance', 'Move the morning review'];
 
 function preview(args: readonly string[]) {
   const parsed = parseScheduleEditArgs(['sched-1', ...args, ...REQUEST]);

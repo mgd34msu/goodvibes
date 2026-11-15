@@ -9,7 +9,7 @@ import {
   resolveDeliverySurfaceName,
   screenOutboundForCardMaterial,
 } from './payments-channel-guard.ts';
-import { isRoutineScheduleDeliverySurfaceKind } from './schedule-delivery-targets.ts';
+import { parseChannelDeliveryTarget, parseRouteDeliveryTarget, type RoutineScheduleDeliveryTargetSpec } from './schedule-delivery-targets.ts';
 import { agentRecordNonce } from '../utils/record-nonce.ts';
 
 type AgentChannelDeliveryRouter = Pick<ChannelDeliveryRouter, 'deliver' | 'listStrategies'>;
@@ -50,33 +50,24 @@ function readText(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-// The channel surfaces a schedule may deliver to are the same set an immediate
-// send accepts, so both read the one list in schedule-delivery-targets.ts.
-const isDeliverySurfaceKind: (value: string) => value is AgentChannelDeliverySurfaceKind =
-  isRoutineScheduleDeliverySurfaceKind;
-
-function parseChannelTarget(raw: string): AgentChannelDeliveryTarget {
-  const [surfaceKind = '', routeId, label] = raw.split(':');
-  if (!isDeliverySurfaceKind(surfaceKind)) {
-    throw new Error(`Unsupported delivery channel "${surfaceKind}".`);
-  }
+// An immediate send and a schedule read a channel or route target with the one
+// parser in schedule-delivery-targets.ts, over the one list of surfaces.
+function surfaceTarget(parsed: RoutineScheduleDeliveryTargetSpec | string): AgentChannelDeliveryTarget {
+  if (typeof parsed === 'string') throw new Error(parsed);
   return {
     kind: 'surface',
-    surfaceKind,
-    ...(readText(routeId) ? { routeId: readText(routeId) } : {}),
-    ...(readText(label) ? { label: readText(label) } : {}),
+    ...(parsed.surfaceKind ? { surfaceKind: parsed.surfaceKind } : {}),
+    ...(parsed.routeId ? { routeId: parsed.routeId } : {}),
+    ...(parsed.label ? { label: parsed.label } : {}),
   };
 }
 
+function parseChannelTarget(raw: string): AgentChannelDeliveryTarget {
+  return surfaceTarget(parseChannelDeliveryTarget(raw));
+}
+
 function parseRouteTarget(raw: string): AgentChannelDeliveryTarget {
-  const [routeId = '', label] = raw.split(':');
-  const normalizedRouteId = readText(routeId);
-  if (!normalizedRouteId) throw new Error('Route delivery target requires a route id.');
-  return {
-    kind: 'surface',
-    routeId: normalizedRouteId,
-    ...(readText(label) ? { label: readText(label) } : {}),
-  };
+  return surfaceTarget(parseRouteDeliveryTarget(raw));
 }
 
 function parseWebhookTarget(raw: string): AgentChannelDeliveryTarget {

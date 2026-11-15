@@ -53,11 +53,11 @@ describe('the printed confirmation command', () => {
   });
 
   test('round-trips channel and route targets with ids and labels', () => {
-    const channel = confirmedPayload(['r1', '--every', '1h', '--delivery-channel', 'slack:C123:Ops team']);
+    const channel = confirmedPayload(['r1', '--every', '1h', '--delivery-channel', 'msteams:19:abc@thread.tacv2 | Ops team']);
     expect(channel.payload).toEqual(channel.preview.payload);
-    const labelOnly = confirmedPayload(['r1', '--at', '2030-01-01T00:00:00Z', '--delivery-channel', 'slack::Ops']);
+    const labelOnly = confirmedPayload(['r1', '--at', '2030-01-01T00:00:00Z', '--delivery-channel', 'slack: | Ops']);
     expect(labelOnly.payload).toEqual(labelOnly.preview.payload);
-    const route = confirmedPayload(['r1', '--cron', '0 9 * * *', '--delivery-route', 'route-1:Label']);
+    const route = confirmedPayload(['r1', '--cron', '0 9 * * *', '--delivery-route', 'route-1 | Label']);
     expect(route.payload).toEqual(route.preview.payload);
     const link = confirmedPayload(['r1', '--cron', '0 9 * * *', '--delivery-link', 'https://example.test/x']);
     expect(link.payload).toEqual(link.preview.payload);

@@ -27,7 +27,8 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { AgentAccountRegistry, type AgentAccountRecord } from '@goodvibes-jev/engine/platform/platform/google';
 import { mintAddressFor } from '@goodvibes-jev/engine/platform/platform/google';
 import { containsSecretLikeText } from '../agent/memory-safety.ts';
-import { getSessionExpectationBook } from '../agent/signup/session-expectations.ts';
+import { getSessionExpectationBook, type DaemonExpectationClient } from '../agent/signup/session-expectations.ts';
+import { ConnectedHostVerbError } from '../runtime/client/daemon-verbs.ts';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 
@@ -67,6 +68,12 @@ export interface AgentAccountsToolOptions {
   readonly baseAddress?: () => string | null;
   /** Secret-store key names, so sweep can drop records whose credential is gone. */
   readonly knownSecretKeys?: () => Promise<readonly string[]>;
+  /**
+   * The daemon's expectation book. When a daemon is reachable the alias opens
+   * its expectation there, so the daemon watches the mailbox and takes the
+   * link or code; without one, the session book is used.
+   */
+  readonly expectations?: DaemonExpectationClient;
 }
 
 export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool {
@@ -116,13 +123,33 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
             return failure('No mailbox is connected to mint a signup alias from. Connect one with: /google connect');
           }
           const alias = mintAddressFor(base, serviceDomain);
+          const purpose = readString(rawArgs.purpose) || `signing up at ${alias.serviceDomain}`;
           // Opening the expectation here is what lets the verification mail
           // this signup provokes be recognised later. Nothing else opens one,
           // so unsolicited "verify your account" mail is never acted on.
+          const daemon = options.expectations;
+          if (daemon && daemon.unreachable() === null) {
+            write.assertCurrent();
+            try {
+              const opened = await daemon.open({ serviceDomain: alias.serviceDomain, recipientAddress: alias.address, purpose });
+              return ok([
+                `Use ${alias.address} as the email address for this signup.`,
+                `It delivers to ${alias.baseAddress}, and it is what a verification mail for ${alias.serviceDomain} will be matched on.`,
+                `The daemon is watching for its verification mail until ${opened.expiresAt} (expectation ${opened.id}). After submitting the form, wait for it with google action:"mail.verification" expectationId:"${opened.id}"; that returns the link or code once it arrives.`,
+                ...(opened.watching && !opened.watching.running ? [`No mailbox is being read right now (${opened.watching.reason}), so the mail cannot arrive until that is fixed.`] : []),
+                'Record the account with accounts action:"record" once it exists.',
+              ].join('\n'));
+            } catch (error) {
+              // The daemon refused for a reason that is not about reaching it (the
+              // mailbox cannot be read, an unusable address): that is the answer.
+              if (error instanceof ConnectedHostVerbError) return failure(`The daemon would not watch for this signup's verification mail: ${error.message}`);
+              throw error;
+            }
+          }
           const expectation = getSessionExpectationBook().openExpectation({
             serviceDomain: alias.serviceDomain,
             recipientAddress: alias.address,
-            purpose: readString(rawArgs.purpose) || `signing up at ${alias.serviceDomain}`,
+            purpose,
           }, write.assertCurrent);
           return ok([
             `Use ${alias.address} as the email address for this signup.`,

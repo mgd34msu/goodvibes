@@ -53,7 +53,7 @@ import type {
  */
 export type EmailExpectationService = Pick<
   InboundExpectationRegistry,
-  'open' | 'list' | 'cancel'
+  'open' | 'list' | 'cancel' | 'wait'
 >;
 
 function readRequired(value: unknown, field: string, hint: string): string {
@@ -177,6 +177,32 @@ export function createEmailExpectationCancelHandler(
   };
 }
 
+/**
+ * Where one expectation stands, waiting up to `timeoutMs` (at most a minute)
+ * for it to change: `arrived` carries the verification link or code the daemon
+ * took from the matching message; `waiting` lists matching messages that held
+ * none; `expired`, `capability-lost` and `cancelled` say how it ended; `unknown`
+ * says no such expectation is open or remembered. `watching` says whether a
+ * mailbox is being read right now, so "nothing yet" is never confused with
+ * "nobody is looking".
+ */
+export function createEmailExpectationWaitHandler(
+  service: EmailExpectationService,
+  watchState?: () => EmailExpectationWatchState,
+): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    const id = readRequired(params.id, 'id', 'the id returned when the expectation was opened');
+    const timeoutMs = params.timeoutMs === undefined || params.timeoutMs === null ? 0 : Number(params.timeoutMs);
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+      throw new GatewayVerbError('timeoutMs (milliseconds to wait, at most 60000) must be a number of 0 or more when supplied', 'INVALID_ARGUMENT', 400);
+    }
+    const state = await service.wait(id, { timeoutMs });
+    const watching = watchState?.();
+    return watching === undefined ? state : { ...state, watching: { running: watching.running, reason: watching.reason } };
+  };
+}
+
 /** Attach the expectation handlers to their descriptors (missing = no-op). */
 export function registerEmailExpectationGatewayMethods(
   catalog: GatewayMethodCatalog,
@@ -190,4 +216,5 @@ export function registerEmailExpectationGatewayMethods(
   attach('email.expectation.open', createEmailExpectationOpenHandler(service, watchState));
   attach('email.expectation.list', createEmailExpectationListHandler(service));
   attach('email.expectation.cancel', createEmailExpectationCancelHandler(service));
+  attach('email.expectation.wait', createEmailExpectationWaitHandler(service, watchState));
 }

@@ -38,7 +38,7 @@ import {
   InboundMailStore,
   PersistedExpectationStore,
 } from '../platform/src/platform/email/inbound/index.ts';
-import type { ImapInboundMessage, InboundMailboxMessage } from '../platform/src/platform/email/inbound/ports.ts';
+import type { GmailInboundMessage, InboundMailboxMessage } from '../platform/src/platform/email/inbound/ports.ts';
 import type { StructuredNotice } from '../platform/src/platform/email/inbound-notice.ts';
 import type { SurfaceNoticeDelivery } from '../platform/src/platform/daemon/types.ts';
 
@@ -57,12 +57,11 @@ function scratch(): string {
   return dir;
 }
 
-// Returns the IMAP variant specifically. It builds one, uidValidity, uid, an
-// envelope, so the narrow type is the true one; typing it as the union meant
-// every read of `.uid` or `.envelope` downstream needed a cast.
-function mail(uid: number): ImapInboundMessage {
+// A Gmail message, because the grant is spent only by a message whose body
+// yields the verification link; an IMAP envelope carries no body.
+function mail(uid: number): GmailInboundMessage {
   return {
-    source: 'imap',
+    source: 'gmail',
     account: 'acct-1',
     mailbox: 'INBOX',
     from: 'verify@service.test',
@@ -72,22 +71,10 @@ function mail(uid: number): ImapInboundMessage {
     // Top-most Delivered-To: the branded correlation key.
     deliveredTo: [ALIAS],
     unverifiedToHeaderClaim: ALIAS,
-    uidValidity: 1000,
-    uid,
-    // A real envelope, not `{} as …`: an empty object asserted into a
-    // ten-field type is what let this fixture drift from the real shape.
-    envelope: {
-      uid,
-      from: 'verify@service.test',
-      subject: 'Confirm your account',
-      date: 'Mon, 27 Jul 2026 10:00:00 +0000',
-      messageId: `<${String(uid)}@service.test>`,
-      mailbox: 'INBOX',
-      deliveredTo: [ALIAS],
-      deliveryEvidence: [],
-      unverifiedToHeaderClaim: ALIAS,
-      authenticationResults: [],
-    },
+    resourceId: `m${String(uid)}`,
+    historyId: String(1000 + uid),
+    body: `Confirm your account: https://service.test/verify?token=t${String(uid)}`,
+    bodyAvailability: 'full',
     via: 'poll',
   };
 }
@@ -319,22 +306,27 @@ describe('the port the inbound path holds', () => {
 
     // Every non-match kind is a no-op, the caller cannot spend a grant by
     // handing back a verdict that never named one.
-    await registry.matcher.consumeMatch({ kind: 'no-expectation', reason: 'none open' });
-    expect(registry.list()).toHaveLength(1);
-
-    const match = await registry.matcher.matchCandidate({
+    const message = {
       messageId: '<x@service.test>',
       from: 'verify@service.test',
       deliveredTo: { address: ALIAS, source: 'delivered-to-header' } as never,
       toHeaderClaim: ALIAS,
       subject: 'Confirm your account',
-      body: '',
-    }, NOW, { consume: false });
+      body: 'Confirm your account: https://service.test/verify?token=abc123',
+    };
+    await registry.matcher.consumeMatch({ kind: 'no-expectation', reason: 'none open' }, message);
+    expect(registry.list()).toHaveLength(1);
+
+    const match = await registry.matcher.matchCandidate(message, NOW, { consume: false });
     expect(match.kind).toBe('matched');
     // Asked without consuming: still open.
     expect(registry.list()).toHaveLength(1);
 
-    await registry.matcher.consumeMatch(match);
+    // A matching message without a link or code leaves the window open for the real one.
+    await registry.matcher.consumeMatch(match, { ...message, body: 'Welcome aboard.' });
+    expect(registry.list()).toHaveLength(1);
+
+    await registry.matcher.consumeMatch(match, message);
     expect(registry.list()).toHaveLength(0);
   });
 });

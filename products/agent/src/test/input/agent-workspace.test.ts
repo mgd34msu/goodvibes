@@ -2832,7 +2832,7 @@ describe('AgentWorkspace', () => {
     expect(JSON.stringify(snapshot.setupChecklist)).not.toContain('SLACK_BOT_TOKEN');
   });
 
-  test('keeps synchronous host auth unverified despite durable setup artifacts', () => {
+  test('stored artifacts are never read as setup receipts', () => {
     const configValues = new Map<string, unknown>([
       ['controlPlane.host', '127.0.0.1'],
       ['controlPlane.port', 3421],
@@ -2899,10 +2899,11 @@ describe('AgentWorkspace', () => {
     } as unknown as CommandContext);
     const byId = new Map(snapshot.setupChecklist.map((item) => [item.id, item]));
 
-    // Durable receipts never mark host auth ready; only a reading of the host does.
+    // Artifact metadata can come from fetched pages: it marks nothing ready and is not history.
     expect(byId.get('connected-host-auth')?.status).not.toBe('ready');
-    expect(snapshot.setupWizard._diagnostic.stepHistory.filter((entry) => entry.kind === 'durable-receipt')).toHaveLength(3);
-    expect(snapshot.setupWizard._diagnostic.receiptGaps.map((gap) => gap.stepId)).toEqual(['runtime']);
+    expect(snapshot.setupWizard._diagnostic.stepHistory.filter((entry) => entry.kind === 'durable-receipt')).toHaveLength(0);
+    expect(snapshot.setupWizard._diagnostic.receiptGaps.map((gap) => gap.stepId)).toEqual(['runtime', 'connected-host-auth']);
+    expect(snapshot.setupWizard._diagnostic.closeout.status).not.toBe('ready-to-finish');
   });
 
   test('keeps synchronous host auth unverified despite daemon receipt read models', () => {

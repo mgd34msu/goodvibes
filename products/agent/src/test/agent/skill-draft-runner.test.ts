@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { AgentNoteRegistry } from '../../agent/note-registry.ts';
 import { AgentSkillRegistry } from '../../agent/skill-registry.ts';
 import { runSkillDraftProposer, readSkillDraftLedger } from '../../agent/skill-draft-runner.ts';
@@ -215,7 +215,9 @@ describe('runSkillDraftProposer: a pass that fails after creating a skill', () =
     const result = await runSkillDraftProposer(makeContextWithPaths(paths), registry, readingOptions());
 
     expect(result.proposed).toBe(1);
-    expect(readFileSync(`${ledgerPath}.corrupt`, 'utf-8')).toBe('this is not json}');
+    const copy = readdirSync(dirname(ledgerPath)).find((name) => name.startsWith('skill-draft-ledger.json.unreadable-'));
+    expect(copy).toBeDefined();
+    expect(readFileSync(join(dirname(ledgerPath), copy!), 'utf-8')).toBe('this is not json}');
   });
 });
 

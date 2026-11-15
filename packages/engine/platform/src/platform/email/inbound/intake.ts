@@ -568,6 +568,16 @@ export function createInboundMailIntake(
     // substituted verdict below is the true statement about what happened, and
     // it is a shape `recordOutcome` and `consumeMatch` already handle: nothing
     // was matched, so nothing is spent.
+    const candidate = {
+      messageId: message.messageId,
+      from: message.from,
+      deliveredTo,
+      toHeaderClaim: message.unverifiedToHeaderClaim,
+      subject: message.subject,
+      // The IMAP path fetched envelopes, so there is no body here and the
+      // empty string is the honest value. The Gmail delta carries one.
+      body: message.source === 'gmail' ? message.body : '',
+    };
     const match: VerificationMatch = bodiesWithheld
       ? {
         kind: 'no-expectation',
@@ -578,16 +588,7 @@ export function createInboundMailIntake(
           + 'be satisfied on evidence nobody read. No expectation was consulted and none was '
           + 'spent.',
       }
-      : await deps.expectations.matchCandidate({
-        messageId: message.messageId,
-        from: message.from,
-        deliveredTo,
-        toHeaderClaim: message.unverifiedToHeaderClaim,
-        subject: message.subject,
-        // The IMAP path fetched envelopes, so there is no body here and the
-        // empty string is the honest value. The Gmail delta carries one.
-        body: message.source === 'gmail' ? message.body : '',
-      }, now, { consume: false });
+      : await deps.expectations.matchCandidate(candidate, now, { consume: false });
 
     // The identity is the message's own, not a shape assumed from one source.
     const { identity, key } = messageIdentity(message);
@@ -722,11 +723,13 @@ export function createInboundMailIntake(
       }
     }
 
-    // LAST. Announced, recorded, and only now spent, see the header. A no-op
+    // LAST. Announced, recorded, and only now spent, see the header: spent
+    // only when this message yields the link or code, so a welcome note that
+    // arrives first leaves the window open for the verification itself. A no-op
     // for every outcome that is not a match, and swallowed for the same reason
     // the write above is: a throw here re-announces.
     try {
-      await deps.expectations.consumeMatch(match);
+      await deps.expectations.consumeMatch(match, candidate);
     } catch (error) {
       note(deps.observer, message, 'post-notice-write-failed',
         `the matched expectation could not be closed (${summarizeError(error)}); it stays open `

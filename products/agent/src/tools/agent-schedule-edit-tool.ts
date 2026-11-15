@@ -66,7 +66,7 @@ function buildScheduleEditArgs(rawArgs: AgentScheduleEditToolArgs): readonly str
   addOptionalArg(args, '--prompt', rawArgs.prompt);
   addOptionalArg(args, '--task', rawArgs.task);
   addOptionalArg(args, '--success-criteria', rawArgs.successCriteria);
-  addOptionalArg(args, '--explicit-user-request', rawArgs.explicitUserRequest);
+  addOptionalArg(args, '--request-provenance', rawArgs.explicitUserRequest);
   return args;
 }
 
@@ -129,7 +129,7 @@ export function createAgentScheduleEditTool(
           },
           explicitUserRequest: {
             type: 'string',
-            description: 'Optional request provenance; does not grant effect authority.',
+            description: 'Optional request provenance, written into a prompt rebuilt from task; does not grant effect authority.',
           },
         },
         anyOf: [{ required: ['scheduleId'] }, { required: ['jobId'] }],
@@ -142,7 +142,7 @@ export function createAgentScheduleEditTool(
       let invoked = false;
       try {
         const effect = captureScheduleEffect(rawArgs, options, shellPaths, configManager, registry);
-        const parsed = parseScheduleEditArgs(buildScheduleEditArgs(rawArgs), { requireExplicitUserRequest: false });
+        const parsed = parseScheduleEditArgs(buildScheduleEditArgs(rawArgs));
         if (parsed.errors.length > 0) return { success: false, error: parsed.errors.join('\n') };
         const preview = buildScheduleEditPreview(parsed);
         effect.assertCurrent();

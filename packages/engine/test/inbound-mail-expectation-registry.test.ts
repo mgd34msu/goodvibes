@@ -124,7 +124,7 @@ describe('a workstream registers an expectation before it submits the form', () 
       NOW,
     );
     expect(match.kind).toBe('sender-unrelated');
-    await registry.matcher.consumeMatch(match);
+    await registry.matcher.consumeMatch(match, arrival({ deliveredTo: 'signup-a1@alias.test', from: 'no-reply@evil.test' }));
     const genuine = await registry.matcher.matchCandidate(
       arrival({ deliveredTo: 'signup-a1@alias.test', from: 'no-reply@example.com' }),
       NOW,

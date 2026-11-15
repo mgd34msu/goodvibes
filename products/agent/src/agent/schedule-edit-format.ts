@@ -57,7 +57,30 @@ function scheduleEditConfirmationRoute(preview: ScheduleEditPreview): string {
       if (schedule.kind === 'cron' && typeof schedule.staggerMs === 'number') args.push(`staggerMs:${schedule.staggerMs}`);
     }
   }
-  if (preview.payload.prompt) args.push('prompt:"..."');
+  // The prompt is the caller's own input, so the route carries it as given; a
+  // rebuilt autonomous prompt is carried by the task and criteria it came from.
+  const task = taskArgs(preview);
+  if (task) args.push(`task:${scheduleRouteArg(task.task)}`, `successCriteria:${scheduleRouteArg(task.successCriteria)}`);
+  else if (preview.payload.prompt) args.push(`prompt:${scheduleRouteArg(preview.payload.prompt)}`);
+  return args.join(' ');
+}
+
+function taskArgs(preview: ScheduleEditPreview): { readonly task: string; readonly successCriteria: string } | null {
+  const at = (flag: string) => {
+    const index = preview.commandArgs.indexOf(flag);
+    return index >= 0 ? preview.commandArgs[index + 1] : undefined;
+  };
+  const task = at('--task'), successCriteria = at('--success-criteria');
+  return task && successCriteria ? { task, successCriteria } : null;
+}
+
+/** The terminal command that applies exactly this preview, bound to the revision it read. */
+function scheduleEditConfirmCommand(preview: ScheduleEditPreview): string {
+  const [id = '', ...rest] = preview.commandArgs;
+  const args = ['/schedule edit', scheduleRouteArg(id)];
+  for (const arg of rest) args.push(arg.startsWith('--') ? arg : scheduleRouteArg(arg));
+  if (preview.revision) args.push('--revision', scheduleRouteArg(preview.revision));
+  args.push('--yes');
   return args.join(' ');
 }
 
@@ -82,7 +105,7 @@ function responseRecord(result: ScheduleEditSuccess): Record<string, unknown> {
 }
 
 function formatScheduleEditFailureKind(kind: ScheduleEditFailure['kind']): string {
-  if (kind === 'confirmation_required') return 'confirmation required';
+  if (kind === 'stale') return 'schedule changed since the preview';
   if (kind === 'auth_required') return 'authorization required';
   if (kind === 'connected_host_unavailable') return 'connected host unavailable';
   if (kind === 'connected_host_incompatible') return 'connected host incompatible';
@@ -94,16 +117,19 @@ export function formatScheduleEditPreview(preview: ScheduleEditPreview): string 
   return [
     'GoodVibes schedule edit preview',
     `  method ${preview.method}`,
-    `  route PATCH ${preview.route.replace('{jobId}', preview.scheduleId)}`,
+    `  route ${preview.route.replace('{jobId}', preview.scheduleId)}`,
     `  schedule ${preview.scheduleId}`,
     `  changes ${preview.changes.join(', ')}`,
     ...formatCurrentScheduleDiff(preview),
     preview.payload.name ? `  name ${preview.payload.name}` : '',
     preview.payload.schedule ? `  schedule ${patchScheduleValue(preview)}` : '',
     preview.payload.prompt ? '  prompt replacement prepared' : '',
-    `  requested by ${preview.explicitUserRequest}`,
+    preview.revision ? `  revision ${preview.revision}` : '',
     '',
-    'Manual CLI confirmation required: rerun with --yes. Model tools require current recorded effect admission.',
+    preview.revision
+      ? 'To apply it, run the command below. It applies only while the schedule is still at this revision; if it changed, the host refuses and nothing is overwritten.'
+      : 'To apply it, run the command below. The current schedule could not be read, so the edit is not bound to a revision.',
+    `  ${scheduleEditConfirmCommand(preview)}`,
     ...scheduleConfirmationRouteLines({ model: scheduleEditConfirmationRoute(preview) }),
   ].filter((line) => line !== '').join('\n');
 }
@@ -116,7 +142,7 @@ export function formatScheduleEditSuccess(result: ScheduleEditSuccess): string {
     'Updated GoodVibes schedule',
     `  schedule ${id}`,
     `  method ${result.kind}`,
-    `  route PATCH ${result.route.replace('{jobId}', result.scheduleId)}`,
+    `  route ${result.route.replace('{jobId}', result.scheduleId)}`,
     `  status ${status}`,
     isRecord(record.schedule) ? `  schedule ${scheduleValue(record.schedule)}` : '',
     ...scheduleNextRouteLines(id),
@@ -126,7 +152,7 @@ export function formatScheduleEditSuccess(result: ScheduleEditSuccess): string {
 export function formatScheduleEditFailure(failure: ScheduleEditFailure): string {
   return [
     `GoodVibes schedule edit error ${formatScheduleEditFailureKind(failure.kind)}`,
-    `  route PATCH ${failure.route}`,
+    `  route ${failure.route}`,
     failure.baseUrl ? `  connected host ${failure.baseUrl}` : '',
     `  error ${failure.error}`,
     failure.kind === 'auth_required'

@@ -93,29 +93,40 @@ function looksLikeOptionName(arg: string): boolean {
 // Delivery-target parsing
 // ---------------------------------------------------------------------------
 
-/** Each parser returns a target, or the message explaining why the input is not one. */
+/**
+ * Sets a label off from a route id: `matrix:!ops:example.org | Ops room`.
+ * Route ids may themselves contain colons (a Matrix room `!room:server`, a
+ * Teams conversation `19:...@thread.tacv2`), so only the first colon ends the
+ * channel kind and the label follows the last ` | `.
+ */
+export const DELIVERY_LABEL_SEPARATOR = ' | ';
+
+function splitRouteAndLabel(raw: string): { readonly routeId?: string; readonly label?: string } {
+  const at = raw.lastIndexOf(DELIVERY_LABEL_SEPARATOR);
+  const routeId = (at < 0 ? raw : raw.slice(0, at)).trim();
+  const label = at < 0 ? '' : raw.slice(at + DELIVERY_LABEL_SEPARATOR.length).trim();
+  return { ...(routeId ? { routeId } : {}), ...(label ? { label } : {}) };
+}
+
+/**
+ * Each parser returns a target, or the message explaining why the input is not one.
+ * A channel is `kind`, `kind:<route id>` or `kind:<route id> | <label>`; every
+ * caller (schedules and an immediate channel send) parses it here.
+ */
 export function parseChannelDeliveryTarget(raw: string): RoutineScheduleDeliveryTargetSpec | string {
-  const [surfaceKind = '', routeId, label] = raw.split(':');
+  const colon = raw.indexOf(':');
+  const surfaceKind = (colon < 0 ? raw : raw.slice(0, colon)).trim();
   if (!isRoutineScheduleDeliverySurfaceKind(surfaceKind)) {
     return `Unsupported delivery channel "${surfaceKind}".`;
   }
-  return {
-    kind: 'surface',
-    surfaceKind,
-    routeId: routeId?.trim() || undefined,
-    label: label?.trim() || undefined,
-  };
+  return { kind: 'surface', surfaceKind, ...splitRouteAndLabel(colon < 0 ? '' : raw.slice(colon + 1)) };
 }
 
+/** A route is `<route id>` or `<route id> | <label>`; the route id is taken whole, colons included. */
 export function parseRouteDeliveryTarget(raw: string): RoutineScheduleDeliveryTargetSpec | string {
-  const [routeId = '', label] = raw.split(':');
-  const normalizedRouteId = routeId.trim();
-  if (!normalizedRouteId) return '--delivery-route requires a route id.';
-  return {
-    kind: 'surface',
-    routeId: normalizedRouteId,
-    label: label?.trim() || undefined,
-  };
+  const parsed = splitRouteAndLabel(raw);
+  if (!parsed.routeId) return '--delivery-route requires a route id.';
+  return { kind: 'surface', ...parsed };
 }
 
 export function parseWebhookDeliveryTarget(raw: string): RoutineScheduleDeliveryTargetSpec | string {
@@ -189,10 +200,13 @@ export function deliveryTargetFlag(target: {
   if (target.kind === 'webhook' && target.address) return { flag: '--delivery-webhook', value: target.address };
   if (target.kind === 'link' && target.address) return { flag: '--delivery-link', value: target.address };
   if (target.kind !== 'surface') return null;
-  const tail = target.label ? `:${target.routeId ?? ''}:${target.label}` : target.routeId ? `:${target.routeId}` : '';
-  if (target.surfaceKind) return { flag: '--delivery-channel', value: `${target.surfaceKind}${tail}` };
+  const label = target.label ? `${DELIVERY_LABEL_SEPARATOR}${target.label}` : '';
+  if (target.surfaceKind) {
+    const tail = target.routeId || label ? `:${target.routeId ?? ''}${label}` : '';
+    return { flag: '--delivery-channel', value: `${target.surfaceKind}${tail}` };
+  }
   if (!target.routeId) return null;
-  return { flag: '--delivery-route', value: `${target.routeId}${target.label ? `:${target.label}` : ''}` };
+  return { flag: '--delivery-route', value: `${target.routeId}${label}` };
 }
 
 // ---------------------------------------------------------------------------

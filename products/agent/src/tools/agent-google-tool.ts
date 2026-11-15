@@ -77,7 +77,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/security';
 import { rememberRefusedOutwardAction, type OutwardActionOutcome } from '../trust/outward-approvals.ts';
 import type { GoogleApiFailure, GoogleApiResult } from '@goodvibes-jev/engine/platform/platform/google';
-import { getSessionExpectationBook } from '../agent/signup/session-expectations.ts';
+import { describeDaemonExpectationState, getSessionExpectationBook, type DaemonExpectationClient } from '../agent/signup/session-expectations.ts';
 import { deliveryEvidenceFromMessage, describeDeliveryEvidence, NO_ALIAS_MAILBOXES } from '@goodvibes-jev/engine/platform/platform/google';
 import { readVerificationArtifact } from '@goodvibes-jev/engine/platform/platform/google';
 import { isHostFailure, type ConnectedHost } from '../agent/connected-host-client.ts';
@@ -141,6 +141,8 @@ export interface AgentGoogleToolOptions {
    * `calendar.events.*` methods. Null or absent keeps them in this process.
    */
   readonly calendarHost?: (() => ConnectedHost | null) | undefined;
+  /** The daemon's expectation book; `mail.verification` with an expectation id waits on it. */
+  readonly expectations?: DaemonExpectationClient | undefined;
 }
 
 type ToolOutput = { readonly success: true; readonly output: string } | { readonly success: false; readonly error: string };
@@ -447,7 +449,8 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
             description: 'What to do. status reports the connected account.',
           },
           query: { type: 'string', description: 'Gmail search query for mail.list.' },
-          id: { type: 'string', description: 'Message id for mail.read or mail.verification.' },
+          id: { type: 'string', description: 'Message id for mail.read, or for mail.verification when the signup had no expectation id.' },
+          expectationId: { type: 'string', description: 'For mail.verification: the expectation id accounts action:"alias" returned. Waits up to 30 s for the daemon to receive the verification mail and returns its link or code.' },
           to: { type: 'string', description: 'Recipient address for mail.send.' },
           subject: { type: 'string', description: 'Subject for mail.send.' },
           body: { type: 'string', description: 'Plain-text body for mail.send.' },
@@ -483,6 +486,15 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       if (action === 'mail.verification') {
         executionOptions?.signal?.throwIfAborted();
         executionOptions?.assertCurrent?.();
+        const expectationId = readString(args.expectationId);
+        if (expectationId) {
+          // The daemon watched the mailbox and took the link or code itself; no model and no mailbox read here.
+          if (!options.expectations) return failure('No daemon expectation book is wired into this Agent, so an expectation id cannot be waited on. Pass the message id from google action:"mail.list" instead.');
+          const unreachable = options.expectations.unreachable();
+          if (unreachable) return failure(`The daemon holding expectation ${expectationId} cannot be reached: ${unreachable}`);
+          const answer = describeDaemonExpectationState(expectationId, await options.expectations.wait(expectationId, 30_000));
+          return answer.ok ? ok(answer.text) : failure(answer.text);
+        }
         assertDecisionModelsEnabled('automatic verification artifact selection; use mail.read to inspect the message and complete verification manually');
       }
 

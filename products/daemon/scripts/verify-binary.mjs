@@ -48,9 +48,9 @@ try {
   const addon = join('lib', target.nativeAddonPackage, target.nativeAddonFile);
   mkdirSync(dirname(join(artifacts, addon)), { recursive: true });
   copyFileSync(join(dirname(original), addon), join(artifacts, addon));
-  // CI has already verified ci-artifact.json against the exact checkout/head.
-  // Compare local relocation/execution bytes directly; download verification
-  // remains the independently pinned release/CI artifact reader's job.
+  // The cohort comes from this run's own producer leg. Compare local
+  // relocation/execution bytes directly; admitting an artifact from another
+  // run remains the release coordinator's job (package-native, install-native).
   const payloadPaths = [target.appArtifact, ...['.bun', '.bun.json', '.bun.LICENSE.md'].map(suffix => target.appArtifact + suffix), addon];
   const payloads = [];
   for (const path of payloadPaths) {
@@ -102,7 +102,6 @@ try {
   for (const [argv, text] of [
     [['install-servce'], 'Unknown command: install-servce'], [['--resume'], '--resume'],
     [['help', 'doctor'], 'Unknown command: doctor'],
-    [['--daemon-home', 'elsewhere', 'send', 'hello'], '`send` has to be the first argument'],
   ]) {
     const result = await run(argv); assert.equal(result.code, 2); assert.equal(result.stdout, ''); assert(result.stderr.includes(text));
   }
@@ -185,8 +184,8 @@ try {
       assert.equal(request.url, '/v1/systemone');
       let text = ''; for await (const chunk of request) { text += chunk; assert(text.length < 1_048_576); }
       const body = JSON.parse(text); assert.equal(body.model, 'jev-latest');
-      // Production startup classifies its model catalog before memory reranking.
-      // Match the existing hosted proof's finite synthetic transport budget.
+      // A runaway guard only; the count is printed below, and the hosted
+      // session proof holds the per-turn decision-model ceilings.
       assert(smokeJudgmentRequests.length < 5_000, 'Unexpected boot SystemOne request loop'); smokeJudgmentRequests.push(body);
       const answers = syntheticSystemOneAnswers(body.questions);
       for (const [name, question] of Object.entries(body.questions)) {
@@ -266,7 +265,7 @@ try {
     const { vector } = await proveNativeMemoryRoundTrip(smokeInvoke);
     assert.ifError(smokeJudgmentError);
     console.log(JSON.stringify({ proof: 'compiled-daemon-boot-smoke', semanticQualification: 'synthetic-only', status: 'running', malformedSettingsExit: malformed.code,
-      binding: { host: '127.0.0.1', port: servePort }, nativeVectorAvailable: vector.vector.available }));
+      binding: { host: '127.0.0.1', port: servePort }, nativeVectorAvailable: vector.vector.available, bootAndMemoryJudgmentRequests: smokeJudgmentRequests.length }));
     const response = await fetch(`http://127.0.0.1:${servePort}/api/channels/inbox`, {
       headers: { Authorization: 'Bearer synthetic-native-inbox-token' }, signal: AbortSignal.timeout(5_000),
     });

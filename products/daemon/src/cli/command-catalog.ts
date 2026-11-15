@@ -85,6 +85,9 @@ export type DaemonCliFlagField =
   | 'port'
   | 'host'
   | 'token'
+  | 'categories'
+  | 'allowWrite'
+  | 'allowDestructive'
   | 'configOverrides'
   | 'enableFeatures'
   | 'disableFeatures';
@@ -155,8 +158,8 @@ export type DaemonCommandSpec = CommandSpec<DaemonCommand, DaemonCliFlagField> &
 // ---------------------------------------------------------------------------
 
 /**
- * Accepted before or after any command, except the passthrough commands, which
- * take their remaining arguments verbatim and are selected by environment instead.
+ * Accepted before or after any command. A passthrough command takes every word
+ * after its name verbatim, so for one they go before the command.
  */
 export const GLOBAL_FLAGS: readonly DaemonCommandFlagSpec[] = [
   {
@@ -361,6 +364,9 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       'Refused when a unit from the older install script is still present, because',
       'installing beside it would leave two daemons competing for one port. Take',
       'that one over with `migrate-service` first.',
+      '',
+      'Exit codes: 0 installed and running; 3 installed but not running (the start',
+      'failed or the daemon exited at once; the receipt says why); 1 not installed.',
       ...SERVICE_DETAIL_TAIL,
     ],
     flags: [],
@@ -373,9 +379,12 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
     summary: 'Stop the daemon service and remove its definition.',
     usage: 'goodvibes-daemon uninstall-service',
     detail: [
-      'Stop the service and delete its definition file. On systemd this does not run',
-      '`disable`, so a stale enablement symlink can remain until',
-      '`systemctl --user daemon-reload`; the receipt says so when it applies.',
+      'Stop and unregister the service (`systemctl --user disable --now`, `launchctl',
+      'unload`, or ending and deleting the Scheduled Task), then delete its definition',
+      'file. A service that is already stopped is uninstalled the same way.',
+      '',
+      'Exit codes: 0 removed; 4 nothing was installed; 1 removal failed or the',
+      'service is still running (the receipt says which).',
       ...SERVICE_DETAIL_TAIL,
     ],
     flags: [],
@@ -504,6 +513,13 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       'printed here and one printed at boot are the same link. Scrolling the startup',
       'banner off the screen therefore costs nothing.',
       '',
+      'It asks the running daemon first: whether it accepts the token, and the address',
+      'and scheme it is really bound to, so the QR carries what the daemon serves. A',
+      'daemon that refuses the token is reported (pass the right one with --token) and',
+      'no link is printed. When no daemon answers, the link is built from the settings',
+      'and the token file, and the output says so. A daemon started on a port other than',
+      'its settings is found with --port.',
+      '',
       'REMOTE FORM (--host http(s)://name of another machine): ask THAT daemon to MINT A NEW',
       'per-device pairing token and print the pairing block for it. Minting is a',
       'different act than reprinting: it is a fresh token, and every token that',
@@ -553,11 +569,21 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
     name: 'mcp',
     aliases: [],
     summary: 'Serve the operator surface of a running daemon to an MCP client over stdio.',
-    usage: 'goodvibes-daemon mcp serve [--host <http(s)://name>] [--port <n>] [--token <t>]',
+    usage: 'goodvibes-daemon mcp serve [--categories <list|all>] [--allow-write] [--allow-destructive] [--host <http(s)://name>] [--port <n>] [--token <t>]',
     detail: [
       'mcp serve              speak the Model Context Protocol on stdin/stdout, with one tool',
       '                       per operator method of the daemon it connects to (session',
       '                       lifecycle first), so an MCP client can drive GoodVibes.',
+      '',
+      'By default it serves the agent slice: the sessions, tasks, contracts and approvals',
+      'methods that read, plus creating a session, sending it a message and steering it',
+      '(about 20 tools). --categories picks other operator families (comma separated or',
+      'repeated; `all` for every family), --allow-write adds the methods that change',
+      'state, and --allow-destructive adds the methods the contract marks dangerous.',
+      'The number of tools served is printed on stderr at start.',
+      '',
+      'A client that cancels a tool call (notifications/cancelled) stops the request to',
+      'the daemon.',
       '',
       'It connects the way status and sessions do: with no flags to the daemon on this',
       'machine using this machine\'s operator token; --host/--port/--token pick another (--host needs http:// or https://).',
@@ -570,7 +596,13 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       '',
       'Client configuration: { "command": "goodvibes-daemon", "args": ["mcp", "serve"] }.',
     ],
-    flags: [...REMOTE_TARGET_FLAGS],
+    flags: [
+      { tokens: ['--categories'], field: 'categories', kind: 'string-list', valueName: 'list',
+        summary: 'Operator families to serve, comma separated or repeated; `all` for every family.' },
+      { tokens: ['--allow-write'], field: 'allowWrite', kind: 'boolean', summary: 'Also serve the methods that change state.' },
+      { tokens: ['--allow-destructive'], field: 'allowDestructive', kind: 'boolean', summary: 'Also serve the methods marked dangerous.' },
+      ...REMOTE_TARGET_FLAGS,
+    ],
     passthrough: false,
     subcommands: ['serve'],
   },
@@ -606,24 +638,26 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
   {
     name: 'update',
     aliases: [],
-    summary: 'Report what this daemon knows about its own updates.',
+    summary: 'Report whether this daemon is keeping itself current, or check now.',
     usage: 'goodvibes-daemon update [--check] [--json] [--host <name>] [--port <n>] [--token <t>]',
     detail: [
-      'Report the running version, the receipts the daemon has written about its own',
-      'updates and restarts, the version an automatic rollback rejected (if any), and',
-      'whether a rollback is currently in force.',
+      'Ask the daemon whether its update loop is on (and if not, why), how often it',
+      'checks, whether checks are failing and with what, a release downloaded and',
+      'waiting for an idle moment, a release a rollback rejected, and an interrupted',
+      'update that is holding the loop off.',
       '',
-      '--check is honest about a gap: the control plane publishes no verb to trigger',
-      'an update check early. It reads status without requesting a check. Automatic',
-      'checks require a configured update artifact and host policy; these receipts',
-      'do not establish an hourly or restart-triggered schedule.',
+      '--check runs one update check now, the same check the schedule runs, and',
+      'reports what it did: ran, another check was already running, or the loop is',
+      'off. It never forces an install; a verified release still waits until no work',
+      'is in flight.',
       '',
-      'The rollback and receipt lines are read from files the daemon writes on its own',
-      'host, so they are reported for a local daemon and named as unavailable for a',
-      'remote one.',
+      'The receipt lines are read from files the daemon writes on its own host, so',
+      'they are reported for a local daemon and named as unavailable for a remote',
+      'one. When the daemon on this machine does not answer, the command exits 1 and',
+      'prints what those files say: uptime, failed starts, rejected version, receipts.',
     ],
     flags: [
-      { tokens: ['--check'], field: 'check', kind: 'boolean', summary: 'Read status and explain the unavailable early-check operation.' },
+      { tokens: ['--check'], field: 'check', kind: 'boolean', summary: 'Run one update check now and report what it did.' },
       JSON_FLAG,
       ...REMOTE_TARGET_FLAGS,
     ],
@@ -818,9 +852,9 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
 ];
 
 /**
- * The commands whose arguments are read straight off `process.argv` before the
- * parser runs at all, because they must be reachable with no runtime composed
- * and with their own flag vocabulary intact. Kept here so the vocabulary and
+ * The commands whose trailing arguments the parser hands over verbatim, because
+ * they must be reachable with no runtime composed and with their own flag
+ * vocabulary intact. Kept here so the vocabulary and
  * the dispatch order agree in one place.
  */
 export const RAW_INTERCEPT_COMMANDS: readonly DaemonCommand[] = DAEMON_COMMANDS
@@ -847,6 +881,9 @@ function createDefaultFlags(): DaemonCliFlags {
     port: undefined,
     host: undefined,
     token: undefined,
+    categories: [],
+    allowWrite: false,
+    allowDestructive: false,
     configOverrides: [],
     enableFeatures: [],
     disableFeatures: [],

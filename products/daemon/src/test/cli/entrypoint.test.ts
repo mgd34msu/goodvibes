@@ -150,8 +150,6 @@ for (const [args, expected] of [
   [['--resume'], ['--resume', 'Usage: goodvibes-daemon [COMMAND] [OPTIONS]']],
   [['provision-wake-model', '--typo'], ['Usage: goodvibes-daemon provision-wake-model [--strict] [--help]']],
   [['help', 'doctor'], ['Unknown command: doctor\n']],
-  [['--daemon-home', 'elsewhere', 'webui', 'status'], ['`webui` has to be the first argument: goodvibes-daemon webui']],
-  [['--daemon-home', 'elsewhere', 'send', 'hello'], ['`send` has to be the first argument: goodvibes-daemon send']],
 ] as const) {
   test(`built CLI refuses invalid arguments ${args.join(' ')}`, async () => {
     const result = await oneShot([...args]);

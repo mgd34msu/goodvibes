@@ -220,8 +220,8 @@ this is not a distributed lease or a global no-overlap guarantee.
 `GOODVIBES_HOME` relocates the state-tree home. `--daemon-home` or
 `GOODVIBES_DAEMON_HOME` relocates only the daemon identity/settings tier;
 `--working-dir` selects the workspace. CLI flags do not mutate the embedding
-process environment or cwd. Raw-intercept commands including `send` must be the
-first argument; use the documented environment homes for relocated one-shot sends. Serve's model, endpoint, config and feature flags
+process environment or cwd. Passthrough commands such as `send` read every word after
+their name themselves, so give `--daemon-home` and `--working-dir` before the command. Serve's model, endpoint, config and feature flags
 are runtime-only and never saved as settings.
 
 Explicitly composed systemd service installation preserves the selected tree,

@@ -92,22 +92,17 @@ export function runConfiguredDaemonCli(
         const intended = resolveHostBinding(config.get('controlPlane.hostMode'), config.get('controlPlane.host'),
           config.get('controlPlane.port'), 'controlPlane');
         stdout(renderDaemonStartupBanner(version, { homeDir: homeDirectory, daemonHomeDir: daemonHomeDirectory, ...intended }));
-        if (closed) return undefined;
-        const updateArtifact = resolveInstalledDaemonUpdateArtifact({ isOverridden }, { signal: maintenance.signal });
         // Installed native artifacts select the complete suite updater. Its
         // admitted transaction owns the configured WebUI alongside programs;
         // startup serves that exact directory without a second download path.
-        if (closed) return undefined;
+        const updateArtifact = resolveInstalledDaemonUpdateArtifact({ isOverridden }, { signal: maintenance.signal });
         const companion = getOrCreateCompanionToken('tui', { daemonHomeDir: daemonHomeDirectory });
         if (companion.quarantined) {
           stderr('The selected daemon operator token store was unreadable. A new shared token was created; paired clients must pair again. '
             + (companion.quarantined.to ? 'The previous file was preserved beside the token store.' : 'The previous file could not be preserved.'));
         }
-        // An injected reporting port can synchronously request shutdown.
-        if (closed) return undefined;
         if (pruneDaemonStartupTokens(active) > 0) {
           stderr('[goodvibes-daemon] warning: some stale workspace operator-token files could not be pruned.');
-          if (closed) return undefined;
         }
         // A set-but-empty override (an env template left blank) is not a token.
         const token = env.GOODVIBES_DAEMON_TOKEN?.trim() ? env.GOODVIBES_DAEMON_TOKEN : companion.token;
@@ -137,47 +132,34 @@ export function runConfiguredDaemonCli(
         await daemon.waitForRestart();
         if (closed) return undefined;
         requireRunning();
-        try {
-          const receipt = await reconcileDaemonStartup(active, env, maintenance.signal);
-          if (closed) return undefined;
-          if (receipt && receipt.reason !== 'no-legacy-unit') {
-            stderr(`[goodvibes-daemon] legacy-unit reconcile: ${receipt.action} (${receipt.reason}).`);
-          }
-        } catch {
-          if (!closed) stderr('[goodvibes-daemon] warning: legacy-unit reconcile failed (non-fatal).');
-        }
+        const reconciled = await reconcileDaemonStartup(active, env, maintenance.signal)
+          .then((receipt) => ({ receipt }), () => ({ receipt: undefined, failed: true }));
         if (closed) return undefined;
+        if ('failed' in reconciled) stderr('[goodvibes-daemon] warning: legacy-unit reconcile failed (non-fatal).');
+        else if (reconciled.receipt && reconciled.receipt.reason !== 'no-legacy-unit') {
+          stderr(`[goodvibes-daemon] legacy-unit reconcile: ${reconciled.receipt.action} (${reconciled.receipt.reason}).`);
+        }
         await daemon.waitForRestart();
         if (closed) return undefined;
         requireRunning();
         const actual = { host: daemon.boundHost, port: daemon.boundPort, scheme: daemon.boundScheme };
         try { persistDaemonStartupPublicUrl(active, actual); }
         catch { stderr('[goodvibes-daemon] warning: the startup public URL could not be persisted.'); }
-        if (closed) return undefined;
-        requireRunning();
         stdout(renderDaemonBoundEndpoint(version, actual));
-        if (closed) return undefined;
         // Background: the sweep reads git for every leftover worktree and must not delay the endpoint line.
         // close() waits for it, so the process never exits halfway through removing a worktree.
         worktreeSweep = sweepWorktrees(active).then((notice) => { if (notice && !closed) stderr(`[goodvibes-daemon] ${notice}`); });
-        requireRunning();
         const clientBinding = readControlPlaneBinding((key) => isKnownConfigKey(key, config.getSchema()) ? config.get(key) : undefined);
         if (describeDerivedBindMismatch(actual, clientBinding) !== null) {
           // The canonical helper decides drift; its raw host/URL prose is private.
           stderr('[goodvibes-daemon] warning: control-plane client binding disagrees with the bound listener (derived-bind-mismatch).');
-          if (closed) return undefined;
         }
-        requireRunning();
         if (pairingOutput) {
           // Only an interactive terminal or an explicitly supplied local sink
           // receives credentials. Service/redirected diagnostics stay private.
           pairingOutput(renderDaemonStartupPairing(config, actual, token, version));
-          if (closed) return undefined;
-          requireRunning();
         }
         stdout(`goodvibes-daemon ${version} host started (${snapshot.state})`);
-        if (closed) return undefined;
-        requireRunning();
         return snapshot;
       },
       async close() {

@@ -132,10 +132,10 @@ export function renderGoodVibesDaemonHelp(
     `Run \`${binary} help <command>\` for a command's own arguments and flags.`,
     `Run \`${binary} --help --json\` for the versioned machine command catalog.`,
     '',
-    `Global options (accepted by every command except ${passthroughNames()}):`,
+    'Global options (accepted by every command):',
     ...GLOBAL_FLAGS.map(renderFlagLine),
     '',
-    `Those commands read their own arguments. Select another daemon home or working directory for them with ${PASSTHROUGH_ENVIRONMENT}.`,
+    `The commands ${passthroughNames()} read every word after their name as their own arguments, so give them global options before the command.`,
     '',
     'Serving options (a bare invocation, or `serve`):',
     ...daemonCommandSpec('serve').flags.map(renderFlagLine),
@@ -149,8 +149,6 @@ export function renderGoodVibesDaemonHelp(
     `${pad('  4')}service-status only: not installed`,
   ].join('\n');
 }
-
-const PASSTHROUGH_ENVIRONMENT = 'the GOODVIBES_DAEMON_HOME and GOODVIBES_WORKING_DIR environment variables';
 
 /** True when a passthrough command prints usage for `--help`. */
 export function answersHelpFlag(spec: { readonly passthroughFlags?: readonly { readonly tokens: readonly string[] }[] | undefined }): boolean {
@@ -195,7 +193,7 @@ export function renderDaemonCommandHelp(
     lines.push(
       '',
       ...(answersHelpFlag(spec) ? [`This command has its own flags; run \`${binary} ${spec.name} --help\` to see them.`] : []),
-      `It does not accept the global options below; set ${PASSTHROUGH_ENVIRONMENT} instead.`,
+      `Every word after \`${spec.name}\` is its own argument; give global options before the command: \`${binary} --daemon-home <dir> ${spec.name} …\`.`,
     );
   }
   lines.push('', 'Global options:', ...GLOBAL_FLAGS.map(renderFlagLine));

@@ -4,11 +4,10 @@ import { writeSync } from 'node:fs';
 import { runClusterCommand, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { readOperatorTokenFile } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { isDeclaredSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import { createNetworkFetch } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
 import { SecretsManager } from '../config/secrets.js';
 import { runConfigCommand } from '../daemon/config-command.js';
 import { runPairCommand } from '../daemon/pair-command.js';
-import { createDaemonCommandSocketFactory } from '../daemon/remote-transport.js';
+import { createDaemonCommandRemote } from '../daemon/remote-transport.js';
 import { runMcpCommand } from '../daemon/mcp-command.js';
 import { runSessionsCommand } from '../daemon/sessions-command.js';
 import { runStatusCommand, runUpdateCommand, type DaemonCommandResult } from '../daemon/status-command.js';
@@ -68,7 +67,8 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       const endpointFlag = (cli.command === 'install-service' || cli.command === 'migrate-service')
         && cli.errors.some((error) => /^--(port|hostname) is not a flag/.test(error));
       return result({ exitCode: 2, lines: [...cli.errors,
-        ...(endpointFlag ? [`Set the persistent binding instead: goodvibes-daemon config set controlPlane.host <host> / controlPlane.port <port>, then run \`${cli.command}\` again.`] : []),
+        ...(endpointFlag ? ['The installed service reads controlPlane.host and controlPlane.port from settings each time it starts, so a flag here could never reach it.',
+          `Set the persistent binding instead: goodvibes-daemon config set controlPlane.host <host> / controlPlane.port <port>, then run \`${cli.command}\` again.`] : []),
         '', renderGoodVibesDaemonHelp()] });
     }
     for (const warning of cli.warnings) stderr(`[goodvibes-daemon] warning: ${warning}`);
@@ -91,7 +91,6 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     }
     if (cli.flags.version || cli.command === 'version') return result({ exitCode: 0, lines: [renderGoodVibesVersion()] });
     if (cli.command === 'completion') return result(runCompletionCommand(cli.commandArgs));
-    if (isRawInterceptCommand(cli.command) && argv[0] !== cli.command) return refuse(`\`${cli.command}\` has to be the first argument: goodvibes-daemon ${cli.command} …`);
     if (cli.command === 'check-install-reader') {
       const { runInstallReaderCheck } = await import('./check-install-reader.js');
       return runInstallReaderCheck(cli.commandArgs, { stdout, stderr });
@@ -143,25 +142,23 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       cli.command === 'serve' || cli.command === 'mcp' ? { readOnly: true, diagnosticMode: 'structural' } : { diagnosticMode: 'structural' });
     const { config, homeDirectory, daemonHomeDirectory, workingDirectory } = configuration;
     const remoteFlags = { host: cli.flags.host, port: cli.flags.port, token: cli.flags.token, json: cli.flags.json };
-    const remote = { configManager: config, daemonHomeDir: daemonHomeDirectory, controlPlaneConfigDir: config.getControlPlaneConfigDir() };
-    const httpRemote = { ...remote, fetchImpl: createNetworkFetch(globalThis.fetch, config),
-      socketFactory: createDaemonCommandSocketFactory(remote) };
+    const remote = createDaemonCommandRemote({ configManager: config, daemonHomeDir: daemonHomeDirectory, controlPlaneConfigDir: config.getControlPlaneConfigDir() });
     switch (cli.command) {
       case 'config': return result(await runConfigCommand(cli.commandArgs, { configManager: config, json: cli.flags.json,
         openSecretStore: () => new SecretsManager({ projectRoot: workingDirectory, globalHome: homeDirectory,
           daemonHome: daemonHomeDirectory, configManager: config, diagnosticMode: 'structural' }) }));
-      case 'status': return result(await runStatusCommand({ ...httpRemote, flags: remoteFlags }));
-      case 'update': return result(await runUpdateCommand({ ...httpRemote, flags: { ...remoteFlags, check: cli.flags.check } }));
-      case 'sessions': return result(await runSessionsCommand({ ...httpRemote, flags: { ...remoteFlags, all: cli.flags.all }, args: cli.commandArgs }));
-      case 'pair': return result(await runPairCommand({ configManager: config, daemonHomeDir: daemonHomeDirectory,
+      case 'status': return result(await runStatusCommand({ ...remote, flags: remoteFlags }));
+      case 'update': return result(await runUpdateCommand({ ...remote, flags: { ...remoteFlags, check: cli.flags.check } }));
+      case 'sessions': return result(await runSessionsCommand({ ...remote, flags: { ...remoteFlags, all: cli.flags.all }, args: cli.commandArgs }));
+      case 'pair': return result(await runPairCommand({ ...remote,
         version: VERSION, readToken: readOperatorTokenFile, operatorToken: env.GOODVIBES_DAEMON_TOKEN?.trim() ? env.GOODVIBES_DAEMON_TOKEN : undefined,
         flags: { ...remoteFlags, yes: cli.flags.yes } }));
       case 'mcp': return await runMcpCommand({ configManager: config, daemonHomeDir: daemonHomeDirectory,
-        flags: remoteFlags, args: cli.commandArgs, stderr, fetchImpl: httpRemote.fetchImpl,
+        flags: { ...remoteFlags, categories: cli.flags.categories, allowWrite: cli.flags.allowWrite, allowDestructive: cli.flags.allowDestructive }, args: cli.commandArgs, stderr, fetchImpl: remote.fetchImpl,
         input: options.mcpStdio?.input ?? process.stdin, output: options.mcpStdio?.output ?? process.stdout });
       case 'webui': return result(runWebuiCommand(cli.commandArgs, { configManager: config, baseDirectory: workingDirectory }));
       case 'cluster': {
-        const answer = await runClusterCommand({ argv: cli.commandArgs, configManager: config, daemonHomeDir: daemonHomeDirectory, fetchImpl: httpRemote.fetchImpl });
+        const answer = await runClusterCommand({ argv: cli.commandArgs, configManager: config, daemonHomeDir: daemonHomeDirectory, fetchImpl: remote.fetchImpl });
         if (answer.rawOutput) stdout(answer.rawOutput);
         return result(answer);
       }
@@ -198,7 +195,6 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
           requireInstalledDefinitionMatch: configuration.isOverridden || cli.flags.workingDir !== undefined
             || env.GOODVIBES_WORKING_DIR !== undefined, actionRunner: options.serviceActionRunner,
           host: binding.host, port: binding.port, confirmMigration: cli.flags.yes, json: cli.flags.json,
-          hostnameFlagProvided: cli.flags.hostname !== undefined, portFlagProvided: cli.flags.port !== undefined,
         }), stdout);
       }
     }

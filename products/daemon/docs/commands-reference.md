@@ -112,7 +112,10 @@ service or Linux lingering was enabled. The shipped launcher lacks the required
 older install script is still present, since installing beside it would leave two daemons
 competing for one port. Take that one over with `migrate-service` first. Refuses an
 explicit `--hostname`/`--port` (the installed unit carries no endpoint flags; use
-`config set controlPlane.host` / `controlPlane.port` instead).
+`config set controlPlane.host` / `controlPlane.port` instead). Exits `0` when the
+service is installed and running, `3` when it was installed but is not running (the
+start failed or the daemon exited at once; the receipt says why), and `1` when it was
+not installed.
 
 ### `uninstall-service`
 
@@ -120,9 +123,10 @@ explicit `--hostname`/`--port` (the installed unit carries no endpoint flags; us
 goodvibes-daemon uninstall-service
 ```
 
-Stop the service and delete its definition file. On systemd this does not run
-`disable`, so a stale enablement symlink can remain until
-`systemctl --user daemon-reload`; the receipt says so when it applies.
+Stop and unregister the service (`systemctl --user disable --now`, `launchctl unload`,
+or ending and deleting the Scheduled Task), then delete its definition file. A service
+that is already stopped is uninstalled the same way. Exits `0` when removed, `4` when
+nothing was installed, and `1` when removal failed or the service is still running.
 
 ### `service-status`
 
@@ -201,8 +205,12 @@ goodvibes-daemon pair [--json] [--host <http(s)://name>] [--port <n>] [--token <
 
 With no `--host`, or one naming this machine, `pair` runs locally: it prints the same
 pairing block a daemon prints once at startup, reusing the existing shared token (never
-minting a new one), so a link printed here and one printed at boot are identical. The
-link is assembled from this machine's own token store.
+minting a new one), so a link printed here and one printed at boot are identical. It
+asks the running daemon first whether it accepts that token and which address and scheme
+it is bound to, so the QR carries what the daemon serves. A daemon that refuses the token
+gets no link (pass the right one with `--token`). When no daemon answers, the link is
+built from the settings and the token file, and the output says so; a daemon started on
+a port other than its settings is found with `--port`.
 
 With `--host` naming a different machine, `pair` runs remotely: it asks that daemon to
 mint a brand-new per-device pairing token over `pairing.handoff.create` and prints the
@@ -240,7 +248,7 @@ everything."
 ### `mcp`
 
 ```
-goodvibes-daemon mcp serve [--host <http(s)://name>] [--port <n>] [--token <t>]
+goodvibes-daemon mcp serve [--categories <list|all>] [--allow-write] [--allow-destructive] [--host <http(s)://name>] [--port <n>] [--token <t>]
 ```
 
 Serves the operator surface of a running daemon to a Model Context Protocol client over
@@ -250,6 +258,14 @@ client of the daemon's operator API and connects by the [remote-target
 convention](#the-remote-target-convention) (no flags: the daemon on this machine, with
 this machine's operator token). The tool set is generated from the operator contract, so
 a tool call is exactly the operator call of the same name.
+
+By default it serves the agent slice: the `sessions`, `tasks`, `contracts` and `approvals`
+methods that read, plus creating a session, sending it a message and steering it (about
+20 tools). `--categories` picks other operator families (comma separated or repeated;
+`all` for every family), `--allow-write` adds the methods that change state, and
+`--allow-destructive` adds the methods the contract marks dangerous. The number of tools
+served is printed on stderr at start. A client that cancels a tool call
+(`notifications/cancelled`) stops the request to the daemon.
 
 Stdout carries only protocol frames; every message for a person goes to stderr. The daemon
 is checked before the first frame: when it is not running, or no operator token exists, or
@@ -293,12 +309,15 @@ for recursive rendering and reader-failure behavior.
 goodvibes-daemon update [--check] [--json] [--host <name>] [--port <n>] [--token <t>]
 ```
 
-Report the running version and readable local lifecycle/update receipts. Remote targets
-cannot expose this machine's filesystem history. `--check` is read-only: there is
-no early-check verb and this partial host does not supply an update artifact or
-activate a binary updater. Restarting is not an update mechanism for this product.
-Product release/version ownership, feed migration, publication and updater activation
-remain unqualified; existing historical receipts do not establish current activation.
+Asks the daemon (`update.status`) whether its update loop is on and, if not, why; how
+often it checks; whether checks are failing and with what; a release downloaded and
+waiting for an idle moment; a release a rollback rejected; and an interrupted update
+that holds the loop off. `--check` runs one check now (`update.check`), the same check
+the schedule runs, and reports whether it ran, found another check already running, or
+found the loop off. It never forces an install. Both work for a remote daemon. The
+receipt lines come from files on the daemon's own host, so a remote target names them
+as unavailable. When the daemon on this machine does not answer, the command exits `1`
+and prints what those files say: uptime, failed starts, rejected version and receipts.
 
 ### `send`
 
@@ -473,9 +492,7 @@ The daemon manifest and compiled fallback use the repository root version.
 The top-level parser recognizes the command but leaves its trailing arguments to its adapter. Every token
 after the command word belongs to that command's own vocabulary rather than to the
 daemon parser (a `send` message may itself start with a dash, or contain `--port`).
-They do not accept `--daemon-home` or `--working-dir` in any position; select another home with the `GOODVIBES_DAEMON_HOME` and `GOODVIBES_WORKING_DIR` environment variables. Each of them only works as the first argument: `goodvibes-daemon --json
-send hello` is refused with `send has to be the first argument`, not silently
-misparsed.
+Global options go before the command word, as for every other command: `goodvibes-daemon --daemon-home <dir> webui status` reads `<dir>`. After the command word, `--daemon-home` and `--working-dir` are that command's own arguments, not global options.
 
 ## Flags this binary refuses by name
 

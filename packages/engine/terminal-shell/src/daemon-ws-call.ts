@@ -59,7 +59,11 @@ const realWebSocketFactory: DaemonWebSocketFactory = (url, init) =>
 export interface CallDaemonWsVerbOptions {
   readonly body?: unknown;
   readonly timeoutMs?: number | undefined;
-  /** Injected in tests so nothing opens a socket. */
+  /**
+   * Opens the connection. A daemon command passes the factory from its remote
+   * object, which carries the configured outbound TLS trust; without one the
+   * socket uses only the process's default trust.
+   */
   readonly socketFactory?: DaemonWebSocketFactory | undefined;
 }
 

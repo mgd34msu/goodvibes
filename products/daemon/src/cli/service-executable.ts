@@ -1,5 +1,6 @@
 /** Admit the actual shipped executable without choosing another binary from PATH or environment. */
 import { resolveInstalledDaemonUpdateArtifact, type ResolveInstalledDaemonUpdateArtifactOptions } from '../config/native-installation.js';
+import { installationRefused } from '../config/installation-refusal.js';
 
 export interface ShippedServiceExecutable {
   readonly binaryPath: string;
@@ -15,9 +16,9 @@ export function resolveShippedServiceExecutable(
   const artifact = resolveInstalledDaemonUpdateArtifact({ isOverridden: false }, options);
   if (!artifact) return undefined;
   const binaryPath = artifact.execPath;
-  if (!binaryPath) throw new Error('Native service executable path is unavailable');
+  if (!binaryPath) throw installationRefused('INSTALLATION_UNAVAILABLE', 'Native service executable path is unavailable');
   const current = artifact.assertCurrent;
-  if (!current) throw new Error('Native service executable admission is unavailable');
+  if (!current) throw installationRefused('INSTALLATION_UNAVAILABLE', 'Native service executable admission is unavailable');
   // Recovery-only admission must never start a service with damaged current bytes.
   current();
   return Object.freeze({ binaryPath, assertCurrent: current });

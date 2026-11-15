@@ -36,8 +36,8 @@ export function completionCommandWords(): readonly string[] {
 }
 
 /**
- * Long and short flag tokens a command accepts. A passthrough command refuses the
- * global flags and reads its own, so it is offered those and nothing else.
+ * Long and short flag tokens a command accepts. A passthrough command reads every
+ * word after its name itself, so after one only its own flags are offered.
  */
 export function completionFlagsFor(command: DaemonCommand): readonly string[] {
   const spec = daemonCommandSpec(command);
@@ -239,7 +239,7 @@ function fishScript(binary: string): string {
   }
 
   lines.push('');
-  // A passthrough command parses its own arguments and refuses the global flags, so they are not offered after one.
+  // Every word after a passthrough command is its own argument, so global flags are offered only before one.
   const passthroughWords = DAEMON_COMMANDS.filter((spec) => spec.passthrough).flatMap((spec) => [spec.name, ...spec.aliases]);
   const globalCondition = passthroughWords.length > 0 ? ` -n 'not __fish_seen_subcommand_from ${passthroughWords.join(' ')}'` : '';
   for (const flag of GLOBAL_FLAGS) {

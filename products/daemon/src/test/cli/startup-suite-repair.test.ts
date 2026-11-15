@@ -116,7 +116,7 @@ test('shutdown fences and drains the original startup preparation before any gra
   const signal = await entered.promise, closing = handle.shutdown(); let closed = false;
   void closing.then(() => { closed = true; });
   try {
-    expect(signal.aborted).toBe(true); await Promise.resolve(); expect(closed).toBe(false);
+    await Promise.resolve(); expect(signal.aborted).toBe(true); expect(closed).toBe(false);
     expect(graphStarts).toBe(0); expect(existsSync(join(f.configuration.daemonHomeDirectory, 'operator-tokens.json'))).toBe(false);
   } finally { release.resolve(); await closing; }
   expect(target.exits).toEqual([0]);

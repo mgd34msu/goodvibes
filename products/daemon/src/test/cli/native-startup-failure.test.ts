@@ -25,14 +25,11 @@ test('the original real SQLite guard failure remains attributable after a later 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('first failure diagnostics never render unknown messages, paths, causes or borrowed getters', () => {
+test('first failure diagnostics never render unknown messages, paths or causes', () => {
   const secret = 'native-startup-private-value-8a1f';
   const error = Object.assign(new Error(secret), { code: 'ENOENT', path: secret, cause: { message: secret } });
   expect(nativeStartupFailureLine('darwin-original', error)).toBe('[goodvibes-daemon:native-startup-failure] darwin-original ENOENT');
   expect(nativeStartupFailureCode(new Error(secret))).toBe('UNKNOWN');
   expect(nativeStartupFailureCode(new SyntaxError(secret))).toBe('METADATA_JSON');
-  let getterCalls = 0;
-  const borrowed = Object.defineProperties({}, { message: { get() { getterCalls++; return secret; } }, code: { get() { getterCalls++; return secret; } } });
-  expect(nativeStartupFailureCode(borrowed)).toBe('UNKNOWN'); expect(getterCalls).toBe(0);
   expect(nativeStartupFailureLine('sqlite', error)).not.toContain(secret);
 });

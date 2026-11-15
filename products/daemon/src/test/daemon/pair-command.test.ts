@@ -25,9 +25,14 @@ function baseInput(overrides: Record<string, unknown> = {}) {
     version: '9.9.9-test',
     readToken: () => JSON.stringify({ token: 'companion-token' }),
     flags: { host: undefined, port: undefined, token: undefined, json: false, yes: false },
+    socketFactory: neverCalledFactory(),
+    fetchImpl: noDaemon,
     ...overrides,
   };
 }
+
+/** No daemon is running on this machine. */
+const noDaemon = async (): Promise<Response> => { throw new Error('connect ECONNREFUSED'); };
 
 /**
  * A WebSocket stand-in that plays the daemon's side of the frame exchange:
@@ -135,7 +140,31 @@ describe('pair reprints the block the daemon prints at startup (local form)', ()
       token: 'companion-token',
       offers: ['notifications', 'passkey'],
     });
-    expect(result.lines).toEqual(expected.lines);
+    expect(result.lines.slice(0, expected.lines.length)).toEqual([...expected.lines]);
+    expect(result.lines.join('\n')).toContain('built from the settings and the token file');
+  });
+
+  test('a running daemon names the address and scheme it serves, and the link uses them', async () => {
+    const result = await runPairCommand(baseInput({
+      configManager: config({ 'controlPlane.webui.serve': true, 'web.publicBaseUrl': '' }),
+      fetchImpl: async (url: string) => (url.endsWith('/api/health')
+        ? Response.json({ network: { controlPlane: { host: '127.0.0.1', port: 4555, scheme: 'https' } } })
+        : Response.json({ status: 'running' })),
+      flags: { host: undefined, port: undefined, token: undefined, json: true, yes: false },
+    }));
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.lines[0]!) as { data: { origin: string; source: string } };
+    expect(parsed.data.origin).toBe('https://127.0.0.1:4555');
+    expect(parsed.data.source).toBe('daemon');
+  });
+
+  test('a running daemon that refuses the token gets no link', async () => {
+    const result = await runPairCommand(baseInput({
+      fetchImpl: async () => new Response('no', { status: 401 }),
+    }));
+    expect(result.exitCode).toBe(1);
+    expect(result.lines.join('\n')).toContain('--token');
+    expect(result.lines.join('\n')).not.toContain('companion-token');
   });
 
   test('the deep link carries the EXISTING token, not a fresh one', async () => {

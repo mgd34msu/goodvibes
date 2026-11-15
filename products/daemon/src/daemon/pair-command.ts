@@ -6,11 +6,16 @@
  * LOCAL FORM, `pair` with no `--host`, or one naming this machine, reprints
  * the pairing block a daemon prints once as it starts: the web origin, the
  * offers a new device can accept, what it will be able to do, and a QR code
- * encoding the deep link that opens the web app already signed in. It reads
- * from THIS machine's own token store (the shared companion token in
- * `<daemon home>/operator-tokens.json` plus the web origin its settings
- * resolve to) and reprints the EXISTING token rather than minting a new one,
+ * encoding the deep link that opens the web app already signed in. It takes
+ * the EXISTING token (`--token`, the process override, or the shared companion
+ * token in `<daemon home>/operator-tokens.json`) rather than minting a new one,
  * so a link printed here and the one printed at boot are the same link.
+ *
+ * The running daemon is the authority on that link: one `GET /status` proves
+ * it accepts the token, and `/api/health` names the address and scheme it is
+ * really bound to. A daemon that refuses the token gets no link (it would not
+ * sign in). Only when no daemon answers is the link rebuilt from the settings
+ * and the token file, and the output says so.
  *
  * REMOTE FORM, `pair --host <name> [--port] [--token]`, asks THAT daemon to
  * MINT A NEW per-device pairing token over `pairing.handoff.create` and prints
@@ -38,8 +43,10 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { renderPairingBanner } from '../core/pairing-banner.js';
 import {
+  callDaemonRoute,
   extractOperatorToken,
   resolveRemoteDaemonTarget,
+  type DaemonFetch,
   resolveRuntimeEndpointBinding,
   type RemoteDaemonTarget,
 } from '@goodvibes-jev/engine/terminal-shell';
@@ -54,8 +61,50 @@ export interface PairCommandDeps {
   readonly readToken: (daemonHomeDir: string) => string | undefined;
   /** Process-local override, never adopted into the stored companion identity. */
   readonly operatorToken?: string | undefined;
-  /** Injected in tests so the remote mint path never opens a real socket. */
-  readonly socketFactory?: DaemonWebSocketFactory | undefined;
+  /** Opens the remote mint connection with the configured outbound TLS trust (`createDaemonCommandRemote`). */
+  readonly socketFactory: DaemonWebSocketFactory;
+  /** Asks the running daemon on this machine, with the same outbound trust. */
+  readonly fetchImpl?: DaemonFetch | undefined;
+}
+
+/** The listener `/api/health` reports. */
+interface HealthBinding {
+  readonly network?: { readonly controlPlane?: { readonly host?: string; readonly port?: number; readonly scheme?: string } };
+}
+
+type LocalDaemonAnswer =
+  | { readonly kind: 'serving'; readonly bound: { readonly host: string; readonly port: number; readonly scheme: 'http' | 'https' } | undefined }
+  | { readonly kind: 'refused'; readonly baseUrl: string }
+  | { readonly kind: 'absent'; readonly baseUrl: string };
+
+/**
+ * Ask the daemon on this machine whether it accepts `token` and where it is
+ * bound. The status code decides; nothing reads wording.
+ */
+async function askLocalDaemon(input: RunPairCommandInput, token: string): Promise<LocalDaemonAnswer> {
+  const resolved = resolveRemoteDaemonTarget({
+    flags: { token, ...(input.flags.port === undefined ? {} : { port: input.flags.port }) },
+    configManager: input.configManager,
+    daemonHomeDir: input.daemonHomeDir,
+    readToken: input.readToken,
+  });
+  if (!resolved.ok) return { kind: 'absent', baseUrl: 'this machine' };
+  const target = resolved.target;
+  const fetchImpl = input.fetchImpl ?? fetch;
+  let status: number;
+  try {
+    status = (await fetchImpl(`${target.baseUrl}/status`, { headers: { Authorization: `Bearer ${token}` } })).status;
+  } catch {
+    return { kind: 'absent', baseUrl: target.baseUrl };
+  }
+  if (status === 401 || status === 403) return { kind: 'refused', baseUrl: target.baseUrl };
+  if (status < 200 || status >= 300) return { kind: 'absent', baseUrl: target.baseUrl };
+  const health = await callDaemonRoute<HealthBinding>(target, '/api/health', { method: 'GET', envelope: 'raw' }, fetchImpl);
+  const listener = health.ok ? health.data.network?.controlPlane : undefined;
+  const bound = listener?.host !== undefined && typeof listener.port === 'number'
+    ? { host: listener.host, port: listener.port, scheme: listener.scheme === 'https' ? 'https' as const : 'http' as const }
+    : undefined;
+  return { kind: 'serving', bound };
 }
 
 export interface PairCommandFlags extends RemoteCommandFlags {
@@ -123,7 +172,7 @@ interface PairingHandoffCreateResult {
 }
 
 /** `goodvibes-daemon pair` with no `--host`, or one naming this machine. */
-function runLocalReprint(input: RunPairCommandInput): DaemonCommandResult {
+async function runLocalReprint(input: RunPairCommandInput): Promise<DaemonCommandResult> {
   const { flags } = input;
   if (flags.port !== undefined && (!Number.isInteger(flags.port) || flags.port < 1 || flags.port > 65535)) {
     return failure('the local pairing port must identify a concrete listener', 'use the nonzero port reported by the running daemon', flags.json);
@@ -138,14 +187,24 @@ function runLocalReprint(input: RunPairCommandInput): DaemonCommandResult {
     );
   }
 
-  // A local reprint writes no token and no setting of its own. The dispatcher
-  // may first have run the daemon-config migration that moves legacy values into
-  // the daemon store, so the binding read here is the migrated one. It cannot
-  // observe an unrelated process's runtime overrides; an explicit --port carries that
-  // choice through for the bundled control-plane surface.
-  const binding = flags.port === undefined ? undefined
-    : { ...resolveRuntimeEndpointBinding(input.configManager, 'controlPlane'), port: flags.port };
-  const origin = resolvePairingWebOrigin(input.configManager, undefined, binding);
+  const answer = await askLocalDaemon(input, token);
+  if (answer.kind === 'refused') {
+    return failure(
+      `the daemon at ${answer.baseUrl} does not accept this machine's stored operator token, so a link built from it would not sign in`,
+      'pass the token that daemon was started with: goodvibes-daemon pair --token <token>',
+      flags.json,
+    );
+  }
+  // A local reprint writes no token and no setting of its own. With no daemon
+  // answering, the binding comes from settings, or from --port when given.
+  const bound = answer.kind === 'serving' ? answer.bound
+    : flags.port === undefined ? undefined
+      : { ...resolveRuntimeEndpointBinding(input.configManager, 'controlPlane'), port: flags.port };
+  const origin = resolvePairingWebOrigin(input.configManager, undefined, bound);
+  const fromFiles = answer.kind === 'absent'
+    ? [`no daemon answered at ${answer.baseUrl}; this link is built from the settings and the token file, and works once the daemon runs with them.`,
+      'a daemon started on another port is found with: goodvibes-daemon pair --port <port>']
+    : [];
   const offers = availablePairingOffers({
     relayEnabled: input.configManager.get('relay.enabled') === true,
     stepUpAvailable: true,
@@ -171,12 +230,13 @@ function runLocalReprint(input: RunPairCommandInput): DaemonCommandResult {
           capabilities: banner.capabilities,
           ...(banner.notice === undefined ? {} : { notice: banner.notice }),
           originFromPublicBaseUrl: origin.fromPublicBaseUrl,
+          source: answer.kind === 'serving' ? 'daemon' : 'files',
         },
       }, null, 2)],
     };
   }
 
-  return { exitCode: 0, lines: banner.lines };
+  return { exitCode: 0, lines: [...banner.lines, ...(fromFiles.length > 0 ? ['', ...fromFiles] : [])] };
 }
 
 /** The plan `pair --host <target>` prints before it will act, absent `-y`. Nothing is called yet. */
@@ -209,7 +269,7 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
 
   const outcome = await callDaemonWsVerb<PairingHandoffCreateResult>(target, 'pairing.handoff.create', {
     body: { name: defaultPairingTokenName() },
-    ...(input.socketFactory ? { socketFactory: input.socketFactory } : {}),
+    socketFactory: input.socketFactory,
   });
   if (!outcome.ok) return failure(outcome.error, outcome.fix, flags.json);
 

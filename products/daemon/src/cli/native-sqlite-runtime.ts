@@ -6,6 +6,7 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, type Bi
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { COMPILED_VERSION } from '../version.js';
+import { nativeStartupRefused } from '../config/installation-refusal.js';
 
 export interface DaemonSqliteRuntime {
   readonly target: 'darwin-x64' | 'darwin-arm64';
@@ -18,7 +19,7 @@ export interface DaemonSqliteRuntime {
 
 export function daemonSqliteRuntime(platform: string, arch: string): DaemonSqliteRuntime | null {
   if (platform !== 'darwin') return null;
-  if (arch !== 'x64' && arch !== 'arm64') throw new Error('Unsupported Darwin native SQLite architecture');
+  if (arch !== 'x64' && arch !== 'arm64') throw nativeStartupRefused('SQLITE_ARCH_UNSUPPORTED', 'Unsupported Darwin native SQLite architecture');
   const target = `darwin-${arch}` as const;
   const libraryPath = `lib/sqlite-${target}/libsqlite3.dylib`;
   return Object.freeze({ target, libraryPath, provenancePath: libraryPath + '.json', sqliteVersion: '3.54.0',
@@ -29,7 +30,7 @@ export function daemonSqliteRuntime(platform: string, arch: string): DaemonSqlit
 export function assertDaemonSqliteArchitecture(bytes: Buffer, target: DaemonSqliteRuntime['target']): void {
   const cpu = target === 'darwin-x64' ? 0x01000007 : 0x0100000c;
   if (bytes.length < 32 || bytes.readUInt32LE(0) !== 0xfeedfacf || bytes.readUInt32LE(4) !== cpu
-    || bytes.readUInt32LE(12) !== 6) throw new Error('Native SQLite library is not the declared Mach-O architecture');
+    || bytes.readUInt32LE(12) !== 6) throw nativeStartupRefused('SQLITE_ARCH_MISMATCH', 'Native SQLite library is not the declared Mach-O architecture');
 }
 
 export interface DaemonSqliteOwner extends DarwinDaemonSqliteOwner {}
@@ -46,7 +47,7 @@ function retainedFile(path: string): { readonly identity: string; readonly file:
   const parents: string[] = [];
   for (let current = dirname(path);;) {
     const stat = lstatSync(current, { bigint: true });
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Native SQLite parent is not a regular directory');
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw nativeStartupRefused('SQLITE_PARENT_TYPE', 'Native SQLite parent is not a regular directory');
     // Keep the original ancestor walk and reject each named symlink before
     // forming its absolute identity. A recursive realpath at every hop repeats
     // traversal without adding another physical identity constraint.
@@ -54,23 +55,23 @@ function retainedFile(path: string): { readonly identity: string; readonly file:
     const parent = dirname(current); if (parent === current) break; current = parent;
   }
   const stat = lstatSync(path, { bigint: true });
-  if (!stat.isFile() || stat.isSymbolicLink() || Number(stat.mode & 0o7777n) !== 0o644) throw new Error('Native SQLite companion must be a regular file with mode 0644');
+  if (!stat.isFile() || stat.isSymbolicLink() || Number(stat.mode & 0o7777n) !== 0o644) throw nativeStartupRefused('SQLITE_FILE_MODE', 'Native SQLite companion must be a regular file with mode 0644');
   const file = fileRevision(stat);
   return { identity: `${parents.join('|')}:${file}`, file };
 }
 
 function readRetainedDescriptor(fd: number, limit: number, exact = false): Buffer {
   const stat = fstatSync(fd);
-  if (!stat.isFile() || stat.size > limit || (exact && stat.size !== limit)) throw new Error('Native SQLite companion exceeds its compiled size bound');
+  if (!stat.isFile() || stat.size > limit || (exact && stat.size !== limit)) throw nativeStartupRefused('SQLITE_SIZE_BOUND', 'Native SQLite companion exceeds its compiled size bound');
   const bytes = Buffer.alloc(stat.size);
   let offset = 0;
   while (offset < bytes.length) {
     const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
-    if (count === 0) throw new Error('Native SQLite companion changed during bounded read');
+    if (count === 0) throw nativeStartupRefused('SQLITE_READ_CHANGED', 'Native SQLite companion changed during bounded read');
     offset += count;
   }
   const extra = Buffer.alloc(1);
-  if (readSync(fd, extra, 0, 1, offset) !== 0 || fstatSync(fd).size !== stat.size) throw new Error('Native SQLite companion changed during bounded read');
+  if (readSync(fd, extra, 0, 1, offset) !== 0 || fstatSync(fd).size !== stat.size) throw nativeStartupRefused('SQLITE_READ_CHANGED', 'Native SQLite companion changed during bounded read');
   return bytes;
 }
 
@@ -101,7 +102,7 @@ export interface DaemonSqliteAdmission {
 function assertSqliteLifetime(check: (() => void) | undefined): void {
   let result: unknown;
   try { result = check?.(); } catch (error) { drainOwned(error); throw error; }
-  if (result !== undefined) { drainOwned(result); throw new Error('Native SQLite lifetime must be synchronous'); }
+  if (result !== undefined) { drainOwned(result); throw nativeStartupRefused('SQLITE_LIFETIME_ASYNC', 'Native SQLite lifetime must be synchronous'); }
 }
 
 /** Run before importing any service module that can construct a database. */
@@ -114,13 +115,13 @@ export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}):
   if (!bundled || platform !== 'darwin') return;
   signal?.throwIfAborted();
   const runtime = daemonSqliteRuntime(platform, arch);
-  if (!runtime) throw new Error('Native SQLite runtime is undeclared');
+  if (!runtime) throw nativeStartupRefused('SQLITE_RUNTIME_UNDECLARED', 'Native SQLite runtime is undeclared');
   const expected = capturedOwner && Object.freeze({ ...capturedOwner });
   if (!expected || expected.schema !== 1 || expected.packageName !== '@goodvibes-jev/daemon'
     || expected.daemonVersion !== version || expected.target !== runtime.target
     || expected.sqliteVersion !== runtime.sqliteVersion || expected.sourceUrl !== runtime.sourceUrl || expected.sourceSha3 !== runtime.sourceSha3
     || !/^[0-9a-f]{64}$/.test(expected.sha256) || !Number.isSafeInteger(expected.size) || expected.size < 32
-    || Object.keys(expected).length !== 9) throw new Error('Native SQLite compiled producer owner is absent or invalid');
+    || Object.keys(expected).length !== 9) throw nativeStartupRefused('SQLITE_COMPILED_OWNER', 'Native SQLite compiled producer owner is absent or invalid');
   // Refuse a retired owner before opening metadata or hashing a native library.
   // Preselection and postselection guards below remain independently live.
   if (assertCurrent !== undefined) assertSqliteLifetime(assertCurrent);
@@ -131,26 +132,26 @@ export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}):
   const libraryFd = openSync(libraryPath, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const descriptorCurrent = () => {
-      if (fileRevision(fstatSync(libraryFd, { bigint: true })) !== libraryOwner.file) throw new Error('Native SQLite companion changed before database construction');
+      if (fileRevision(fstatSync(libraryFd, { bigint: true })) !== libraryOwner.file) throw nativeStartupRefused('SQLITE_ADMISSION_CHANGED', 'Native SQLite companion changed before database construction');
     };
     descriptorCurrent();
     const bytes = readRetainedDescriptor(libraryFd, expected.size, true);
     descriptorCurrent();
     const provenance: unknown = JSON.parse(readRetainedBytes(provenancePath, 16_384).toString('utf8'));
     if (bytes.length !== expected.size || createHash('sha256').update(bytes).digest('hex') !== expected.sha256) {
-      throw new Error('Native SQLite library differs from the compiled producer bytes');
+      throw nativeStartupRefused('SQLITE_BYTES_MISMATCH', 'Native SQLite library differs from the compiled producer bytes');
     }
     if (!provenance || typeof provenance !== 'object' || Array.isArray(provenance)
       || Object.keys(provenance).length !== Object.keys(expected).length
       || !Object.entries(expected).every(([key, value]) => Reflect.get(provenance, key) === value)) {
-      throw new Error('Native SQLite companion owner or bytes differ from the declared runtime');
+      throw nativeStartupRefused('SQLITE_PROVENANCE_MISMATCH', 'Native SQLite companion owner or bytes differ from the declared runtime');
     }
     assertDaemonSqliteArchitecture(bytes, runtime.target);
     const current = () => {
       signal?.throwIfAborted();
       assertSqliteLifetime(assertCurrent);
       descriptorCurrent();
-      if (retainedFile(libraryPath).identity !== libraryOwner.identity || retainedFile(provenancePath).identity !== provenanceOwner.identity) throw new Error('Native SQLite companion changed before database construction');
+      if (retainedFile(libraryPath).identity !== libraryOwner.identity || retainedFile(provenancePath).identity !== provenanceOwner.identity) throw nativeStartupRefused('SQLITE_ADMISSION_CHANGED', 'Native SQLite companion changed before database construction');
     };
     current();
     // Bun 1.3.14 synchronously dlopens and initializes SQLite before returning
@@ -160,13 +161,13 @@ export function initializeDaemonNativeSqlite(options: DaemonSqliteOptions = {}):
     const loaderPath = `@executable_path/${relative(cohortRoot, `/dev/fd/${libraryFd}`)}`;
     let selected: unknown;
     try { selected = setCustomSQLite(loaderPath); } catch (error) { drainOwned(error); throw error; }
-    if (selected !== true) { drainOwned(selected); throw new Error('Bun refused the retained native SQLite runtime before database construction'); }
+    if (selected !== true) { drainOwned(selected); throw nativeStartupRefused('SQLITE_LOADER_REFUSED', 'Bun refused the retained native SQLite runtime before database construction'); }
     current();
     // Sibling reader-floor publication changes directory clocks without
     // replacing an ancestor. Retain physical ancestors and exact leaf revisions.
     return Object.freeze({ owner: expected, execPath, libraryPath, provenancePath, assertCurrent() {
       signal?.throwIfAborted(); assertSqliteLifetime(assertCurrent);
-      if (retainedFile(libraryPath).identity !== libraryOwner.identity || retainedFile(provenancePath).identity !== provenanceOwner.identity) throw new Error('Original native SQLite source changed');
+      if (retainedFile(libraryPath).identity !== libraryOwner.identity || retainedFile(provenancePath).identity !== provenanceOwner.identity) throw nativeStartupRefused('SQLITE_SOURCE_CHANGED', 'Original native SQLite source changed');
       signal?.throwIfAborted();
     } });
   } finally { closeSync(libraryFd); }

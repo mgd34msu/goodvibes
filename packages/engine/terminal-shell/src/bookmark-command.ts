@@ -35,7 +35,7 @@ export function handleBookmarks(ctx: BookmarkCommandContext, getManager: () => P
             id: entry.key,
             label: entry.label,
             detail: new Date(entry.timestamp).toLocaleTimeString(),
-            actions: '[d] delete',
+            actions: '[Del] delete',
           }));
     ctx.openSelection('Bookmarks', items, { allowSearch: true, customActions: deleteAction }, (result) => {
       if (!result || result.item.id === '_empty') return;

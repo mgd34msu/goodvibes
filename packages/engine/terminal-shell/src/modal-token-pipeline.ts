@@ -1,5 +1,54 @@
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { withModalState as withState, type ModalTokenSnapshot } from './modal-input-routes.js';
+import { MODAL_NAMES, isModalName, type ModalName } from './modal-state.js';
+type ModalRoute =
+  | 'handleSelectionModalToken'
+  | 'handleBookmarkModalToken'
+  | 'handleSettingsModalToken'
+  | 'handleMcpWorkspaceToken'
+  | 'handleSessionPickerToken'
+  | 'handleProfilePickerToken'
+  | 'handleOverlayToken'
+  | 'handleModelPickerToken'
+  | 'handleEscapeOnlyModalToken'
+  | 'handleFilePickerToken'
+  | 'handleBlockActionsToken'
+  | 'config'
+  | 'onboarding'
+  | 'agent-workspace'
+  | 'live-tail'
+  | 'process';
+/** The key route of each modal. Command mode is routed by the composer, not here. */
+const MODAL_ROUTES: Readonly<Record<ModalName, ModalRoute | null>> = {
+  help: 'handleOverlayToken',
+  shortcuts: 'handleOverlayToken',
+  bookmark: 'handleBookmarkModalToken',
+  liveTail: 'live-tail',
+  settings: 'handleSettingsModalToken',
+  mcpWorkspace: 'handleMcpWorkspaceToken',
+  agentWorkspace: 'agent-workspace',
+  sessionPicker: 'handleSessionPickerToken',
+  profilePicker: 'handleProfilePickerToken',
+  config: 'config',
+  contextInspector: 'handleEscapeOnlyModalToken',
+  process: 'process',
+  modelPicker: 'handleModelPickerToken',
+  filePicker: 'handleFilePickerToken',
+  blockActions: 'handleBlockActionsToken',
+  selection: 'handleSelectionModalToken',
+  onboarding: 'onboarding',
+  command: null,
+};
+/**
+ * Keys go to the modal Escape would close: the topmost stacked modal still on
+ * screen, else the first active modal in {@link MODAL_NAMES}. Transcript search comes
+ * before any modal and composer history search after them, in both apps.
+ */
+const ROUTE_ORDER: readonly (ModalRoute | 'handleSearchModeToken' | 'handleHistorySearchToken')[] = [
+  'handleSearchModeToken',
+  ...new Set(MODAL_NAMES.map((name) => MODAL_ROUTES[name]).filter((route): route is ModalRoute => route !== null)),
+  'handleHistorySearchToken',
+];
 export type ModalTokenResult = ReturnType<typeof withState>;
 export type CommonModalRoutingState = ModalTokenSnapshot &
   Readonly<
@@ -191,26 +240,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
     ) => boolean;
   },
   options: {
-    readonly order: readonly (
-      | 'handleSearchModeToken'
-      | 'handleSelectionModalToken'
-      | 'handleBookmarkModalToken'
-      | 'handleSettingsModalToken'
-      | 'handleMcpWorkspaceToken'
-      | 'handleSessionPickerToken'
-      | 'handleProfilePickerToken'
-      | 'handleOverlayToken'
-      | 'handleHistorySearchToken'
-      | 'handleModelPickerToken'
-      | 'handleEscapeOnlyModalToken'
-      | 'handleFilePickerToken'
-      | 'handleBlockActionsToken'
-      | 'config'
-      | 'onboarding'
-      | 'agent-workspace'
-      | 'live-tail'
-      | 'process'
-    )[];
     readonly additional?:
       | Readonly<
           Partial<
@@ -436,15 +465,28 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
     handleFilePickerToken,
     handleBlockActionsToken,
   };
+  const run = (name: (typeof ROUTE_ORDER)[number], state: State, token: InputToken): ModalTokenResult | undefined => {
+    if (name in routes) return routes[name as keyof typeof routes](state, token);
+    const extra = options.additional?.[name as keyof NonNullable<typeof options.additional>];
+    return extra?.(state, token) ? withState(state, true) : undefined;
+  };
   return function handleModalTokenRoutes(state: State, token: InputToken): ModalTokenResult {
-    for (const name of options.order) {
-      if (name in routes) {
-        const result = routes[name as keyof typeof routes](state, token);
-        if (result) return result;
-      } else {
-        const extra = options.additional?.[name as keyof NonNullable<typeof options.additional>];
-        if (extra?.(state, token)) return withState(state, true);
-      }
+    // Topmost stacked modal still on screen first; an entry whose modal closed
+    // itself declines the key, which is the same entry Escape skips.
+    const stack = (state.modalStack as readonly string[] | undefined) ?? [];
+    const tried = new Set<ModalRoute>();
+    for (let i = stack.length - 1; i >= 0; i--) {
+      const name = stack[i];
+      const route = name !== undefined && isModalName(name) ? MODAL_ROUTES[name] : null;
+      if (!route || tried.has(route)) continue;
+      tried.add(route);
+      const result = run(route, state, token);
+      if (result) return result;
+    }
+    for (const name of ROUTE_ORDER) {
+      if (tried.has(name as ModalRoute)) continue;
+      const result = run(name, state, token);
+      if (result) return result;
     }
     return withState(state, false);
   };

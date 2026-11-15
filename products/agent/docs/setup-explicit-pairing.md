@@ -49,6 +49,15 @@ host offers a `CLEAR ...` phrase that forgets the local marker. Do that only
 after checking on the host that no pairing token exists for the attempt; a
 token that does exist stays valid until you revoke it there.
 
+When the host no longer accepts the stored device credential (it was revoked
+there, or the daemon was reset), `setup pair` says `credential-rejected`, and
+`--apply` offers a `FORGET ...` phrase that removes the stored credential so
+this Agent can pair again. `goodvibes-agent setup unpair` (or `/setup unpair`,
+typed by the owner) forgets the stored credential for the selected host at any
+time; nothing is sent to the host, and the token stays valid there until you
+revoke it. It exits 0 when a credential was forgotten and 1 otherwise. A
+pairing store that cannot be used names the cause, the path and the fix.
+
 In the standalone command, Enter or an incorrect phrase cancels with exit code 2.
 From the confirmation
 prompt onward, Ctrl-C and terminal EOF (Ctrl-D) interrupt with exit code 130,

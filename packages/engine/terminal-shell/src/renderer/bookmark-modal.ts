@@ -4,7 +4,7 @@
  * Title with the selected position, the always-live search row (filters by
  * key and label), one kit row per bookmark (label, the block key muted after
  * it, the time right-aligned), a muted scroll count and keycap hints:
- * ↑↓ move · ⏎ jump · o open file · d remove.
+ * ↑↓ move · ⏎ jump · ctrl+o open file · del remove; letters type into the search row.
  */
 
 import type { BookmarkModal } from '../bookmark-modal.js';
@@ -31,7 +31,7 @@ function rowFor(entry: BookmarkEntry, selected: boolean): KitRow {
   return { label: entry.label, desc: entry.key, right: formatTime(entry.timestamp), selected };
 }
 
-const HINTS: readonly KitHint[] = [['↑↓', 'move'], ['⏎', 'jump'], ['o', 'open file'], ['d', 'remove']];
+const HINTS: readonly KitHint[] = [['↑↓', 'move'], ['⏎', 'jump'], ['ctrl+o', 'open file'], ['del', 'remove']];
 
 /**
  * Render the bookmark modal as a SurfaceLayer in screen coordinates.

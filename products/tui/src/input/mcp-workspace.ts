@@ -166,15 +166,16 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
   }
 
   async confirmDelete(): Promise<void> {
-    if (!this.context || !this.editingServerName) return;
+    if (!this.context || !this.editingServerName || this.mode !== 'delete-confirm') return;
     const name = this.editingServerName;
+    // Leave the confirmation before awaiting, so a repeated y or Enter cannot start a second removal.
+    this.mode = 'browse';
+    this.editingServerName = null;
     try {
       const server = this.snapshot.effectiveConfig.servers.find((entry) => entry.server.name === name);
       const scope = server?.source.scope === 'global' ? 'global' : 'project';
       const api = requireMcpApi(this.context);
       const result = await api.removeServerConfig(requireShellPaths(this.context), scope, name);
-      this.mode = 'browse';
-      this.editingServerName = null;
       this.refreshSnapshot();
       this.setStatus(
         result.removed

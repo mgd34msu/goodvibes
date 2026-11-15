@@ -26,7 +26,7 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
     name: 'services',
     aliases: ['svc'],
     description: 'Manage API service configurations',
-    usage: '[open|list|inspect <name>|test <name>|resolve <name>|auth <name>|auth-review|doctor|export <path>|import <path>]',
+    usage: '[open|list|inspect <name>|test <name>|resolve|auth <name>|auth-review|doctor|export <path>|import <path>]',
     async handler(args, ctx) {
       const sub = args[0] ?? 'open';
       const shellPaths = requireShellPaths(ctx);
@@ -82,37 +82,21 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
         ].join('\n'));
         return;
       }
-      if (sub === 'resolve') {
+      if (sub === 'resolve' || sub === 'auth') {
+        // One check, two spellings: whether the service's credential resolves to auth headers now.
         const name = args[1];
         if (!name) {
-          ctx.print('Usage: /services resolve <name>');
+          ctx.print(`Usage: /services ${sub} <name>`);
           return;
         }
         const headers = await svcRegistry.resolveAuth(name);
         if (!headers) {
-          ctx.print(`Service ${name} has no resolvable auth headers right now.`);
+          ctx.print(`Service ${name} has no resolvable auth headers right now. /services inspect ${name} shows which credential is missing.`);
           return;
         }
         ctx.print([
-          `Resolved auth headers for ${name}`,
+          `Resolved auth headers for ${name} (values not shown)`,
           ...Object.keys(headers).map((key) => `  ${key}: <redacted>`),
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'auth') {
-        const name = args[1];
-        if (!name) {
-          ctx.print('Usage: /services auth <name>');
-          return;
-        }
-        const headers = await svcRegistry.resolveAuth(name);
-        if (!headers) {
-          ctx.print(`Service ${name} has no resolvable auth headers right now.`);
-          return;
-        }
-        ctx.print([
-          `Service auth ${name}`,
-          ...Object.keys(headers).map((key) => `  ${key}: <resolved>`),
         ].join('\n'));
         return;
       }
@@ -212,7 +196,7 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
         const testAction = new Map<string, SelectionAction>([['t', 'select' as const]]);
         const items: SelectionItem[] = keys.length === 0
           ? [{ id: '_empty', label: 'No services configured', detail: '.goodvibes/tui/services.json' }]
-          : keys.map((key) => ({ id: key, label: all[key].name ?? key, detail: `${all[key].authType}  ${all[key].baseUrl ?? '(no url)'}`, actions: '[t] test' }));
+          : keys.map((key) => ({ id: key, label: all[key].name ?? key, detail: `${all[key].authType}  ${all[key].baseUrl ?? '(no url)'}`, actions: '[Ctrl+T] test' }));
         ctx.openSelection('Services', items, { allowSearch: true, customActions: testAction }, (result) => {
           if (!result || result.item.id === '_empty') return;
           const svc = all[result.item.id];

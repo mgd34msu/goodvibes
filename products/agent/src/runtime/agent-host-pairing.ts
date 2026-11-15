@@ -6,7 +6,7 @@ import { createConnectedHost, isHostFailure, resolveConnectedHost, type Connecte
 import type { AgentDaemonVerbCallerOptions } from './client/daemon-verbs.ts';
 import { readConnectedHostOperatorToken } from './connected-host-auth.ts';
 import { isHostPairingBootstrapPrincipal, isNativePairedPrincipal, parseMintedPairingToken, readHostPairingResponse } from './native-paired-principal.ts';
-import { agentHostPairingStorePath, beginAgentHostPairing, canonicalizePairingHost, clearAgentHostPairingAttempt, completeAgentHostPairing, readAgentHostPairing } from './connected-host-pairing-store.ts';
+import { agentHostPairingStorePath, beginAgentHostPairing, canonicalizePairingHost, clearAgentHostPairingAttempt, completeAgentHostPairing, readAgentHostPairing, removeAgentHostPairing, type RemoveAgentHostPairingResult } from './connected-host-pairing-store.ts';
 
 export interface AgentHostPairingResult {
   readonly status:
@@ -36,8 +36,14 @@ export const PAIRING_AUTH_DEADLINE_MS = 5_000;
 /** How long the mint request may take before its outcome is unknown. */
 const PAIRING_MINT_DEADLINE_MS = 5_000;
 
-const storeUnreadable = (home: string): AgentHostPairingResult => ({ status: 'pairing-store-unreadable', message: `The pairing store at ${agentHostPairingStorePath(home)} cannot be read or written. Fix its permissions or move the damaged file aside, then preview again. Nothing was created.` });
-const unknown = (host: string): AgentHostPairingResult => ({ status: 'unknown', host, message: 'A pairing attempt may already have created a credential. Its outcome must be reviewed on this host; no automatic remint or revoke is allowed.' });
+/** The store's own refusal (cause, path, fix) when it gave one; otherwise the store path and the usual fixes. */
+const storeUnreadable = (home: string, refusal?: { readonly status: string; readonly reason?: string }): AgentHostPairingResult => ({
+  status: 'pairing-store-unreadable',
+  message: refusal?.status === 'unavailable' && refusal.reason
+    ? `${refusal.reason} Nothing was created.`
+    : `The pairing store at ${agentHostPairingStorePath(home)} cannot be read or written. Fix its permissions or move the damaged file aside, then preview again. Nothing was created.`,
+});
+const unknown = (host: string): AgentHostPairingResult => ({ status: 'unknown', host, message: 'The reply to a pairing request was lost, so this Agent does not know whether the host created its credential. Run goodvibes-agent setup pair to repeat the same request: the host answers it with that credential, never a second one.' });
 const rejected = (host: string, status: number): AgentHostPairingResult => ({ status: 'rejected', host, message: `The host refused the pairing request (HTTP ${status}); nothing was created. Check that this host allows pairing, then preview again.` });
 // A refusal before any minting (a 4xx other than a timeout or a conflict, or a host that was not listening) proves no credential exists.
 const refusedWithoutMinting = (status: number): boolean => status >= 400 && status < 500 && status !== 408 && status !== 409;
@@ -83,9 +89,10 @@ function authCheckFailed(error: unknown, host: string, aborted: boolean): AgentH
  * No raw token, credential digest or remote error leaves this module.
  */
 /**
- * An unresolved attempt blocks pairing until the owner has checked the host.
- * Clearing it is an owner-terminal action: it only deletes the local marker, so
- * it is offered with the warning that a credential the host did mint stays there.
+ * An unresolved attempt that could not be repeated (no credential to send, or
+ * the host still did not answer). Clearing it is an owner-terminal action: it
+ * only deletes the local marker. A credential the host minted for it was an
+ * offer nobody received, so it never authenticates and lapses unused.
  */
 function clearPreview(home: string, host: string, attemptId: string): AgentHostPairingPreview {
   const confirmation = `CLEAR ${randomBytes(6).toString('hex')}`;
@@ -95,16 +102,111 @@ function clearPreview(home: string, host: string, attemptId: string): AgentHostP
       ...unknown(host),
       confirmation,
       confirmationPrompt: 'forget this unresolved attempt',
-      message: `${unknown(host).message} If the host shows no pairing token for this attempt, confirm below to forget it and pair again; a token that does exist stays valid until you revoke it on the host.`,
+      message: `${unknown(host).message} Or confirm below to forget the attempt and pair from scratch; a credential the host made for it was never received, so it cannot sign in and lapses within 15 minutes.`,
     },
     async confirm(answer) {
       if (consumed || answer !== confirmation) return cancelled();
       consumed = true;
       const cleared = await clearAgentHostPairingAttempt(home, host, attemptId);
       if (cleared.status === 'cleared') return { status: 'cleared', host, message: 'The unresolved attempt was forgotten. Preview again to pair.' };
-      return cleared.status === 'conflict' ? changed() : storeUnreadable(home);
+      return cleared.status === 'conflict' ? changed() : storeUnreadable(home, cleared);
     },
   };
+}
+
+/** What forgetting a stored credential did. The token stays valid on the host until it is revoked there. */
+function forgotten(result: RemoveAgentHostPairingResult, host: string, tokenId: string): AgentHostPairingResult {
+  if (result.status === 'removed') return { status: 'cleared', host, message: `The stored device credential (token ${tokenId}) was forgotten. It stays valid on the host until it is revoked there. Pair again with goodvibes-agent setup pair --apply.` };
+  if (result.status === 'conflict') return changed();
+  return { status: 'pairing-store-unreadable', host, message: `${result.reason} Nothing was forgotten.` };
+}
+
+/**
+ * The host answered 401 or 403 to the stored device credential: it was revoked
+ * or the daemon there was reset. Forgetting it locally is offered so this Agent
+ * can pair again; the owner confirms with a fresh phrase.
+ */
+function forgetPreview(home: string, host: string, tokenId: string): AgentHostPairingPreview {
+  const confirmation = `FORGET ${randomBytes(6).toString('hex')}`;
+  let consumed = false;
+  return {
+    result: {
+      status: 'credential-rejected', host, confirmation,
+      confirmationPrompt: 'forget the stored credential so this Agent can pair again',
+      message: `The host at ${host} no longer accepts the stored device credential (it was revoked, or the daemon there was reset). Confirm below to forget it, then pair again with goodvibes-agent setup pair --apply.`,
+    },
+    async confirm(answer) {
+      if (consumed || answer !== confirmation) return cancelled();
+      consumed = true;
+      return forgotten(await removeAgentHostPairing(home, host, tokenId), host, tokenId);
+    },
+  };
+}
+
+/**
+ * `goodvibes-agent setup unpair` and `/setup unpair`: forget this Agent's
+ * stored device credential for the selected host. Local only; nothing is sent.
+ */
+export async function unpairAgentHost(options: Pick<AgentDaemonVerbCallerOptions, 'configManager' | 'homeDirectory'>): Promise<AgentHostPairingResult> {
+  const home = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
+  const configured = resolveConnectedHostBaseUrl(options.configManager);
+  const host = canonicalizePairingHost(configured);
+  if (!host) return { status: 'no-host-configured', message: `The configured host address (${configured}) is not a usable http(s) origin, so there is no credential to forget. Set controlPlane.host and controlPlane.port to name the host.` };
+  const state = readAgentHostPairing(home, host);
+  if (state.status === 'unavailable') return { status: 'pairing-store-unreadable', host, message: `${state.reason} Nothing was forgotten.` };
+  if (state.status === 'missing') return { status: 'blocked', host, message: 'No device credential is stored for this host; nothing to forget.' };
+  if (state.status === 'unknown') return { ...unknown(host), message: `${unknown(host).message} Run goodvibes-agent setup pair --apply to review the unresolved attempt and forget it.` };
+  return forgotten(await removeAgentHostPairing(home, host, state.tokenId), host, state.tokenId);
+}
+
+type MigrationOutcome =
+  | { readonly status: 'paired'; readonly token: string; readonly tokenId: string }
+  | { readonly status: 'settled'; readonly result: AgentHostPairingResult };
+
+/**
+ * One `pairing.tokens.migrate` request for the attempt whose marker stands,
+ * then the minted credential stored for this host. The attempt id goes with
+ * it: sending the same attempt again after a lost reply is answered with the
+ * offer the host already made (same token id, new secret) while it is unused,
+ * so a repeat never adds a credential. A refusal before minting releases the
+ * marker; a lost or failed reply leaves it, because the host may have minted.
+ */
+async function sendAgentMigration(input: {
+  readonly home: string; readonly host: string; readonly token: string; readonly name: string; readonly attemptId: string;
+  /** This attempt was sent before, so an unreachable host proves nothing about it. */
+  readonly repeat: boolean;
+  readonly fetchImpl?: typeof fetch | undefined; readonly signal?: AbortSignal | undefined;
+}): Promise<MigrationOutcome> {
+  const { home, host, name, attemptId, signal } = input;
+  const settled = (result: AgentHostPairingResult): MigrationOutcome => ({ status: 'settled', result });
+  try {
+    // `pairing.tokens.migrate` has no route of its own in the operator
+    // contract, so it goes through the daemon's invoke-by-id route.
+    const response = await (input.fetchImpl ?? fetch)(`${host}/api/control-plane/methods/pairing.tokens.migrate/invoke`, {
+      method: 'POST', redirect: 'error',
+      headers: { authorization: `Bearer ${input.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ body: { name, attemptId } }),
+      signal: AbortSignal.any([AbortSignal.timeout(PAIRING_MINT_DEADLINE_MS), ...(signal ? [signal] : [])]),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      if (!refusedWithoutMinting(response.status)) return settled(unknown(host));
+      if ((await clearAgentHostPairingAttempt(home, host, attemptId)).status !== 'cleared') return settled(unknown(host));
+      return settled(response.status === 404
+        ? { status: 'host-lacks-pairing', host, message: `The host at ${host} does not offer pairing (HTTP 404); it runs an older GoodVibes. Update GoodVibes on the host, then preview again. Nothing was created.` }
+        : rejected(host, response.status));
+    }
+    const minted = parseMintedPairingToken(await readHostPairingResponse(response), name);
+    if (!minted) return settled(unknown(host));
+    const complete = await completeAgentHostPairing(home, host, attemptId, { token: minted.token, tokenId: minted.id, name, createdAt: minted.createdAt });
+    if (complete.status !== 'paired') return settled(unknown(host));
+    return { status: 'paired', token: minted.token, tokenId: minted.id };
+  } catch (error) {
+    if (!input.repeat && connectionRefused(error) && (await clearAgentHostPairingAttempt(home, host, attemptId)).status === 'cleared') {
+      return settled({ status: 'host-unreachable', host, message: `No GoodVibes daemon answered at ${host} when the pairing request was sent. Start the daemon there, then preview again. Nothing was created.` });
+    }
+    return settled(unknown(host));
+  }
 }
 
 export async function previewAgentHostPairing(
@@ -125,7 +227,7 @@ export async function previewAgentHostPairing(
     const pairingHost = host;
     const state = readAgentHostPairing(home, pairingHost);
     if (state.status === 'unknown') return clearPreview(home, pairingHost, state.attemptId);
-    if (state.status === 'unavailable') return { result: storeUnreadable(home) };
+    if (state.status === 'unavailable') return { result: storeUnreadable(home, state) };
     const selection = { configManager: options.configManager, homeDirectory: options.homeDirectory };
     const selected = resolveConnectedHost(selection);
     if (selected.token === null) {
@@ -145,11 +247,17 @@ export async function previewAgentHostPairing(
     };
     let auth;
     try { auth = await verifyAs(selectedToken, signal); }
-    catch (error) { return { result: authCheckFailed(error, pairingHost, Boolean(signal?.aborted)) }; }
+    catch (error) {
+      // Only the stored device credential itself being refused is offered for
+      // forgetting; a rejected environment or shared token is not this store's.
+      if (!signal?.aborted && state.status === 'paired' && selectedToken === state.token && isHostFailure(error)
+        && (error.refusal.code === 'auth_rejected' || error.refusal.code === 'forbidden')) return forgetPreview(home, pairingHost, state.tokenId);
+      return { result: authCheckFailed(error, pairingHost, Boolean(signal?.aborted)) };
+    }
     if (signal?.aborted) return { result: cancelled() };
     if (!current() || !isDeepStrictEqual(readAgentHostPairing(home, pairingHost), state)) return { result: changed() };
     if (state.status === 'paired' || isNativePairedPrincipal(auth)) {
-      return { result: { status: 'already-paired', host: pairingHost, message: 'An existing paired credential is present. This route will not mint or replace it; use setup status to verify the effective credential.' } };
+      return { result: { status: 'already-paired', host: pairingHost, message: 'An existing paired credential is present. This route will not mint or replace it; use setup status to verify the effective credential, or setup unpair to forget it.' } };
     }
     if (!isHostPairingBootstrapPrincipal(auth)) return { result: { status: 'blocked', host: pairingHost, message: 'Migration requires this host to verify the existing legacy shared operator token with write:control-plane. No credential was created.' } };
     const confirmation = `PAIR ${randomBytes(6).toString('hex')}`;
@@ -174,7 +282,7 @@ export async function previewAgentHostPairing(
         if (!isHostPairingBootstrapPrincipal(live)) return changed();
         attemptId = randomUUID();
         const begin = await beginAgentHostPairing(home, pairingHost, { attemptId, name, startedAt: Date.now() });
-        if (begin.status !== 'begun') return begin.status === 'conflict' ? changed() : storeUnreadable(home);
+        if (begin.status !== 'begun') return begin.status === 'conflict' ? changed() : storeUnreadable(home, begin);
         // Once the durable marker exists, every interruption is conservatively
         // unknown until an exact successful response is safely stored.
         attempted = true;

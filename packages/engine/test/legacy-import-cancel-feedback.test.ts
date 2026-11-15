@@ -31,7 +31,7 @@ function harness() {
 test('cancelling with a mistyped request ID on a project with no journal creates nothing', async () => {
   const f = harness();
   const session = await f.open();
-  try { await expect(session.cancel('mistyped')).rejects.toThrow('does not match'); } finally { session.dispose(); }
+  try { await expect(session.cancel('mistyped')).rejects.toThrow('No saved legacy import'); } finally { session.dispose(); }
   expect(existsSync(f.path)).toBe(false);
   expect(existsSync(join(f.path, '..'))).toBe(false);
   expect(f.writes).toEqual([]);

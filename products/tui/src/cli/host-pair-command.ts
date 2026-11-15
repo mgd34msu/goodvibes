@@ -2,9 +2,9 @@ import { createInterface } from 'node:readline/promises';
 import { TuiConfigManager } from '../config/host-settings.ts';
 import { applyRuntimeConfigValue } from '@goodvibes-jev/engine/terminal-shell';
 import { canonicalizePairingHost } from '../runtime/tui-host-credential-store.ts';
-import { formatTuiHostPairing, previewTuiHostPairing } from '../runtime/tui-host-pairing.ts';
+import { formatTuiHostPairing, previewTuiHostPairing, unpairTuiHost } from '../runtime/tui-host-pairing.ts';
 
-export const TUI_HOST_PAIR_HELP = 'Usage: goodvibes host pair [--url <exact-origin>] [--name <device-name>] [--bootstrap-shared] [--apply]. --apply requires fresh owner-terminal confirmation; --yes and scripted approval are unsupported.';
+export const TUI_HOST_PAIR_HELP = 'Usage: goodvibes host pair [--url <exact-origin>] [--name <device-name>] [--bootstrap-shared] [--apply] | goodvibes host unpair [--url <exact-origin>]. --apply requires fresh owner-terminal confirmation; --yes and scripted approval are unsupported. unpair forgets the stored device credential for the host.';
 export interface TuiHostPairingTerminal {
   readonly interactive: boolean;
   write(text: string): void;
@@ -40,6 +40,17 @@ export async function runTuiHostCommand(
   let name = 'GoodVibes TUI'; let url: string | undefined; let bootstrapShared = false; let apply = false;
   const seen = new Set<string>();
   if (args.length === 0 || args.length === 1 && (args[0] === '--help' || args[0] === 'help')) { io.write(TUI_HOST_PAIR_HELP); return 0; }
+  if (args[0] === 'unpair') {
+    let unpairUrl: string | undefined;
+    if (args.length === 3 && args[1] === '--url') unpairUrl = args[2];
+    else if (args.length !== 1) { io.write(TUI_HOST_PAIR_HELP); return 2; }
+    if (unpairUrl !== undefined && !canonicalizePairingHost(unpairUrl)) { io.write('Use an exact HTTP(S) origin without a path, user information, query or fragment.'); return 2; }
+    const configManager = new TuiConfigManager({ workingDir: roots.defaultWorkingDirectory, homeDir: roots.homeDirectory, surfaceRoot: 'tui', readOnly: true });
+    if (unpairUrl !== undefined) applyRuntimeConfigValue(configManager, 'controlPlane.publicBaseUrl', canonicalizePairingHost(unpairUrl)!);
+    const result = await unpairTuiHost({ configManager, homeDirectory: roots.homeDirectory });
+    io.write(formatTuiHostPairing(result));
+    return result.status === 'cleared' ? 0 : 1;
+  }
   if (args[0] !== 'pair') { io.write(TUI_HOST_PAIR_HELP); return 2; }
   for (let index = 1; index < args.length; index++) {
     const arg = args[index]!;

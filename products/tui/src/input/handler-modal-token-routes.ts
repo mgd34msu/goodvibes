@@ -111,23 +111,6 @@ export const handleModalTokenRoutes = createModalTokenPipeline<ModalTokenRouteSt
     handleBlockActionsToken,
   },
   {
-    order: [
-      'handleSearchModeToken',
-      'handleSelectionModalToken',
-      'handleBookmarkModalToken',
-      'handleSettingsModalToken',
-      'handleMcpWorkspaceToken',
-      'handleSessionPickerToken',
-      'handleProfilePickerToken',
-      'config',
-      'handleOverlayToken',
-      'handleHistorySearchToken',
-      'handleModelPickerToken',
-      'onboarding',
-      'handleEscapeOnlyModalToken',
-      'handleFilePickerToken',
-      'handleBlockActionsToken',
-    ],
     additional: {
       config: (state, token) =>
         handleConfigModalToken(

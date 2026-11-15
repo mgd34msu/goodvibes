@@ -1,4 +1,4 @@
-import { previewAgentHostPairing } from '../../runtime/agent-host-pairing.ts';
+import { previewAgentHostPairing, unpairAgentHost } from '../../runtime/agent-host-pairing.ts';
 import { formatSetupPairing } from '../../runtime/setup-pairing-presentation.ts';
 import { isDirectOwnerCommandContext, type CommandRegistry } from '../command-registry.ts';
 
@@ -10,6 +10,18 @@ export function registerOnboardingRuntimeCommands(registry: CommandRegistry): vo
     hidden: true,
     usage: '',
     async handler(args, ctx) {
+      if (args[0] === 'unpair') {
+        // Forgetting the credential cuts this Agent off from the host: the owner's own keystrokes only.
+        if (args.length > 1) { ctx.print('Usage: /setup unpair'); return; }
+        if (!isDirectOwnerCommandContext(ctx, 'setup')) {
+          ctx.print('Unpairing requires the owner to type /setup unpair in the live Agent terminal. Nothing was forgotten.');
+          return;
+        }
+        const homeDirectory = ctx.workspace?.shellPaths?.homeDirectory;
+        if (!homeDirectory) { ctx.print('Unpairing is unavailable without an Agent home. Nothing was forgotten.'); return; }
+        ctx.print(formatSetupPairing(await unpairAgentHost({ configManager: ctx.platform.configManager, homeDirectory })));
+        return;
+      }
       if (args[0] === 'pair') {
         let apply = false;
         let name = 'GoodVibes Agent';

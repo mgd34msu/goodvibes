@@ -225,6 +225,12 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
         const print = (message: string) => ctx.print(present(message));
         const mcpApi = requireMcpApi(ctx);
         const listServerSecurity = () => mcpApi.listServerSecurity();
+        /** The configured or connected server a change names; an unknown name is refused before anything is asked or changed. */
+        const knownServer = (name: string, change: string): McpSecurityServer | undefined => {
+          const server = listServerSecurity().find((entry) => entry.name === name);
+          if (!server) print(`No MCP server named ${name}, so its ${change} was not changed. Run /mcp servers to list configured servers.`);
+          return server;
+        };
         // A trailing --yes is never a server argument, whether or not this
         // product asks for confirmation; only tokens after -- are passed on.
         const stripped = args[0] === 'add' ? stripMcpAddYesFlag(args) : policy.confirmMutations ? stripYesFlag(args) : { rest: args, yes: true };
@@ -370,11 +376,17 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
               ctx.openSettingsModal?.();
               return;
             }
+            if (!knownServer(serverName, 'trust mode')) return;
             if (!confirmation.yes) {
               requireYesFlag(ctx, `change MCP trust mode for ${serverName}`, MCP_TRUST_COMMAND_USAGE);
               return;
             }
-            mcpApi.setServerTrustMode(serverName, mode);
+            try {
+              mcpApi.setServerTrustMode(serverName, mode);
+            } catch (error) {
+              print(`MCP trust mode not changed: ${summarizeError(error)}`);
+              return;
+            }
             print(`Updated MCP trust mode for ${serverName} to ${formatMcpTrustMode(mode)} for this session only. Edit the server in /mcp to keep it after a restart.`);
             return;
           }
@@ -395,11 +407,17 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
               return;
             }
             const role = requestedRole;
+            if (!knownServer(serverName, 'role')) return;
             if (!confirmation.yes) {
               requireYesFlag(ctx, `change MCP role for ${serverName}`, MCP_ROLE_COMMAND_USAGE);
               return;
             }
-            mcpApi.setServerRole(serverName, role);
+            try {
+              mcpApi.setServerRole(serverName, role);
+            } catch (error) {
+              print(`MCP role not changed: ${summarizeError(error)}`);
+              return;
+            }
             print(`Updated MCP role for ${serverName} to ${formatMcpRole(role)} for this session only. Edit the server in /mcp to keep it after a restart.`);
             return;
           }
@@ -537,22 +555,19 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
             print('Usage: /mcp quarantine <server> [detail] --yes\n       /mcp quarantine <server> approve [operatorId] --yes');
             return;
           }
+          const target = knownServer(serverName, action === 'approve' ? 'quarantine override' : 'quarantine');
+          if (!target) return;
           if (action === 'approve') {
+            if (target.schemaFreshness !== 'quarantined') {
+              print(`MCP server ${serverName} is not quarantined (status ${formatMcpFreshness(target.schemaFreshness)}). Nothing was approved.`);
+              return;
+            }
             if (!confirmation.yes) {
               requireYesFlag(
                 ctx,
                 `approve MCP tool-definition quarantine override for ${serverName}`,
                 '/mcp quarantine <server> approve [operatorId] --yes',
               );
-              return;
-            }
-            const target = listServerSecurity().find((server) => server.name === serverName);
-            if (!target) {
-              print(`No MCP server named ${serverName}. Nothing was approved. Run /mcp servers to list configured servers.`);
-              return;
-            }
-            if (target.schemaFreshness !== 'quarantined') {
-              print(`MCP server ${serverName} is not quarantined (status ${formatMcpFreshness(target.schemaFreshness)}). Nothing was approved.`);
               return;
             }
             const operatorId = commandArgs[3] || 'operator';

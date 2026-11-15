@@ -97,21 +97,20 @@ export function handleSelectionModalToken(state: SelectionRouteState, token: Inp
             state.selectionCallback({ item: selected, action });
         }
     };
-    // The search row is always live (no search mode): printable text goes into
-    // the query, except a key the picker claims (a custom action, or Space for
-    // a toggle) which fires while the query is empty. Pickers without search
-    // only have their claimed keys.
+    // One meaning per key. In a picker with search, every letter types into the
+    // search row; the picker's actions fire only from keys that are not text:
+    // Ctrl+<letter> for the letter it claims, and Delete for its delete action.
+    // A picker without search has no text to type, so its letters are actions.
     if (token.type === 'text') {
-        const queryEmpty = state.selectionModal.query.length === 0;
         const single = [...token.value].length === 1;
-        if (queryEmpty && single && token.value === ' ' && getSpaceAction(state.selectionModal.getSelected())) {
+        if (single && token.value === ' ' && state.selectionModal.query.length === 0 && getSpaceAction(state.selectionModal.getSelected())) {
             fireSpace();
-        }
-        else if (queryEmpty && single && state.selectionModal.customActions.has(token.value)) {
-            fireClaimedKey(token.value);
         }
         else if (state.selectionModal.allowSearch) {
             state.selectionModal.setQuery(state.selectionModal.query + token.value);
+        }
+        else if (single && state.selectionModal.customActions.has(token.value)) {
+            fireClaimedKey(token.value);
         }
         else if (single && token.value === ' ') {
             fireSpace();
@@ -148,18 +147,21 @@ export function handleSelectionModalToken(state: SelectionRouteState, token: Inp
                 dispatchSelectionAction(token.logicalName === 'right' ? 'increment' : 'decrement', selected, getAdjustmentStep(selected, token.shift));
             }
         }
+        else if (token.logicalName === 'delete') {
+            // Search filters are end-anchored with no cursor, so forward-delete
+            // edits nothing; Delete is the picker's delete action when it has one.
+            const deleteKey = [...state.selectionModal.customActions].find(([, action]) => action === 'delete')?.[0];
+            if (deleteKey !== undefined)
+                fireClaimedKey(deleteKey);
+        }
         else if (isTextBackspace(token.logicalName ?? '')) {
             if (state.selectionModal.allowSearch && state.selectionModal.query.length > 0) {
                 state.selectionModal.setQuery(state.selectionModal.query.slice(0, -1));
             }
-            // 'delete' is intentionally absent here: modal search filters are
-            // end-anchored with no cursor, so forward-delete is a no-op per the
-            // delete-key policy (src/input/delete-key-policy.ts).
         }
-        else if (token.logicalName && [...token.logicalName].length === 1) {
-            // A modified letter (a CSI-u chord): fires a claimed action whatever
-            // the query holds, it is never typed.
-            fireClaimedKey(token.logicalName);
+        else if ((token.ctrl || token.meta) && token.logicalName && [...token.logicalName].length === 1) {
+            // Ctrl+<letter> fires the letter's action whatever the query holds; it is never typed.
+            fireClaimedKey(token.logicalName.toLowerCase());
         }
     }
     state.requestRender();
@@ -185,26 +187,18 @@ type BookmarkRouteState = {
     handleEscape: () => void;
 };
 /**
- * Bookmarks: the search row is always live. `d` (remove) and `o` (open the
- * saved file) fire while the query is empty; otherwise every printable key is
- * typed into the query. Backspace edits it; Esc closes.
+ * Bookmarks: every letter types into the search row. Delete removes the
+ * selected bookmark and Ctrl+O opens its saved file. Backspace edits the
+ * query; Esc closes.
  */
 export function handleBookmarkModalToken(state: BookmarkRouteState, token: InputToken): boolean {
     if (!state.bookmarkModal.active)
         return false;
     const modal = state.bookmarkModal;
-    const act = (key: string): boolean => {
-        if (key === 'd') {
-            modal.removeSelected();
-            if (modal.entries.length === 0)
-                modal.close();
-            return true;
-        }
-        if (key === 'o') {
-            modal.openSelectedFile();
-            return true;
-        }
-        return false;
+    const remove = (): void => {
+        modal.removeSelected();
+        if (modal.entries.length === 0)
+            modal.close();
     };
     if (token.type === 'key') {
         if (token.logicalName === 'escape') {
@@ -221,21 +215,17 @@ export function handleBookmarkModalToken(state: BookmarkRouteState, token: Input
                 state.commandContext?.jumpToBookmark?.(entry.key);
             modal.close();
         }
+        else if (token.logicalName === 'delete')
+            remove();
         else if (isTextBackspace(token.logicalName ?? '')) {
             if (modal.query.length > 0)
                 modal.setQuery(modal.query.slice(0, -1));
         }
-        else if (token.logicalName) {
-            // Modified letters (CSI-u chords) fire their action whatever the query holds.
-            act(token.logicalName);
-        }
+        else if ((token.ctrl || token.meta) && token.logicalName?.toLowerCase() === 'o')
+            modal.openSelectedFile();
     }
     else if (token.type === 'text') {
-        const claimed = modal.query.length === 0 && (token.value === 'd' || token.value === 'o');
-        if (claimed)
-            act(token.value);
-        else
-            modal.setQuery(modal.query + token.value);
+        modal.setQuery(modal.query + token.value);
     }
     state.requestRender();
     return true;

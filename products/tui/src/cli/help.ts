@@ -36,7 +36,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes'): string {
     '  sessions                   List, show, export, or resume saved sessions',
     '  tasks                      List/show in-process tasks or submit a non-interactive task',
     '  acp                        Run as an Agent Client Protocol agent over stdio (for editors)',
-    '  host pair                 Review explicit TUI host pairing (--bootstrap-shared; --apply)',
+    '  host pair|unpair          Review explicit TUI host pairing (--bootstrap-shared; --apply), or forget it',
     '  pair|qrcode                Print companion pairing payload and QR code',
     '  surfaces                   Inspect/check/enable/disable browser/listener/external surfaces',
     '  listener test              Test HTTP listener/webhook readiness',
@@ -166,9 +166,9 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     examples: ['auth', 'auth add-user admin --password-stdin', 'auth rotate-password admin --password-stdin', 'auth clear-bootstrap'],
   },
   host: {
-    usage: ['host pair [--url <exact-origin>] [--name <device-name>] [--bootstrap-shared] [--apply]'],
-    summary: 'Review pairing of this TUI with its host. --apply creates the credential and needs fresh confirmation in an owner terminal; scripted approval (--yes) is not supported.',
-    examples: ['host pair', 'host pair --bootstrap-shared', 'host pair --apply'],
+    usage: ['host pair [--url <exact-origin>] [--name <device-name>] [--bootstrap-shared] [--apply]', 'host unpair [--url <exact-origin>]'],
+    summary: 'Review pairing of this TUI with its host. --apply creates the credential and needs fresh confirmation in an owner terminal; scripted approval (--yes) is not supported. When the host no longer accepts the stored credential, pair --apply offers to forget it. unpair forgets the stored credential (it stays valid on the host until revoked there).',
+    examples: ['host pair', 'host pair --bootstrap-shared', 'host pair --apply', 'host unpair'],
   },
   subscription: {
     usage: [
@@ -216,7 +216,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   'support-bundle': {
     usage: ['support-bundle export [path]', 'support-bundle inspect <path>', 'support-bundle import <path> [--yes]'],
     summary:
-      'Export, inspect, or import a support snapshot (redacted config + diagnostics + posture). Import applies only the config values, validated first and only with --yes. Aliases: bundle, bundles. Distinct from `plugin bundles` (capability bundles).',
+      'Export, inspect, or import a support snapshot (redacted config + diagnostics + posture). Import applies only the config values: it refuses a bundle from another product or format version, checks every value before changing any, and without --yes lists the values it would set and changes nothing (exit 2). Aliases: bundle, bundles. Distinct from `plugin bundles` (capability bundles).',
     examples: ['support-bundle export goodvibes-bundle.json', 'support-bundle inspect goodvibes-bundle.json'],
   },
   acp: {

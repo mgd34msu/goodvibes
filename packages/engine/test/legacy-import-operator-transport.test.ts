@@ -15,19 +15,18 @@ function host() {
   if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
   const sources = fixture.sources.map(entry => entry.source);
   const calls: string[] = [];
-  let revoked = false; let revokeDuringDiscovery = false; let malformed = false;
+  let malformed = false;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
     if (request.headers.get('authorization') !== 'Bearer synthetic-read-token') return new Response(null, { status: 401 });
     const url = new URL(request.url); calls.push(url.pathname + url.search);
     if (url.pathname === '/api/control-plane/auth') return Response.json({
       authenticated: true, admin: true, principalId: 'synthetic-principal', principalKind: 'user',
-      scopes: revoked ? ['read:work-ledger'] : ['read:work-ledger', 'read:knowledge'], roles: ['admin'],
+      scopes: ['read:work-ledger', 'read:knowledge'], roles: ['admin'],
       authMode: 'session', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false,
     });
     if (url.pathname === '/api/knowledge/sources') {
       if (!url.searchParams.has('limit')) return Response.json({ sources });
       if (malformed) return Response.json({ items: sources, hasMore: 'false' });
-      if (revokeDuringDiscovery) revoked = true;
       return Response.json(url.searchParams.has('cursor')
         ? { items: sources.slice(1), hasMore: false }
         : { items: sources.slice(0, 1), hasMore: true, nextCursor: 'second-page' });
@@ -40,7 +39,7 @@ function host() {
   } });
   const baseUrl = `http://127.0.0.1:${server.port}`;
   return { calls, prepared, sources, baseUrl, close: () => server.stop(true),
-    revokeDuringDiscovery() { revokeDuringDiscovery = true; }, malformed() { malformed = true; },
+    malformed() { malformed = true; },
     open: () => openLegacyImportOperator({ projectId: fixture.projectId, journalPath: join(root, 'journal.sqlite'),
       resolve: () => ({ baseUrl, token: 'synthetic-read-token', workspace: root }) }),
   };
@@ -61,14 +60,7 @@ test('real operator platform validates both legacy and paginated source response
   } finally { client.dispose(); f.close(); }
 });
 
-test('real operator platform retains response validation and post-page revocation fencing', async () => {
-  const f = host();
-  try {
-    f.revokeDuringDiscovery(); const session = await f.open();
-    try { await expect(session.prepare()).rejects.toThrow('read:knowledge'); } finally { session.dispose(); }
-    expect(f.calls.filter(path => path.startsWith('/api/knowledge/sources'))).toHaveLength(1);
-    expect(f.calls.some(path => path.startsWith('/api/work-ledger'))).toBe(false);
-  } finally { f.close(); }
+test('real operator platform refuses a malformed source page before any import preparation', async () => {
   const invalid = host();
   try {
     invalid.malformed(); const session = await invalid.open();

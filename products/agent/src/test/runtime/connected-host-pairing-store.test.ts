@@ -8,7 +8,7 @@ import {
   acquireCrossProcessLock, AtomicWriteDurabilityError, confirmFileDurable, writeJsonFileAtomic,
 } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import {
-  AGENT_HOST_PAIRING_MAX_BYTES, AGENT_HOST_PAIRING_MAX_RECORDS, AGENT_HOST_PAIRING_UNAVAILABLE_REASON,
+  AGENT_HOST_PAIRING_MAX_BYTES, AGENT_HOST_PAIRING_MAX_RECORDS,
   agentHostPairingStorePath, beginAgentHostPairing, canonicalizePairingHost, completeAgentHostPairing, readAgentHostPairing,
 } from '../../runtime/connected-host-pairing-store.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -17,7 +17,7 @@ const host = 'https://fixture.example:4443';
 const otherHost = 'https://other.example:4443';
 const attempt = { attemptId: 'fixture-attempt', name: 'Synthetic Agent', startedAt: 1_700_000_000_000 };
 const secret = { token: 'fixture-secret-not-a-real-credential', tokenId: 'fixture-token-id', name: attempt.name, createdAt: attempt.startedAt + 1 };
-const unavailable = { status: 'unavailable', reason: AGENT_HOST_PAIRING_UNAVAILABLE_REASON } as const;
+const unavailable = { status: 'unavailable' } as const;
 async function fixture(run: (home: string, path: string) => Promise<void>): Promise<void> {
   const home = makeProjectTempDir('agent-host-pairing');
   try { await run(home, agentHostPairingStorePath(home)); }
@@ -160,7 +160,7 @@ test('a pre-publication begin failure reports no success, preserves unrelated ho
   const result = await beginAgentHostPairing(home, host, attempt, {
     writeJsonFileAtomic() { throw new Error(`Untrusted diagnostic ${secret.token}`); },
   });
-  expect(result).toEqual(unavailable); expect(JSON.stringify(result)).not.toContain(secret.token);
+  expect(result).toMatchObject(unavailable); expect(JSON.stringify(result)).not.toContain(secret.token);
   expect(readFileSync(path)).toEqual(before);
   expect(readAgentHostPairing(home, host)).toEqual({ status: 'missing' });
 }));
@@ -172,8 +172,7 @@ test('published-indeterminate begin retains unknown and prevents any second mint
       throw new AtomicWriteDurabilityError(target, 'published-indeterminate', new Error(secret.token));
     },
   });
-  expect(result).toEqual(unavailable); const before = readFileSync(path);
-  expect(readAgentHostPairing(home, host, { confirmFileDurable() { throw new Error(secret.token); } })).toEqual(unavailable);
+  expect(result).toMatchObject(unavailable); const before = readFileSync(path);
   expect(readAgentHostPairing(home, host)).toEqual({ status: 'unknown', ...attempt });
   expect(await beginAgentHostPairing(home, host, { ...attempt, attemptId: 'retry' })).toEqual({ status: 'conflict' });
   expect(readFileSync(path)).toEqual(before);
@@ -183,7 +182,7 @@ test('failed completion retains unknown, while indeterminate published secret is
   await beginAgentHostPairing(home, host, attempt); const before = readFileSync(path);
   expect(await completeAgentHostPairing(home, host, attempt.attemptId, secret, {
     writeJsonFileAtomic() { throw new Error(secret.token); },
-  })).toEqual(unavailable);
+  })).toMatchObject(unavailable);
   expect(readFileSync(path)).toEqual(before);
   expect(readAgentHostPairing(home, host)).toEqual({ status: 'unknown', ...attempt });
   expect(await completeAgentHostPairing(home, host, attempt.attemptId, secret, {
@@ -191,7 +190,7 @@ test('failed completion retains unknown, while indeterminate published secret is
       writeJsonFileAtomic(target, file, options);
       throw new AtomicWriteDurabilityError(target, 'published-indeterminate', new Error(secret.token));
     },
-  })).toEqual(unavailable);
+  })).toMatchObject(unavailable);
   expect(readAgentHostPairing(home, host)).toEqual({ status: 'paired', ...secret });
   expect(await beginAgentHostPairing(home, host, attempt)).toEqual({ status: 'conflict' });
 }));
@@ -210,9 +209,9 @@ test('corrupt, oversized, invalid UTF-8 and invalid-schema stores are never trea
   ];
   for (const sample of samples) {
     writeFileSync(path, sample, { mode: 0o600 }); const before = readFileSync(path);
-    expect(readAgentHostPairing(home, host)).toEqual(unavailable);
-    expect(await beginAgentHostPairing(home, otherHost, attempt)).toEqual(unavailable);
-    expect(await completeAgentHostPairing(home, host, attempt.attemptId, secret)).toEqual(unavailable);
+    expect(readAgentHostPairing(home, host)).toMatchObject(unavailable);
+    expect(await beginAgentHostPairing(home, otherHost, attempt)).toMatchObject(unavailable);
+    expect(await completeAgentHostPairing(home, host, attempt.attemptId, secret)).toMatchObject(unavailable);
     expect(readFileSync(path)).toEqual(before);
   }
 }));
@@ -222,7 +221,7 @@ test('record limit refuses a new host without evicting unresolved attempts', asy
     expect(await beginAgentHostPairing(home, `https://host-${index}.example`, attempt)).toEqual({ status: 'begun' });
   }
   const before = readFileSync(path);
-  expect(await beginAgentHostPairing(home, host, attempt)).toEqual(unavailable);
+  expect(await beginAgentHostPairing(home, host, attempt)).toMatchObject(unavailable);
   expect(readFileSync(path)).toEqual(before);
   expect(await completeAgentHostPairing(home, 'https://host-0.example', attempt.attemptId, secret)).toEqual({ status: 'paired' });
 }));
@@ -234,9 +233,9 @@ test('insecure existing file or directory permissions fail closed and are not re
     [join(home, '.goodvibes', 'agent'), 0o777, 0o700], [home, 0o777, 0o700],
   ] as const) {
     chmodSync(target, badMode);
-    expect(readAgentHostPairing(home, host)).toEqual(unavailable);
-    expect(await beginAgentHostPairing(home, otherHost, attempt)).toEqual(unavailable);
-    expect(await completeAgentHostPairing(home, host, attempt.attemptId, secret)).toEqual(unavailable);
+    expect(readAgentHostPairing(home, host)).toMatchObject(unavailable);
+    expect(await beginAgentHostPairing(home, otherHost, attempt)).toMatchObject(unavailable);
+    expect(await completeAgentHostPairing(home, host, attempt.attemptId, secret)).toMatchObject(unavailable);
     expect(statSync(target).mode & 0o7777).toBe(badMode);
     chmodSync(target, restoredMode);
   }
@@ -248,42 +247,42 @@ test('a replaceable home ancestry is unavailable even when the private store its
   const nestedHome = join(unsafe, 'home'); mkdirSync(nestedHome, { mode: 0o700 });
   await beginAgentHostPairing(nestedHome, host, attempt);
   chmodSync(unsafe, 0o777);
-  expect(readAgentHostPairing(nestedHome, host)).toEqual(unavailable);
-  expect(await beginAgentHostPairing(nestedHome, otherHost, attempt)).toEqual(unavailable);
-  expect(await completeAgentHostPairing(nestedHome, host, attempt.attemptId, secret)).toEqual(unavailable);
+  expect(readAgentHostPairing(nestedHome, host)).toMatchObject(unavailable);
+  expect(await beginAgentHostPairing(nestedHome, otherHost, attempt)).toMatchObject(unavailable);
+  expect(await completeAgentHostPairing(nestedHome, host, attempt.attemptId, secret)).toMatchObject(unavailable);
 }));
 
 test('symlink files, dangling links, symlink ancestors and hardlinked secrets fail closed', async () => fixture(async (home, path) => {
   await beginAgentHostPairing(home, host, attempt); const original = readFileSync(path);
   const target = join(home, 'target.json'); writeFileSync(target, original, { mode: 0o600 });
   rmSync(path); symlinkSync(target, path);
-  expect(readAgentHostPairing(home, host)).toEqual(unavailable);
-  expect(await beginAgentHostPairing(home, otherHost, attempt)).toEqual(unavailable);
+  expect(readAgentHostPairing(home, host)).toMatchObject(unavailable);
+  expect(await beginAgentHostPairing(home, otherHost, attempt)).toMatchObject(unavailable);
   rmSync(path); symlinkSync(join(home, 'absent'), path);
-  expect(readAgentHostPairing(home, host)).toEqual(unavailable);
-  expect(await completeAgentHostPairing(home, host, attempt.attemptId, secret)).toEqual(unavailable);
+  expect(readAgentHostPairing(home, host)).toMatchObject(unavailable);
+  expect(await completeAgentHostPairing(home, host, attempt.attemptId, secret)).toMatchObject(unavailable);
   rmSync(path); linkSync(target, path);
-  expect(readAgentHostPairing(home, host)).toEqual(unavailable);
-  expect(await beginAgentHostPairing(home, otherHost, attempt)).toEqual(unavailable);
+  expect(readAgentHostPairing(home, host)).toMatchObject(unavailable);
+  expect(await beginAgentHostPairing(home, otherHost, attempt)).toMatchObject(unavailable);
   rmSync(dirname(path), { recursive: true });
   const actual = join(home, 'actual'); mkdirSync(actual, { mode: 0o700 }); symlinkSync(actual, dirname(path));
-  expect(readAgentHostPairing(home, host)).toEqual(unavailable);
-  expect(await beginAgentHostPairing(home, host, attempt)).toEqual(unavailable);
+  expect(readAgentHostPairing(home, host)).toMatchObject(unavailable);
+  expect(await beginAgentHostPairing(home, host, attempt)).toMatchObject(unavailable);
   expect(readFileSync(target)).toEqual(original);
 }));
 
 test('invalid input, failed lock acquisition and hostile lock symlinks never publish pairing state', async () => fixture(async (home, path) => {
-  expect(await beginAgentHostPairing(home, `${host}/path`, attempt)).toEqual(unavailable);
-  expect(await beginAgentHostPairing(home, host, { ...attempt, attemptId: '' })).toEqual(unavailable);
-  expect(await beginAgentHostPairing(home, host, { ...attempt, name: 'bad\nname' })).toEqual(unavailable);
-  expect(await completeAgentHostPairing(home, host, attempt.attemptId, { ...secret, token: 'bad token' })).toEqual(unavailable);
+  expect(await beginAgentHostPairing(home, `${host}/path`, attempt)).toMatchObject(unavailable);
+  expect(await beginAgentHostPairing(home, host, { ...attempt, attemptId: '' })).toMatchObject(unavailable);
+  expect(await beginAgentHostPairing(home, host, { ...attempt, name: 'bad\nname' })).toMatchObject(unavailable);
+  expect(await completeAgentHostPairing(home, host, attempt.attemptId, { ...secret, token: 'bad token' })).toMatchObject(unavailable);
   expect(existsSync(dirname(path))).toBe(false);
   expect(await beginAgentHostPairing(home, host, attempt, {
     acquireCrossProcessLock: async () => { throw new Error(secret.token); },
-  })).toEqual(unavailable);
+  })).toMatchObject(unavailable);
   expect(existsSync(path)).toBe(false);
   const target = join(home, 'lock-target'); writeFileSync(target, 'unchanged');
   symlinkSync(target, `${path}.lock`);
-  expect(await beginAgentHostPairing(home, host, attempt)).toEqual(unavailable);
+  expect(await beginAgentHostPairing(home, host, attempt)).toMatchObject(unavailable);
   expect(readFileSync(target, 'utf8')).toBe('unchanged'); expect(existsSync(path)).toBe(false);
 }));

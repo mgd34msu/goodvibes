@@ -136,6 +136,17 @@ describe('host pairing attempts can be cleared exactly', () => {
     expect((await store.clearHostPairingAttempt(home, HOST, 'attempt-1')).status).toBe('conflict');
     expect(store.readHostPairing(home, HOST).status).toBe('paired');
   });
+
+  test('a saved credential is forgotten only by its own token id, and the host can then be paired again', async () => {
+    const home = scratchDir();
+    await store.beginHostPairing(home, HOST, attempt);
+    await store.completeHostPairing(home, HOST, 'attempt-1', { token: 'gvp_token', tokenId: 'pair-1', name: 'laptop', createdAt: 2 });
+    expect((await store.removeHostPairing(home, HOST, 'pair-other')).status).toBe('conflict');
+    expect(store.readHostPairing(home, HOST).status).toBe('paired');
+    expect((await store.removeHostPairing(home, HOST, 'pair-1')).status).toBe('removed');
+    expect(store.readHostPairing(home, HOST).status).toBe('missing');
+    expect((await store.beginHostPairing(home, HOST, { ...attempt, attemptId: 'attempt-2' })).status).toBe('begun');
+  });
 });
 
 describe('a daemon call keeps a verb\'s own refusal', () => {

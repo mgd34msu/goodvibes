@@ -9,7 +9,7 @@ import { hasCommandFlag, isPresentConfigValue, extractAuthorizationCode } from '
 export { hasCommandFlag, isPresentConfigValue, extractAuthorizationCode } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
 import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
-import { runSetupPairingCommand } from './setup-pair-command.ts';
+import { runSetupPairingCommand, runSetupUnpairCommand } from './setup-pair-command.ts';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -191,9 +191,9 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
   try {
     switch (runtime.cli.command) {
       case 'onboarding':
-        return runtime.cli.commandArgs[0] === 'pair'
-          ? { handled: true, exitCode: await runSetupPairingCommand(runtime) }
-          : { handled: false, exitCode: 0 };
+        if (runtime.cli.commandArgs[0] === 'pair') return { handled: true, exitCode: await runSetupPairingCommand(runtime) };
+        if (runtime.cli.commandArgs[0] === 'unpair') return { handled: true, exitCode: await runSetupUnpairCommand(runtime) };
+        return { handled: false, exitCode: 0 };
       case 'run':
         return { handled: true, exitCode: await runNonInteractiveAgent(runtime) };
       case 'providers': {

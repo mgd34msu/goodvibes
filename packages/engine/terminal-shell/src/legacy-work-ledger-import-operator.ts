@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { drainOwned, parseJevDecision } from '@goodvibes-jev/judgment/decisions';
+import { parseJevDecision } from '@goodvibes-jev/judgment/decisions';
 import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
-import { array, boolean, enum as enumSchema, literal, object, record, strictObject, string, union, unknown } from 'zod/v4';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { array, boolean, discriminatedUnion, enum as enumSchema, literal, object, record, strictObject, string, unknown } from 'zod/v4';
 import { validateLegacyWorkLedgerManifest, type LegacyMigrationPreparation } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
-import { bindingKey, LegacyImportJournal, type LegacyImportBinding, type LegacyImportEntry, type LegacyImportCommand, type LegacyImportJournalOptions, legacyImportResultSchema } from './legacy-work-ledger-import-journal.js';
+import { LegacyImportJournal, type LegacyImportBinding, type LegacyImportEntry, type LegacyImportCommand, type LegacyImportJournalOptions, legacyImportResultSchema } from './legacy-work-ledger-import-journal.js';
 
 export interface LegacyImportHost { readonly baseUrl: string; readonly token: string; readonly workspace: string; readonly selectionIdentity?: string }
 export interface LegacyImportOperatorClient { currentAuth(signal?: AbortSignal): Promise<unknown>; invoke(method: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>; dispose(): void }
@@ -15,143 +16,145 @@ export interface LegacyImportOperatorOptions {
 }
 const authSchema = object({ authenticated: boolean(), admin: boolean(), principalId: string().min(1).nullable(), principalKind: enumSchema(['bot', 'service', 'token', 'user']).nullable(), scopes: array(string()) });
 const pageSchema = object({ items: array(object({ id: string().min(1), connectorId: string(), metadata: record(string(), unknown()) })).max(1000), hasMore: boolean(), nextCursor: string().nullable().optional() });
-const preparationSchema = union([
+// The kind decides the shape first, so a host's refusal is reported as the host said it, not as a broken manifest.
+const preparationSchema = discriminatedUnion('kind', [
   strictObject({ kind: literal('prepared'), manifest: unknown().transform(validateLegacyWorkLedgerManifest) }),
   strictObject({ kind: literal('blocked'), code: enumSchema(['cancelled', 'pending-local-changes', 'invalid-source', 'limit', 'identity-conflict', 'target-conflict', 'stale-preparation']), reason: string() }),
 ]);
-function clientFor(host: LegacyImportHost, current: () => void): LegacyImportOperatorClient {
-  const client = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: async (input, init) => {
-    current(); const response = await fetch(input, { ...init, redirect: 'error' }); current(); return response;
-  } });
+function clientFor(host: LegacyImportHost): LegacyImportOperatorClient {
+  const client = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: (input, init) => fetch(input, { ...init, redirect: 'error' }) });
   return { currentAuth: signal => client.control.auth.current({}, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000) }),
     invoke: (method, input, signal) => client.invoke(method, input, { signal }), dispose: () => client.dispose() };
 }
-/** Read paths do not grant mutation. Every explicit dispatch uses the selected host's autonomous gate. */
+/** Reads grant no mutation; every dispatch goes through the selected host's own admission. */
 export interface LegacyImportOperatorSession {
   readonly binding: LegacyImportBinding;
   prepare(): Promise<LegacyMigrationPreparation>;
   status(): Promise<LegacyImportEntry | null>;
   submit(): Promise<LegacyImportEntry>;
-  reconsider(requestId: string): Promise<LegacyImportEntry>;
-  recover(requestId: string): Promise<LegacyImportEntry>;
-  cancel(requestId: string): Promise<LegacyImportEntry>;
-  restart(requestId: string): Promise<LegacyImportEntry>;
+  /** The saved import is the one for this workspace and project; a request id, when given, must name it. */
+  reconsider(requestId?: string): Promise<LegacyImportEntry>;
+  recover(requestId?: string): Promise<LegacyImportEntry>;
+  cancel(requestId?: string): Promise<LegacyImportEntry>;
+  restart(requestId?: string): Promise<LegacyImportEntry>;
   dispose(): void;
 }
+/**
+ * One authentication per command: the host checks scope on every call, and a
+ * 401 or 403 later means the credential or principal changed. The one saved
+ * request id is what makes a retry safe: the host applies a request id once.
+ */
 export async function openLegacyImportOperator(options: LegacyImportOperatorOptions): Promise<LegacyImportOperatorSession> {
-  // Capture this session's actual selection before a resolver, client factory or
-  // authentication callback can retarget the caller-owned options object.
   const projectId = options.projectId, journalPath = options.journalPath;
-  const resolve = options.resolve.bind(options), createClient = options.createClient?.bind(options);
-  const journalOwner = options.journalOptions, journalGuard = journalOwner?.assertCurrent?.bind(journalOwner), journalWrite = journalOwner?.beforeWrite?.bind(journalOwner);
-  const journalLayout = journalOwner?.layout, manifestWrite = journalOwner?.beforeManifestWrite?.bind(journalOwner);
-  const selected = resolve(); if ('reason' in selected) throw new Error(selected.reason);
+  const selected = options.resolve(); if ('reason' in selected) throw new Error(selected.reason);
   const host = { ...selected };
-  bindingKey({ endpoint: host.baseUrl, projectId, workspaceId: host.workspace, principalId: 'unresolved', principalKind: 'unresolved' });
   if (!host.token.trim()) throw new Error('An existing authenticated host credential is required');
+  const client = options.createClient ? options.createClient(host) : clientFor(host);
   const lifetime = new AbortController();
-  let closed = false; let binding: LegacyImportBinding | undefined;
-  const selection = () => {
-    const current = resolve();
-    if (closed || 'reason' in current || current.baseUrl !== host.baseUrl || current.token !== host.token || current.workspace !== host.workspace || current.selectionIdentity !== host.selectionIdentity) throw new Error('Selected host, credentials or workspace changed');
-    const checked: unknown = journalGuard?.();
-    if (checked !== undefined) { drainOwned(checked); throw new Error('Import journal selection must complete synchronously'); }
+  let closed = false; let store: LegacyImportJournal | undefined;
+  const journal = (): LegacyImportJournal => {
+    if (closed) throw new Error('This import session is closed');
+    return store ??= new LegacyImportJournal(journalPath, undefined, options.journalOptions);
   };
-  const client = createClient ? createClient(host) : clientFor(host, selection);
-  const authenticate = async (write = false) => {
-    selection(); const auth = authSchema.parse(await client.currentAuth(lifetime.signal)); selection();
-    if (!auth.authenticated || !auth.admin || !auth.principalId || !auth.principalKind || !['read:work-ledger', 'read:knowledge'].every(scope => auth.scopes.includes('*') || auth.scopes.includes(scope))) throw new Error('Current admin, read:work-ledger and read:knowledge required');
-    if (write && !auth.scopes.some(scope => scope === '*' || scope === 'write:work-ledger-import')) throw new Error('Current write:work-ledger-import required');
-    const current = { endpoint: host.baseUrl, workspaceId: host.workspace, projectId, principalId: auth.principalId, principalKind: auth.principalKind };
-    if (binding && bindingKey(binding) !== bindingKey(current)) throw new Error('Authenticated principal changed');
-    binding = current;
+  const plain = (error: unknown): Error => {
+    const message = (error instanceof Error ? error.message : String(error)).split(host.token).join('[redacted]');
+    if (error instanceof GoodVibesError && error.kind === 'auth')
+      return new Error(`The host at ${host.baseUrl} no longer accepts this terminal's credential (${message}). Pair again with /host pair, then run the command again; a saved import keeps its request id.`);
+    return new Error(message);
   };
-  const safe = async <T>(operation: () => Promise<T>): Promise<T> => {
-    try { return await operation(); } catch (error) { throw new Error((error instanceof Error ? error.message : String(error)).split(host.token).join('[redacted]')); }
+  const safe = async <T>(operation: () => Promise<T> | T): Promise<T> => {
+    try { return await operation(); } catch (error) { throw plain(error); }
   };
-  const journal = <T>(operation: (store: LegacyImportJournal) => T): T => {
-    selection(); const store = new LegacyImportJournal(journalPath, undefined, { ...(journalLayout ? { layout: journalLayout } : {}), beforeWrite: journalWrite, beforeManifestWrite: manifestWrite, assertCurrent: selection });
-    try { return operation(store); } finally { store.close(); }
+  const authenticated = async (): Promise<{ binding: LegacyImportBinding; canWrite: boolean }> => {
+    try {
+      const auth = authSchema.parse(await client.currentAuth(lifetime.signal));
+      if (!auth.authenticated || !auth.admin || !auth.principalId || !auth.principalKind || !['read:work-ledger', 'read:knowledge'].every(scope => auth.scopes.includes('*') || auth.scopes.includes(scope)))
+        throw new Error('This credential needs admin with read:work-ledger and read:knowledge on the host; pair with an admin credential');
+      return {
+        canWrite: auth.scopes.some(scope => scope === '*' || scope === 'write:work-ledger-import'),
+        binding: { endpoint: host.baseUrl, workspaceId: host.workspace, projectId, principalId: auth.principalId, principalKind: auth.principalKind },
+      };
+    } catch (error) { client.dispose(); throw plain(error); }
   };
-  const status = async () => { await authenticate(); return journal(store => store.read(binding!)); };
-  const selectedEntry = (requestId: string): LegacyImportEntry => journal(store => {
-    // Look without writing first: a mistyped request ID must not create a journal or raise the writer format floor.
-    // A journal that cannot be read read-only (an interrupted write) is recovered through the update path.
-    let entry: LegacyImportEntry | null;
-    try { entry = store.read(binding!); } catch { entry = store.readForUpdate(binding!); }
-    if (!entry || entry.command.requestId !== requestId) throw new Error('Selected import request does not match the saved command');
-    return store.readForUpdate(binding!) ?? entry;
-  });
+  const { binding, canWrite } = await authenticated();
+  const requireWrite = () => { if (!canWrite) throw new Error('This credential lacks write:work-ledger-import on the host; pair with a credential that has it'); };
+  const status = () => journal().read(binding);
+  const readSaved = (): LegacyImportEntry | null => {
+    // Look without writing first: a read, or a preparation the host then blocks, must not create a
+    // journal or raise the writer format floor. A journal that cannot be opened read-only (a write an
+    // earlier process left half done) is recovered through the update path.
+    try { return journal().read(binding); } catch { return journal().readForUpdate(binding); }
+  };
+  const savedEntry = (requestId?: string): LegacyImportEntry => named(readSaved(), requestId);
+  const named = (entry: LegacyImportEntry | null, requestId: string | undefined): LegacyImportEntry => {
+    if (!entry) throw new Error(`No saved legacy import for project ${projectId}; run /work-import submit ${projectId}`);
+    if (requestId !== undefined && entry.command.requestId !== requestId) throw new Error(`Request ${requestId} is not the saved import for project ${projectId} (that is ${entry.command.requestId}); run /work-import status ${projectId}`);
+    return entry;
+  };
   const prepareSources = async (): Promise<LegacyMigrationPreparation> => {
-      const sourceIds: string[] = []; const seen = new Set<string>(); const cursors = new Set<string>(); let cursor: string | undefined;
-      do {
-        await authenticate();
-        const raw = await client.invoke('knowledge.sources.list', { limit: 100, includeAllSpaces: true, ...(cursor ? { cursor } : {}) }, lifetime.signal);
-        await authenticate(); const page = pageSchema.parse(raw);
-        if ((page.hasMore && (!page.nextCursor || !page.items.length)) || (!page.hasMore && page.nextCursor != null)) throw new Error('Incomplete source discovery: inconsistent cursor');
-        for (const source of page.items) {
-          if (seen.has(source.id)) throw new Error('Source discovery repeated an identity'); seen.add(source.id);
-          if (source.connectorId === 'goodvibes-project-planning' && source.metadata.projectPlanning === true && source.metadata.projectId === projectId) sourceIds.push(source.id);
-        }
-        if (seen.size >= 5000 || sourceIds.length > 500) throw new Error('Source discovery limit prevents proving completeness');
-        cursor = page.hasMore ? page.nextCursor! : undefined;
-        if (cursor) { if (cursors.has(cursor)) throw new Error('Source cursor repeated'); cursors.add(cursor); }
-      } while (cursor);
-      if (!sourceIds.length) throw new Error('No complete persisted legacy sources found');
-      await authenticate(); const result = await client.invoke('workLedger.prepareLegacyImport', { projectId, sourceIds: sourceIds.sort() }, lifetime.signal); await authenticate();
-      const prepared = preparationSchema.parse(result);
-      if (prepared.kind === 'blocked') return prepared;
-      const manifest = prepared.manifest;
-      if (manifest.projectId !== projectId || JSON.stringify(manifest.sources.map(item => String(item.source.id)).sort()) !== JSON.stringify(sourceIds)) throw new Error('Prepared source selection changed');
-      return { kind: 'prepared', manifest };
+    const sourceIds: string[] = []; const seen = new Set<string>(); const cursors = new Set<string>(); let cursor: string | undefined;
+    do {
+      const page = pageSchema.parse(await client.invoke('knowledge.sources.list', { limit: 100, includeAllSpaces: true, ...(cursor ? { cursor } : {}) }, lifetime.signal));
+      if ((page.hasMore && (!page.nextCursor || !page.items.length)) || (!page.hasMore && page.nextCursor != null)) throw new Error('Incomplete source discovery: inconsistent cursor');
+      for (const source of page.items) {
+        if (seen.has(source.id)) throw new Error('Source discovery repeated an identity'); seen.add(source.id);
+        if (source.connectorId === 'goodvibes-project-planning' && source.metadata.projectPlanning === true && source.metadata.projectId === projectId) sourceIds.push(source.id);
+      }
+      if (seen.size >= 5000 || sourceIds.length > 500) throw new Error('Source discovery limit prevents proving completeness');
+      cursor = page.hasMore ? page.nextCursor! : undefined;
+      if (cursor) { if (cursors.has(cursor)) throw new Error('Source cursor repeated'); cursors.add(cursor); }
+    } while (cursor);
+    if (!sourceIds.length) throw new Error(`No saved legacy planning sources for project ${projectId} were found on the host; nothing to import`);
+    const prepared = preparationSchema.parse(await client.invoke('workLedger.prepareLegacyImport', { projectId, sourceIds: sourceIds.sort() }, lifetime.signal));
+    if (prepared.kind === 'blocked') return prepared;
+    const manifest = prepared.manifest;
+    if (manifest.projectId !== projectId || JSON.stringify(manifest.sources.map(item => String(item.source.id)).sort()) !== JSON.stringify(sourceIds)) throw new Error('Prepared source selection changed');
+    return { kind: 'prepared', manifest };
   };
   const dispatch = async (entry: LegacyImportEntry): Promise<LegacyImportEntry> => {
-    await authenticate(true);
-    const dispatched = journal(store => store.dispatch(binding!, entry.command, entry));
-    // Durably unknown BEFORE transmission. A lost response, disposal or revoked
-    // read permission cannot claim rollback or generate another request identity.
+    // Saved as sent BEFORE transmission, so a lost answer is resent with the same id instead of a new one.
+    const dispatched = journal().dispatch(binding, entry.command, entry);
     const raw = await client.invoke('workLedger.importLegacy', entry.command, lifetime.signal);
-    await authenticate(true);
     if (raw && typeof raw === 'object' && 'kind' in raw && raw.kind === 'decision') {
       const semantic = strictObject({ kind: literal('decision'), decision: unknown().transform(parseJevDecision) }).parse(raw);
       if (semantic.decision.outcome === 'act') throw new Error('Host returned an uncommitted act decision');
-      return journal(store => store.recordDecision(binding!, entry.command, semantic.decision,
-        entry.state === 'pending' ? dispatched.attempts : undefined));
+      return journal().recordDecision(binding, entry.command, semantic.decision, entry.state === 'pending' ? dispatched.attempts : undefined);
     }
-    const result = legacyImportResultSchema.parse(raw);
-    return journal(store => store.record(binding!, entry.command, result, entry.state === 'pending' ? dispatched.attempts : undefined));
+    return journal().record(binding, entry.command, legacyImportResultSchema.parse(raw), entry.state === 'pending' ? dispatched.attempts : undefined);
   };
-  const create = async (replaceRequestId?: string): Promise<LegacyImportEntry> => {
-    await authenticate(true);
-    const prior = journal(store => store.readForUpdate(binding!));
-    if (prior && !replaceRequestId) return prior;
-    if (replaceRequestId && (!prior || prior.command.requestId !== replaceRequestId || !['rejected', 'cancelled'].includes(prior.state))) throw new Error('Only the selected rejected or undispatched cancelled import can be replaced');
+  const create = async (replace?: { requestId?: string | undefined }): Promise<LegacyImportEntry> => {
+    requireWrite();
+    const prior = readSaved();
+    if (prior && !replace) return prior;
+    if (replace) {
+      const saved = named(prior, replace.requestId);
+      if (!['rejected', 'cancelled'].includes(saved.state)) throw new Error(`Only a rejected or cancelled import can be restarted; this one is ${saved.state}. Run /work-import status ${projectId} for its next step`);
+    }
     const prepared = await prepareSources();
-    if (prepared.kind === 'blocked') throw new Error(`Preparation blocked: ${prepared.code}: ${prepared.reason}`);
-    await authenticate(true);
+    if (prepared.kind === 'blocked') throw new Error(`The host blocked the preparation: ${prepared.code}: ${prepared.reason}. Resolve that on the host, then run /work-import preview ${projectId}`);
     const command: LegacyImportCommand = { type: 'import_legacy', requestId: randomUUID(), expectedRevision: prepared.manifest.expectedLedgerRevision, manifest: prepared.manifest };
-    const reserved = journal(store => store.reserve(binding!, () => command, replaceRequestId));
+    const reserved = journal().reserve(binding, () => command, replace ? prior!.command.requestId : undefined);
     if (reserved.command.requestId !== command.requestId) return reserved;
     return dispatch(reserved);
   };
-  const resume = async (requestId: string, state: 'pending' | 'unknown'): Promise<LegacyImportEntry> => {
-    await authenticate(true); const entry = selectedEntry(requestId);
-    if (entry.state !== state) throw new Error(`Selected import must be ${state}; inspect status before choosing recovery`);
+  const resume = async (requestId: string | undefined, state: 'pending' | 'unknown'): Promise<LegacyImportEntry> => {
+    requireWrite();
+    const entry = savedEntry(requestId);
+    if (entry.state !== state) throw new Error(`The saved import is ${entry.state}, not ${state}; run /work-import status ${projectId} for the next step`);
     return dispatch(entry);
   };
-  try { await safe(authenticate); } catch (error) { client.dispose(); throw error; }
   return {
-    get binding() { return { ...binding! }; },
+    get binding() { return { ...binding }; },
     status: () => safe(status),
     prepare: () => safe(async () => {
-      if (await status()) throw new Error('A saved import exists; retain its exact command and reconcile it instead of preparing another');
+      if (status()) throw new Error(`A saved import exists for project ${projectId}; run /work-import status ${projectId} for its next step instead of preparing another`);
       return prepareSources();
     }),
     submit: () => safe(() => create()),
-    restart: requestId => safe(() => create(requestId)),
+    restart: requestId => safe(() => create({ requestId })),
     reconsider: requestId => safe(() => resume(requestId, 'pending')),
     recover: requestId => safe(() => resume(requestId, 'unknown')),
-    cancel: requestId => safe(async () => { await authenticate(); const entry = selectedEntry(requestId); return journal(store => store.cancel(binding!, entry.command))!; }),
-    dispose() { if (!closed) { closed = true; lifetime.abort(); client.dispose(); } },
+    cancel: requestId => safe(() => { const entry = savedEntry(requestId); return journal().cancel(binding, entry.command)!; }),
+    dispose() { if (!closed) { closed = true; lifetime.abort(); client.dispose(); store?.close(); } },
   };
 }

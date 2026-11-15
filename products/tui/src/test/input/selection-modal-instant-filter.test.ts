@@ -51,7 +51,7 @@ describe('SelectionModal instant filter (item 3a)', () => {
     expect(modal.filteredItems.map((item) => item.id)).toEqual(['/model']);
   });
 
-  test('a claimed hotkey letter still fires its action instead of arming search (no regression to /bookmarks-style pickers)', () => {
+  test('in a searchable picker a claimed letter is typed, and Delete fires the delete action', () => {
     let dispatched: string | null = null;
     const customActions = new Map<string, SelectionAction>([['d', 'delete']]);
     const modal = new SelectionModal();
@@ -61,11 +61,11 @@ describe('SelectionModal instant filter (item 3a)', () => {
     });
 
     handleSelectionModalToken(state, { type: 'text', value: 'd' });
-    // TS narrows dispatched to its initializer (null) and doesn't widen back
-    // across the closure reassignment inside selectionCallback, the cast
-    // reflects the variable's real declared type.
+    expect(dispatched as string | null).toBeNull();
+    expect(modal.query).toBe('d');
+    handleSelectionModalToken(state, { type: 'key', name: 'backspace', logicalName: 'backspace', ctrl: false, shift: false, meta: false });
+    handleSelectionModalToken(state, { type: 'key', name: 'delete', logicalName: 'delete', ctrl: false, shift: false, meta: false });
     expect(dispatched as string | null).toBe('delete');
-    expect(modal.query).toBe(''); // the letter was not typed
   });
 
   test('allowSearch: false pickers (e.g. /effort) are unaffected; an unclaimed letter still does nothing', () => {

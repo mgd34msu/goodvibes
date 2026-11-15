@@ -258,7 +258,16 @@ export function handleEscape(state: EscapeState, clearCommandText = false): {
             },
         });
     };
-    pruneStaleModalStack({ ...state, helpOverlayActive, shortcutsOverlayActive, commandMode });
+    // Esc closes the modal on screen: names above the topmost modal still
+    // active closed themselves and are dropped first, so one Esc never pops a
+    // name that does nothing. Key routing skips the same names.
+    const live = { ...state, helpOverlayActive, shortcutsOverlayActive, commandMode };
+    for (;;) {
+        const top = state.modalStack[state.modalStack.length - 1];
+        if (top === undefined || (isModalName(top) && isModalActive(live, top)))
+            break;
+        state.modalStack.pop();
+    }
     if (state.modalStack.length > 0) {
         const current = state.modalStack.pop();
         if (current === undefined)

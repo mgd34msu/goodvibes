@@ -21,20 +21,14 @@ export interface McpWorkspaceControls {
   setQuery(query: string): void;
   adjustFormEnum(direction: 1 | -1): void;
 }
-// The workspace stays in delete-confirm until the removal returns, so a repeated
-// y or Enter would start a second removal on the same config file.
-const deletesInFlight = new WeakSet<McpWorkspaceControls>();
-function confirmDeleteOnce(workspace: McpWorkspaceControls): void {
-  if (deletesInFlight.has(workspace)) return;
-  deletesInFlight.add(workspace);
-  void (async () => {
-    try {
-      await workspace.confirmDelete();
-    } finally {
-      deletesInFlight.delete(workspace);
-    }
-  })();
-}
+/**
+ * Keys in the MCP workspace have one meaning each. In the browser every letter
+ * types into the search row; actions are chords that cannot be text (Ctrl+N
+ * add, Ctrl+E edit, Ctrl+R reload, Ctrl+T tools) and Delete, which only asks.
+ * A removal is confirmed by y or Enter typed after that question is shown;
+ * `confirmDelete` leaves the confirmation before it awaits, so a repeated key
+ * cannot start a second removal.
+ */
 export function handleMcpWorkspaceToken(
   workspace: McpWorkspaceControls,
   token: InputToken,
@@ -49,20 +43,17 @@ export function handleMcpWorkspaceToken(
     requestRender();
     return true;
   }
-  const browseAction = (key: string): boolean => {
-    if (key === 'a') workspace.openAddForm();
+  const browseChord = (key: string): void => {
+    if (key === 'n') workspace.openAddForm();
     else if (key === 'e' && workspace.selectedServer) workspace.openEditForm(workspace.selectedServer.name);
-    else if (key === 'd' && workspace.selectedServer) workspace.requestDelete(workspace.selectedServer.name);
     else if (key === 'r') workspace.requestReload();
     else if (key === 't') void workspace.refreshTools();
-    else return false;
-    return true;
   };
   if (token.type === 'text') {
     if (workspace.mode === 'form') {
       workspace.appendFormText(token.value);
     } else if (workspace.mode === 'delete-confirm') {
-      if (token.value.toLowerCase() === 'y') confirmDeleteOnce(workspace);
+      if (token.value.toLowerCase() === 'y') void workspace.confirmDelete();
       else if (token.value.toLowerCase() === 'n') workspace.cancelForm();
     } else if (workspace.mode === 'reload-confirm') {
       if (token.value.toLowerCase() === 'y') {
@@ -70,11 +61,7 @@ export function handleMcpWorkspaceToken(
         void workspace.reloadRuntime();
       } else if (token.value.toLowerCase() === 'n') workspace.cancelForm();
     } else {
-      // Browse: the search row is always live. An action letter fires while
-      // the query is empty; everything else is typed into the query.
-      const value = token.value.toLowerCase();
-      const claimed = workspace.query.length === 0 && [...token.value].length === 1 && 'aedrt'.includes(value);
-      if (!claimed || !browseAction(value)) workspace.setQuery(workspace.query + token.value);
+      workspace.setQuery(workspace.query + token.value);
     }
     requestRender();
     return true;
@@ -96,7 +83,7 @@ export function handleMcpWorkspaceToken(
   else if (token.logicalName === 'pageup') workspace.moveSelection(-10);
   else if (token.logicalName === 'pagedown') workspace.moveSelection(10);
   else if (token.logicalName === 'enter') {
-    if (workspace.mode === 'delete-confirm') confirmDeleteOnce(workspace);
+    if (workspace.mode === 'delete-confirm') void workspace.confirmDelete();
     else void workspace.activateSelected();
   }
   else if (token.logicalName === 'backspace') {
@@ -112,9 +99,8 @@ export function handleMcpWorkspaceToken(
   } else if (token.logicalName === 'space') {
     if (workspace.mode === 'form') workspace.appendFormText(' ');
     else if (workspace.mode === 'browse') workspace.setQuery(workspace.query + ' ');
-  } else if (workspace.mode === 'browse' && token.logicalName) {
-    // Modified letters (CSI-u chords) fire their action whatever the query holds.
-    browseAction(token.logicalName);
+  } else if (workspace.mode === 'browse' && (token.ctrl || token.meta) && token.logicalName) {
+    browseChord(token.logicalName.toLowerCase());
   }
   requestRender();
   return true;

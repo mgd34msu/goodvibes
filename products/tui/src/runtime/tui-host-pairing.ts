@@ -1,16 +1,15 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { isDeepStrictEqual } from 'node:util';
 import { isHostPairingBootstrapPrincipal, isNativePairedPrincipal, parseMintedPairingToken, readHostPairingResponse } from '@goodvibes-jev/engine/terminal-shell/native-paired-principal';
 import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveNativeHostCredential, resolveTuiHostOrigin, type NativeHostCredentialOptions } from './client/native-host-credential.ts';
 import { readTuiLegacyPairingBootstrap } from './tui-host-pairing-bootstrap.ts';
-import { beginTuiHostPairing, clearTuiHostPairingAttempt, completeTuiHostPairing, readTuiHostPairing } from './tui-host-credential-store.ts';
+import { beginTuiHostPairing, clearTuiHostPairingAttempt, completeTuiHostPairing, readTuiHostPairing, removeTuiHostPairing, type RemoveTuiHostPairingResult } from './tui-host-credential-store.ts';
 
 export interface TuiHostPairingResult {
-  readonly status: 'preview' | 'blocked' | 'already-paired' | 'cancelled' | 'changed' | 'unknown' | 'cleared' | 'paired' | 'paired-unverified';
+  readonly status: 'preview' | 'blocked' | 'already-paired' | 'cancelled' | 'changed' | 'unknown' | 'cleared' | 'paired' | 'paired-unverified' | 'credential-rejected';
   readonly message: string;
   readonly host?: string;
   readonly name?: string;
@@ -30,16 +29,17 @@ export interface TuiHostPairingOptions extends NativeHostCredentialOptions {
   readonly fetchImpl?: typeof fetch;
 }
 const unavailable = (): TuiHostPairingResult => ({ status: 'blocked', message: 'Pairing could not be verified. Check the selected host and safe local credential store, then preview again.' });
-const unknown = (host: string): TuiHostPairingResult => ({ status: 'unknown', host, message: 'A pairing attempt may already have created a credential. Review its outcome on this host; no automatic remint, reset or revoke is allowed.' });
+const unknown = (host: string): TuiHostPairingResult => ({ status: 'unknown', host, message: 'The reply to a pairing request was lost, so this terminal does not know whether the host created its credential. Run /host pair --bootstrap-shared (or /work on this machine) to repeat the same request: the host answers it with that credential, never a second one.' });
 const refused = (host: string, status: number): TuiHostPairingResult => ({ status: 'blocked', host, message: `The host refused the pairing request (HTTP ${status}), so no credential was created and nothing was saved. Preview again to retry.` });
 const changed = (): TuiHostPairingResult => ({ status: 'changed', message: 'The selected host, home, bootstrap credential, authority or local pairing state changed. Preview again before confirming.' });
 const cancelled = (): TuiHostPairingResult => ({ status: 'cancelled', message: 'Pairing cancelled before the migration request.' });
 const unverified = (host: string): TuiHostPairingResult => ({ status: 'paired-unverified', host, message: 'The credential is saved for its original host, but current native authority is unverified. Inspect goodvibes host pair again; do not remint.' });
 
 /**
- * An unresolved attempt blocks pairing until the owner has checked the host.
- * Clearing it is an owner-terminal action: it only deletes the local marker, so
- * it is offered with the warning that a credential the host did mint stays there.
+ * An unresolved attempt that could not be repeated (no bootstrap selected, or
+ * the host still did not answer). Clearing it is an owner-terminal action: it
+ * only deletes the local marker. A credential the host minted for it was an
+ * offer nobody received, so it never authenticates and lapses unused.
  */
 function clearPreview(home: string, host: string, attemptId: string): TuiHostPairingPreview {
   const confirmation = `CLEAR ${randomBytes(6).toString('hex')}`;
@@ -49,7 +49,7 @@ function clearPreview(home: string, host: string, attemptId: string): TuiHostPai
       ...unknown(host),
       confirmation,
       confirmationPrompt: 'forget this unresolved attempt',
-      message: `${unknown(host).message} If the host shows no pairing token for this attempt, run /host pair --apply and confirm to forget it and pair again; a token that does exist stays valid until you revoke it on the host.`,
+      message: `${unknown(host).message} Or confirm here to forget the attempt and pair from scratch; a credential the host made for it was never received, so it cannot sign in and lapses within 15 minutes.`,
     },
     async confirm(answer) {
       if (consumed || answer !== confirmation) return cancelled();
@@ -68,24 +68,30 @@ type MintOutcome =
 
 /**
  * The one migration request: a durable "attempt begun" marker, one POST of
- * `pairing.tokens.migrate` with the bootstrap token, then the minted device
- * credential saved for this origin. A refusal (4xx other than 408) releases the
- * marker; a lost or failed reply after the request leaves it, because the host
- * may have minted.
+ * `pairing.tokens.migrate` with the bootstrap token and the attempt id, then the
+ * minted device credential saved for this origin. A refusal (4xx other than 408)
+ * releases the marker; a lost or failed reply after the request leaves it,
+ * because the host may have minted. Passing `repeat` (the stored unresolved
+ * attempt) sends that attempt again under its own id: the host answers it with
+ * the offer it already made (same token id, new secret) while that offer is
+ * unused, so a lost reply is settled without a second credential.
  */
 async function mintTuiDevicePairing(input: {
   readonly home: string; readonly host: string; readonly token: string; readonly name: string;
+  readonly repeat?: { readonly attemptId: string } | undefined;
   readonly current: () => boolean; readonly fetchImpl?: typeof fetch | undefined; readonly signal?: AbortSignal | undefined;
 }): Promise<MintOutcome> {
-  const { home, host, token, name, current, signal } = input;
-  const attemptId = randomUUID();
-  const begin = await beginTuiHostPairing(home, host, { attemptId, name, startedAt: Date.now() }, {}, () => !signal?.aborted && current());
-  if (begin.status !== 'begun') return { status: begin.status === 'cancelled' ? signal?.aborted ? 'cancelled' : 'changed' : begin.status === 'conflict' ? 'changed' : 'unavailable' };
+  const { home, host, token, name, current, signal, repeat } = input;
+  const attemptId = repeat?.attemptId ?? randomUUID();
+  if (!repeat) {
+    const begin = await beginTuiHostPairing(home, host, { attemptId, name, startedAt: Date.now() }, {}, () => !signal?.aborted && current());
+    if (begin.status !== 'begun') return { status: begin.status === 'cancelled' ? signal?.aborted ? 'cancelled' : 'changed' : begin.status === 'conflict' ? 'changed' : 'unavailable' };
+  }
   try {
-    // Durable uncertainty precedes the only request. Cancellation never clears it.
-    const pending = readTuiHostPairing(home, host);
-    if (pending.status !== 'unknown' || pending.attemptId !== attemptId || pending.name !== name) return { status: 'unknown' };
+    // Durable uncertainty precedes the only request: begin published the marker durably. Cancellation never clears it.
     if (signal?.aborted || !current()) {
+      // An earlier send of a repeated attempt may have minted, so its marker stays.
+      if (repeat) return { status: 'unknown' };
       // No request was sent, so nothing can have been minted: release the marker so pairing can be previewed again.
       const released = await clearTuiHostPairingAttempt(home, host, attemptId);
       if (released.status !== 'cleared') return { status: 'unknown' };
@@ -93,7 +99,7 @@ async function mintTuiDevicePairing(input: {
     }
     const response = await (input.fetchImpl ?? fetch)(`${host}/api/control-plane/methods/pairing.tokens.migrate/invoke`, {
       method: 'POST', redirect: 'error', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ body: { name } }), signal: AbortSignal.any([AbortSignal.timeout(5000), ...(signal ? [signal] : [])]),
+      body: JSON.stringify({ body: { name, attemptId } }), signal: AbortSignal.any([AbortSignal.timeout(5000), ...(signal ? [signal] : [])]),
     });
     if (!response.ok) {
       // A 4xx is the host refusing the request, so no credential was created and the marker is released. A timeout answer (408), a 5xx or a lost response may have followed a mint and stays unknown.
@@ -125,22 +131,26 @@ function isLoopbackOrigin(origin: string): boolean {
  * its device credential with that token (one request), saves it for this
  * origin and uses it from then on. The device shows in the daemon's device list
  * and is revoked like any other. A daemon on another machine is never sent the
- * local token; it is paired with /host pair. Returns the outcome when a request
- * was made, otherwise null (already paired, an earlier attempt to settle, or not
- * this machine's daemon).
+ * local token; it is paired with /host pair. An earlier attempt whose reply was
+ * lost is settled by repeating it. Returns the outcome when a request was made,
+ * otherwise null (already paired, or not this machine's daemon).
  */
 export async function pairLocalTuiHostAutomatically(options: TuiHostPairingOptions, signal?: AbortSignal): Promise<TuiHostPairingResult | null> {
   try {
     const home = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
     const host = resolveTuiHostOrigin(options.configManager);
     if (!host || !isLoopbackOrigin(host) || !resolveDaemonEnabled(options.configManager)) return null;
-    if (readTuiHostPairing(home, host).status !== 'missing') return null;
+    const state = readTuiHostPairing(home, host);
+    if (state.status !== 'missing' && state.status !== 'unknown') return null;
     const token = readTuiLegacyPairingBootstrap(home);
     if (!token) return null;
     const homeNow = () => typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
     const current = () => homeNow() === home && resolveDaemonEnabled(options.configManager) && resolveTuiHostOrigin(options.configManager) === host;
-    const name = `GoodVibes TUI on ${hostname()}`.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu, '').slice(0, 80).trim();
-    const outcome = await mintTuiDevicePairing({ home, host, token, name, current, fetchImpl: options.fetchImpl, signal });
+    // An earlier attempt whose reply was lost is repeated under its own id and name.
+    const name = state.status === 'unknown' ? state.name
+      : `GoodVibes TUI on ${hostname()}`.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu, '').slice(0, 80).trim();
+    const repeat = state.status === 'unknown' ? { attemptId: state.attemptId } : undefined;
+    const outcome = await mintTuiDevicePairing({ home, host, token, name, repeat, current, fetchImpl: options.fetchImpl, signal });
     switch (outcome.status) {
       case 'paired': return { status: 'paired', host, name, message: 'This terminal created its device credential for the daemon on this machine.' };
       case 'refused': return refused(host, outcome.httpStatus);
@@ -152,8 +162,54 @@ export async function pairLocalTuiHostAutomatically(options: TuiHostPairingOptio
   } catch { return signal?.aborted ? cancelled() : unavailable(); }
 }
 
-/** Read-only preview. Source credentials are used only after explicit bootstrap
- * selection; no generic command, startup or native operation can confirm a migration.
+/** What forgetting a stored credential did. The token stays valid on the host until it is revoked there. */
+function forgotten(result: RemoveTuiHostPairingResult, host: string, tokenId: string): TuiHostPairingResult {
+  if (result.status === 'removed') return { status: 'cleared', host, message: `The stored device credential (token ${tokenId}) was forgotten. It stays valid on the host until it is revoked there. Pair again with /host pair --bootstrap-shared --apply.` };
+  if (result.status === 'conflict') return changed();
+  return { status: 'blocked', host, message: `${result.reason} Nothing was forgotten.` };
+}
+
+/**
+ * The host answered 401 or 403 to the stored credential: it was revoked or
+ * the daemon there was reset. Forgetting it locally is offered so the terminal
+ * can pair again; the owner confirms with a fresh phrase.
+ */
+function forgetPreview(home: string, host: string, tokenId: string): TuiHostPairingPreview {
+  const confirmation = `FORGET ${randomBytes(6).toString('hex')}`;
+  let consumed = false;
+  return {
+    result: {
+      status: 'credential-rejected', host, confirmation,
+      confirmationPrompt: 'forget the stored credential so this terminal can pair again',
+      message: `The host at ${host} no longer accepts the stored device credential (it was revoked, or the daemon there was reset). Run /host pair --apply and confirm to forget it, then pair again with /host pair --bootstrap-shared --apply.`,
+    },
+    async confirm(answer) {
+      if (consumed || answer !== confirmation) return cancelled();
+      consumed = true;
+      return forgotten(await removeTuiHostPairing(home, host, tokenId), host, tokenId);
+    },
+  };
+}
+
+/**
+ * `/host unpair` and `goodvibes host unpair`: forget this terminal's stored
+ * device credential for the selected host. Local only; nothing is sent.
+ */
+export async function unpairTuiHost(options: NativeHostCredentialOptions): Promise<TuiHostPairingResult> {
+  const home = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
+  const host = resolveTuiHostOrigin(options.configManager);
+  if (!host) return { status: 'blocked', message: 'No host is selected, so there is no credential to forget. Set controlPlane.publicBaseUrl (or pass --url) to name the host.' };
+  const state = readTuiHostPairing(home, host);
+  if (state.status === 'unavailable') return { status: 'blocked', host, message: `${state.reason} Nothing was forgotten.` };
+  if (state.status === 'missing') return { status: 'blocked', host, message: 'No device credential is stored for this host; nothing to forget.' };
+  if (state.status === 'unknown') return { ...unknown(host), message: `${unknown(host).message} Run /host pair --apply to review the unresolved attempt and forget it.` };
+  return forgotten(await removeTuiHostPairing(home, host, state.tokenId), host, state.tokenId);
+}
+
+/** Read-only preview, except that an attempt the owner already confirmed and
+ * whose reply was lost is repeated under its own id when the bootstrap is
+ * selected. Source credentials are used only after explicit bootstrap
+ * selection; no generic command, startup or native operation can confirm a new migration.
  * The interactive shell holds its capability privately across the owner gesture. Secrets and remote errors never enter presentation data.
  */
 export async function previewTuiHostPairing(options: TuiHostPairingOptions, name = 'GoodVibes TUI', signal?: AbortSignal): Promise<TuiHostPairingPreview> {
@@ -165,24 +221,19 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
     const home = homeNow(); const host = resolveTuiHostOrigin(options.configManager);
     if (!host || !resolveDaemonEnabled(options.configManager)) return { result: unavailable() };
     const state = readTuiHostPairing(home, host);
-    if (state.status === 'unknown') return clearPreview(home, host, state.attemptId);
-    if (state.status === 'unavailable') return { result: unavailable() };
+    if (state.status === 'unavailable') return { result: { status: 'blocked', host, message: `${state.reason} Then run /host pair again.` } };
     const sameSelection = () => homeNow() === home && resolveDaemonEnabled(options.configManager) && resolveTuiHostOrigin(options.configManager) === host;
+    // The flow carries the record it read; the store's compare-and-swap on begin
+    // and complete refuses a record another process changed meanwhile.
     const auth = async (token: string, requestSignal?: AbortSignal, sourceCurrent: () => boolean = sameSelection) => {
-      const expectedState = readTuiHostPairing(home, host);
       const client = createOperatorApiClient({ baseUrl: host, authToken: token, fetchImpl: (input, init) => {
-        // platform setup and retries may await before dispatch. Recheck at the real
-        // network boundary so a stale selection cannot send even a read.
-        if (requestSignal?.aborted || !sourceCurrent() || !sameSelection() || !isDeepStrictEqual(readTuiHostPairing(home, host), expectedState)) throw new Error('Pairing selection changed');
+        // Client setup may await before dispatch: a token is sent only to the origin still selected.
+        if (requestSignal?.aborted || !sourceCurrent()) throw new Error('Pairing selection changed');
         return (options.fetchImpl ?? fetch)(input, { ...init, redirect: 'error' });
       } });
-      const method = client.getOperation('control.auth.current');
-      const schema = method.outputSchema, originalMethod = JSON.stringify(method);
       const assertCurrent = () => {
         requestSignal?.throwIfAborted();
-        if (!sourceCurrent() || !sameSelection() || !isDeepStrictEqual(readTuiHostPairing(home, host), expectedState)
-          || client.getOperation('control.auth.current') !== method || method.outputSchema !== schema
-          || JSON.stringify(method) !== originalMethod) throw new Error('Pairing authority source changed');
+        if (!sourceCurrent()) throw new Error('Pairing selection changed');
       };
       try {
         for (let attempt = 0; ; attempt++) {
@@ -205,12 +256,40 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
       }
       finally { client.dispose(); }
     };
+    // A freshly saved credential counts as paired only once the host verifies it as this device.
+    const verifyMinted = async (minted: { readonly token: string; readonly tokenId: string }, verifySignal?: AbortSignal): Promise<TuiHostPairingResult> => {
+      if (verifySignal?.aborted || !sameSelection()) return unverified(host);
+      let verified;
+      try { verified = await auth(minted.token, verifySignal); } catch { return unverified(host); }
+      const effective = resolveNativeHostCredential(options);
+      if (verifySignal?.aborted || !sameSelection() || !isNativePairedPrincipal(verified, `pairing:${minted.tokenId}`) || !effective.available || effective.baseUrl !== host || effective.token !== minted.token) return unverified(host);
+      return { status: 'paired', host, message: 'TUI pairing is saved and the selected host verified its native authority. Provider, workspace, Jev and execution readiness remain separate checks.' };
+    };
+    if (state.status === 'unknown') {
+      // The owner confirmed this attempt when it was first sent. With the bootstrap
+      // selected again it is repeated under its own id, which the host answers with
+      // the credential it already made (or a first one), never a second.
+      const token = options.bootstrapShared ? readTuiLegacyPairingBootstrap(home) : null;
+      if (!token) return clearPreview(home, host, state.attemptId);
+      const current = () => sameSelection() && readTuiLegacyPairingBootstrap(home) === token;
+      const outcome = await mintTuiDevicePairing({ home, host, token, name: state.name, repeat: { attemptId: state.attemptId }, current, fetchImpl: options.fetchImpl, signal });
+      switch (outcome.status) {
+        case 'paired': return { result: await verifyMinted(outcome, signal) };
+        case 'unknown': return clearPreview(home, host, state.attemptId);
+        case 'refused': return { result: { status: 'blocked', host, message: `The host refused the repeated pairing request (HTTP ${outcome.httpStatus}), so the unresolved attempt was forgotten; anything the host made for it was never received and lapses unused. Preview again to pair.` } };
+        case 'changed': return { result: changed() };
+        case 'cancelled': return { result: cancelled() };
+        default: return { result: unavailable() };
+      }
+    }
     if (state.status === 'paired') {
-      try {
-        const live = await auth(state.token, signal);
-        if (signal?.aborted || !sameSelection() || !isDeepStrictEqual(readTuiHostPairing(home, host), state) || !isNativePairedPrincipal(live, `pairing:${state.tokenId}`)) return { result: unverified(host) };
-        return { result: { status: 'already-paired', host, message: 'This TUI host credential is saved and its expected native principal is verified. No credential will be minted or replaced.' } };
-      } catch { return { result: unverified(host) }; }
+      let live: unknown;
+      try { live = await auth(state.token, signal); } catch (error) {
+        if (!signal?.aborted && error instanceof GoodVibesError && error.kind === 'auth') return forgetPreview(home, host, state.tokenId);
+        return { result: unverified(host) };
+      }
+      if (signal?.aborted || !sameSelection() || !isNativePairedPrincipal(live, `pairing:${state.tokenId}`)) return { result: unverified(host) };
+      return { result: { status: 'already-paired', host, message: 'This TUI host credential is saved and its expected native principal is verified. No credential will be minted or replaced. To forget it, run /host unpair.' } };
     }
     if (!options.bootstrapShared) return { result: { status: 'blocked', host, message: 'No device credential is bound to this origin. For the daemon on this machine, /work creates one on first use. Select --bootstrap-shared to create it now with the daemon operator token.' } };
     const token = readTuiLegacyPairingBootstrap(home);
@@ -218,7 +297,7 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
     const current = () => sameSelection() && readTuiLegacyPairingBootstrap(home) === token;
     const live = await auth(token, signal, current);
     if (signal?.aborted) return { result: cancelled() };
-    if (!current() || !isDeepStrictEqual(readTuiHostPairing(home, host), state)) return { result: changed() };
+    if (!current()) return { result: changed() };
     if (!isHostPairingBootstrapPrincipal(live)) return { result: { status: 'blocked', host, message: 'This host must verify the explicitly selected bootstrap as its legacy shared operator token with write:control-plane. No credential was created.' } };
     const confirmation = `PAIR ${randomBytes(6).toString('hex')}`;
     let consumed = false;
@@ -231,10 +310,10 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
       if (answer !== confirmation || actionSignal?.aborted) return cancelled();
       let attempted = false;
       try {
-        if (!current() || !isDeepStrictEqual(readTuiHostPairing(home, host), state)) return changed();
+        if (!current()) return changed();
         const revalidated = await auth(token, actionSignal, current);
         if (actionSignal?.aborted) return cancelled();
-        if (!current() || !isDeepStrictEqual(readTuiHostPairing(home, host), state) || !isHostPairingBootstrapPrincipal(revalidated)) return changed();
+        if (!current() || !isHostPairingBootstrapPrincipal(revalidated)) return changed();
         const outcome = await mintTuiDevicePairing({ home, host, token, name, current, fetchImpl: options.fetchImpl, signal: actionSignal });
         attempted = true;
         if (outcome.status === 'refused') return refused(host, outcome.httpStatus);
@@ -242,15 +321,9 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
         if (outcome.status === 'changed') return changed();
         if (outcome.status === 'unavailable') return unavailable();
         if (outcome.status !== 'paired') return unknown(host);
-        const minted = { token: outcome.token, id: outcome.tokenId };
-        // Save the only copy before verification. Late responses may preserve the
+        // The only copy was saved before verification. Late responses may preserve the
         // original host's recovery state, never create a replacement or revoke it.
-        if (actionSignal?.aborted || !sameSelection()) return unverified(host);
-        let verified;
-        try { verified = await auth(minted.token, actionSignal); } catch { return unverified(host); }
-        const effective = resolveNativeHostCredential(options);
-        if (actionSignal?.aborted || !sameSelection() || !isNativePairedPrincipal(verified, `pairing:${minted.id}`) || !effective.available || effective.baseUrl !== host || effective.token !== minted.token) return unverified(host);
-        return { status: 'paired', host, message: 'TUI pairing is saved and the selected host verified its native authority. Provider, workspace, Jev and execution readiness remain separate checks.' };
+        return await verifyMinted(outcome, actionSignal);
       } catch { return attempted ? unknown(host) : actionSignal?.aborted ? cancelled() : unavailable(); }
     } };
   } catch { return { result: signal?.aborted ? cancelled() : unavailable() }; }

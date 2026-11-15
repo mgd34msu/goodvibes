@@ -188,6 +188,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'setup status',
       'setup pair [--name <device-name>]',
       'setup pair [--name <device-name>] --apply',
+      'setup unpair',
       'onboarding',
       'onboarding status',
     ],
@@ -557,7 +558,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   bundle: {
     usage: ['bundle export [path]', 'bundle inspect <path>', 'bundle import <path> [--yes]'],
-    summary: 'Export, inspect, or import a bundle. Import applies only the config values, validated first and only with --yes; other sections are inspected but never imported.',
+    summary: 'Export, inspect, or import a bundle. Import applies only the config values: it refuses a bundle from another product or format version, checks every value before changing any, and without --yes lists the values it would set and changes nothing (exit 2); other sections are inspected but never imported.',
     examples: ['bundle export goodvibes-agent-bundle.json', 'bundle inspect goodvibes-agent-bundle.json'],
   },
   pair: COMMON_COMMAND_HELP['pair'],

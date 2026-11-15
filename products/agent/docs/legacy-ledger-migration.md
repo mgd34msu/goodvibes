@@ -14,16 +14,22 @@ inspection and explicit migration; importing does not require a live planning in
   Repeating submit returns existing state and does not dispatch again.
 - `/work-import status <project-id>` reads the protected local journal. It never
   contacts an import mutation or resumes work.
-- `/work-import reconsider <project-id> <request-id>` explicitly asks for a fresh
+- `/work-import reconsider <project-id> [request-id]` explicitly asks for a fresh
   host reading of a pending unchanged command. Prior decisions remain provenance.
-- `/work-import recover <project-id> <request-id>` retransmits an unknown command
+- `/work-import recover <project-id> [request-id]` retransmits an unknown command
   unchanged. The host checks exact durable receipts before source freshness or
   Jev; accepted replay neither reimports records nor starts work.
-- `/work-import cancel <project-id> <request-id>` cancels only a known pending
+- `/work-import cancel <project-id> [request-id]` cancels only a known pending
   command. A dispatched unknown request stays unknown; this is not host rollback.
-- `/work-import restart <project-id> <request-id>` captures a new command only
-  after that exact selected request is definitively rejected or locally cancelled.
+- `/work-import restart <project-id> [request-id]` captures a new command only
+  after the saved request is definitively rejected or locally cancelled.
   The prior command is archived. Unresolved or accepted requests cannot be replaced.
+
+Each workspace and project holds exactly one saved import, so the request id is
+optional; when given, it must name the saved one. Every result ends with the next
+command to run, and a preview the host blocks shows the host's code and reason.
+Each command authenticates once; the host checks scope on every call, and a
+401 or 403 is reported as a credential the host no longer accepts.
 
 Agent and TUI use their own exact-host private pairing stores. Unbound
 environment and daemon-global tokens are not fallback import credentials.
@@ -108,8 +114,8 @@ authorizes a later action; reconsideration makes a fresh recorded reading.
 Agent and TUI share one canonical workspace/project journal path. Resolve aliases
 through realpath and fail closed on an earlier incompatible Agent journal. Store
 the complete immutable command and request identity in private SQLite files,
-using immediate cross-process transactions, EXTRA synchronization and ordered
-containing-directory/ancestor fsync. A process-interruption test does not prove
+using immediate cross-process transactions, EXTRA synchronization and an fsync
+of the containing directory when the journal file is created. A process-interruption test does not prove
 hardware power-loss durability; importing the shared module under Node is allowed,
 but journal construction without Bun fails before creating storage.
 
@@ -126,13 +132,12 @@ Store actual shared decision provenance beside the exact command and authenticat
 selection; old journals keep empty provenance rather than invented decisions.
 Credentials are neither minted nor journaled. Preview/status need no keyboard
 attestation or human-confirmation claim. Discover all source pages: malformed
-cursors, duplicate IDs and the 5,000-source cap fail closed. Recheck revocation
-before displaying protected data. Preserve both legacy `{ sources }` and cursor
+cursors, duplicate IDs and the 5,000-source cap fail closed. Preserve both legacy `{ sources }` and cursor
 `{ items, hasMore, nextCursor? }` source-list results with validation enabled;
 TypeScript callers narrow the output union even when omitting pagination input.
 
 Read-only status and preview make no import mutation, preserve the paired
-credential bytes and leave a private 0600 journal with zero saved commands.
+credential bytes and create no journal file.
 They do not imply mutation, runner or live-provider acceptance.
 
 The native persistence and legacy guard contract

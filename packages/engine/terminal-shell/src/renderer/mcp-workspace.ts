@@ -61,10 +61,11 @@ export function createMcpWorkspaceRenderer(policy: {
     return [
       ['↑↓', 'move'],
       ['⏎', policy.browseEnter],
-      ['a', 'add'],
-      ['d', 'remove'],
-      ['r', 'reload'],
-      ['t', 'tools'],
+      ['type', 'search'],
+      ['ctrl+n', 'add'],
+      ['del', 'remove'],
+      ['ctrl+r', 'reload'],
+      ['ctrl+t', 'tools'],
     ];
   }
 

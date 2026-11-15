@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline/promises';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CliCommandRuntime } from './management.ts';
-import { previewAgentHostPairing } from '../runtime/agent-host-pairing.ts';
+import { previewAgentHostPairing, unpairAgentHost } from '../runtime/agent-host-pairing.ts';
 
 import { formatSetupPairing } from '../runtime/setup-pairing-presentation.ts';
 export { formatSetupPairing } from '../runtime/setup-pairing-presentation.ts';
@@ -10,6 +10,20 @@ export interface SetupPairingTerminal {
   readonly interactive: boolean;
   write(text: string): void;
   question(text: string, signal: AbortSignal): Promise<string>;
+}
+
+/**
+ * `goodvibes-agent setup unpair`: forget the stored device credential for the
+ * selected host. Local only; exit 0 when it was forgotten, 1 otherwise.
+ */
+export async function runSetupUnpairCommand(runtime: CliCommandRuntime): Promise<number> {
+  if (runtime.cli.commandArgs.length > 1) {
+    console.error('Usage: goodvibes-agent setup unpair. It forgets the device credential stored for the selected host (controlPlane.host and controlPlane.port).');
+    return 2;
+  }
+  const result = await unpairAgentHost({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory });
+  process.stdout.write(`${runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(result) : formatSetupPairing(result)}\n`);
+  return result.status === 'cleared' ? 0 : 1;
 }
 
 /** No --yes, scripted answer, or model-supplied confirmation bypass. */

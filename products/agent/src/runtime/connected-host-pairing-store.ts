@@ -8,6 +8,7 @@ import {
   type HostPairing,
   type BeginHostPairingResult,
   type CompleteHostPairingResult,
+  type RemoveHostPairingResult,
   type HostPairingIO,
 } from '@goodvibes-jev/engine/terminal-shell/host-pairing-store';
 export const AGENT_HOST_PAIRING_MAX_RECORDS = HOST_PAIRING_MAX_RECORDS;
@@ -19,6 +20,7 @@ export type AgentHostPairingUnavailable = HostPairingUnavailable<typeof AGENT_HO
 export type AgentHostPairing = HostPairing<typeof AGENT_HOST_PAIRING_UNAVAILABLE_REASON>;
 export type BeginAgentHostPairingResult = BeginHostPairingResult<typeof AGENT_HOST_PAIRING_UNAVAILABLE_REASON, false>;
 export type CompleteAgentHostPairingResult = CompleteHostPairingResult<typeof AGENT_HOST_PAIRING_UNAVAILABLE_REASON>;
+export type RemoveAgentHostPairingResult = RemoveHostPairingResult<typeof AGENT_HOST_PAIRING_UNAVAILABLE_REASON>;
 export type AgentHostPairingIO = HostPairingIO;
 export const {
   canonicalizePairingHost,
@@ -27,6 +29,7 @@ export const {
   beginHostPairing: beginAgentHostPairing,
   completeHostPairing: completeAgentHostPairing,
   clearHostPairingAttempt: clearAgentHostPairingAttempt,
+  removeHostPairing: removeAgentHostPairing,
 } = createHostPairingStore({
   unavailableReason: AGENT_HOST_PAIRING_UNAVAILABLE_REASON,
   surfaceRoot: 'agent',

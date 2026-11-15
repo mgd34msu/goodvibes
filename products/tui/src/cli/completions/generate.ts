@@ -287,8 +287,8 @@ export const COMPLETION_COMMANDS: readonly CompletionCommand[] = [
   {
     name: 'host',
     aliases: ['host'],
-    description: 'Review explicit TUI host pairing',
-    subcommands: ['pair'],
+    description: 'Review, create or forget explicit TUI host pairing',
+    subcommands: ['pair', 'unpair'],
   },
   {
     name: 'completion',

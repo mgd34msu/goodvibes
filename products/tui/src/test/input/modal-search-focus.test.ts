@@ -81,13 +81,11 @@ afterEach(() => {
 });
 
 describe('modal search focus routing', () => {
-  test('selection modal: a claimed action letter fires while the query is empty; once typing, it is a character', () => {
+  test('selection modal: letters always type into the search row; Delete and Ctrl+<letter> fire the action', () => {
     const modal = new SelectionModal();
     const customActions = new Map([['d', 'delete' as const]]);
-    modal.open('Pick', [
-      { id: 'one', label: 'One' },
-      { id: 'two', label: 'Two' },
-    ], { allowSearch: true, customActions });
+    const items = [{ id: 'one', label: 'One' }, { id: 'two', label: 'Two' }];
+    modal.open('Pick', items, { allowSearch: true, customActions });
 
     let result: { item: { id: string }; action: string } | null = null;
     const state = {
@@ -99,18 +97,16 @@ describe('modal search focus routing', () => {
     };
 
     handleSelectionModalToken(state, { type: 'text', value: 'd' });
-    expect(result).not.toBeNull();
-    expect(result!.action).toBe('delete');
+    expect(result).toBeNull();
+    expect(modal.query).toBe('d');
+    handleSelectionModalToken(state, { type: 'key', name: 'backspace', logicalName: 'backspace', ctrl: false, shift: false, meta: false });
+    handleSelectionModalToken(state, { type: 'key', name: 'delete', logicalName: 'delete', ctrl: false, shift: false, meta: false });
+    expect(result).toEqual(expect.objectContaining({ action: 'delete' }));
 
     result = null;
-    modal.open('Pick', [
-      { id: 'one', label: 'One' },
-      { id: 'two', label: 'Two' },
-    ], { allowSearch: true, customActions });
-    handleSelectionModalToken(state, { type: 'text', value: 't' });
-    handleSelectionModalToken(state, { type: 'text', value: 'd' });
-    expect(result).toBeNull();
-    expect(modal.query).toBe('td');
+    modal.open('Pick', items, { allowSearch: true, customActions });
+    handleSelectionModalToken(state, { type: 'key', name: 'd', logicalName: 'd', ctrl: true, shift: false, meta: false });
+    expect(result).toEqual(expect.objectContaining({ action: 'delete' }));
   });
 
   test('selection modal: up/down always move the selection (there is no search mode to enter)', () => {

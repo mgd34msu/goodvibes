@@ -15,7 +15,8 @@
 //
 //   Selection modal filters (end-anchored, no cursor)
 //     'backspace' → remove last char   ✓
-//     'delete'    → no-op              ✓
+//     'delete'    → the picker's single-item delete action, when it has one
+//                   (a bookmark, a remembered rule; a session asks first)
 //
 //   A long-form draft buffer (end-anchored, no cursor)
 //     'backspace' → remove last char   ✓

@@ -38,25 +38,22 @@ test('editing another field of a server with no trust mode leaves it running wit
   expect(formToServerConfig(form).trustMode).toBeUndefined();
 });
 
-test('a repeated confirm while a removal is pending starts only one removal', async () => {
-  let removals = 0;
-  let release!: () => void;
-  const pending = new Promise<void>((resolve) => { release = resolve; });
+test('typing a search word in the MCP browser only searches; removal needs Delete, then y after the question', () => {
+  const calls: string[] = [];
   const workspace = {
-    active: true, mode: 'delete-confirm', query: '', selectedServer: null,
-    confirmDelete: async () => { removals += 1; await pending; workspace.mode = 'browse'; },
-    activateSelected: async () => { throw new Error('Enter in delete-confirm must route to the guarded confirm'); },
-    cancelForm: () => {},
-  } as unknown as McpWorkspaceControls;
+    active: true, mode: 'browse', query: '', selectedServer: { name: 'github' },
+    setQuery(query: string) { calls.push(`query:${query}`); workspace.query = query; },
+    requestDelete(name: string) { calls.push(`requestDelete:${name}`); workspace.mode = 'delete-confirm'; },
+    confirmDelete: async () => { calls.push('confirmDelete'); workspace.mode = 'browse'; },
+    openAddForm() { calls.push('add'); }, openEditForm() { calls.push('edit'); }, requestReload() { calls.push('reload'); },
+    refreshTools: async () => { calls.push('tools'); },
+  } as unknown as McpWorkspaceControls & { query: string; mode: string };
   const press = (token: unknown) => handleMcpWorkspaceToken(workspace, token as never, () => {}, () => {});
+  for (const letter of 'deploy') press({ type: 'text', value: letter });
+  expect(calls.filter((call) => !call.startsWith('query:'))).toEqual([]);
+  expect(workspace.query).toBe('deploy');
+  press({ type: 'key', logicalName: 'delete' });
+  expect(workspace.mode).toBe('delete-confirm');
   press({ type: 'text', value: 'y' });
-  press({ type: 'text', value: 'y' });
-  press({ type: 'key', logicalName: 'enter' });
-  expect(removals).toBe(1);
-  release();
-  await pending;
-  await Promise.resolve();
-  workspace.mode = 'delete-confirm';
-  press({ type: 'text', value: 'y' });
-  expect(removals).toBe(2);
+  expect(calls.filter((call) => !call.startsWith('query:'))).toEqual(['requestDelete:github', 'confirmDelete']);
 });

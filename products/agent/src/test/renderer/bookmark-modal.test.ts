@@ -47,8 +47,8 @@ describe('renderBookmarkModal', () => {
     const text = layerTextBlock(renderBookmarkModal(modal, W, H));
     expect(text).toContain('↑↓  move');
     expect(text).toContain('⏎  jump');
-    expect(text).toContain('o  open file');
-    expect(text).toContain('d  remove');
+    expect(text).toContain('ctrl+o  open file');
+    expect(text).toContain('del  remove');
   });
 
   test('renders bookmark entries with their keys and the selected row as the gradient', () => {
@@ -98,19 +98,19 @@ describe('handleBookmarkModalToken (always-live search row)', () => {
     return { bookmarkModal: modal, requestRender: () => {}, handleEscape: () => { escapes.n++; modal.close(); } };
   }
 
-  test('d removes while the query is empty; once typing, d is a character', () => {
+  test('letters always type into the search row; Delete removes the selected bookmark', () => {
     seedBookmarks(3);
     const modal = new BookmarkModal(bookmarkManager);
     modal.open();
     const escapes = { n: 0 };
     handleBookmarkModalToken(state(modal, escapes), { type: 'text', value: 'd' } as never);
-    expect(modal.entries.length).toBe(2);
-    handleBookmarkModalToken(state(modal, escapes), { type: 'text', value: 'k' } as never);
-    handleBookmarkModalToken(state(modal, escapes), { type: 'text', value: 'd' } as never);
-    expect(modal.query).toBe('kd');
-    expect(modal.entries.length).toBe(2);
+    handleBookmarkModalToken(state(modal, escapes), { type: 'text', value: 'o' } as never);
+    expect(modal.query).toBe('do');
+    expect(modal.entries.length).toBe(3);
     handleBookmarkModalToken(state(modal, escapes), { type: 'key', logicalName: 'backspace' } as never);
-    expect(modal.query).toBe('k');
+    handleBookmarkModalToken(state(modal, escapes), { type: 'key', logicalName: 'backspace' } as never);
+    handleBookmarkModalToken(state(modal, escapes), { type: 'key', logicalName: 'delete' } as never);
+    expect(modal.entries.length).toBe(2);
   });
 
   test('Esc closes in one press, whatever the query holds', () => {

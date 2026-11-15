@@ -120,11 +120,11 @@ test('a stale dispatch snapshot cannot race recovery or replacement even with th
 });
 
 
-test('a journal that retained initial absence cannot adopt another first publisher by retrying an exclusive open', () => {
+test('a second journal opened before the first one saved returns the saved command instead of replacing it', () => {
   const f = setup(), first = new LegacyImportJournal(f.path), absent = new LegacyImportJournal(f.path);
   try {
     const original = first.reserve(f.binding, () => f.first), bytes = readFileSync(f.path);
-    expect(() => absent.reserve(f.binding, () => f.second)).toThrow('EEXIST');
+    expect(absent.reserve(f.binding, () => f.second)).toEqual(original);
     expect(first.read(f.binding)).toEqual(original);
     expect(readFileSync(f.path)).toEqual(bytes);
     const reopened = new LegacyImportJournal(f.path);

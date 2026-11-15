@@ -37,8 +37,8 @@ test('submit durably captures complete command before dispatch and repeated subm
   try {
     const saved = await session.submit(); expect(saved.state).toBe('accepted'); expect(saved.command.manifest).toEqual(f.prepared.manifest);
     expect(await session.submit()).toEqual(saved); expect(await session.status()).toEqual(saved);
-    await expect(session.recover(saved.command.requestId)).rejects.toThrow('must be unknown');
-    await expect(session.restart(saved.command.requestId)).rejects.toThrow('Only the selected');
+    await expect(session.recover(saved.command.requestId)).rejects.toThrow('not unknown');
+    await expect(session.restart(saved.command.requestId)).rejects.toThrow('Only a rejected or cancelled');
     expect(f.commands).toHaveLength(1); expect(f.commands[0]!.requestId.length).toBeGreaterThan(0);
   } finally { session.dispose(); }
 });
@@ -51,7 +51,7 @@ test('lost acknowledgement survives reopen and explicit recovery retains source,
   session = await f.open();
   try {
     expect(await session.submit()).toEqual(unknown!); await expect(session.prepare()).rejects.toThrow('saved import');
-    await expect(session.recover('wrong-request')).rejects.toThrow('does not match');
+    await expect(session.recover('wrong-request')).rejects.toThrow('is not the saved import');
     expect((await session.cancel(unknown!.command.requestId)).state).toBe('unknown');
     f.respond(async command => f.accepted(command, true));
     const recovered = await session.recover(unknown!.command.requestId);
@@ -80,18 +80,15 @@ test('only selected known terminal state permits new capture; stale request cann
     const held = await session.submit(); expect((await session.cancel(held.command.requestId)).state).toBe('cancelled');
     f.respond(async command => f.accepted(command)); const fresh = await session.restart(held.command.requestId);
     expect(fresh.state).toBe('accepted'); expect(fresh.command.requestId).not.toBe(held.command.requestId);
-    await expect(session.cancel(held.command.requestId)).rejects.toThrow('does not match');
+    await expect(session.cancel(held.command.requestId)).rejects.toThrow('is not the saved import');
     expect((await session.status())!.state).toBe('accepted');
   } finally { session.dispose(); }
 });
 
-test('read-only auth cannot reserve or dispatch; post-dispatch revocation cannot release unknown', async () => {
-  const f = harness(); const session = await f.open();
+test('a credential without write:work-ledger-import cannot reserve or dispatch, and creates no journal', async () => {
+  const f = harness(); f.auth.scopes.pop(); const session = await f.open();
   try {
-    f.auth.scopes.pop(); await expect(session.submit()).rejects.toThrow('write:work-ledger-import'); expect(await session.status()).toBeNull(); expect(f.commands).toHaveLength(0);
-    f.auth.scopes.push('write:work-ledger-import');
-    f.respond(async command => { f.auth.scopes.pop(); return f.accepted(command); });
-    await expect(session.submit()).rejects.toThrow('write:work-ledger-import'); expect((await session.status())!.state).toBe('unknown');
+    await expect(session.submit()).rejects.toThrow('write:work-ledger-import'); expect(await session.status()).toBeNull(); expect(f.commands).toHaveLength(0);
   } finally { session.dispose(); }
 });
 
@@ -121,7 +118,7 @@ test('first known stale-source rejection permits only explicit selected restart 
   try {
     const stale = await session.submit(); expect(stale).toMatchObject({ state: 'rejected', attempts: 1, result: { code: 'stale_source' } });
     expect(await session.submit()).toEqual(stale); expect(f.commands).toHaveLength(1);
-    await expect(session.restart('wrong-request')).rejects.toThrow('Only the selected');
+    await expect(session.restart('wrong-request')).rejects.toThrow('is not the saved import');
     f.respond(async command => f.accepted(command));
     const fresh = await session.restart(stale.command.requestId);
     expect(fresh.state).toBe('accepted'); expect(fresh.command.requestId).not.toBe(stale.command.requestId);
@@ -135,7 +132,7 @@ test('known stale-source recovery cannot release an earlier ambiguous dispatch o
     await expect(session.submit()).rejects.toThrow('lost prior response'); const command = (await session.status())!.command;
     f.respond(async () => ({ kind: 'rejected', code: 'stale_source', reason: 'Complete persisted import sources changed.', revision: 0 }));
     const recovered = await session.recover(command.requestId); expect(recovered).toMatchObject({ state: 'unknown', attempts: 2 });
-    await expect(session.restart(command.requestId)).rejects.toThrow('Only the selected');
+    await expect(session.restart(command.requestId)).rejects.toThrow('Only a rejected or cancelled');
     expect(f.commands[1]).toEqual(command); expect(f.commands).toHaveLength(2);
   } finally { session.dispose(); }
 });

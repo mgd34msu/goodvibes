@@ -54,7 +54,7 @@ import type { HookDispatcher } from '../hooks/dispatcher.js';
 import type { HookEvent } from '../hooks/types.js';
 import { McpPermissionManager, captureMcpDecisionHistoryReadSource } from '../runtime/mcp/permissions.js';
 import { McpSchemaFreshnessTracker } from '../runtime/mcp/schema-freshness.js';
-import type { McpDecisionRecord, QuarantineReason, SchemaFreshness } from '../runtime/mcp/types.js';
+import type { McpDecisionRecord, McpServerRole, McpTrustMode, QuarantineReason, SchemaFreshness } from '../runtime/mcp/types.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import {
   emitMcpConfigured,
@@ -147,6 +147,18 @@ export class McpRegistry {
   /** Why a configured server's last connect attempt failed; a failed client is not kept, so this is the only record. */
   private readonly connectFailures = new Map<string, string>();
   private permissions = new McpPermissionManager();
+  /** Trust and role the owner set this session. They outlive a reconnect or reload and end with the process or the server's removal. */
+  private readonly sessionPolicy = new Map<string, { trustMode?: McpTrustMode; role?: McpServerRole }>();
+  /** The policy a server runs under: what the owner set this session, else its config, else the defaults. */
+  private policyProfile(name: string, config: McpServerConfig | undefined): { role: McpServerRole; mode: McpTrustMode; allowedPaths: string[]; allowedHosts: string[] } {
+    const session = this.sessionPolicy.get(name);
+    return {
+      role: session?.role ?? config?.role ?? 'general',
+      mode: session?.trustMode ?? config?.trustMode ?? MCP_DEFAULT_TRUST_MODE,
+      allowedPaths: config?.allowedPaths ?? [],
+      allowedHosts: config?.allowedHosts ?? [],
+    };
+  }
   private readonly policyLifetimes = new Map<string, AbortController>();
   private policyLifetime(serverName: string): AbortController {
     let lifetime = this.policyLifetimes.get(serverName);
@@ -645,6 +657,7 @@ export class McpRegistry {
   private forgetServer(name: string): void {
     if (this.serverConfigs.has(name) || this.clients.has(name) || this.pendingConnections.has(name)) return;
     this.permissions.removeServer(name);
+    this.sessionPolicy.delete(name);
     this.freshness.removeServer(name);
     this.connectFailures.delete(name);
     this.policyLifetimes.delete(name);
@@ -765,8 +778,8 @@ export class McpRegistry {
         transport: server.transport,
         protocolVersion: server.protocolVersion,
         protocolEra: server.protocolEra,
-        role: permissions?.profile.role ?? 'general',
-        trustMode: permissions?.profile.mode ?? this.serverConfigs.get(server.name)?.trustMode ?? MCP_DEFAULT_TRUST_MODE,
+        role: permissions?.profile.role ?? this.policyProfile(server.name, this.serverConfigs.get(server.name)).role,
+        trustMode: permissions?.profile.mode ?? this.policyProfile(server.name, this.serverConfigs.get(server.name)).mode,
         allowedPaths: permissions?.profile.allowedPaths ?? [],
         allowedHosts: permissions?.profile.allowedHosts ?? [],
         schemaFreshness: this.freshness.getFreshness(server.name),
@@ -801,25 +814,35 @@ export class McpRegistry {
     });
   }
 
-  /** A policy change names a server that has a policy; refused before anything in flight is cancelled. */
-  private assertPolicyOwner(serverName: string, change: string): void {
+  /**
+   * A policy change names a configured or connected server; an unknown name is
+   * refused before anything in flight is cancelled. A configured server that
+   * has not connected gets its policy record here, so it can be blocked or
+   * given a role before it ever runs.
+   */
+  private ensurePolicyOwner(serverName: string, change: string): void {
     if (this.permissions.getServerPermissions(serverName)) return;
-    const state = this.serverConfigs.has(serverName) ? `is configured but not connected (${this.serverPhase(serverName)})` : 'is not configured';
-    throw new Error(`MCP server '${serverName}' ${state}, so its ${change} cannot be changed; nothing was changed. `
-      + (this.serverConfigs.has(serverName) ? 'Connect it (reload the MCP configuration), then change it again.' : `Known servers: ${this.serverNames.join(', ') || '(none)'}.`));
+    const config = this.serverConfigs.get(serverName);
+    if (!config) {
+      throw new Error(`No MCP server named '${serverName}', so its ${change} was not changed. `
+        + `Known servers: ${this.serverNames.join(', ') || '(none)'}. Run /mcp servers to list them.`);
+    }
+    this.permissions.registerServer(serverName, 'standard', this.policyProfile(serverName, config));
   }
 
-  setServerTrustMode(serverName: string, mode: import('../runtime/mcp/types.js').McpTrustMode): void {
-    this.assertPolicyOwner(serverName, 'trust mode');
+  setServerTrustMode(serverName: string, mode: McpTrustMode): void {
+    this.ensurePolicyOwner(serverName, 'trust mode');
     this.invalidatePolicyLifetime(serverName, 'its trust mode was changed');
     this.permissions.setTrustMode(serverName, mode);
+    this.sessionPolicy.set(serverName, { ...this.sessionPolicy.get(serverName), trustMode: mode });
     this._emitPolicyUpdate(serverName);
   }
 
-  setServerRole(serverName: string, role: import('../runtime/mcp/types.js').McpServerRole): void {
-    this.assertPolicyOwner(serverName, 'role');
+  setServerRole(serverName: string, role: McpServerRole): void {
+    this.ensurePolicyOwner(serverName, 'role');
     this.invalidatePolicyLifetime(serverName, 'its role was changed');
     this.permissions.setServerRole(serverName, role);
+    this.sessionPolicy.set(serverName, { ...this.sessionPolicy.get(serverName), role });
     this._emitPolicyUpdate(serverName);
   }
 
@@ -978,12 +1001,7 @@ export class McpRegistry {
       assertHostCurrent();
       await executePolicyCheck(() => client.connect(), signal);
       assertHostCurrent(); assertProcessCurrent();
-      this.permissions.registerServer(name, 'standard', {
-        role: serverConfig.role ?? 'general',
-        mode: serverConfig.trustMode ?? MCP_DEFAULT_TRUST_MODE,
-        allowedPaths: serverConfig.allowedPaths ?? [],
-        allowedHosts: serverConfig.allowedHosts ?? [],
-      });
+      this.permissions.registerServer(name, 'standard', this.policyProfile(name, serverConfig));
       this.clients.set(name, client); this.#revision++;
       this.connectFailures.delete(name);
       established = true;
@@ -997,6 +1015,7 @@ export class McpRegistry {
       this.freshness.markFresh(name);
       logger.info('McpRegistry: server connected', { name });
       if (this.runtimeBus) {
+        const policy = this.policyProfile(name, serverConfig);
         emitMcpConfigured(this.runtimeBus, {
           sessionId: 'mcp-registry',
           traceId: `mcp-registry:${name}:configured`,
@@ -1005,10 +1024,10 @@ export class McpRegistry {
           serverId: name,
           transport: client.protocolInfo?.transport ?? (serverConfig.url ? 'http' : 'stdio'),
           ...(serverConfig.url ? { url: serverConfig.url } : {}),
-          role: serverConfig.role ?? 'general',
-          trustMode: serverConfig.trustMode ?? MCP_DEFAULT_TRUST_MODE,
-          allowedPaths: serverConfig.allowedPaths ?? [],
-          allowedHosts: serverConfig.allowedHosts ?? [],
+          role: policy.role,
+          trustMode: policy.mode,
+          allowedPaths: policy.allowedPaths,
+          allowedHosts: policy.allowedHosts,
         });
       }
       // Lifecycle:mcp:connected hook (fire-and-forget)

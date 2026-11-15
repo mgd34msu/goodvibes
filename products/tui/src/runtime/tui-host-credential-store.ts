@@ -8,6 +8,7 @@ import {
   type HostPairing,
   type BeginHostPairingResult,
   type CompleteHostPairingResult,
+  type RemoveHostPairingResult,
   type HostPairingIO,
 } from '@goodvibes-jev/engine/terminal-shell/host-pairing-store';
 export const TUI_HOST_PAIRING_MAX_RECORDS = HOST_PAIRING_MAX_RECORDS;
@@ -19,6 +20,7 @@ export type TuiHostPairingUnavailable = HostPairingUnavailable<typeof TUI_HOST_P
 export type TuiHostPairing = HostPairing<typeof TUI_HOST_PAIRING_UNAVAILABLE_REASON>;
 export type BeginTuiHostPairingResult = BeginHostPairingResult<typeof TUI_HOST_PAIRING_UNAVAILABLE_REASON, true>;
 export type CompleteTuiHostPairingResult = CompleteHostPairingResult<typeof TUI_HOST_PAIRING_UNAVAILABLE_REASON>;
+export type RemoveTuiHostPairingResult = RemoveHostPairingResult<typeof TUI_HOST_PAIRING_UNAVAILABLE_REASON>;
 export type TuiHostPairingIO = HostPairingIO;
 export const {
   canonicalizePairingHost,
@@ -27,6 +29,7 @@ export const {
   beginHostPairing: beginTuiHostPairing,
   completeHostPairing: completeTuiHostPairing,
   clearHostPairingAttempt: clearTuiHostPairingAttempt,
+  removeHostPairing: removeTuiHostPairing,
 } = createHostPairingStore({
   unavailableReason: TUI_HOST_PAIRING_UNAVAILABLE_REASON,
   surfaceRoot: 'tui',

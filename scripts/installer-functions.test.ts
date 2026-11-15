@@ -18,6 +18,16 @@ function lib(body: string, env: Record<string, string> = {}) {
     env: { ...process.env, HOME: home, SHELL: '/bin/bash', GOODVIBES_INSTALL_SH_LIB: '1', GOODVIBES_INSTALL_DIR: install,
       FIXTURE_INSTALLER: installer, ...env } });
 }
+test('the unit marker and description the installer writes are the ones the daemon recognizes', async () => {
+  // Loaded by path at run time so this check does not pull the daemon's sources into the installer's typecheck.
+  const daemon = resolve(import.meta.dir, '../products/daemon/src/runtime');
+  const { INSTALLER_UNIT_MARKER } = await import(join(daemon, 'legacy-daemon-reconcile.ts')) as { INSTALLER_UNIT_MARKER: string };
+  const { MANAGED_SERVICE_DESCRIPTION } = await import(join(daemon, 'legacy-daemon-migration.ts')) as { MANAGED_SERVICE_DESCRIPTION: string };
+  const source = readFileSync(installer, 'utf8');
+  expect(source).toContain(`\nINSTALLER_MARKER="${INSTALLER_UNIT_MARKER}"\n`);
+  expect(source).toContain(`\nPRODUCT_UNIT_FINGERPRINT='${MANAGED_SERVICE_DESCRIPTION}'\n`);
+});
+
 const claimSetup = 'VERSION=v3.2.0; os_tag=linux; arch_tag=x64; VEC_OS=linux; VEC_SUFFIX=so; PLATFORM_SUFFIX=linux-x64';
 
 test('a second install directory gets its own PATH line and uninstalling one leaves the other', () => {

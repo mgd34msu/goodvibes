@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:http';
-import { acceptPublishedSuite, consumeAcceptanceMetadataFetch, acceptanceFailureRecord, markAcceptanceCheckpoint, readPublicAcceptanceDelivery, finishAcceptance, waitForAcceptanceReadiness, waitForNativeServiceRetirement, assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, type AcceptanceSteps, type NativeServiceRetirementObservation, type AcceptanceFetch } from './accept-published-suite.mjs';
+import { acceptPublishedSuite, consumeAcceptanceMetadataFetch, acceptanceFailureRecord, markAcceptanceCheckpoint, readPublicAcceptanceDelivery, finishAcceptance, waitForAcceptanceReadiness, waitForNativeServiceRetirement, assertDisposableAccount, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, type AcceptanceSteps, type NativeServiceRetirementObservation, type AcceptanceFetch } from './accept-published-suite.mjs';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -213,14 +213,15 @@ test('HTTP status is scoped to its actual request and only valid integer statuse
   const fixture = publicDeliveryFixture(); await fixture.deliver();
   expect(fixture.evidence.check).toBe('installer.public.bytes'); expect(fixture.evidence.httpStatus).toBeUndefined();
 });
-test('only original non-root GitHub-hosted native accounts admit real service acceptance', () => {
+test('real service acceptance admits only a non-root account that is hosted or declared disposable', () => {
   const input = { env: { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted', RUNNER_TEMP: '/tmp/runner' },
     platform: 'linux', arch: 'x64', target: 'linux-x64', home: '/home/runner', accountHome: '/home/runner',
     uid: 1001, tag: 'v3.1.2', source: 'a'.repeat(40) };
-  expect(() => assertHostedContext(input)).not.toThrow();
+  expect(() => assertDisposableAccount(input)).not.toThrow();
+  expect(() => assertDisposableAccount({ ...input, env: {}, disposableAccount: true })).not.toThrow();
   for (const change of [{ home: '/tmp/fake-home' }, { uid: 0 }, { target: 'darwin-arm64' },
     { env: { ...input.env, RUNNER_ENVIRONMENT: 'self-hosted' } }, { tag: '../other' }, { source: 'main' }])
-    expect(() => assertHostedContext({ ...input, ...change })).toThrow();
+    expect(() => assertDisposableAccount({ ...input, ...change })).toThrow();
 });
 test('all native jobs use actual install/defaults/opt-out/reinstall/uninstall ordering', async () => {
   const events: string[] = []; await runAcceptanceSteps(steps(events));
@@ -525,15 +526,15 @@ test('failed owned installers report actual source refusals while stdout and exp
     const installer = join(root, `install-${stream}.sh`);
     const source = `#!/bin/sh
 set -eu
-fail() { printf 'install.sh: %s\\n' "$*" ${stream === 'stderr' ? '>&2' : ''}; exit 1; }
+fail() { _fail_id=$1; shift; printf 'install.sh: %s (%s)\\n' "$*" "$_fail_id" ${stream === 'stderr' ? '>&2' : ''}; exit 1; }
 printf '%s\\n' "$ACCEPTANCE_SECRET"
 printf 'unrelated credential: %s\\n' "$ACCEPTANCE_SECRET" >&2
-fail "Missing or ambiguous checksum: $ACCEPTANCE_SECRET. Release $ACCEPTANCE_SECRET is incomplete; no source build will be attempted."
+fail INSTALL_E009 "Missing or ambiguous checksum: $ACCEPTANCE_SECRET. Release $ACCEPTANCE_SECRET is incomplete; no source build will be attempted."
 `;
     writeFileSync(installer, source, { mode: 0o600 });
     const result = await runOwnedCommand('sh', [installer], { env: { ...process.env, ACCEPTANCE_SECRET: secret }, installerSource: source });
     expect(result.code).toBe(1); expect(result.stdout).toContain(secret);
-    expect(result.diagnostics).toContain('install.sh: Missing or ambiguous checksum: [redacted]. Release [redacted] is incomplete; no source build will be attempted.');
+    expect(result.diagnostics).toContain('install.sh refusal INSTALL_E009');
     expect(JSON.stringify({ stage: 'install', exitCode: result.code, diagnostics: result.diagnostics })).not.toContain(secret);
     expect(result).not.toHaveProperty('stderr');
   }

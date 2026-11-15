@@ -265,15 +265,27 @@ test('compatible reader evidence permits reinstall and survives data-preserving 
 test('the installer cannot replace a native updater claim or a program protected by it', () => {
   mkdirSync(join(home, 'bin')); writeFileSync(join(home, 'bin/goodvibes'), 'original program');
   const claim = join(home, 'bin/goodvibes-daemon.update-transaction'); writeFileSync(claim, 'original updater evidence');
-  const result = run(); expect(result.status).not.toBe(0); expect(result.stderr).toContain('Another update');
+  const result = run(); expect(result.status).not.toBe(0); expect(result.stderr).toContain(claim);
   expect(readFileSync(claim, 'utf8')).toBe('original updater evidence'); expect(readFileSync(join(home, 'bin/goodvibes'), 'utf8')).toBe('original program');
   expect(readdirSync(join(home, 'bin')).filter(name => name.startsWith('.goodvibes-install-claim.'))).toEqual([]);
+});
+
+test('a claim whose process is gone is released and the install completes; a live owner is refused by pid', () => {
+  const claim = join(home, 'bin/goodvibes-daemon.update-transaction');
+  const dead = spawnSync('true').pid!;
+  mkdirSync(join(home, 'bin')); writeFileSync(claim, JSON.stringify({ pid: dead, startedAt: Date.now(), owner: 'install.sh' }) + '\n');
+  const recovered = run(); expect(recovered.status, recovered.stderr).toBe(0);
+  expect(existsSync(claim)).toBe(false);
+  writeFileSync(claim, JSON.stringify({ pid: process.pid, startedAt: Date.now(), owner: 'updater' }) + '\n');
+  const refused = run(); expect(refused.status).not.toBe(0);
+  expect(refused.stderr).toContain(`process ${process.pid}`); expect(refused.stderr).toContain(claim);
+  expect(existsSync(claim)).toBe(true);
 });
 
 test('orphaned companion transaction evidence is preserved before any executable replacement', () => {
   mkdirSync(join(home, 'bin')); writeFileSync(join(home, 'bin/goodvibes'), 'original program');
   const slot = join(home, 'bin/goodvibes-daemon.bun.update-download'); writeFileSync(slot, 'retained updater staging');
-  const result = run(); expect(result.status).not.toBe(0); expect(result.stderr).toContain('transaction files require inspection');
+  const result = run(); expect(result.status).not.toBe(0); expect(result.stderr).toContain(slot);
   expect(readFileSync(slot, 'utf8')).toBe('retained updater staging'); expect(readFileSync(join(home, 'bin/goodvibes'), 'utf8')).toBe('original program');
   expect(readdirSync(join(home, 'bin')).filter(name => /update-transaction|install-claim/.test(name))).toEqual([]);
 });

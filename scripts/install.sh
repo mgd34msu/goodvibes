@@ -72,7 +72,9 @@ INSTALL_AGENT_CLAIM_ID=""
 # remove) apart from a hand-written one (never deleted, only reported). The
 # systemd unit carries it as a `# managed by goodvibes install.sh` comment; the
 # launchd plist carries it both as an XML comment and a GoodVibesManagedBy key —
-# a plain substring grep for this string matches either form.
+# a plain substring grep for this string matches either form. The daemon's
+# legacy-unit reconcile reads the same string (INSTALLER_UNIT_MARKER in the
+# engine's terminal shell); the installer tests require the two to be equal.
 INSTALLER_MARKER="managed by goodvibes install.sh"
 
 # Service unit / LaunchAgent identities. The systemd unit name is the SAME one
@@ -102,7 +104,10 @@ LEGACY_SYSTEMD_DAEMON_UNIT="goodvibes-daemon.service"
 VERIFY_SETTLE_SECS="${GOODVIBES_INSTALL_VERIFY_SETTLE_SECS:-1}"
 
 say() { printf '%s\n' "$*"; }
-fail() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
+# Every refusal carries a stable id (INSTALL_E###) after its sentence. Logs that must not show the sentence's
+# expanded values (published acceptance records) print the id alone. A new refusal takes the next unused number;
+# an id is never reused for a different refusal.
+fail() { _fail_id=$1; shift; printf 'install.sh: %s (%s)\n' "$*" "$_fail_id" >&2; exit 1; }
 
 # Release-platform selectors can be overridden by callers of this shell
 # library. Descriptor observations must use the actual host's filesystem API.
@@ -295,16 +300,16 @@ resolve_platform() {
     Linux) os_tag="linux" ;;
     Darwin) os_tag="macos" ;;
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
-      fail "native Windows is not supported yet. Install WSL2 and run GoodVibes inside it (the Linux binaries apply unchanged):
+      fail INSTALL_E001 "native Windows is not supported yet. Install WSL2 and run GoodVibes inside it (the Linux binaries apply unchanged):
     1. In an elevated PowerShell:  wsl --install
     2. Open your WSL2 distribution, then re-run:  curl -fsSL https://goodvibes.sh/install.sh | sh
   WSL2 setup and native-Windows status: https://github.com/$REPO/blob/main/docs/windows.md" ;;
-    *) fail "unsupported operating system: $os (Windows: use WSL2; see https://github.com/$REPO/blob/main/docs/windows.md)" ;;
+    *) fail INSTALL_E002 "unsupported operating system: $os (Windows: use WSL2; see https://github.com/$REPO/blob/main/docs/windows.md)" ;;
   esac
   case "$arch" in
     x86_64|amd64) arch_tag="x64" ;;
     aarch64|arm64) arch_tag="arm64" ;;
-    *) fail "unsupported architecture: $arch" ;;
+    *) fail INSTALL_E003 "unsupported architecture: $arch" ;;
   esac
   PLATFORM_SUFFIX="${os_tag}-${arch_tag}"
   # The sqlite-vec addon uses the Node-style platform tag (linux|darwin) and the
@@ -327,7 +332,7 @@ fetch() {
     # download, so only the curl path enforces that; both bound the wait.
     wget -q --timeout=30 --tries=3 -O "$2" "$1"
   else
-    fail "need curl or wget"
+    fail INSTALL_E004 "need curl or wget"
   fi
 }
 
@@ -337,7 +342,7 @@ sha256_of() {
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1" | awk '{print $1}'
   else
-    fail "need sha256sum or shasum to verify downloads"
+    fail INSTALL_E005 "need sha256sum or shasum to verify downloads"
   fi
 }
 
@@ -350,14 +355,14 @@ resolve_tag() {
     # GitHub serves the tag in the redirect Location for /releases/latest.
     if command -v curl >/dev/null 2>&1; then
       redirect=$(curl -fsSI -o /dev/null -w '%{redirect_url}' "https://github.com/$tag_repo/releases/latest") ||
-        fail "could not resolve the latest release tag for $tag_repo"
+        fail INSTALL_E006 "could not resolve the latest release tag for $tag_repo"
       tag="${redirect##*/}"
     else
       redirect=$(wget -q --max-redirect=0 --server-response "https://github.com/$tag_repo/releases/latest" 2>&1 |
         awk '/Location:/ {print $2}' | tr -d '\r' | head -1)
       tag="${redirect##*/}"
     fi
-    [ -n "$tag" ] || fail "could not resolve the latest release tag for $tag_repo"
+    [ -n "$tag" ] || fail INSTALL_E007 "could not resolve the latest release tag for $tag_repo"
   else
     tag="$tag_requested"
   fi
@@ -368,10 +373,10 @@ resolve_tag() {
 resolve_version() {
   # Resolve once. A suite cannot mix versions from former product repositories.
   for requested in "$REQUESTED_DAEMON_VERSION" "$REQUESTED_AGENT_VERSION" "$REQUESTED_WEBUI_VERSION"; do
-    [ "${requested#v}" = "${REQUESTED_VERSION#v}" ] || fail "All products use GOODVIBES_VERSION; remove conflicting per-product version overrides."
+    [ "${requested#v}" = "${REQUESTED_VERSION#v}" ] || fail INSTALL_E008 "All products use GOODVIBES_VERSION; remove conflicting per-product version overrides."
   done
   VERSION=$(resolve_tag "$REPO" "$REQUESTED_VERSION")
-  printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$' || fail "Invalid release version: $VERSION"
+  printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$' || fail INSTALL_E009 "Invalid release version: $VERSION"
 }
 
 # Require exactly one valid checksum; duplicate/ambiguous entries are errors.
@@ -383,10 +388,10 @@ release_checksum() {
 }
 fetch_release_asset() {
   _release_asset=$1
-  _release_expected=$(release_checksum "$_release_asset") || fail "Missing or ambiguous checksum: $_release_asset. Release $VERSION is incomplete; no source build will be attempted."
+  _release_expected=$(release_checksum "$_release_asset") || fail INSTALL_E010 "Missing or ambiguous checksum: $_release_asset. Release $VERSION is incomplete; no source build will be attempted."
   fetch "$BASE_URL/$_release_asset" "$WORKDIR/$_release_asset"
   _release_actual=$(sha256_of "$WORKDIR/$_release_asset")
-  [ "$_release_actual" = "$_release_expected" ] || fail "Checksum mismatch: $_release_asset"
+  [ "$_release_actual" = "$_release_expected" ] || fail INSTALL_E011 "Checksum mismatch: $_release_asset"
 }
 prepare_release() {
   fetch "$BASE_URL/SHA256SUMS.txt" "$WORKDIR/SHA256SUMS.txt"
@@ -422,14 +427,14 @@ prepare_release() {
   if [ "$WITH_WEBUI" = 1 ]; then fetch_release_asset "goodvibes-webui-bundle-${VERSION#v}.tar.gz"; fi
   # Validate required archive contents before any installed program is changed.
   mkdir -p "$WORKDIR/browser-driver-staging"
-  tar -xzf "$WORKDIR/browser-driver.tar.gz" -C "$WORKDIR/browser-driver-staging" || fail 'Could not extract the verified browser driver.'
+  tar -xzf "$WORKDIR/browser-driver.tar.gz" -C "$WORKDIR/browser-driver-staging" || fail INSTALL_E012 'Could not extract the verified browser driver.'
   for _driver_entry in package.json index.js cli.js; do
-    [ -f "$WORKDIR/browser-driver-staging/playwright-core/$_driver_entry" ] || fail "The verified browser driver is missing playwright-core/$_driver_entry."
+    [ -f "$WORKDIR/browser-driver-staging/playwright-core/$_driver_entry" ] || fail INSTALL_E013 "The verified browser driver is missing playwright-core/$_driver_entry."
   done
   if [ "$WITH_WEBUI" = 1 ]; then
     mkdir -p "$WORKDIR/webui-staging"
-    tar -xzf "$WORKDIR/goodvibes-webui-bundle-${VERSION#v}.tar.gz" -C "$WORKDIR/webui-staging" || fail 'Could not extract the verified WebUI.'
-    [ -f "$WORKDIR/webui-staging/goodvibes-webui/index.html" ] || fail 'The verified WebUI is missing goodvibes-webui/index.html.'
+    tar -xzf "$WORKDIR/goodvibes-webui-bundle-${VERSION#v}.tar.gz" -C "$WORKDIR/webui-staging" || fail INSTALL_E014 'Could not extract the verified WebUI.'
+    [ -f "$WORKDIR/webui-staging/goodvibes-webui/index.html" ] || fail INSTALL_E015 'The verified WebUI is missing goodvibes-webui/index.html.'
   fi
   if [ "$os_tag" = linux ]; then prepare_daemon_receipt; fi
 }
@@ -444,7 +449,7 @@ prepare_daemon_receipt() {
     fetch_release_asset "$_reader_asset"
     _reader_source="$WORKDIR/$_reader_asset"
     chmod 755 "$WORKDIR/$_receipt_asset"
-    _compiled_readers=$("$WORKDIR/$_receipt_asset" check-install-reader --describe) || fail 'The verified daemon did not confirm its compiled readers. No installed program was replaced.'
+    _compiled_readers=$("$WORKDIR/$_receipt_asset" check-install-reader --describe) || fail INSTALL_E016 'The verified daemon did not confirm its compiled readers. No installed program was replaced.'
   fi
   # The ordinary released Bun prepares metadata in private staging. Older
   # updaters still consume the original descriptor; richer evidence must name
@@ -484,7 +489,7 @@ prepare_daemon_receipt() {
       }
       await Bun.write(output, JSON.stringify({schema:1,packageName:"@goodvibes-jev/daemon",version,artifact},null,2)+"\n");
     } catch { process.exitCode = 1; }
-  ' "$WORKDIR/$_receipt_asset.ci-artifact.json" "$_reader_source" "$_compiled_readers" "${VERSION#v}" "$WORKDIR/daemon-installation.json" || fail 'The verified daemon release metadata could not be confirmed. No installed program was replaced.'
+  ' "$WORKDIR/$_receipt_asset.ci-artifact.json" "$_reader_source" "$_compiled_readers" "${VERSION#v}" "$WORKDIR/daemon-installation.json" || fail INSTALL_E017 'The verified daemon release metadata could not be confirmed. No installed program was replaced.'
 }
 
 # A claim's payload is diagnostic, never an authority key. Retain its actual
@@ -567,6 +572,7 @@ release_install_claims() {
     [ ! -e "$_claim_reference" ] && [ ! -L "$_claim_reference" ] || return 1
   done
   install_claim_directories_current || return 1
+  rm -f "${INSTALL_CLAIM_OWNER:?}/swap-journal" || return 1
   rmdir "$INSTALL_CLAIM_OWNER" || return 1
   [ ! -e "$INSTALL_CLAIM_OWNER" ] && [ ! -L "$INSTALL_CLAIM_OWNER" ] || return 1
   INSTALL_CLAIM_OWNER=""
@@ -579,16 +585,16 @@ release_install_claims() {
 }
 
 assert_install_claims() {
-  [ "$INSTALL_CLAIM_COUNT" = 3 ] || fail 'The complete suite installation claims are not retained.'
-  install_claim_directories_current || fail 'The original installation or private claim directory changed; no further program replacement is allowed.'
+  [ "$INSTALL_CLAIM_COUNT" = 3 ] || fail INSTALL_E018 'The complete suite installation claims are not retained.'
+  install_claim_directories_current || fail INSTALL_E019 'The original installation or private claim directory changed; no further program replacement is allowed.'
   for _assert_product in goodvibes-daemon goodvibes goodvibes-agent; do
     _assert_claim="$INSTALL_CLAIM_DIR/$_assert_product.update-transaction"
-    _assert_expected=$(expected_install_claim_identity "$_assert_product") || fail 'Original installation claim identity is unavailable.'
+    _assert_expected=$(expected_install_claim_identity "$_assert_product") || fail INSTALL_E020 'Original installation claim identity is unavailable.'
     [ -n "$_assert_expected" ] && [ ! -L "$_assert_claim" ] && [ ! -L "$INSTALL_CLAIM_OWNER/$_assert_product" ] \
       && [ "$_assert_claim" -ef "$INSTALL_CLAIM_OWNER/$_assert_product" ] \
       && [ "$(install_claim_file_identity "$_assert_claim")" = "$_assert_expected" ] \
       && [ "$(install_claim_file_identity "$INSTALL_CLAIM_OWNER/$_assert_product")" = "$_assert_expected" ] \
-      || fail 'Original installation claim ownership changed; no further program replacement is allowed.'
+      || fail INSTALL_E021 'Original installation claim ownership changed; no further program replacement is allowed.'
   done
 }
 
@@ -598,21 +604,21 @@ assert_install_claims() {
 # temporary name and renamed into place only once it succeeded.
 install_journal_target() {
   _journal_target=$1
-  [ -n "$INSTALL_JOURNAL" ] || fail 'The installer swap journal is not available.'
+  [ -n "$INSTALL_JOURNAL" ] || fail INSTALL_E022 'The installer swap journal is not available.'
   _journal_backup="$_journal_target.goodvibes-previous"
   if [ -e "$_journal_target" ] || [ -L "$_journal_target" ]; then
-    [ ! -e "$_journal_backup" ] && [ ! -L "$_journal_backup" ] || fail "A retained previous-program backup requires inspection before installing: $_journal_backup"
+    [ ! -e "$_journal_backup" ] && [ ! -L "$_journal_backup" ] || fail INSTALL_E023 "A previous-program backup appeared at $_journal_backup during this install; nothing more was replaced. Check that $_journal_target runs, then remove the backup and re-run the installer."
     if ! ln "$_journal_target" "$_journal_backup" 2>/dev/null; then
       _journal_partial="$_journal_backup.partial"
       rm -f "$_journal_partial"
       if ! cp -Pp "$_journal_target" "$_journal_partial" || ! mv -f "$_journal_partial" "$_journal_backup"; then
         rm -f "$_journal_partial"
-        fail "Could not back up $_journal_target before replacing it."
+        fail INSTALL_E024 "Could not back up $_journal_target before replacing it."
       fi
     fi
-    printf 'R%s\n' "$_journal_target" >> "$INSTALL_JOURNAL" || { rm -f "$_journal_backup"; fail 'Could not record the swap journal.'; }
+    printf 'R%s\n' "$_journal_target" >> "$INSTALL_JOURNAL" || { rm -f "$_journal_backup"; fail INSTALL_E025 'Could not record the swap journal.'; }
   else
-    printf 'N%s\n' "$_journal_target" >> "$INSTALL_JOURNAL" || fail 'Could not record the swap journal.'
+    printf 'N%s\n' "$_journal_target" >> "$INSTALL_JOURNAL" || fail INSTALL_E026 'Could not record the swap journal.'
   fi
 }
 
@@ -629,7 +635,7 @@ assert_no_stale_backups() {
       _stale_quoted="$_stale_quoted $(shadow_quote "$_stale_file")"
     fi
   done
-  [ -z "$_stale_list" ] || fail "Leftover previous-program backups from an interrupted earlier install were found; nothing was changed. They are never restored automatically (they may be older than the installed programs):$_stale_list
+  [ -z "$_stale_list" ] || fail INSTALL_E027 "Leftover previous-program backups from an interrupted earlier install were found; nothing was changed. They are never restored automatically (they may be older than the installed programs):$_stale_list
 Check that the installed programs run, then remove them all and re-run the installer: rm -f --$_stale_quoted
 If an installed program is broken, put its backup back first: mv -f <file>.goodvibes-previous <file>"
 }
@@ -718,7 +724,7 @@ rollback_install_swap() {
 }
 
 report_unfinished_swap() {
-  say "install.sh: suite replacement did not finish and could not be undone automatically. Inspect retained *.update-transaction files in $INSTALL_CLAIM_DIR before recovery; do not remove them and retry blindly." >&2
+  say "install.sh: suite replacement did not finish and could not be undone automatically. Its claims ($INSTALL_CLAIM_DIR/*.update-transaction) and journal ($INSTALL_JOURNAL) were kept." >&2
   # Recovery commands are only printed while the original directory is still the one on record.
   if [ "${1:-}" = commands ] && [ -n "$INSTALL_JOURNAL" ] && [ -s "$INSTALL_JOURNAL" ]; then
     say 'install.sh: files this run replaced, with the command that puts each previous version back:' >&2
@@ -733,7 +739,7 @@ report_unfinished_swap() {
         N*) say "  new file, remove: rm -f $(shadow_quote "$_journal_path")" >&2 ;;
       esac
     done < "$INSTALL_JOURNAL"
-    say "install.sh: once those are done, remove the claims with: rm -f -- $(shadow_quote "$INSTALL_CLAIM_DIR")/*.update-transaction $(shadow_quote "$INSTALL_CLAIM_OWNER")/*; rmdir $(shadow_quote "$INSTALL_CLAIM_OWNER"); then re-run the installer." >&2
+    say "install.sh: once those are done, remove the claims with: rm -f -- $(shadow_quote "$INSTALL_CLAIM_DIR")/*.update-transaction $(shadow_quote "$INSTALL_CLAIM_OWNER")/*; rmdir $(shadow_quote "$INSTALL_CLAIM_OWNER"); then re-run the installer. Re-running the installer first retries this undo from the kept journal." >&2
   fi
 }
 
@@ -745,7 +751,7 @@ cleanup_release_install() {
   if [ -n "$INSTALL_CLAIM_OWNER" ]; then
     if [ "$INSTALL_SWAP_BEGUN" = 0 ] || [ "$INSTALL_SWAP_FINISHED" = 1 ]; then
       if ! release_install_claims; then
-        say 'install.sh: installation claims changed; retained ownership evidence requires inspection.' >&2
+        say "install.sh: this run's installation claims in $INSTALL_CLAIM_DIR changed while it ran, so they were left in place. Re-run the installer once no other goodvibes install or update is running; it releases claims whose process is gone." >&2
         _install_exit=1
       fi
     else
@@ -757,7 +763,7 @@ cleanup_release_install() {
           say 'install.sh: installation did not finish. The previous programs were restored and the installation claims were released; running services were not touched.' >&2
           say "install.sh: to try again, re-run the installer: curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=$VERSION sh" >&2
         else
-          say 'install.sh: the previous programs were restored, but the installation claims changed; retained ownership evidence requires inspection.' >&2
+          say "install.sh: the previous programs were restored, but this run's installation claims in $INSTALL_CLAIM_DIR changed, so they were left in place. Re-run the installer once no other goodvibes install or update is running; it releases claims whose process is gone." >&2
         fi
       else
         report_unfinished_swap commands
@@ -769,57 +775,129 @@ cleanup_release_install() {
   exit "$_install_exit"
 }
 
+# The pid an installation claim records, or nothing when the claim cannot be read. install.sh writes the pid
+# first; the native updater writes it after its operation and targets, so the field is found anywhere.
+install_claim_pid() { sed -n 's/.*"pid":\([0-9][0-9]*\)[,}].*/\1/p' "$1" 2>/dev/null | head -n 1; }
+
+# True while the process that wrote a claim is still running. A pid that is alive but started after the claim
+# was written belongs to another program that reused the number (after a reboot, say), not to the claim's owner.
+install_claim_owner_running() {
+  kill -0 "$2" 2>/dev/null || return 1
+  _owner_started_ms=$(sed -n 's/.*"startedAt":\([0-9][0-9]*\)[,}].*/\1/p' "$1" 2>/dev/null | head -n 1)
+  [ -n "$_owner_started_ms" ] || return 0
+  _owner_elapsed=$(ps -o etime= -p "$2" 2>/dev/null | awk '{ t = $1; d = 0
+    if (index(t, "-")) { d = substr(t, 1, index(t, "-") - 1); t = substr(t, index(t, "-") + 1) }
+    n = split(t, a, ":"); s = 0; for (i = 1; i <= n; i++) s = s * 60 + a[i]; print d * 86400 + s }')
+  [ -n "$_owner_elapsed" ] || return 0
+  # Started (now - elapsed) no later than the claim, with a few seconds for clock granularity.
+  [ $(( $(date +%s) - _owner_elapsed )) -le $(( _owner_started_ms / 1000 + 5 )) ]
+}
+
+# A claim whose process is gone was left by an install or update that was killed outright (SIGKILL, power
+# loss, out of memory). An install.sh run keeps its swap journal in its private claim directory: undo that
+# swap exactly as its EXIT trap would have, release its claims, and continue. Any other claim of a dead
+# process is released when no partial file remains beside the program. A live owner is refused with its pid.
+recover_abandoned_install_claims() {
+  for _abandoned_product in goodvibes-daemon goodvibes goodvibes-agent; do
+    _abandoned_claim="$INSTALL_CLAIM_DIR/$_abandoned_product.update-transaction"
+    [ -e "$_abandoned_claim" ] || [ -L "$_abandoned_claim" ] || continue
+    _abandoned_pid=''
+    if [ -f "$_abandoned_claim" ] && [ ! -L "$_abandoned_claim" ]; then _abandoned_pid=$(install_claim_pid "$_abandoned_claim"); fi
+    [ -n "$_abandoned_pid" ] || fail INSTALL_E117 "The installation claim $_abandoned_claim cannot be read, so its owner is unknown; nothing was changed. If no goodvibes install or update is running, remove it and re-run the installer: rm -rf -- $(shadow_quote "$_abandoned_claim")"
+    if install_claim_owner_running "$_abandoned_claim" "$_abandoned_pid"; then
+      fail INSTALL_E118 "Another goodvibes update or install (process $_abandoned_pid) is replacing programs in $INSTALL_CLAIM_DIR and holds $_abandoned_claim; nothing was changed. Wait for it to finish, then re-run the installer."
+    fi
+    _abandoned_owner=''
+    for _abandoned_dir in "$INSTALL_CLAIM_DIR"/.goodvibes-install-claim.*; do
+      [ "$_abandoned_dir" != "$INSTALL_CLAIM_OWNER" ] && [ -d "$_abandoned_dir" ] && [ ! -L "$_abandoned_dir" ] || continue
+      if [ "$_abandoned_dir/$_abandoned_product" -ef "$_abandoned_claim" ]; then _abandoned_owner=$_abandoned_dir; break; fi
+    done
+    if [ -n "$_abandoned_owner" ]; then
+      if [ -s "$_abandoned_owner/swap-journal" ]; then
+        _abandoned_own_journal=$INSTALL_JOURNAL
+        INSTALL_JOURNAL="$_abandoned_owner/swap-journal"
+        if ! rollback_install_swap; then
+          INSTALL_JOURNAL=$_abandoned_own_journal
+          fail INSTALL_E119 "An installation interrupted earlier (process $_abandoned_pid, no longer running) could not be undone automatically; nothing else was changed. Its journal $_abandoned_owner/swap-journal lists each replaced file (R: put back <file>.goodvibes-previous) and each new file (N: remove it). Once those are done, release its claims and re-run the installer: rm -rf -- $(shadow_quote "$_abandoned_owner") $(shadow_quote "$INSTALL_CLAIM_DIR")/*.update-transaction"
+        fi
+        INSTALL_JOURNAL=$_abandoned_own_journal
+      fi
+      for _abandoned_released in goodvibes-daemon goodvibes goodvibes-agent; do
+        if [ "$_abandoned_owner/$_abandoned_released" -ef "$INSTALL_CLAIM_DIR/$_abandoned_released.update-transaction" ]; then
+          rm -f "${INSTALL_CLAIM_DIR:?}/${_abandoned_released:?}.update-transaction"
+        fi
+      done
+      rm -rf "${_abandoned_owner:?}"
+      say "  recovered  an installation interrupted earlier (process $_abandoned_pid is gone): restored the programs it had replaced and released its claims"
+      continue
+    fi
+    _abandoned_partial=''
+    for _abandoned_companion in '' .bun .bun.json .bun.LICENSE.md .readers.json; do
+      for _abandoned_tail in .update-download .update-previous .rollback-exchange .incoming; do
+        _abandoned_path="$INSTALL_CLAIM_DIR/$_abandoned_product$_abandoned_companion$_abandoned_tail"
+        if [ -e "$_abandoned_path" ] || [ -L "$_abandoned_path" ]; then _abandoned_partial="$_abandoned_partial
+  $_abandoned_path"; fi
+      done
+    done
+    [ -z "$_abandoned_partial" ] || fail INSTALL_E120 "An update or install that is no longer running (process $_abandoned_pid) left $_abandoned_claim with partial files beside the program; nothing was changed:$_abandoned_partial
+If $INSTALL_CLAIM_DIR/$_abandoned_product is missing, put its saved copy back first: mv -f <file>.update-previous <file>. Then remove the partial files and the claim, and re-run the installer."
+    rm -f "${_abandoned_claim:?}"
+    say "  released   $_abandoned_claim (process $_abandoned_pid is gone and no partial file remains beside the program)"
+  done
+}
+
 claim_release_install() {
   _claim_purpose=${1:-install}
-  case "$_claim_purpose" in install|uninstall) : ;; *) fail 'Unknown suite claim purpose.' ;; esac
-  command -v stat >/dev/null 2>&1 || fail 'The native stat utility is required to retain original installation ownership.'
+  case "$_claim_purpose" in install|uninstall) : ;; *) fail INSTALL_E028 'Unknown suite claim purpose.' ;; esac
+  command -v stat >/dev/null 2>&1 || fail INSTALL_E029 'The native stat utility is required to retain original installation ownership.'
   if [ "$_claim_purpose" = uninstall ]; then
-    [ -d "$INSTALL_DIR" ] && [ ! -L "$INSTALL_DIR" ] && installer_open_file_matches 0 "$INSTALL_DIR" || fail 'The original uninstall directory changed before exclusion.'
+    [ -d "$INSTALL_DIR" ] && [ ! -L "$INSTALL_DIR" ] && installer_open_file_matches 0 "$INSTALL_DIR" || fail INSTALL_E030 'The original uninstall directory changed before exclusion.'
   else mkdir -p "$INSTALL_DIR"
   fi
-  INSTALL_CLAIM_DIR=$(CDPATH= cd -- "$INSTALL_DIR" && pwd -P) || fail 'Could not retain the installation directory.'
+  INSTALL_CLAIM_DIR=$(CDPATH= cd -- "$INSTALL_DIR" && pwd -P) || fail INSTALL_E031 'Could not retain the installation directory.'
   # Publish only to the selected directory, even when the original option was
   # a relative path or symlink. The open descriptor detects its replacement.
   exec 9< "$INSTALL_CLAIM_DIR"
-  installer_open_file_matches 9 "$INSTALL_CLAIM_DIR" || fail 'Could not retain the selected installation directory.'
+  installer_open_file_matches 9 "$INSTALL_CLAIM_DIR" || fail INSTALL_E032 'Could not retain the selected installation directory.'
   if [ "$_claim_purpose" = uninstall ]; then
-    installer_open_file_matches 0 "$INSTALL_CLAIM_DIR" || fail 'The original uninstall directory changed before claiming.'
+    installer_open_file_matches 0 "$INSTALL_CLAIM_DIR" || fail INSTALL_E033 'The original uninstall directory changed before claiming.'
   fi
   INSTALL_DIR=$INSTALL_CLAIM_DIR
   WEBUI_ROOT="$INSTALL_DIR/webui"
   INSTALL_CLAIM_OWNER=$(mktemp -d "$INSTALL_CLAIM_DIR/.goodvibes-install-claim.XXXXXX")
-  [ ! -L "$INSTALL_CLAIM_OWNER" ] || fail 'The private installation claim directory changed.'
+  [ ! -L "$INSTALL_CLAIM_OWNER" ] || fail INSTALL_E034 'The private installation claim directory changed.'
   exec 8< "$INSTALL_CLAIM_OWNER"
-  install_claim_directories_current || fail 'Could not retain the original private claim directory.'
+  install_claim_directories_current || fail INSTALL_E035 'Could not retain the original private claim directory.'
+  recover_abandoned_install_claims
   for _claim_product in goodvibes-daemon goodvibes goodvibes-agent; do
     # Occupied native transaction slots never grant execution, even while
     # their owner writes the receipt. Noclobber creates exclusively without
     # following a symlink or treating an existing directory as a destination.
     _claim_path="$INSTALL_CLAIM_DIR/$_claim_product.update-transaction"
-    [ ! -e "$_claim_path" ] && [ ! -L "$_claim_path" ] || fail 'Another update or interrupted installation owns this directory. Inspect its retained transaction files first.'
+    [ ! -e "$_claim_path" ] && [ ! -L "$_claim_path" ] || fail INSTALL_E036 "Another goodvibes update or install claimed $_claim_path while this run started; nothing was changed. Re-run the installer once it finishes."
     # The native updater shares this claim file and treats a claim as a live
     # transaction only when it parses as JSON with a numeric pid and a startedAt
     # in milliseconds. Written that way, a daemon that checks for updates during
     # this install defers instead of reading the claim as a crashed transaction.
-    (umask 077; set -C; printf '{"pid":%s,"startedAt":%s000,"owner":"install.sh","version":"%s","note":"Interrupted replacement: inspect installed programs and retained claims before recovery."}\n' "$$" "$(date +%s)" "$VERSION" > "$_claim_path") || fail 'Another update or interrupted installation owns this directory. Inspect its retained transaction files first.'
+    (umask 077; set -C; printf '{"pid":%s,"startedAt":%s000,"owner":"install.sh","version":"%s","note":"Interrupted replacement: inspect installed programs and retained claims before recovery."}\n' "$$" "$(date +%s)" "$VERSION" > "$_claim_path") || fail INSTALL_E037 "Another goodvibes update or install claimed $_claim_path while this run started; nothing was changed. Re-run the installer once it finishes."
     INSTALL_CLAIM_COUNT=$((INSTALL_CLAIM_COUNT + 1))
     case "$_claim_product" in
       goodvibes-daemon) exec 5< "$_claim_path"; _created_claim_fd=5 ;;
       goodvibes) exec 6< "$_claim_path"; _created_claim_fd=6 ;;
       goodvibes-agent) exec 7< "$_claim_path"; _created_claim_fd=7 ;;
     esac
-    [ ! -L "$_claim_path" ] && installer_open_file_matches "$_created_claim_fd" "$_claim_path" || fail 'The original installation claim changed during capture.'
-    _created_claim_id=$(install_claim_file_identity "$_claim_path") || fail 'Could not retain the original native installation claim.'
-    [ ! -L "$_claim_path" ] && installer_open_file_matches "$_created_claim_fd" "$_claim_path" || fail 'The native installation claim changed during observation.'
+    [ ! -L "$_claim_path" ] && installer_open_file_matches "$_created_claim_fd" "$_claim_path" || fail INSTALL_E038 'The original installation claim changed during capture.'
+    _created_claim_id=$(install_claim_file_identity "$_claim_path") || fail INSTALL_E039 'Could not retain the original native installation claim.'
+    [ ! -L "$_claim_path" ] && installer_open_file_matches "$_created_claim_fd" "$_claim_path" || fail INSTALL_E040 'The native installation claim changed during observation.'
     case "$_claim_product" in
       goodvibes-daemon) INSTALL_DAEMON_CLAIM_ID=$_created_claim_id ;;
       goodvibes) INSTALL_TUI_CLAIM_ID=$_created_claim_id ;;
       goodvibes-agent) INSTALL_AGENT_CLAIM_ID=$_created_claim_id ;;
     esac
-    ln "$_claim_path" "$INSTALL_CLAIM_OWNER/$_claim_product" || fail 'The installer could not retain its transaction ownership. Inspect the retained claim before retrying.'
+    ln "$_claim_path" "$INSTALL_CLAIM_OWNER/$_claim_product" || fail INSTALL_E041 'The installer could not retain its transaction ownership. Inspect the retained claim before retrying.'
     [ ! -L "$_claim_path" ] && [ ! -L "$INSTALL_CLAIM_OWNER/$_claim_product" ] \
       && installer_open_file_matches "$_created_claim_fd" "$_claim_path" && installer_open_file_matches "$_created_claim_fd" "$INSTALL_CLAIM_OWNER/$_claim_product" \
-      || fail 'The original installation claim changed before retention.'
+      || fail INSTALL_E042 'The original installation claim changed before retention.'
   done
   if [ "$_claim_purpose" = uninstall ]; then assert_install_claims; return 0; fi
   # An interrupted updater may have retained a companion slot even when its
@@ -829,21 +907,21 @@ claim_release_install() {
       for _idle_tail in .update-transaction .update-download .update-previous .rollback-exchange .incoming; do
         [ -n "$_idle_companion" ] || [ "$_idle_tail" != .update-transaction ] || continue
         _idle_path="$INSTALL_CLAIM_DIR/$_idle_product$_idle_companion$_idle_tail"
-        [ ! -e "$_idle_path" ] && [ ! -L "$_idle_path" ] || fail 'Retained program transaction files require inspection before installation.'
+        [ ! -e "$_idle_path" ] && [ ! -L "$_idle_path" ] || fail INSTALL_E043 "An interrupted update left the partial program file $_idle_path; nothing was changed. No update holds it now. If the installed programs run, remove it and re-run the installer."
       done
     done
   done
   for _idle_file in daemon-installation.json "lib/sqlite-vec-${VEC_OS}-${arch_tag}/vec0.${VEC_SUFFIX}"; do
     for _idle_tail in .update-transaction .update-download .update-previous .rollback-exchange .incoming; do
       _idle_path="$INSTALL_CLAIM_DIR/$_idle_file$_idle_tail"
-      [ ! -e "$_idle_path" ] && [ ! -L "$_idle_path" ] || fail 'Retained companion transaction files require inspection before installation.'
+      [ ! -e "$_idle_path" ] && [ ! -L "$_idle_path" ] || fail INSTALL_E044 "An interrupted update left the partial companion file $_idle_path; nothing was changed. No update holds it now. If the installed programs run, remove it and re-run the installer."
     done
   done
   if [ "$os_tag" = macos ]; then
     for _sqlite_tail in '' .json; do
       for _idle_tail in .update-transaction .update-download .update-previous .rollback-exchange .incoming; do
         _idle_path="$INSTALL_CLAIM_DIR/lib/sqlite-darwin-$arch_tag/libsqlite3.dylib$_sqlite_tail$_idle_tail"
-        [ ! -e "$_idle_path" ] && [ ! -L "$_idle_path" ] || fail 'Retained SQLite runtime transaction files require inspection before installation.'
+        [ ! -e "$_idle_path" ] && [ ! -L "$_idle_path" ] || fail INSTALL_E045 "An interrupted update left the partial SQLite runtime file $_idle_path; nothing was changed. No update holds it now. If the installed programs run, remove it and re-run the installer."
       done
     done
   fi
@@ -853,8 +931,8 @@ claim_release_install() {
 
 assert_install_library_directory() {
   for _library_parent in "$INSTALL_DIR/lib" "$INSTALL_DIR/lib/$1"; do
-    [ ! -L "$_library_parent" ] || fail 'An installed native library directory is an alias; inspect it before replacing programs.'
-    [ ! -e "$_library_parent" ] || [ -d "$_library_parent" ] || fail 'An installed native library parent is not a directory.'
+    [ ! -L "$_library_parent" ] || fail INSTALL_E046 "The native library directory $_library_parent is a symbolic link, and the installer does not replace programs through one; nothing was changed. Replace the link with a plain directory (or remove it), then re-run the installer."
+    [ ! -e "$_library_parent" ] || [ -d "$_library_parent" ] || fail INSTALL_E047 'An installed native library parent is not a directory.'
   done
 }
 
@@ -867,11 +945,11 @@ install_release_library_file() {
   mkdir -p "$INSTALL_DIR/lib/$_library_directory"
   assert_install_library_directory "$_library_directory"
   _library_target="$INSTALL_DIR/lib/$_library_directory/$_library_name"
-  [ ! -e "$_library_target.incoming" ] && [ ! -L "$_library_target.incoming" ] || fail 'A retained native library stage requires inspection.'
+  [ ! -e "$_library_target.incoming" ] && [ ! -L "$_library_target.incoming" ] || fail INSTALL_E048 "An interrupted run left the staged library $_library_target.incoming; nothing was changed. No install holds it now: remove it and re-run the installer: rm -rf -- $(shadow_quote "$_library_target.incoming")"
   # Journal the stage before creating it (the check above proved it is not someone else's), so an
   # interrupt while it exists is cleaned up by the rollback instead of blocking the retry.
-  printf 'I%s\n' "$_library_target" >> "$INSTALL_JOURNAL" || fail 'Could not record the swap journal.'
-  (set -C; cat "$WORKDIR/$_library_asset" > "$_library_target.incoming") || fail 'Could not exclusively stage the native library.'
+  printf 'I%s\n' "$_library_target" >> "$INSTALL_JOURNAL" || fail INSTALL_E049 'Could not record the swap journal.'
+  (set -C; cat "$WORKDIR/$_library_asset" > "$_library_target.incoming") || fail INSTALL_E050 'Could not exclusively stage the native library.'
   chmod 644 "$_library_target.incoming"
   assert_install_claims
   assert_install_library_directory "$_library_directory"
@@ -888,8 +966,8 @@ require_client_reader_evidence() {
   _evidence_product=$1
   _evidence_asset="$_evidence_product-$PLATFORM_SUFFIX"
   _evidence_file="$WORKDIR/$_evidence_asset.reader-ci-artifact.json"
-  [ -f "$_evidence_file" ] && [ ! -L "$_evidence_file" ] || fail "The selected $_evidence_product release has no reader evidence. The installed programs were kept."
-  case "$_evidence_product" in goodvibes) _evidence_package='@goodvibes-jev/tui' ;; goodvibes-agent) _evidence_package='@goodvibes-jev/agent' ;; goodvibes-daemon) _evidence_package='@goodvibes-jev/daemon' ;; *) fail 'Unsupported native reader evidence.' ;; esac
+  [ -f "$_evidence_file" ] && [ ! -L "$_evidence_file" ] || fail INSTALL_E051 "The selected $_evidence_product release has no reader evidence. The installed programs were kept."
+  case "$_evidence_product" in goodvibes) _evidence_package='@goodvibes-jev/tui' ;; goodvibes-agent) _evidence_package='@goodvibes-jev/agent' ;; goodvibes-daemon) _evidence_package='@goodvibes-jev/daemon' ;; *) fail INSTALL_E052 'Unsupported native reader evidence.' ;; esac
   _evidence_target="$VEC_OS-$arch_tag"
   awk -v package="$_evidence_package" -v version="${VERSION#v}" -v target="$_evidence_target" '
     /^  "schema": 1,$/ { schema++ }
@@ -898,7 +976,7 @@ require_client_reader_evidence() {
     /^  "target": / { if ($0 == "  \"target\": \"" target "\",") host++ }
     /^  "readers": \{$/ { readers++ }
     END { exit !(schema==1 && name==1 && release==1 && host==1 && readers==1) }
-  ' "$_evidence_file" || fail "The selected $_evidence_product reader evidence does not name this release and platform. The installed programs were kept."
+  ' "$_evidence_file" || fail INSTALL_E053 "The selected $_evidence_product reader evidence does not name this release and platform. The installed programs were kept."
   _evidence_members=''
   if [ "$os_tag" = linux ]; then _evidence_members='.bun .bun.LICENSE.md .bun.json'; fi
   for _evidence_suffix in '' $_evidence_members; do
@@ -907,9 +985,9 @@ require_client_reader_evidence() {
       /"path": / { name=$0; sub(/^.*"path": "/,"",name); sub(/",? *$/,"",name); selected=(name==wanted); next }
       selected && /"sha256": / { pin=$0; sub(/^.*"sha256": "/,"",pin); sub(/",? *$/,"",pin); print pin; count++; selected=0 }
       END { if (count != 1) exit 1 }
-    ' "$_evidence_file") || fail 'Reader evidence has a missing or ambiguous program pin.'
-    _evidence_expected=$(release_checksum "$_evidence_member") || fail 'Reader evidence names an unavailable release member.'
-    [ "$_evidence_pin" = "$_evidence_expected" ] || fail 'Reader evidence does not match the selected released program bytes. No installed program was replaced.'
+    ' "$_evidence_file") || fail INSTALL_E054 'Reader evidence has a missing or ambiguous program pin.'
+    _evidence_expected=$(release_checksum "$_evidence_member") || fail INSTALL_E055 'Reader evidence names an unavailable release member.'
+    [ "$_evidence_pin" = "$_evidence_expected" ] || fail INSTALL_E056 'Reader evidence does not match the selected released program bytes. No installed program was replaced.'
   done
 }
 
@@ -927,9 +1005,9 @@ check_release_reader() {
     _reader_binary="$WORKDIR/$_reader_product-$PLATFORM_SUFFIX"
     chmod 755 "$_reader_binary"
     if [ "$os_tag" = linux ]; then chmod 755 "$_reader_binary.bun"; fi
-    _reader_receipt=$("$_reader_binary" check-install-reader "$INSTALL_CLAIM_DIR/$_reader_product") || fail "The selected $_reader_product release cannot read the saved data. The installed programs were kept; choose a compatible newer release."
+    _reader_receipt=$("$_reader_binary" check-install-reader "$INSTALL_CLAIM_DIR/$_reader_product") || fail INSTALL_E057 "The selected $_reader_product release cannot read the saved data. The installed programs were kept; choose a compatible newer release."
     assert_install_claims
-    [ "$_reader_receipt" = "$_reader_expected" ] || fail "The selected $_reader_product did not confirm its matching compiled readers. The installed programs were kept."
+    [ "$_reader_receipt" = "$_reader_expected" ] || fail INSTALL_E058 "The selected $_reader_product did not confirm its matching compiled readers. The installed programs were kept."
   done
 }
 
@@ -950,7 +1028,7 @@ install_release_binary() {
   if [ "$os_tag" = linux ]; then
     for _binary_suffix in .bun .bun.json .bun.LICENSE.md; do
       _stage_target="$INSTALL_DIR/$_installed_binary$_binary_suffix"
-      printf 'I%s\n' "$_stage_target" >> "$INSTALL_JOURNAL" || fail 'Could not record the swap journal.'
+      printf 'I%s\n' "$_stage_target" >> "$INSTALL_JOURNAL" || fail INSTALL_E059 'Could not record the swap journal.'
       cp "$WORKDIR/$_binary_asset$_binary_suffix" "$_stage_target.incoming"
       case "$_binary_suffix" in .bun) chmod 755 "$_stage_target.incoming" ;; *) chmod 644 "$_stage_target.incoming" ;; esac
       _stage_files="$_stage_files $_binary_suffix"
@@ -960,7 +1038,7 @@ install_release_binary() {
   if [ "$_has_readers" = 1 ]; then
     if [ -f "$WORKDIR/$_binary_asset.reader-ci-artifact.json" ]; then
       require_client_reader_evidence "$_binary"
-      printf 'I%s\n' "$_installed_readers" >> "$INSTALL_JOURNAL" || fail 'Could not record the swap journal.'
+      printf 'I%s\n' "$_installed_readers" >> "$INSTALL_JOURNAL" || fail INSTALL_E060 'Could not record the swap journal.'
       cp "$WORKDIR/$_binary_asset.reader-ci-artifact.json" "$_installed_readers.incoming"
       chmod 644 "$_installed_readers.incoming"
       _readers_mode=publish
@@ -969,11 +1047,11 @@ install_release_binary() {
     fi
   fi
   if [ "$_binary" = goodvibes-daemon ] && [ "$os_tag" = linux ]; then
-    printf 'I%s\n' "$INSTALL_DIR/daemon-installation.json" >> "$INSTALL_JOURNAL" || fail 'Could not record the swap journal.'
+    printf 'I%s\n' "$INSTALL_DIR/daemon-installation.json" >> "$INSTALL_JOURNAL" || fail INSTALL_E061 'Could not record the swap journal.'
     cp "$WORKDIR/daemon-installation.json" "$INSTALL_DIR/daemon-installation.json.incoming"
     chmod 644 "$INSTALL_DIR/daemon-installation.json.incoming"
   fi
-  printf 'I%s\n' "$INSTALL_DIR/$_installed_binary" >> "$INSTALL_JOURNAL" || fail 'Could not record the swap journal.'
+  printf 'I%s\n' "$INSTALL_DIR/$_installed_binary" >> "$INSTALL_JOURNAL" || fail INSTALL_E062 'Could not record the swap journal.'
   cp "$WORKDIR/$_binary_asset" "$INSTALL_DIR/$_installed_binary.incoming"
   chmod 755 "$INSTALL_DIR/$_installed_binary.incoming"
   # Publish companions, then descriptors, then the program itself.
@@ -1340,11 +1418,13 @@ legacy_unit_provenance() {
   fi
 }
 
-# The exact Description the product's own unit writer emits (see
-# MANAGED_SERVICE_DESCRIPTION in src/runtime/legacy-daemon-migration.ts) — the
-# fingerprint that identifies a unit written by the in-app install-service /
-# onboarding, which carry no installer marker but are just as platform-owned
-# (the product overwrites its own units freely whenever install-service runs).
+# The exact Description the product's own unit writer emits
+# (MANAGED_SERVICE_DESCRIPTION in the engine's terminal shell, used by the
+# daemon's install-service and the terminal app's onboarding), and the one this
+# installer's unit carries too. It identifies a unit written by the product,
+# which carries no installer marker but is just as platform-owned (the product
+# overwrites its own units freely whenever install-service runs). The installer
+# tests require the two strings to be equal.
 PRODUCT_UNIT_FINGERPRINT='GoodVibes daemon (shared session broker + companion host)'
 
 # Provenance of a CANONICAL unit/plist file:
@@ -1843,7 +1923,7 @@ RestartMaxDelaySec=300"
 # know this unit is installer-managed and safe to remove. Delete that line and
 # the installer treats this unit as hand-written and never touches it.
 [Unit]
-Description=GoodVibes daemon (shared session broker + companion host)
+Description=$PRODUCT_UNIT_FINGERPRINT
 After=network-online.target
 StartLimitIntervalSec=0
 
@@ -2446,7 +2526,7 @@ install_daemon() {
   if daemon_version_out=$("$INSTALL_DIR/goodvibes-daemon" --version 2>/dev/null); then
     say "  running:   $daemon_version_out"
   else
-    fail "the installed goodvibes-daemon binary failed to run ('goodvibes-daemon --version')"
+    fail INSTALL_E063 "the installed goodvibes-daemon binary failed to run ('goodvibes-daemon --version')"
   fi
 }
 
@@ -2526,7 +2606,7 @@ install_agent() {
   if agent_version_out=$("$INSTALL_DIR/goodvibes-agent" --version 2>/dev/null); then
     say "  running:   $agent_version_out"
   else
-    fail "the installed goodvibes-agent binary failed to run ('goodvibes-agent --version')"
+    fail INSTALL_E064 "the installed goodvibes-agent binary failed to run ('goodvibes-agent --version')"
   fi
 
 }
@@ -2557,26 +2637,26 @@ publish_release_directory() (
   case "$_directory_parent" in
     "$INSTALL_DIR") : ;;
     "$INSTALL_DIR/webui")
-      [ ! -L "$_directory_parent" ] || fail 'The WebUI directory is an alias; its existing deployment was preserved.'
+      [ ! -L "$_directory_parent" ] || fail INSTALL_E065 'The WebUI directory is an alias; its existing deployment was preserved.'
       if [ ! -e "$_directory_parent" ]; then
         assert_install_claims
         # The scoped umask makes this new original level mode700.
-        mkdir "$_directory_parent" || fail 'Could not exclusively create the WebUI directory.'
+        mkdir "$_directory_parent" || fail INSTALL_E066 'Could not exclusively create the WebUI directory.'
       fi ;;
-    *) fail 'Released directories must belong to this original suite installation.' ;;
+    *) fail INSTALL_E067 'Released directories must belong to this original suite installation.' ;;
   esac
-  [ -d "$_directory_parent" ] && [ ! -L "$_directory_parent" ] || fail 'The original directory publication parent is unavailable.'
+  [ -d "$_directory_parent" ] && [ ! -L "$_directory_parent" ] || fail INSTALL_E068 'The original directory publication parent is unavailable.'
   exec 0< "$_directory_parent"
-  installer_open_file_matches 0 "$_directory_parent" || fail 'Could not retain the original directory publication parent.'
-  [ -d "$_directory_source" ] && [ ! -L "$_directory_source" ] || fail 'Verified directory staging is unavailable.'
+  installer_open_file_matches 0 "$_directory_parent" || fail INSTALL_E069 'Could not retain the original directory publication parent.'
+  [ -d "$_directory_source" ] && [ ! -L "$_directory_source" ] || fail INSTALL_E070 'Verified directory staging is unavailable.'
   exec 7< "$_directory_source"
-  installer_open_file_matches 7 "$_directory_source" || fail 'Verified directory staging changed.'
-  [ ! -e "$_directory_target.incoming" ] && [ ! -L "$_directory_target.incoming" ] || fail 'An existing incoming directory requires inspection; it was preserved.'
+  installer_open_file_matches 7 "$_directory_source" || fail INSTALL_E071 'Verified directory staging changed.'
+  [ ! -e "$_directory_target.incoming" ] && [ ! -L "$_directory_target.incoming" ] || fail INSTALL_E072 "An interrupted run left the staged directory $_directory_target.incoming; it was preserved and nothing was changed. If no goodvibes install or update is running, remove it and re-run the installer: rm -rf -- $(shadow_quote "$_directory_target.incoming")"
   _directory_had_old=0
   if [ -e "$_directory_target" ] || [ -L "$_directory_target" ]; then
-    [ -d "$_directory_target" ] && [ ! -L "$_directory_target" ] || fail 'The existing directory target is a custom file or alias; it was preserved.'
+    [ -d "$_directory_target" ] && [ ! -L "$_directory_target" ] || fail INSTALL_E073 'The existing directory target is a custom file or alias; it was preserved.'
     exec 6< "$_directory_target"
-    installer_open_file_matches 6 "$_directory_target" || fail 'Could not retain the original installed directory.'
+    installer_open_file_matches 6 "$_directory_target" || fail INSTALL_E074 'Could not retain the original installed directory.'
     _directory_had_old=1
   fi
   # A repair run, or any re-run of the same release, finds exactly the files it was
@@ -2586,7 +2666,7 @@ publish_release_directory() (
   if [ "$_directory_had_old" = 1 ] && diff -r "$_directory_source" "$_directory_target" >/dev/null 2>&1; then
     return 0
   fi
-  _directory_work=$(mktemp -d "$_directory_parent/.goodvibes-directory-install.XXXXXX") || fail 'Could not reserve private directory staging.'
+  _directory_work=$(mktemp -d "$_directory_parent/.goodvibes-directory-install.XXXXXX") || fail INSTALL_E075 'Could not reserve private directory staging.'
   exec 5< "$_directory_work"
   _directory_incoming="$_directory_work/incoming"
   _directory_outgoing="$_directory_work/outgoing"
@@ -2685,32 +2765,32 @@ publish_release_directory() (
   trap 'exit 130' INT
   trap 'exit 143' TERM
   trap 'exit 129' HUP
-  _directory_base_current || fail 'Original directory staging changed.'
-  [ ! -e "$_directory_claim" ] && [ ! -L "$_directory_claim" ] || fail 'Another directory update or interrupted publication owns this target.'
-  (set -C; printf 'GoodVibes directory installation %s\n' "$VERSION" > "$_directory_claim") || fail 'Could not claim the original directory target.'
-  ln "$_directory_claim" "$_directory_work/claim" || fail 'Could not retain the directory claim; inspect it before retrying.'
+  _directory_base_current || fail INSTALL_E076 'Original directory staging changed.'
+  [ ! -e "$_directory_claim" ] && [ ! -L "$_directory_claim" ] || fail INSTALL_E077 'Another directory update or interrupted publication owns this target.'
+  (set -C; printf 'GoodVibes directory installation %s\n' "$VERSION" > "$_directory_claim") || fail INSTALL_E078 'Could not claim the original directory target.'
+  ln "$_directory_claim" "$_directory_work/claim" || fail INSTALL_E079 'Could not retain the directory claim; inspect it before retrying.'
   exec 3< "$_directory_work/claim"
   _directory_claim_owned=1
-  _directory_claim_current || fail 'The directory claim changed before staging.'
-  mkdir "$_directory_incoming" || fail 'Could not exclusively create incoming directory staging.'
+  _directory_claim_current || fail INSTALL_E080 'The directory claim changed before staging.'
+  mkdir "$_directory_incoming" || fail INSTALL_E081 'Could not exclusively create incoming directory staging.'
   exec 4< "$_directory_incoming"
   _directory_incoming_owned=1
-  _directory_original_current || fail 'Original directory sources changed before copying.'
-  cp -Rp "$_directory_source/." "$_directory_incoming/" || fail 'Could not copy the verified directory into its private publication stage.'
-  _directory_original_current || fail 'Original directory sources changed while copying.'
-  chmod 755 "$_directory_incoming" || fail 'Could not set incoming directory permissions.'
-  _directory_original_current || fail 'Original directory sources changed before publication.'
+  _directory_original_current || fail INSTALL_E082 'Original directory sources changed before copying.'
+  cp -Rp "$_directory_source/." "$_directory_incoming/" || fail INSTALL_E083 'Could not copy the verified directory into its private publication stage.'
+  _directory_original_current || fail INSTALL_E084 'Original directory sources changed while copying.'
+  chmod 755 "$_directory_incoming" || fail INSTALL_E085 'Could not set incoming directory permissions.'
+  _directory_original_current || fail INSTALL_E086 'Original directory sources changed before publication.'
   if [ "$_directory_had_old" = 1 ]; then
-    [ ! -e "$_directory_outgoing" ] && [ ! -L "$_directory_outgoing" ] || fail 'An unknown outgoing directory slot appeared.'
-    mv "$_directory_target" "$_directory_outgoing" || fail 'Could not park the original directory.'
-    _directory_claim_current || fail 'Original directory ownership changed after parking.'
-    [ ! -L "$_directory_outgoing" ] && installer_open_file_matches 6 "$_directory_outgoing" || fail 'The parked original directory changed.'
+    [ ! -e "$_directory_outgoing" ] && [ ! -L "$_directory_outgoing" ] || fail INSTALL_E087 'An unknown outgoing directory slot appeared.'
+    mv "$_directory_target" "$_directory_outgoing" || fail INSTALL_E088 'Could not park the original directory.'
+    _directory_claim_current || fail INSTALL_E089 'Original directory ownership changed after parking.'
+    [ ! -L "$_directory_outgoing" ] && installer_open_file_matches 6 "$_directory_outgoing" || fail INSTALL_E090 'The parked original directory changed.'
   fi
-  [ ! -e "$_directory_target" ] && [ ! -L "$_directory_target" ] || fail 'A foreign live directory appeared; it was preserved.'
-  [ ! -L "$_directory_incoming" ] && installer_open_file_matches 4 "$_directory_incoming" || fail 'The original incoming directory changed.'
-  mv "$_directory_incoming" "$_directory_target" || fail 'Could not publish the retained incoming directory.'
-  _directory_claim_current || fail 'Original directory ownership changed after publication.'
-  [ ! -L "$_directory_target" ] && installer_open_file_matches 4 "$_directory_target" || fail 'The directory rename result is unknown.'
+  [ ! -e "$_directory_target" ] && [ ! -L "$_directory_target" ] || fail INSTALL_E091 'A foreign live directory appeared; it was preserved.'
+  [ ! -L "$_directory_incoming" ] && installer_open_file_matches 4 "$_directory_incoming" || fail INSTALL_E092 'The original incoming directory changed.'
+  mv "$_directory_incoming" "$_directory_target" || fail INSTALL_E093 'Could not publish the retained incoming directory.'
+  _directory_claim_current || fail INSTALL_E094 'Original directory ownership changed after publication.'
+  [ ! -L "$_directory_target" ] && installer_open_file_matches 4 "$_directory_target" || fail INSTALL_E095 'The directory rename result is unknown.'
   _directory_done=1
 )
 
@@ -2804,10 +2884,10 @@ configure_webui() {
 write_directory_release_marker() {
   _marker_root=$1
   _marker_path="$_marker_root/.goodvibes-release.json"
-  [ -d "$_marker_root" ] && [ ! -L "$_marker_root" ] || fail 'Released directory staging is unavailable.'
-  [ ! -e "$_marker_path" ] && [ ! -L "$_marker_path" ] || fail 'The release archive collides with local directory bookkeeping.'
-  (umask 022; set -C; printf '{"schema":1,"version":"%s"}\n' "${VERSION#v}" > "$_marker_path") || fail 'Could not record the selected directory release.'
-  chmod 644 "$_marker_path" || fail 'Could not set directory release metadata permissions.'
+  [ -d "$_marker_root" ] && [ ! -L "$_marker_root" ] || fail INSTALL_E096 'Released directory staging is unavailable.'
+  [ ! -e "$_marker_path" ] && [ ! -L "$_marker_path" ] || fail INSTALL_E097 'The release archive collides with local directory bookkeeping.'
+  (umask 022; set -C; printf '{"schema":1,"version":"%s"}\n' "${VERSION#v}" > "$_marker_path") || fail INSTALL_E098 'Could not record the selected directory release.'
+  chmod 644 "$_marker_path" || fail INSTALL_E099 'Could not set directory release metadata permissions.'
 }
 
 # Previous/custom WebUI directories are deliberately retained. The directory
@@ -3653,7 +3733,7 @@ assert_uninstall_recovery_slots_idle() {
   for _uninstall_recovery_slot in .update-transaction .update-download .update-previous .rollback-exchange .incoming; do
     _uninstall_recovery_path="$1$_uninstall_recovery_slot"
     [ ! -e "$_uninstall_recovery_path" ] && [ ! -L "$_uninstall_recovery_path" ] \
-      || fail "Retained update files include $_uninstall_recovery_path. Inspect the original transaction before uninstalling; nothing was removed."
+      || fail INSTALL_E100 "An interrupted update left $_uninstall_recovery_path; nothing was removed. If $1 is missing and this is its .update-previous copy, put it back (mv -f -- $(shadow_quote "$_uninstall_recovery_path") $(shadow_quote "$1")); otherwise remove it (rm -rf -- $(shadow_quote "$_uninstall_recovery_path")). Then re-run the uninstall."
   done
 }
 
@@ -3667,7 +3747,7 @@ assert_uninstall_update_idle() {
         [ -n "$_uninstall_companion" ] || [ "$_uninstall_slot" != .update-transaction ] || continue
         _uninstall_pending="$INSTALL_DIR/$_uninstall_product$_uninstall_companion$_uninstall_slot"
         [ ! -e "$_uninstall_pending" ] && [ ! -L "$_uninstall_pending" ] \
-          || fail "An update or retained transaction owns $_uninstall_pending. Stop the updater and inspect its recovery files before uninstalling; nothing was removed."
+          || fail INSTALL_E101 "An interrupted update left $_uninstall_pending; nothing was removed. If $INSTALL_DIR/$_uninstall_product$_uninstall_companion is missing and this is its .update-previous copy, put it back (mv -f -- $(shadow_quote "$_uninstall_pending") $(shadow_quote "$INSTALL_DIR/$_uninstall_product$_uninstall_companion")); otherwise remove it (rm -rf -- $(shadow_quote "$_uninstall_pending")). Then re-run the uninstall."
       done
     done
   done
@@ -3684,12 +3764,12 @@ assert_uninstall_update_idle() {
   fi
   for _uninstall_pending in "$INSTALL_DIR/playwright-core.directory-update.lock"; do
     [ ! -e "$_uninstall_pending" ] && [ ! -L "$_uninstall_pending" ] \
-      || fail "An update or retained transaction owns $_uninstall_pending. Inspect it before uninstalling; nothing was removed."
+      || fail INSTALL_E102 "A browser-driver update holds $_uninstall_pending; nothing was removed. If no goodvibes update is running, remove it (rm -rf -- $(shadow_quote "$_uninstall_pending")), then re-run the uninstall."
   done
   if [ -d "$WEBUI_ROOT" ] && [ ! -L "$WEBUI_ROOT" ]; then
     for _uninstall_pending in "$WEBUI_ROOT"/*.directory-update.lock; do
       [ ! -e "$_uninstall_pending" ] && [ ! -L "$_uninstall_pending" ] \
-        || fail "A WebUI update owns $_uninstall_pending. Inspect it before uninstalling; nothing was removed."
+        || fail INSTALL_E103 "A WebUI update holds $_uninstall_pending; nothing was removed. If no goodvibes update is running, remove it (rm -rf -- $(shadow_quote "$_uninstall_pending")), then re-run the uninstall."
     done
   fi
 }
@@ -3735,10 +3815,10 @@ run_uninstall() (
   trap 'exit 143' TERM
   trap 'exit 129' HUP
   if [ -e "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ]; then
-    [ -d "$INSTALL_DIR" ] || fail 'The selected uninstall directory is unavailable; it was preserved.'
-    _uninstall_original=$(CDPATH= cd -- "$INSTALL_DIR" && pwd -P) || fail 'Could not retain the original uninstall directory.'
+    [ -d "$INSTALL_DIR" ] || fail INSTALL_E104 'The selected uninstall directory is unavailable; it was preserved.'
+    _uninstall_original=$(CDPATH= cd -- "$INSTALL_DIR" && pwd -P) || fail INSTALL_E105 'Could not retain the original uninstall directory.'
     exec 0< "$_uninstall_original"
-    installer_open_file_matches 0 "$_uninstall_original" || fail 'The original uninstall directory changed.'
+    installer_open_file_matches 0 "$_uninstall_original" || fail INSTALL_E106 'The original uninstall directory changed.'
     INSTALL_DIR=$_uninstall_original
     WEBUI_ROOT="$INSTALL_DIR/webui"
     VERSION=${VERSION:-uninstall}
@@ -3793,14 +3873,14 @@ run_uninstall() (
     assert_install_claims
     [ ! -L "$INSTALL_DIR/lib" ] && installer_open_file_matches 3 "$INSTALL_DIR/lib" \
       && [ ! -L "$_uninstall_parent" ] && installer_open_file_matches 4 "$_uninstall_parent" \
-      || fail 'An original native library directory changed during uninstall; its remaining files were preserved.'
+      || fail INSTALL_E107 'An original native library directory changed during uninstall; its remaining files were preserved.'
   }
   if [ -L "$INSTALL_DIR/lib" ]; then
     record_kept "$INSTALL_DIR/lib (native library alias; not followed)"
   elif [ -d "$INSTALL_DIR/lib" ]; then
     exec 3< "$INSTALL_DIR/lib"
     assert_install_claims
-    [ ! -L "$INSTALL_DIR/lib" ] && installer_open_file_matches 3 "$INSTALL_DIR/lib" || fail 'The original native library root changed.'
+    [ ! -L "$INSTALL_DIR/lib" ] && installer_open_file_matches 3 "$INSTALL_DIR/lib" || fail INSTALL_E108 'The original native library root changed.'
     for _uninstall_target in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
       case "$_uninstall_target" in darwin-*) _uninstall_vec=vec0.dylib ;; *) _uninstall_vec=vec0.so ;; esac
       for _uninstall_library in "sqlite-vec-$_uninstall_target/$_uninstall_vec" "sqlite-$_uninstall_target/libsqlite3.dylib" "sqlite-$_uninstall_target/libsqlite3.dylib.json"; do
@@ -3825,7 +3905,7 @@ run_uninstall() (
       done
     done
     assert_install_claims
-    [ ! -L "$INSTALL_DIR/lib" ] && installer_open_file_matches 3 "$INSTALL_DIR/lib" || fail 'The original native library root changed before cleanup.'
+    [ ! -L "$INSTALL_DIR/lib" ] && installer_open_file_matches 3 "$INSTALL_DIR/lib" || fail INSTALL_E109 'The original native library root changed before cleanup.'
     rmdir "$INSTALL_DIR/lib" 2>/dev/null || true
   elif [ -e "$INSTALL_DIR/lib" ]; then
     record_kept "$INSTALL_DIR/lib (custom non-directory path; not removed)"
@@ -3912,15 +3992,15 @@ parse_options() {
       --no-service) DAEMON_SERVICE=0; shift ;;
       --service) DAEMON_SERVICE=1; shift ;;
       --version|--bin-dir|--install-dir|--decision-policy)
-        [ "$#" -ge 2 ] && [ -n "$2" ] || fail "$1 needs a value"
+        [ "$#" -ge 2 ] && [ -n "$2" ] || fail INSTALL_E110 "$1 needs a value"
         case "$1" in
           --version) REQUESTED_VERSION=$2; REQUESTED_DAEMON_VERSION=$2; REQUESTED_AGENT_VERSION=$2; REQUESTED_WEBUI_VERSION=$2 ;;
           --bin-dir|--install-dir) INSTALL_DIR=$2; WEBUI_ROOT="$INSTALL_DIR/webui" ;;
           --decision-policy)
-            case "$2" in 'Default - On'|Preferred|'Classic - Off') DECISION_POLICY=$2 ;; *) fail 'Unknown decision policy' ;; esac ;;
+            case "$2" in 'Default - On'|Preferred|'Classic - Off') DECISION_POLICY=$2 ;; *) fail INSTALL_E111 'Unknown decision policy' ;; esac ;;
         esac
         shift 2 ;;
-      *) fail "Unknown option: $1. Use --help for released-version installation; source builds use scripts/install-from-checkout.sh." ;;
+      *) fail INSTALL_E112 "Unknown option: $1. Use --help for released-version installation; source builds use scripts/install-from-checkout.sh." ;;
     esac
   done
 }
@@ -3938,7 +4018,7 @@ main() {
           */commands/goodvibes|*/commands/goodvibes-daemon|*/commands/goodvibes-agent)
             owned_prefix=$(dirname "$(dirname "$linked")")
             if [ -f "$owned_prefix/installation.json" ]; then
-              [ -x "$owned_prefix/current/runtime/bun" ] && [ -f "$owned_prefix/current/uninstall.js" ] || fail 'The receipt-owned uninstaller is missing; restore that installation before removing it.'
+              [ -x "$owned_prefix/current/runtime/bun" ] && [ -f "$owned_prefix/current/uninstall.js" ] || fail INSTALL_E113 'The receipt-owned uninstaller is missing; restore that installation before removing it.'
               exec "$owned_prefix/current/runtime/bun" "$owned_prefix/current/uninstall.js" --prefix "$owned_prefix"
             fi ;;
         esac
@@ -3958,7 +4038,9 @@ main() {
         */commands/goodvibes|*/commands/goodvibes-daemon|*/commands/goodvibes-agent)
           owned_prefix=$(dirname "$(dirname "$linked")")
           if [ -f "$owned_prefix/installation.json" ]; then
-            fail "A checkout installation owns $command_path. Run its goodvibes-uninstall first (user data is preserved), then install released binaries. Its saved data remains in the data directory recorded by $owned_prefix/installation.json."
+            owned_data=$(sed -n 's/^ *"dataDir": *"\([^"]*\)",*$/\1/p' "$owned_prefix/installation.json" | head -n 1)
+            [ -n "$owned_data" ] || owned_data="the data directory recorded in $owned_prefix/installation.json"
+            fail INSTALL_E114 "A checkout installation owns $command_path; nothing was changed. Run $owned_prefix/commands/goodvibes-uninstall first (it keeps your data), then re-run this installer. That installation's sessions and settings are in $owned_data/.goodvibes and its credentials in $owned_data/environment; released programs read $HOME/.goodvibes. To keep using them, after uninstalling and before installing, when $HOME/.goodvibes does not exist yet, move them: mv -- '$owned_data/.goodvibes' '$HOME/.goodvibes'"
           fi ;;
       esac
     fi
@@ -3967,8 +4049,6 @@ main() {
 
   BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
   WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/goodvibes-install.XXXXXX")
-  INSTALL_JOURNAL="$WORKDIR/swap-journal"
-  : > "$INSTALL_JOURNAL"
   trap cleanup_release_install EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
@@ -3976,6 +4056,9 @@ main() {
 
   prepare_release
   claim_release_install
+  # The journal sits with the claims, so a run killed outright can be undone by the next one.
+  INSTALL_JOURNAL="$INSTALL_CLAIM_OWNER/swap-journal"
+  : > "$INSTALL_JOURNAL" || fail INSTALL_E121 "Could not create the swap journal in $INSTALL_CLAIM_OWNER; nothing was replaced."
   check_release_reader
   assert_no_stale_backups
 
@@ -4006,7 +4089,7 @@ main() {
   if installed_version=$("$INSTALL_DIR/goodvibes" --version 2>/dev/null); then
     say "Installed: $installed_version"
   else
-    fail "the installed binary failed to run ('goodvibes --version'); the download may not match this platform"
+    fail INSTALL_E115 "the installed binary failed to run ('goodvibes --version'); the download may not match this platform"
   fi
 
   # Install the sqlite-vec addon before restarting the daemon so the restarted
@@ -4026,7 +4109,7 @@ main() {
   discard_stale_previous_cohort
   INSTALL_SWAP_FINISHED=1
   commit_install_journal
-  release_install_claims || fail 'Suite files were installed, but changed transaction claims require inspection before starting services.'
+  release_install_claims || fail INSTALL_E116 "Suite files were installed, but this run's transaction claims in $INSTALL_CLAIM_DIR changed, so services were not started. Re-run the installer once no other goodvibes install or update is running; it releases claims whose process is gone."
 
   apply_decision_policy
   # Both commands may load configuration and publish native data. Their real

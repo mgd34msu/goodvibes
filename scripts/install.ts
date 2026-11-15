@@ -5,7 +5,8 @@ import { createServer } from 'node:net';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { COMMANDS, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, isReleaseInUse, pendingPath, plainPath, present, quote, readDataId, readInstallation, receiptPath, recoverInterruptedUpdate, releaseHeldLocks, run, stopService, switchRelease, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
+import { PAIRING_DEFERRED_EXIT } from '../products/tui/scripts/pairing-exit.ts';
+import { COMMANDS, CommandError, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, discardAbandonedFirstInstall, isReleaseInUse, plainPath, present, quote, readDataId, readInstallation, receiptPath, recoverInterruptedUpdate, run, stopService, switchRelease, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
 
 export interface Options extends Layout { port: number; service: boolean; runtimeDir: string; nodePath?: string; workspace?: string; decisionPolicy?: DecisionModelPolicy }
 const ROOT = resolve(import.meta.dir, '..');
@@ -43,13 +44,17 @@ export function preflight(options: Options, old: Installation | undefined, execu
   if (contained(options.prefix, ROOT) || contained(ROOT, options.prefix) || contained(options.dataDir, ROOT)) throw new Error('Install programs and data outside the source checkout.');
   if (old) assertOwnedFiles(old);
   else {
-    if (present(options.prefix) && readdirSync(options.prefix).length) throw new Error('Program directory is not empty and has no Jev installation receipt.');
-    for (const name of COMMANDS) if (present(join(options.binDir, name))) throw new Error(`Command already exists: ${join(options.binDir, name)}. Choose --bin-dir or remove the old installation first.`);
-    if (present(unitPath(options))) throw new Error(`A service already exists at ${unitPath(options)}.`);
+    if (present(options.prefix) && readdirSync(options.prefix).length) throw new Error(`Program directory ${options.prefix} is not empty and has no Jev installation receipt, so this installer does not own it; nothing was changed. Choose another --prefix, or remove it if nothing you need is there: rm -rf -- ${quote(options.prefix)}`);
+    for (const name of COMMANDS) if (present(join(options.binDir, name))) throw new Error(`Command already exists: ${join(options.binDir, name)}; nothing was changed. Choose --bin-dir, or uninstall the installation that owns it first.`);
+    if (present(unitPath(options))) throw new Error(`A service definition this installer does not own already exists at ${unitPath(options)}; nothing was changed. Install with --no-service, or remove it after stopping it: systemctl --user disable --now ${SERVICE} && rm -- ${quote(unitPath(options))}`);
     if (present(options.dataDir) && readdirSync(options.dataDir).length && !readDataId(options)) throw new Error('Data directory is not empty and is not owned by the Jev installer. Choose --data-dir.');
   }
   if (options.service || old?.service) {
-    execute('systemctl', ['--user', 'show-environment'], { capture: true });
+    try { execute('systemctl', ['--user', 'show-environment'], { capture: true }); }
+    catch (error) {
+      if (!(error instanceof CommandError)) throw error;
+      throw new Error(`No systemd user service manager is reachable from this session (${error.message}); nothing was changed. Re-run with --no-service, or log in to a session with a user manager (systemctl --user), then retry.`);
+    }
     const fragment = execute('systemctl', ['--user', 'show', SERVICE, '--property=FragmentPath', '--value'], { capture: true });
     if (fragment && (!old?.service || fragment !== unitPath(options))) throw new Error(`Another ${SERVICE} is already loaded.`);
   }
@@ -102,8 +107,14 @@ export async function build(root: string, execute: Run): Promise<string> {
   const git = (...args: string[]) => execute('git', args, { cwd: root, capture: true });
   const commit = git('rev-parse', 'HEAD');
   if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('Install from a Git checkout with an exact commit.');
-  try { git('diff', '--quiet', 'HEAD'); }
-  catch { throw new Error('Commit or stash tracked changes before installing, so the build matches its recorded commit.'); }
+  const assertClean = (when: string): void => {
+    try { git('diff', '--quiet', 'HEAD'); }
+    catch (error) {
+      if (!(error instanceof CommandError) || error.status !== 1) throw error;
+      throw new Error(`Tracked files differ from commit ${commit} ${when}, so the build would not match its recorded commit. ${when === 'before the build' ? 'Commit or stash tracked changes' : 'A build step rewrote a tracked file; inspect it with git status, restore it with git checkout -- <file>'}, then re-run the installer.`);
+    }
+  };
+  assertClean('before the build');
   console.log(`Building GoodVibes Jev from ${commit}...`);
   execute('bun', ['install', '--frozen-lockfile'], { cwd: root });
   execute('bun', ['packages/engine/scripts/build.ts'], { cwd: root });
@@ -111,7 +122,7 @@ export async function build(root: string, execute: Run): Promise<string> {
     execute('bun', ['run', script!], { cwd: join(root, 'products', product!) });
   }
   if (git('rev-parse', 'HEAD') !== commit) throw new Error('Checkout changed during the build; re-run installation.');
-  git('diff', '--quiet', 'HEAD');
+  assertClean('after the build');
   execute('bun', ['scripts/ci-artifact.ts', 'record', commit, commit], { cwd: join(root, 'products/daemon') });
   return commit;
 }
@@ -154,18 +165,15 @@ export interface InstallHooks {
   /** Replaces the installed-host pairing step (the real one needs a live daemon). */
   pairHost?: Run;
 }
-/** Exit status of pair-installed-host.ts meaning "pairing deferred to the owner; nothing else is wrong". Keep in sync with that script. */
-export const PAIRING_DEFERRED_EXIT = 75;
 /** Recovery for the install currently in flight; the failure path and the signal path both run exactly this. */
 let activeRecovery: (() => void) | undefined;
-/** Roll the interrupted install back, release every lock, and return the conventional exit code (128 + signal). */
+/** Roll the interrupted install back and return the conventional exit code (128 + signal). Locks end with the process. */
 export function interruptInstall(signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP'): number {
   const recover = activeRecovery; activeRecovery = undefined;
   try { recover?.(); }
   catch (error) {
     console.error(`Install interrupted and automatic recovery was incomplete; inspect ${SERVICE} before retrying. ${error instanceof Error ? error.message : String(error)}`);
   }
-  releaseHeldLocks();
   return signal === 'SIGINT' ? 130 : signal === 'SIGHUP' ? 129 : 143;
 }
 export async function install(options: Options, hooks: InstallHooks = {}): Promise<void> {
@@ -173,6 +181,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
   await withLock(options.prefix, () => withLock(options.dataDir, async () => {
     const old = readInstallation(options.prefix);
     if (old) recoverInterruptedUpdate(old);
+    else discardAbandonedFirstInstall(options.prefix);
     preflight(options, old, execute);
     const commit = await (hooks.build ?? build)(ROOT, execute);
     // Check again after a potentially long build, before touching live files.
@@ -217,7 +226,6 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
           if (contents !== undefined) atomicWrite(path, contents);
           else rmSync(path, { force: true });
         }
-        rmSync(pendingPath(options.prefix), { force: true });
       }
       if (metadataTouched) {
         for (const [path, contents] of previousMetadata) {
@@ -250,7 +258,8 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         const state = execute('systemctl', ['--user', 'show', SERVICE, '--property=ActiveState', '--value'], { capture: true });
         wasRunning = !['inactive', 'failed'].includes(state);
         stopAttempted = true;
-        stopService(old, execute);
+        // A first install killed before it wrote the unit left nothing loaded to stop.
+        if (wasRunning || present(unitPath(old))) stopService(old, execute);
       }
       if (options.service) await assertPortFree(options.port);
       for (const path of settingsPaths) {
@@ -271,14 +280,18 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         if (key?.includes('\n') || key?.includes('\r') || key?.includes('\0')) throw new Error('TYPESAFE_API_KEY must be a single line.');
         atomicWrite(environment, '# Private shell environment for GoodVibes Jev.\n' + (key ? `TYPESAFE_API_KEY=${quote(key)}\n` : '# TYPESAFE_API_KEY=your-key\n'));
       }
-      // If the process is killed before the receipt below is saved, this names the release to discard on the next run.
-      if (old) atomicWrite(pendingPath(options.prefix), `${releaseName}\n`);
+      const wrappers: Record<string, string> = Object.fromEntries(COMMANDS.map(name => [name, wrapper(options, name)]));
+      const { runtimeDir: _runtimeDir, nodePath: _nodePath, ...installedOptions } = options;
+      const receipt: Installation = { ...installedOptions, schema: 2, package: PACKAGE, id, release: releaseName, sourceCommit: commit,
+        service: options.service, unit, wrappers };
+      // A first install owns everything it is about to publish from here on, so a run killed outright leaves an
+      // ordinary receipt-owned installation that uninstall removes and a re-run updates. An update keeps the
+      // previous receipt until the new release is ready; `current` naming another release marks it interrupted.
+      if (!old) atomicWrite(receiptPath(options), JSON.stringify(receipt, null, 2) + '\n');
       switchRelease(options.prefix, releaseName); published = true;
-      const wrappers: Record<string, string> = {};
       mkdirSync(options.binDir, { recursive: true });
       for (const name of COMMANDS) {
-        const contents = wrapper(options, name); wrappers[name] = contents;
-        atomicWrite(join(options.prefix, 'commands', name), contents, 0o755);
+        atomicWrite(join(options.prefix, 'commands', name), wrappers[name]!, 0o755);
         const link = join(options.binDir, name);
         if (!present(link)) symlinkSync(join(options.prefix, 'commands', name), link);
       }
@@ -314,7 +327,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
             // already be minted), so a retry cannot succeed until the owner clears it, and failing here would roll
             // back an install that is otherwise complete and running. The pairing script has already printed what
             // happened and how to clear it; finish the install and name the one command that pairs later.
-            if (!(error instanceof Error) || !error.message.endsWith(` failed (${PAIRING_DEFERRED_EXIT})`)) throw error;
+            if (!(error instanceof CommandError) || error.status !== PAIRING_DEFERRED_EXIT) throw error;
             console.warn(`TUI pairing was skipped (it needs the owner's attention, see above); the installation itself is complete and the daemon is running.\nAfter clearing the recorded attempt, pair with: ${[quote(join(options.prefix, 'current/runtime/bun')), ...pairArguments.map(quote)].join(' ')}`);
           }
         }
@@ -322,13 +335,9 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         execute('systemctl', ['--user', 'disable', SERVICE]);
         rmSync(unitPath(options)); execute('systemctl', ['--user', 'daemon-reload']);
       }
-      const { runtimeDir: _runtimeDir, nodePath: _nodePath, ...installedOptions } = options;
-      const receipt: Installation = { ...installedOptions, schema: 2, package: PACKAGE, id, release: releaseName, sourceCommit: commit,
-        service: options.service, unit, wrappers };
-      atomicWrite(receiptPath(options), JSON.stringify(receipt, null, 2) + '\n');
+      if (old) atomicWrite(receiptPath(options), JSON.stringify(receipt, null, 2) + '\n');
       // The receipt names the new release from here on; a rollback now would leave it pointing at a deleted one.
       committed = true; activeRecovery = undefined;
-      rmSync(pendingPath(options.prefix), { force: true });
       // Keep every earlier release until all publication and readiness checks pass, then drop the ones nothing runs from.
       // A release kept for a running terminal on one update is reconsidered on the next.
       for (const earlier of readdirSync(join(options.prefix, 'releases'))) {

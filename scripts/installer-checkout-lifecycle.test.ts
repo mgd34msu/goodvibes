@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { build, install, interruptInstall, parseOptions, ready, stage, type InstallHooks, type Options, type ReadyTiming } from './install.ts';
-import { COMMANDS, assertOwnedFiles, atomicWrite, dataOwner, pendingPath, readInstallation, unitPath, uninstall, type Run } from './installation.ts';
+import { COMMANDS, CommandError, assertOwnedFiles, atomicWrite, dataOwner, readInstallation, unitPath, uninstall, type Run } from './installation.ts';
 
 let home: string;
 let previousHome: string | undefined;
@@ -106,7 +106,7 @@ describe('checkout build guards', () => {
   const fake = (revisions: string[], dirty = false): Run => (command, args) => {
     calls.push([command, ...args]);
     if (command === 'git' && args[0] === 'rev-parse') return revisions.shift() ?? COMMIT;
-    if (command === 'git' && args[0] === 'diff' && dirty) throw new Error('git failed (1)');
+    if (command === 'git' && args[0] === 'diff' && dirty) throw new CommandError('git', 1, undefined);
     return '';
   };
   beforeEach(() => { calls.length = 0; });
@@ -207,7 +207,6 @@ describe('an update that is killed after publishing', () => {
     } })).rejects.toThrow('killed');
     rmSync(options.prefix, { recursive: true }); cpSync(snapshot, options.prefix, { recursive: true, verbatimSymlinks: true });
     const abandoned = releasesOf().find(name => name !== before)!;
-    expect(existsSync(pendingPath(options.prefix))).toBe(true);
     expect(() => assertOwnedFiles(readInstallation(options.prefix)!)).toThrow('current link has changed');
     return { before, abandoned };
   }
@@ -225,7 +224,6 @@ describe('an update that is killed after publishing', () => {
     expect(receipt.release).not.toBe(before);
     expect(receipt.release).not.toBe(abandoned);
     expect(releasesOf()).toEqual([receipt.release]);
-    expect(existsSync(pendingPath(options.prefix))).toBe(false);
     assertOwnedFiles(receipt);
   });
   test('a digest-only receipt from an earlier installer recovers without calling the new commands edited', async () => {
@@ -249,11 +247,6 @@ describe('an update that is killed after publishing', () => {
     expect(releasesOf()).toEqual([receipt.release]);
     assertOwnedFiles(receipt);
   });
-  test('a successful update leaves no marker behind', async () => {
-    await install(options, hooks);
-    await install(options, { ...hooks, build: async () => 'b'.repeat(40) });
-    expect(existsSync(pendingPath(options.prefix))).toBe(false);
-  });
   test('a hang-up rolls the update back and exits 129', async () => {
     options.service = true;
     await install(options, hooks);
@@ -262,8 +255,37 @@ describe('an update that is killed after publishing', () => {
     await expect(install(options, { ...hooks, ready: async () => { code = interruptInstall('SIGHUP'); throw new Error('hung up'); } })).rejects.toThrow('hung up');
     expect(code).toBe(129);
     expect(readInstallation(options.prefix)).toEqual(before);
-    expect(existsSync(pendingPath(options.prefix))).toBe(false);
     assertOwnedFiles(before);
+  });
+});
+
+describe('a first install that is killed outright', () => {
+  test('is an ordinary receipt-owned installation that uninstall removes', async () => {
+    options.service = true;
+    const snapshot = join(home, 'snapshot');
+    await expect(install(options, { ...hooks, ready: async () => {
+      cpSync(options.prefix, snapshot, { recursive: true, verbatimSymlinks: true });
+      throw new Error('killed');
+    } })).rejects.toThrow('killed');
+    // Put back what a SIGKILL inside the readiness wait leaves: the published release, its links and the unit.
+    cpSync(snapshot, options.prefix, { recursive: true, verbatimSymlinks: true });
+    for (const name of COMMANDS) symlinkSync(join(options.prefix, 'commands', name), join(options.binDir, name));
+    writeFileSync(unitPath(options), readInstallation(options.prefix)!.unit);
+    await uninstall(options.prefix, false, execute);
+    expect(existsSync(options.prefix)).toBe(false);
+    expect(existsSync(unitPath(options))).toBe(false);
+    for (const name of COMMANDS) expect(existsSync(join(options.binDir, name))).toBe(false);
+  });
+  test('killed while staging, before its receipt, leaves only a release the next run removes; anything else is kept', async () => {
+    const leftover = join(options.prefix, 'releases', `${'a'.repeat(40)}-${'0'.repeat(8)}-0000-0000-0000-${'0'.repeat(12)}`);
+    mkdirSync(join(leftover, 'daemon'), { recursive: true });
+    writeFileSync(join(options.prefix, 'notes.txt'), 'mine');
+    await expect(install(options, hooks)).rejects.toThrow('has no Jev installation receipt');
+    expect(existsSync(leftover)).toBe(true);
+    rmSync(join(options.prefix, 'notes.txt'));
+    await install(options, hooks);
+    expect(existsSync(leftover)).toBe(false);
+    expect(readInstallation(options.prefix)).toBeDefined();
   });
 });
 
@@ -329,25 +351,6 @@ describe('credentials file on a repeat install', () => {
     process.env.TYPESAFE_API_KEY = 'synthetic-new-value';
     await install(options, { ...hooks, build: async () => 'b'.repeat(40) });
     expect(warnings.join('\n')).not.toContain('already exists');
-  });
-});
-
-describe('reclaiming a lock left by a dead process', () => {
-  const lockOf = () => `${options.prefix}.lock`;
-  const plantDead = () => {
-    mkdirSync(lockOf(), { recursive: true });
-    writeFileSync(join(lockOf(), 'owner.json'), JSON.stringify({ pid: spawnSync('true').pid!, startTime: '1' }));
-  };
-  test('a second reclaimer in progress makes this one refuse and leaves the lock as it was', async () => {
-    plantDead();
-    mkdirSync(`${lockOf()}.reclaim`);
-    await expect(install(options, hooks)).rejects.toThrow(`rmdir '${lockOf()}.reclaim'`);
-    expect(existsSync(join(lockOf(), 'owner.json'))).toBe(true);
-  });
-  test('a completed reclaim leaves neither the reclaim marker nor a stale copy', async () => {
-    plantDead();
-    await install(options, hooks);
-    expect(readdirSync(dirname(options.prefix)).filter(name => name.includes('.lock'))).toEqual([]);
   });
 });
 

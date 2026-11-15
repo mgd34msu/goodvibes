@@ -1,4 +1,6 @@
-/** Native lifecycle acceptance on disposable GitHub-hosted accounts only.
+/** Native lifecycle acceptance on a disposable account: a GitHub-hosted runner, or
+ * any account started with --disposable-account (a throwaway container with a user
+ * service manager, a fresh macOS user) that holds nothing of GoodVibes.
  * Public and staged delivery share the actual source installer, compiled native
  * programs and original service manager; no simulated service substitutes. */
 import assert from 'node:assert/strict';
@@ -186,31 +188,14 @@ const installerLineProbe = `if [ -n "\${BASH_VERSION:-}" ]; then
 fi
 . "$0"`;
 
-/** Emit public source literals and fixed error classes only. In particular,
- * paths, expanded shell variables and unrelated stdout/stderr stay private. */
+/** Emit fixed vocabulary only: the installer's stable refusal ids (INSTALL_E###, printed
+ * after every refusal), OS error classes and curl codes. Paths, expanded shell variables
+ * and the rest of stdout/stderr stay private. */
 function installerFailureDiagnostics(source, stdout, stderr) {
-  const templates = [], sourceLines = source.split('\n').length;
-  for (const match of source.matchAll(/\bfail\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g)) {
-    const text = (match[1] ?? match[2]).split('\n')[0];
-    // Unsupported shell quoting/substitution must never turn into raw output.
-    if (!text || /[\\`]|\$\(/.test(text)) continue;
-    const parts = match[1] !== undefined ? [text] : text.split(/(\$(?:\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?]))/g);
-    if (!parts.some((part, index) => index % 2 === 0 && /[A-Za-z]{3}/.test(part))) continue;
-    templates.push({ literals: parts.filter((_part, index) => index % 2 === 0).map((part, index) => index === 0 ? `install.sh: ${part}` : part),
-      diagnostic: `install.sh: ${parts.map((part, index) => index % 2 ? '[redacted]' : part).join('')}`.slice(0, 512) });
-  }
-  const diagnostics = new Set();
+  const sourceLines = source.split('\n').length, diagnostics = new Set();
   for (const line of `${stderr}\n${stdout}`.split(/\r?\n/)) {
-    const template = templates.find(({ literals }) => {
-      if (literals.length === 1) return line === literals[0];
-      if (!line.startsWith(literals[0]) || !line.endsWith(literals.at(-1))) return false;
-      let offset = literals[0].length;
-      return literals.slice(1).every(literal => {
-        const found = line.indexOf(literal, offset); if (found < 0) return false;
-        offset = found + literal.length; return true;
-      });
-    });
-    if (template) diagnostics.add(template.diagnostic);
+    const refusal = /\((INSTALL_E\d{3})\)$/.exec(line)?.[1];
+    if (refusal) diagnostics.add(`install.sh refusal ${refusal}`);
     // Shells print different prefixes; preserve only an in-range source line.
     const number = /:\s*(?:line\s+)?(\d+):/.exec(line)?.[1];
     const location = number && Number(number) > 0 && Number(number) <= sourceLines ? ` at installer line ${Number(number)}` : '';
@@ -218,7 +203,7 @@ function installerFailureDiagnostics(source, stdout, stderr) {
     // Dash abbreviates missing read-redirection targets to "No such file".
     const canonicalReason = /^no such file(?: or directory)?$/i.test(reason ?? '') ? 'no such file or directory' : reason?.toLowerCase();
     if (canonicalReason) diagnostics.add(`Shell/OS failure${location}: ${canonicalReason}`);
-    else if (location && !template) diagnostics.add(`Unclassified shell failure${location}; dynamic output withheld.`);
+    else if (location && !refusal) diagnostics.add(`Unclassified shell failure${location}; dynamic output withheld.`);
     const curl = /^curl: \((\d{1,3})\)/.exec(line);
     if (curl) diagnostics.add(`curl failed with error ${Number(curl[1])}; dynamic output withheld.`);
     if (diagnostics.size >= 8) break;
@@ -226,16 +211,20 @@ function installerFailureDiagnostics(source, stdout, stderr) {
   return [...diagnostics].slice(0, 8);
 }
 
-export function assertHostedContext(input) {
-  assert.equal(input.env.GITHUB_ACTIONS, 'true', 'Acceptance requires a disposable Actions account.');
-  assert.equal(input.env.RUNNER_ENVIRONMENT, 'github-hosted', 'Persistent/self-hosted accounts are refused.');
+/** Acceptance installs, starts and removes real services in this account, so it needs one that may be
+ * thrown away: a GitHub-hosted runner, or an account the caller declares disposable. Either way the
+ * account must hold nothing of GoodVibes (checked separately before any work). */
+export function assertDisposableAccount(input) {
+  const hosted = input.env.GITHUB_ACTIONS === 'true' && input.env.RUNNER_ENVIRONMENT === 'github-hosted';
+  assert.ok(hosted || input.disposableAccount === true,
+    'Acceptance installs and removes real services in this account. Run it on a GitHub-hosted runner, or pass --disposable-account in a throwaway container or a fresh user account.');
   assert.match(input.tag, /^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
   assert.match(input.source, /^[a-f0-9]{40}$/);
   assert.equal(input.target, `${input.platform}-${input.arch}`);
   assert.ok(['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'].includes(input.target));
   assert.equal(input.home, input.accountHome, 'A HOME override cannot isolate a native service manager.');
   assert.ok(input.uid > 0, 'Do not install into the root account.');
-  assert.ok(input.env.RUNNER_TEMP && isAbsolute(input.env.RUNNER_TEMP));
+  if (hosted) assert.ok(input.env.RUNNER_TEMP && isAbsolute(input.env.RUNNER_TEMP));
 }
 
 /** Drain the exact admitted child before reporting timeout/cancellation. Output
@@ -575,14 +564,14 @@ export async function acceptPublishedSuite(input) {
   }
 }
 
-async function performPublishedAcceptance({ tag, source, target, signal, scenario = 'fresh', delivery, previousTag, previousSource: selectedPreviousSource, mode = 'release' }, evidence, metadataFetch) {
+async function performPublishedAcceptance({ tag, source, target, signal, scenario = 'fresh', delivery, previousTag, previousSource: selectedPreviousSource, mode = 'release', disposableAccount = false }, evidence, metadataFetch) {
   assert.ok(delivery === undefined || mode === 'release', 'A staged candidate is accepted before publication; recheck applies to published releases only.');
   assert.ok(scenario === 'fresh' || scenario === 'upgrade-previous', 'Unknown published acceptance scenario.');
   const previousRelease = scenario === 'upgrade-previous';
   if (previousRelease) assertPreviousReleaseInputs({ tag, previousTag, previousSource: selectedPreviousSource });
   else assert.ok(previousTag === undefined && selectedPreviousSource === undefined, 'Previous inputs belong to previous-release acceptance only.');
   const account = userInfo(), home = realpathSync(process.env.HOME ?? '');
-  assertHostedContext({ env: process.env, platform: process.platform, arch: process.arch,
+  assertDisposableAccount({ env: process.env, platform: process.platform, arch: process.arch, disposableAccount,
     home, accountHome: realpathSync(account.homedir), uid: account.uid, tag, source, target });
   const originalHome = lstatSync(home, { bigint: true });
   const assertHome = () => {
@@ -600,7 +589,8 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     const stat = lstatSync(path, { throwIfNoEntry: false });
     if (stat) assert.ok(stat.isDirectory() && !stat.isSymbolicLink() && realpathSync(path) === path, 'Native install parents must belong to the original account.');
   }
-  const root = mkdtempSync(join(realpathSync(process.env.RUNNER_TEMP), 'goodvibes-published-')); evidence.root = root;
+  const temporary = process.env.RUNNER_TEMP && isAbsolute(process.env.RUNNER_TEMP) ? process.env.RUNNER_TEMP : tmpdir();
+  const root = mkdtempSync(join(realpathSync(temporary), 'goodvibes-published-')); evidence.root = root;
   evidence.stage = 'native-service-context';
   const env = { ...process.env, HOME: home };
   for (const name of Object.keys(env)) if (/^(?:GOODVIBES_|OPENAI_|ANTHROPIC_|GOOGLE_|GEMINI_|JEV_|CLEF_)/.test(name)
@@ -620,8 +610,12 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   if (process.platform === 'linux') {
     env.XDG_RUNTIME_DIR = `/run/user/${account.uid}`;
     env.DBUS_SESSION_BUS_ADDRESS = `unix:path=${env.XDG_RUNTIME_DIR}/bus`;
-    await invoke('sudo', ['-n', 'loginctl', 'enable-linger', account.username]);
-    await invoke('sudo', ['-n', 'systemctl', 'start', `user@${account.uid}.service`]);
+    // A runner account has no user service manager until one is started for it; an account that already
+    // runs one (a container started with it, a logged-in user) needs no administrator step.
+    if ((await runOwnedCommand('systemctl', ['--user', 'show-environment'], { env, signal })).code !== 0) {
+      await invoke('sudo', ['-n', 'loginctl', 'enable-linger', account.username]);
+      await invoke('sudo', ['-n', 'systemctl', 'start', `user@${account.uid}.service`]);
+    }
     await invoke('systemctl', ['--user', 'show-environment']);
     for (const name of [unit, 'goodvibes-daemon.service']) {
       const probe = await runOwnedCommand('systemctl', ['--user', 'show', name, '--property=LoadState', '--value'], { env });
@@ -915,11 +909,12 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [tag, source, target, scenario = 'fresh', previousTag, previousSource] = process.argv.slice(2);
+  const argv = process.argv.slice(2), disposableAccount = argv.includes('--disposable-account');
+  const [tag, source, target, scenario = 'fresh', previousTag, previousSource] = argv.filter(arg => arg !== '--disposable-account');
   // Set to `recheck` to re-verify an already published release (see readPublicAcceptanceDelivery).
   const mode = process.env.GOODVIBES_ACCEPTANCE_MODE === 'recheck' ? 'recheck' : 'release';
   const controller = new AbortController(), stop = () => controller.abort(new Error('Acceptance owner stopped.'));
   process.once('SIGTERM', stop); process.once('SIGINT', stop);
-  acceptPublishedSuite({ tag, source, target, scenario, previousTag, previousSource, mode, signal: controller.signal }).catch(() => { console.error('Published suite acceptance failed; no successful native install claim was emitted.'); process.exitCode = 1; })
+  acceptPublishedSuite({ tag, source, target, scenario, previousTag, previousSource, mode, disposableAccount, signal: controller.signal }).catch(() => { console.error('Published suite acceptance failed; no successful native install claim was emitted.'); process.exitCode = 1; })
     .finally(() => { process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop); });
 }

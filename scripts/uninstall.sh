@@ -13,12 +13,18 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 if [ -f "$prefix/installation.json" ]; then
-  [ -x "$prefix/current/runtime/bun" ] && [ -f "$prefix/current/uninstall.js" ] || {
-    echo 'The receipt-owned installed uninstaller is missing; restore that installation before removing it.' >&2; exit 1;
+  # A first install stopped just after it recorded its receipt has not published `current` yet; its release has the uninstaller.
+  release_root="$prefix/current"
+  if [ ! -e "$release_root" ]; then
+    release=$(sed -n 's/^ *"release": *"\([0-9a-f-]*\)",*$/\1/p' "$prefix/installation.json" | head -n 1)
+    [ -z "$release" ] || release_root="$prefix/releases/$release"
+  fi
+  [ -x "$release_root/runtime/bun" ] && [ -f "$release_root/uninstall.js" ] || {
+    echo "The uninstaller recorded for $prefix is missing ($release_root/uninstall.js), so it cannot be run; nothing was removed. Re-run the checkout installer with --prefix $prefix to repair that installation, then uninstall it." >&2; exit 1;
   }
   set -- --prefix "$prefix"
   if [ "$purge" = 1 ]; then set -- "$@" --purge; fi
-  exec "$prefix/current/runtime/bun" "$prefix/current/uninstall.js" "$@"
+  exec "$release_root/runtime/bun" "$release_root/uninstall.js" "$@"
 fi
 if [ "$explicit_prefix" = 1 ]; then
   echo "No receipt-owned installation at $prefix. User data remains untouched."

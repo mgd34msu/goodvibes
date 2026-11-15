@@ -5,9 +5,11 @@ export const repository: string;
 export function consumeAcceptanceMetadataFetch(env?: NodeJS.ProcessEnv, fetchImpl?: AcceptanceFetch): {
   authentication: 'read-only-ci-token' | 'anonymous'; fetch: AcceptanceFetch;
 };
-export interface HostedContext {
+export interface AccountContext {
   env: NodeJS.ProcessEnv; platform: string; arch: string; home: string; accountHome: string;
   uid: number; tag: string; source: string; target: string;
+  /** The caller declares this account disposable (--disposable-account); not needed on a GitHub-hosted runner. */
+  disposableAccount?: boolean;
 }
 export interface AcceptanceSteps {
   admit(): Promise<void>; install(): Promise<void>; verifyInstalled(): Promise<void>; verifyDefaults(): Promise<void>;
@@ -36,7 +38,7 @@ export function verifyCompiledSuiteRollback(input: {
   host: NativeLifecycleHost; target: string; source: string; sourceRoot: string; previousVersion: string; currentVersion: string;
   previousReaders: Map<string, unknown>; webuiDirectory: string; verifyPreserved(): Promise<void>;
 }): Promise<{ updatedPid: number; rolledBackPid: number }>;
-export function assertHostedContext(input: HostedContext): void;
+export function assertDisposableAccount(input: AccountContext): void;
 export function runAcceptanceSteps(host: AcceptanceSteps): Promise<void>;
 export type NativeDaemonFailure = 'token-missing' | 'invalid-port' | 'unreachable' | 'auth-refused' | 'route-missing'
   | 'unreadable-reply' | 'cli-command-caught' | 'native-startup-repair' | 'unknown';
@@ -93,7 +95,9 @@ export function acceptPublishedSuite(input: { tag: string; source: string; targe
   scenario?: 'fresh' | 'upgrade-previous';
   previousTag?: string; previousSource?: string; signal?: AbortSignal; delivery?: AcceptanceDelivery;
   /** `recheck` re-verifies an already published release; see readPublicAcceptanceDelivery. */
-  mode?: 'release' | 'recheck' }): Promise<void>;
+  mode?: 'release' | 'recheck';
+  /** Run outside a GitHub-hosted runner, in an account that may be thrown away. */
+  disposableAccount?: boolean }): Promise<void>;
 export function readPublishedReaders(input: { tag: string; source: string; target: string; assets: ReadonlySet<string>; onCheck?(check: string): void },
   load: (name: string) => Promise<PublishedReader>): Promise<Map<string, unknown>>;
 export function readPublicAcceptanceDelivery(input: {

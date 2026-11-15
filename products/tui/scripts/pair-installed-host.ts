@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { beginTuiHostPairing, completeTuiHostPairing, readTuiHostPairing, tuiHostPairingStorePath, type TuiHostPairingSecret } from '../src/runtime/tui-host-credential-store.ts';
 import { readTuiLegacyPairingBootstrap } from '../src/runtime/tui-host-pairing-bootstrap.ts';
+import { PAIRING_DEFERRED_EXIT } from './pairing-exit.ts';
 
 // The explicitly invoked local installer provisions its own client and daemon.
 // Generic host pairing still requires the owner-terminal confirmation flow.
@@ -15,8 +16,6 @@ const pid = execFileSync('systemctl', ['--user', 'show', 'goodvibes-jev.service'
 const executable = realpathSync(join(prefix, 'current', 'daemon', `goodvibes-daemon-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}`));
 if (readlinkSync(`/proc/${pid}/exe`) !== executable) throw new Error('Pairing requires the daemon running from this installation.');
 const host = `http://127.0.0.1:${port}`;
-/** Exit status the installer recognizes as "pairing skipped, installation otherwise complete". Keep in sync with scripts/install.ts. */
-const PAIRING_DEFERRED_EXIT = 75;
 /**
  * A pairing attempt is recorded BEFORE the daemon is asked to mint a token, and the store deliberately has
  * no reset: an abandoned attempt may already have minted one. So this never clears the record itself. It

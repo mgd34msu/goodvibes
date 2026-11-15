@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { install, interruptInstall, parseOptions, preflight, wrapper, type InstallHooks, type Options, assertPortFree } from './install.ts';
-import { COMMANDS, assertOwnedFiles, atomicWrite, dataOwner, isReleaseInUse, readInstallation, receiptPath, unitPath, uninstall, validateLayout, withLock, processStartTime, type Run } from './installation.ts';
+import { COMMANDS, CommandError, assertOwnedFiles, atomicWrite, dataOwner, isReleaseInUse, readInstallation, receiptPath, unitPath, uninstall, validateLayout, withLock, type Run } from './installation.ts';
 
 let home: string;
 let previousHome: string | undefined;
@@ -297,9 +297,13 @@ describe('suite install and uninstall', () => {
   });
   test('serializes install and uninstall for the same prefix', async () => {
     await withLock(options.prefix, async () => {
-      await expect(install(options, hooks)).rejects.toThrow('Another install/uninstall');
+      await expect(install(options, hooks)).rejects.toThrow('Another install or uninstall');
     });
-    expect(existsSync(`${options.prefix}.lock`)).toBe(false);
+    // A refusal of the inner data-directory lock still releases the program-directory lock.
+    await withLock(options.dataDir, async () => {
+      await expect(install(options, hooks)).rejects.toThrow('Another install or uninstall');
+    });
+    await install(options, hooks);
   });
   test('rejects occupied ports without touching their listener', async () => {
     const listener = createServer();
@@ -384,44 +388,6 @@ test('a stop followed by a failed state query restarts the previous running serv
   expect(readInstallation(options.prefix)).toEqual(receipt);
 });
 
-describe('A44 installer lock ownership', () => {
-  const lockOf = () => `${options.prefix}.lock`;
-  const plant = (record?: unknown) => {
-    mkdirSync(lockOf(), { recursive: true });
-    if (record !== undefined) writeFileSync(join(lockOf(), 'owner.json'), JSON.stringify(record));
-  };
-  test('a lock whose owner is dead is reclaimed', async () => {
-    const dead = spawnSync('true').pid!;
-    plant({ pid: dead, startTime: '1' });
-    await install(options, hooks);
-    expect(existsSync(lockOf())).toBe(false);
-    expect(readInstallation(options.prefix)).toBeDefined();
-  });
-  test('a lock whose pid was reused by another process is reclaimed', async () => {
-    const start = processStartTime(process.pid);
-    if (start === undefined) {
-      // Without a readable start time reuse cannot be proven, so a live pid keeps its lock.
-      plant({ pid: process.pid, startTime: '1' });
-      await expect(install(options, hooks)).rejects.toThrow('Another install/uninstall');
-      expect(existsSync(join(lockOf(), 'owner.json'))).toBe(true);
-      return;
-    }
-    plant({ pid: process.pid, startTime: `${start}0` });
-    await install(options, hooks);
-    expect(existsSync(lockOf())).toBe(false);
-  });
-  test('a live owner is still refused and its lock kept', async () => {
-    plant({ pid: process.pid, startTime: processStartTime(process.pid) });
-    await expect(install(options, hooks)).rejects.toThrow('Another install/uninstall');
-    expect(existsSync(join(lockOf(), 'owner.json'))).toBe(true);
-  });
-  test('a lock with no record is refused with the exact removal command', async () => {
-    plant();
-    await expect(install(options, hooks)).rejects.toThrow(`rmdir '${lockOf()}'`);
-    expect(existsSync(lockOf())).toBe(true);
-  });
-});
-
 describe('A30 interrupted install', () => {
   test('an interrupt after the service was stopped restores the old service and releases both locks', async () => {
     options.service = true;
@@ -437,8 +403,6 @@ describe('A30 interrupted install', () => {
     expect(readInstallation(options.prefix)).toEqual(before);
     expect(readlinkSync(join(options.prefix, 'current'))).toBe(`releases/${before.release}`);
     expect(state).toBe('active');
-    expect(existsSync(`${options.prefix}.lock`)).toBe(false);
-    expect(existsSync(`${options.dataDir}.lock`)).toBe(false);
   });
   test('the interrupt releases the locks even if the process then exits without unwinding', async () => {
     let code = -1;
@@ -449,7 +413,6 @@ describe('A30 interrupted install', () => {
     } });
     await expect(pending).rejects.toThrow('stop here');
     expect(code).toBe(130);
-    expect(existsSync(`${options.prefix}.lock`)).toBe(false);
     expect(existsSync(options.prefix)).toBe(false);
   });
 });
@@ -477,17 +440,16 @@ describe('A40 deferred TUI pairing', () => {
     options.service = true;
     const warnings: string[] = []; const warn = console.warn; console.warn = (...args: unknown[]) => { warnings.push(args.join(' ')); };
     try {
-      await install(options, { ...hooks, pairHost: () => { throw new Error('bun failed (75)'); } });
+      await install(options, { ...hooks, pairHost: () => { throw new CommandError('bun', 75, undefined); } });
     } finally { console.warn = warn; }
     expect(state).toBe('active');
     expect(readInstallation(options.prefix)?.service).toBe(true);
-    expect(existsSync(`${options.prefix}.lock`)).toBe(false);
     expect(warnings.join('\n')).toContain('pair-installed-host.ts');
     expect(warnings.join('\n')).toContain(join(options.prefix, 'current/runtime/bun'));
   });
   test('any other pairing failure still rolls the install back', async () => {
     options.service = true;
-    await expect(install(options, { ...hooks, pairHost: () => { throw new Error('bun failed (1)'); } })).rejects.toThrow('bun failed (1)');
+    await expect(install(options, { ...hooks, pairHost: () => { throw new CommandError('bun', 1, undefined); } })).rejects.toThrow('bun failed (1)');
     expect(existsSync(options.prefix)).toBe(false);
     expect(state).toBe('inactive');
   });

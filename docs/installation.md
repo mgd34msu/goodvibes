@@ -108,12 +108,16 @@ file-level recovery; a directory whose publication fails keeps or regains its
 original content.
 
 If the previous files cannot be put back, the claims and the
-`.goodvibes-previous` backups stay in place. The installer prints one `mv`
-command per file to restore, followed by the command that removes the claims.
-Run those before installing again. An installer that is killed outright cannot
-recover or print anything: its claims and backups also stay in place, and the
-next installation is refused until the retained `*.update-transaction` files
-have been inspected and resolved.
+`.goodvibes-previous` backups stay in place, with the installer's record of what
+it replaced kept next to its claims. The installer prints one `mv` command per
+file to restore, followed by the command that removes the claims; running the
+installer again also retries the restore from that record. An installer that is
+killed outright (SIGKILL, power loss, out of memory) cannot recover or print
+anything, so the next installation or uninstall does it: when the process that
+holds a `*.update-transaction` claim is no longer running, it puts the previous
+files back from that record, releases the claims and continues. A claim held by
+a running process is refused with that process's id; wait for it to finish.
+Every refusal ends with a stable id such as `(INSTALL_E036)`.
 
 Other failure behavior:
 
@@ -225,8 +229,9 @@ wrote, which carries the product's description rather than the installer's marke
 keeping `~/.goodvibes` settings, sessions and memory.
 Browser-driver, WebUI and retained directory backups are listed and preserved;
 they may contain local additions or serve another deployment. Review those paths
-before removing their contents. An active update, or one that left its claims
-behind, must be resolved before uninstall can remove its programs. A saved installer can perform
+before removing their contents. An update that is still running must finish
+before uninstall can remove its programs; claims left by a process that is no
+longer running are released first, as for an installation. A saved installer can perform
 this operation without release downloads. `scripts/uninstall.sh` also recognizes
 receipt-owned installations made by the earlier checkout installer and invokes
 their installed uninstaller. Their `--prefix` and `--purge` options remain available.
@@ -245,20 +250,23 @@ A checkout installation that fails, or is interrupted with Ctrl-C or a
 termination signal or a hang-up (closing the terminal), restores the previously
 installed version, restarts the service if it was running before, and releases
 its locks. If the process is killed outright during an update, the next update or
-uninstall restores the previous version first. After an update, earlier versions
+uninstall restores the previous version first. A first installation that is
+killed outright is already recorded as installed, so uninstall removes it and
+running the installer again completes it; one killed earlier, while it was still
+copying the new version, leaves only that unfinished copy, which the next run
+removes. After an update, earlier versions
 are removed unless a terminal or agent is still running from them; they are
 checked again on the next update. An existing `environment` file is never
 overwritten: if `TYPESAFE_API_KEY` is exported but the file has no key, the
 installer says so and names the file. Uninstall also completes when the data
 directory has already been removed.
 
-The installer and uninstaller take a lock directory beside each of the program
-and data directories (`<directory>.lock`). The lock records the process that holds it. A lock left by a
-process that is no longer running is reclaimed automatically; a lock held by a
-running process is refused and names its pid. A lock with no owner record is
-refused with the `rmdir` command that removes it once you have confirmed no
-install or uninstall is running. `./scripts/uninstall.sh` can be run again after
-a partial uninstall.
+The installer and uninstaller lock a file beside each of the program and data
+directories (`<directory>.writer.sqlite`). The operating system releases the lock
+when the process ends for any reason, so nothing is left to clean up after a
+crash; a second install or uninstall started while one runs is refused and
+changes nothing. Uninstall removes the lock files. `./scripts/uninstall.sh` can
+be run again after a partial uninstall.
 
 When a service is installed, the checkout installer also pairs the local TUI
 with the daemon. If an earlier pairing attempt is recorded as unfinished, that

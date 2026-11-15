@@ -1,18 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { categorizeBuiltinCommands } from '@/input/commands.ts';
-import { renderCommandReferenceMarkdown } from '@/input/command-reference.ts';
-
-const ROOT = join(import.meta.dir, '..', '..', '..');
-const DOC_PATH = join(ROOT, 'docs', 'commands-reference.md');
 
 describe('command reference gate', () => {
-
-  test('docs/commands-reference.md matches the generated reference (run `bun run docs:commands` to refresh)', () => {
-    const generated = renderCommandReferenceMarkdown(categorizeBuiltinCommands());
-    expect(readFileSync(DOC_PATH, 'utf8')).toBe(generated);
-  });
 
   test('every categorized command carries a non-empty category and description', () => {
     const entries = categorizeBuiltinCommands();

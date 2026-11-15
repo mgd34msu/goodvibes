@@ -14,17 +14,13 @@
  * This module is the single place that calls the host's automation.runs.list
  * operator method (?since=<epoch-ms>) and normalizes its output into the
  * plain shapes the digest and the schedule surface both need. It never
- * throws, every failure mode (no token, host unreachable, incompatible
- * host) resolves to an empty result so the caller can stay best-effort and
+ * throws, every failure mode (no credential, host unreachable or slow,
+ * refused) resolves to an empty result naming the cause, so the caller can stay best-effort and
  * offline-tolerant, matching the away-digest's existing silent-failure
  * contract. It never falls back to the local automation manager.
  */
-import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
-import {
-  resolveAgentConnectedHostConnection,
-  type AgentConnectedHostConfigReader,
-  type AgentConnectedHostConnection,
-} from './routine-schedule-promotion.ts';
+import { createConnectedHost, isHostFailure, type ConnectedHost } from './connected-host-client.ts';
+import type { AgentConnectedHostConfigReader, AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 export const AUTOMATION_RUNS_LIST_METHOD = 'automation.runs.list';
 
@@ -121,19 +117,21 @@ function readDeliveries(run: Record<string, unknown>): readonly AutomationRunDel
 /**
  * Fetch every automation run active on or after `since` (epoch ms) from the
  * connected host, normalized into outcomes + sent deliveries. Returns an
- * empty result (never throws) when there is no token, the host is
- * unreachable, or the response cannot be parsed, with `unavailable` naming why,
- * so a caller can say it could not check rather than that nothing ran. Callers
+ * empty result (never throws) when there is no credential, the host is
+ * unreachable or slow, or it refused, with `unavailable` naming why, so a
+ * caller can say it could not check rather than that nothing ran. Callers
  * must not fall back to a local read on failure.
  */
 export async function listAutomationRunsSince(
-  connection: AgentConnectedHostConnection,
+  host: ConnectedHost | AgentConnectedHostConnection,
   since: number,
+  options: { readonly signal?: AbortSignal } = {},
 ): Promise<AutomationRunsSinceResult> {
-  if (!connection.token) return unavailableResult('no connected-host operator token', 'not_configured');
+  const client = 'invoke' in host
+    ? host
+    : createConnectedHost(() => ({ baseUrl: host.baseUrl, token: host.token, credential: host.tokenPath }));
   try {
-    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
-    const output: unknown = await platformClient.operator.invoke(AUTOMATION_RUNS_LIST_METHOD, { since });
+    const output: unknown = await client.invoke(AUTOMATION_RUNS_LIST_METHOD, { since }, { signal: options.signal });
     const record = isRecord(output) ? output : {};
     const rawRuns: readonly unknown[] = Array.isArray(record.runs) ? record.runs : [];
     const runs: AutomationRunOutcome[] = [];
@@ -144,22 +142,25 @@ export async function listAutomationRunsSince(
       if (isRecord(raw)) deliveries.push(...readDeliveries(raw));
     }
     return { runs, deliveries };
-  } catch {
-    return unavailableResult('the connected host did not answer', 'no_answer');
+  } catch (error) {
+    if (!isHostFailure(error)) return unavailableResult(error instanceof Error ? error.message : String(error), 'no_answer');
+    const notConfigured = error.kind === 'auth_required'
+      && (error.refusal.code === 'no_credential' || error.refusal.code === 'dial_disabled');
+    return unavailableResult(error.refusal.reason, notConfigured ? 'not_configured' : 'no_answer');
   }
 }
 
 /**
  * Build the `listAutomationRunsSince` callback AutonomySurfacingOptions
- * wants, resolving the connected-host connection fresh on every call (the
- * token file can rotate). Extracted here (rather than inlined at the
- * main.ts call site) purely to keep that wiring to one line there.
+ * wants. The connected-host client resolves the host and credential on every
+ * call (a pairing or token file can change) and bounds the wait.
  */
 export function buildListAutomationRunsSince(
   configManager: AgentConnectedHostConfigReader,
   homeDirectory: string,
 ): (since: number) => Promise<AutomationRunsSinceResult> {
-  return (since) => listAutomationRunsSince(resolveAgentConnectedHostConnection(configManager, homeDirectory), since);
+  const host = createConnectedHost({ configManager, homeDirectory });
+  return (since) => listAutomationRunsSince(host, since);
 }
 
 /**

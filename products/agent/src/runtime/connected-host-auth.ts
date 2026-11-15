@@ -6,8 +6,12 @@ import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platf
 
 type JsonRecord = Record<string, unknown>;
 
+/** Where a connected-host credential came from, in precedence order. */
+export type ConnectedHostCredentialSource = 'environment' | 'pairing' | 'operator-file';
+
 export interface ConnectedHostOperatorToken {
   readonly path: string;
+  readonly source: ConnectedHostCredentialSource;
   readonly present: boolean;
   readonly token: string | null;
   /** Only private pairing records bind a token to a locally known principal. */
@@ -40,6 +44,7 @@ export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: 
   if (connectedHostEnvToken) {
     return selected({
       path: 'env:GOODVIBES_CONNECTED_HOST_TOKEN',
+      source: 'environment',
       present: true,
       token: connectedHostEnvToken,
     });
@@ -48,27 +53,28 @@ export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: 
   if (legacyEnvToken) {
     return selected({
       path: 'env:GOODVIBES_DAEMON_TOKEN',
+      source: 'environment',
       present: true,
       token: legacyEnvToken,
     });
   }
   if (hostUrl !== undefined) {
     const pairing = readAgentHostPairing(homeDirectory, hostUrl);
-    if (pairing.status === 'paired') return selected({ path: 'Agent host-bound pairing store', present: true, token: pairing.token, expectedPrincipalId: `pairing:${pairing.tokenId}` }, pairing);
-    if (pairing.status === 'unknown') return selected({ path: 'Agent host-bound pairing store', present: true, token: null, error: 'A prior pairing outcome is unknown; no credential fallback or remint is allowed.' }, pairing);
-    if (pairing.status === 'unavailable') return selected({ path: 'Agent host-bound pairing store', present: true, token: null, error: 'The Agent host-bound pairing store could not be read safely.' }, pairing);
+    if (pairing.status === 'paired') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: pairing.token, expectedPrincipalId: `pairing:${pairing.tokenId}` }, pairing);
+    if (pairing.status === 'unknown') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: 'A prior pairing outcome is unknown; no credential fallback or remint is allowed.' }, pairing);
+    if (pairing.status === 'unavailable') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: 'The Agent host-bound pairing store could not be read safely.' }, pairing);
   }
   const path = connectedHostOperatorTokenPath(homeDirectory);
-  if (!existsSync(path)) return selected({ path, present: false, token: null });
+  if (!existsSync(path)) return selected({ path, source: 'operator-file', present: false, token: null });
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
     const token = isRecord(parsed) && typeof parsed.token === 'string' && parsed.token.trim().length > 0
       ? parsed.token
       : null;
-    return selected({ path, present: true, token });
+    return selected({ path, source: 'operator-file', present: true, token });
   } catch {
     // Parser diagnostics can quote the secret-bearing source text.
-    return selected({ path, present: true, token: null, error: 'Connected-host token record could not be read.' });
+    return selected({ path, source: 'operator-file', present: true, token: null, error: 'Connected-host token record could not be read.' });
   }
 }
 

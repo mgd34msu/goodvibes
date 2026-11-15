@@ -1,12 +1,11 @@
 /**
- * Typed connected-host operator gateway calls for CLI and Agent features.
- * Failure reporting shares the engine contract used by schedule commands;
- * classification never retries an operator mutation.
+ * Typed connected-host operator gateway calls for CLI and Agent features: a
+ * result-value face over the one connected-host client
+ * (connected-host-client.ts), which owns resolution, deadlines and failure
+ * classification. Never retries an operator mutation.
  */
-import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import { classifyConnectedHostError } from './connected-host-failure.ts';
+import { createConnectedHost, isHostFailure, type HostCallApplied, type HostRefusal } from './connected-host-client.ts';
 import type { AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 export type OperatorGatewayCallFailureKind =
@@ -14,7 +13,8 @@ export type OperatorGatewayCallFailureKind =
   | 'connected_host_unavailable'
   | 'connected_host_incompatible'
   | 'connected_host_route_unavailable'
-  | 'connected_host_error';
+  | 'connected_host_error'
+  | 'cancelled';
 
 export interface OperatorGatewayCallSuccess<T> {
   readonly ok: true;
@@ -26,102 +26,53 @@ export interface OperatorGatewayCallSuccess<T> {
 export interface OperatorGatewayCallFailure {
   readonly ok: false;
   readonly kind: OperatorGatewayCallFailureKind;
+  /** `<what failed>: <cause>; <next step>`. */
   readonly error: string;
   readonly methodId: OperatorMethodId;
   readonly route: string;
   readonly baseUrl?: string;
+  /** State, reason and next steps, for a caller that renders them itself. */
+  readonly refusal?: HostRefusal;
+  /** Whether the host may have acted: `unknown` for a write that was sent and not answered. */
+  readonly applied?: HostCallApplied;
 }
 
 export type OperatorGatewayCallResult<T> = OperatorGatewayCallSuccess<T> | OperatorGatewayCallFailure;
 
+export interface OperatorGatewayCallOptions {
+  readonly signal?: AbortSignal | undefined;
+  /** The caller's currency check, run once before the request leaves. */
+  readonly assertCurrent?: (() => void) | undefined;
+}
+
 /**
  * Invoke one operator gateway method against the connected host, returning a
- * discriminated result instead of throwing. `route` is an informational HTTP
- * route label used in error/preview output; the platform's operator.invoke resolves
- * the actual HTTP method/path from the operator contract itself.
+ * discriminated result instead of throwing. `route` is the caller's label; the
+ * route reported back is the one the operator contract binds the method to.
  *
- * ## Why the payload is typed against the method id
- *
- * This used to take `payload: unknown` and call `invoke(methodId, payload as never)`.
- * That was a total opt-out: no operator body the agent sent was ever checked
- * against its declared input, for any method. Two breaking contract changes
- * landed during one round, `authority` becoming required on the profile write
- * verbs, then `profile.forget` dropping `lineIndex`, and both compiled clean
- * here and were caught only by reading the platform source.
- *
- * The platform's typed overload was correct all along. The escape is the loose one
- * beneath it (`invoke<T>(methodId: string, input?: Record<string, unknown>)`):
- * a known method id carrying a wrong body fails the typed overload and silently
- * matches the loose one, and `as never` guaranteed the typed overload was never
- * reached at all. Binding the payload to `OperatorMethodInput<TMethodId>` and
- * dropping the cast puts every call site back on the typed overload, so the next
- * contract change is a compile error rather than a runtime 400.
- *
- * A method whose generated type is genuinely wrong should cast at ITS OWN call
- * site, visibly, rather than every call site opting out through this one.
+ * The payload is bound to `OperatorMethodInput<TMethodId>`, so a body that
+ * does not match the method's declared input is a compile error at the call
+ * site rather than a runtime 400.
  */
 export async function invokeOperatorGatewayMethod<TMethodId extends OperatorMethodId>(
   connection: AgentConnectedHostConnection,
   methodId: TMethodId,
   route: string,
   payload: OperatorMethodInput<TMethodId>,
-  options: JudgmentReadingOptions = {},
+  options: OperatorGatewayCallOptions = {},
 ): Promise<OperatorGatewayCallResult<OperatorMethodOutput<TMethodId>>> {
-  const fetch = globalThis.fetch;
-  const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
-  assertCurrent();
-  if (!connection.token) {
-    return {
-      ok: false,
-      kind: 'auth_required',
-      error: `No connected-host operator token found at ${connection.tokenPath}`,
-      methodId,
-      route,
-      baseUrl: connection.baseUrl,
-    };
-  }
-  const failed = async (error: unknown): Promise<OperatorGatewayCallFailure> => {
-    assertCurrent();
-    const failure = await classifyConnectedHostError(error, connection, {
-      route,
-      incompatibleMessage: `Connected GoodVibes host compatibility does not satisfy Agent requirements; ${methodId} is unavailable.`,
-      site: 'agent.operator-gateway.failure',
-    });
-    assertCurrent(); return { ...failure, methodId };
-  };
-  try {
-    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token,
-      ...(options.assertCurrent || options.signal ? { retry: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
-        fetch: async (input, init) => {
-          assertCurrent();
-          if (globalThis.fetch !== fetch) throw new Error('Operator transport changed.');
-          const signal = AbortSignal.any([...(options.signal ? [options.signal] : []), ...(init?.signal ? [init.signal] : [])]);
-          const response = await fetch(input, { ...init, signal });
-          assertCurrent(); return response;
-        } } : {}),
-    });
-    // The platform's typed overload takes a CONDITIONAL argument tuple
-    // (`MethodArgs` makes the input optional when every key is optional), and a
-    // conditional type cannot be resolved against a still-generic `TMethodId`
-    // inside this function. So the tuple shape, and only the tuple shape, is
-    // asserted here, at the single seam, with both ends of it still bound to
-    // `TMethodId`. Every caller is checked: a wrong body or a wrong expected
-    // output is a compile error at the call site, which is exactly what the old
-    // `payload as never` gave away.
-    const invokeTyped = platformClient.operator.invoke as unknown as (
-      methodId: TMethodId,
-      input: OperatorMethodInput<TMethodId>,
-    ) => Promise<OperatorMethodOutput<TMethodId>>;
-    // Awaiting a still-generic operator output makes TypeScript expand every
-    // method's output through Awaited. Wrap the fully typed result first;
-    // preserve the same classification for both rejection and setup throws.
-    return invokeTyped(methodId, payload).then(
-      (data): OperatorGatewayCallSuccess<OperatorMethodOutput<TMethodId>> => { assertCurrent(); return { ok: true, data, methodId, route }; },
-      failed,
-    );
-  } catch (error) {
-    return failed(error);
-  }
+  options.signal?.throwIfAborted(); options.assertCurrent?.();
+  const host = createConnectedHost(() => ({ baseUrl: connection.baseUrl, token: connection.token, credential: connection.tokenPath }));
+  // Wrap the typed result before it is awaited: awaiting a still-generic
+  // operator output makes TypeScript expand every method's output.
+  return host.invoke(methodId, payload, { signal: options.signal }).then(
+    (data): OperatorGatewayCallSuccess<OperatorMethodOutput<TMethodId>> => ({ ok: true, data, methodId, route }),
+    (error: unknown): OperatorGatewayCallFailure => isHostFailure(error)
+      ? { ok: false, kind: error.kind, error: error.message, methodId, route: error.route, baseUrl: error.baseUrl,
+        refusal: error.refusal, applied: error.applied }
+      : { ok: false, kind: 'connected_host_error', error: error instanceof Error ? error.message : String(error),
+        methodId, route, baseUrl: connection.baseUrl },
+  );
 }
 
 export function formatOperatorGatewayFailure(failure: OperatorGatewayCallFailure): string {

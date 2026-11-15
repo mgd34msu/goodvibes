@@ -382,10 +382,12 @@ export const CONTRACTS_START_INPUT_SCHEMA = objectSchema({
   sessionId: STRING_SCHEMA,
   workspaceRoot: STRING_SCHEMA,
   isolation: ISOLATION_INPUT_SCHEMA,
+  idempotencyKey: STRING_SCHEMA,
 }, ['ask']);
 export const CONTRACTS_START_OUTPUT_SCHEMA = objectSchema({
   contract: CONTRACT_VIEW_SCHEMA,
   ownerAgentId: STRING_SCHEMA,
+  replayed: BOOLEAN_SCHEMA,
 }, ['contract', 'ownerAgentId']);
 
 export const CONTRACTS_CANCEL_INPUT_SCHEMA = objectSchema({ contractId: STRING_SCHEMA, reason: STRING_SCHEMA }, ['contractId']);

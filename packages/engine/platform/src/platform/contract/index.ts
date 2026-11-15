@@ -376,7 +376,6 @@ export type {
 // The command line (section 10.1): the whole CLI as one function, for the bin and a product's run command.
 export {
   CLI_CANCEL_REASON,
-  CLI_INTERRUPT_REASON,
   CONTRACT_CLI_USAGE,
   EXIT_AWAITING_OWNER,
   EXIT_FAILED,

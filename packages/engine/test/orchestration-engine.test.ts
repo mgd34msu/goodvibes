@@ -68,8 +68,6 @@ interface Harness {
   readonly registeredSignals: Map<string, AbortSignal>;
   readonly configManager: Pick<import('../platform/src/platform/config/manager.js').ConfigManager, 'get' | 'getCategory'>;
   readonly commitCalls: Array<{ message: string; paths?: string[] | undefined }>;
-  readonly mergeCalls: string[];
-  readonly cleanupCalls: string[];
   readonly projectRoot: string;
   readonly configOverrides: { gates: Array<{ name: string; command: string; enabled: boolean }>; commitScope: 'off' | 'scoped' | 'all' };
   makeEngine(depsOverrides?: Partial<OrchestrationEngineDeps>): ReturnType<typeof createOrchestrationEngine>;
@@ -85,8 +83,6 @@ function makeHarness(projectRoot: string): Harness {
   const cancelCalls: Array<{ id: string; kind: 'interrupt' | 'kill' }> = [];
   const registeredSignals = new Map<string, AbortSignal>();
   const commitCalls: Array<{ message: string; paths?: string[] | undefined }> = [];
-  const mergeCalls: string[] = [];
-  const cleanupCalls: string[] = [];
   let counter = 0;
 
   const configOverrides = { gates: [] as Array<{ name: string; command: string; enabled: boolean }>, commitScope: 'scoped' as 'off' | 'scoped' | 'all' };
@@ -145,13 +141,6 @@ function makeHarness(projectRoot: string): Harness {
   };
 
   const createWorktree = (): WorktreeOps => ({
-    merge: async (agentId) => {
-      mergeCalls.push(agentId);
-      return true;
-    },
-    cleanup: async (agentId) => {
-      cleanupCalls.push(agentId);
-    },
     commitWorkingTree: async (message, paths) => {
       commitCalls.push({ message, paths });
       return { hash: 'commit-hash', skippedIgnored: [] };
@@ -214,7 +203,7 @@ function makeHarness(projectRoot: string): Harness {
 
   return {
     bus, agentManager, agentStore, spawnedTasks, cancelCalls, registeredSignals, configManager,
-    commitCalls, mergeCalls, cleanupCalls, projectRoot, configOverrides,
+    commitCalls, projectRoot, configOverrides,
     makeEngine, completeAgent, failAgent, cancelAgentEvent,
   };
 }
@@ -513,7 +502,6 @@ describe('primitive reuse', () => {
     expect(item.state).toBe('passed');
     expect(h.commitCalls.length).toBe(1);
     expect(h.commitCalls[0]!.paths).toEqual(['real-file.ts']);
-    expect(h.mergeCalls).toContain(item.agentId!);
   });
 
   test('commitScope "off" never commits even on a passing gate', async () => {
@@ -543,8 +531,6 @@ describe('dual-outcome: post-gate bookkeeping never contradicts a passed phase',
   /** A worktree whose commit always throws with the given error, exercises the post-gate commit-failure paths. */
   function throwingWorktree(error: Error): () => WorktreeOps {
     return () => ({
-      merge: async () => true,
-      cleanup: async () => { /* no-op */ },
       commitWorkingTree: async () => { throw error; },
       currentHead: async () => null,
     });

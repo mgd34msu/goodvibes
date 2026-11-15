@@ -17,13 +17,13 @@ import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { OwnerReplyRefusedError, type OwnerReplyOutcome } from './escalation.js';
 import type { ContractRunner } from './runner.js';
-import { isTerminalContractStatus, type ContractOrigin, type ContractView, type NativeContractSource } from './types.js';
+import { isTerminalContractStatus, type ContractOrigin, type ContractView, type NativeContractSource, type StartContractInput } from './types.js';
 
 /** The session a contract started over the operator surface without a session belongs to. */
 export const OPERATOR_SESSION_ID = 'operator';
 
 /** The runner surface the service reads and acts through. */
-export type OperatorContractRunner = Pick<ContractRunner, 'start' | 'get' | 'list' | 'cancel' | 'reply'>;
+export type OperatorContractRunner = Pick<ContractRunner, 'start' | 'startIdempotent' | 'get' | 'list' | 'cancel' | 'reply'>;
 
 /** A live hosted session's floor runner and the workspace its turns work in. */
 export interface HostedSessionContracts {
@@ -63,11 +63,19 @@ export interface OperatorStartInput {
    */
   readonly workspaceRoot?: string | undefined;
   readonly isolation?: 'auto' | 'worktree' | 'shared' | undefined;
+  /**
+   * The caller's retry key (the Idempotency-Key header). The same caller and
+   * key return the contract the first call started, also after a daemon
+   * restart, instead of starting the work again.
+   */
+  readonly idempotencyKey?: string | undefined;
 }
 
 export interface OperatorStartedContract {
   readonly contract: ContractView;
   readonly ownerAgentId: string;
+  /** True when an earlier call with the same retry key started this contract. */
+  readonly replayed?: boolean | undefined;
 }
 
 export interface ContractOperatorService {
@@ -236,14 +244,24 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       );
     }
     const origin: ContractOrigin = hosted === null ? 'external' : 'hosted';
-    const started = await (hosted?.runner ?? deps.runner).start({
+    const runner = hosted?.runner ?? deps.runner;
+    const startInput: StartContractInput = {
       ask,
       ...(hosted?.selectedModel === undefined ? {} : { selectedModel: hosted.selectedModel }),
       sessionId: input.sessionId ?? OPERATOR_SESSION_ID,
       origin,
       projectRoot: hosted?.workspaceRoot ?? input.workspaceRoot ?? deps.workingDirectory,
       ...(input.isolation === undefined ? {} : { isolation: input.isolation }),
-    });
+    };
+    if (input.idempotencyKey !== undefined && runner.startIdempotent !== undefined) {
+      const keyed = await runner.startIdempotent(startInput, { principalId: input.principalId ?? '', key: input.idempotencyKey });
+      return {
+        contract: projectContractOperatorView(keyed.contract),
+        ownerAgentId: keyed.ownerAgentId,
+        ...(keyed.replayed ? { replayed: true } : {}),
+      };
+    }
+    const started = await runner.start(startInput);
     return { contract: projectContractOperatorView(started.contract), ownerAgentId: started.owner.id };
   }
 

@@ -130,12 +130,10 @@ describe('OrchestrationEngine.join', () => {
     recordSettled(joined, log);
     await executionEntered.promise;
     expect(h.cancelCalls.some((call) => call.agentId === 'agent-1')).toBe(true);
-    expect(h.worktree.cleanups).toHaveLength(0);
     log.push('executor-exits');
     execution.resolve();
     await joined;
     expect(log).toEqual(['executor-exits', 'joined']);
-    expect(h.worktree.cleanups).toEqual(['agent-1']);
     expect(ws.items[0]!.state).toBe('failed');
   });
 
@@ -147,7 +145,6 @@ describe('OrchestrationEngine.join', () => {
     engine.dispose();
     await engine.join();
     expect(ws.items[0]!.state).toBe('failed');
-    expect(h.worktree.cleanups).toEqual(['agent-1']);
   });
 
   test('a completion emitted inside spawn is observed before spawn returns', async () => {
@@ -274,7 +271,6 @@ describe('OrchestrationEngine.join', () => {
     const joined = engine.join();
     recordSettled(joined, log);
     await executionEntered.promise;
-    expect(h.worktree.cleanups).toHaveLength(0);
     log.push('executor-exits');
     execution.resolve();
     await joined;

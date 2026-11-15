@@ -1,0 +1,51 @@
+import { afterEach, expect, test } from 'bun:test';
+import { rmSync } from 'node:fs';
+import { RefusalError } from '@goodvibes-jev/engine/errors';
+import { makeHarness, makeRepo, oneUnitPlan, type Harness } from './runner-support.js';
+
+const roots: string[] = [];
+const harnesses: Harness[] = [];
+afterEach(async () => {
+  for (const h of harnesses.splice(0)) {
+    const ids = h.runner.list({ includeTerminal: true }).map((row) => row.id);
+    await Promise.resolve(h.dispose()).catch(() => undefined);
+    await Promise.all(ids.map((id) => h.runner.join(id).catch(() => undefined)));
+  }
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function harness(root: string): Harness {
+  const value = makeHarness({ root, contract: { maxActiveContracts: 0 }, plan: oneUnitPlan(), scripts: {} });
+  harnesses.push(value);
+  return value;
+}
+
+const input = (projectRoot: string, ask = 'Keep the original requested work') =>
+  ({ ask, sessionId: 'retry-session', origin: 'external' as const, projectRoot, isolation: 'shared' as const });
+
+test('a retried start with the same caller and key returns the first contract, also after a restart, and starts no second one', async () => {
+  const root = makeRepo(); roots.push(root);
+  const first = harness(root);
+  const started = await first.runner.startIdempotent!(input(root), { principalId: 'p1', key: 'k1' });
+  expect(started.replayed).toBe(false);
+  const retry = await first.runner.startIdempotent!(input(root), { principalId: 'p1', key: 'k1' });
+  expect(retry).toMatchObject({ replayed: true, ownerAgentId: started.ownerAgentId });
+  expect(retry.contract.id).toBe(started.contract.id);
+  expect(first.runner.list({ includeTerminal: true })).toHaveLength(1);
+
+  let refused: unknown;
+  try { await first.runner.startIdempotent!(input(root, 'A different request'), { principalId: 'p1', key: 'k1' }); }
+  catch (error) { refused = error; }
+  expect(refused).toBeInstanceOf(RefusalError);
+  expect((refused as RefusalError).refusal).toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED', status: 409 });
+
+  const other = await first.runner.startIdempotent!(input(root), { principalId: 'p2', key: 'k1' });
+  expect(other.replayed).toBe(false);
+  expect(other.contract.id).not.toBe(started.contract.id);
+
+  await first.dispose();
+  const restarted = harness(root);
+  const afterRestart = await restarted.runner.startIdempotent!(input(root), { principalId: 'p1', key: 'k1' });
+  expect(afterRestart.replayed).toBe(true);
+  expect(afterRestart.contract.id).toBe(started.contract.id);
+});

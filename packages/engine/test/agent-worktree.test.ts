@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentWorktree, AgentWorktreeMergeConflictError } from '../platform/src/platform/agents/worktree.js';
+import { AgentWorktree } from '../platform/src/platform/agents/worktree.js';
 import { GitService } from '../platform/src/platform/git/service.js';
 
 const roots: string[] = [];
@@ -314,64 +314,5 @@ describe('AgentWorktree', () => {
     expect(runGit(root, ['diff', '--cached', '--name-only']).trim()).toBe('');
     // And the working-tree file is untouched (still present, just not staged).
     expect(runGit(root, ['status', '--porcelain']).trim()).toContain('deliverable.ts');
-  });
-});
-
-describe('AgentWorktree.merge', () => {
-  function mergeFixture(prefix: string) {
-    const root = tempRoot(prefix);
-    runGit(root, ['init', '-b', 'main']);
-    runGit(root, ['config', 'user.name', 'Native fixture']);
-    runGit(root, ['config', 'user.email', 'native-fixture@example.test']);
-    writeFileSync(join(root, 'shared.ts'), 'base\n');
-    runGit(root, ['add', '.']); runGit(root, ['commit', '-m', 'baseline']);
-    return root;
-  }
-  function commitIn(path: string, message: string): void {
-    runGit(path, ['add', '-A']);
-    runGit(path, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-m', message]);
-  }
-  const branchOf = (root: string, name: string): boolean => Bun.spawnSync(['git', 'rev-parse', '--verify', '-q', `refs/heads/${name}`], { cwd: root }).exitCode === 0;
-
-  test('a conflicting merge keeps the worktree, its branch and its uncommitted work, and names the conflict', async () => {
-    const root = mergeFixture('agent-worktree-conflict-');
-    const agents = new AgentWorktree(root);
-    const path = await agents.create('a1');
-    writeFileSync(join(path, 'shared.ts'), 'agent\n');
-    commitIn(path, 'agent change');
-    writeFileSync(join(path, 'scratch.txt'), 'uncommitted\n');
-    writeFileSync(join(root, 'shared.ts'), 'main\n');
-    runGit(root, ['commit', '-am', 'main change']);
-    const failure = await agents.merge('a1').catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(AgentWorktreeMergeConflictError);
-    expect((failure as AgentWorktreeMergeConflictError).conflicts).toEqual(['shared.ts']);
-    expect(existsSync(path)).toBe(true);
-    expect(readFileSync(join(path, 'scratch.txt'), 'utf8')).toBe('uncommitted\n');
-    expect(branchOf(root, 'agent/a1')).toBe(true);
-    expect(runGit(root, ['status', '--porcelain', '--', ':!.goodvibes'])).toBe('');
-    expect(readFileSync(join(root, 'shared.ts'), 'utf8')).toBe('main\n');
-  });
-
-  test('a clean merge removes the worktree and deletes the merged branch', async () => {
-    const root = mergeFixture('agent-worktree-clean-merge-');
-    const agents = new AgentWorktree(root);
-    const path = await agents.create('a2');
-    writeFileSync(join(path, 'new.ts'), 'agent\n');
-    commitIn(path, 'agent change');
-    expect(await agents.merge('a2')).toBe(true);
-    expect(existsSync(path)).toBe(false);
-    expect(branchOf(root, 'agent/a2')).toBe(false);
-    expect(readFileSync(join(root, 'new.ts'), 'utf8')).toBe('agent\n');
-  });
-
-  test('a merged worktree that still holds uncommitted work is kept rather than forced away', async () => {
-    const root = mergeFixture('agent-worktree-dirty-merge-');
-    const agents = new AgentWorktree(root);
-    const path = await agents.create('a3');
-    writeFileSync(join(path, 'new.ts'), 'agent\n');
-    commitIn(path, 'agent change');
-    writeFileSync(join(path, 'late.txt'), 'written after the commit\n');
-    expect(await agents.merge('a3')).toBe(true);
-    expect(readFileSync(join(path, 'late.txt'), 'utf8')).toBe('written after the commit\n');
   });
 });

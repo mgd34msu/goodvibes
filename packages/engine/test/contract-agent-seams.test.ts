@@ -618,8 +618,6 @@ describe('phase runner contract binding', () => {
       runtimeBus,
       projectRoot: workDir(),
       createWorktree: () => ({
-        merge: async () => true,
-        cleanup: async () => {},
         commitWorkingTree: async () => ({ hash: null, skippedIgnored: [] }),
         currentHead: async () => null,
       }),

@@ -7,5 +7,5 @@ Not met:
 - [u1.c4] The parser tests pass
 - [u1.c5] parseDate is exported from src/index.ts
 Goal: The work as a whole does not yet do what the unit is for: parseDate reads every documented date form
-Claims not found on disk:
+Claims not changed by this unit:
 - No changed files were found and your report names none; this unit must change files to meet its criteria.

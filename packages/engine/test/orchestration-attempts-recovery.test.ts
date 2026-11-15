@@ -240,8 +240,6 @@ function engineHarness(projectRoot: string): EngineHarness {
       : undefined),
   } as unknown as OrchestrationEngineDeps['configManager'];
   const createWorktree = (): WorktreeOps => ({
-    merge: async () => true,
-    cleanup: async () => undefined,
     commitWorkingTree: async () => ({ hash: 'commit-hash', skippedIgnored: [] }),
     currentHead: async () => 'head-hash',
   });

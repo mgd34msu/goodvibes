@@ -181,50 +181,35 @@ function readExplicitUserRequest(req: Request): boolean | undefined {
 
 const MAX_IDEMPOTENCY_KEY_LENGTH = 255;
 const MAX_ACKNOWLEDGED_RECEIPTS = 200;
-const MAX_REMEMBERED_CONTRACT_STARTS = 1000;
+
+/**
+ * contracts.start takes a caller's retry key in the Idempotency-Key header.
+ * It goes to the handler as `idempotencyKey`, where the contract runner keeps
+ * it with the contract store, so a retry on either path, also after a daemon
+ * restart, returns the first contract. The header wins over a body field.
+ */
+function withContractRetryKey(methodId: string, req: Request, body: unknown): unknown {
+  if (methodId !== 'contracts.start') return body;
+  const key = req.headers.get('idempotency-key')?.trim();
+  if (!key) return body;
+  if (key.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+    return jsonErrorResponse({ error: `Idempotency-Key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`, code: 'INVALID_ARGUMENT' }, { status: 400 });
+  }
+  const record = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  return { ...record, idempotencyKey: key };
+}
+
+/** A gateway call's answer; a contracts.start that returned an earlier call's contract says so in a header. */
+function gatewayCallResponse(methodId: string, response: { readonly status: number; readonly body: unknown }): Response {
+  const replayed = methodId === 'contracts.start'
+    && response.body !== null && typeof response.body === 'object'
+    && (response.body as { readonly replayed?: unknown }).replayed === true;
+  return Response.json(response.body, { status: response.status, ...(replayed ? { headers: { 'Idempotent-Replayed': 'true' } } : {}) });
+}
 
 export function createDaemonControlRouteHandlers(
   context: ControlRouteContext,
 ): DaemonControlRouteHandlers {
-  // A client retrying a dispatch whose answer it never saw sends the same
-  // Idempotency-Key; the retry gets the first contract instead of starting a
-  // second one. Only a started contract is remembered, so a refused or failed
-  // dispatch can be retried. Held in memory, bounded: a daemon restart forgets
-  // keys, and a retry that crosses a restart starts a new contract.
-  const contractStarts = new Map<string, { readonly fingerprint: string; readonly result: Promise<{ readonly status: number; readonly body: unknown }> }>();
-  const replayableContractStart = async (
-    scopedKey: string,
-    fingerprint: string,
-    dispatch: () => Promise<{ readonly status: number; readonly body: unknown }>,
-  ): Promise<Response> => {
-    const known = contractStarts.get(scopedKey);
-    if (known) {
-      if (known.fingerprint !== fingerprint) {
-        return jsonErrorResponse({
-          error: 'This Idempotency-Key was already used for a different contract request; use a new key for a different request.',
-          code: 'IDEMPOTENCY_KEY_REUSED',
-        }, { status: 409 });
-      }
-      const first = await known.result.catch(() => null);
-      if (first) return Response.json(first.body, { status: first.status, headers: { 'Idempotent-Replayed': 'true' } });
-      // The first attempt failed and removed itself; this one is a fresh try.
-      return replayableContractStart(scopedKey, fingerprint, dispatch);
-    }
-    const result = dispatch();
-    contractStarts.set(scopedKey, { fingerprint, result });
-    if (contractStarts.size > MAX_REMEMBERED_CONTRACT_STARTS) {
-      const oldest = contractStarts.keys().next().value;
-      if (oldest !== undefined) contractStarts.delete(oldest);
-    }
-    try {
-      const response = await result;
-      if (response.status >= 300) contractStarts.delete(scopedKey);
-      return Response.json(response.body, { status: response.status });
-    } catch (error) {
-      contractStarts.delete(scopedKey);
-      throw error;
-    }
-  };
   return {
     postLogin: (req) => context.login
       ? context.login(req)
@@ -361,12 +346,14 @@ export function createDaemonControlRouteHandlers(
       if (parsedBody instanceof Response) return parsedBody;
       const payload = controlBodySchemas.gatewayInvoke.parse(parsedBody ?? {});
       if (payload instanceof Response) return payload;
+      const invokeBody = withContractRetryKey(methodId, req, payload.body);
+      if (invokeBody instanceof Response) return invokeBody;
       const response = await context.invokeGatewayMethodCall({
         authToken: context.extractAuthToken(req),
         signal: req.signal,
         methodId,
         query: payload.query,
-        body: payload.body,
+        body: invokeBody,
         context: {
           principalId: principal?.principalId,
           principalKind: principal?.principalKind,
@@ -378,7 +365,7 @@ export function createDaemonControlRouteHandlers(
             : { explicitUserRequest: readExplicitUserRequest(req) }),
         },
       });
-      return Response.json(response.body, { status: response.status });
+      return gatewayCallResponse(methodId, response);
     },
     invokeGatewayRestVerb: async (invocation: GatewayRestVerbInvocation) => {
       // REST parity for a handler-backed gateway verb reached by its advertised
@@ -418,12 +405,14 @@ export function createDaemonControlRouteHandlers(
       const query: Record<string, unknown> = {};
       for (const [key, value] of searchParams) query[key] = value;
       Object.assign(query, params);
-      const dispatch = () => context.invokeGatewayMethodCall({
+      const restBody = withContractRetryKey(methodId, req, { ...bodyRecord, ...params });
+      if (restBody instanceof Response) return restBody;
+      const response = await context.invokeGatewayMethodCall({
         authToken: context.extractAuthToken(req),
         signal: req.signal,
         methodId,
         query,
-        body: { ...bodyRecord, ...params },
+        body: restBody,
         // Carry the depth forward. This route IS the far side of a synthesized
         // dispatch, so a marked request arriving here is the loop itself.
         synthesizedDepth: readSynthesizedDispatchDepth(req),
@@ -438,17 +427,7 @@ export function createDaemonControlRouteHandlers(
             : { explicitUserRequest: readExplicitUserRequest(req) }),
         },
       });
-      if (methodId === 'contracts.start') {
-        const idempotencyKey = req.headers.get('idempotency-key')?.trim();
-        if (idempotencyKey) {
-          if (idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
-            return jsonErrorResponse({ error: `Idempotency-Key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`, code: 'INVALID_ARGUMENT' }, { status: 400 });
-          }
-          return replayableContractStart(`${principal?.principalId ?? ''}\u0000${idempotencyKey}`, JSON.stringify(bodyRecord), dispatch);
-        }
-      }
-      const response = await dispatch();
-      return Response.json(response.body, { status: response.status });
+      return gatewayCallResponse(methodId, response);
     },
     createControlPlaneEventStream: (req) => {
       const url = new URL(req.url);

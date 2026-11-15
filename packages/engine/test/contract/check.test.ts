@@ -282,7 +282,7 @@ describe('check outcomes, in table order (4.6)', () => {
     const outcome = await check({}, { evidence: evidence({ claims }) });
     expect(outcome.check.result).toBe('nudge');
     expect(outcome.nudge?.kinds).toEqual(['claims']);
-    expect(outcome.nudge?.text).toContain('- src/a.ts (claimed as created or modified; not present)');
+    expect(outcome.nudge?.text).toContain('- src/a.ts (claimed as created or modified; the unit did not change it, or it is outside the working tree)');
   });
 
   test('row 4: no claims and no changes nudges a unit that must write, not one that reads', async () => {

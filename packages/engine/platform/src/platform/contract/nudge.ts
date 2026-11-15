@@ -58,8 +58,8 @@ const NOT_SHOWN = 'Not shown (show evidence that these are met: run the command 
 const GOAL_UNMET = (goal: string): string => `Goal: The work as a whole does not yet do what the unit is for: ${goal}`;
 const QUALITY = 'Quality problems:';
 const GATES = 'Gate failures:';
-const CLAIMS = 'Claims not found on disk:';
-const CLAIM_MISSING = (path: string): string => `- ${path} (claimed as created or modified; not present)`;
+const CLAIMS = 'Claims not changed by this unit:';
+const CLAIM_MISSING = (path: string): string => `- ${path} (claimed as created or modified; the unit did not change it, or it is outside the working tree)`;
 const CLAIM_NO_CHANGES = '- No changed files were found and your report names none; this unit must change files to meet its criteria.';
 const ALREADY_MET = 'Already met (binding: do not break these):';
 

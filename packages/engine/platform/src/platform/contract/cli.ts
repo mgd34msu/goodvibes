@@ -106,8 +106,6 @@ export const EXIT_INTERRUPTED = 130;
 export const SESSION_CONTINUE_LINE = 'The contract\'s checks asked for more work on this request. Continue the work until every acceptance criterion is met.';
 /** The reason a cancel from the command line records. */
 export const CLI_CANCEL_REASON = 'Cancelled from the command line.';
-/** @deprecated Ctrl-C no longer cancels a followed contract; it stops following and keeps the contract for `resume`. */
-export const CLI_INTERRUPT_REASON = 'Interrupted from the command line.';
 
 export const CONTRACT_CLI_USAGE = [
   'Usage: goodvibes-contract <command> [options]',

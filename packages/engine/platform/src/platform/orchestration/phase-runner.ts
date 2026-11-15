@@ -20,7 +20,7 @@
  *
  * Shared-tree note: without worktree isolation every agent runs in the ONE
  * shared `projectRoot`; AgentWorktree is used only for its
- * commitWorkingTree/merge/cleanup surface. In worktree mode the engine hands
+ * commitWorkingTree/currentHead surface. In worktree mode the engine hands
  * the item's own worktree in `itemWorktree`, the agent runs there, and the
  * engine's integration lane owns merge-back and cleanup.
  */
@@ -48,10 +48,8 @@ export type PhaseRunnerAgentManagerLike = Pick<
   'spawn' | 'getStatus' | 'cancel' | 'registerCancellationSignal' | 'releaseCancellationSignal'
 > & Partial<Pick<AgentManager, 'join'>>;
 
-/** Structural pick of AgentWorktree's surface: the worktree operations a phase needs (merge, cleanup, commit, head), so tests can pass a stub. */
+/** Structural pick of AgentWorktree's surface: the shared-tree operations a phase needs (commit, head), so tests can pass a stub. */
 export interface WorktreeOps {
-  merge(agentId: string): Promise<boolean>;
-  cleanup(agentId: string): Promise<void>;
   commitWorkingTree(message: string, paths?: string[], beforeCommit?: () => void): Promise<CommitWorkingTreeResult>;
   currentHead(): Promise<string | null>;
 }
@@ -343,7 +341,7 @@ interface CommitPhaseWorkResult {
 }
 
 /**
- * Runs the POST-gate scoped-commit + merge for a passed phase and reports its
+ * Runs the POST-gate scoped commit for a passed phase and reports its
  * outcome HONESTLY rather than swallowing failures. The gate has already
  * decided the phase passed; this step only records the changes, so its result
  * is bookkeeping: a failure surfaces to the engine as a warning on a passed
@@ -354,7 +352,6 @@ interface CommitPhaseWorkResult {
 async function commitPhaseWork(
   item: WorkItem,
   phase: Phase,
-  agentId: string,
   worktree: WorktreeOps,
   deps: PhaseRunnerDeps,
 ): Promise<CommitPhaseWorkResult> {
@@ -420,7 +417,7 @@ async function commitPhaseWork(
     const originalRoot = deps.launchDirtySnapshot ? nativeDirtySnapshotRoot(deps.launchDirtySnapshot, deps.projectRoot) : undefined;
     const assertRoot = originalRoot?.assertCurrent; assertRoot?.();
     const result = await worktree.commitWorkingTree(`orchestration: ${item.title}, ${phase.kind} phase`, paths, assertRoot);
-    assertRoot?.(); await worktree.merge(agentId); assertRoot?.();
+    assertRoot?.();
     const ignoredNote = result.skippedIgnored.length > 0
       ? `${result.skippedIgnored.length} ignored path${result.skippedIgnored.length === 1 ? '' : 's'} skipped`
       : undefined;
@@ -502,7 +499,7 @@ async function settleWithoutAgent(
     const summary = outcome === 'cancelled' ? 'cancelled by operator' : 'the contract runner failed the unit before an agent ran';
     return { agentStatus: outcome, result: { ...base, report: genericReport(summary), gate: { passed: false, results: [] }, completedAt: Date.now() } };
   }
-  const committed = await commitPhaseWork(item, phase, '', worktree, deps);
+  const committed = await commitPhaseWork(item, phase, worktree, deps);
   const settledCommit = currentFailureOutcome(committed.commit, committed.bookkeeping);
   return {
     agentStatus: deps.cancellationSignal?.aborted ? 'cancelled' : 'completed',
@@ -571,7 +568,6 @@ async function runPhaseWithSignal(
   const termination = observeAgentTermination(deps.runtimeBus, deps.agentManager);
   let record: AgentRecord | undefined;
   let outcome: AgentOutcome;
-  let receivedOutcome = false;
   try {
     record = deps.agentManager.spawn({
       mode: 'spawn',
@@ -609,7 +605,6 @@ async function runPhaseWithSignal(
     } else {
       outcome = await termination.wait(record.id, signal);
     }
-    receivedOutcome = true;
   } catch (error) {
     if (record) deps.agentManager.cancel(record.id, 'kill');
     throw error;
@@ -622,7 +617,6 @@ async function runPhaseWithSignal(
         if (deps.agentManager.join) await deps.agentManager.join(record.id);
       } finally {
         deps.agentManager.releaseCancellationSignal(record.id, signal);
-        if (!receivedOutcome) await worktree.cleanup(record.id).catch(() => undefined);
       }
     }
   }
@@ -630,7 +624,6 @@ async function runPhaseWithSignal(
   const usage = usageFromRecord(outcome.record, deps.priceUsage, deps.priceProvenance);
 
   if (outcome.status === 'cancelled') {
-    await worktree.cleanup(record.id).catch(() => undefined);
     return {
       agentStatus: 'cancelled',
       result: {
@@ -651,13 +644,11 @@ async function runPhaseWithSignal(
     const retryLimit = unitSpawn ? 0 : getContractTransportRetryLimit(deps.configManager);
     if (item.transportRetryCount < retryLimit && await isTransportFailure(outcome.record?.error ?? '')) {
       item.transportRetryCount += 1;
-      await worktree.cleanup(record.id).catch(() => undefined);
       await sleep(getContractTransportRetryDelayMs(deps.configManager));
       // The failed attempt spent tokens too; the caller folds only the returned usage into the item.
       const retried = await runPhase(workstream, item, phase, priorReports, deps);
       return { ...retried, result: { ...retried.result, usage: mergeUsage(usage, retried.result.usage) } };
     }
-    await worktree.cleanup(record.id).catch(() => undefined);
     return {
       agentStatus: 'failed',
       result: {
@@ -691,18 +682,11 @@ async function runPhaseWithSignal(
   let commit: PhaseCommitOutcome | undefined;
   let bookkeeping: BookkeepingFailureReading | undefined;
   if (gate.passed) {
-    const committed = await commitPhaseWork(item, phase, record.id, worktree, deps);
+    const committed = await commitPhaseWork(item, phase, worktree, deps);
     commitExclusion = committed.exclusion;
     commit = committed.commit;
     bookkeeping = committed.bookkeeping;
   }
-  // In worktree mode the item worktree persists across phases (the engine's
-  // integration lane owns its teardown), so only the shared-mode transient
-  // worktree gets cleaned up here.
-  if (!deps.itemWorktree) {
-    await worktree.cleanup(record.id).catch(() => undefined);
-  }
-
   commit = currentFailureOutcome(commit, bookkeeping);
   return {
     agentStatus: signal.aborted ? 'cancelled' : 'completed',

@@ -10,12 +10,16 @@
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
+import { formatRefusal, RefusalError } from '@goodvibes-jev/engine/errors';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import { ContractOperatorError, projectContractOperatorView, type ContractOperatorService } from '../../contract/operator-service.js';
 
 /** The reason a cancel over the operator surface records when the caller gives none. */
 export const OPERATOR_CANCEL_REASON = 'cancelled by an operator';
+
+/** The longest retry key a caller may send (the Idempotency-Key header or `idempotencyKey`). */
+const MAX_IDEMPOTENCY_KEY_LENGTH = 255;
 
 function requireString(params: Record<string, unknown>, field: string): string {
   const value = params[field];
@@ -56,6 +60,9 @@ function toGatewayVerbError(error: unknown): never {
   if (error instanceof ContractOperatorError) {
     throw new GatewayVerbError(error.message, error.code, error.status, error.field);
   }
+  if (error instanceof RefusalError && error.refusal.code === 'IDEMPOTENCY_KEY_REUSED') {
+    throw new GatewayVerbError(formatRefusal(error.refusal), error.refusal.code, error.refusal.status ?? 409, 'idempotencyKey');
+  }
   throw error;
 }
 
@@ -91,6 +98,10 @@ export function createContractsStartHandler(service: ContractOperatorService): G
     const sessionId = optionalString(params, 'sessionId');
     const workspaceRoot = optionalString(params, 'workspaceRoot');
     const isolation = optionalIsolation(params);
+    const idempotencyKey = optionalString(params, 'idempotencyKey');
+    if (idempotencyKey !== undefined && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+      throw new GatewayVerbError(`idempotencyKey must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`, 'INVALID_ARGUMENT', 400, 'idempotencyKey');
+    }
     try {
       return await service.start({
         ask,
@@ -98,6 +109,7 @@ export function createContractsStartHandler(service: ContractOperatorService): G
         ...(invocation.context.principalId ? { principalId: invocation.context.principalId } : {}),
         ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
         ...(isolation === undefined ? {} : { isolation }),
+        ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
       });
     } catch (error) {
       return toGatewayVerbError(error);

@@ -16,8 +16,8 @@ Gate failures:
 - typecheck:
   src/date.ts(4,3): error TS2322: Type string is not assignable to type Date.
   Found 1 error.
-Claims not found on disk:
-- src/date-rfc.ts (claimed as created or modified; not present)
+Claims not changed by this unit:
+- src/date-rfc.ts (claimed as created or modified; the unit did not change it, or it is outside the working tree)
 
 Already met (binding: do not break these):
 - [u1.c5] parseDate is exported from src/index.ts

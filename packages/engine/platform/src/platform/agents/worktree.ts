@@ -120,91 +120,16 @@ function changedStatusPaths(status: string): string[] {
   return [...paths];
 }
 
-/** A merge of an agent's branch conflicted: the worktree and branch are intact and the base tree was restored. */
-export class AgentWorktreeMergeConflictError extends Error {
-  constructor(readonly branch: string, readonly worktreePath: string, readonly conflicts: readonly string[]) {
-    super(`Merging ${branch} conflicted${conflicts.length > 0 ? ` in ${conflicts.join(', ')}` : ''}. The agent's worktree (${worktreePath}) and branch were kept and the base branch was restored; resolve the conflict by hand or discard the worktree.`);
-    this.name = 'AgentWorktreeMergeConflictError';
-  }
-}
-
 /**
- * AgentWorktree, Manages git worktree lifecycle for spawned agents.
- *
- * Each agent works in an isolated git worktree so its file changes are
- * sandboxed from the main working tree.
- *
- * Lifecycle:
- *   create() , create worktree + branch, return path
- *   merge()  , merge agent branch back to current branch, remove worktree
- *   cleanup(), remove worktree without merging (cancel/error path)
+ * AgentWorktree, the scoped commit and HEAD reading on one working tree: the
+ * shared project tree of an orchestration phase, an item's own worktree
+ * (through IsolatedWorktree.commit), or a contract's result tree.
  */
 export class AgentWorktree {
   private readonly git: GitService;
 
   constructor(cwd: string) {
     this.git = new GitService(cwd);
-  }
-
-  /**
-   * Create a new worktree for the given agent.
-   * Returns the absolute path to the worktree directory.
-   */
-  async create(agentId: string): Promise<string> {
-    const worktreePath = this._worktreePath(agentId);
-    const branch = this._branchName(agentId);
-
-    logger.debug('AgentWorktree.create', { agentId, worktreePath, branch });
-
-    await this.git.worktreeAdd(worktreePath, branch);
-    return worktreePath;
-  }
-
-  /**
-   * Merge the agent's branch back into the current branch and remove the worktree.
-   * Returns true if a merge was performed, false if no changes were found. A conflicting merge throws
-   * AgentWorktreeMergeConflictError and leaves the worktree and branch in place.
-   */
-  async merge(agentId: string): Promise<boolean> {
-    const worktreePath = this._worktreePath(agentId);
-    const branch = this._branchName(agentId);
-
-    logger.debug('AgentWorktree.merge', { agentId, worktreePath, branch });
-
-    if (!(await this._branchExists(branch))) {
-      logger.debug('AgentWorktree.merge: branch missing, skipping merge', { agentId, branch });
-      return false;
-    }
-
-    const hasChanges = await this._hasChanges(worktreePath, branch);
-    if (!hasChanges) {
-      logger.debug('AgentWorktree.merge: no changes, skipping merge', { agentId });
-      // No commits to merge does not mean nothing to lose: uncommitted work in the tree is the only copy.
-      await this._releaseIfNothingUnique(worktreePath, branch);
-      return false;
-    }
-
-    // The branch ref holds the commits whether or not its worktree exists, so merge first: a conflict then
-    // leaves the worktree and branch exactly as they were, and the caller is told which files conflict.
-    const merged = await this.git.merge(branch);
-    if (!merged.success) {
-      // Put the base tree back the way it was; the agent's work stays on its branch and in its worktree.
-      await (await createSimpleGit({ baseDir: this.git.getCwd() })).raw(['merge', '--abort'])
-        .catch((error: unknown) => logger.warn('AgentWorktree.merge: merge --abort did not complete after conflict', { branch, error: summarizeError(error) }));
-      throw new AgentWorktreeMergeConflictError(branch, worktreePath, merged.conflicts ?? []);
-    }
-
-    // Merged: release the worktree and branch without force. A tree with changes still in it, or a branch that is
-    // somehow not merged, stays and is reported rather than being thrown away.
-    try {
-      if (existsSync(worktreePath)) await this.git.worktreeRemove(worktreePath);
-      await this._deleteBranch(branch);
-    } catch (error) {
-      logger.warn('AgentWorktree.merge: merged, but the worktree could not be removed without force, so it and its branch were kept', { worktreePath, branch, error: summarizeError(error) });
-    }
-
-    logger.debug('AgentWorktree.merge: complete', { agentId });
-    return true;
   }
 
   /**
@@ -410,97 +335,6 @@ export class AgentWorktree {
       return null;
     }
   }
-
-  /**
-   * Release the worktree without merging (cancel/error path). A worktree that
-   * holds the only copy of anything is kept, with its branch: uncommitted changes
-   * (tracked, untracked or ignored), commits the base branch does not
-   * have, or git state that cannot be read. Only a tree with nothing unique is
-   * removed, and never by force.
-   */
-  async cleanup(agentId: string): Promise<void> {
-    const worktreePath = this._worktreePath(agentId);
-    const branch = this._branchName(agentId);
-
-    logger.debug('AgentWorktree.cleanup', { agentId, worktreePath });
-
-    await this._releaseIfNothingUnique(worktreePath, branch);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private helpers
-  // ---------------------------------------------------------------------------
-
-  private _worktreePath(agentId: string): string {
-    return join(this.git.getCwd(), '.goodvibes', '.worktrees', `agent-${agentId}`);
-  }
-
-  private _branchName(agentId: string): string {
-    return `agent/${agentId}`;
-  }
-
-  /**
-   * Check whether the agent branch has any commits that differ from
-   * the current branch (the main working tree HEAD).
-   */
-  private async _hasChanges(worktreePath: string, branch: string): Promise<boolean> {
-    try {
-      // Use a simple-git instance pointed at the worktree to check status
-      const wgit = await createSimpleGit({ baseDir: this.git.getCwd() });
-      // Count commits on the branch that aren't on the current branch
-      const result = await wgit.raw(['rev-list', '--count', `HEAD..${branch}`]);
-      const count = parseInt(result.trim(), 10);
-      return count > 0;
-    } catch (err) {
-      // If rev-list fails (e.g. brand-new worktree with no commits), treat as no changes
-      logger.warn('AgentWorktree._hasChanges: rev-list failed, treating as no changes', { branch, worktreeDir: worktreePath, error: summarizeError(err) });
-      return false;
-    }
-  }
-
-  private async _branchExists(branch: string): Promise<boolean> {
-    try {
-      const wgit = await createSimpleGit({ baseDir: this.git.getCwd() });
-      await wgit.raw(['rev-parse', '--verify', '--quiet', branch]);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /** Why this agent's work cannot be thrown away, or null when nothing in it is unique ({@link uniqueWork} against the root tree's HEAD). */
-  private async _uniqueWork(worktreePath: string, branch: string): Promise<string | null> {
-    return uniqueWork(this.git.getCwd(), worktreePath, branch, 'HEAD');
-  }
-
-  /** Removes the worktree and its branch unless something in them is unique; never forces either. */
-  private async _releaseIfNothingUnique(worktreePath: string, branch: string): Promise<void> {
-    const unique = await this._uniqueWork(worktreePath, branch);
-    if (unique !== null) {
-      logger.warn('AgentWorktree: kept the worktree and branch because they hold work that exists nowhere else', { worktreePath, branch, reason: unique });
-      return;
-    }
-    try {
-      if (existsSync(worktreePath)) await this.git.worktreeRemove(worktreePath);
-      // -d: a branch the base does not contain survives, even if it appeared since the check.
-      const root = await createSimpleGit({ baseDir: this.git.getCwd() });
-      await root.raw(['branch', '-d', branch]).catch(() => { /* no branch: create() never completed */ });
-    } catch (error) {
-      logger.warn('AgentWorktree: the worktree could not be removed without force, so it was kept', { worktreePath, branch, error: summarizeError(error) });
-    }
-  }
-
-  /**
-   * Delete a merged branch (no-op if it doesn't exist). `-d`, so a branch the base lacks survives.
-   */
-  private async _deleteBranch(branch: string): Promise<void> {
-    try {
-      const wgit = await createSimpleGit({ baseDir: this.git.getCwd() });
-      await wgit.raw(['branch', '-d', branch]);
-    } catch (err) {
-      logger.warn('AgentWorktree._deleteBranch failed during cleanup', { branch, error: summarizeError(err) });
-    }
-  }
 }
 
 /** Outcome of integrating an item branch back into the base branch (see IsolatedWorktree.integrate). */
@@ -516,9 +350,8 @@ export type IntegrationOutcome =
  * IsolatedWorktree, one work item's dedicated git worktree for the
  * orchestration engine's `worktree` isolation mode (see WorkstreamIsolation).
  *
- * Unlike {@link AgentWorktree} (whose merge() folds an agent branch into the
- * SAME working tree's current branch and is used today only for its
- * commitWorkingTree surface), an IsolatedWorktree models the full per-item
+ * Unlike {@link AgentWorktree} (a scoped commit on an existing working tree),
+ * an IsolatedWorktree models the full per-item
  * lifecycle the engine drives:
  *
  *   create()   , add a git worktree at `path` on a fresh branch `branch`,

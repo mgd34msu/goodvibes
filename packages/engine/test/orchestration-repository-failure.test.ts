@@ -207,8 +207,6 @@ test('isolated phase cancellation settles without waiting for an uncooperative r
   const outcome = await pending;
   expect(outcome.agentStatus).toBe('cancelled');
   expect(outcome.result.commit).toMatchObject({ status: 'failed', classification: 'held', reason: 'Original isolated failure' });
-  expect(f.h.worktree.merges).toHaveLength(0);
-  expect(f.h.worktree.cleanups).toHaveLength(0);
   deferred.release(); await drain();
   expect(outcome.result.commit?.negating).toBeUndefined();
 });

@@ -380,12 +380,13 @@ The runner reads `contract.*` (`config/schema-domain-contract.ts`,
 | `contract.gates` | typecheck, lint and build, all off | Quality gate commands run at each completion check; each runs only once you enable it (`enabled: true`) |
 | `contract.gateTimeoutMs` | `0` (no limit) | Timeout per gate; `0` lets a gate run until it finishes or is cancelled |
 | `contract.acceptanceStakes` | `high` | Which declared pass band the judges use: `high` or `critical` |
-| `contract.midRunChecks` | `true` | Check a unit after turns that write, edit or run commands |
+| `contract.midRunChecks` | `true` | Check a unit after turns that write, edit or run commands, once a criterion already reads met (before that nothing can regress) |
 | `contract.evidenceNudgeLimit` | `0` (no limit) | Unsettled checks before the owner is asked; with `0` the owner is not asked on this count, and `contract.stallLimit` still applies |
 | `contract.stallLimit` | `3` | Consecutive checks without progress that make a stall |
 | `contract.maxNudgesPerUnit` | `0` (no limit) | Nudge ceiling per unit; with `0` a unit is not stopped on this count |
-| `contract.maxFixRounds` | `0` (no limit) | Fix groups plus fresh agents before the owner decides; with `0` the owner is not asked on this count |
-| `contract.planRepairLimit` | `0` (no limit) | Planner repairs before the owner decides; with `0` repairs continue until the plan passes or a repair repeats the same unresolved problems |
+| `contract.maxFixRounds` | `3` | Fix groups plus fresh agents before the owner decides; `0` removes this limit |
+| `contract.planRepairLimit` | `3` | Planner repairs before the owner decides; a round that repeats the previous round's problems goes to the owner at once; `0` removes this limit |
+| `contract.judgmentCallBudget` | `400` | Decision-model calls one contract may spend; when spent, the next correction asks the owner and says what was spent (`0` off) |
 | `contract.maxUnits` | `0` (no limit) | Units per plan; with `0` a plan may hold any number of units |
 | `contract.defaultAttempts` | `1` | Attempts per unit without an explicit ask |
 | `contract.maxActiveContracts` | `6` | Contracts running at once |

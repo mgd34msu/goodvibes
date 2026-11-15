@@ -16,7 +16,9 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  * passed and claims verified.
  *
  * Unmet criteria get a severity reading (`contract.unmet-severity`) after the
- * nudge goes out, so it never delays one.
+ * nudge goes out, so it never delays one. The reasons and passage locators a
+ * completion nudge carries are read side by side (one round trip); a mid-run
+ * nudge carries none.
  */
 import { nativeContractPort, type NativeContractServices } from './native-decisions.js';
 import { assignedReviewPaths, reviewProjectPath } from './review-inventory.js';
@@ -273,6 +275,12 @@ async function readNudgeRationales(input: {
   return { rationales, decisionIds };
 }
 
+/** A passage locator's nudge paragraph and the decision that chose it. */
+interface LocatedFinding {
+  readonly decisionId: string | undefined;
+  readonly text: string | undefined;
+}
+
 function nudgedCriteria(findings: Findings, kinds: readonly NudgeKind[]): string[] {
   const regressed = new Set(findings.regressions.map((regression) => regression.criterionId));
   return [...findings.verdicts].flatMap(([id, verdict]) => {
@@ -398,14 +406,28 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
   let nudge: CheckNudge | undefined;
   let rationales: ReadonlyMap<string, string> = new Map();
   if (chosen.nudgeKinds.length > 0) {
-    // Why each listed criterion still reads unmet or not shown, so the worker knows what to show.
+    // Why each listed criterion still reads unmet or not shown, and where in
+    // the answer the goal or quality problem sits. All three readings run
+    // side by side, so the nudge waits one round trip, not three. A mid-run
+    // nudge (a regression or a quality item while the agent still works)
+    // goes out with the verdicts alone: the agent is not held, and the
+    // completion check explains whatever still reads unmet.
     const explainIds = new Set(nudgedCriteria(findings, chosen.nudgeKinds));
-    const explained = judged.filter((criterion) => explainIds.has(criterion.id));
-    if (explained.length > 0) {
-      const read = await readNudgeRationales({ port: checkedPort(CHECK_SITES.gap), goal: unit.goal, criteria: explained, output: state['output'] as EntryType, evidence: state['evidence'] as EntryType, signal: input.signal });
+    const explained = input.trigger === 'turn-end' ? [] : judged.filter((criterion) => explainIds.has(criterion.id));
+    const [read, goalFinding, qualityFinding] = await Promise.all([
+      explained.length > 0
+        ? readNudgeRationales({ port: checkedPort(CHECK_SITES.gap), goal: unit.goal, criteria: explained, output: state['output'] as EntryType, evidence: state['evidence'] as EntryType, signal: input.signal })
+        : Promise.resolve(undefined),
+      input.trigger !== 'turn-end' && goalVerdict === 'unmet' && [...verdicts.values()].every(verdict => verdict === 'met')
+        ? locateGoalIssue() : Promise.resolve(undefined),
+      input.trigger !== 'turn-end' && chosen.nudgeQuality.includes('unsupported_claims')
+        ? locateUnsupportedClaim() : Promise.resolve(undefined),
+    ]);
+    if (read !== undefined) {
       rationales = read.rationales;
       decisionIds.push(...read.decisionIds);
     }
+    for (const finding of [goalFinding, qualityFinding]) if (finding?.decisionId !== undefined) decisionIds.push(finding.decisionId);
     const nudgeFindings: NudgeFindings = {
       checkNumber: checkNumberOf(checkId),
       kinds: chosen.nudgeKinds,
@@ -428,58 +450,62 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
     if (Array.isArray(comparisons) && comparisons.length) nudge = { ...nudge, text: nudge.text
       + '\n\nActual native host arithmetic over complete byte-bound JSON references and retained returned observations (not semantic approval or worker script execution):\n'
       + JSON.stringify(comparisons) };
-    if (input.trigger !== 'turn-end' && goalVerdict === 'unmet' && [...verdicts.values()].every(verdict => verdict === 'met')) {
-      const output = typeof state['output'] === 'string' ? state['output'] : evidence.output;
-      const candidates = [...new Intl.Segmenter(undefined, { granularity: 'sentence' }).segment(output)]
-        .filter(sentence => sentence.segment.trim()).map((sentence, index) => ({ id: `sentence-${index}`,
-          content: { reference: `current proposed answer at character ${sentence.index}`, quote: sentence.segment.trim() } }));
-      if (candidates.length) {
-        try {
-          const site = 'contract.check.unit-goal-finding';
-          const selected = await responseFinding.select(
-            meteredPort(input.checkPort ?? (input.native === undefined ? judgmentPort(site)
-              : nativeContractPort(input.native.contract, input.native.services, judgmentPort(site), input.signal)), usage),
-            { issue: `The current work was read as failing this assigned unit goal: ${unit.goal}. All explicit unit criteria were read met. Locate a concrete missing substantive result, scope reduction or incorrect attribution in the CURRENT answer. Do not substitute the parent task or later host acceptance/publication for this assigned goal. Choose none rather than inventing a problem.`,
-              evidence: state, metCriteria: judged.map(criterion => criterion.text) }, candidates, { ...signal, site },
-          );
-          if (selected.decisionId) decisionIds.push(selected.decisionId);
-          const passage = candidates.find(candidate => candidate.id === selected.chosen)?.content;
-          selected.recordAction('Localize an unmet assigned unit goal; preserve the original rejection and all acceptance requirements.');
-          nudge = { ...nudge, text: nudge.text + '\n\n' + (passage
-            ? (selected.outcome === 'act' ? 'Specific goal issue to address' : 'Candidate goal issue to investigate (localization is uncertain)')
-              + ` at ${passage.reference}:\n${JSON.stringify(passage.quote)}\nAddress this passage against the assigned goal and actual evidence, preserving completed work and already-met criteria.`
-            : 'The goal reading did not localize a concrete passage. Do not invent omitted work or restart completed reviews from this unlocalized reading. Reconcile the assigned goal with the supplied evidence; this feedback grants no acceptance.') };
-        } catch {
-          input.signal?.throwIfAborted();
-          // A failed diagnostic cannot waive the original unmet-goal finding.
-        }
-      }
+    for (const finding of [goalFinding, qualityFinding]) if (finding?.text !== undefined) nudge = { ...nudge, text: nudge.text + '\n\n' + finding.text };
+  }
+
+  /** Where in the current answer an unmet unit goal shows, as the nudge paragraph that names it. */
+  async function locateGoalIssue(): Promise<LocatedFinding | undefined> {
+    const output = typeof state['output'] === 'string' ? state['output'] : evidence.output;
+    const candidates = [...new Intl.Segmenter(undefined, { granularity: 'sentence' }).segment(output)]
+      .filter(sentence => sentence.segment.trim()).map((sentence, index) => ({ id: `sentence-${index}`,
+        content: { reference: `current proposed answer at character ${sentence.index}`, quote: sentence.segment.trim() } }));
+    if (!candidates.length) return undefined;
+    try {
+      const site = 'contract.check.unit-goal-finding';
+      const selected = await responseFinding.select(
+        meteredPort(input.checkPort ?? (input.native === undefined ? judgmentPort(site)
+          : nativeContractPort(input.native.contract, input.native.services, judgmentPort(site), input.signal)), usage),
+        { issue: `The current work was read as failing this assigned unit goal: ${unit.goal}. All explicit unit criteria were read met. Locate a concrete missing substantive result, scope reduction or incorrect attribution in the CURRENT answer. Do not substitute the parent task or later host acceptance/publication for this assigned goal. Choose none rather than inventing a problem.`,
+          evidence: state, metCriteria: judged.map(criterion => criterion.text) }, candidates, { ...signal, site },
+      );
+      const passage = candidates.find(candidate => candidate.id === selected.chosen)?.content;
+      selected.recordAction('Localize an unmet assigned unit goal; preserve the original rejection and all acceptance requirements.');
+      return { decisionId: selected.decisionId, text: passage
+        ? (selected.outcome === 'act' ? 'Specific goal issue to address' : 'Candidate goal issue to investigate (localization is uncertain)')
+          + ` at ${passage.reference}:\n${JSON.stringify(passage.quote)}\nAddress this passage against the assigned goal and actual evidence, preserving completed work and already-met criteria.`
+        : 'The goal reading did not localize a concrete passage. Do not invent omitted work or restart completed reviews from this unlocalized reading. Reconcile the assigned goal with the supplied evidence; this feedback grants no acceptance.' };
+    } catch {
+      input.signal?.throwIfAborted();
+      // A failed diagnostic cannot waive the original unmet-goal finding.
+      return undefined;
     }
-    if (input.trigger !== 'turn-end' && chosen.nudgeQuality.includes('unsupported_claims')) {
-      const candidates = [...new Intl.Segmenter(undefined, { granularity: 'sentence' }).segment(evidence.output)]
-        .filter(sentence => sentence.segment.trim()).map((sentence, index) => ({ id: `sentence-${index}`,
-          content: { reference: `current unit report at character ${sentence.index}`, quote: sentence.segment.trim() } }));
-      if (candidates.length) {
-        try {
-          const site = 'contract.check.unit-quality-finding';
-          const selected = await responseFinding.select(
-            meteredPort(input.checkPort ?? (input.native === undefined ? judgmentPort(site)
-              : nativeContractPort(input.native.contract, input.native.services, judgmentPort(site), input.signal)), usage),
-            { issue: 'The current unit report claims performed actions or verified results that the actual evidence does not establish. Locate the specific unsupported claim, including attributing retained earlier operations to the current worker.',
-              evidence: qualityState(unit, evidence) }, candidates, { ...signal, site },
-          );
-          const passage = candidates.find(candidate => candidate.id === selected.chosen)?.content;
-          if (selected.decisionId) decisionIds.push(selected.decisionId);
-          selected.recordAction('Localize an unsupported unit-report claim for correction; the quality hold and acceptance requirements are unchanged.');
-          if (passage) nudge = { ...nudge, text: nudge.text + '\n\n'
-            + (selected.outcome === 'act' ? 'Specific claim to correct' : 'Candidate claim to investigate (localization is uncertain)')
-            + ` at ${passage.reference}:\n${JSON.stringify(passage.quote)}\n`
-            + 'Make this claim match the actual evidence. Attribute retained observations to the earlier work; claim new operations only when their actual execution records establish them. Preserve completed work and already-met criteria. This feedback grants no acceptance.' };
-        } catch {
-          input.signal?.throwIfAborted();
-          // Localization failure leaves the original held check and its feedback intact.
-        }
-      }
+  }
+
+  /** Where in the unit report an unsupported claim sits, as the nudge paragraph that names it. */
+  async function locateUnsupportedClaim(): Promise<LocatedFinding | undefined> {
+    const candidates = [...new Intl.Segmenter(undefined, { granularity: 'sentence' }).segment(evidence.output)]
+      .filter(sentence => sentence.segment.trim()).map((sentence, index) => ({ id: `sentence-${index}`,
+        content: { reference: `current unit report at character ${sentence.index}`, quote: sentence.segment.trim() } }));
+    if (!candidates.length) return undefined;
+    try {
+      const site = 'contract.check.unit-quality-finding';
+      const selected = await responseFinding.select(
+        meteredPort(input.checkPort ?? (input.native === undefined ? judgmentPort(site)
+          : nativeContractPort(input.native.contract, input.native.services, judgmentPort(site), input.signal)), usage),
+        { issue: 'The current unit report claims performed actions or verified results that the actual evidence does not establish. Locate the specific unsupported claim, including attributing retained earlier operations to the current worker.',
+          evidence: qualityState(unit, evidence) }, candidates, { ...signal, site },
+      );
+      const passage = candidates.find(candidate => candidate.id === selected.chosen)?.content;
+      selected.recordAction('Localize an unsupported unit-report claim for correction; the quality hold and acceptance requirements are unchanged.');
+      return { decisionId: selected.decisionId, text: passage
+        ? (selected.outcome === 'act' ? 'Specific claim to correct' : 'Candidate claim to investigate (localization is uncertain)')
+          + ` at ${passage.reference}:\n${JSON.stringify(passage.quote)}\n`
+          + 'Make this claim match the actual evidence. Attribute retained observations to the earlier work; claim new operations only when their actual execution records establish them. Preserve completed work and already-met criteria. This feedback grants no acceptance.'
+        : undefined };
+    } catch {
+      input.signal?.throwIfAborted();
+      // Localization failure leaves the original held check and its feedback intact.
+      return undefined;
     }
   }
 

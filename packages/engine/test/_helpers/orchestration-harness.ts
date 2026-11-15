@@ -92,28 +92,15 @@ export function reviewerReportOutput(opts: {
 
 export interface FakeWorktree extends WorktreeOps {
   readonly commits: Array<{ message: string; paths: string[] | undefined; agentId?: string }>;
-  readonly merges: string[];
-  readonly cleanups: string[];
 }
 
 export function makeFakeWorktree(): FakeWorktree {
   const commits: FakeWorktree['commits'] = [];
-  const merges: string[] = [];
-  const cleanups: string[] = [];
   return {
     commits,
-    merges,
-    cleanups,
     async commitWorkingTree(message: string, paths?: string[]): Promise<CommitWorkingTreeResult> {
       commits.push({ message, paths });
       return { hash: 'fake-commit-sha', skippedIgnored: [] };
-    },
-    async merge(agentId: string): Promise<boolean> {
-      merges.push(agentId);
-      return true;
-    },
-    async cleanup(agentId: string): Promise<void> {
-      cleanups.push(agentId);
     },
     async currentHead(): Promise<string | null> {
       return 'fake-head-sha';

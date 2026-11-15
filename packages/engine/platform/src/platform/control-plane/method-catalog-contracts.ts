@@ -61,7 +61,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
     replay: {
       in: 'header',
       name: 'Idempotency-Key',
-      behavior: 'A retry with the same key and the same body returns the first contract (with the Idempotent-Replayed: true response header) instead of starting a second one; the same key with a different body is refused with IDEMPOTENCY_KEY_REUSED. Keys are held in memory, so a retry after a daemon restart starts a new contract.',
+      behavior: 'A retry with the same key and the same body returns the first contract (with the Idempotent-Replayed: true response header) instead of starting a second one; the same key with a different body is refused with IDEMPOTENCY_KEY_REUSED. Keys are kept with the contract store per caller, so a retry after a daemon restart still returns the first contract; the body is compared field by field, in any order. The key may also be sent as `idempotencyKey` in the body; the header wins when both are given. A replayed result carries `replayed: true`.',
     },
     errorCodes: [
       INVALID_ARGUMENT,

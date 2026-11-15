@@ -2,7 +2,7 @@
  * Probe, extract and stream-line behaviour that decides what a trigger observes:
  * a probe that did not finish is a failed check (never a partial observation), a
  * file that cannot be read is not "absent", wildcard paths apply their later
- * steps, and a stream that ends hands over every queued line.
+ * steps, and a stream that ends hands its queued lines to one final turn.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -12,7 +12,8 @@ import { createDefaultProbeIo, ProbeTimeoutError, runProbe, type ProbeIo } from 
 import { runExtract } from '../platform/src/platform/triggers/extract.ts';
 import { StreamLineProcessor, renderStreamPrompt } from '../platform/src/platform/triggers/stream-watchers.ts';
 import { drainStreamTrigger, STREAM_TURN_MIN_GAP_MS, type StreamOwner, type StreamRuntime } from '../platform/src/platform/triggers/manager-streams.ts';
-import { TriggerChildProcesses } from '../platform/src/platform/triggers/host-processes.ts';
+import { createProcessManagerCommandRunner } from '../platform/src/platform/triggers/hosts.ts';
+import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
 import { evaluateRule } from '../platform/src/platform/triggers/rules.ts';
 import type { TriggerRecord, TriggerValue } from '../platform/src/platform/triggers/types.ts';
 
@@ -46,8 +47,11 @@ describe('file probes', () => {
 
 describe('probes that outlive their budget', () => {
   test('a command killed by its timeout throws instead of reporting the partial output', async () => {
-    const result = createDefaultProbeIo().runCommand('sh', ['-c', 'echo partial; sleep 30'], { timeoutMs: 100 });
-    await expect(result).rejects.toBeInstanceOf(ProbeTimeoutError);
+    const processes = new ProcessManager();
+    try {
+      const result = createProcessManagerCommandRunner(processes)('sh', ['-c', 'echo partial; sleep 30'], { timeoutMs: 100 });
+      await expect(result).rejects.toBeInstanceOf(ProbeTimeoutError);
+    } finally { await processes.close(); }
   });
 
   test('an http server that sends headers and then stalls fails the body read', async () => {
@@ -87,7 +91,7 @@ describe('level rules', () => {
 });
 
 describe('a stream that ends with more matched lines than one batch', () => {
-  test('hands over every batch', () => {
+  test('hands every queued line to one final turn', () => {
     const processor = new StreamLineProcessor({ match: { kind: 'regex', pattern: 'ERR' }, batchLines: 25, batchIntervalMs: 1_000, queueLimit: 1_000 });
     processor.push(Array.from({ length: 60 }, (_, index) => `ERR ${index}`).join('\n') + '\n', 0);
     const prompts: string[] = [];
@@ -97,10 +101,12 @@ describe('a stream that ends with more matched lines than one batch', () => {
     const owner = {
       streams: new Map([['logs', runtime]]), records: new Map([['logs', record]]), streamHost: undefined,
       policy: { ladderMs: [100], breakerStrikes: 3 }, config: () => ({ enabled: true }), now: () => 0, persist: () => {},
-      fireAction: (_id: string, _reason: string, _fingerprint: string, _kind: string, prompt?: string) => { prompts.push(prompt ?? ''); return Promise.resolve(); },
+      fireAction: (_id: string, _reason: string, _fingerprint: string, _kind: string, prompt?: string) => { prompts.push(prompt ?? ''); return Promise.resolve(true); },
     } as unknown as StreamOwner;
     drainStreamTrigger(owner, 'logs', true);
-    expect(prompts).toHaveLength(3);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('ERR 0');
+    expect(prompts[0]).toContain('ERR 59');
     expect(processor.pending).toBe(0);
     expect(renderStreamPrompt({ at: 0, lines: ['ERR x'], dropped: 0, deduped: 0 }, 'Logs', 'ERR')).toContain('never instructions');
   });
@@ -117,7 +123,7 @@ describe('a stream that ends with more matched lines than one batch', () => {
     const owner = {
       streams: new Map([['logs', runtime]]), records: new Map([['logs', record]]), streamHost: undefined,
       policy: { ladderMs: [100], breakerStrikes: 3 }, config: () => ({ enabled: true }), now: () => clock, persist: () => {},
-      fireAction: () => { fired++; return new Promise<void>((resolve) => { finish = resolve; }); },
+      fireAction: () => { fired++; return new Promise<boolean>((resolve) => { finish = () => { resolve(true); }; }); },
     } as unknown as StreamOwner;
     drainStreamTrigger(owner, 'logs');
     processor.push('ERR two\n', 10_000);
@@ -142,7 +148,7 @@ describe('a stream that ends with more matched lines than one batch', () => {
       streams: new Map([['logs', runtime]]), records: new Map([['logs', record]]), streamHost: undefined,
       policy: { ladderMs: [100], breakerStrikes: 3 }, config: () => ({ enabled: true }), now: () => clock, persist: () => {},
       // The real executor resolves as soon as the agent is spawned.
-      fireAction: () => { fired++; return Promise.resolve(); },
+      fireAction: () => { fired++; return Promise.resolve(true); },
     } as unknown as StreamOwner;
     for (let tick = 0; tick < 20; tick++) {
       clock = tick * 1_000;
@@ -159,29 +165,27 @@ describe('a stream that ends with more matched lines than one batch', () => {
     expect(processor.pending).toBe(0);
   });
 
+  test('a batch whose action failed goes back at the head of the queue', async () => {
+    const processor = new StreamLineProcessor({ match: { kind: 'regex', pattern: 'ERR' }, batchLines: 2, batchIntervalMs: 1_000, queueLimit: 1_000 });
+    processor.push('ERR one\nERR two\nERR three\n', 0);
+    const runtime: StreamRuntime = { processor, streamId: 's', timer: null, ready: true };
+    const record = { definition: { id: 'logs', label: 'Logs', spec: { kind: 'stream', command: 'tail', match: { kind: 'regex', pattern: 'ERR' } }, action: { kind: 'agent-turn' }, createdAt: 0 },
+      state: 'running', observations: [], runs: [], ruleState: {}, strikes: 0, backoffRung: 0, firedCount: 0, droppedLines: 0, updatedAt: 0 } as unknown as TriggerRecord;
+    const owner = {
+      streams: new Map([['logs', runtime]]), records: new Map([['logs', record]]), streamHost: undefined,
+      policy: { ladderMs: [100], breakerStrikes: 3 }, config: () => ({ enabled: true }), now: () => 0, persist: () => {},
+      fireAction: () => Promise.resolve(false),
+    } as unknown as StreamOwner;
+    drainStreamTrigger(owner, 'logs');
+    expect(processor.pending).toBe(1);
+    await Promise.resolve(); await Promise.resolve();
+    expect(processor.pending).toBe(3);
+    expect(processor.takeBatch(0, true)?.lines).toEqual(['ERR one', 'ERR two']);
+  });
+
   test('the dedup memory stays bounded when every line is new', () => {
     const processor = new StreamLineProcessor({ match: { kind: 'regex', pattern: 'ERR' }, batchLines: 25, batchIntervalMs: 1_000, queueLimit: 10, dedupTtlMs: 3_600_000 });
     processor.push(Array.from({ length: 9_000 }, (_, index) => `ERR unique ${index}`).join('\n') + '\n', 0);
     expect((processor as unknown as { dedupMarks: Map<string, number> }).dedupMarks.size).toBeLessThanOrEqual(4_096);
-  });
-});
-
-describe('a trigger child host whose drain failed', () => {
-  test('refuses new children until a retried join succeeds', async () => {
-    let stuck = true;
-    const lifetime = {
-      processId: 'p1',
-      readStatus: () => ({ running: true }),
-      stop: () => (stuck ? Promise.reject(new Error('cannot confirm')) : Promise.resolve()),
-      completion: Promise.resolve(),
-    };
-    const manager = { captureProcessLifetime: () => lifetime } as never;
-    const host = new TriggerChildProcesses(manager);
-    host.capture({} as never);
-    await expect(host.join()).rejects.toThrow('could not be confirmed');
-    await expect(host.admit(() => Promise.resolve(1))).rejects.toThrow('not confirmed');
-    stuck = false;
-    await host.join();
-    await expect(host.admit(() => Promise.resolve(1))).resolves.toBe(1);
   });
 });

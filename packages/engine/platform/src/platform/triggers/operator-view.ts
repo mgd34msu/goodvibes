@@ -18,9 +18,9 @@ export type TriggerOperatorFailureKind = 'other-process' | 'migration-required' 
 export const TRIGGER_OPERATOR_MESSAGES: Readonly<Record<TriggerOperatorFailureKind, string>> = Object.freeze({
   'other-process': 'Another GoodVibes process owns these triggers. Inspect them here, or close that process and reopen the owning surface before migrating.',
   'migration-required': 'Close every older GoodVibes instance using these triggers, then explicitly acknowledge that they are closed before migrating. This acknowledgement is your statement, not a process-liveness check.',
-  'not-required': 'These triggers do not currently require migration. Refresh their status before taking another action.',
+  'not-required': 'Trigger state needs no migration: earlier saved triggers are imported automatically when the trigger store is first opened.',
   'future-version': 'This trigger state was written by a newer GoodVibes reader. Update this installation before continuing; the saved state has been preserved.',
-  unavailable: 'Trigger state or its original owner is unavailable. Check the selected surface, storage permissions and active GoodVibes processes, then reopen trigger recovery. Saved state has been preserved.',
+  unavailable: 'Trigger state could not be read. The daemon log names the file and the cause; check that file and its permissions, then run /triggers status again.',
 });
 export function readTriggerOperatorStatus(value: unknown): TriggerOperatorStatus {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid trigger status');

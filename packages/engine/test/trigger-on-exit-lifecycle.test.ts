@@ -10,14 +10,16 @@
  *   - a max-duration kill fires with an explicit timed-out state
  *   - a daemon restart fires once with an explicit unknown/daemon-restart state
  *     instead of the trigger silently evaporating
+ *   - an action that could not be delivered stays owed and is delivered later
  *   - `bg_output` returns output for a process that is still RUNNING
  */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import * as crypto from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
 import {
   buildDaemonRestartTermination,
@@ -25,8 +27,6 @@ import {
   computeGrantDigest,
   createActionGrant,
   captureRegisteredGrantAction,
-  loadTriggerSnapshot,
-  saveTriggerSnapshot,
   decideOnExitRecovery,
   renderOnExitPrompt,
   StreamLineProcessor,
@@ -342,8 +342,7 @@ describe('daemon restart', () => {
     const secondExecutor = new RecordingExecutor();
     const secondManager = managerWith(secondHost, secondExecutor, storePath, 'boot-2', clock);
     secondManager.load();
-    await Promise.resolve();
-    await Promise.resolve();
+    await secondManager.join();
 
     expect(secondExecutor.turns).toHaveLength(1);
     expect(secondExecutor.turns[0]?.prompt).toContain('UNKNOWN');
@@ -357,6 +356,56 @@ describe('daemon restart', () => {
     await Promise.resolve();
     expect(thirdExecutor.turns).toHaveLength(0);
     expect(thirdManager.get('nightly-build')).toBeNull();
+  });
+
+  test('a child still alive after a restart is waited for, and its end is reported once', async () => {
+    const storePath = tempStore();
+    const clock = { t: 1_000 };
+    const first = managerWith(new FakeProcessHost(), new RecordingExecutor(), storePath, 'boot-1', clock);
+    await first.create(onExitDefinition);
+    first.shutdown(); await first.join();
+    clock.t = 10_000;
+    const host = new FakeProcessHost();
+    const executor = new RecordingExecutor();
+    const second = managerWith(host, executor, storePath, 'boot-2', clock);
+    second.load(); await second.pollProcesses();
+    expect(executor.turns).toHaveLength(0);
+    expect(second.get('nightly-build')?.state).toBe('running');
+    host.setAlive(false);
+    await second.pollProcesses(); await second.join();
+    expect(executor.turns).toHaveLength(1);
+    expect(executor.turns[0]?.prompt).toContain('UNKNOWN');
+    expect(second.get('nightly-build')?.state).toBe('fired');
+  });
+});
+
+describe('an on-exit action that could not be delivered', () => {
+  test('stays owed, is never reaped, and is delivered on the next due poll', async () => {
+    const host = new FakeProcessHost();
+    let refuse = true;
+    const delivered: string[] = [];
+    const executor: TriggerActionExecutor = {
+      runAgentTurn: (input) => { if (refuse) return Promise.reject(new Error('provider unavailable')); delivered.push(input.prompt); return Promise.resolve('ok'); },
+      runGrant: () => Promise.resolve('granted'),
+    };
+    const clock = { t: 1_000 };
+    const manager = new TriggerManager({ storePath: tempStore(), config: { enabled: true, backoffLadderMs: '100' }, actions: executor, processHost: host, daemonBootId: 'boot-1', now: () => clock.t });
+    managers.push(manager);
+    await manager.create(onExitDefinition);
+    host.finish({ exitCode: 0, stdoutTail: 'build ok' });
+    await manager.pollProcesses();
+    const owed = manager.get('nightly-build');
+    expect(owed?.state).toBe('backoff');
+    expect(owed?.pendingExit?.state).toBe('exited');
+    expect(owed?.firedCount).toBe(0);
+    expect(manager.sweep().reapedIds).toEqual([]);
+    refuse = false;
+    clock.t += 100;
+    await manager.pollProcesses();
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).toContain('build ok');
+    expect(manager.get('nightly-build')?.state).toBe('fired');
+    expect(manager.get('nightly-build')?.pendingExit).toBeUndefined();
   });
 });
 
@@ -442,7 +491,8 @@ describe('action grants', () => {
       createdAt: 1000, confirmedAt: 1000, confirmedBy: 'owner',
       digest: '68c22546806379ca18e20a432dd6353ef37bb85a7363254c0c16861d0d0bb76d' };
     const path = tempStore();
-    saveTriggerSnapshot(path, { daemonBootId: 'old-boot', triggers: [], grants: [old], eventLog: [], now: 1000 });
+    // An earlier release's JSON store; the trigger database imports it when it is created.
+    writeFileSync(path, JSON.stringify({ version: 1, daemonBootId: 'old-boot', savedAt: 1000, triggers: [], grants: [old], eventLog: [] }));
     const host = new FakeProcessHost(), executor = new RecordingExecutor();
     const manager = managerWith(host, executor, path, 'new-boot');
     expect(verifyGrant(manager.listGrants(), old.id, old.digest).ok).toBe(true);
@@ -489,15 +539,17 @@ describe('action grants', () => {
     expect(Object.isFrozen(action.approvedAction)).toBe(true); expect(Object.isFrozen(action.approvedAction.args)).toBe(true);
     args[0] = 'caller mutation'; forged.args[0] = 'another caller mutation';
     expect(action.approvedAction.args).toEqual(['all']);
-    const snapshot = loadTriggerSnapshot(path).snapshot;
-    if (!snapshot) throw new Error('Missing original persisted trigger');
-    const saved = snapshot.grants.find(value => value.id === grant.id);
-    if (!saved?.approvedAction) throw new Error('Missing original registry approval');
-    const replacement = field === 'args' ? ['clean'] : field === 'cwd' ? '/b' : 'other-command';
-    Reflect.set(saved, field, replacement); Reflect.set(saved.approvedAction, field, replacement);
     manager.shutdown(); await manager.join();
-    saveTriggerSnapshot(path, { ...snapshot, now: 1001 });
-    const restarted = managerWith(new FakeProcessHost(), executor, path, 'boot-2');
+    const db = new Database(join(dirname(path), 'triggers.db'));
+    const row = db.query('SELECT body FROM grants WHERE id = ?').get(grant.id) as { body: string } | null;
+    if (!row) throw new Error('Missing original registry approval');
+    const saved = JSON.parse(row.body) as Record<string, unknown> & { approvedAction: Record<string, unknown> };
+    const replacement = field === 'args' ? ['clean'] : field === 'cwd' ? '/b' : 'other-command';
+    saved[field] = replacement; saved.approvedAction[field] = replacement;
+    db.query('UPDATE grants SET body = ? WHERE id = ?').run(JSON.stringify(saved), grant.id);
+    db.close();
+    const gone = new FakeProcessHost(); gone.setAlive(false);
+    const restarted = managerWith(gone, executor, path, 'boot-2');
     restarted.load(); await restarted.pollProcesses();
     expect(executor.grants).toEqual([]);
     const history = restarted.history('nightly-build');

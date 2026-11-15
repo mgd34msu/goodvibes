@@ -20,6 +20,7 @@ import type { ProcessManager } from '../tools/shared/process-manager.js';
 import type { LaunchedProcess, ObservedTermination, TriggerProcessHost } from './process-triggers.js';
 import type { TriggerActionExecutor, TriggerStreamHost } from './manager-types.js';
 import type { TriggerActionGrant } from './types.js';
+import { ProbeTimeoutError, type ProbeIo } from './probes.js';
 
 /** ProcessManager-backed on-exit host. Binds only to processes we launched. */
 export function createProcessManagerTriggerHost(processManager: ProcessManager): TriggerProcessHost {
@@ -114,6 +115,24 @@ export function createBunStreamHost(processManager: ProcessManager): TriggerStre
     stop: (streamId) => running.stop(streamId),
     join: () => running.join(),
   });
+}
+
+/**
+ * Command probes through the same process manager: credential scrub, a
+ * private process group killed whole at the deadline, and bounded output.
+ * A probe whose command outlives its budget is a failed check, never its
+ * partial output.
+ */
+export function createProcessManagerCommandRunner(processManager: ProcessManager): ProbeIo['runCommand'] {
+  return async (command, args, options) => {
+    const result = await processManager.spawnArgv(command, args, options.cwd, undefined,
+      { timeout_ms: Math.max(1, options.timeoutMs), sigterm_grace_ms: 500, stdin: 'ignore' });
+    const child = processManager.captureProcessLifetime(result);
+    await child.completion;
+    const status = child.readStatus();
+    if (status.timedOut) throw new ProbeTimeoutError('command', options.timeoutMs);
+    return { exitCode: status.exitCode, stdout: status.stdoutTail, stderr: status.stderrTail };
+  };
 }
 
 /** What a fired trigger needs in order to actually start an agent turn. */

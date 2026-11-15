@@ -15,7 +15,7 @@
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { renderStreamPrompt, resolveStreamOptions, StreamLineProcessor } from './stream-watchers.js';
-import { applyFailure, type SupervisionPolicy } from './supervision.js';
+import { applyFailure, backoffDelayFor, type SupervisionPolicy } from './supervision.js';
 import type { TriggerManagerConfig, TriggerStreamHost } from './manager-types.js';
 import type { StreamTriggerSpec, TriggerRecord } from './types.js';
 
@@ -30,6 +30,8 @@ export interface StreamRuntime {
   inFlight?: boolean;
   /** When the last batch started a turn. The executor returns as soon as the agent is spawned, so this gap is what spaces turns. */
   lastTurnAt?: number;
+  /** When the stream was activated; how long it then stayed up decides whether its exit counts against it. */
+  activatedAt?: number;
 }
 
 /** Least time between two unforced agent turns from one stream; queued lines wait, and the queue is bounded. */
@@ -43,16 +45,18 @@ export interface StreamOwner {
   readonly policy: SupervisionPolicy;
   config(): TriggerManagerConfig;
   now(): number;
-  persist(): void;
+  /** Saves one trigger's record. */
+  persist(id: string): void;
   readonly deferActivation?: boolean;
   assertCurrent?(id: string, runtime: StreamRuntime): void;
+  /** Resolves true when the action was delivered, false when it failed (the failure is already on the record). */
   fireAction(
     id: string,
     reason: string,
     fingerprint: string,
     kind: 'condition' | 'stream',
     promptOverride?: string,
-  ): Promise<void>;
+  ): Promise<boolean>;
 }
 
 export async function startStreamTrigger(
@@ -113,6 +117,7 @@ export function activateStreamTrigger(owner: StreamOwner, id: string): void {
   if (!runtime || !record || record.definition.spec.kind !== 'stream' || runtime.ready) return;
   owner.assertCurrent?.(id, runtime);
   runtime.ready = true;
+  runtime.activatedAt = owner.now();
   const config = owner.config(), spec = record.definition.spec;
   const interval = Math.max(50, spec.batchIntervalMs ?? config.streamBatchIntervalMs ?? 1_000);
   runtime.timer = setInterval(() => { drainStreamTrigger(owner, id); }, interval); runtime.timer.unref?.();
@@ -122,7 +127,13 @@ export function activateStreamTrigger(owner: StreamOwner, id: string): void {
   } else drainStreamTrigger(owner, id);
 }
 
-/** Emits whatever batches are ready. An agent runs only when one is. */
+/**
+ * Emits whatever batches are ready. An agent runs only when one is. While the
+ * stream runs, turns are spaced by the minimum gap and one at a time; when it
+ * ends (`force`), everything still queued goes out as one final batch.
+ * `fired` is recorded once, when the action returned; a batch whose action
+ * failed goes back at the head of the queue while the stream still runs.
+ */
 export function drainStreamTrigger(owner: StreamOwner, id: string, force = false): void {
   const runtime = owner.streams.get(id);
   const record = owner.records.get(id);
@@ -131,50 +142,49 @@ export function drainStreamTrigger(owner: StreamOwner, id: string, force = false
   for (;;) {
     if (!force && (runtime.inFlight
       || (runtime.lastTurnAt !== undefined && owner.now() - runtime.lastTurnAt < STREAM_TURN_MIN_GAP_MS))) break;
-    const batch = runtime.processor.takeBatch(owner.now(), force);
-    if (!batch) break;
     const now = owner.now();
+    const batch = force ? runtime.processor.takeFinal(now) : runtime.processor.takeBatch(now);
+    if (!batch) break;
     const current = owner.records.get(id);
-    if (current) {
-      owner.records.set(id, {
-        ...current,
-        droppedLines: runtime.processor.droppedTotal,
-        runs: [...current.runs, {
-          at: now,
-          outcome: 'fired',
-          detail: `${batch.lines.length} matched line(s)${batch.dropped > 0 ? `, ${batch.dropped} dropped` : ''}`,
-        }],
-        updatedAt: now,
-      });
+    if (current && current.droppedLines !== runtime.processor.droppedTotal) {
+      owner.records.set(id, { ...current, droppedLines: runtime.processor.droppedTotal, updatedAt: now });
     }
     const prompt = renderStreamPrompt(batch, record.definition.label, spec.match.pattern);
     runtime.inFlight = true; runtime.lastTurnAt = now;
-    void owner.fireAction(
-      id,
-      `${batch.lines.length} line(s) matched ${spec.match.pattern}`,
-      `stream:${batch.lines[0] ?? ''}`,
-      'stream',
-      prompt,
-    ).catch((error: unknown) => {
+    const reason = `${batch.lines.length} line(s) matched ${spec.match.pattern}${batch.final ? ' as the command ended' : ''}${batch.dropped > 0 ? `, ${batch.dropped} dropped` : ''}`;
+    const giveBack = (): void => { if (!batch.final && owner.streams.get(id) === runtime) runtime.processor.requeue(batch.lines, owner.now()); };
+    void owner.fireAction(id, reason, `stream:${batch.lines[0] ?? ''}`, 'stream', prompt).then((delivered) => {
+      if (!delivered) giveBack();
+    }, (error: unknown) => {
       logger.warn('Stream trigger action failed', { triggerId: id, error: summarizeError(error) });
+      giveBack();
     }).finally(() => { runtime.inFlight = false; });
-    // A forced drain (the stream ended) keeps going until the queue is empty: the
-    // processor is discarded right after, so a single batch would lose the rest.
+    if (batch.final) break;
   }
 }
 
-/** A supervised stream command that exits walks the same ladder and breaker. */
+/**
+ * A supervised stream command that exits walks the same ladder and breaker,
+ * counting only the exits that say something is wrong. A stream that stayed
+ * up for at least the first rung of the ladder, or delivered a matched line,
+ * was healthy: its strikes and rung start again from zero. An exit with code 0
+ * is a restart, not a strike: at once after a healthy run, on the ladder
+ * (without a strike) after a short one, so `tail -f` across a log rotation
+ * never parks the watcher.
+ */
 export function handleStreamExit(owner: StreamOwner, id: string, exitCode: number | null): void {
   const record = owner.records.get(id);
   if (!record || record.definition.spec.kind !== 'stream') return;
   if (record.state === 'cancelled') return;
   const runtime = owner.streams.get(id);
+  const now = owner.now();
+  const healthy = runtime !== undefined && (runtime.processor.matchedTotal > 0
+    || (runtime.activatedAt !== undefined && now - runtime.activatedAt >= backoffDelayFor(owner.policy, 0)));
   if (runtime) {
     if (runtime.timer) clearInterval(runtime.timer);
     runtime.timer = null; runtime.streamId = null; runtime.ready = false;
     owner.streams.delete(id);
   }
-  const now = owner.now();
   const spec = record.definition.spec;
   if (spec.restart === false) {
     owner.records.set(id, {
@@ -184,12 +194,28 @@ export function handleStreamExit(owner: StreamOwner, id: string, exitCode: numbe
       runs: [...record.runs, { at: now, outcome: 'skipped', detail: `stream command exited (${exitCode}); restart disabled` }],
       updatedAt: now,
     });
-    owner.persist();
+    owner.persist(id);
+    return;
+  }
+  const base = healthy ? { strikes: 0, backoffRung: 0 } : { strikes: record.strikes, backoffRung: record.backoffRung };
+  if (exitCode === 0) {
+    const delayMs = healthy ? 0 : backoffDelayFor(owner.policy, base.backoffRung);
+    owner.records.set(id, {
+      ...record,
+      state: 'backoff',
+      strikes: base.strikes,
+      backoffRung: healthy ? 0 : Math.min(base.backoffRung + 1, Math.max(0, owner.policy.ladderMs.length - 1)),
+      nextCheckAt: now + delayMs,
+      lastError: undefined,
+      runs: [...record.runs, { at: now, outcome: 'skipped', detail: delayMs === 0 ? 'stream command ended normally; restarting it' : `stream command ended normally soon after starting; restarting in ${delayMs}ms` }],
+      updatedAt: now,
+    });
+    owner.persist(id);
     return;
   }
   // An exit carries only its code and no wording to read, so it spends the
   // retry budget like any failure a retry may clear.
-  const outcome = applyFailure(record, owner.policy, now);
+  const outcome = applyFailure(base, owner.policy, now);
   owner.records.set(id, {
     ...record,
     state: outcome.state,
@@ -201,10 +227,10 @@ export function handleStreamExit(owner: StreamOwner, id: string, exitCode: numbe
       at: now,
       outcome: 'failed',
       detail: outcome.breakerOpened
-        ? `stream command exited (${exitCode}); breaker opened after ${outcome.strikes} consecutive exits`
+        ? `stream command exited (${exitCode}); breaker opened after ${outcome.strikes} consecutive failed runs; reset the trigger to start it again`
         : `stream command exited (${exitCode}); restarting in ${outcome.delayMs}ms`,
     }],
     updatedAt: now,
   });
-  owner.persist();
+  owner.persist(id);
 }

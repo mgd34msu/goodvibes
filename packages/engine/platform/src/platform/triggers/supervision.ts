@@ -120,18 +120,20 @@ export function applySuccess(intervalMs: number, now: number): {
  *
  * - idle -> running: an on-exit launch or a stream (re)start reserves the record.
  * - running/idle/backoff -> idle: a success, or a stream that exited with restart disabled.
- * - -> backoff / circuit-open: applyFailure.
+ * - -> backoff / circuit-open: applyFailure, including an on-exit action that failed.
  * - circuit-open -> idle: explicit operator reset.
- * - -> fired: an on-exit trigger's child exited and its action was reserved (fired stays fired).
+ * - running/idle/backoff -> firing: an on-exit trigger's child ended and its action is being delivered.
+ * - firing -> fired: the action was delivered; firing -> backoff / circuit-open: it was not, and is retried.
  * - -> cancelled: operator cancel. fired and cancelled are final.
  * - failed: nothing assigns it; it can only arrive from a persisted snapshot
  *   (snapshot-validation accepts it), where it is an operator-visible parked state.
  */
 export const triggerLifecycle = defineLifecycle<TriggerState>('trigger', {
-  idle: ['idle', 'running', 'backoff', 'circuit-open', 'fired', 'cancelled'],
-  running: ['idle', 'backoff', 'circuit-open', 'fired', 'cancelled'],
-  backoff: ['idle', 'running', 'backoff', 'circuit-open', 'fired', 'cancelled'],
-  'circuit-open': ['idle', 'fired', 'cancelled'],
+  idle: ['idle', 'running', 'backoff', 'circuit-open', 'firing', 'cancelled'],
+  running: ['idle', 'backoff', 'circuit-open', 'firing', 'cancelled'],
+  backoff: ['idle', 'running', 'backoff', 'circuit-open', 'firing', 'cancelled'],
+  'circuit-open': ['idle', 'cancelled'],
+  firing: ['fired', 'backoff', 'circuit-open', 'cancelled'],
   fired: ['fired'],
   cancelled: [],
   failed: ['idle', 'cancelled'],
@@ -159,7 +161,7 @@ export function isCircuitOpen(record: Pick<TriggerRecord, 'state'>): boolean {
  * or its breaker is open (only an operator reset closes it).
  */
 export function holdsAgainstCheckResult(record: Pick<TriggerRecord, 'state'>): boolean {
-  return record.state === 'cancelled' || record.state === 'fired' || record.state === 'circuit-open';
+  return record.state === 'cancelled' || record.state === 'fired' || record.state === 'firing' || record.state === 'circuit-open';
 }
 
 /**
@@ -180,6 +182,6 @@ export function resetBreaker(record: TriggerRecord, now: number): TriggerRecord 
 
 /** True when the trigger is due to run. Circuit-open triggers are never due. */
 export function isDue(record: TriggerRecord, now: number): boolean {
-  if (record.state === 'circuit-open' || record.state === 'cancelled' || record.state === 'fired') return false;
+  if (record.state === 'circuit-open' || record.state === 'cancelled' || record.state === 'fired' || record.state === 'firing') return false;
   return (record.nextCheckAt ?? 0) <= now;
 }

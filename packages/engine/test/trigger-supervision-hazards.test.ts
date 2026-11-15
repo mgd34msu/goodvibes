@@ -237,11 +237,24 @@ describe('an action that fails after its rule consumed the edge', () => {
   });
 });
 
+describe('a probe result JSON cannot hold', () => {
+  test('is stored as text, and the check, the other triggers and listing all carry on', async () => {
+    const { manager } = newManager({ probeIo: io(() => body('{"depth": 1e999}')) });
+    await manager.create(condition());
+    await manager.create(condition({ id: 'other', label: 'Other' }));
+    const checked = await manager.runCheck('depth');
+    expect(checked?.lastError).toBeUndefined();
+    expect(checked?.observations.at(-1)?.text).toBe('Infinity');
+    expect(manager.list().map((record) => record.definition.id).sort()).toEqual(['depth', 'other']);
+    expect((await manager.runCheck('other'))?.state).toBe('idle');
+  });
+});
+
 describe('a store whose owner has exited', () => {
   test('the observing process takes over on its next supervision tick', async () => {
     const path = storePath();
     const owner = newManager({ path, bootId: 'boot-1' });
-    owner.manager.start();
+    await owner.manager.create(condition());
     expect(owner.manager.executionOwnership).toBe('local');
     const observer = newManager({ path, bootId: 'boot-2' });
     observer.manager.start();
@@ -260,7 +273,7 @@ describe('operator inspection failures', () => {
     const { logger } = await import('../platform/src/platform/utils/logger.ts');
     const warn = spyOn(logger, 'warn').mockImplementation(() => {});
     try {
-      const supervisor = { inspectRecords: () => { throw new TypeError('corrupt record'); }, executionOwnership: 'local' as const, migratePrevious: () => { throw new Error('unused'); } };
+      const supervisor = { inspectRecords: () => { throw new TypeError('corrupt record'); }, executionOwnership: 'local' as const };
       let thrown: unknown;
       try { triggerOperatorStatus(supervisor as never); } catch (error) { thrown = error; }
       expect(thrown).toBeInstanceOf(TriggerOperatorError);

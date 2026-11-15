@@ -236,6 +236,21 @@ export function validateRegexSource(pattern: string, field: string, flags?: stri
   }
 }
 
+/** Compiled patterns by flags and source; a rule or extractor runs on every check, and a pattern is checked and compiled once. */
+const compiledPatterns = new Map<string, RegExp>();
+const MAX_COMPILED_PATTERNS = 256;
+
+/** The checked, compiled form of a pattern, cached so a check does not re-scan and re-compile it. */
+export function compiledRegex(pattern: string, field: string, flags?: string | undefined): RegExp {
+  const key = `${flags ?? ''}\u0000${pattern}`;
+  const cached = compiledPatterns.get(key);
+  if (cached) return cached;
+  const regex = validateRegexSource(pattern, field, flags);
+  if (compiledPatterns.size >= MAX_COMPILED_PATTERNS) compiledPatterns.delete(compiledPatterns.keys().next().value!);
+  compiledPatterns.set(key, regex);
+  return regex;
+}
+
 export function validateProbe(input: unknown, field = 'probe'): TriggerProbe {
   const probe = requireObject(input, field);
   const kind = probe.kind;
@@ -465,7 +480,7 @@ export function validateAction(input: unknown, field = 'action'): TriggerFireAct
     // A fired trigger starts its own agent; nothing attaches it to an existing session.
     // Refusing the field beats accepting it and running the turn somewhere else.
     if (action.sessionId !== undefined && !readingPersistedDefinition) {
-      throw new TriggerDefinitionError(`${field}.sessionId`, 'is not supported: a fired trigger starts its own agent turn and cannot be attached to a session');
+      throw new TriggerDefinitionError(`${field}.sessionId`, 'is not supported: a fired trigger starts its own agent and cannot run inside a session. Leave sessionId out; the agent that fired is listed with the trigger\'s history');
     }
   } else {
     requireString(action.grantId, `${field}.grantId`);

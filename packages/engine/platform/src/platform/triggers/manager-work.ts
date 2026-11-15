@@ -1,9 +1,9 @@
-/** Keep a current trigger-store lease until all admitted async work has actually
+/** Keep the trigger-store lock until all admitted async work has actually
  * completed. A caller-visible cancellation is not proof that a start/effect
- * callback has drained. This is local ownership, not authority over old code.
+ * callback has drained.
  */
 import { logger } from '../utils/logger.js';
-import { TriggerStoreError } from './store-owner.js';
+
 import type { TriggerProcessHost } from './process-triggers.js';
 import type { TriggerStreamHost } from './manager-types.js';
 import type { StreamRuntime } from './manager-streams.js';
@@ -14,7 +14,11 @@ export class TriggerManagerWork {
   private stopping: Promise<void> | undefined;
   constructor(private readonly release: () => void) {}
   get stopped(): boolean { return this.closed; }
-  start(): void { if (!this.closed) return; if (this.pending.size > 0 || !this.resourcesStopped) throw new TriggerStoreError('unavailable'); this.closed = false; this.resourcesStopped = false; this.stopping = undefined; }
+  start(): void {
+    if (!this.closed) return;
+    if (this.pending.size > 0 || !this.resourcesStopped) throw new Error('The trigger supervisor is still stopping its work; start it again once join() has settled');
+    this.closed = false; this.resourcesStopped = false; this.stopping = undefined;
+  }
   own<T>(begin: () => Promise<T>): Promise<T> {
     const { promise, resolve, reject } = Promise.withResolvers<T>();
     this.pending.add(promise);
@@ -38,10 +42,10 @@ export class TriggerManagerWork {
       this.releaseOwned();
       this.resourcesStopped = true;
     })();
-    void this.stopping.catch(() => logger.warn('Trigger resources could not be drained; executor lease retained'));
+    void this.stopping.catch(() => logger.warn('Trigger resources could not be drained; the supervisor lock is kept'));
   }
   private releaseOwned(): void {
-    try { this.release(); } catch { logger.warn('Trigger store lease could not be released from its original directory'); throw new TriggerStoreError('unavailable'); }
+    try { this.release(); } catch (error) { logger.warn('Trigger store could not be released'); throw error; }
   }
 }
 
@@ -61,6 +65,6 @@ export function stopTriggerResources(
   const streamJoin = streamHost?.join?.bind(streamHost), processJoin = processHost?.join?.bind(processHost);
   return async () => {
     const results = await Promise.allSettled([streamJoin, processJoin].map(async (join) => { await join?.(); }));
-    if (failed || results.some((result) => result.status === 'rejected')) throw new TriggerStoreError('unavailable');
+    if (failed || results.some((result) => result.status === 'rejected')) throw new Error('Trigger children could not all be confirmed stopped');
   };
 }

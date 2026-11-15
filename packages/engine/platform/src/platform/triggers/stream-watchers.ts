@@ -32,6 +32,8 @@ export interface StreamBatch {
   readonly dropped: number;
   /** Lines suppressed by the dedup TTL since the previous batch. */
   readonly deduped: number;
+  /** The watched command ended and this is everything that was still queued. */
+  readonly final?: boolean | undefined;
 }
 
 export interface StreamProcessorOptions {
@@ -49,6 +51,9 @@ export const DEFAULT_STREAM_QUEUE_LIMIT = 1_000;
 /** A single line longer than this is truncated rather than buffered whole. */
 const MAX_LINE_LENGTH = 8_192;
 const MAX_DEDUP_MARKS = 4_096;
+/** Bounds of the one batch sent when a stream ends; older queued lines beyond them are counted as dropped. */
+export const FINAL_BATCH_MAX_LINES = 200;
+export const FINAL_BATCH_MAX_CHARS = 32_768;
 
 export function resolveStreamOptions(
   spec: StreamTriggerSpec,
@@ -192,6 +197,44 @@ export class StreamLineProcessor {
     this.firstQueuedAt = this.queue.length > 0 ? now : null;
     return batch;
   }
+
+  /**
+   * Everything still queued as one batch, for when the command has ended: the
+   * newest lines within the final-batch bounds, the older rest counted as
+   * dropped. One turn for the end of a stream, never one per queued batch.
+   */
+  takeFinal(now: number, maxLines = FINAL_BATCH_MAX_LINES, maxChars = FINAL_BATCH_MAX_CHARS): StreamBatch | null {
+    if (this.queue.length === 0) return null;
+    const kept: string[] = [];
+    let chars = 0;
+    for (let index = this.queue.length - 1; index >= 0 && kept.length < maxLines; index -= 1) {
+      const line = this.queue[index]!;
+      if (kept.length > 0 && chars + line.length > maxChars) break;
+      kept.push(line);
+      chars += line.length;
+    }
+    kept.reverse();
+    const omitted = this.queue.length - kept.length;
+    this.totalDropped += omitted;
+    const batch: StreamBatch = { at: now, lines: kept, dropped: this.droppedSinceBatch + omitted, deduped: this.dedupedSinceBatch, final: true };
+    this.queue = [];
+    this.droppedSinceBatch = 0;
+    this.dedupedSinceBatch = 0;
+    this.firstQueuedAt = null;
+    return batch;
+  }
+
+  /** Puts the lines of a batch whose action failed back at the head of the queue; the queue bound still applies. */
+  requeue(lines: readonly string[], now: number): void {
+    if (lines.length === 0) return;
+    if (this.queue.length === 0) this.firstQueuedAt = now;
+    this.queue = [...lines, ...this.queue];
+    while (this.queue.length > this.options.queueLimit) {
+      this.queue.shift();
+      this.droppedSinceBatch += 1;
+      this.totalDropped += 1;
+    }
+  }
 }
 
 /**
@@ -207,6 +250,9 @@ export function renderStreamPrompt(batch: StreamBatch, label: string, pattern: s
     `Match pattern: ${pattern}`,
     `Matched lines in this batch: ${batch.lines.length}`,
   ];
+  if (batch.final === true) {
+    lines.push('The watched command ended; these are the last matched lines still waiting to be delivered.');
+  }
   if (batch.deduped > 0) {
     lines.push(`Suppressed as repeats inside the dedup window: ${batch.deduped}`);
   }

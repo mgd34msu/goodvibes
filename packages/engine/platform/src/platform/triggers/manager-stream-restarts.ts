@@ -1,5 +1,5 @@
 /** Restart only a due supervised stream or an explicit operator reset. The
- * restart reservation is durable before entering the borrowed process host;
+ * restart reservation is saved before entering the borrowed process host;
  * overlapping ticks share one original admitted operation per trigger.
  */
 import { summarizeError } from '../utils/error-display.js';
@@ -29,7 +29,7 @@ async function restartStream(owner: StreamOwner, work: TriggerManagerWork, origi
     lastError: 'stream restart reserved; acknowledgement unobserved',
     runs: [...original.runs, { at: now, outcome: 'checked', detail: 'stream restart reserved; acknowledgement unobserved' }],
   };
-  owner.records.set(id, reserved); owner.persist();
+  owner.records.set(id, reserved); owner.persist(id);
   let runtime: StreamRuntime | undefined;
   try {
     const starting = startStreamTrigger(owner, reserved, spec, now);
@@ -38,7 +38,7 @@ async function restartStream(owner: StreamOwner, work: TriggerManagerWork, origi
     if (work.stopped || !owner.config().enabled || owner.records.get(id) !== reserved) throw new Error('Stream restart owner retired');
     if (!runtime) throw new Error('Stream restart has no original process observation');
     owner.assertCurrent?.(id, runtime);
-    owner.records.set(id, { ...running, lastError: undefined }); owner.persist();
+    owner.records.set(id, { ...running, lastError: undefined }); owner.persist(id);
     activateStreamTrigger(owner, id);
   } catch (error) {
     if (runtime?.timer) clearInterval(runtime.timer);
@@ -53,7 +53,7 @@ async function restartStream(owner: StreamOwner, work: TriggerManagerWork, origi
       lastError: 'stream restart failed', updatedAt: at,
       runs: [...reserved.runs, { at, outcome: 'failed', detail: failure.breakerOpened ? 'stream restart failed; circuit open' : 'stream restart failed; retry scheduled' }],
     });
-    owner.persist();
+    owner.persist(id);
     logger.warn('Trigger stream restart failed', { triggerId: id, error: summarizeError(error) });
   }
 }

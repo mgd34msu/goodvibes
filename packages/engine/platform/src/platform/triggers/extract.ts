@@ -11,8 +11,9 @@
  * is no expression language to escape from.
  */
 
+import { createHash } from 'node:crypto';
 import type { TriggerExtract, TriggerObservation, TriggerValue } from './types.js';
-import { validateRegexSource } from './validation.js';
+import { compiledRegex } from './validation.js';
 
 const MAX_REGEX_INPUT_CHARS = 65_536;
 
@@ -40,8 +41,60 @@ export function numericOf(value: TriggerValue): number | null {
   return null;
 }
 
-export function toObservation(value: TriggerValue, at: number): TriggerObservation {
-  return { at, value, text: stableText(value), numeric: numericOf(value) };
+/** Characters of a result kept on a stored observation; a change past them is still seen through the hash. */
+export const OBSERVATION_SAMPLE_CHARS = 512;
+/** Nesting kept from a probe result; anything deeper is held as its text form. */
+const MAX_OBSERVED_DEPTH = 32;
+
+/**
+ * The probe result as plain JSON data. A number JSON cannot hold (`1e999`
+ * parses to Infinity) becomes its text, and nesting past the bound becomes the
+ * text of that branch, so an observation can always be stored.
+ */
+export function toJsonValue(value: unknown, depth = 0): TriggerValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : String(value);
+  if (typeof value !== 'object') return value === undefined ? null : String(value);
+  if (depth >= MAX_OBSERVED_DEPTH) return stableText(value as TriggerValue);
+  if (Array.isArray(value)) return value.map((entry: unknown) => toJsonValue(entry, depth + 1));
+  const result: Record<string, TriggerValue> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (entry !== undefined) result[key] = toJsonValue(entry, depth + 1);
+  }
+  return result;
+}
+
+/** Short digest of an observation's full text; the identity change and transition rules compare. */
+export function textHash(text: string): string {
+  return createHash('sha256').update(text).digest('hex').slice(0, 32);
+}
+
+/** The digest of an observation, computed for one saved before observations carried it. */
+export function observationHash(observation: TriggerObservation): string {
+  return observation.hash ?? textHash(observation.text);
+}
+
+/** Text for a reason or prompt: the sample, marked when it was cut. */
+export function observationLabel(observation: TriggerObservation): string {
+  return observation.truncated === true ? `${observation.text}… (${observation.hash ?? 'cut'})` : observation.text;
+}
+
+/** One observation, made once per check: plain JSON data with its digest. The rule sees this, whole. */
+export function toObservation(raw: TriggerValue, at: number): TriggerObservation {
+  const value = toJsonValue(raw);
+  const text = stableText(value);
+  return { at, value, text, numeric: numericOf(value), hash: textHash(text) };
+}
+
+/**
+ * The form an observation is kept in. A value whose text is longer than the
+ * sample keeps only the sample (as text), its digest and its number, so the
+ * ring never holds a body and a change past the sample is still seen.
+ */
+export function storedObservation(observation: TriggerObservation): TriggerObservation {
+  if (observation.text.length <= OBSERVATION_SAMPLE_CHARS) return observation;
+  const sample = observation.text.slice(0, OBSERVATION_SAMPLE_CHARS);
+  return { at: observation.at, value: sample, text: sample, numeric: observation.numeric, hash: observationHash(observation), truncated: true };
 }
 
 function parseJsonIfPossible(input: TriggerValue): TriggerValue {
@@ -205,7 +258,7 @@ export function runExtract(extract: TriggerExtract, input: TriggerValue): Trigge
       // The pattern runs synchronously on the daemon, so the text it scans is bounded.
       const full = typeof input === 'string' ? input : stableText(input);
       const source = full.length > MAX_REGEX_INPUT_CHARS ? full.slice(0, MAX_REGEX_INPUT_CHARS) : full;
-      const regex = validateRegexSource(extract.pattern, 'extract', extract.flags);
+      const regex = compiledRegex(extract.pattern, 'extract', extract.flags);
       const match = regex.exec(source);
       if (!match) return null;
       const group = extract.group ?? 0;

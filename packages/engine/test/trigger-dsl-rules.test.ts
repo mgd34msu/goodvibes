@@ -251,6 +251,28 @@ describe('rule: debounce-n', () => {
     expect(miss.fire).toBe(false);
     expect(miss.ruleState.streak).toBe(0);
   });
+
+  test('counts checks on which an edge rule holds, and fires once per sustained episode', () => {
+    const rule: TriggerRule = { kind: 'debounce-n', count: 3, inner: { kind: 'value', operator: 'gt', operand: 90 } };
+    let state: TriggerRuleState = {};
+    const fires: boolean[] = [];
+    for (let check = 1; check <= 8; check += 1) {
+      const decision = decide(rule, observations([[check, 95]]), state);
+      fires.push(decision.fire);
+      state = decision.ruleState;
+    }
+    expect(fires).toEqual([false, false, true, false, false, false, false, false]);
+  });
+});
+
+describe('comparison', () => {
+  test('empty or non-numeric text is never a number, and two texts compare as text', () => {
+    const lt = decide({ kind: 'value', operator: 'lt', operand: 5, level: true }, observations([[1, '']]));
+    const eqZero = decide({ kind: 'value', operator: 'eq', operand: 0, level: true }, observations([[1, '']]));
+    const versions = decide({ kind: 'value', operator: 'eq', operand: '1.1', level: true }, observations([[1, '1.10']]));
+    const padded = decide({ kind: 'value', operator: 'eq', operand: 42, level: true }, observations([[1, ' 42\n']]));
+    expect([lt.fire, eqZero.fire, versions.fire, padded.fire]).toEqual([false, false, false, true]);
+  });
 });
 
 describe('rule: dedup-ttl', () => {

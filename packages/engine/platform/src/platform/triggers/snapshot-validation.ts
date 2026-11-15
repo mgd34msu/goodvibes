@@ -1,5 +1,5 @@
-/** Complete persisted-data checks. A valid snapshot does not confirm a grant;
- * fire-time approval ownership remains in grants.ts. No data checksum is minted.
+/** Checks for rows read back from the trigger store. A valid row does not
+ * confirm a grant; fire-time approval ownership remains in grants.ts.
  */
 import { validateArgv, validateDefinition } from './validation.js';
 import type { TriggerActionGrant, TriggerEventLogEntry, TriggerRecord, TriggerRecoveryReport } from './types.js';
@@ -15,7 +15,8 @@ function approval(value: unknown): boolean {
   try { validateArgv(value['command'], value['args'], 'approval'); return true; } catch { return false; }
 }
 function observation(value: unknown): boolean {
-  return object(value) && finite(value['at']) && 'value' in value && text(value['text']) && (value['numeric'] === null || finite(value['numeric']));
+  return object(value) && finite(value['at']) && 'value' in value && text(value['text']) && (value['numeric'] === null || finite(value['numeric']))
+    && optional(value, 'hash', text) && optional(value, 'truncated', entry => typeof entry === 'boolean');
 }
 function termination(value: unknown): boolean {
   return object(value) && oneOf(value['state'], ['exited', 'signalled', 'timed-out', 'unknown'])
@@ -38,10 +39,11 @@ function definition(value: unknown): boolean {
   return object(action) && optional(action, 'approvedAction', approval);
 }
 export function isTriggerRecord(value: unknown): value is TriggerRecord {
-  if (!object(value) || !definition(value['definition']) || !oneOf(value['state'], ['idle', 'running', 'backoff', 'circuit-open', 'fired', 'cancelled', 'failed'])
+  if (!object(value) || !definition(value['definition']) || !oneOf(value['state'], ['idle', 'running', 'backoff', 'circuit-open', 'firing', 'fired', 'cancelled', 'failed'])
     || !Array.isArray(value['observations']) || !value['observations'].every(observation) || !Array.isArray(value['runs']) || !value['runs'].every(run)
     || !count(value['strikes']) || !count(value['backoffRung']) || !count(value['firedCount']) || !count(value['droppedLines']) || !finite(value['updatedAt'])
-    || !optional(value, 'nextCheckAt', finite) || !optional(value, 'lastError', text) || !optional(value, 'lastFiredAt', finite)) return false;
+    || !optional(value, 'nextCheckAt', finite) || !optional(value, 'lastError', text) || !optional(value, 'lastFiredAt', finite)
+    || !optional(value, 'pendingExit', termination)) return false;
   const rule = value['ruleState'];
   if (!object(rule) || !optional(rule, 'armed', entry => typeof entry === 'boolean') || !optional(rule, 'lastMatched', entry => typeof entry === 'boolean')
     || !optional(rule, 'streak', count) || !optional(rule, 'dedupMarks', entry => object(entry) && Object.values(entry).every(finite))) return false;
@@ -63,34 +65,4 @@ export function isTriggerEvent(value: unknown): value is TriggerEventLogEntry {
 export function isTriggerReport(value: unknown): value is TriggerRecoveryReport {
   return object(value) && finite(value['at']) && oneOf(value['reason'], ['startup', 'sweep']) && strings(value['reapedIds']) && strings(value['orphanedProcesses'])
     && ['triggersLoaded', 'triggersReaped', 'runsReaped', 'observationsReaped', 'eventsReaped'].every(key => count(value[key])) && optional(value, 'quarantined', text);
-}
-/** Detached data-only input; reject accessors, prototypes, cycles and non-finite
- * JSON numbers before any native writer/floor callback can change its producer.
- */
-export function snapshotJson(value: unknown, active = new WeakSet<object>(), depth = 0): unknown {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
-  if (finite(value)) return value;
-  if (depth > 128 || typeof value !== 'object' || value === null || active.has(value)) throw new Error('Trigger snapshot input is not plain JSON data');
-  const array = Array.isArray(value), prototype: unknown = Object.getPrototypeOf(value);
-  if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) throw new Error('Trigger snapshot input is not plain JSON data');
-  active.add(value);
-  try {
-    const result: unknown[] | Record<string, unknown> = array ? [] : {};
-    let arrayEntries = 0;
-    for (const key of Reflect.ownKeys(value)) {
-      if (array && key === 'length') continue;
-      if (array && (typeof key !== 'string' || !/^(0|[1-9][0-9]*)$/.test(key))) throw new Error('Trigger snapshot array has named properties');
-      if (array) arrayEntries += 1;
-      if (typeof key !== 'string') throw new Error('Trigger snapshot keys are not plain JSON data');
-      const property = Object.getOwnPropertyDescriptor(value, key);
-      if (!property || !('value' in property)) throw new Error('Trigger snapshot properties are not plain JSON data');
-      if (!array && !property.enumerable) continue;
-      // Optional fields are omitted by JSON, preserving exactOptionalPropertyTypes.
-      if (property.value === undefined && !array) continue;
-      const next = snapshotJson(property.value, active, depth + 1);
-      Object.defineProperty(result, key, { value: next, enumerable: true, writable: true, configurable: true });
-    }
-    if (array && (arrayEntries !== (value as unknown[]).length || (result as unknown[]).length !== (value as unknown[]).length)) throw new Error('Trigger snapshot array is sparse');
-    return result;
-  } finally { active.delete(value); }
 }

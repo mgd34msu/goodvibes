@@ -9,6 +9,7 @@
  * long-lived command, arrives through one of these interfaces.
  */
 
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 import type { TriggerProcessHost } from './process-triggers.js';
 import type { ProbeIo } from './probes.js';
@@ -68,10 +69,11 @@ export interface TriggerManagerConfig {
 }
 
 export interface TriggerManagerOptions {
+  /** The trigger database (`…/triggers.db`); a path to an earlier `.json` store means the database beside it. */
   readonly storePath: string;
-  /** Read-only original v1 source; never overwritten by new installed readers. */
-  readonly previousStorePath?: string | undefined;
-  /** Actual admitted installed reader owner; declares v2 before publication. */
+  /** Earlier JSON stores, read once when the database is created and never written. */
+  readonly previousStorePath?: string | readonly string[] | undefined;
+  /** @deprecated Ignored: the database is a new file no earlier reader opens. */
   readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
   /**
    * A snapshot, or a function read on every access. Hosts pass the function
@@ -89,6 +91,11 @@ export interface TriggerManagerOptions {
   /** Stable for the lifetime of one daemon process. Drives restart detection. */
   readonly daemonBootId?: string | undefined;
   readonly sessionIsLive?: ((sessionId: string) => boolean) | undefined;
+  /**
+   * Subscribes to `watchers.triggers.enabled`; returns the unsubscribe. With
+   * it, turning the setting on starts supervising stored triggers at once.
+   */
+  readonly watchEnabled?: ((onChange: (enabled: boolean) => void) => () => void) | undefined;
 }
 
 /**
@@ -96,9 +103,15 @@ export interface TriggerManagerOptions {
  * that quietly declines to exist is the worst of both worlds, the operator
  * believes it is running.
  */
-export class TriggerDisabledError extends Error {
+export class TriggerDisabledError extends RefusalError {
   constructor(operation: string) {
-    super(`Cannot ${operation}: the trigger family is off. Set watchers.triggers.enabled true to turn it on.`);
+    super(refusal({
+      code: 'TRIGGERS_OFF',
+      state: 'triggers are off (watchers.triggers.enabled is false)',
+      reason: `Cannot ${operation}: the trigger family is off (watchers.triggers.enabled is false)`,
+      next: ['Set watchers.triggers.enabled to true (/config set watchers.triggers.enabled true), then try again'],
+      status: 409,
+    }));
     this.name = 'TriggerDisabledError';
   }
 }

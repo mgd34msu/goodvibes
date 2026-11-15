@@ -9,12 +9,10 @@ export class TriggerChildProcesses {
   private readonly watchers = new Set<Promise<void>>();
   private readonly stops = new Map<string, Promise<void>>();
   private draining: Promise<void> | undefined;
-  /** A drain that could not be confirmed leaves children unaccounted for, so no new child is admitted until a retried join succeeds. */
-  private drainFailed = false;
   constructor(private readonly manager: ProcessManager) {}
 
   admit<T>(begin: () => Promise<T>): Promise<T> {
-    if (this.draining || this.drainFailed) return Promise.reject(new Error(this.draining ? 'Trigger process host is draining' : 'Trigger process host drain was not confirmed; call join() again before launching'));
+    if (this.draining) return Promise.reject(new Error('The trigger process host is stopping its children; start the trigger again once it has stopped'));
     const { promise, resolve, reject } = Promise.withResolvers<T>();
     this.launches.add(promise);
     const done = () => { this.launches.delete(promise); };
@@ -73,9 +71,9 @@ export class TriggerChildProcesses {
       }
       this.children.clear(); this.stops.clear(); this.watchers.clear();
     })();
-    // A successful drain allows a deliberate supervisor restart with the same host;
-    // a failed one stays refused but can be retried by calling join() again.
-    void this.draining.then(() => { this.draining = undefined; this.drainFailed = false; }, () => { this.draining = undefined; this.drainFailed = true; });
+    // Either way the host takes children again. A child whose stop was not
+    // confirmed stays in `children`, so the next join() asks it to stop again.
+    void this.draining.then(() => { this.draining = undefined; }, () => { this.draining = undefined; });
     return this.draining;
   }
 }

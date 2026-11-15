@@ -173,7 +173,6 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   ['tailscale', (catalog) => registerTailscaleGatewayMethods(catalog, stubDeps())],
   ['trigger-supervisor', (catalog) => registerTriggerSupervisorGatewayMethods(catalog, {
     inspectRecords: () => [], executionOwnership: 'unclaimed',
-    migratePrevious() { throw new Error('The conformance probe must not migrate trigger state.'); },
   })],
   ['update', (catalog) => registerUpdateGatewayMethods(catalog, stubDeps())],
   ['voice-setup', (catalog) => registerVoiceSetupGatewayMethods(catalog, stubDeps())],

@@ -13,7 +13,7 @@
  *   transition          one specific previous -> current pair
  *   threshold           enter/exit band, so a value hovering on the line
  *                       cannot flap the trigger (hysteresis)
- *   debounce-n          inner rule must match N consecutive checks
+ *   debounce-n          inner condition must hold on N consecutive checks
  *   dedup-ttl           inner rule fires at most once per fingerprint per TTL
  *   rate-of-change      delta across a time window, per second or per minute
  *   windowed-aggregate  min/max/mean/sum/count/stddev over a time window
@@ -21,7 +21,7 @@
  *                       bounded shared event log
  */
 
-import { stableText } from './extract.js';
+import { numericOf, observationHash, observationLabel, stableText, textHash } from './extract.js';
 import type {
   ComparisonOperator,
   CorrelationRule,
@@ -31,7 +31,7 @@ import type {
   TriggerRuleState,
   TriggerValue,
 } from './types.js';
-import { validateRegexSource } from './validation.js';
+import { compiledRegex } from './validation.js';
 
 export interface RuleEvaluationContext {
   /** Newest last. The rule reads whatever depth the ring buffer retains. */
@@ -61,33 +61,43 @@ function previous(context: RuleEvaluationContext): TriggerObservation | undefine
   return context.observations[context.observations.length - 2];
 }
 
+/** A number or numeric text as a number (`numericOf`: empty or non-numeric text is never 0); anything else is not a number here. */
+function scalarNumber(value: TriggerValue): number | null {
+  return typeof value === 'number' || typeof value === 'string' ? numericOf(value) : null;
+}
+
+/**
+ * Ordering operators need two numbers. Equality is numeric when either side is
+ * a number and both read as numbers (`" 42\n" eq 42`); two texts are compared
+ * as text, so `"1.10"` is not `"1.1"`, and an empty result is never `eq 0`.
+ */
 export function compare(operator: ComparisonOperator, left: TriggerValue, right: TriggerValue): boolean {
   const leftText = stableText(left);
   const rightText = stableText(right);
-  const leftNum = typeof left === 'number' ? left : Number(leftText);
-  const rightNum = typeof right === 'number' ? right : Number(rightText);
-  const numeric = Number.isFinite(leftNum) && Number.isFinite(rightNum);
+  const leftNum = scalarNumber(left);
+  const rightNum = scalarNumber(right);
+  const numericEquality = leftNum !== null && rightNum !== null && !(typeof left === 'string' && typeof right === 'string');
 
   switch (operator) {
     case 'eq':
-      return numeric ? leftNum === rightNum : leftText === rightText;
+      return numericEquality ? leftNum === rightNum : leftText === rightText;
     case 'ne':
-      return numeric ? leftNum !== rightNum : leftText !== rightText;
+      return numericEquality ? leftNum !== rightNum : leftText !== rightText;
     case 'lt':
-      return numeric && leftNum < rightNum;
+      return leftNum !== null && rightNum !== null && leftNum < rightNum;
     case 'lte':
-      return numeric && leftNum <= rightNum;
+      return leftNum !== null && rightNum !== null && leftNum <= rightNum;
     case 'gt':
-      return numeric && leftNum > rightNum;
+      return leftNum !== null && rightNum !== null && leftNum > rightNum;
     case 'gte':
-      return numeric && leftNum >= rightNum;
+      return leftNum !== null && rightNum !== null && leftNum >= rightNum;
     case 'contains':
       return leftText.includes(rightText);
     case 'not-contains':
       return !leftText.includes(rightText);
     case 'matches':
       // Synchronous on the daemon: scan a bounded prefix, never an unbounded probe result.
-      return validateRegexSource(rightText, 'rule.operand').test(leftText.length > 65_536 ? leftText.slice(0, 65_536) : leftText);
+      return compiledRegex(rightText, 'rule.operand').test(leftText.length > 65_536 ? leftText.slice(0, 65_536) : leftText);
     default:
       return false;
   }
@@ -192,6 +202,28 @@ function evaluateCorrelation(rule: CorrelationRule, context: RuleEvaluationConte
   };
 }
 
+/** A short form of an observation for a reason line; the full text never goes into a reason or prompt. */
+const REASON_TEXT_CHARS = 160;
+function reasonText(observation: TriggerObservation): string {
+  const label = observationLabel(observation);
+  return label.length > REASON_TEXT_CHARS ? `${label.slice(0, REASON_TEXT_CHARS)}…` : label;
+}
+
+/** Whether a rule's condition holds on this check, as opposed to whether it fired on an edge. */
+function holds(rule: TriggerRule, decision: RuleDecision): boolean {
+  switch (rule.kind) {
+    case 'value':
+    case 'rate-of-change':
+    case 'windowed-aggregate':
+    case 'correlation':
+      return decision.ruleState.lastMatched === true;
+    case 'threshold':
+      return decision.ruleState.armed === true;
+    default:
+      return decision.fire;
+  }
+}
+
 /** Evaluates one rule. Pure: same inputs, same decision, no side effects. */
 export function evaluateRule(rule: TriggerRule, context: RuleEvaluationContext): RuleDecision {
   const current = latest(context);
@@ -208,15 +240,17 @@ export function evaluateRule(rule: TriggerRule, context: RuleEvaluationContext):
           fire: rule.fireOnFirst === true,
           ruleState: state,
           reason: rule.fireOnFirst === true ? 'first observation (fireOnFirst)' : 'first observation, nothing to compare against',
-          fingerprint: `change:${current.text}`,
+          fingerprint: `change:${observationHash(current)}`,
         };
       }
-      const changed = prior.text !== current.text;
+      const before = observationHash(prior);
+      const after = observationHash(current);
+      const changed = before !== after;
       return {
         fire: changed,
         ruleState: state,
-        reason: changed ? `value changed ${prior.text} -> ${current.text}` : 'value unchanged',
-        fingerprint: `change:${prior.text}->${current.text}`,
+        reason: changed ? `value changed ${reasonText(prior)} -> ${reasonText(current)}` : 'value unchanged',
+        fingerprint: `change:${before}->${after}`,
       };
     }
 
@@ -230,8 +264,8 @@ export function evaluateRule(rule: TriggerRule, context: RuleEvaluationContext):
         return {
           fire: matched,
           ruleState: nextState,
-          reason: matched ? `${current.text} ${rule.operator} ${stableText(rule.operand)}` : 'comparison did not hold',
-          fingerprint: `value:${current.text}`,
+          reason: matched ? `${reasonText(current)} ${rule.operator} ${stableText(rule.operand)}` : 'comparison did not hold',
+          fingerprint: `value:${observationHash(current)}`,
         };
       }
       const rising = matched && state.lastMatched !== true;
@@ -239,9 +273,9 @@ export function evaluateRule(rule: TriggerRule, context: RuleEvaluationContext):
         fire: rising,
         ruleState: nextState,
         reason: rising
-          ? `entered ${rule.operator} ${stableText(rule.operand)} at ${current.text}`
+          ? `entered ${rule.operator} ${stableText(rule.operand)} at ${reasonText(current)}`
           : matched ? 'still matching (edge already consumed)' : 'comparison did not hold',
-        fingerprint: `value:${current.text}`,
+        fingerprint: `value:${observationHash(current)}`,
       };
     }
 
@@ -249,11 +283,11 @@ export function evaluateRule(rule: TriggerRule, context: RuleEvaluationContext):
       if (!current || !prior) {
         return { fire: false, ruleState: state, reason: 'need two observations for a transition', fingerprint: 'transition:none' };
       }
-      const hit = prior.text === rule.from && current.text === rule.to;
+      const hit = observationHash(prior) === textHash(rule.from) && observationHash(current) === textHash(rule.to);
       return {
         fire: hit,
         ruleState: state,
-        reason: hit ? `transitioned ${rule.from} -> ${rule.to}` : `no ${rule.from} -> ${rule.to} transition (saw ${prior.text} -> ${current.text})`,
+        reason: hit ? `transitioned ${rule.from} -> ${rule.to}` : `no ${rule.from} -> ${rule.to} transition (saw ${reasonText(prior)} -> ${reasonText(current)})`,
         fingerprint: `transition:${rule.from}->${rule.to}`,
       };
     }
@@ -291,15 +325,19 @@ export function evaluateRule(rule: TriggerRule, context: RuleEvaluationContext):
     }
 
     case 'debounce-n': {
+      // The streak counts checks on which the inner condition holds, not its edges:
+      // an edge rule reports `fire` once, so counting fires could never reach 2.
+      // It fires once, on the check that completes the streak, and again only after
+      // the condition has stopped holding and held for the full count once more.
       const inner = evaluateRule(rule.inner, { ...context, ruleState: state });
-      const streak = inner.fire ? (state.streak ?? 0) + 1 : 0;
-      const ready = streak >= rule.count;
+      const streak = holds(rule.inner, inner) ? Math.min((state.streak ?? 0) + 1, rule.count + 1) : 0;
+      const ready = streak === rule.count;
       return {
         fire: ready,
-        ruleState: { ...inner.ruleState, streak: ready ? 0 : streak },
+        ruleState: { ...inner.ruleState, streak },
         reason: ready
-          ? `inner rule matched ${rule.count} consecutive checks (${inner.reason})`
-          : `debounce ${streak}/${rule.count} (${inner.reason})`,
+          ? `the condition held for ${rule.count} consecutive checks (${inner.reason})`
+          : streak > rule.count ? `still holding after ${rule.count} checks (already acted on)` : `debounce ${streak}/${rule.count} (${inner.reason})`,
         fingerprint: inner.fingerprint,
       };
     }

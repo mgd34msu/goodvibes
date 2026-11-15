@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TriggerManager, loadTriggerSnapshot, type TriggerStreamHost } from '../platform/src/platform/triggers/index.ts';
+import { TriggerManager, TriggerStore, type TriggerStreamHost } from '../platform/src/platform/triggers/index.ts';
 
 const roots: string[] = [], managers: TriggerManager[] = [];
 afterEach(async () => {
@@ -36,10 +36,31 @@ test('the actual supervision tick restarts an exited stream at its saved deadlin
   f.starts[1]!.onChunk('ERROR current\n'); await f.manager.join(); expect(f.actions()).toBe(1);
 });
 
+test('start with nothing stored takes no lock, writes no file and starts no supervision', () => {
+  const f = fixture(); f.manager.start();
+  expect(f.manager.executionOwnership).toBe('unclaimed');
+  expect(existsSync(f.manager.storePath)).toBe(false); expect(existsSync(`${f.manager.storePath}.writer.sqlite`)).toBe(false);
+});
+
+test('a stream that keeps ending after healthy runs is restarted every time and never parks', async () => {
+  const f = fixture(); await f.manager.create(definition);
+  for (let run = 0; run < 6; run += 1) {
+    f.starts.at(-1)!.onChunk('ERROR seen\n'); await f.manager.join();
+    f.starts.at(-1)!.onExit(1); f.advance(100); await f.manager.supervisionTick();
+  }
+  // A clean end after a healthy run is restarted at once.
+  for (let run = 0; run < 6; run += 1) {
+    f.starts.at(-1)!.onChunk('ERROR again\n'); await f.manager.join();
+    f.starts.at(-1)!.onExit(0); await f.manager.supervisionTick();
+  }
+  expect(f.manager.get('stream')?.state).toBe('running');
+  expect(f.manager.get('stream')?.strikes).toBe(0);
+});
+
 test('operator inspection of an unclaimed supervisor never creates state or acquires execution', () => {
   const f = fixture(); expect(f.manager.executionOwnership).toBe('unclaimed');
   expect(f.manager.inspectRecords()).toEqual([]); expect(f.manager.executionOwnership).toBe('unclaimed');
-  expect(existsSync(f.path)).toBe(false); expect(existsSync(`${f.path}.owner.lock`)).toBe(false);
+  expect(existsSync(f.manager.storePath)).toBe(false); expect(existsSync(`${f.manager.storePath}.writer.sqlite`)).toBe(false);
 });
 
 test('overlapping ticks admit one restart and the host observes the durable reservation first', async () => {
@@ -47,7 +68,7 @@ test('overlapping ticks admit one restart and the host observes the durable rese
   const returned = Promise.withResolvers<{ streamId: string; pid: number }>(), entered = Promise.withResolvers<void>(); let launches = 0;
   f.host.start = input => {
     launches += 1; f.starts.push(input); entered.resolve();
-    const stored = loadTriggerSnapshot(f.path).snapshot?.triggers[0];
+    const stored = new TriggerStore(f.path).read().records[0];
     expect(stored?.state).toBe('running'); expect(stored?.lastError).toContain('acknowledgement unobserved');
     return returned.promise;
   };

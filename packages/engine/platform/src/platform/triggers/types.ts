@@ -373,6 +373,7 @@ export type TriggerState =
   | 'running'
   | 'backoff'
   | 'circuit-open'
+  | 'firing'
   | 'fired'
   | 'cancelled'
   | 'failed';
@@ -381,10 +382,14 @@ export type TriggerState =
 export interface TriggerObservation {
   readonly at: number;
   readonly value: TriggerValue;
-  /** Stable string form used by change/transition/dedup rules. */
+  /** Stable string form used by change/transition/dedup rules; cut to a short sample when `truncated`. */
   readonly text: string;
   /** Numeric coercion, or null when the value is not numeric. */
   readonly numeric: number | null;
+  /** Digest of the full text, so a change is seen even when only the sample is kept. */
+  readonly hash?: string | undefined;
+  /** True when `value` and `text` hold a sample of a larger result. */
+  readonly truncated?: boolean | undefined;
 }
 
 export interface TriggerRunRecord {
@@ -427,6 +432,8 @@ export interface TriggerRecord {
   readonly droppedLines: number;
   /** on-exit: the child we launched, so recovery can tell whether it survived. */
   readonly process?: TrackedProcessRef | undefined;
+  /** on-exit: how the child ended, kept until its action is delivered so a failed action can be retried. */
+  readonly pendingExit?: TerminationMetadata | undefined;
   readonly updatedAt: number;
 }
 

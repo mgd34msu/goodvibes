@@ -2,14 +2,12 @@
  * trigger-supervision-store.test.ts, the supervision spine and the persisted
  * store's recovery housekeeping.
  *
- * The store half is the one that has bitten this project before: persistence
- * without recovery-time housekeeping does not fail loudly, it silently serves
- * corrupt or stale state forever. So these tests check all five obligations,
- * reap, bound, validate by CONTENT (not existence), sweep repeatedly, and
- * disclose what was removed.
+ * The store half: persistence without recovery-time housekeeping does not fail
+ * loudly, it silently serves stale state forever. These tests check the
+ * reaping and bounding the sweep applies.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,18 +17,12 @@ import {
   backoffDelayFor,
   boundEventLog,
   boundRecord,
-  checksumOf,
   DEFAULT_BACKOFF_LADDER_MS,
-  getTriggerReapReportPath,
   isDue,
-  loadTriggerSnapshot,
   parseBackoffLadder,
   resetBreaker,
   resolveSupervisionPolicy,
-  saveTriggerSnapshot,
   sweepTriggers,
-  validateSnapshot,
-  writeReapReport,
   type TriggerEventLogEntry,
   type TriggerRecord,
   TriggerManager,
@@ -172,75 +164,6 @@ describe('five-strike breaker', () => {
   });
 });
 
-describe('persisted state is content-validated, never existence-validated', () => {
-  test('a good snapshot round-trips', () => {
-    const path = tempStore();
-    saveTriggerSnapshot(path, { daemonBootId: 'boot-a', triggers: [record()], grants: [], eventLog: [], now: 1_000 });
-    const loaded = loadTriggerSnapshot(path);
-    expect(loaded.quarantined).toBeUndefined();
-    expect(loaded.snapshot?.triggers).toHaveLength(1);
-    expect(loaded.snapshot?.daemonBootId).toBe('boot-a');
-  });
-
-  test('a zero-filled file that merely EXISTS is refused and set aside', () => {
-    const path = tempStore();
-    // Exactly the crash shape that burned the feature cache: a full-size file
-    // of zeros that an existence-only check treats as complete.
-    writeFileSync(path, '\0'.repeat(4096));
-    const loaded = loadTriggerSnapshot(path);
-    expect(loaded.snapshot).toBeNull();
-    expect(loaded.quarantined).toContain('unparseable');
-    expect(existsSync(path)).toBe(false);
-  });
-
-  test('a truncated v2 write fails complete parsing instead of being served', () => {
-    const path = tempStore();
-    saveTriggerSnapshot(path, { daemonBootId: 'boot-a', triggers: [record()], grants: [], eventLog: [], now: 1_000 });
-    const good = readFileSync(path, 'utf-8');
-    writeFileSync(path, good.slice(0, Math.floor(good.length / 2)));
-    const loaded = loadTriggerSnapshot(path);
-    expect(loaded.snapshot).toBeNull();
-    expect(loaded.quarantined).toBeDefined();
-  });
-
-  test('a body edited after the checksum was written is refused', () => {
-    const parsed = {
-      version: 1,
-      daemonBootId: 'boot-a',
-      savedAt: 1_000,
-      triggers: [],
-      grants: [],
-      eventLog: [],
-      checksum: checksumOf({ version: 1, daemonBootId: 'boot-a', savedAt: 1_000, triggers: [], grants: [], eventLog: [] }),
-    };
-    expect('invalid' in validateSnapshot(parsed)).toBe(false);
-
-    const tampered = { ...parsed, savedAt: 2_000 };
-    const result = validateSnapshot(tampered);
-    expect('invalid' in result && result.invalid).toContain('checksum mismatch');
-  });
-
-  test('a snapshot with no checksum at all is treated as an incomplete write', () => {
-    const result = validateSnapshot({ version: 1, triggers: [], grants: [], eventLog: [] });
-    expect('invalid' in result && result.invalid).toContain('the write did not complete');
-  });
-
-  test('records that pass the checksum but not the shape check are still refused', () => {
-    const body = {
-      version: 1,
-      daemonBootId: 'b',
-      savedAt: 0,
-      triggers: [{ definition: { id: 'x' } }],
-      grants: [],
-      eventLog: [],
-    };
-    // body deliberately carries a TriggerRecord missing state/observations/runs/etc
-    //, proving the shape check refuses it even once the checksum matches.
-    const result = validateSnapshot({ ...body, checksum: checksumOf(body as unknown as Parameters<typeof checksumOf>[0]) });
-    expect('invalid' in result && result.invalid).toContain('shape validation');
-  });
-});
-
 describe('bounding: count cap AND age TTL', () => {
   test('run history is capped by count and by age', () => {
     const now = 100_000;
@@ -344,49 +267,6 @@ describe('recovery sweep: reap, disclose, and stay idempotent', () => {
     const second = sweepTriggers({ triggers: first.triggers, eventLog: first.eventLog, policy: retention, now: 0, reason: 'sweep', sessionIsLive: () => false });
     expect(second.triggers.map((r) => r.definition.id)).toEqual(first.triggers.map((r) => r.definition.id));
     expect(second.report.triggersReaped).toBe(0);
-  });
-
-  test('what was reaped is disclosed to disk, not deleted silently', () => {
-    const path = tempStore();
-    const swept = sweepTriggers({
-      triggers: [record({ definition: { id: 'dead', ownerSessionId: 'gone' } as never })],
-      eventLog: [],
-      policy: retention,
-      now: 1_000,
-      reason: 'startup',
-      sessionIsLive: () => false,
-    });
-    writeReapReport(path, swept.report);
-    const reportPath = getTriggerReapReportPath(path);
-    expect(existsSync(reportPath)).toBe(true);
-    const history = JSON.parse(readFileSync(reportPath, 'utf-8')) as Array<{ reapedIds: string[] }>;
-    expect(history[0]?.reapedIds).toEqual(['dead']);
-  });
-
-  test('a sweep that removed nothing writes no report: no noise', () => {
-    const path = tempStore();
-    const swept = sweepTriggers({ triggers: [record()], eventLog: [], policy: retention, now: 0, reason: 'sweep' });
-    writeReapReport(path, swept.report);
-    expect(existsSync(getTriggerReapReportPath(path))).toBe(false);
-  });
-
-  test('the disclosure history is itself bounded', () => {
-    const path = tempStore();
-    for (let i = 0; i < 60; i += 1) {
-      writeReapReport(path, {
-        at: i,
-        reason: 'sweep',
-        triggersLoaded: 1,
-        triggersReaped: 1,
-        reapedIds: [`t${i}`],
-        runsReaped: 0,
-        observationsReaped: 0,
-        eventsReaped: 0,
-        orphanedProcesses: [],
-      });
-    }
-    const history = JSON.parse(readFileSync(getTriggerReapReportPath(path), 'utf-8')) as unknown[];
-    expect(history).toHaveLength(50);
   });
 });
 

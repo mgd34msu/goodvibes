@@ -162,8 +162,9 @@ describe('the manager applies the ladder and the breaker to a failing check', ()
     ['404: no metrics endpoint at /metrics', { category: 'not_found' }],
   ]);
 
-  test('a failure read as one no retry clears parks the trigger on its first strike', async () => {
-    const io = scriptedIo({ throwWith: '404: no metrics endpoint at /metrics' });
+  test('a failure whose status no retry clears parks the trigger on its first strike, with no model request', async () => {
+    const io = scriptedIo({});
+    io.fetch = () => Promise.reject(Object.assign(new Error('no metrics endpoint at /metrics'), { status: 404 }));
     const clock = { t: 0 };
     const manager = managerWith(io, new RecordingExecutor(), clock);
     await manager.create(conditionDefinition());
@@ -173,7 +174,7 @@ describe('the manager applies the ladder and the breaker to a failing check', ()
     expect(parked?.state).toBe('circuit-open');
     expect(parked?.strikes).toBe(1);
     expect(parked?.runs.at(-1)?.detail).toContain('a retry cannot clear this failure');
-    expect(readings.requests.length).toBeGreaterThan(0);
+    expect(readings.requests).toHaveLength(0);
   });
 
   test('consecutive probe failures walk the ladder and then park the trigger', async () => {

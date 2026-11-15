@@ -26,6 +26,9 @@ export interface ProbeCommandResult {
  * The effects a probe needs. A host wires the real ones; a test wires fakes.
  * `runCommand` takes argv, not a command string, there is no shell anywhere in
  * this path, so no extracted value can ever be interpreted as a metacharacter.
+ * The real command runner is the process manager's (`createProcessManagerCommandRunner`
+ * in hosts.ts): credential scrub, its own process group, bounded output and a
+ * kill of the whole group at the deadline.
  */
 export interface ProbeIo {
   readonly fetch: (url: string, init: RequestInit, timeoutMs: number) => Promise<{
@@ -56,8 +59,37 @@ export class ProbeTimeoutError extends Error {
   }
 }
 
-/** Node/Bun-backed default effects. Hosts may substitute their own. */
-export function createDefaultProbeIo(): ProbeIo {
+/** Most of an http body a probe reads; the rest is not read, so a large page cannot fill memory. */
+export const HTTP_PROBE_MAX_BYTES = 1_048_576;
+
+async function readBounded(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const room = maxBytes - bytes;
+      const chunk = value.byteLength > room ? value.subarray(0, room) : value;
+      bytes += chunk.byteLength;
+      text += decoder.decode(chunk, { stream: true });
+      if (bytes >= maxBytes) break;
+    }
+    return text + decoder.decode();
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
+/**
+ * Default effects: fetch, file reads and stats. Command probes run only through
+ * the runner the host passes (the process manager's); with none, a command
+ * probe fails and says so.
+ */
+export function createDefaultProbeIo(options: { readonly runCommand?: ProbeIo['runCommand'] | undefined } = {}): ProbeIo {
   return {
     fetch: async (url, init, timeoutMs) => {
       const controller = new AbortController();
@@ -75,7 +107,7 @@ export function createDefaultProbeIo(): ProbeIo {
           status: response.status,
           ok: response.ok,
           text: async () => {
-            try { return await response.text(); } catch (error) { throw timedOut(error); } finally { clearTimeout(timer); }
+            try { return await readBounded(response, HTTP_PROBE_MAX_BYTES); } catch (error) { throw timedOut(error); } finally { clearTimeout(timer); }
           },
           close: () => { clearTimeout(timer); controller.abort(); },
         };
@@ -102,33 +134,8 @@ export function createDefaultProbeIo(): ProbeIo {
         return null;
       }
     },
-    runCommand: async (command, args, options) => {
-      const proc = Bun.spawn([command, ...args], {
-        ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-        stdin: 'ignore',
-        stdout: 'pipe',
-        stderr: 'pipe',
-      } as Parameters<typeof Bun.spawn>[1]);
-      let timedOut = false;
-      const timer = setTimeout(() => {
-        timedOut = true;
-        try { proc.kill('SIGKILL'); } catch { /* already gone */ }
-      }, options.timeoutMs);
-      timer.unref?.();
-      try {
-        const [stdout, stderr, exitCode] = await Promise.all([
-          new Response(proc.stdout as ReadableStream<Uint8Array>).text(),
-          new Response(proc.stderr as ReadableStream<Uint8Array>).text(),
-          proc.exited,
-        ]);
-        // Output cut off by the kill is not an observation: a `change` rule would fire on it.
-        if (timedOut) throw new ProbeTimeoutError('command', options.timeoutMs);
-        return { exitCode, stdout, stderr };
-      } finally {
-        clearTimeout(timer);
-      }
-    },
-    callTool: () => Promise.reject(new Error('No platform-tool probe host is wired; register one before using platform-tool probes.')),
+    runCommand: options.runCommand ?? (() => Promise.reject(new Error('Command probes run through the process manager, and this host passed none; use an http or file probe, or run the trigger in the daemon.'))),
+    callTool: () => Promise.reject(new Error('Platform-tool probes have no host in this build; use an http, file or command probe.')),
   };
 }
 
@@ -139,16 +146,22 @@ function isAbsentFile(error: unknown): boolean {
   return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
-/** Rejects with ProbeTimeoutError when the work outlives its budget. */
-async function withinBudget<T>(kind: string, timeoutMs: number, work: Promise<T>): Promise<T> {
+/** Rejects with ProbeTimeoutError when the work outlives its budget (plus any grace before it is abandoned). */
+async function withinBudget<T>(kind: string, timeoutMs: number, work: Promise<T>, graceMs = 0): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<never>((_, reject) => { timer = setTimeout(() => { reject(new ProbeTimeoutError(kind, timeoutMs)); }, timeoutMs); timer.unref?.(); });
+  const expired = new Promise<never>((_, reject) => { timer = setTimeout(() => { reject(new ProbeTimeoutError(kind, timeoutMs)); }, timeoutMs + graceMs); timer.unref?.(); });
   try { return await Promise.race([work, expired]); } finally { clearTimeout(timer); }
 }
 const DEFAULT_FILE_MAX_BYTES = 1_048_576;
+/** Time past the budget a probe that keeps its own deadline (http, command) has to report it before it is abandoned. */
+const PROBE_SETTLE_GRACE_MS = 1_000;
 
-/** Runs one probe and returns its raw result for the extractor to narrow. */
-export async function runProbe(
+/**
+ * Runs one probe and returns its raw result for the extractor to narrow. The
+ * whole probe is held to its budget, so a check always settles and the
+ * trigger is never left waiting on output a stray child still holds open.
+ */
+export function runProbe(
   probe: TriggerProbe,
   io: ProbeIo,
   defaults: { readonly timeoutMs?: number | undefined } = {},
@@ -156,7 +169,12 @@ export async function runProbe(
   const budget = probe.kind === 'file'
     ? (defaults.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS)
     : (probe.timeoutMs ?? defaults.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS);
+  // http and command probes keep their own deadline and report it first; a file
+  // read has none, so the budget is its deadline.
+  return withinBudget(probe.kind, budget, runProbeWork(probe, io, budget), probe.kind === 'file' ? 0 : PROBE_SETTLE_GRACE_MS);
+}
 
+async function runProbeWork(probe: TriggerProbe, io: ProbeIo, budget: number): Promise<TriggerValue> {
   switch (probe.kind) {
     case 'http': {
       const init: RequestInit = {
@@ -180,7 +198,7 @@ export async function runProbe(
         return stat ? { exists: true, size: stat.size, mtimeMs: Math.floor(stat.mtimeMs) } : { exists: false };
       }
       try {
-        return await withinBudget('file', budget, io.readFile(probe.path, probe.maxBytes ?? DEFAULT_FILE_MAX_BYTES));
+        return await io.readFile(probe.path, probe.maxBytes ?? DEFAULT_FILE_MAX_BYTES);
       } catch (error) {
         // A missing file is an observation, not a probe failure: a `change`
         // rule watching for a file to appear needs to see the absent state.

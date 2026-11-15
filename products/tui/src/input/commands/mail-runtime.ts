@@ -15,14 +15,14 @@
  * because a draft changes nothing outside the account's own Drafts folder.
  *
  * Sending is exposed too, a shipped route with no way to reach it is a route
- * that is not wired up, but never in one step. `/mail send` first renders
- * exactly what would leave the machine and stops; only a re-run carrying
- * `--confirm` sets both flags the daemon's gate demands. That mirrors the
- * preview-then-confirm shape `/review` uses for hunk reverts, and it means the
- * dangerous action cannot happen from a typo. Slash commands are not kept in
- * the prompt history, so a recalled line cannot re-send either. The wire has no
- * idempotency key, so this process refuses to send the exact same message twice
- * unless `--again` is given, which covers a retry after a timeout.
+ * that is not wired up, but never without a question. A send cannot be undone,
+ * so the command registry asks once, showing exactly what would leave the
+ * machine; only the confirming answer (or `--yes` typed by the owner) sets both
+ * flags the daemon's gate demands, so the send cannot happen from a typo.
+ * Slash commands are not kept in the prompt history, so a recalled line cannot
+ * re-send either. The wire has no idempotency key, so this process refuses to
+ * send the exact same message twice unless `--again` is given, which covers a
+ * retry after a timeout.
  *
  * Message bodies are attacker-controlled text. They are printed as transcript
  * output, which is display-only and never enters the model's message history,
@@ -116,20 +116,37 @@ export function renderMessage(message: FullMessage): string {
 }
 
 /**
- * Split `to | subject | body` on unescaped pipes.
- *
- * A pipe rather than positional words because a subject and a body both
- * contain spaces, and quoting rules invented per-command are their own bug
- * source. Exactly three fields are required, so a missing one is a clear
+ * Read `to | subject | body`: the recipient is the text before the first `|`,
+ * the subject the text before the second, and the body everything after it,
+ * further pipes included. A pipe rather than positional words because a subject
+ * and a body both contain spaces. All three are required, so a missing one is a
  * usage error rather than a message sent with an empty subject.
  */
 export function parseComposeArgs(raw: string): { to: string; subject: string; body: string } | null {
-  const parts = raw.split('|').map((part) => part.trim());
-  if (parts.length !== 3) return null;
-  const [to, subject, body] = parts;
+  const first = raw.indexOf('|');
+  const second = first < 0 ? -1 : raw.indexOf('|', first + 1);
+  if (second < 0) return null;
+  const to = raw.slice(0, first).trim();
+  const subject = raw.slice(first + 1, second).trim();
+  const body = raw.slice(second + 1).trim();
   if (!to || !subject || !body) return null;
   return { to, subject, body };
 }
+
+/**
+ * Splits a compose line into the flags typed before its first field and the
+ * text. A flag is read only there: the same word inside the subject or body is
+ * text and is sent as typed.
+ */
+export function splitLeadingFlags(rest: readonly string[], known: ReadonlySet<string>): { readonly flags: ReadonlySet<string>; readonly text: string } {
+  const flags = new Set<string>();
+  let index = 0;
+  while (index < rest.length && known.has(rest[index]!)) flags.add(rest[index++]!);
+  return { flags, text: rest.slice(index).join(' ') };
+}
+
+/** `--again` sends a message identical to one already sent; `--confirm` was the old second step and has no effect. */
+const COMPOSE_FLAGS: ReadonlySet<string> = new Set(['--again', '--confirm']);
 
 function parseLimit(raw: string | undefined): number {
   const parsed = Number(raw);
@@ -144,7 +161,9 @@ const USAGE = [
   '  /mail list [n]              list the n most recent messages (default 15)',
   '  /mail read <uid>            open one message',
   '  /mail draft <to | subject | body>   save a draft to the account',
-  '  /mail send  <to | subject | body> [--confirm]   preview, then send',
+  '  /mail send [--again] <to | subject | body>   shows the message and asks once, then sends',
+  '',
+  '  The body is everything after the second |, pipes included. --again goes before the recipient.',
 ].join('\n');
 
 export function registerMailRuntimeCommands(registry: CommandRegistry): void {
@@ -154,6 +173,17 @@ export function registerMailRuntimeCommands(registry: CommandRegistry): void {
     description: 'Mail over the daemon: connection status, inbox, read, draft, send',
     usage: '[status|list|read|draft|send] …',
     argsHint: '[status|list <n>|read <uid>|draft|send]',
+    subcommands: { status: '', list: '[n]', read: '<uid>', draft: '<to | subject | body>', send: '[--again] <to | subject | body>' },
+    confirm(args) {
+      if ((args[0] ?? '').toLowerCase() !== 'send') return undefined;
+      const parsed = parseComposeArgs(splitLeadingFlags(args.slice(1), COMPOSE_FLAGS).text);
+      if (parsed === null) return undefined; // The handler prints the usage; nothing is sent.
+      return {
+        title: `Send this message to ${parsed.to}?`,
+        detail: [`To:      ${parsed.to}`, `Subject: ${parsed.subject}`, '', parsed.body, '', 'A sent message cannot be recalled.'].join('\n'),
+        confirmLabel: 'Send',
+      };
+    },
     async handler(args, ctx) {
       const gateway = ctx.workspace.gatewayMethods;
       const sub = (args[0] ?? '').toLowerCase();
@@ -262,14 +292,13 @@ async function readMessage(ctx: CommandContext, gateway: Gateway, rawUid: string
 }
 
 async function compose(ctx: CommandContext, gateway: Gateway, verb: 'draft' | 'send', rest: readonly string[]): Promise<void> {
-  const raw = rest.filter((part) => part !== '--confirm' && part !== '--again').join(' ');
-  const confirmed = rest.includes('--confirm');
-  const again = rest.includes('--again');
-  const parsed = parseComposeArgs(raw);
+  const line = splitLeadingFlags(rest, COMPOSE_FLAGS);
+  const again = line.flags.has('--again');
+  const parsed = parseComposeArgs(line.text);
   if (parsed === null) {
     ctx.print([
-      `Usage: /mail ${verb} <to | subject | body>`,
-      '  Three fields separated by |, for example:',
+      `Usage: /mail ${verb}${verb === 'send' ? ' [--again]' : ''} <to | subject | body>`,
+      '  Three fields separated by |; the body is everything after the second |. For example:',
       `  /mail ${verb} me@example.com | Build is green | All gates passed.`,
     ].join('\n'));
     return;
@@ -292,28 +321,9 @@ async function compose(ctx: CommandContext, gateway: Gateway, verb: 'draft' | 's
     return;
   }
 
-  // Send: preview first, always. The daemon would refuse an unconfirmed call
-  // anyway; showing exactly what would leave the machine is the point.
-  if (!confirmed) {
-    ctx.print([
-      'This would send:',
-      `  To:      ${parsed.to}`,
-      `  Subject: ${parsed.subject}`,
-      '',
-      parsed.body,
-      '',
-      'Nothing has been sent. Re-run the same line with --confirm to send it (add --again to resend an identical message).',
-    ].join('\n'));
-    return;
-  }
-
-  // The daemon treats this call as the user's own explicit request, so only the user's own line may make it.
-  if (ctx.invokedByModel === true) {
-    ctx.print('Refused: /mail send must be typed by the user; a model-invoked send is not allowed. The preview above is all it can do.');
-    return;
-  }
+  // The registry has asked the owner by now (or the owner typed --yes), so this is the user's own explicit request.
   if (!claimIrreversibleWrite(gateway, `mail.send\0${parsed.to}\0${parsed.subject}\0${parsed.body}`, again)) {
-    ctx.print('This exact message was already sent (or a send was attempted and its outcome is unknown) from this session, so it was not sent again. Check the Sent folder first; add --again to send it anyway.');
+    ctx.print('This exact message was already sent (or a send was attempted and its outcome is unknown) from this session, so it was not sent again. Check the Sent folder first; to send it anyway put --again before the recipient: /mail send --again <to | subject | body>.');
     return;
   }
 

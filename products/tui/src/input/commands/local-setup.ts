@@ -7,25 +7,63 @@ import type { SetupTransferBundle } from './local-setup-transfer.ts';
 import {
   applySetupTransferChanges,
   buildSetupTransferBundle,
-  createSetupLink,
+  describeSetupTransferChanges,
   exportSetupTransferBundle,
   inspectSetupTransferBundle,
-  parseSetupLink,
   planSetupTransferImport,
   revertSetupTransferChanges,
 } from './local-setup-transfer.ts';
 import { buildSetupReviewSnapshot, exportSetupSupportBundle, renderSetupSandboxReview } from './local-setup-review.ts';
 import { openOnboardingWizard, requireShellPaths } from './runtime-services.ts';
+import { DEEP_LINK_SURFACES, buildDeepLink, openDeepLink, parseDeepLink } from './deep-link.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 type SetupSnapshot = Awaited<ReturnType<typeof buildSetupReviewSnapshot>>;
+
+/** The files a setup transfer import replaces whole. */
+function setupTransferReplacedFiles(bundle: SetupTransferBundle): string[] {
+  return [
+    bundle.services ? 'services.json' : undefined,
+    bundle.ecosystem?.plugins ? 'ecosystem/plugins.json' : undefined,
+    bundle.ecosystem?.skills ? 'ecosystem/skills.json' : undefined,
+  ].filter((name): name is string => name !== undefined);
+}
 
 export function registerLocalSetupCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'setup',
     aliases: ['startup'],
     description: 'Launch the onboarding wizard and review startup readiness, service posture, and sandbox bring-up',
-    usage: '[review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir> [--overwrite]|export <path> [--overwrite]|transfer <export [--overwrite]|inspect|import [--yes]> <path>|link <surface> [target]|open-link <uri>]',
+    usage: '[review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir> [--overwrite]|export <path> [--overwrite]|transfer <export [--overwrite]|inspect|import> <path>|link <surface> [target]|open-link <uri>]',
+    subcommands: {
+      'support-bundle': '<dir> [--overwrite]', export: '<path> [--overwrite]',
+      transfer: '<export [--overwrite]|inspect|import> <path>', link: '<surface> [target]', 'open-link': '<uri>',
+    },
+    confirm(args, ctx) {
+      if (args[0] !== 'transfer' || args[1]?.toLowerCase() !== 'import') return undefined;
+      const pathArg = args.slice(2).find((value) => !value.startsWith('--'));
+      if (!pathArg) return undefined;
+      let plan: ReturnType<typeof planSetupTransferImport>;
+      try {
+        plan = planSetupTransferImport(ctx.platform.configManager, JSON.parse(readFileSync(requireShellPaths(ctx).resolveWorkspacePath(pathArg), 'utf-8')));
+      } catch {
+        return undefined; // The handler reports an unreadable bundle; nothing would change.
+      }
+      if (!plan.ok) return undefined;
+      const { bundle, changes, ignoredKeys, skippedParts } = plan;
+      const replacedFiles = setupTransferReplacedFiles(bundle);
+      return {
+        title: `Import setup from ${pathArg}?`,
+        detail: [
+          ...describeSetupTransferChanges(changes),
+          `Files replaced: ${replacedFiles.length > 0 ? replacedFiles.join(', ') : 'none'}.`,
+          ...(skippedParts.length > 0 ? [`Kept as they are here (the bundle masked credentials in them): ${skippedParts.join(', ')}.`] : []),
+          ...(ignoredKeys.length > 0 ? [`Unknown settings skipped: ${ignoredKeys.join(', ')}.`] : []),
+          'The replaced files are not kept.',
+        ].join('\n'),
+        confirmLabel: 'Import',
+      };
+    },
     async handler(args, ctx) {
       const sub = args[0] ?? 'review';
       let shellPaths: ReturnType<typeof requireShellPaths> | null = null;
@@ -117,8 +155,7 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
       }
 
       if (sub === 'sandbox') {
-        const snapshot = await getSnapshot();
-        ctx.print(renderSetupSandboxReview(ctx, snapshot));
+        ctx.print(renderSetupSandboxReview(ctx));
         return;
       }
 
@@ -140,7 +177,7 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
           ctx.print(`${plannedDir} already holds a support bundle; nothing was written. Choose another directory or add --overwrite.`);
           return;
         }
-        const targetDir = exportSetupSupportBundle(dirArg, snapshot, ctx);
+        const { targetDir, masked } = await exportSetupSupportBundle(dirArg, snapshot, ctx);
         writeFileSync(join(targetDir, 'remote-summary.json'), JSON.stringify({
           runners: ctx.ops.remoteRuntime?.listContracts() ?? [],
           artifacts: (ctx.ops.remoteRuntime?.listArtifacts() ?? []).map((artifact) => ({
@@ -150,7 +187,7 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
             createdAt: artifact.createdAt,
           })),
         }, null, 2) + '\n', 'utf-8');
-        ctx.print(`Exported support bundle to ${targetDir}`);
+        ctx.print(`Exported support bundle to ${targetDir}${masked > 0 ? ` (${masked} literal credential value(s) masked)` : ''}`);
         return;
       }
 
@@ -176,7 +213,7 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
         const mode = args[1]?.toLowerCase();
         const pathArg = args.slice(2).find((value) => !value.startsWith('--'));
         if (!mode || !pathArg) {
-          ctx.print('Usage: /setup transfer <export [--overwrite]|inspect|import [--yes]> <path>');
+          ctx.print('Usage: /setup transfer <export [--overwrite]|inspect|import> <path>');
           return;
         }
         const targetPath = getShellPaths().resolveWorkspacePath(pathArg);
@@ -187,7 +224,11 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
           }
           const snapshot = await getSnapshot();
           const bundle = buildSetupTransferBundle(ctx, snapshot);
-          ctx.print(`Exported setup transfer bundle to ${exportSetupTransferBundle(ctx, pathArg, bundle)}`);
+          const redacted = bundle.redacted ?? [];
+          ctx.print([
+            `Exported setup transfer bundle to ${exportSetupTransferBundle(ctx, pathArg, bundle)}`,
+            ...(redacted.length > 0 ? [`  ${redacted.length} literal credential(s) were left out or masked (${redacted.slice(0, 8).join(', ')}${redacted.length > 8 ? ', ...' : ''}); secret-store references travel, so link credentials with /secrets link to carry them.`] : []),
+          ].join('\n'));
           return;
         }
         if (mode === 'inspect') {
@@ -206,22 +247,8 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
               ctx.print(`Setup transfer bundle not imported: ${plan.reason}`);
               return;
             }
-            const { bundle, changes, ignoredKeys } = plan;
-            const replacedFiles = [
-              bundle.services ? 'services.json' : undefined,
-              bundle.ecosystem?.plugins ? 'ecosystem/plugins.json' : undefined,
-              bundle.ecosystem?.skills ? 'ecosystem/skills.json' : undefined,
-            ].filter((name): name is string => name !== undefined);
-            if (!args.includes('--yes')) {
-              ctx.print([
-                `Setup transfer import from ${targetPath}: nothing was changed yet.`,
-                `  settings that would change: ${changes.length}${changes.length > 0 ? ` (${changes.slice(0, 12).map((change) => change.key).join(', ')}${changes.length > 12 ? ', ...' : ''})` : ''}`,
-                `  files that would be replaced: ${replacedFiles.length > 0 ? replacedFiles.join(', ') : 'none'}`,
-                ...(ignoredKeys.length > 0 ? [`  unknown settings that would be skipped: ${ignoredKeys.join(', ')}`] : []),
-                '  Review the list, then run /setup transfer import <path> --yes to apply it.',
-              ].join('\n'));
-              return;
-            }
+            const { bundle, changes, ignoredKeys, skippedParts } = plan;
+            const replacedFiles = setupTransferReplacedFiles(bundle);
             applySetupTransferChanges(ctx.platform.configManager, changes);
             const fileWrites: Array<{ path: string; body: unknown }> = [];
             if (bundle.services) fileWrites.push({ path: getShellPaths().resolveProjectPath('tui', 'services.json'), body: bundle.services });
@@ -249,13 +276,13 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
               ctx.print(`Failed to import setup transfer bundle: ${summarizeError(error)}. Settings were restored${notRestored.length > 0 ? `; these files could not be put back and still hold the imported contents: ${notRestored.join(', ')}` : ' and any files already replaced were put back'}.`);
               return;
             }
-            ctx.print(`Imported setup transfer bundle from ${targetPath}: ${changes.length} setting(s) changed, ${replacedFiles.length} file(s) replaced${ignoredKeys.length > 0 ? `, ${ignoredKeys.length} unknown setting(s) skipped (${ignoredKeys.join(', ')})` : ''}.`);
+            ctx.print(`Imported setup transfer bundle from ${targetPath}: ${changes.length} setting(s) changed, ${replacedFiles.length} file(s) replaced${skippedParts.length > 0 ? `, ${skippedParts.join(' and ')} kept as they are here (the bundle masked credentials in them; move those credentials into the secret store with /secrets link on the exporting machine and export again)` : ''}${ignoredKeys.length > 0 ? `, ${ignoredKeys.length} unknown setting(s) skipped (${ignoredKeys.join(', ')})` : ''}.`);
           } catch (error) {
             ctx.print(`Failed to import setup transfer bundle (settings written before the failure were restored): ${summarizeError(error)}`);
           }
           return;
         }
-        ctx.print('Usage: /setup transfer <export [--overwrite]|inspect|import [--yes]> <path>');
+        ctx.print('Usage: /setup transfer <export [--overwrite]|inspect|import> <path>');
         return;
       }
 
@@ -263,49 +290,29 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
         const surface = args[1];
         const target = args[2];
         if (!surface) {
-          ctx.print('Usage: /setup link <cockpit|security|remote|knowledge|incident|hooks|orchestration|tasks> [target]');
+          ctx.print(`Usage: /setup link <${DEEP_LINK_SURFACES.join('|')}> [target]`);
           return;
         }
-        ctx.print(createSetupLink(surface, target));
+        ctx.print(buildDeepLink(surface, target));
         return;
       }
 
       if (sub === 'open-link') {
         const link = args[1];
         if (!link) {
-          ctx.print('Usage: /setup open-link <goodvibes://...>');
+          ctx.print('Usage: /setup open-link <goodvibes://open/...>');
           return;
         }
-        const parsed = parseSetupLink(link);
+        const parsed = parseDeepLink(link);
         if (!parsed) {
-          ctx.print(`Invalid setup link: ${link}`);
+          ctx.print(`Not opened: ${link} is not a goodvibes://open/<view> link.`);
           return;
         }
-        const viewOpeners: Record<string, (() => void) | undefined> = {
-          cockpit: ctx.openCockpitView,
-          security: ctx.openSecurityView,
-          remote: ctx.openRemoteView,
-          knowledge: ctx.openKnowledgeView,
-          incident: ctx.openIncidentView,
-          hooks: ctx.openHooksView,
-          orchestration: ctx.openOrchestrationView,
-        };
-        if (parsed.surface === 'tasks') {
-          ctx.openView?.('tasks');
-          ctx.print(`Opened setup link for tasks${parsed.target ? ` (${parsed.target})` : ''}.`);
-          return;
-        }
-        const openSurface = viewOpeners[parsed.surface];
-        if (!openSurface) {
-          ctx.print(`Unsupported setup link surface: ${parsed.surface}`);
-          return;
-        }
-        openSurface();
-        ctx.print(`Opened setup link for ${parsed.surface}${parsed.target ? ` (${parsed.target})` : ''}.`);
+        ctx.print(openDeepLink(ctx, parsed.surface, parsed.target));
         return;
       }
 
-      ctx.print('Usage: /setup [review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir> [--overwrite]|export <path> [--overwrite]|transfer <export [--overwrite]|inspect|import [--yes]> <path>|link <surface> [target]|open-link <uri>]');
+      ctx.print('Usage: /setup [review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir> [--overwrite]|export <path> [--overwrite]|transfer <export [--overwrite]|inspect|import> <path>|link <surface> [target]|open-link <uri>]');
     },
   });
 }

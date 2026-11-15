@@ -1,40 +1,13 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname } from 'node:path';
 import type { CommandRegistry } from '../command-registry.ts';
 import { requireSecretsManager, requireShellPaths } from './runtime-services.ts';
-
-interface SecureStorageBundle {
-  readonly version: 1;
-  readonly exportedAt: number;
-  readonly storedKeys: readonly string[];
-  readonly envBackedKeys: readonly string[];
-}
+import { DEEP_LINK_SURFACES, buildDeepLink, openDeepLink, parseDeepLink } from './deep-link.ts';
 
 interface DeepLinkBundle {
   readonly version: 1;
   readonly exportedAt: number;
   readonly links: readonly string[];
-}
-
-interface IntegrationHelperBundle {
-  readonly version: 1;
-  readonly exportedAt: number;
-  readonly apiFamilies: readonly string[];
-  readonly routes: readonly string[];
-}
-
-function buildSetupLink(surface: string, target?: string): string {
-  const params = target ? `?target=${encodeURIComponent(target)}` : '';
-  return `goodvibes://open/${surface}${params}`;
-}
-
-function inspectStorageBundle(bundle: SecureStorageBundle): string {
-  return [
-    'Secure Storage Bundle Review',
-    `  exportedAt: ${new Date(bundle.exportedAt).toISOString()}`,
-    `  storedKeys: ${bundle.storedKeys.length}`,
-    `  envBackedKeys: ${bundle.envBackedKeys.length}`,
-  ].join('\n');
 }
 
 function inspectDeepLinkBundle(bundle: DeepLinkBundle): string {
@@ -45,35 +18,37 @@ function inspectDeepLinkBundle(bundle: DeepLinkBundle): string {
   ].join('\n');
 }
 
-function inspectIntegrationHelperBundle(bundle: IntegrationHelperBundle): string {
-  return [
-    'Integration Helper Review',
-    `  exportedAt: ${new Date(bundle.exportedAt).toISOString()}`,
-    `  apiFamilies: ${bundle.apiFamilies.length}`,
-    `  routes: ${bundle.routes.length}`,
-  ].join('\n');
-}
-
 export function registerPlatformServicesRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'storage',
-    description: 'Review secure storage posture and export portable storage metadata bundles',
-    usage: '[review|list|delete <key>|bundle export <path>|bundle inspect <path>]',
+    description: 'Review secure storage posture, list stored keys and delete one (the support bundle carries the key names)',
+    usage: '[review|list|delete <key> (runs /secrets delete)]',
+    subcommands: { review: '', list: '', delete: '<key> (same as /secrets delete)' },
     async handler(args, ctx) {
-      const shellPaths = requireShellPaths(ctx);
-      const manager = requireSecretsManager(ctx);
       const sub = args[0] ?? 'review';
-      const review = await manager.inspect();
-      const storedKeys = await manager.list();
+      // One delete with one rule: /secrets delete asks once, takes the same scope flags and says whether the key existed.
+      if (sub === 'delete') {
+        if (!ctx.executeCommand) {
+          ctx.print('Use /secrets delete <key>: it is the one way to delete a stored secret.');
+          return;
+        }
+        await ctx.executeCommand('secrets', args);
+        return;
+      }
+      const manager = requireSecretsManager(ctx);
       const detailedKeys = await manager.listDetailed();
-      const envBackedKeys = [...new Set(detailedKeys.filter((record) => record.source === 'env').map((record) => record.key))];
+      const storedRecords = detailedKeys.filter((record) => record.source !== 'env');
+      const storedKeys = [...new Set(storedRecords.map((record) => record.key))];
+      // A stored secret whose value an environment variable supplies; the environment's other variables are not secrets.
+      const envBackedKeys = [...new Set(storedRecords.filter((record) => record.overriddenByEnv).map((record) => record.key))];
 
       if (sub === 'review') {
+        const review = await manager.inspect();
         ctx.print([
           'Secure Storage Review',
           `  policy: ${review.policy}`,
           `  stored keys: ${storedKeys.length}`,
-          `  env-backed keys: ${envBackedKeys.length}`,
+          `  stored keys an environment variable overrides: ${envBackedKeys.length}`,
           `  secure keys: ${review.secureKeys}`,
           `  plaintext keys: ${review.plaintextKeys}`,
           ...review.locations.map((location) => `  ${location.source}: ${location.exists ? 'present' : 'absent'} (${location.path})`),
@@ -82,48 +57,12 @@ export function registerPlatformServicesRuntimeCommands(registry: CommandRegistr
         return;
       }
       if (sub === 'list') {
-        ctx.print(detailedKeys.filter((record) => record.source !== 'env').length > 0
-          ? ['Secure Storage Keys', ...detailedKeys.filter((record) => record.source !== 'env').map((record) => `  ${record.key} (${record.source}${record.refSource ? `, ref:${record.refSource}` : ''}${record.overriddenByEnv ? ', env override' : ''})`)].join('\n')
+        ctx.print(storedRecords.length > 0
+          ? ['Secure Storage Keys', ...storedRecords.map((record) => `  ${record.key} (${record.source}${record.refSource ? `, ref:${record.refSource}` : ''}${record.overriddenByEnv ? ', env override' : ''})`)].join('\n')
           : 'Secure Storage Keys\n  No stored secrets yet.');
         return;
       }
-      if (sub === 'delete') {
-        const key = args[1];
-        if (!key) {
-          ctx.print('Usage: /storage delete <key>');
-          return;
-        }
-        await manager.delete(key);
-        ctx.print(`Deleted secure storage key ${key}.`);
-        return;
-      }
-      if (sub === 'bundle') {
-        const mode = args[1];
-        const pathArg = args[2];
-        if ((mode !== 'export' && mode !== 'inspect') || !pathArg) {
-          ctx.print(`Usage: /storage bundle ${mode === 'export' || mode === 'inspect' ? mode : 'export|inspect'} <path>`);
-          return;
-        }
-        const targetPath = shellPaths.resolveWorkspacePath(pathArg);
-        if (mode === 'export') {
-          const bundle: SecureStorageBundle = {
-            version: 1,
-            exportedAt: Date.now(),
-            storedKeys,
-            envBackedKeys,
-          };
-          mkdirSync(dirname(targetPath), { recursive: true });
-          writeFileSync(targetPath, `${JSON.stringify(bundle, null, 2)}\n`, 'utf-8');
-          ctx.print(`Secure storage bundle exported to ${targetPath}`);
-          return;
-        }
-        if (mode === 'inspect') {
-          const bundle = JSON.parse(readFileSync(targetPath, 'utf-8')) as SecureStorageBundle;
-          ctx.print(inspectStorageBundle(bundle));
-          return;
-        }
-      }
-      ctx.print('Usage: /storage [review|list|delete <key>|bundle export <path>|bundle inspect <path>]');
+      ctx.print('Usage: /storage [review|list|delete <key>]\n  Stored key names for a support thread are in /setup support-bundle <dir> (platform-review.json).');
     },
   });
 
@@ -131,9 +70,8 @@ export function registerPlatformServicesRuntimeCommands(registry: CommandRegistr
     name: 'helpers',
     aliases: ['integration-api'],
     description: 'Review local integration helper APIs for remote clients and future web frontends',
-    usage: '[review|bundle export <path>|bundle inspect <path>]',
+    usage: '[review]',
     handler(args, ctx) {
-      const shellPaths = requireShellPaths(ctx);
       const sub = args[0] ?? 'review';
       const review = ctx.extensions.integrationHelpers?.buildReview();
       if (!review) {
@@ -155,67 +93,38 @@ export function registerPlatformServicesRuntimeCommands(registry: CommandRegistr
         ].join('\n'));
         return;
       }
-      if (sub === 'bundle') {
-        const mode = args[1];
-        const pathArg = args[2];
-        if ((mode !== 'export' && mode !== 'inspect') || !pathArg) {
-          ctx.print(`Usage: /helpers bundle ${mode === 'export' || mode === 'inspect' ? mode : 'export|inspect'} <path>`);
-          return;
-        }
-        const targetPath = shellPaths.resolveWorkspacePath(pathArg);
-        if (mode === 'export') {
-          const bundle: IntegrationHelperBundle = {
-            version: 1,
-            exportedAt: Date.now(),
-            apiFamilies: review.apiFamilies,
-            routes: review.routes,
-          };
-          mkdirSync(dirname(targetPath), { recursive: true });
-          writeFileSync(targetPath, `${JSON.stringify(bundle, null, 2)}\n`, 'utf-8');
-          ctx.print(`Integration helper bundle exported to ${targetPath}`);
-          return;
-        }
-        if (mode === 'inspect') {
-          const bundle = JSON.parse(readFileSync(targetPath, 'utf-8')) as IntegrationHelperBundle;
-          ctx.print(inspectIntegrationHelperBundle(bundle));
-          return;
-        }
-      }
-      ctx.print('Usage: /helpers [review|bundle export <path>|bundle inspect <path>]');
+      ctx.print('Usage: /helpers [review]\n  The API families and routes for a support thread are in /setup support-bundle <dir> (platform-review.json).');
     },
   });
 
   registry.register({
     name: 'deeplink',
     aliases: ['link'],
-    description: 'Review and package deep-link entrypoints for setup and operator screens',
-    usage: '[review|open <surface> [target]|bundle export <path>|bundle inspect <path>]',
+    description: 'List, open and package goodvibes://open links to views; a target selects a process in the Agents view',
+    usage: '[review|open <view|goodvibes://open/...> [target]|bundle export <path>|bundle inspect <path>]',
     handler(args, ctx) {
-      const shellPaths = requireShellPaths(ctx);
       const sub = args[0] ?? 'review';
-      const links = [
-        buildSetupLink('cockpit'),
-        buildSetupLink('security'),
-        buildSetupLink('remote'),
-        buildSetupLink('knowledge'),
-        buildSetupLink('marketplace'),
-        buildSetupLink('sandbox'),
-      ];
+      const links = DEEP_LINK_SURFACES.map((surface) => buildDeepLink(surface));
       if (sub === 'review') {
-        ctx.print(['Deep Link Review', ...links.map((link) => `  ${link}`)].join('\n'));
+        ctx.print(['Deep Link Review', ...links.map((link) => `  ${link}`), '  open one: /deeplink open <view> [target]'].join('\n'));
         return;
       }
       if (sub === 'open') {
-        const surface = args[1];
-        const target = args[2];
-        if (!surface) {
-          ctx.print('Usage: /deeplink open <surface> [target]');
+        const subject = args[1];
+        if (!subject) {
+          ctx.print('Usage: /deeplink open <view|goodvibes://open/...> [target]');
           return;
         }
-        ctx.print(buildSetupLink(surface, target));
+        const parsed = subject.includes('://') ? parseDeepLink(subject) : { surface: subject, ...(args[2] ? { target: args[2] } : {}) };
+        if (!parsed) {
+          ctx.print(`Not opened: ${subject} is not a goodvibes://open/<view> link.`);
+          return;
+        }
+        ctx.print(openDeepLink(ctx, parsed.surface, parsed.target));
         return;
       }
       if (sub === 'bundle') {
+        const shellPaths = requireShellPaths(ctx);
         const mode = args[1];
         const pathArg = args[2];
         if ((mode !== 'export' && mode !== 'inspect') || !pathArg) {
@@ -240,7 +149,7 @@ export function registerPlatformServicesRuntimeCommands(registry: CommandRegistr
           return;
         }
       }
-      ctx.print('Usage: /deeplink [review|open <surface> [target]|bundle export <path>|bundle inspect <path>]');
+      ctx.print('Usage: /deeplink [review|open <view|goodvibes://open/...> [target]|bundle export <path>|bundle inspect <path>]');
     },
   });
 }

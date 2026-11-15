@@ -3,13 +3,22 @@ import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { CommandContext } from '../command-registry.ts';
 import { discoverSkills } from '../../views/skills-discovery.ts';
-import { buildSandboxReview } from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
+import {
+  buildSandboxReview,
+  renderSandboxProfiles,
+  renderSandboxRecommendation,
+  renderSandboxReview,
+} from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
 import '@goodvibes-jev/engine/platform/platform/plugins';
 import '@goodvibes-jev/engine/platform/platform/config';
+import { VERSION } from '../../version.ts';
+import { DEEP_LINK_SURFACES, buildDeepLink } from './deep-link.ts';
 import { maskLiteralSecrets, type SetupReviewSnapshot } from './local-setup-transfer.ts';
 import {
+  requireProfileManager,
   requireProviderApi,
   requireReadModels,
+  requireSecretsManager,
   requireServiceRegistry,
   requireShellPaths,
   requireSubscriptionManager,
@@ -32,16 +41,50 @@ export function renderSetupSandboxReview(ctx: CommandContext): string {
 }
 
 /**
- * Writes a bundle for a support thread: the startup review plus the service
- * registry and managed hooks with every literal credential masked by the
- * shared redaction rule. Returns the directory and how many values were masked.
+ * The install, secure-storage, integration-helper, sandbox and deep-link facts a
+ * support thread asks for, in one record. Key names only: no stored value is read.
  */
-export function exportSetupSupportBundle(targetDirArg: string, snapshot: SetupReviewSnapshot, ctx: CommandContext): { readonly targetDir: string; readonly masked: number } {
+async function buildPlatformReview(ctx: CommandContext): Promise<Record<string, unknown>> {
+  const shellPaths = requireShellPaths(ctx);
+  const records = await requireSecretsManager(ctx).listDetailed();
+  const stored = records.filter((record) => record.source !== 'env');
+  const helpers = ctx.extensions.integrationHelpers?.buildReview();
+  const config = ctx.platform.configManager;
+  return {
+    install: {
+      appVersion: VERSION,
+      workingDirectory: shellPaths.workingDirectory,
+      homeDirectory: shellPaths.homeDirectory,
+      profileCount: requireProfileManager(ctx).list().length,
+    },
+    storage: {
+      storedKeys: [...new Set(stored.map((record) => record.key))],
+      overriddenByEnv: [...new Set(stored.filter((record) => record.overriddenByEnv).map((record) => record.key))],
+    },
+    integrationHelpers: helpers ? { apiFamilies: helpers.apiFamilies, routes: helpers.routes } : 'unavailable in this runtime',
+    sandbox: {
+      review: renderSandboxReview(config),
+      recommendation: renderSandboxRecommendation(config),
+      profiles: renderSandboxProfiles(config),
+    },
+    deepLinks: DEEP_LINK_SURFACES.map((surface) => buildDeepLink(surface)),
+  };
+}
+
+/**
+ * Writes a bundle for a support thread: the startup review, the platform review
+ * (install, storage key names, integration helpers, sandbox, deep links), and the
+ * service registry and managed hooks, with every literal credential masked by
+ * the shared redaction rule. Returns the directory and how many values were masked.
+ */
+export async function exportSetupSupportBundle(targetDirArg: string, snapshot: SetupReviewSnapshot, ctx: CommandContext): Promise<{ readonly targetDir: string; readonly masked: number }> {
   const shellPaths = requireShellPaths(ctx);
   const targetDir = shellPaths.resolveWorkspacePath(targetDirArg);
+  const platformReview = await buildPlatformReview(ctx);
   mkdirSync(targetDir, { recursive: true });
   const masked: string[] = [];
   writeFileSync(join(targetDir, 'startup-review.json'), JSON.stringify(maskLiteralSecrets(snapshot, masked), null, 2) + '\n', 'utf-8');
+  writeFileSync(join(targetDir, 'platform-review.json'), JSON.stringify(maskLiteralSecrets(platformReview, masked, 'platform-review.json'), null, 2) + '\n', 'utf-8');
   const copies: ReadonlyArray<readonly [string, string]> = [
     [shellPaths.resolveProjectPath('tui', 'services.json'), 'services.json'],
     [shellPaths.resolveProjectPath('hooks.managed.json'), 'hooks.managed.json'],

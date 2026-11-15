@@ -1,24 +1,18 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { requireShellPaths } from './runtime-services.ts';
 import {
   buildSandboxReview,
   getSandboxPreset,
-  inspectSandboxBundle,
   inspectSandboxProbe,
   renderSandboxPresets,
   renderSandboxProfiles,
   renderSandboxRecommendation,
   renderSandboxReview,
-  type SandboxBundle,
   type SandboxProbe,
 } from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { renderSandboxDoctor } from '../../runtime/sandbox-public-gaps.ts';
 import { handleSandboxSessionCommand } from './platform-sandbox-session.ts';
 
-const SANDBOX_USAGE = '[open|review|recommend|profiles|presets|preset <id>|apply-preset <id>|probe|doctor|session ...|bundle <export|inspect> <path>|set-mcp <mode>|set-windows <mode>]';
+const SANDBOX_USAGE = '[open|review|recommend|profiles|presets|preset <id>|apply-preset <id>|probe|doctor|session ...|set-mcp <mode>|set-windows <mode>]';
 const PRESET_IDS = 'secure-balanced|secure-isolated|shared-performance|windows-basic';
 
 function applySandboxPreset(
@@ -114,37 +108,6 @@ export function registerPlatformSandboxRuntimeCommands(registry: CommandRegistry
         ctx.print('QEMU sandbox commands have been retired. This runtime supports the local backend only. Use /sandbox review or /sandbox session.');
         return;
       }
-      if (sub === 'bundle') {
-        const mode = args[1];
-        const pathArg = args[2];
-        if (!pathArg || (mode !== 'export' && mode !== 'inspect')) {
-          ctx.print('Usage: /sandbox bundle <export|inspect> <path>');
-          return;
-        }
-        const targetPath = requireShellPaths(ctx).resolveWorkspacePath(pathArg);
-        try {
-          if (mode === 'export') {
-            const bundle: SandboxBundle = {
-              version: 1,
-              exportedAt: Date.now(),
-              review: {
-                reviewText: renderSandboxReview(ctx.platform.configManager),
-                recommendationText: renderSandboxRecommendation(ctx.platform.configManager),
-                profilesText: renderSandboxProfiles(ctx.platform.configManager),
-              },
-            };
-            mkdirSync(dirname(targetPath), { recursive: true });
-            writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
-            ctx.print(`Sandbox bundle exported to ${targetPath}`);
-          } else {
-            const bundle = JSON.parse(readFileSync(targetPath, 'utf-8')) as SandboxBundle;
-            ctx.print(inspectSandboxBundle(bundle));
-          }
-        } catch (error) {
-          ctx.print(`Failed to ${mode} sandbox bundle: ${summarizeError(error)}`);
-        }
-        return;
-      }
       if (sub === 'session') {
         await handleSandboxSessionCommand(args, ctx);
         return;
@@ -171,7 +134,7 @@ export function registerPlatformSandboxRuntimeCommands(registry: CommandRegistry
         ctx.print(`Sandbox Windows mode set to ${mode}.`);
         return;
       }
-      ctx.print(`Usage: /sandbox ${SANDBOX_USAGE}`);
+      ctx.print(`Usage: /sandbox ${SANDBOX_USAGE}\n  The sandbox review, recommendation and profiles for a support thread are in /setup support-bundle <dir> (platform-review.json).`);
     },
   });
 }

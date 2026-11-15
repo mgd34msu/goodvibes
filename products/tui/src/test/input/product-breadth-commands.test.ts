@@ -942,7 +942,7 @@ describe('product breadth commands', () => {
     out.length = 0;
     await intelligence!.handler(['symbols', intelligenceFile], ctx as never);
     expect(out.join('\n')).toContain('Intelligence Symbols:');
-    expect(out.join('\n')).toContain('source: best-effort tree-sitter/LSP fallback');
+    expect(out.join('\n')).toContain('source: tree-sitter');
 
     out.length = 0;
     await intelligence!.handler(['outline', intelligenceFile], ctx as never);
@@ -1295,7 +1295,7 @@ describe('product breadth commands', () => {
     expect(out.join('\n')).toContain('Updated curated plugin');
 
     out.length = 0;
-    await plugin!.handler(['uninstall', 'deploy-audit', 'project'], ctx);
+    await plugin!.handler(['uninstall', 'deploy-audit', 'project', '--yes'], ctx);
     expect(out.join('\n')).toContain('Uninstalled curated plugin');
 
     out.length = 0;
@@ -1405,11 +1405,9 @@ describe('product breadth commands', () => {
     expect(out.join('\n')).toContain('goodvibes://open/security');
 
     out.length = 0;
-    ctx.openSecurityView = () => { out.push('opened-security-view'); };
+    ctx.openView = (name: string) => { out.push(`opened-${name}-view`); return true; };
     await setup!.handler(['open-link', 'goodvibes://open/security?target=incident-1'], ctx);
     expect(out.join('\n')).toContain('opened-security-view');
-    expect(out.join('\n')).toContain('Opened setup link for security');
-    expect(out.join('\n')).toContain('Opened setup link for security (incident-1).');
   });
 
   test('incident command can summarize, export, and capture bundles', async () => {
@@ -1672,7 +1670,7 @@ describe('product breadth commands', () => {
     expect(out.join('\n')).toContain('merged into existing entries by kind and id; 0 rejected');
 
     out.length = 0;
-    await marketplace!.handler(['uninstall', 'plugin', 'deploy-audit', 'project'], ctx);
+    await marketplace!.handler(['uninstall', 'plugin', 'deploy-audit', 'project', '--yes'], ctx);
     expect(out.join('\n')).toContain('Uninstalled curated plugin deploy-audit');
   });
 
@@ -1880,13 +1878,8 @@ describe('product breadth commands', () => {
       runtimeServices.configManager.setDynamic('provider.model', 'openai:changed-model');
       ctx.session.runtime.model = 'openai:changed-model';
       out.length = 0;
+      // Model settings loosen no security, so the bundle applies in one step with no question.
       await managed!.handler(['apply', bundlePath], ctx);
-      // A medium-risk bundle is staged for review first, and changes nothing.
-      expect(out.join('\n')).toContain('nothing was applied');
-      expect(ctx.session.runtime.model).toBe('openai:changed-model');
-
-      out.length = 0;
-      await managed!.handler(['apply', bundlePath, '--yes'], ctx);
       expect(out.join('\n')).toContain('Managed settings bundle applied');
       expect(ctx.session.runtime.model).toBe('openai:model-1');
 
@@ -1979,7 +1972,7 @@ describe('product breadth commands', () => {
     expect(out.join('\n')).not.toContain('Open panels');
   });
 
-  test('install command exports and inspects install bundles', async () => {
+  test('install review reports version, profiles and stored keys', async () => {
     const registry = new CommandRegistry();
     registerBuiltinCommands(registry);
     const install = registry.get('install');
@@ -1992,17 +1985,6 @@ describe('product breadth commands', () => {
     expect(out.join('\n')).toContain('Install Review');
     expect(out.join('\n')).toContain('profiles: 0');
     expect(out.join('\n')).toContain('secret keys: 0');
-
-    const bundlePath = join(root, 'artifacts', 'install.json');
-    out.length = 0;
-    await install!.handler(['bundle', 'export', bundlePath], ctx);
-    expect(out.join('\n')).toContain('Install bundle exported');
-    expect(existsSync(bundlePath)).toBe(true);
-
-    out.length = 0;
-    await install!.handler(['bundle', 'inspect', bundlePath], ctx);
-    expect(out.join('\n')).toContain('Install Bundle Review');
-    expect(out.join('\n')).toContain(`workingDirectory: ${root}`);
   });
 
   test('private update review and bundle commands give rebuild guidance without exporting', async () => {
@@ -2084,8 +2066,8 @@ describe('product breadth commands', () => {
     try {
       out.length = 0;
       await auth!.handler(['login', 'daemon', `http://127.0.0.1:${daemon.boundPort}`, 'admin', 'admin', 'DAEMON_SESSION'], ctx);
-      expect(out.join('\n')).toContain('Stored daemon session token');
-      expect(out.join('\n')).toContain('Stored daemon session token in secure storage as DAEMON_SESSION.');
+      expect(out.join('\n')).toContain('Signed in to the daemon');
+      expect(out.join('\n')).toContain('secure storage as DAEMON_SESSION');
     } finally {
       await daemon.stop();
     }
@@ -2251,7 +2233,7 @@ describe('product breadth commands', () => {
 
     out.length = 0;
     await sandbox!.handler(['set-mcp', 'per-server-vm'], ctx);
-    expect(out.join('\n')).toContain('Sandbox MCP isolation set to per-server-vm');
+    expect(out.join('\n')).toContain('Sandbox MCP isolation recorded as per-server-vm');
   });
 
   test('storage and deeplink commands expose platform-service breadth', async () => {
@@ -2278,12 +2260,6 @@ describe('product breadth commands', () => {
     expect(out.join('\n')).toContain('sessions: 0');
     expect(out.join('\n')).toContain('GET /api/session');
     expect(out.join('\n')).toContain('GET /api/settings');
-
-    out.length = 0;
-    const storageBundle = join(root, 'artifacts', 'storage-bundle.json');
-    await storage!.handler(['bundle', 'export', storageBundle], ctx);
-    expect(out.join('\n')).toContain('Secure storage bundle exported');
-    expect(existsSync(storageBundle)).toBe(true);
 
     out.length = 0;
     await deeplink!.handler(['review'], ctx);

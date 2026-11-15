@@ -11,10 +11,10 @@
  *
  * `list` (the agenda) and `get` are exposed: knowing what is next without
  * leaving the terminal is the whole value of a calendar on this surface.
- * `create` is exposed behind the same preview-then-`--confirm` step `/mail
- * send` uses, because the daemon gates it on both `body.confirm` and an
- * explicit user request, and because an event created by a typo is a real
- * nuisance to undo.
+ * `create` asks once before it runs (the command registry's one confirmation,
+ * showing the event with its times in this machine's zone), because this
+ * surface has no way to delete an event, and the daemon gates the call on both
+ * `body.confirm` and an explicit user request.
  *
  * `calendar.ics.import` and `calendar.ics.export` are deliberately NOT given a
  * command. They are bulk file-level transfers of a whole calendar, an
@@ -26,6 +26,7 @@
  */
 
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { splitLeadingFlags } from './mail-runtime.ts';
 import {
   EXPLICIT_WRITE_INVOCATION_CONTEXT,
   claimIrreversibleWrite,
@@ -49,8 +50,18 @@ interface CalendarEvent {
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = 200;
 
+/** `+HH:MM` / `-HH:MM` for a `Date.getTimezoneOffset()` value (minutes west of UTC). */
+function offsetLabel(minutesWest: number): string {
+  const east = -minutesWest;
+  const sign = east >= 0 ? '+' : '-';
+  const abs = Math.abs(east);
+  return `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`;
+}
+
 /**
- * Render a timestamp for a terminal agenda.
+ * Render a timestamp for a terminal agenda, in this machine's zone with the
+ * offset shown (`2026-08-01 09:00 -05:00`), so a reader anywhere knows which
+ * hour is meant.
  *
  * An unparseable value is printed verbatim rather than replaced with a
  * placeholder, showing what the server actually returned is more useful than
@@ -59,9 +70,28 @@ const MAX_LIST_LIMIT = 200;
 export function formatWhen(raw: string): string {
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return raw;
-  const date = parsed.toISOString().slice(0, 10);
-  const time = parsed.toISOString().slice(11, 16);
-  return `${date} ${time}`;
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  const date = `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
+  return `${date} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())} ${offsetLabel(parsed.getTimezoneOffset())}`;
+}
+
+/** An ISO-8601 time ends in `Z` or a `±HH:MM` offset when it names its zone. */
+const NAMES_ZONE = /(?:[zZ]|[+-]\d{2}:?\d{2})$/;
+
+/**
+ * One time typed for `/calendar create`, as the instant that is sent. A time
+ * without a zone is read in this machine's zone and sent with that offset, so
+ * the daemon cannot read it in another one; `zoneStated` says the zone was
+ * chosen here.
+ */
+export function normaliseEventTime(raw: string): { readonly instant: string; readonly zoneStated: boolean } | null {
+  const trimmed = raw.trim();
+  // A bare date is read as UTC midnight by Date; it is meant as midnight here.
+  const parsed = new Date(/^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? `${trimmed}T00:00:00` : trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  const local = `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}:${pad(parsed.getSeconds())}`;
+  return { instant: `${local}${offsetLabel(parsed.getTimezoneOffset())}`, zoneStated: !NAMES_ZONE.test(trimmed) };
 }
 
 function truncate(value: string, width: number): string {
@@ -96,17 +126,23 @@ export function renderEvent(event: CalendarEvent): string {
 }
 
 /**
- * Split `title | start | end` on unescaped pipes, same separator rule as
- * `/mail`, for the same reason: titles contain spaces and per-command quoting
- * conventions are their own bug source.
+ * Read `title | start | end`: the start and end are the last two fields (a
+ * time holds no pipe) and the title is everything before them, pipes included.
+ * Same separator as `/mail`, for the same reason: titles contain spaces.
  */
 export function parseEventArgs(raw: string): { title: string; start: string; end: string } | null {
-  const parts = raw.split('|').map((part) => part.trim());
-  if (parts.length !== 3) return null;
-  const [title, start, end] = parts;
+  const last = raw.lastIndexOf('|');
+  const middle = last < 0 ? -1 : raw.lastIndexOf('|', last - 1);
+  if (middle < 0) return null;
+  const title = raw.slice(0, middle).trim();
+  const start = raw.slice(middle + 1, last).trim();
+  const end = raw.slice(last + 1).trim();
   if (!title || !start || !end) return null;
   return { title, start, end };
 }
+
+/** `--again` creates an event identical to one already created; `--confirm` was the old second step and has no effect. */
+const CREATE_FLAGS: ReadonlySet<string> = new Set(['--again', '--confirm']);
 
 function parseLimit(raw: string | undefined): number {
   const parsed = Number(raw);
@@ -120,9 +156,10 @@ const USAGE = [
   '  /calendar status            connection status only',
   '  /calendar list [n]          the next n events (default 20)',
   '  /calendar get <id>          open one event',
-  '  /calendar create <title | start | end> [--confirm]   preview, then create',
+  '  /calendar create [--again] <title | start | end>   shows the event and asks once, then creates it',
   '',
-  '  Times are ISO-8601, e.g. 2026-08-01T14:00:00Z',
+  '  Times are ISO-8601, e.g. 2026-08-01T14:00:00Z or 2026-08-01T09:00:00-05:00;',
+  '  a time without a zone is read in this machine\'s zone, which the question names.',
 ].join('\n');
 
 export function registerCalendarRuntimeCommands(registry: CommandRegistry): void {
@@ -132,6 +169,17 @@ export function registerCalendarRuntimeCommands(registry: CommandRegistry): void
     description: 'Calendar over the daemon: connection status, agenda, event detail, create',
     usage: '[status|list|get|create] …',
     argsHint: '[status|list <n>|get <id>|create]',
+    subcommands: { status: '', list: '[n]', get: '<id>', create: '[--again] <title | start | end>' },
+    confirm(args) {
+      if ((args[0] ?? '').toLowerCase() !== 'create') return undefined;
+      const plan = planEventCreate(args.slice(1));
+      if (!plan.ok) return undefined; // The handler prints the usage or the refusal; nothing is created.
+      return {
+        title: `Create calendar event "${plan.title}"?`,
+        detail: plan.lines.join('\n'),
+        confirmLabel: 'Create',
+      };
+    },
     async handler(args, ctx) {
       const gateway = ctx.workspace.gatewayMethods;
       const sub = (args[0] ?? '').toLowerCase();
@@ -211,47 +259,59 @@ async function getEvent(ctx: CommandContext, gateway: Gateway, eventId: string |
   });
 }
 
-async function createEvent(ctx: CommandContext, gateway: Gateway, rest: readonly string[]): Promise<void> {
-  const raw = rest.filter((part) => part !== '--confirm' && part !== '--again').join(' ');
-  const confirmed = rest.includes('--confirm');
-  const again = rest.includes('--again');
-  const parsed = parseEventArgs(raw);
+/** A `/calendar create` line read into the event it creates, or why it creates nothing. */
+type EventCreatePlan =
+  | { readonly ok: true; readonly title: string; readonly start: string; readonly end: string; readonly again: boolean; readonly lines: readonly string[] }
+  | { readonly ok: false; readonly problem: string };
+
+function planEventCreate(rest: readonly string[]): EventCreatePlan {
+  // Flags are read only before the title, so the same word inside the title is text.
+  const line = splitLeadingFlags(rest, CREATE_FLAGS);
+  const parsed = parseEventArgs(line.text);
   if (parsed === null) {
-    ctx.print([
-      'Usage: /calendar create <title | start | end>',
-      '  Three fields separated by |, for example:',
-      '  /calendar create Design review | 2026-08-01T14:00:00Z | 2026-08-01T15:00:00Z',
-    ].join('\n'));
-    return;
+    return {
+      ok: false,
+      problem: [
+        'Usage: /calendar create [--again] <title | start | end>',
+        '  Three fields separated by |; start and end are the last two. For example:',
+        '  /calendar create Design review | 2026-08-01T14:00:00Z | 2026-08-01T15:00:00Z',
+      ].join('\n'),
+    };
   }
+  const start = normaliseEventTime(parsed.start);
+  const end = normaliseEventTime(parsed.end);
+  if (!start || !end) {
+    return { ok: false, problem: `Not created: ${!start ? `start "${parsed.start}"` : `end "${parsed.end}"`} is not a time. Use ISO-8601, for example 2026-08-01T14:00:00Z.` };
+  }
+  const lines = [
+    `Title: ${parsed.title}`,
+    `Start: ${formatWhen(start.instant)}`,
+    `End:   ${formatWhen(end.instant)}`,
+    ...(start.zoneStated || end.zoneStated
+      ? [`A time typed without a zone is read in this machine's zone, UTC${offsetLabel(new Date(start.instant).getTimezoneOffset())}.`]
+      : []),
+    'This app cannot delete the event afterwards.',
+  ];
+  return { ok: true, title: parsed.title, start: start.instant, end: end.instant, again: line.flags.has('--again'), lines };
+}
 
-  if (!confirmed) {
-    ctx.print([
-      'This would create:',
-      `  Title: ${parsed.title}`,
-      `  Start: ${formatWhen(parsed.start)}`,
-      `  End:   ${formatWhen(parsed.end)}`,
-      '',
-      'Nothing has been created. Re-run the same line with --confirm to create it (add --again to create an identical event twice).',
-    ].join('\n'));
+async function createEvent(ctx: CommandContext, gateway: Gateway, rest: readonly string[]): Promise<void> {
+  const plan = planEventCreate(rest);
+  if (!plan.ok) {
+    ctx.print(plan.problem);
     return;
   }
-
-  // The daemon treats this call as the user's own explicit request, so only the user's own line may make it.
-  if (ctx.invokedByModel === true) {
-    ctx.print('Refused: /calendar create must be typed by the user; a model-invoked create is not allowed. The preview above is all it can do.');
-    return;
-  }
-  if (!claimIrreversibleWrite(gateway, `calendar.create\0${parsed.title}\0${parsed.start}\0${parsed.end}`, again)) {
-    ctx.print('This exact event was already created (or a create was attempted and its outcome is unknown) from this session, so it was not created again. Check the calendar first; add --again to create it anyway.');
+  // The registry has asked the owner by now (or the owner typed --yes), so this is the user's own explicit request.
+  if (!claimIrreversibleWrite(gateway, `calendar.create\0${plan.title}\0${plan.start}\0${plan.end}`, plan.again)) {
+    ctx.print('This exact event was already created (or a create was attempted and its outcome is unknown) from this session, so it was not created again. Check the calendar first; to create it anyway put --again before the title: /calendar create --again <title | start | end>.');
     return;
   }
 
   await withStatusOnFailure(ctx, gateway, 'create', async () => {
     const result = await gateway.invoke('calendar.events.create', {
       ...EXPLICIT_WRITE_INVOCATION_CONTEXT,
-      body: { title: parsed.title, start: parsed.start, end: parsed.end, confirm: true },
+      body: { title: plan.title, start: plan.start, end: plan.end, confirm: true },
     }) as { readonly eventId: string; readonly createdAt: string };
-    ctx.print(`Created "${parsed.title}" (event id ${result.eventId}, at ${result.createdAt}).`);
+    ctx.print(`Created "${plan.title}", ${formatWhen(plan.start)} to ${formatWhen(plan.end)} (event id ${result.eventId}).`);
   });
 }

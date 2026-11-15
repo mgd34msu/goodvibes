@@ -23,6 +23,30 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
     description: 'Manage plugins, trust, review, and ecosystem paths',
     usage: 'list | dirs | inspect <name> | review | installed | catalog-review <id> | publish-local <id> <path> <summary...> | unpublish <id> | install <id> [project|user] | update <id> [project|user] | uninstall <id> [project|user] | enable <name> | disable <name> | reload',
     argsHint: 'list | dirs | inspect | review | installed | catalog-review | publish-local | unpublish | install | update | uninstall | enable | disable | reload',
+    subcommands: {
+      list: '', dirs: '', inspect: '<name>', review: '', installed: '', 'catalog-review': '<id>',
+      'publish-local': '<id> <path> <summary...>', unpublish: '<id>', install: '<id> [project|user]',
+      update: '<id> [project|user]', uninstall: '<id> [project|user]', enable: '<name>', disable: '<name>', reload: '',
+    },
+    confirm(args, ctx) {
+      // Recording 'trusted' for a plugin whose signature does not verify vouches for code nobody signed: asked once.
+      if (args[0] === 'trust' && args[1] && args[2] === 'trusted') {
+        const verification = ctx.extensions.pluginManager?.verify(args[1]);
+        if (!verification || verification.valid || (!verification.ok && verification.reason?.includes('not found'))) return undefined;
+        return {
+          title: `Mark plugin ${args[1]} trusted although its signature does not verify?`,
+          detail: `The manifest signature check failed: ${verification.reason ?? 'unknown reason'}. The override and that reason are kept in the plugin's trust note. /plugin trust ${args[1]} untrusted takes it back.`,
+          confirmLabel: 'Trust',
+        };
+      }
+      // A scope word that is not project or user is refused by the handler; nothing would change.
+      if (args[0] !== 'uninstall' || !args[1] || (args[2] !== undefined && args[2] !== 'project' && args[2] !== 'user')) return undefined;
+      return {
+        title: `Uninstall plugin ${args[1]}?`,
+        detail: `This removes ${args[1]}'s install directory (${args[2] ?? 'project'} scope) and its install receipt. Its files cannot be recovered; /plugin install ${args[1]} installs it again from the catalog.`,
+        confirmLabel: 'Uninstall',
+      };
+    },
     async handler(args, ctx) {
       const pluginManager = ctx.extensions.pluginManager;
       const ecosystemPaths = requireEcosystemCatalogPaths(ctx);
@@ -104,10 +128,8 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
           'Plugin Security Review',
           `  total: ${plugins.length}`,
           `  active: ${plugins.filter((plugin) => plugin.active).length}`,
-          `  trusted: ${plugins.filter((plugin) => plugin.trustTier === 'trusted').length}`,
-          `  limited: ${plugins.filter((plugin) => plugin.trustTier === 'limited').length}`,
-          `  untrusted: ${plugins.filter((plugin) => plugin.trustTier === 'untrusted').length}`,
-          `  quarantined: ${plugins.filter((plugin) => plugin.quarantined).length}`,
+          // Only quarantine refuses anything (a quarantined plugin does not load); trust tiers are notes, shown by /plugin inspect.
+          `  quarantined (will not load): ${plugins.filter((plugin) => plugin.quarantined).length}`,
         ].join('\n'));
         return;
       }
@@ -304,7 +326,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         const name = args[1];
         const rawTier = args[2];
         if (!name || !rawTier) {
-          ctx.print('Usage: /plugin trust <name> <untrusted|limited|trusted> [--override] [note]');
+          ctx.print('Usage: /plugin trust <name> <untrusted|limited|trusted> [note]');
           return;
         }
         if (rawTier !== 'untrusted' && rawTier !== 'limited' && rawTier !== 'trusted') {
@@ -312,29 +334,20 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
           return;
         }
         const tier = rawTier as 'untrusted' | 'limited' | 'trusted';
-        const override = args.slice(3).includes('--override');
+        // `--override` was the old retyped answer; the registry now asks once when the signature fails.
         const userNote = args.slice(3).filter((word) => word !== '--override').join(' ');
         let note = userNote || undefined;
         if (tier === 'trusted') {
           const sigResult = pluginManager.trustSigned(name);
           if (sigResult.ok) {
-            ctx.print(`Plugin '${name}' elevated to 'trusted' via signed manifest${sigResult.fingerprint ? ` (fingerprint: ${sigResult.fingerprint})` : ''}.\nThe tier is recorded; it is not enforced per capability.`);
+            ctx.print(`Plugin '${name}' elevated to 'trusted' via signed manifest${sigResult.fingerprint ? ` (fingerprint: ${sigResult.fingerprint})` : ''}.\nThe tier is a record of your trust; only quarantine stops a plugin from loading.`);
             return;
           }
-          if (!override) {
-            ctx.print(
-              `Refused: signature validation failed for plugin '${name}' (${sigResult.error}). Its trust tier is unchanged.\n`
-              + `To grant 'trusted' anyway, run: /plugin trust ${name} trusted --override [note]\n`
-              + 'The tier is a record of your trust and is not enforced per capability.',
-            );
-            return;
-          }
-          note = `operator override after failed signature check (${sigResult.error})${userNote ? `; ${userNote}` : ''}`;
-          ctx.print(`Warning: Signature validation failed (${sigResult.error}).\nGranting 'trusted' tier by explicit --override. The tier is a record of your trust and is not enforced per capability.`);
+          note = `owner override after failed signature check (${sigResult.error})${userNote ? `; ${userNote}` : ''}`;
         }
         const result = pluginManager.trust(name, tier, note);
         ctx.print(result.ok
-          ? `Plugin '${name}' trust tier set to '${tier}'.${tier === 'trusted' ? '\nThe tier is a record of your trust and is not enforced per capability.' : ''}`
+          ? `Plugin '${name}' trust tier set to '${tier}'${note && tier === 'trusted' ? ' (signature not verified; recorded in the trust note)' : ''}.\nThe tier is a record of your trust; only quarantine stops a plugin from loading.`
           : `Error: ${result.error}`);
         return;
       }
@@ -412,7 +425,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         + '  enable <name>              — enable a plugin\n'
         + '  disable <name>             — disable a plugin\n'
         + '  reload                     — reload all enabled plugins\n'
-        + '  trust <name> <tier> [--override] [note] — set trust tier (untrusted|limited|trusted); the trusted tier needs a valid signature or --override\n'
+        + '  trust <name> <tier> [note] — record a trust tier (untrusted|limited|trusted); trusted without a valid signature asks once\n'
         + '  verify <name>              — inspect a plugin manifest signature\n'
         + '  capabilities <name>        — show requested capabilities and trust tier\n'
         + '  browse [query]             — browse curated local-first plugin catalog entries\n'

@@ -1,7 +1,5 @@
 import { createAuthBundleHandler } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
 import { createAuthReviewHandler } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/pairing';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
@@ -18,17 +16,6 @@ import {
   requireSubscriptionManager,
 } from './runtime-services.ts';
 
-interface InstallBundle {
-  readonly version: 1;
-  readonly exportedAt: number;
-  readonly appVersion: string;
-  readonly workingDirectory: string;
-  readonly homeDirectory: string;
-  readonly profileCount: number;
-  readonly secretKeyCount: number;
-  readonly setupLinks: readonly string[];
-}
-
 interface AuthReviewBundle {
   readonly version: 1;
   readonly exportedAt: number;
@@ -37,22 +24,6 @@ interface AuthReviewBundle {
   readonly secretKeys: readonly string[];
   readonly activeSubscriptions: readonly string[];
   readonly pendingSubscriptions: readonly string[];
-}
-
-function buildSetupLink(surface: string, target?: string): string {
-  const params = target ? `?target=${encodeURIComponent(target)}` : '';
-  return `goodvibes://open/${surface}${params}`;
-}
-
-function inspectInstallBundle(bundle: InstallBundle): string {
-  return [
-    'Install Bundle Review',
-    `  appVersion: ${bundle.appVersion}`,
-    `  workingDirectory: ${bundle.workingDirectory}`,
-    `  profileCount: ${bundle.profileCount}`,
-    `  secretKeys: ${bundle.secretKeyCount}`,
-    `  setupLinks: ${bundle.setupLinks.length}`,
-  ].join('\n');
 }
 
 function inspectAuthBundle(bundle: AuthReviewBundle): string {
@@ -240,10 +211,9 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
 
   registry.register({
     name: 'install',
-    description: 'Review install posture and export portable install bundles',
-    usage: '[review|bundle export <path>|bundle inspect <path>]',
+    description: 'Review install posture (the support bundle carries the install facts)',
+    usage: '[review]',
     async handler(args, ctx) {
-      const shellPaths = requireShellPaths(ctx);
       const sub = args[0] ?? 'review';
       if (sub === 'review') {
         const profiles = requireProfileManager(ctx).list();
@@ -258,39 +228,7 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
         );
         return;
       }
-      if (sub === 'bundle') {
-        const mode = args[1];
-        const pathArg = args[2];
-        if ((mode !== 'export' && mode !== 'inspect') || !pathArg) {
-          ctx.print(`Usage: /install bundle ${mode === 'export' || mode === 'inspect' ? mode : 'export|inspect'} <path>`);
-          return;
-        }
-        const targetPath = shellPaths.resolveWorkspacePath(pathArg);
-        if (mode === 'export') {
-          const profiles = requireProfileManager(ctx).list();
-          const secretKeys = await requireSecretsManager(ctx).list();
-          const bundle: InstallBundle = {
-            version: 1,
-            exportedAt: Date.now(),
-            appVersion: VERSION,
-            workingDirectory: shellPaths.workingDirectory,
-            homeDirectory: shellPaths.homeDirectory,
-            profileCount: profiles.length,
-            secretKeyCount: secretKeys.length,
-            setupLinks: [buildSetupLink('cockpit'), buildSetupLink('security'), buildSetupLink('remote'), buildSetupLink('knowledge')],
-          };
-          mkdirSync(dirname(targetPath), { recursive: true });
-          writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
-          ctx.print(`Install bundle exported to ${targetPath}`);
-          return;
-        }
-        if (mode === 'inspect') {
-          const bundle = JSON.parse(readFileSync(targetPath, 'utf-8')) as InstallBundle;
-          ctx.print(inspectInstallBundle(bundle));
-          return;
-        }
-      }
-      ctx.print('Usage: /install [review|bundle export <path>|bundle inspect <path>]');
+      ctx.print('Usage: /install [review]\n  The install facts for a support thread are in /setup support-bundle <dir> (platform-review.json).');
     },
   });
 

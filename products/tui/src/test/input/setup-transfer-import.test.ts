@@ -63,13 +63,13 @@ describe('/setup transfer import', () => {
     expect(f.text()).toContain('no "config" object');
   });
 
-  test('without --yes it previews the changes and applies none', async () => {
+  test('without --yes, on a surface that cannot ask, it names the changes and applies none', async () => {
     const f = fixture();
     const stream = f.config.get('display.stream');
     const path = f.write('b.json', { schemaVersion: 'v1', exportedAt: 1, startupReview: {}, config: { 'display.stream': !stream } });
     await f.run(path);
     expect(f.config.get('display.stream')).toBe(stream);
-    expect(f.text()).toContain('nothing was changed yet');
+    expect(f.text()).toContain('not done');
     expect(f.text()).toContain('display.stream');
     expect(f.text()).toContain('--yes');
   });
@@ -127,6 +127,18 @@ describe('/setup transfer import', () => {
     expect(readFileSync(servicesPath, 'utf-8')).toBe('{"old":true}');
     expect(f.text()).toContain('Settings were restored');
     expect(f.text()).not.toContain('Imported setup transfer bundle');
+  });
+
+  test('export leaves literal credentials behind and keeps secret-store references', () => {
+    const f = fixture();
+    const servicesPath = f.context.workspace.shellPaths!.resolveProjectPath('tui', 'services.json');
+    mkdirSync(join(servicesPath, '..'), { recursive: true });
+    writeFileSync(servicesPath, JSON.stringify({ deploy: { baseUrl: 'https://deploy.example', password: 'hunter2-literal-password', tokenRef: 'goodvibes://secrets/goodvibes/DEPLOY_TOKEN' } }));
+    const bundle = buildSetupTransferBundle(f.context, REVIEW);
+    const text = JSON.stringify(bundle);
+    expect(text).not.toContain('hunter2-literal-password');
+    expect(text).toContain('goodvibes://secrets/goodvibes/DEPLOY_TOKEN');
+    expect(bundle.redacted).toContain('services.json.deploy.password');
   });
 
   test('export carries only settings that differ from their defaults', () => {

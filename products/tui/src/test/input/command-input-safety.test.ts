@@ -172,31 +172,6 @@ describe('/auth login', () => {
   });
 });
 
-describe('bundle subcommands without a mode or path', () => {
-  test('/install bundle prints usage instead of throwing on an undefined path', async () => {
-    const { ctx, out } = makeCtx();
-    await command(registerPlatformAccessRuntimeCommands, 'install').handler(['bundle'], ctx);
-    expect(out.join('\n')).toContain('Usage: /install bundle');
-    out.length = 0;
-    await command(registerPlatformAccessRuntimeCommands, 'install').handler(['bundle', 'foo'], ctx);
-    expect(out.join('\n')).toContain('Usage: /install bundle');
-  });
-
-  test('/storage bundle prints usage instead of throwing on an undefined path', async () => {
-    const { ctx, out } = makeCtx({
-      platform: {
-        secretsManager: {
-          inspect: async () => ({ policy: 'x', secureKeys: 0, plaintextKeys: 0, locations: [], warnings: [] }),
-          list: async () => [],
-          listDetailed: async () => [],
-        },
-      },
-    });
-    await command(registerPlatformServicesRuntimeCommands, 'storage').handler(['bundle'], ctx);
-    expect(out.join('\n')).toContain('Usage: /storage bundle');
-  });
-});
-
 describe('/share', () => {
   const originalFetch = globalThis.fetch;
   afterEach(() => {

@@ -20,6 +20,7 @@ import {
 } from '@/runtime/index.ts';
 import { requireProfileManager, requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { describeSetupTransferChanges, isSecurityBearingChange } from './local-setup-transfer.ts';
 
 /** The stored settings, never an owner-profile value: a rollback must not pin a profile value as a setting. */
 function buildConfigSnapshot(
@@ -44,14 +45,48 @@ function syncRuntimeMirror(ctx: CommandContext): void {
   ctx.session.runtime.reasoningEffort = config.get('provider.reasoningEffort') as string;
 }
 
-function splitKeyArguments(values: readonly string[]): { requestedKeys: ConfigKey[]; invalidKeys: string[]; yes: boolean } {
-  const yes = values.includes('--yes');
+function splitKeyArguments(values: readonly string[]): { requestedKeys: ConfigKey[]; invalidKeys: string[] } {
+  // `--yes` answers the registry's question in advance; it never selects a key.
   const keys = values.filter((value) => value !== '--yes');
   return {
     requestedKeys: keys.filter((value): value is ConfigKey => CONFIG_KEYS.has(value as ConfigKey)),
     invalidKeys: keys.filter((value) => !CONFIG_KEYS.has(value as ConfigKey)),
-    yes,
   };
+}
+
+type PlannedChange = { readonly key: string; readonly previous: unknown; readonly next: unknown };
+
+/**
+ * The setting changes an `apply <path>` or `apply-staged` line would make, read
+ * from the bundle file or the staged record with no model and no write; undefined
+ * for any other line or one the handler will refuse.
+ */
+function plannedManagedChanges(args: readonly string[], ctx: CommandContext): readonly PlannedChange[] | undefined {
+  const config = ctx.platform.configManager;
+  if (args[0] === 'apply' && args[1]) {
+    const { requestedKeys, invalidKeys } = splitKeyArguments(args.slice(2));
+    if (invalidKeys.length > 0) return undefined;
+    let bundle: ManagedSettingsBundle;
+    try {
+      bundle = readBundleFile(requireShellPaths(ctx).resolveWorkspacePath(args[1])) as ManagedSettingsBundle;
+    } catch {
+      return undefined;
+    }
+    if (!bundle || typeof bundle !== 'object' || !bundle.settings || typeof bundle.settings !== 'object') return undefined;
+    return Object.entries(bundle.settings)
+      .filter(([key]) => CONFIG_KEYS.has(key as ConfigKey) && (requestedKeys.length === 0 || requestedKeys.includes(key as ConfigKey)))
+      .map(([key, next]) => ({ key, previous: config.get(key as ConfigKey), next }))
+      .filter((change) => JSON.stringify(change.previous) !== JSON.stringify(change.next));
+  }
+  if (args[0] === 'apply-staged') {
+    const { requestedKeys, invalidKeys } = splitKeyArguments(args.slice(1));
+    const staged = getSettingsControlPlaneSnapshot(config).stagedManagedBundle;
+    if (invalidKeys.length > 0 || !staged) return undefined;
+    return staged.changes
+      .filter((change) => change.changed && (requestedKeys.length === 0 || requestedKeys.includes(change.key)))
+      .map((change) => ({ key: change.key, previous: change.previousValue, next: change.nextValue }));
+  }
+  return undefined;
 }
 
 function readBundleFile(sourcePath: string): unknown {
@@ -68,7 +103,7 @@ function readBundleFile(sourcePath: string): unknown {
   }
 }
 
-const MANAGED_USAGE_ARGS = '[review|staged|rollback-history|export <profile> <path>|inspect <path>|stage <path>|apply <path> [key ...] [--yes]|apply-staged [key ...]|rollback <token>|lock <key> <source> <reason...>|unlock <key>]';
+const MANAGED_USAGE_ARGS = '[review|staged|rollback-history|export <profile> <path>|inspect <path>|stage <path>|apply <path> [key ...]|apply-staged [key ...]|rollback <token>|lock <key> <source> <reason...>|unlock <key>]';
 const MANAGED_USAGE = `Usage: /managed ${MANAGED_USAGE_ARGS}`;
 
 export function registerManagedRuntimeCommands(registry: CommandRegistry): void {
@@ -76,6 +111,19 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
     name: 'managed',
     description: 'Export, inspect, and apply managed settings bundles',
     usage: MANAGED_USAGE_ARGS,
+    confirm(args, ctx) {
+      if (args[0] === 'unlock' && args[1]) {
+        return { title: `Unlock managed setting ${args[1]}?`, detail: `The managed lock on ${args[1]} is cleared, so it can be changed here again. A lock set by your organisation is a security setting; /managed lock sets it again.`, confirmLabel: 'Unlock' };
+      }
+      // Applying a bundle asks once only when it changes a key that can loosen security or holds a credential.
+      const changes = plannedManagedChanges(args, ctx);
+      if (!changes || !changes.some(isSecurityBearingChange)) return undefined;
+      return {
+        title: 'Apply managed settings that change security?',
+        detail: [...describeSetupTransferChanges(changes), 'Each applied key is locked as managed; /managed rollback <token> puts the previous values back.'].join('\n'),
+        confirmLabel: 'Apply',
+      };
+    },
     async handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
       const controlPlaneConfigDir = ctx.platform.configManager.getControlPlaneConfigDir();
@@ -240,15 +288,6 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
           return;
         }
 
-        // apply: a bundle that is not known to be low risk is staged for review instead of applied in one step.
-        if (stage.risk !== 'low' && !keyArguments.yes) {
-          ctx.print([
-            `Managed settings bundle staged from ${sourcePath} (${stage.changeCount} changes, risk=${stage.risk}); nothing was applied.`,
-            'Review it with /managed staged, then run /managed apply-staged, or re-run /managed apply <path> --yes.',
-            ...(ignoredNote ? [ignoredNote.trimStart()] : []),
-          ].join('\n'));
-          return;
-        }
         const result = await applyStagedManagedBundle(ctx.platform.configManager, keyArguments.requestedKeys);
         syncRuntimeMirror(ctx);
         ctx.print(`Managed settings bundle applied from ${sourcePath} (${result.appliedCount} changes, risk=${stage.risk}, rollback ${result.rollbackToken}${result.remainingCount > 0 ? `, ${result.remainingCount} still staged` : ''}).${ignoredNote}`);

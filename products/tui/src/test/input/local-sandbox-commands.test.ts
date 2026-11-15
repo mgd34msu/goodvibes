@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -108,18 +108,6 @@ describe('local sandbox and setup commands', () => {
     }
   });
 
-  test('sandbox bundle export/inspect round trips and malformed requests are handled', async () => {
-    expect(await run('sandbox', ['bundle', 'export', 'bundle/review.json'])).toContain('Sandbox bundle exported');
-    const bundle = JSON.parse(readFileSync(join(root, 'bundle/review.json'), 'utf8'));
-    expect(bundle.review.reviewText).toContain('resolved backend: local');
-    expect(await run('sandbox', ['bundle', 'inspect', 'bundle/review.json'])).toContain('Sandbox Bundle Review');
-    for (const args of [['bundle'], ['bundle', 'unknown'], ['bundle', 'export'], ['bundle', 'inspect']]) {
-      expect(await run('sandbox', args)).toContain('Usage: /sandbox bundle');
-    }
-    writeFileSync(join(root, 'bad.json'), '{');
-    expect(await run('sandbox', ['bundle', 'inspect', 'bad.json'])).toContain('Failed to inspect sandbox bundle');
-  });
-
   test('sessions start, inspect, execute with current options, export and stop through the public registry', async () => {
     expect(await run('sandbox', ['session', 'start', 'eval-py', 'Local', 'evaluation'])).toContain('Started sandbox session');
     const session = sessions.list()[0]!;
@@ -138,7 +126,7 @@ describe('local sandbox and setup commands', () => {
     expect(await run('sandbox', ['session', 'artifact', 'export', session.id, 'session.json'])).toContain('artifact exported');
     expect(await run('sandbox', ['session', 'artifact', 'inspect', 'session.json'])).toContain('Sandbox Session Artifact');
     expect(await run('sandbox', ['session', 'stop', session.id])).toContain(`Stopped sandbox session ${session.id}`);
-    expect(sessions.get(session.id)?.state).toBe('stopped');
+    expect(sessions.get(session.id)).toBeNull();
     expect(await run('sandbox', ['session', 'start', 'invalid'])).toContain('Usage:');
     await withPublicErrorText(['Unknown sandbox session: missing'], async () => {
       expect(await run('sandbox', ['session', 'run', 'missing', 'bash'])).toContain('Unknown sandbox session');

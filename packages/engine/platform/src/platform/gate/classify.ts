@@ -7,7 +7,9 @@
  * standing rule that matched, where the instruction came from, whether the
  * turn read untrusted text) and this function applies one order:
  *
- *   1. surface authority, then the plan posture;
+ *   1. surface authority (a change asked for on a channel the owner set up is
+ *      his to approve; on a surface anyone can write to it is refused), then
+ *      the plan posture;
  *   2. yolo runs everything that passed 1;
  *   3. a matching deny or ask rule;
  *   4. the owner-only list;
@@ -24,7 +26,7 @@
 import { relative, resolve, isAbsolute, sep } from 'node:path';
 import type { PermissionCategory, ToolArgumentPath, ToolDecision, ToolDefinition, ToolSideEffect } from '../types/tools.js';
 import type { GatePresetName } from './presets.js';
-import { effectPermittedForProvenance, surfaceCarriesCommandAuthority } from './surface-authority.js';
+import { effectPermittedForProvenance, surfaceCarriesCommandAuthority, surfaceRequestsReachOwner } from './surface-authority.js';
 
 /**
  * The closed list of what only the owner decides. Jev never approves one, in
@@ -50,7 +52,9 @@ export type OwnerOnlyKind =
   /** Killing a session, revoking the shared token, an irreversible cluster operation. */
   | 'irreversible-operator'
   /** The owner's own standing "always ask me" rule matched. */
-  | 'standing-ask';
+  | 'standing-ask'
+  /** A change asked for on a channel the owner set up, where a message cannot direct one by itself. */
+  | 'channel-request';
 
 /** Plain words for each owner-only kind, as the owner and the asking agent read them. */
 const OWNER_ONLY_REASONS: Readonly<Record<OwnerOnlyKind, string>> = {
@@ -64,6 +68,7 @@ const OWNER_ONLY_REASONS: Readonly<Record<OwnerOnlyKind, string>> = {
   'change-contract': 'it changes what a contract requires',
   'irreversible-operator': 'it is an operator action that cannot be undone',
   'standing-ask': 'your rule says to ask you about this',
+  'channel-request': 'it was asked for in a channel conversation, where a message cannot direct a change by itself',
 };
 
 export function ownerOnlyReason(kind: OwnerOnlyKind): string {
@@ -138,6 +143,9 @@ function ruleDecision(rule: CallRuleFact, allow: boolean): ToolDecision {
 /** Classify one call. The first step that settles it decides; see the module comment for the order. */
 export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass {
   if (facts.surface !== undefined && facts.category !== 'read' && !surfaceCarriesCommandAuthority(facts.surface)) {
+    // A channel the owner set up: the request becomes his approval, answered on a command surface.
+    // Plan mode still refuses below; yolo does not skip it (the surface, not the mode, lacks authority).
+    if (mode !== 'plan' && surfaceRequestsReachOwner(facts.surface)) return { kind: 'owner-only', item: 'channel-request' };
     const verdict = effectPermittedForProvenance(facts.category === 'write' ? 'write' : 'exec', { surfaceId: facts.surface });
     const problem = verdict.allowed ? `The ${facts.surface} surface cannot direct changes.` : verdict.problem;
     return { kind: 'fact', allow: false, basis: 'surface', decision: {

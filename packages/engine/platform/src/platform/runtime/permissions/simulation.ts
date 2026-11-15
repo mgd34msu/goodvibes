@@ -207,10 +207,7 @@ export class PermissionSimulator {
     if (this.simulationMode === 'enforce') this.assertDivergenceGate();
     const actualDecision = await this.actual.evaluateAsync(toolName, args, classification);
     const simulatedDecision = await this.simulated.evaluateAsync(toolName, args, classification);
-    this.actual.assertCurrent(actualDecision); this.simulated.assertCurrent(simulatedDecision);
-    const result = this.finishEvaluation(toolName, args, classification, actualDecision, simulatedDecision);
-    this.actual.assertCurrent(actualDecision); this.simulated.assertCurrent(simulatedDecision);
-    return result;
+    return this.finishEvaluation(toolName, args, classification, actualDecision, simulatedDecision);
   }
 
   private finishEvaluation(toolName: string, args: Record<string, unknown>, classification: CommandClassification,

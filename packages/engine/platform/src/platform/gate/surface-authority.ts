@@ -51,8 +51,10 @@
  *     command set at runtime: authority is source, not state, so it cannot
  *     be granted by anything the agent processes.
  *
- * No import in this file, and nothing it reads, comes from message content.
+ * Nothing this file reads comes from message content; its one import is the
+ * fixed list of channel surface kinds.
  */
+import { isChannelSurfaceKind } from '../../events/surfaces.js';
 
 /**
  * Whether messages arriving on a surface can direct the agent's actions.
@@ -118,6 +120,25 @@ export function surfaceCarriesCommandAuthority(surfaceId: string): boolean {
 }
 
 /**
+ * Channels anyone can write to with no sender the owner admitted. A request on
+ * one is refused outright and never raises an approval, so a stranger cannot
+ * fill the owner's approvals.
+ */
+const ANYONE_CAN_WRITE: ReadonlySet<string> = new Set(['email', 'webhook', 'ntfy']);
+
+/**
+ * Whether a change asked for on this surface becomes an approval for the owner
+ * (true) or a refusal (false). True only for a third-party channel the owner
+ * set up, whose ingress policy admits the senders he allowed (Slack, Discord,
+ * WhatsApp, ...). Any other input-only surface, a web page or an undeclared
+ * source included, is refused.
+ */
+export function surfaceRequestsReachOwner(surfaceId: string): boolean {
+  const normalized = normalizeSurfaceId(surfaceId);
+  return isChannelSurfaceKind(normalized) && !surfaceCarriesCommandAuthority(normalized) && !ANYONE_CAN_WRITE.has(normalized);
+}
+
+/**
  * Every surface that can start, approve, or confirm work, sorted for stable
  * display. This is what a refusal offers the owner as somewhere to go
  * instead, so it is derived from the same table the refusal is based on and
@@ -169,19 +190,28 @@ export type ConfirmationAuthorityDecision =
  * useful response is to tell the owner which surface to confirm on, which
  * requires the refusal to be a value the caller can render.
  */
-export function assertCanConfirm(surfaceId: string): ConfirmationAuthorityDecision {
+export function assertCanConfirm(surfaceId: string, answer: {
+  /** The answer comes from the sender the channel's policy records as its owner (`ownerId`), verified by the adapter. */
+  readonly fromChannelOwner?: boolean | undefined;
+} = {}): ConfirmationAuthorityDecision {
   const normalized = normalizeSurfaceId(surfaceId);
   if (surfaceCarriesCommandAuthority(normalized)) {
+    return { allowed: true, surfaceId: normalized };
+  }
+  // On a channel the owner set up, his own verified account answers as he does
+  // on his terminal; anyone else the allowlists admit can talk, not approve.
+  if (answer.fromChannelOwner === true && surfaceRequestsReachOwner(normalized)) {
     return { allowed: true, surfaceId: normalized };
   }
   const confirmOn = listCommandAuthoritySurfaces();
   return {
     allowed: false,
     surfaceId: normalized,
-    problem:
-      `The ${normalized} surface is input-only: anyone can send to it, so a message there ` +
-      'cannot agree to or confirm work, no matter who it claims to be from.',
-    fix: `Ask the owner to confirm on ${formatSurfaceList(confirmOn)}.`,
+    problem: surfaceRequestsReachOwner(normalized)
+      ? `On ${normalized} only the channel's owner can answer an approval, and this answer came from someone else.`
+      : `The ${normalized} surface is input-only: anyone can send to it, so a message there `
+        + 'cannot agree to or confirm work, no matter who it claims to be from.',
+    fix: `The owner answers on ${formatSurfaceList(confirmOn)}${surfaceRequestsReachOwner(normalized) ? `, or as the channel's owner on ${normalized}` : ''}.`,
     confirmOn,
   };
 }
@@ -251,8 +281,9 @@ export function effectPermittedForProvenance(
       'Anyone can send to it, so content there is evidence about what a sender wants, ' +
       'not a direction to act. Reading, searching and summarizing it is fine; ' +
       `${effect} is not.`,
-    fix:
-      `Report what the ${surface} message asks for and let the owner decide. ` +
-      `To go ahead, the owner approves on ${formatSurfaceList(confirmOn)}.`,
+    fix: surfaceRequestsReachOwner(surface)
+      ? `The owner is asked to approve it on ${formatSurfaceList(confirmOn)}, or as the channel's owner on ${surface}.`
+      : `Report what the ${surface} message asks for and let the owner decide; `
+        + `to have it done, the owner asks for it on ${formatSurfaceList(confirmOn)}.`,
   };
 }

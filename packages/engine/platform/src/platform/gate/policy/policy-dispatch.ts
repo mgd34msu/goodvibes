@@ -371,6 +371,7 @@ async function handlePromote(args: string[], context: PolicyCommandContext): Pro
   }
   const current = registry.getCurrent();
   context.print(`[policy] Promoted: "${result.bundleId}" is now the active enforcement policy.`);
+  if (result.notice) context.print(`[policy] ${result.notice}`);
   if (result.gate) {
     context.print(`[policy] Gate at promotion: ${result.gate.status}; divergence rate ${result.gate.divergenceRate !== undefined ? fmtRate(result.gate.divergenceRate) : 'unknown'} (threshold ${fmtRate(result.gate.threshold)}).`);
   }
@@ -389,6 +390,7 @@ async function handleRollback(_args: string[], context: PolicyCommandContext): P
   }
   const current = registry.getCurrent();
   context.print(`[policy] Rolled back to bundle "${result.restoredBundleId}".`);
+  if (result.notice) context.print(`[policy] ${result.notice}`);
   if (current) context.print(bundleSummary('[policy] Active bundle', current));
   policyState.setDashboard(null);
   policyState.notify();

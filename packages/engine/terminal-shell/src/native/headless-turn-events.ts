@@ -123,7 +123,9 @@ export function observeHeadlessTurn(bus: Pick<RuntimeEventBus, 'on'>, format: st
       const request = requested.get(payload.callId);
       if (request) {
         requested.delete(payload.callId);
-        emit({ ...request, ownerPrompt });
+        // The request is raised before the gate has read the call; its risk and summary come with the decision.
+        emit({ ...request, ...(request['riskLevel'] === undefined && payload.riskLevel !== undefined ? { riskLevel: payload.riskLevel } : {}),
+          ...(request['summary'] === undefined && payload.summary !== undefined ? { summary: forwardedText(payload.summary) } : {}), ownerPrompt });
       }
       emit({ type: 'PERMISSION_DECIDED', callId: payload.callId, tool: payload.tool, category: payload.category, approved: payload.approved,
         source: payload.source, ownerPrompt, ...(payload.reasonCode === undefined ? {} : { reasonCode: payload.reasonCode }) });

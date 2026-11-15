@@ -26,6 +26,10 @@ import type { DivergenceReport, SimulationMode } from './types.js';
 import type { EnforceGateResult } from './divergence-dashboard.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import { revisionSource, type RevisionSource } from '../../utils/revision.js';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { writeDocument } from '../../utils/atomic-json-store.js';
+import { summarizeError } from '../../utils/error-display.js';
 
 // ── Registry types ─────────────────────────────────────────────────────────────
 
@@ -112,11 +116,25 @@ export interface PromoteResult {
   error?: string | undefined;
   /** The bundle that was promoted, if successful. */
   bundleId?: string | undefined;
+  /** Set when the promotion holds now but was not recorded for the next start. */
+  notice?: string | undefined;
 }
 
 /**
  * Result of a rollback operation.
  */
+/** What the activation record keeps about the active bundle. */
+interface ActivationRecord {
+  readonly bundleId: string;
+  readonly payloadHash: string;
+  readonly activatedAt: string;
+}
+
+/** A hash of a bundle's payload, so a changed file is told apart from the one promoted. */
+function payloadHash(bundle: SignedPolicyBundle<PolicyBundlePayload>): string {
+  return createHash('sha256').update(JSON.stringify(bundle.payload)).digest('hex');
+}
+
 export interface RollbackResult {
   /** Whether the rollback succeeded. */
   ok: boolean;
@@ -124,6 +142,8 @@ export interface RollbackResult {
   restoredBundleId?: string | undefined;
   /** Human-readable error when rollback fails. */
   error?: string | undefined;
+  /** Set when the rollback holds now but was not recorded for the next start. */
+  notice?: string | undefined;
 }
 
 /**
@@ -174,6 +194,7 @@ export class PolicyRegistry {
   private _candidate: PolicyBundleVersion | null = null;
   private _history: PolicyBundleVersion[] = [];
   private _publicationRevision = 0;
+  private _activationRecordPath: string | undefined;
 
   public readonly DEFAULT_HISTORY_SIZE = 10;
 
@@ -372,12 +393,62 @@ export class PolicyRegistry {
 
     this._candidate = null;
     this._publicationRevision++;
+    const recorded = this._recordActivation();
 
     return {
       ok: true,
       gate: gateResult,
       bundleId: this._current.bundle.bundleId,
+      ...(recorded ? { notice: recorded } : {}),
     };
+  }
+
+  // ── Activation across restarts ──────────────────────────────────────────────────
+
+  /**
+   * Where promote and rollback record which bundle is active (its id, a hash of
+   * its payload and when it became active), so the next start restores the same
+   * enforcement. Bound by the host that loads the configured bundle.
+   */
+  public bindActivationRecord(path: string): void {
+    this._activationRecordPath = path;
+  }
+
+  /**
+   * At start, after the configured bundle was loaded as the candidate: make it
+   * active again when it is the bundle promoted before, unchanged. A record for
+   * the same bundle id whose payload differs is not restored and says why.
+   */
+  public restoreActivation(): { readonly restored: boolean; readonly reason?: string | undefined } {
+    const path = this._activationRecordPath;
+    const candidate = this._candidate;
+    if (!path || !candidate || this._current) return { restored: false };
+    let record: ActivationRecord | null = null;
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<ActivationRecord> | null;
+      if (parsed && typeof parsed.bundleId === 'string' && typeof parsed.payloadHash === 'string') record = parsed as ActivationRecord;
+    } catch { return { restored: false }; }
+    if (!record || record.bundleId !== candidate.bundle.bundleId) return { restored: false };
+    if (record.payloadHash !== payloadHash(candidate.bundle)) {
+      return { restored: false, reason: `policy bundle "${record.bundleId}" was promoted, but its rules changed on disk since; it is loaded as a candidate only. Run /policy simulate, then /policy promote, to enforce it again.` };
+    }
+    this._current = { ...candidate, state: 'active', activatedAt: typeof record.activatedAt === 'string' ? record.activatedAt : new Date().toISOString() };
+    this._candidate = null;
+    this._publicationRevision++;
+    return { restored: true };
+  }
+
+  /** Write the activation record; returns a sentence when it could not be kept. */
+  private _recordActivation(): string | undefined {
+    const path = this._activationRecordPath;
+    const current = this._current;
+    if (!path || !current) return undefined;
+    try {
+      writeDocument(path, { bundleId: current.bundle.bundleId, payloadHash: payloadHash(current.bundle), activatedAt: current.activatedAt ?? new Date().toISOString() } satisfies ActivationRecord);
+      return undefined;
+    } catch (error) {
+      return `The active policy could not be recorded (${summarizeError(error)}); after a restart the bundle is loaded as a candidate and must be promoted again.`;
+    }
   }
 
   // ── Rollback ──────────────────────────────────────────────────────────────────
@@ -411,10 +482,12 @@ export class PolicyRegistry {
     this._history = this._history.filter((v) => v !== previous);
     this._current = { ...previous, state: 'active', activatedAt: now };
     this._publicationRevision++;
+    const recorded = this._recordActivation();
 
     return {
       ok: true,
       restoredBundleId: this._current.bundle.bundleId,
+      ...(recorded ? { notice: recorded } : {}),
     };
   }
 

@@ -64,16 +64,6 @@ export type DecisionReason =
   | 'RULE_DENY_MANAGED'
   // Policy layer, user-defined deny rules
   | 'RULE_DENY_USER'
-  // Session override, user approved once
-  | 'PROMPT_ALLOW_ONCE'
-  // Session override, user approved for entire session
-  | 'PROMPT_ALLOW_SESSION'
-  // Session override, user denied
-  | 'PROMPT_DENY'
-  // Session override, cached approval hit
-  | 'SESSION_CACHED_ALLOW'
-  // Session override, cached denial hit
-  | 'SESSION_CACHED_DENY'
   // Safety, destructive prefix pattern matched
   | 'SAFETY_DENY_DESTRUCTIVE_PREFIX'
   // Safety, path escape attempt detected
@@ -108,10 +98,20 @@ export type DecisionReason =
 export type SourceLayer =
   | 'safety'  // Layer 1: bypass-immune safety checks
   | 'mode'    // Layer 2: mode constraints
-  | 'session' // Layer 3: session overrides / cache
   | 'policy'  // Layer 4: policy rules (prefix, arg-shape, path, network)
   | 'default' // Layer 5: default policy
   ;
+
+/**
+ * The paths, commands and hosts one call names, read from where the tool
+ * declares them (ToolDefinition.subjects). A rule evaluator given a list reads
+ * it instead of guessing argument names; absent means the tool declared none.
+ */
+export interface CallSubjects {
+  readonly paths?: readonly string[] | undefined;
+  readonly commands?: readonly string[] | undefined;
+  readonly hosts?: readonly string[] | undefined;
+}
 
 // ── Evaluation Trace ──────────────────────────────────────────────────────────
 

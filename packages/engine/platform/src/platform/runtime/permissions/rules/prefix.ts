@@ -141,6 +141,8 @@ export function evaluatePrefixRule(
   rule: PrefixRule,
   toolName: string,
   args: Record<string, unknown>,
+  /** The commands the tool declares this call runs; read in place of probing argument names. */
+  declaredCommands?: readonly string[],
 ): PrefixRuleResult {
   const toolMatches = toolMatchesPrefixPattern(toolName, rule.toolPattern);
 
@@ -172,7 +174,7 @@ export function evaluatePrefixRule(
     };
   }
 
-  const commandArgs = extractCommandArgs(args);
+  const commandArgs = declaredCommands ? [...declaredCommands] : extractCommandArgs(args);
   if (commandArgs.length === 0) {
     return {
       matched: false,

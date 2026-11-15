@@ -1,27 +1,23 @@
 /**
- * Tool Contract Verifier, registration-time contract checks for all registered tools.
+ * Tool Contract Verifier, contract checks for registered tools.
  *
- * Validates five contract dimensions for every tool:
- * 1. Schema validity
- * 2. Timeout/cancellation semantics
- * 3. Permission class mapping
- * 4. Output policy alignment
- * 5. Idempotency declaration for side-effecting tools
- *
- * Invalid tools fail closed: a tool with contract violations is rejected at
- * registration time with actionable diagnostics surfaced to the caller.
+ * Five contract dimensions:
+ * 1. Schema validity: checked by ToolRegistry.register for every tool, so a
+ *    tool with a malformed schema is refused where it enters.
+ * 2. Permission class: the category on the tool's definition (an engine tool's
+ *    comes from ENGINE_TOOL_CATEGORIES), the one the gate classes its calls by.
+ * 3-5. Timeout/cancellation, output policy and idempotency: metadata only the
+ *    phased executor's tools (PhasedTool) carry; plain tools are not checked.
  *
  * Every check is code except one: whether the description explains what the
- * tool does and when to use it is read by Jev
- * (`engine.tools.description-quality`, one request per distinct description,
- * remembered). That reading can only add a warning, so registration gates on
- * the code checks alone (verifyStructure, synchronous) and the full
- * verification (verify, verifyAll) adds the reading.
+ * tool does and when to use it is read by Jev for a single tool
+ * (`verify`, one request per distinct description, remembered). Verifying
+ * every tool (`verifyAll`) runs the code checks only.
  */
 
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../decision-policy.js';
-import type { Tool, ToolDefinition } from '../../types/tools.js';
+import { PERMISSION_CATEGORIES, toolCategoryOf, type Tool, type ToolDefinition } from '../../types/tools.js';
 import { descriptionQuality } from './batteries/description-quality.js';
 import type { PhasedTool } from './adapter.js';
 import { TOOL_CLASS_BY_CATEGORY } from './output-policy.js';
@@ -107,7 +103,13 @@ export interface ContractVerifierOptions {
  * sound JSON Schema. Does not make network calls or validate against a meta-schema;
  * checks for the most common structural mistakes that cause LLM call failures.
  */
-function checkSchema(def: ToolDefinition): ContractViolation[] {
+export function checkToolSchema(def: ToolDefinition, options: {
+  /**
+   * Whether a schema with no `type` is an error. Registration passes false: an
+   * untyped schema is reported by verification, not refused where it enters.
+   */
+  readonly requireType?: boolean | undefined;
+} = {}): ContractViolation[] {
   const violations: ContractViolation[] = [];
   const params = def.parameters;
 
@@ -123,7 +125,7 @@ function checkSchema(def: ToolDefinition): ContractViolation[] {
 
   // Must have a type field
   if (!('type' in params)) {
-    violations.push({
+    if (options.requireType !== false) violations.push({
       dimension: 'schema',
       severity: 'error',
       message: `Tool '${def.name}': parameters schema missing required 'type' field.`,
@@ -265,33 +267,19 @@ function checkTimeoutCancellation(phased: Partial<PhasedTool>, toolName: string)
 }
 
 /**
- * Check 3, Permission class mapping.
- *
- * For PhasedTools: validates that a category is declared and maps to a known
- * permission class. Plain Tools receive a warning about missing classification.
+ * Check 3, Permission class: the category the gate classes the tool's calls
+ * by, read from its definition. A tool that declares none is classed 'delegate'
+ * (every call goes to the gate's full decision), which is reported.
  */
-function checkPermissionClass(phased: Partial<PhasedTool>, toolName: string, strict: boolean): ContractViolation[] {
-  const violations: ContractViolation[] = [];
-
-  const knownCategories = new Set(['read', 'write', 'execute', 'delegate', 'network', 'analyze']);
-
-  if (phased.category === undefined) {
-    violations.push({
-      dimension: 'permission-class',
-      severity: strict ? 'error' : 'warn',
-      message: `Tool '${toolName}': no permission class (category) declared.`,
-      hint: 'Implement PhasedTool and set category to read|write|execute|delegate|network|analyze so the permission evaluator can classify this tool.',
-    });
-  } else if (!knownCategories.has(phased.category)) {
-    violations.push({
-      dimension: 'permission-class',
-      severity: 'error',
-      message: `Tool '${toolName}': unknown category '${phased.category}'.`,
-      hint: `Use one of: ${[...knownCategories].join(', ')}.`,
-    });
-  }
-
-  return violations;
+function checkPermissionClass(definition: ToolDefinition, strict: boolean): ContractViolation[] {
+  const category = toolCategoryOf(definition);
+  if (category !== undefined) return [];
+  return [{
+    dimension: 'permission-class',
+    severity: strict ? 'error' : 'warn',
+    message: `Tool '${definition.name}': no permission category declared; its calls are classed 'delegate'.`,
+    hint: `Set category on the tool definition to one of: ${PERMISSION_CATEGORIES.join(', ')}.`,
+  }];
 }
 
 /**
@@ -408,7 +396,7 @@ export class ToolContractVerifier {
   /**
    * Verify a single tool against every check that is code (all 5 dimensions,
    * without the description reading). Every error-level violation comes from
-   * these checks, so this is what registration gates on.
+   * these checks.
    *
    * @param tool - The tool to verify.
    * @returns A ContractVerificationResult with all violations and a pass/fail flag.
@@ -418,9 +406,9 @@ export class ToolContractVerifier {
     const isPhasedTool = 'category' in phased && phased.category !== undefined;
 
     const violations: ContractViolation[] = [
-      ...checkSchema(tool.definition),
+      ...checkToolSchema(tool.definition),
       ...checkTimeoutCancellation(phased, tool.definition.name),
-      ...checkPermissionClass(phased, tool.definition.name, this._opts.strictPermissionClass!),
+      ...checkPermissionClass(tool.definition, this._opts.strictPermissionClass!),
       ...checkOutputPolicy(phased, tool.definition.name),
       ...checkIdempotency(phased, tool.definition.name, this._opts.strictIdempotency!),
     ];
@@ -438,16 +426,18 @@ export class ToolContractVerifier {
   }
 
   /**
-   * Verify multiple tools at once.
+   * Verify multiple tools at once, with the code checks only: a command over
+   * every tool never waits on one decision-model request per description.
+   * `verify` reads one tool's description.
    *
    * @param tools - Array of tools to verify.
    * @returns Map of tool name to verification result.
    */
   async verifyAll(tools: readonly Tool[]): Promise<Map<string, ContractVerificationResult>> {
-    return withConfiguredDecisionModelPolicy(async () => {
-      const verified = await Promise.all(tools.map((tool) => this.verify(tool)));
-      return new Map(verified.map((result) => [result.toolName, result]));
-    });
+    return new Map(tools.map((tool) => {
+      const result = this.verifyStructure(tool);
+      return [result.toolName, result] as const;
+    }));
   }
 
   /**
@@ -476,7 +466,7 @@ export class ToolContractVerifier {
       }
     }
 
-    if (result.descriptionQuality === 'not-evaluated') lines.push('  Description quality was not assessed by a decision model.');
+    if (result.descriptionQuality === 'not-evaluated') lines.push('  Description quality was not assessed (verify one tool by name to read it).');
     return lines.join('\n');
   }
 

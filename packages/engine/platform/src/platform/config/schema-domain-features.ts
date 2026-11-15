@@ -289,7 +289,7 @@ export const featureConfigSettings: ConfigSetting[] = [
     type: 'string',
     default: '',
     description:
-      'Filesystem path to the policy bundle JSON loaded at startup when policy.bundleSource is "file" and policy.registryEnabled is true. Empty disables file loading. The loaded bundle enters the registry as a candidate (subject to the divergence gate before promotion).',
+      'Filesystem path to the policy bundle JSON loaded at startup when policy.bundleSource is "file" and policy.registryEnabled is true. Empty disables file loading. The loaded bundle enters the registry as a candidate (subject to the divergence gate before promotion); once promoted, the same unchanged bundle is enforced again at every start.',
   },
   {
     key: 'agents.passiveInjection.knowledge',

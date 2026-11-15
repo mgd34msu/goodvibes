@@ -38,12 +38,23 @@ export function captureTriageData(value: unknown): unknown {
 export interface CapturedTriageInput {
   readonly id: string; readonly surface: string; readonly subject: string; readonly snippet: string;
   readonly conversationKind: string; readonly unread: boolean;
+  /** Set when the item holds what may not be sent to a model (a credential, a card number): it is not read. */
+  readonly withheld?: 'protected-content' | undefined;
 }
 const invalid = (): never => { throw new JudgmentInputError('unsupported-input'); };
-/** Original input is fully captured and privacy-inspected before any projection. */
+
+/** Whether one item may be sent to a model; the privacy screen runs per item, so one item never blocks the page. */
+function protectedContent(item: unknown): boolean {
+  try { snapshotJudgmentInput(item); return false; }
+  catch (error) {
+    if (error instanceof JudgmentInputError) return true;
+    throw error;
+  }
+}
+
+/** Original input is fully captured, then each item is privacy-inspected on its own before any projection. */
 export function captureTriageInputs(items: readonly TriageInput[]): readonly CapturedTriageInput[] {
   const captured = captureTriageData(items);
-  snapshotJudgmentInput(captured);
   if (!Array.isArray(captured) || captured.length > 100) return invalid();
   const seen = new Set<string>();
   return Object.freeze(captured.map((value: unknown) => {
@@ -58,7 +69,7 @@ export function captureTriageInputs(items: readonly TriageInput[]): readonly Cap
     seen.add(item['id']);
     return Object.freeze({ id: item['id'], surface: item['surface'], subject: (item['subject'] ?? '') as string,
       snippet: (item['snippet'] ?? '') as string, conversationKind: (item['conversationKind'] ?? 'service') as string,
-      unread: (item['unread'] ?? false) as boolean });
+      unread: (item['unread'] ?? false) as boolean, ...(protectedContent(item) ? { withheld: 'protected-content' as const } : {}) });
   }));
 }
 /** Capture only a private comparison domain. No scope text enters the model

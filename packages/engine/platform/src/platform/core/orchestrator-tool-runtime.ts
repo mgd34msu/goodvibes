@@ -14,13 +14,15 @@ import { isAuthenticAutonomousAdmission, type AutonomousPermissionAdmission } fr
 import type { TurnHookOwner } from '../hooks/turn-ownership.js';
 import { ToolError, PermissionError } from '../types/errors.js';
 import type { HookEvent, HookEventPath, HookResult } from '../hooks/types.js';
-import type { ToolCall, ToolResult } from '../types/tools.js';
+import type { ToolCall, ToolDefinition, ToolResult } from '../types/tools.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { PermissionManager } from '../permissions/manager.js';
 import { buildToolDenial, buildDenialErrorMessage, toolDecisionOf } from '../permissions/denial.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import {
+  emitGateDecision,
+  emitGateRequested,
   emitToolCancelled,
   emitToolExecuting,
   emitToolFailed,
@@ -62,10 +64,12 @@ type HookDispatcherLike = {
 
 // Replay identity belongs to the actual permission manager, just like its
 // autonomousClaims/autonomousEpochs. Retain only protocol references, never
-// requests or arguments. No eviction: forgetting a claimed tuple would permit
-// it to execute again in a later batch. The WeakMap releases the full history
-// when the manager itself becomes unreachable.
+// requests or arguments. A call id can come back only within its own turn, and
+// a session runs one turn at a time, so a session keeps the identities of its
+// current turn and the one before it; older turns can never present a call
+// again. The WeakMap releases everything when the manager becomes unreachable.
 const autonomousInvocationSources = new WeakMap<object, Map<string, Map<string, Map<string, string>>>>();
+const RETAINED_TURNS_PER_SESSION = 2;
 
 function autonomousInvocationSource(manager: object, session: string, turn: string, call: string): string {
   // Admit the original references before lookup, even on an existing tuple.
@@ -78,7 +82,11 @@ function autonomousInvocationSource(manager: object, session: string, turn: stri
   let turns = sessions.get(session);
   if (!turns) { turns = new Map(); sessions.set(session, turns); }
   let calls = turns.get(turn);
-  if (!calls) { calls = new Map(); turns.set(turn, calls); }
+  if (!calls) {
+    calls = new Map(); turns.set(turn, calls);
+    // Maps keep insertion order: the first key is the oldest turn.
+    while (turns.size > RETAINED_TURNS_PER_SESSION) turns.delete(turns.keys().next().value!);
+  }
   let source = calls.get(call);
   if (!source) { source = opaqueUuid(); calls.set(call, source); }
   return source;
@@ -98,16 +106,17 @@ async function resolvePermissionCheck(
   args: Record<string, unknown>,
   signal?: AbortSignal,
   hookOwner?: TurnHookOwner,
-  dangerous = false,
+  definition?: ToolDefinition,
 ): Promise<import('../permissions/types.js').PermissionCheckResult> {
   const manager = permissionManager as {
     checkDetailed?: PermissionManager['checkDetailed'];
     check: PermissionManager['check'];
   };
+  const options = { signal, hookOwner, ...(definition ? { definition, ...(definition.dangerous === true ? { dangerous: true } : {}) } : {}) };
   if (typeof manager.checkDetailed === 'function') {
-    return manager.checkDetailed(toolName, args, undefined, { signal, hookOwner, ...(dangerous ? { dangerous } : {}) });
+    return manager.checkDetailed(toolName, args, undefined, options);
   }
-  const approved = await manager.check(toolName, args, undefined, { signal, hookOwner, ...(dangerous ? { dangerous } : {}) });
+  const approved = await manager.check(toolName, args, undefined, options);
   return {
     approved,
     persisted: false,
@@ -120,6 +129,14 @@ async function resolvePermissionCheck(
       reasons: [],
     },
   };
+}
+
+/** The category the gate classes a call under, for its request event; 'delegate' when the manager cannot say. */
+function gateCategory(permissionManager: object, toolName: string, args: Record<string, unknown>, registry?: ToolRegistry): string {
+  const manager = permissionManager as Partial<Pick<PermissionManager, 'getCategory'>>;
+  if (typeof manager.getCategory !== 'function') return 'delegate';
+  const definition = registry && typeof registry.definitionOf === 'function' ? registry.definitionOf(toolName) : undefined;
+  return manager.getCategory(toolName, args, definition);
 }
 
 type EmitterContextFactory = (turnId: string) => import('../runtime/emitters/index.js').EmitterContext;
@@ -163,8 +180,9 @@ export type ToolExecutionDeps = {
   } | undefined;
   /**
    * Per-call budget (`runtime.toolBudget.*`), read once per call. Absent or
-   * undefined means no limit. A budget is checked after the tool returns, so a
-   * breach cannot undo the call's effect; it is reported on the result.
+   * undefined means no limit. The time limit stops the call when it is reached
+   * (its signal aborts); token and cost limits are known only from the result,
+   * so a breach of those is reported on it.
    */
   toolBudget?: (() => ToolBudget | undefined) | undefined;
   /** The cap on calls of one batch in flight at once, read once per batch (`maxParallelToolCalls`). Absent: the default of 8. */
@@ -201,6 +219,24 @@ export function toolBudgetFromConfig(configManager: Pick<ConfigManager, 'get'> |
   if (maxTokens > 0) budget.maxTokens = maxTokens;
   if (maxCostUsd > 0) budget.maxCostUsd = maxCostUsd;
   return Object.keys(budget).length > 0 ? budget : undefined;
+}
+
+/** The signal that stops a call at its time limit, or undefined when it has none. */
+export function toolBudgetDeadline(budget: ToolBudget | undefined): AbortSignal | undefined {
+  return budget?.maxMs === undefined ? undefined : AbortSignal.timeout(budget.maxMs);
+}
+
+/**
+ * The result of a call its time limit stopped. Whatever the tool produced
+ * before it stopped is kept; it may have done part of its work.
+ */
+export function toolBudgetStoppedResult(callId: string, toolName: string, budget: ToolBudget, settled: ToolResult | null): ToolResult {
+  return {
+    callId,
+    success: false,
+    error: `Tool '${toolName}' was stopped at its time limit of ${budget.maxMs} ms (runtime.toolBudget.maxMs). Part of its action may have taken effect, so check before repeating it, or ask for a smaller piece of work.`,
+    ...(settled?.output !== undefined ? { output: settled.output } : {}),
+  };
 }
 
 /**
@@ -403,6 +439,13 @@ async function executeToolCallsInMode(
         });
       }
 
+      // The gate's own pair of events: requested before any owner prompt, decided once it settles.
+      const requestedCategory = gateCategory(deps.permissionManager, call.name, call.arguments, deps.toolRegistry);
+      if (deps.runtimeBus) {
+        emitGateRequested(deps.runtimeBus, deps.emitterContext(turnId), {
+          callId: call.id, tool: call.name, args: call.arguments, category: requestedCategory,
+        });
+      }
       // Event observers and every awaited admission boundary can cancel the turn.
       assertTurnActive();
       let checkResult: import('../permissions/types.js').PermissionCheckResult;
@@ -425,7 +468,16 @@ async function executeToolCallsInMode(
           call = { id: prepared.callId, name: prepared.name, arguments: prepared.args };
         }
       } else {
-        checkResult = await resolvePermissionCheck(deps.permissionManager, call.name, call.arguments, turnSignal, deps.hookOwner, deps.toolRegistry.isDangerous(call.name));
+        checkResult = await resolvePermissionCheck(deps.permissionManager, call.name, call.arguments, turnSignal, deps.hookOwner,
+          typeof deps.toolRegistry.definitionOf === 'function' ? deps.toolRegistry.definitionOf(call.name) : undefined);
+      }
+      if (deps.runtimeBus) {
+        emitGateDecision(deps.runtimeBus, deps.emitterContext(turnId), {
+          callId: call.id, tool: call.name, category: checkResult.category ?? requestedCategory,
+          approved: checkResult.approved, source: checkResult.sourceLayer, sourceLayer: checkResult.sourceLayer,
+          persisted: checkResult.persisted, reasonCode: checkResult.reasonCode,
+          classification: checkResult.analysis.classification, riskLevel: checkResult.analysis.riskLevel, summary: checkResult.analysis.summary,
+        });
       }
       assertTurnActive();
       if (checkResult.decisionPolicy) resultPolicy = checkResult.decisionPolicy;
@@ -544,7 +596,11 @@ async function executeToolCallsInMode(
       const budget = deps.toolBudget?.();
       const executeStartedAt = performance.now();
       const perCallSignal = earlyCallSignal ?? deps.toolCallSignals?.open(call.id);
-      const callSignal = turnSignal && perCallSignal ? AbortSignal.any([turnSignal, perCallSignal]) : turnSignal ?? perCallSignal;
+      const deadline = toolBudgetDeadline(budget);
+      const callSignals = [turnSignal, perCallSignal, deadline].filter((signal): signal is AbortSignal => signal !== undefined);
+      const callSignal = callSignals.length > 1 ? AbortSignal.any(callSignals) : callSignals[0];
+      // The time limit, not the person or the turn, stopped this call.
+      const stoppedByBudget = () => deadline?.aborted === true && turnSignal?.aborted !== true && perCallSignal?.aborted !== true;
       try {
         assertTurnActive();
         callSignal?.throwIfAborted();
@@ -570,7 +626,9 @@ async function executeToolCallsInMode(
           },
         ));
         if (checkResult.autonomousDecision) result = { ...result, autonomousDecision: checkResult.autonomousDecision };
-        if (callSignal?.aborted) {
+        if (stoppedByBudget()) {
+          result = toolBudgetStoppedResult(call.id, call.name, budget!, result);
+        } else if (callSignal?.aborted) {
           // The user cancelled THIS call mid-flight: the model sees a structured
           // cancelled result and the turn continues.
           result = toCancelledResult(call.id, result);
@@ -579,7 +637,9 @@ async function executeToolCallsInMode(
         }
       } catch (err) {
         assertDecisionAvailable(err);
-        const message = callSignal?.aborted
+        const stopped = stoppedByBudget() ? toolBudgetStoppedResult(call.id, call.name, budget!, null) : undefined;
+        const message = stopped ? stopped.error!
+          : callSignal?.aborted
           ? TOOL_CALL_CANCELLED_MESSAGE
           : err instanceof ToolInputProjectionError
             ? describeToolInputProjectionProblem(err.problem, err.detail)
@@ -588,13 +648,13 @@ async function executeToolCallsInMode(
               : err instanceof Error
                 ? err.message
                 : summarizeError(err);
-        result = callSignal?.aborted
+        result = stopped ?? (callSignal?.aborted
           ? toCancelledResult(call.id, null)
           : {
             callId: call.id,
             success: false,
             error: message,
-          };
+          });
 
         if (deps.hookDispatcher && !turnSignal?.aborted) {
           try {
@@ -692,28 +752,6 @@ async function executeToolCallsInMode(
         // A cancellation during dispatch cannot admit another tool or continue
         // the turn, including when the hook rejected and was logged above.
         assertTurnActive();
-      }
-
-      if (result.success && result.output && call.name === 'read') {
-        try {
-          const parsed = JSON.parse(result.output) as Record<string, unknown>;
-          if (Array.isArray(parsed['images']) && (parsed['images'] as unknown[]).length > 0) {
-            const images = parsed['images'] as Array<{ path: string; base64: string; mediaType: string; description: string }>;
-            delete parsed['images'];
-            if (parsed['files'] && typeof parsed['files'] === 'object') {
-              for (const key of Object.keys(parsed['files'] as Record<string, unknown>)) {
-                const f = (parsed['files'] as Record<string, unknown>)[key];
-                if (f && typeof f === 'object') {
-                  delete (f as Record<string, unknown>)['imageData'];
-                }
-              }
-            }
-            result.output = JSON.stringify(parsed);
-            (result as ToolResult & { _images?: typeof images })._images = images;
-          }
-        } catch {
-          // leave result as-is
-        }
       }
 
       result = capToolResultOutput(call.name, call.arguments, result);

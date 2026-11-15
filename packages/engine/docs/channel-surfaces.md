@@ -273,6 +273,18 @@ else the allowlists admit can talk to the assistant, but cannot approve tool use
 or spending, or act on the owner's runs. A policy saved before owners were
 recorded takes its first allowlisted user as its owner when it loads; when the
 owner is no longer on a non-empty user list, its first entry becomes the owner.
+An approval button pressed by anyone else is refused with the same rule (403,
+`APPROVAL_ANSWER_REFUSED`), and the approval stays pending.
+
+A channel conversation can ask the assistant to read, search and summarize. A
+request that would change something (write a file, run a command, send a
+message) is not refused: it becomes an approval for the owner, shown on the
+terminal apps, the web UI, Telegram and in that conversation, where the
+channel's owner can answer it. It is asked each time; an answer is not
+remembered for later calls. Email, webhook and ntfy are the exception, as is
+anything read from a web page or another source that is not a channel: anyone
+can write to them, so a change asked for there is refused and no approval is
+raised; the owner asks for it himself on a command surface.
 
 An approval prompt that cannot be shown in the conversation it belongs to (no
 route, a refused or failed send) is taken to the owner's other conversations,

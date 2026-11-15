@@ -12,8 +12,22 @@ type SourceBindings = ReadonlyMap<string, TriageSourceBinding>;
 export function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal, preview?: false, source?: SourceBindings): Promise<readonly TriageReceipt[]>;
 export function scoreCapturedTriage(items: readonly CapturedTriageInput[], port: JudgmentPort | undefined, signal: AbortSignal | undefined,
   preview: true, source?: SourceBindings): Promise<readonly TriagePreview[]>;
-export async function scoreCapturedTriage(items: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal,
+export async function scoreCapturedTriage(all: readonly CapturedTriageInput[], port?: JudgmentPort, signal?: AbortSignal,
   preview = false, source?: SourceBindings): Promise<readonly (TriageReceipt | TriagePreview)[]> {
+  // An item the privacy screen refused is answered as withheld, never sent; the rest are scored together.
+  const items = all.filter(item => item.withheld === undefined);
+  const scored = await scoreReadable(items, port, signal, preview, source);
+  if (items.length === all.length) return scored;
+  const byId = new Map(scored.map(receipt => [receipt.id, receipt]));
+  const withheld = (id: string): TriageReceipt | TriagePreview => {
+    const binding = { id, battery: inboxTriage.name, batteryVersion: inboxTriage.version, status: 'withheld' as const, reason: 'protected-content' as const };
+    return preview ? Object.freeze(binding) : Object.freeze({ ...binding, receiptVersion: 3 as const });
+  };
+  return Object.freeze(all.map(item => byId.get(item.id) ?? withheld(item.id)));
+}
+
+async function scoreReadable(items: readonly CapturedTriageInput[], port: JudgmentPort | undefined, signal: AbortSignal | undefined,
+  preview: boolean, source: SourceBindings | undefined): Promise<readonly (TriageReceipt | TriagePreview)[]> {
   // Only settled evidence has a later exact-input matching consumer. A failed
   // attempt needs enough metadata to withdraw an old label, never a hash of the
   // discarded private preview. Missing ports and cancellation perform no hashing.

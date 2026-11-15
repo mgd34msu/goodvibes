@@ -19,19 +19,19 @@ function tool(name: string, parameters: Tool['definition']['parameters'] = { typ
   return { definition: { name, description, parameters }, execute: async () => ({ success: true }) };
 }
 
-test.each(['Classic - Off', 'Preferred'] as const)('%s full registered-tool diagnostics retain native failures and unassessed description provenance', async policy => {
+test.each(['Classic - Off', 'Preferred'] as const)('%s full registered-tool diagnostics retain native failures and ask no model', async policy => {
   const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic outage'); }); install(fake.port);
   await under(policy, async () => {
     const registry = new ToolRegistry();
     registry.register(tool('read'));
     const results = await registry.verifyAllContracts({ strictIdempotency: false });
     const read = results.get('read');
-    expect(read).toMatchObject({ passed: true, descriptionQuality: 'not-evaluated', provenance: 'classic' });
+    expect(read).toMatchObject({ passed: true, descriptionQuality: 'not-evaluated' });
     expect(ToolContractVerifier.formatAllResults(results)).toContain('Description quality was not assessed');
-    const invalid = await new ToolContractVerifier().verify(tool('broken', { type: 'tuple' }));
+    expect(fake.requests).toHaveLength(0);
+    const invalid = new ToolContractVerifier().verifyStructure(tool('broken', { type: 'tuple' }));
     expect(invalid.passed).toBe(false);
     expect(invalid.violations.some(v => v.severity === 'error' && v.dimension === 'schema')).toBe(true);
-    expect(policy === 'Classic - Off' ? fake.requests.length === 0 : fake.requests.length > 0).toBe(true);
   });
 });
 

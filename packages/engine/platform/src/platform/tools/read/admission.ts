@@ -128,6 +128,12 @@ export function assertAdmittedAgentRead(args: Record<string, unknown>, options?:
   assertCapture(capture);
 }
 
+/** Whether this call carries a recorded read admission; the byte-reader's guard checks that it still holds. */
+export function hasAgentReadAdmission(options?: ToolExecuteOptions): boolean {
+  const context = options?.inputProjectionContext;
+  return context !== undefined && captures.has(context);
+}
+
 /** The actual byte-reader's guard; legacy platform reads keep their existing owner contracts. */
 export function readExecutionGuard(args: Record<string, unknown>, options: ToolExecuteOptions | undefined, index: Pick<ProjectIndex, 'baseDir'>): () => void {
   const context = options?.inputProjectionContext;

@@ -18,6 +18,19 @@ export const PERMISSION_CATEGORIES = ['read', 'write', 'execute', 'delegate'] as
 export type PermissionCategory = (typeof PERMISSION_CATEGORIES)[number];
 
 /**
+ * The category of each engine tool, stated once. Each engine tool's definition
+ * carries its entry as `category`; the gate reads the definition, and this
+ * table only for a check made by name without one.
+ */
+export const ENGINE_TOOL_CATEGORIES: Readonly<Record<string, PermissionCategory>> = Object.freeze({
+  read: 'read', find: 'read', fetch: 'read', analyze: 'read', inspect: 'read', state: 'read', registry: 'read',
+  goodvibes_context: 'read', repo_map: 'read', context_accounting: 'read',
+  write: 'write', edit: 'write', goodvibes_settings: 'write',
+  exec: 'execute',
+  agent: 'delegate', delegate: 'delegate', workflow: 'delegate', mcp: 'delegate',
+});
+
+/**
  * Where a value sits in a call's arguments: keys joined by dots, `[]` for
  * every entry of a list. `files[].path` is the `path` of each entry of `files`.
  */
@@ -41,6 +54,11 @@ export interface ToolRecoverability {
   readonly unless?: readonly ToolArgumentPath[] | undefined;
 }
 
+/** The category a tool's calls are classed under: its declared one, else an engine tool's entry; undefined when neither. */
+export function toolCategoryOf(definition: Pick<ToolDefinition, 'name' | 'category'>): PermissionCategory | undefined {
+  return definition.category ?? (Object.hasOwn(ENGINE_TOOL_CATEGORIES, definition.name) ? ENGINE_TOOL_CATEGORIES[definition.name] : undefined);
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -51,7 +69,11 @@ export interface ToolDefinition {
    * its effects alone.
    */
   sideEffects?: readonly ToolSideEffect[] | undefined;
-  /** The tool's permission category; absent means the gate's built-in table decides. */
+  /**
+   * The tool's permission category: what the gate and the contract verifier
+   * class its calls by (toolCategoryOf). An engine tool's comes from
+   * ENGINE_TOOL_CATEGORIES; a tool that declares none is treated as 'delegate'.
+   */
   category?: PermissionCategory | undefined;
   /** Where the paths, commands, hosts and recipients of a call sit in its arguments. Absent: undeclared. */
   subjects?: ToolSubjectDeclaration | undefined;

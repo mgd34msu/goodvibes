@@ -11,7 +11,7 @@
  * `instrumentedFetch`. Off by default; enabled only with an endpoint.
  *
  * Each decision maps to the same attribute set in both shapes:
- *   decision.id     , the log entry's monotonic sequence number
+ *   decision.id     , a sequence number that rises across the process's decisions
  *   tool.name       , the tool evaluated
  *   command.class   , the semantic classification (read/write/network/…)
  *   permission.mode , the active permission mode, when the caller supplies it
@@ -106,6 +106,8 @@ export interface DecisionOtlpConfig {
 export interface DecisionOtlpContext {
   /** The active permission mode, mapped to the `permission.mode` attribute. */
   readonly mode?: string | undefined;
+  /** The trace the decision belongs to (32 hex characters, one per session); a random one when absent. */
+  readonly traceId?: string | undefined;
 }
 
 const SCOPE_NAME = 'goodvibes.permissions.decisions';
@@ -146,7 +148,7 @@ function hexId(bytes: number): string {
 export function decisionToSpan(entry: DecisionLogEntry, ctx: DecisionOtlpContext = {}): OtlpSpan {
   const nanos = String(entry.decision.timestamp * 1_000_000);
   return {
-    traceId: hexId(16),
+    traceId: ctx.traceId ?? hexId(16),
     spanId: hexId(8),
     name: 'permission.decision',
     kind: 1, // SPAN_KIND_INTERNAL

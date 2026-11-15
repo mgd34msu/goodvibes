@@ -17,7 +17,7 @@ import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
  */
 
 import { dirname } from 'node:path';
-import type { PolicyRule } from '../runtime/permissions/types.js';
+import type { CallSubjects, PolicyRule } from '../runtime/permissions/types.js';
 import type { OwnerOnlyKind } from '../gate/classify.js';
 import {
   evaluateArgShapeRule,
@@ -55,7 +55,9 @@ function uniqueSorted(values: string[]): string[] {
  * 'session' is always offered; surfaces may also offer plain one-time
  * approve/deny (a decision with no remember at all).
  */
-export function buildRememberOptions(toolName: string, args: Record<string, unknown>): RememberTierOption[] {
+export function buildRememberOptions(toolName: string, args: Record<string, unknown>,
+  /** The rules already remembered in this project; three exact answers for one command class put the class tier first. */
+  remembered: readonly PolicyRule[] = []): RememberTierOption[] {
   const options: RememberTierOption[] = [];
   const commands = extractCommandArgs(args);
   const paths = extractPathArgs(args);
@@ -68,11 +70,13 @@ export function buildRememberOptions(toolName: string, args: Record<string, unkn
     });
     const classes = uniqueSorted(commands.map(commandClassOf).filter((cls) => cls.length > 0));
     if (classes.length > 0) {
-      options.push({
+      const classOption: RememberTierOption = {
         tier: 'command-class',
         label: `every ${classes.join(' / ')} command`,
         detail: classes.map((cls) => `${cls} ...`).join(' ; '),
-      });
+      };
+      if (classes.every((cls) => exactAnswersForClass(remembered, toolName, cls) >= REPEATED_EXACT_ANSWERS)) options.unshift(classOption);
+      else options.push(classOption);
     }
   }
 
@@ -97,6 +101,58 @@ export function buildRememberOptions(toolName: string, args: Record<string, unkn
     detail: 'in-memory only; forgotten when the session ends',
   });
   return options;
+}
+
+/** Exact answers for one command class after which the class tier is offered first. */
+const REPEATED_EXACT_ANSWERS = 3;
+
+/** How many remembered exact-command rules of this tool name a command of this class. */
+function exactAnswersForClass(remembered: readonly PolicyRule[], toolName: string, cls: string): number {
+  return remembered.filter((rule) => rule.type === 'prefix' && rule.toolPattern === toolName
+    && rule.exactCommandMatch === undefined && rule.commandPrefixes === undefined
+    && (rule.exactCommands ?? []).some((command) => commandClassOf(command) === cls)).length;
+}
+
+/** The tools a rule names, or null for a wildcard. */
+function ruleTools(rule: PolicyRule): readonly string[] | null {
+  const pattern = rule.toolPattern;
+  const tools = Array.isArray(pattern) ? pattern : [pattern];
+  return tools.includes('*') ? null : tools;
+}
+
+/**
+ * Whether `broader`, a remembered rule, already decides every call `narrower`
+ * decides, the same way: same effect and owner-only marker, and a whole-tool
+ * rule over the same tools, a command class over exact commands of that class,
+ * or a directory over paths inside it. Used when an answer is remembered, so the
+ * store neither keeps rules a newer one covers nor writes one already covered.
+ */
+export function ruleCovers(broader: PolicyRule, narrower: PolicyRule): boolean {
+  if (broader.effect !== narrower.effect || broader.ownerOnly !== narrower.ownerOnly) return false;
+  if (broader.origin !== 'user' || narrower.origin !== 'user') return false;
+  const broadTools = ruleTools(broader), narrowTools = ruleTools(narrower);
+  if (broadTools !== null && (narrowTools === null || !narrowTools.every((tool) => broadTools.includes(tool)))) return false;
+  if (broader.type === 'prefix' && (broader.commandPrefixes?.length ?? 0) === 0 && (broader.exactCommands?.length ?? 0) === 0) {
+    return narrower.type === 'prefix' || narrower.type === 'path-scope';
+  }
+  if (broader.type === 'prefix' && broader.exactCommandMatch === 'command-class' && narrower.type === 'prefix') {
+    const classes = broader.exactCommands ?? [];
+    const exact = narrower.exactCommands ?? [];
+    return narrower.exactCommandMatch === undefined && narrower.commandPrefixes === undefined && exact.length > 0
+      && exact.every((command) => classes.includes(commandClassOf(command)));
+  }
+  if (broader.type === 'path-scope' && narrower.type === 'path-scope') {
+    const dirs = broader.pathPatterns.filter((pattern) => pattern.endsWith('/**')).map((pattern) => pattern.slice(0, -3));
+    return narrower.pathPatterns.every((pattern) => pattern.endsWith('/**')
+      && dirs.some((dir) => pattern.slice(0, -3) === dir || pattern.startsWith(`${dir}/`)));
+  }
+  if (broader.type === 'prefix' && narrower.type === 'prefix' && broader.exactCommandMatch === undefined
+    && broader.commandPrefixes === undefined && narrower.commandPrefixes === undefined && narrower.exactCommandMatch === undefined) {
+    const exact = broader.exactCommands ?? [];
+    return (narrower.exactCommands ?? []).length > 0 && (narrower.exactCommands ?? []).every((command) => exact.includes(command))
+      && (broader.exactContext ?? null) === (narrower.exactContext ?? null);
+  }
+  return false;
 }
 
 /**
@@ -277,33 +333,36 @@ export function matchDurableRules(
   return firstAllow;
 }
 
+/**
+ * The rules and arguments are the caller's owned copies, so nothing between
+ * two synchronous rule checks can change them; the caller's check runs only
+ * after an arg-shape rule's await, the one point another writer can run.
+ */
 export async function matchDurableRulesAsync(
   rules: readonly PolicyRule[],
   toolName: string,
   args: Record<string, unknown>,
-  options: JudgmentReadingOptions & { readonly projectRoot?: string | undefined } = {},
+  options: JudgmentReadingOptions & { readonly projectRoot?: string | undefined; readonly subjects?: CallSubjects | undefined } = {},
 ): Promise<DurableRuleMatch | null> {
-  const before = JSON.stringify([rules, args, options.projectRoot]);
-  const current = () => {
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    if (JSON.stringify([rules, args, options.projectRoot]) !== before) throw new Error('Durable permission rules changed while reading');
-  };
+  const current = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   current();
+  const subjects = options.subjects;
   let firstAllow: DurableRuleMatch | null = null;
   for (const rule of rules) {
     let matched = false;
     switch (rule.type) {
       case 'prefix':
-        matched = evaluatePrefixRule(rule, toolName, args).matched;
+        matched = evaluatePrefixRule(rule, toolName, args, subjects?.commands).matched;
         break;
       case 'arg-shape':
         matched = (await evaluateArgShapeRuleAsync(rule, toolName, args, { signal: options.signal, assertCurrent: current })).matched;
+        current();
         break;
       case 'path-scope':
-        matched = evaluatePathScopeRule(rule, toolName, args, options.projectRoot).matched;
+        matched = evaluatePathScopeRule(rule, toolName, args, options.projectRoot, subjects?.paths).matched;
         break;
       case 'network-scope':
-        matched = evaluateNetworkScopeRule(rule, toolName, args).matched;
+        matched = evaluateNetworkScopeRule(rule, toolName, args, subjects?.hosts).matched;
         break;
       case 'mode-constraint':
         // Mode-constraint rules are mode-layer policy, not approval-derived,
@@ -312,7 +371,6 @@ export async function matchDurableRulesAsync(
         matched = false;
         break;
     }
-    current();
     if (matched) {
       if (rule.effect === 'deny') return { effect: 'deny', ruleId: rule.id };
       firstAllow ??= { effect: 'allow', ruleId: rule.id };

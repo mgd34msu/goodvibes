@@ -2,9 +2,9 @@ import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 /**
  * Runtime permissions evaluator.
  *
- * Evaluates owner-authored and managed policy rules (and the mode and session
- * layers used by policy simulation) through a layered priority stack. First
- * match wins. The gate (permissions/manager.ts) consults only its rule layer.
+ * Evaluates owner-authored and managed policy rules (and the mode layer used
+ * by policy simulation) through a layered priority stack. First match wins.
+ * The gate (permissions/manager.ts) consults only its rule layer.
  */
 
 import type {
@@ -16,10 +16,10 @@ import type {
   PolicyRule,
   SourceLayer,
   PermissionsConfig,
+  CallSubjects,
 } from './types.js';
 import type { BundleProvenance } from './policy-loader.js';
 
-import { DecisionLog } from './decision-log.js';
 import { evaluatePrefixRule } from './rules/prefix.js';
 import { evaluateArgShapeRule, evaluateArgShapeRuleAsync, type ArgShapeRuleResult } from './rules/arg-shape.js';
 import { evaluatePathScopeRule } from './rules/path-scope.js';
@@ -184,13 +184,14 @@ function dispatchPolicyRule(
   classification: CommandClassification,
   projectRoot?: string,
   argShape?: ArgShapeRuleResult,
+  subjects?: CallSubjects,
 ): PolicyRuleCheckResult {
   let matched = false;
   let step: EvaluationStep;
 
   switch (rule.type) {
     case 'prefix': {
-      const result = evaluatePrefixRule(rule, toolName, args);
+      const result = evaluatePrefixRule(rule, toolName, args, subjects?.commands);
       matched = result.matched;
       step = result.step;
       break;
@@ -202,13 +203,13 @@ function dispatchPolicyRule(
       break;
     }
     case 'path-scope': {
-      const result = evaluatePathScopeRule(rule, toolName, args, projectRoot);
+      const result = evaluatePathScopeRule(rule, toolName, args, projectRoot, subjects?.paths);
       matched = result.matched;
       step = result.step;
       break;
     }
     case 'network-scope': {
-      const result = evaluateNetworkScopeRule(rule, toolName, args);
+      const result = evaluateNetworkScopeRule(rule, toolName, args, subjects?.hosts);
       matched = result.matched;
       step = result.step;
       break;
@@ -238,8 +239,10 @@ function dispatchPolicyRule(
 /**
  * LayeredPolicyEvaluator, Core runtime permissions evaluator.
  *
- * Evaluates tool calls through five layers in priority order.
- * Maintains a session approval cache and a structured audit log.
+ * Evaluates tool calls through the mode, policy-rule and default layers in
+ * priority order. It holds no state between calls: the gate builds one per
+ * decision over a rule list it already owns, and answers given in a session
+ * live in the permission manager, not here.
  *
  * Usage:
  * ```ts
@@ -249,74 +252,57 @@ function dispatchPolicyRule(
  */
 export class LayeredPolicyEvaluator {
   private readonly mode: PermissionMode;
-  private readonly rules: PolicyRule[];
+  private readonly rules: readonly PolicyRule[];
   private readonly defaultEffect: 'allow' | 'deny';
   private readonly projectRoot?: string | undefined;
-  private readonly sessionCache: Map<string, boolean> = new Map();
-  private sessionCacheInsertOrder: string[] = [];
-  private sessionPublication = 0;
-  private readonly decisionOwners = new WeakMap<PermissionDecision, () => void>();
-  readonly log: DecisionLog;
   /** Provenance from the loaded policy bundle, if any. */
   private readonly provenance?: BundleProvenance | undefined;
-
-  private static readonly MAX_SESSION_CACHE_SIZE = 500;
 
   constructor(config: PermissionsConfig, provenance?: BundleProvenance) {
     this.mode = config.mode ?? 'default';
     this.rules = config.rules ?? [];
     this.defaultEffect = config.defaultEffect ?? 'deny';
     this.projectRoot = config.projectRoot;
-    this.log = new DecisionLog();
     this.provenance = provenance;
   }
 
   /**
    * evaluate, Evaluates a tool call and returns a PermissionDecision.
    *
-   * Runs all five layers in priority order. Populates a full evaluation trace.
-   * Appends the decision to the audit log if `auditLog` is enabled (default: true).
-   *
    * @param toolName, The tool name being called.
    * @param args    , The arguments passed to the tool.
-   * @param classification, What the call does, from the gate's Jev reading
-   *   (gate/reading.ts classificationFromReading or readCallClassification).
+   * @param classification, What the call does, from the gate's reading.
+   * @param subjects, The paths, commands and hosts the call names, from the tool's declaration.
    */
   /** @deprecated Synchronous compatibility only. Production callers use evaluateAsync. */
-  evaluate(toolName: string, args: Record<string, unknown>, classification: CommandClassification): PermissionDecision {
-    const walk = this.evaluateSteps(toolName, args, classification);
+  evaluate(toolName: string, args: Record<string, unknown>, classification: CommandClassification, subjects?: CallSubjects): PermissionDecision {
+    const walk = this.evaluateSteps(toolName, args, classification, subjects);
     let next = walk.next();
     while (!next.done) next = walk.next(evaluateArgShapeRule(next.value, toolName, args));
     return next.value;
   }
 
-  async evaluateAsync(toolName: string, args: Record<string, unknown>, classification: CommandClassification, options: JudgmentReadingOptions = {}): Promise<PermissionDecision> {
-    const before = JSON.stringify([this.sessionPublication, this.mode, this.rules, this.projectRoot, this.defaultEffect, args]);
-    const current = () => {
-      options.signal?.throwIfAborted(); options.assertCurrent?.();
-      if (JSON.stringify([this.sessionPublication, this.mode, this.rules, this.projectRoot, this.defaultEffect, args]) !== before) throw new Error('Permission policy changed while reading');
-    };
+  /**
+   * The rule list and arguments are the caller's owned copies and do not change;
+   * only an arg-shape rule awaits, so the caller's check runs after that await.
+   */
+  async evaluateAsync(toolName: string, args: Record<string, unknown>, classification: CommandClassification, options: JudgmentReadingOptions & { readonly subjects?: CallSubjects | undefined } = {}): Promise<PermissionDecision> {
+    const current = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
     current();
-    const walk = this.evaluateSteps(toolName, args, classification);
+    const walk = this.evaluateSteps(toolName, args, classification, options.subjects);
     let next = walk.next();
     while (!next.done) {
-      const result = await evaluateArgShapeRuleAsync(next.value, toolName, args, { ...options, assertCurrent: current });
+      const result = await evaluateArgShapeRuleAsync(next.value, toolName, args, { signal: options.signal, assertCurrent: current });
       current(); next = walk.next(result);
     }
-    current(); this.decisionOwners.set(next.value, current); return next.value;
-  }
-
-  /** The observation is current only while its exact policy/session/request owns it. */
-  assertCurrent(decision: PermissionDecision): void {
-    const current = this.decisionOwners.get(decision);
-    if (!current) throw new Error('Permission decision has no async owner');
-    current();
+    return next.value;
   }
 
   private *evaluateSteps(
     toolName: string,
     args: Record<string, unknown>,
     classification: CommandClassification,
+    subjects: CallSubjects | undefined,
   ): Generator<Extract<PolicyRule, { type: 'arg-shape' }>, PermissionDecision, ArgShapeRuleResult> {
     const trace: EvaluationStep[] = [];
 
@@ -346,37 +332,7 @@ export class LayeredPolicyEvaluator {
       });
     }
 
-    // ── Layer 3: Session overrides ─────────────────────────────────
-    const sessionKey = this.getSessionKey(toolName, args);
-    const cached = this.sessionCache.get(sessionKey);
-    if (cached !== undefined) {
-      const cacheReason: DecisionReason = cached
-        ? 'SESSION_CACHED_ALLOW'
-        : 'SESSION_CACHED_DENY';
-      trace.push({
-        layer: 'session',
-        check: 'session-cache',
-        matched: true,
-        detail: `cache hit for key "${sessionKey}" → ${cached ? 'allow' : 'deny'}`,
-      });
-      return this.finalize({
-        allowed: cached,
-        reason: cacheReason,
-        sourceLayer: 'session',
-        toolName,
-        args,
-        classification,
-        trace,
-      });
-    }
-    trace.push({
-      layer: 'session',
-      check: 'session-cache',
-      matched: false,
-      detail: `no session cache entry for key "${sessionKey}"`,
-    });
-
-    // ── Layer 4: Policy rules (managed denies, then user before managed, first match wins) ─────
+// ── Layer 4: Policy rules (managed denies, then user before managed, first match wins) ─────
     // An administrator's deny is a ceiling: no user or remembered allow may sit ahead of it.
     const managedDenies = this.rules.filter((r) => r.origin === 'managed' && r.effect === 'deny');
     const userRules = this.rules.filter((r) => r.origin === 'user');
@@ -385,7 +341,7 @@ export class LayeredPolicyEvaluator {
 
     for (const rule of orderedRules) {
       const argShape = rule.type === 'arg-shape' ? yield rule : undefined;
-      const result = dispatchPolicyRule(rule, toolName, args, this.mode, classification, this.projectRoot, argShape);
+      const result = dispatchPolicyRule(rule, toolName, args, this.mode, classification, this.projectRoot, argShape, subjects);
       trace.push(result.step);
       if (result.matched) {
         return this.finalize({
@@ -424,36 +380,6 @@ export class LayeredPolicyEvaluator {
   }
 
   /**
-   * recordSessionOverride, Records a user-provided session approval/denial
-   * in the cache (used after a user prompt resolves).
-   *
-   * @param toolName , Tool name.
-   * @param args     , Tool arguments.
-   * @param approved , Whether the user approved or denied.
-   * @param remember , Whether to persist for the session (default: false = once only).
-   */
-  recordSessionOverride(
-    toolName: string,
-    args: Record<string, unknown>,
-    approved: boolean,
-    remember = false,
-  ): void {
-    if (remember) {
-      const key = this.getSessionKey(toolName, args);
-      if (!this.sessionCache.has(key)) {
-        // Evict oldest entry if at capacity
-        if (this.sessionCacheInsertOrder.length >= LayeredPolicyEvaluator.MAX_SESSION_CACHE_SIZE) {
-          const oldest = this.sessionCacheInsertOrder.shift()!;
-          this.sessionCache.delete(oldest);
-        }
-        this.sessionCacheInsertOrder.push(key);
-      }
-      this.sessionCache.set(key, approved);
-      this.sessionPublication++;
-    }
-  }
-
-  /**
    * getMode, Returns the active PermissionMode.
    */
   getMode(): PermissionMode {
@@ -487,28 +413,6 @@ export class LayeredPolicyEvaluator {
         provenanceSource: this.provenance.provenanceSource,
       }),
     };
-    this.log.append(decision);
     return decision;
   }
-
-  private getSessionKey(
-    toolName: string,
-    args: Record<string, unknown>,
-  ): string {
-    if (typeof args['path'] === 'string') return `${toolName}:path:${args['path']}`;
-    if (typeof args['command'] === 'string') return `${toolName}:cmd:${args['command']}`;
-    if (typeof args['url'] === 'string') return `${toolName}:url:${args['url']}`;
-    // Other shapes (exec `commands`, fetch `urls`, ...) are keyed on their full
-    // values: names alone would let one remembered call approve every other
-    // call that merely has the same argument names.
-    return `${toolName}:args:${stableStringify(args)}`;
-  }
-}
-
-/** JSON with object keys sorted at every depth, so equal arguments give an equal string. */
-function stableStringify(value: unknown): string {
-  return JSON.stringify(value, (_key, item: unknown) => {
-    if (item === null || typeof item !== 'object' || Array.isArray(item)) return item;
-    return Object.fromEntries(Object.entries(item).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)));
-  }) ?? 'undefined';
 }

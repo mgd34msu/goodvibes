@@ -112,6 +112,8 @@ export function evaluatePathScopeRule(
   toolName: string,
   args: Record<string, unknown>,
   projectRoot?: string,
+  /** The paths the tool declares this call names; read in place of probing argument names. */
+  declaredPaths?: readonly string[],
 ): PathScopeRuleResult {
   const toolMatches = toolMatchesPathPattern(toolName, rule.toolPattern);
 
@@ -127,7 +129,7 @@ export function evaluatePathScopeRule(
     };
   }
 
-  const rawPaths = extractPathArgs(args);
+  const rawPaths = declaredPaths ? [...declaredPaths] : extractPathArgs(args);
   if (rawPaths.length === 0) {
     return {
       matched: false,

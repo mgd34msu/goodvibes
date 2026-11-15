@@ -151,6 +151,11 @@ export interface PermissionExecutionOptions {
   readonly signal?: AbortSignal | undefined;
   /** The tool declares itself dangerous: it is never allowed without the owner's answer except in allow-all. */
   readonly dangerous?: boolean | undefined;
+  /**
+   * The registered definition of the tool being checked: its category, declared
+   * effects, subjects and `dangerous` flag are the facts the gate classifies by.
+   */
+  readonly definition?: import('../types/tools.js').ToolDefinition | undefined;
 }
 
 export type PermissionRequestHandler = (

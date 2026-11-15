@@ -234,7 +234,8 @@ export function loadPolicyBundle(
 
   return {
     ok: true,
-    rules: bundle.payload.rules,
+    // A bundle is the managed source: every rule it carries is a managed rule.
+    rules: bundle.payload.rules.map((rule) => ({ ...rule, origin: 'managed' as const })),
     provenance: provenanceFor(signatureStatus),
   };
 }
@@ -245,6 +246,47 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** The modes the gate evaluates policy under; a mode-constraint rule naming another can never apply. */
+const GATE_POLICY_MODES: ReadonlySet<string> = new Set(['default', 'plan', 'allow-all']);
+
+function isStringList(value: unknown, nonEmpty: boolean): boolean {
+  return Array.isArray(value) && (!nonEmpty || value.length > 0) && value.every((item) => typeof item === 'string' && item.length > 0);
+}
+
+/** What a rule of its type is missing, or undefined when the evaluator can apply it as written. */
+function describeRuleFieldError(rule: Record<string, unknown>, at: string): string | undefined {
+  const pattern = rule['toolPattern'];
+  if (!(typeof pattern === 'string' && pattern.length > 0) && !isStringList(pattern, true)) {
+    return `${at} needs a toolPattern: a tool name, "*", or a list of names.`;
+  }
+  switch (rule['type']) {
+    case 'prefix':
+      if (rule['commandPrefixes'] !== undefined && !isStringList(rule['commandPrefixes'], false)) return `${at} commandPrefixes must be a list of strings.`;
+      if (rule['exactCommands'] !== undefined && !isStringList(rule['exactCommands'], false)) return `${at} exactCommands must be a list of strings.`;
+      return undefined;
+    case 'arg-shape':
+      return isRecord(rule['argMatchers']) && Object.keys(rule['argMatchers']).length > 0 ? undefined : `${at} needs argMatchers: an object of argument names to values or /patterns/.`;
+    case 'path-scope':
+      return isStringList(rule['pathPatterns'], true) ? undefined : `${at} needs pathPatterns: a non-empty list of path globs.`;
+    case 'network-scope':
+      if (!isStringList(rule['hostPatterns'], true)) return `${at} needs hostPatterns: a non-empty list of host globs.`;
+      if (rule['ports'] !== undefined && !(Array.isArray(rule['ports']) && rule['ports'].every((port) => Number.isInteger(port) && port >= 0 && port <= 65_535))) {
+        return `${at} ports must be a list of port numbers (0 means any).`;
+      }
+      return undefined;
+    case 'mode-constraint': {
+      const modes = rule['activeModes'];
+      if (!isStringList(modes, true)) return `${at} needs activeModes: a non-empty list of modes.`;
+      const never = (modes as string[]).filter((mode) => !GATE_POLICY_MODES.has(mode));
+      return never.length > 0
+        ? `${at} names mode(s) ${never.join(', ')} that policy is never evaluated under; use ${[...GATE_POLICY_MODES].join(', ')}.`
+        : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
 /** What is wrong with a parsed bundle's shape, or undefined when the loader can read it. Parsed JSON can be anything. */
 function describeBundleShapeError(bundle: unknown): string | undefined {
   if (!isRecord(bundle)) return 'expected an object with bundleId and payload.';
@@ -252,9 +294,14 @@ function describeBundleShapeError(bundle: unknown): string | undefined {
   const payload = bundle['payload'];
   if (!isRecord(payload) || !Array.isArray(payload['rules'])) return 'payload.rules must be an array.';
   for (const [index, rule] of (payload['rules'] as unknown[]).entries()) {
-    if (!isRecord(rule) || typeof rule['id'] !== 'string') return `rule ${index + 1} needs a string id.`;
-    if (typeof rule['type'] !== 'string' || !RULE_TYPES.has(rule['type'])) return `rule ${index + 1} has an unknown type.`;
-    if (rule['effect'] !== 'allow' && rule['effect'] !== 'deny') return `rule ${index + 1} effect must be "allow" or "deny".`;
+    const at = `rule ${index + 1}`;
+    if (!isRecord(rule) || typeof rule['id'] !== 'string') return `${at} needs a string id.`;
+    if (typeof rule['type'] !== 'string' || !RULE_TYPES.has(rule['type'])) return `${at} has an unknown type.`;
+    if (rule['effect'] !== 'allow' && rule['effect'] !== 'deny') return `${at} effect must be "allow" or "deny".`;
+    // A bundle is managed policy; a rule claiming to be the owner's own answer is not one.
+    if (rule['origin'] !== undefined && rule['origin'] !== 'managed') return `${at} has origin "${String(rule['origin'])}"; a policy bundle carries managed rules only (omit origin or use "managed").`;
+    const fieldError = describeRuleFieldError(rule, `${at} (${rule['type']})`);
+    if (fieldError !== undefined) return fieldError;
   }
   return undefined;
 }

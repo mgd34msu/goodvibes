@@ -17,6 +17,7 @@ export {
   normalizeSurfaceId,
   surfaceAuthority,
   surfaceCarriesCommandAuthority,
+  surfaceRequestsReachOwner,
   type ActingProvenance,
   type AgentEffect,
   type ConfirmationAuthorityDecision,

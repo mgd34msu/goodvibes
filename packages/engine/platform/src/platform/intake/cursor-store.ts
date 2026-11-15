@@ -197,7 +197,7 @@ export interface InboxTriageReceiptRow {
   readonly id: string;
   /** The row's `triage_revision` when it was read for scoring. */
   readonly revision: string;
-  readonly status: 'settled' | 'held' | 'unavailable';
+  readonly status: 'settled' | 'held' | 'unavailable' | 'withheld';
   readonly label?: TriageLabel;
   readonly score?: number;
   readonly tags?: readonly string[];

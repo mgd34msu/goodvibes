@@ -667,7 +667,7 @@ function toTaintSources(ingests: readonly UntrustedIngest[]): readonly TaintSour
       let source = taintSourceOf.get(entry);
       if (!source) {
         source = Object.freeze({ surface: entry.surface, origin: entry.origin, text: entry.content });
-        taintSourceOf.set(entry, source); markLedgerTaintSource(source);
+        taintSourceOf.set(entry, source); markLedgerTaintSource(source); ledgerSourceObjects.add(source);
       }
       return source;
     }));
@@ -722,6 +722,19 @@ export function captureRetainedTaintEvidence(value: unknown): RetainedTaintEvide
   return captured;
 }
 
+/** Frozen sources the ledger handed out: whether each may be sent for a reading is decided once. */
+const ledgerSourceObjects = new WeakSet<TaintSource>();
+const withheldSources = new WeakMap<TaintSource, boolean>();
+
+/** Whether a source holds what may not be sent to a model; a ledger source is screened once, not per assessment. */
+function sourceWithheldFromJudgment(source: TaintSource): boolean {
+  const known = withheldSources.get(source);
+  if (known !== undefined) return known;
+  const withheld = judgmentInputProblem(source) !== undefined;
+  if (ledgerSourceObjects.has(source)) withheldSources.set(source, withheld);
+  return withheld;
+}
+
 async function assessEvidence(
   evidence: Pick<TaintEvidence, 'sources' | 'complete'>,
   content: Readonly<Record<string, string | undefined>> | undefined,
@@ -732,7 +745,7 @@ async function assessEvidence(
   if (evidence.sources.length === 0) return { kind: 'clean', findings: [] };
   if (content === undefined) return { kind: 'incomplete', findings: [], reason: 'missing-content' };
   const fields = Object.freeze({ ...content });
-  if (judgmentInputProblem(fields) || evidence.sources.some(source => judgmentInputProblem(source))) {
+  if (judgmentInputProblem(fields) || evidence.sources.some(sourceWithheldFromJudgment)) {
     return { kind: 'incomplete', findings: [], reason: 'protected-input' };
   }
   // An over-long outgoing field cannot be read whole, so it is an unanswerable assessment, not a thrown refusal.

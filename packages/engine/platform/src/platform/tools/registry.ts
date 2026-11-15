@@ -30,14 +30,15 @@ import { assertPreparedConfigWriteRoute } from '../config/settings-precondition-
 import { assertRemoteSettingsImportPrecondition, applyRemoteSettingsImportPrecondition,
   assertCompletedRemoteSettingsImportPrecondition } from '../config/settings-import-precondition-client.js';
 import { firstJsonSchemaFailureAsync } from '@goodvibes-jev/engine/transport-http';
-import type { Tool, ToolDefinition, ToolExecuteOptions, ToolResult } from '../types/tools.js';
+import { PERMISSION_CATEGORIES, type Tool, type ToolDefinition, type ToolExecuteOptions, type ToolResult } from '../types/tools.js';
 import { UnknownPreparedToolError } from './preparation-error.js';
 import { ToolError } from '../types/errors.js';
 import { repairToolCall } from './auto-repair.js';
-import { ToolContractVerifier } from '../runtime/tools/contract-verifier.js';
+import { checkToolSchema, ToolContractVerifier } from '../runtime/tools/contract-verifier.js';
 import type { ContractVerificationResult, ContractVerifierOptions } from '../runtime/tools/contract-verifier.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
+import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 
 /**
@@ -431,6 +432,15 @@ function preparationData(tool: Tool, name: string, freshness = false): { executo
     ? captureOwnedJson(definition, nodeTypes.isProxy) : snapshotJudgmentInput(definition)) as unknown as ToolDefinition };
 }
 
+/** Refuse a definition a provider or the gate cannot use, naming every problem. */
+function assertRegistrableDefinition(definition: ToolDefinition): void {
+  const problems = checkToolSchema(definition, { requireType: false }).filter((violation) => violation.severity === 'error').map((violation) => violation.message);
+  if (definition.category !== undefined && !(PERMISSION_CATEGORIES as readonly string[]).includes(definition.category)) {
+    problems.push(`Tool '${definition.name}': category '${String(definition.category)}' is not one of ${PERMISSION_CATEGORIES.join(', ')}.`);
+  }
+  if (problems.length > 0) throw new Error(`Tool '${definition.name}' cannot be registered:\n  ${problems.join('\n  ')}`);
+}
+
 export class ToolRegistry {
   private readonly prepared = new WeakMap<PreparedToolCall, PreparedExecution>();
   private tools = new Map<string, Tool>();
@@ -438,6 +448,7 @@ export class ToolRegistry {
   private readonly projections = new WeakMap<ProjectedToolCall, CapturedProjection>();
   private readonly projectedArgs = new WeakMap<object, CapturedProjection>();
   private registrationRevision = 0;
+  readonly #revisionSource = revisionSource('tool registry', () => this.registrationRevision);
   private definitionSequence = 0;
   private readonly definitionRevisions = new WeakMap<ProjectionRegistration, { readonly definition: ToolDefinition; readonly revision: string }>();
 
@@ -446,11 +457,20 @@ export class ToolRegistry {
     if (expectedPermissionManager !== undefined) registryPermissionOwners.set(this, expectedPermissionManager);
   }
 
-  /** Register a tool. Throws if a tool with the same name is already registered. */
+  /** Every registration and removal as a revision source. */
+  get revisionSource(): RevisionSource { return this.#revisionSource; }
+
+  /**
+   * Register a tool. Throws if a tool with the same name is already
+   * registered, or if its definition would be refused by a provider or the
+   * gate: a malformed parameter schema, a missing name or description, or a
+   * category that is not one of the permission categories.
+   */
   register(tool: Tool, opts?: ToolRegistrationOptions): void {
     const { definition } = preparationData(tool, 'registration');
     const name = definition.name;
     if (this.tools.has(name)) throw new Error(`Tool '${name}' is already registered`);
+    assertRegistrableDefinition(definition);
     const configured = opts === undefined ? undefined : projectionProperty(opts, 'inputProjection');
     // A supplied but missing projector is a protected registration, never an opt-out.
     const candidate = configured === undefined && opts !== undefined && Reflect.has(opts, 'inputProjection') ? null : configured;
@@ -469,45 +489,16 @@ export class ToolRegistry {
   }
 
   /**
-   * Register a tool after running contract verification.
-   *
-   * If verification finds error-level violations the tool is NOT registered
-   * and an error is thrown listing all violations. This implements "fail closed"
-   * semantics: invalid tools cannot enter the registry.
-   *
-   * Warn-level violations are collected and returned so callers can surface them
-   * without blocking registration.
-   *
-   * Registration runs the code checks only (ToolContractVerifier.verifyStructure).
-   * The one check that is read by Jev, whether the description explains the
-   * tool, can only add a warning and never changes whether a tool registers,
-   * so registration does not wait on it; verifyContract and verifyAllContracts
-   * include it.
-   *
-   * @param tool    - The tool to register.
-   * @param opts    - Optional verifier options (strictness overrides).
-   * @returns The full ContractVerificationResult so callers can inspect warnings.
-   * @throws If the tool has any error-level contract violations.
+   * Register a tool and return its code-checked contract result.
+   * @deprecated `register` refuses a malformed definition itself; call it directly.
    */
   registerWithContract(
     tool: Tool,
     opts?: ContractVerifierOptions,
     registration?: ToolRegistrationOptions,
   ): ContractVerificationResult {
-    const verifier = new ToolContractVerifier(opts);
-    const result = verifier.verifyStructure(tool);
-
-    if (!result.passed) {
-      const errors = result.violations
-        .filter((v) => v.severity === 'error')
-        .map((v) => `  [${v.dimension}] ${v.message}`);
-      throw new Error(
-        `Tool '${tool.definition.name}' failed contract verification:\n${errors.join('\n')}`,
-      );
-    }
-
     this.register(tool, registration);
-    return result;
+    return new ToolContractVerifier(opts).verifyStructure(tool);
   }
 
   /**
@@ -902,6 +893,11 @@ export class ToolRegistry {
   /** Whether the registered tool of this name declares itself dangerous. */
   isDangerous(name: string): boolean {
     return this.tools.get(name)?.definition.dangerous === true;
+  }
+
+  /** The registered definition of a tool: the facts (category, effects, subjects) the gate decides its calls by. */
+  definitionOf(name: string): ToolDefinition | undefined {
+    return this.tools.get(name)?.definition;
   }
 
   /** Opaque backend binding, never part of the serializable permission evidence. */
@@ -1453,6 +1449,7 @@ export class ToolRegistry {
     if (!current || (expected !== undefined && current !== expected)) return false;
     this.tools.delete(name);
     this.registrations.delete(name);
+    this.registrationRevision++;
     return true;
   }
 

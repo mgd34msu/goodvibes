@@ -58,8 +58,8 @@ Every frame carries `schemaVersion` (currently `1`). Consumers should ignore fra
 | --- | --- |
 | `STREAM_DELTA` | `content`, `accumulated` (unless `--omit-accumulated`) |
 | `TOOL_EXECUTING`, `TOOL_SUCCEEDED`, `TOOL_FAILED`, `TOOL_CANCELLED` | `turnId`, `callId`, `tool`; plus `durationMs`, `error` or `reason` |
-| `PERMISSION_REQUESTED` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `ownerPrompt` |
-| `PERMISSION_DECIDED` | `callId`, `tool`, `category`, `approved`, `source`, `reasonCode`, `ownerPrompt` |
+| `PERMISSION_REQUESTED` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `ownerPrompt` (one per gated tool call, written when its decision is known) |
+| `PERMISSION_DECIDED` | `callId`, `tool`, `category`, `approved`, `source`, `reasonCode`, `ownerPrompt` (follows its request) |
 | `PERMISSION_PROMPT` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `answer` (only with `--answer-permissions`; the run waits for the answer) |
 | `PERMISSION_ANSWERED` | `callId`, `approved` (an answer line was accepted) |
 | `PERMISSION_ANSWER_REJECTED` | `callId` (when it was a string), `reason`, `waiting` (an answer line was not used, and which call ids still wait) |

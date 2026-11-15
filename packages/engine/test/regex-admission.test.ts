@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFindTool } from '../platform/src/platform/tools/find/executor.ts';
-import { PermissionSimulator } from '../platform/src/platform/runtime/permissions/simulation.ts';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { admitRegex, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -188,26 +187,6 @@ test('the four exact wire grammars retain native anchors, Unicode, nested-not an
   expect(firstJsonSchemaFailure({ pattern: '[^!-~]' }, 'x'.repeat(60_000))?.received).toBe('non-matching string');
   expect(await firstJsonSchemaFailureAsync({ pattern: '^a+$' }, 'a')).toBeUndefined();
 });
-
-test('a session deny arriving during regex execution invalidates pending policy allow', async () => {
-  const rule = { type: 'arg-shape' as const, id: 'allow', origin: 'user' as const, effect: 'allow' as const, toolPattern: 'read', argMatchers: { path: '/public/' } };
-  const args = { path: 'public' };
-  const evaluator = new LayeredPolicyEvaluator({ mode: 'default', rules: [rule], defaultEffect: 'deny' });
-  const pending = evaluator.evaluateAsync('read', args, 'read');
-  evaluator.recordSessionOverride('read', args, false, true);
-  await expect(pending).rejects.toThrow();
-});
-
-
-test('simulator cannot publish a decision whose source changed during execution', async () => {
-  const rule = { type: 'arg-shape' as const, id: 'allow', origin: 'user' as const, effect: 'allow' as const, toolPattern: 'read', argMatchers: { path: '/public/' } };
-  const simulated = { ...rule, argMatchers: { path: '/public/' } };
-  const simulator = new PermissionSimulator({ mode: 'default', rules: [rule] }, { mode: 'default', rules: [simulated] }, 'simulation-only');
-  const pending = simulator.evaluateAsync('read', { path: 'public' }, 'read');
-  rule.argMatchers.path = '/private/';
-  await expect(pending).rejects.toThrow();
-});
-
 
 test('find searches long lines and large files without a Jev gate or a hidden skip', async () => {
   const root = mkdtempSync(join(tmpdir(), 'regex-find-large-'));

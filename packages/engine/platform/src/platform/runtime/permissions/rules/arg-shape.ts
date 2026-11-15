@@ -153,12 +153,9 @@ export function evaluateArgShapeRule(rule: ArgShapeRule, toolName: string, args:
 export async function evaluateArgShapeRuleAsync(
   rule: ArgShapeRule, toolName: string, args: Record<string, unknown>, options: JudgmentReadingOptions = {},
 ): Promise<ArgShapeRuleResult> {
-  const before = JSON.stringify([rule, args]);
+  // Matched against its own copy, so a caller's later change cannot reach the reading.
   const [capturedRule, capturedArgs] = structuredClone([rule, args]) as [ArgShapeRule, Record<string, unknown>];
-  const current = () => {
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    if (JSON.stringify([rule, args]) !== before) throw new Error('Permission regex source changed while reading');
-  };
+  const current = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   current();
   const matches = new Map<unknown, boolean>();
   if (toolMatchesArgPattern(toolName, capturedRule.toolPattern)) {

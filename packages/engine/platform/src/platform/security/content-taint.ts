@@ -223,9 +223,11 @@ const DERIVATION_REQUEST_CHARS = 100_000;
  *
  * Exact containment runs in code over the whole of every source. The
  * derivation reading asks, per field, ONE request carrying every source not
- * already cleared for that field (a long source as consecutive pieces), each
- * with its own pair of questions; fields are read side by side. Pairs cleared
- * earlier are remembered, so a second send in the same turn asks nothing new.
+ * already cleared for that field's text (a long source as consecutive pieces),
+ * each with its own pair of questions; fields are read side by side. Cleared
+ * pairs are remembered by text, so an outward action is assessed once: when the
+ * gate has read a call's content, the tool that checks the same content again
+ * asks nothing new, and neither does a second send in the same turn.
  */
 export async function findContentTaint(
   fields: Readonly<Record<string, string | undefined>>,
@@ -261,7 +263,9 @@ export async function findContentTaint(
   const port = taintPort(options.signal, options.port);
   const perField = await mapLimit(pending, DERIVATION_CONCURRENCY, async (pair): Promise<TaintFinding | undefined> => {
     const reply = replyFields.has(pair.field);
-    const fieldKey = `${reply ? 'reply' : 'plain'}\0${pair.field}\0${pair.text}`;
+    // A cleared pair is a fact about two fixed texts, whatever a caller names the field:
+    // the gate's reading of a call's text clears the same text when the tool assesses it again.
+    const fieldKey = `${reply ? 'reply' : 'plain'}\0${pair.text}`;
     const unread = pieces.filter(entry => !clearedFor(entry.borrowed, fieldKey)?.has(entry.piece));
     if (unread.length === 0) return undefined;
     const derivationItem = reply ? 'reply_derives' : 'derives';

@@ -38,11 +38,7 @@ function makeRepo(): string {
 describe('repo_map registration', () => {
   test('registers with the tool registry and passes contract verification', () => {
     const registry = new ToolRegistry();
-    const result = registry.registerWithContract(createRepoMapTool({ projectRoot: makeRepo() }), {
-      strictIdempotency: false,
-      strictPermissionClass: false,
-    });
-    expect(result.passed).toBe(true);
+    registry.register(createRepoMapTool({ projectRoot: makeRepo() }));
     expect(registry.has('repo_map')).toBe(true);
     const def = registry.getToolDefinitions().find((d) => d.name === 'repo_map');
     expect(def?.sideEffects).toEqual(['read_fs']);

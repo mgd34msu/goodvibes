@@ -19,7 +19,7 @@
  * not know about in every project; leaving scoped rules out of `rules` makes
  * it ask again instead.
  *
- * Every change re-reads the file inside an advisory lock, so a second process
+ * Every change re-reads the file inside a process lock, so a second process
  * (another window on the same config directory) neither brings back a rule
  * this one deleted nor drops one it added. Readers notice a file another
  * process replaced the next time they ask for rules, so a rule revoked in one
@@ -31,11 +31,11 @@ import { resolve } from 'node:path';
 import type { PolicyRule } from '../runtime/permissions/types.js';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
-import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
+import { withProcessLock } from '../utils/process-lock.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
-import type { RememberTier } from './approval-rules.js';
+import { ruleCovers, type RememberTier } from './approval-rules.js';
 
 /** A stored rule plus its provenance. */
 export interface StoredUserPermissionRule {
@@ -234,6 +234,16 @@ export class UserPermissionRuleStore {
   /** Monotonic committed-publication identity, including same-value replacements. */
   getPublicationRevision(): number { return this.publicationRevision; }
 
+  /**
+   * The publication revision after taking in another process's write (one
+   * stat). Rules remembered from an answer do not move it, so the answer never
+   * invalidates the call it admitted; a deletion or a foreign change does.
+   */
+  committedRevision(): number {
+    this.refreshFromDisk();
+    return this.publicationRevision;
+  }
+
   /** Every rule change as a revision source. Reading it takes in another process's write first (one stat). */
   get revisionSource(): RevisionSource { return this.#revisionSource; }
 
@@ -280,9 +290,16 @@ export class UserPermissionRuleStore {
   async remember(record: StoredUserPermissionRule): Promise<void> {
     await this.awaitReady();
     await this.mutate((disk) => {
-      const next = [...disk.filter((existing) => existing.rule.id !== record.rule.id), record];
+      // A rule already stored for every project, or for this one, that decides
+      // everything the answer does: nothing new to keep.
+      if (disk.some((other) => other.rule.id !== record.rule.id && (other.project === undefined || other.project === record.project)
+        && ruleCovers(other.rule, record.rule))) return null;
+      // Rules of this project the answer now covers go: the list stays one rule per decision the owner made.
+      const covered = new Set(disk.filter((other) => other.rule.id !== record.rule.id && other.project === record.project
+        && ruleCovers(record.rule, other.rule)).map((other) => other.rule.id));
+      const next = [...disk.filter((existing) => existing.rule.id !== record.rule.id && !covered.has(existing.rule.id)), record];
       // adoptDisk keeps the written record, as a remembered rule.
-      return { next, publish: () => undefined };
+      return { next, covered, publish: () => undefined };
     });
   }
 
@@ -319,26 +336,30 @@ export class UserPermissionRuleStore {
    * change starts from the last commit even after a failure, and a failed
    * write never installs an uncommitted grant or removes a denial.
    */
-  private mutate(change: (disk: StoredUserPermissionRule[]) => { next: StoredUserPermissionRule[]; publish: (revisionMoved: boolean) => void } | null): Promise<void> {
+  private mutate(change: (disk: StoredUserPermissionRule[]) => {
+    next: StoredUserPermissionRule[];
+    /** Rules dropped because the new one decides the same calls the same way; their removal grants or revokes nothing. */
+    covered?: ReadonlySet<string>;
+    publish: (revisionMoved: boolean) => void;
+  } | null): Promise<void> {
     return this.writes.run(async () => {
-      const lockPath = this.store.lockPath;
-      const release = lockPath ? await acquireCrossProcessLock(lockPath, { totalTimeoutMs: 10_000 }) : undefined;
-      try {
+      const update = async () => {
         const disk = recordsOf(await this.store.load());
         const planned = change(disk);
         if (!planned) return;
         await this.store.persist(fileOf(planned.next));
         this.diskSignature = this.signatureOfFile();
-        const bumped = this.adoptDisk(planned.next);
+        const bumped = this.adoptDisk(planned.next, planned.covered);
         planned.publish(bumped);
-      } finally {
-        release?.();
-      }
+      };
+      // ':memory:' has no file another process could write.
+      if (this.store.lockPath === null) await update();
+      else await withProcessLock(`${this.filePath}.writer.sqlite`, update);
     });
   }
 
   /** Bring live readers in line with a file this process just wrote. */
-  private adoptDisk(written: readonly StoredUserPermissionRule[]): boolean {
+  private adoptDisk(written: readonly StoredUserPermissionRule[], covered?: ReadonlySet<string>): boolean {
     const ids = new Set(written.map((record) => record.rule.id));
     const committed = this.records.filter((record) => ids.has(record.rule.id));
     const known = new Set([...committed, ...this.remembered].map((record) => record.rule.id));
@@ -346,7 +367,7 @@ export class UserPermissionRuleStore {
       ...this.remembered.filter((record) => ids.has(record.rule.id)),
       ...written.filter((record) => !known.has(record.rule.id)),
     ];
-    const dropped = committed.length !== this.records.length;
+    const dropped = this.records.some((record) => !ids.has(record.rule.id) && !covered?.has(record.rule.id));
     if (dropped) this.publicationRevision++;
     // Every call follows a write, this process's or another's.
     this.#changeRevision++;

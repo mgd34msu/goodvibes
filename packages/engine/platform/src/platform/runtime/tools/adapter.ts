@@ -52,9 +52,9 @@ export interface PhasedTool extends Tool {
 }
 
 /**
- * Wraps a base Tool in a PhasedTool by merging the phased metadata.
- * Use this in `createPhasedExecTool` / `createPhasedReadTool` factories
- * to avoid duplicating the underlying tool's `definition` and `execute`.
+ * Wraps a base Tool in a PhasedTool by merging the phased metadata, for a
+ * caller of the phased executor; the registered tools are plain Tools whose
+ * category is on their definition.
  *
  * @param tool     - The existing Tool implementation to wrap.
  * @param options  - Phased execution metadata to attach.

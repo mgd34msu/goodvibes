@@ -41,9 +41,15 @@ export type TriageEvidence = TriageBinding & {
   readonly tags: readonly string[];
   readonly signals: Readonly<{ spam: number; urgency: number }>;
 };
+/**
+ * An attempt that settled nothing: `held` (the reading was unsure),
+ * `unavailable` (no decision model answered) or `withheld` (the item holds a
+ * credential or card number, so it was not sent to a model; `reason` says so).
+ */
 export type TriageFailureReceipt = TriageAttribution & {
   readonly receiptVersion: 3;
-  readonly status: 'held' | 'unavailable';
+  readonly status: 'held' | 'unavailable' | 'withheld';
+  readonly reason?: 'protected-content' | undefined;
 };
 export type TriageReceipt = TriageEvidence | TriageFailureReceipt;
 /** A reading that is shown and never stored, so it has no receipt generation. */

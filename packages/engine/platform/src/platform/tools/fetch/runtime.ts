@@ -937,6 +937,8 @@ export function createFetchTool(
         + ' redirect tracking, timing metrics, token estimation, and verbosity control.',
       parameters: toRecord(FETCH_TOOL_SCHEMA),
       sideEffects: ['network'],
+      // Where a call's hosts sit: the gate and network-scope policy rules read them from here.
+      subjects: { hosts: ['urls[].url'] },
       concurrency: 'parallel',
       supportsProgress: true,
       supportsStreamingOutput: true,

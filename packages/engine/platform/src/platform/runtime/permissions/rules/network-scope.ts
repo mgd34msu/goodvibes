@@ -78,13 +78,17 @@ function parseHostTarget(raw: string): { host: string; port: number | null } | n
 /**
  * extractHostTargets, Extracts every hostname (and port) the call names.
  *
- * Checks `url`, `endpoint`, `uri`, `href`, `host` and `hostname`; every one that
- * is present is returned so a rule cannot be sidestepped by naming a second field.
+ * Checks `url`, `endpoint`, `uri`, `href`, `host` and `hostname`, and the `url`
+ * of each entry of a `urls` list (the fetch tool's shape); every one that is
+ * present is returned so a rule cannot be sidestepped by naming a second field.
+ * A tool that declares where its hosts sit is read from that declaration instead.
  */
 function extractHostTargets(args: Record<string, unknown>): Array<{ host: string; port: number | null }> {
   const targets: Array<{ host: string; port: number | null }> = [];
-  for (const key of ['url', 'endpoint', 'uri', 'href']) {
-    const raw = args[key];
+  const urls = Array.isArray(args['urls'])
+    ? args['urls'].map((entry) => (entry && typeof entry === 'object' ? (entry as Record<string, unknown>)['url'] : entry))
+    : [];
+  for (const raw of [...['url', 'endpoint', 'uri', 'href'].map((key) => args[key]), ...urls]) {
     if (typeof raw !== 'string') continue;
     const target = parseHostTarget(raw);
     if (target !== null) targets.push(target);
@@ -112,6 +116,8 @@ export function evaluateNetworkScopeRule(
   rule: NetworkScopeRule,
   toolName: string,
   args: Record<string, unknown>,
+  /** The URLs or hosts the tool declares this call reaches; read in place of probing argument names. */
+  declaredHosts?: readonly string[],
 ): NetworkScopeRuleResult {
   const toolMatches = toolMatchesNetworkPattern(toolName, rule.toolPattern);
 
@@ -127,15 +133,24 @@ export function evaluateNetworkScopeRule(
     };
   }
 
-  const targets = extractHostTargets(args);
+  const targets = declaredHosts
+    ? declaredHosts.map(parseHostTarget).filter((target): target is { host: string; port: number | null } => target !== null)
+    : extractHostTargets(args);
   if (targets.length === 0) {
+    // A deny that names this tool, or a tool that declares where its hosts sit,
+    // cannot be checked when no host can be read: the call is refused rather
+    // than decided as if the rule did not exist.
+    const unreadable = rule.effect === 'deny' && (declaredHosts !== undefined
+      || (Array.isArray(rule.toolPattern) ? rule.toolPattern.includes(toolName) : rule.toolPattern === toolName));
     return {
-      matched: false,
+      matched: unreadable,
       step: {
         layer: 'policy',
         check: `network-scope-rule:${rule.id}`,
-        matched: false,
-        detail: 'no network host/URL argument found in args',
+        matched: unreadable,
+        detail: unreadable
+          ? 'no host could be read from this call, so the deny rule cannot be checked; the call is refused'
+          : 'no network host/URL argument found in args',
       },
     };
   }

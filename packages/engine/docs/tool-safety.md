@@ -179,16 +179,21 @@ When the platform drops a malformed tool call due to a parse error, a log entry 
 
 ## Tool contract verification
 
-Tool contract verification is implemented at registration time. Built-in tool
-registration goes through `registerToolWithContractGate`, and the
-`tools.contractVerification` setting is enabled by default when no host
-feature manager is supplied.
+Every tool is checked where it enters: `ToolRegistry.register` refuses a
+definition with a malformed parameter schema, a missing name or description,
+or a `category` that is not one of `read`, `write`, `execute`, `delegate`. The
+refusal names each problem.
 
-The verifier checks the registered tool definition and phased-tool metadata
-before the tool enters the registry: schema shape, timeout/cancellation support,
-permission class, output policy, and idempotency metadata. Error-level
-violations fail closed by throwing from `ToolRegistry.registerWithContract`;
-warning-level violations are returned for diagnostics.
+A tool's permission category is one field on its definition (`category`); an
+engine tool's comes from one table (`ENGINE_TOOL_CATEGORIES`), and a tool that
+declares none is classed `delegate`. The gate, `/tool verify` and the policy
+evaluators read that one value.
+
+`/tool verify-all` runs the code checks over every registered tool and asks no
+decision model. `/tool verify <name>` also asks whether that one tool's
+description explains what it does and when to use it (one reading per distinct
+description, remembered). The timeout, output-policy and idempotency checks
+apply only to tools built for the phased executor (`PhasedTool`).
 
 Handler-level argument validation is still required for untrusted runtime input.
 Contract verification prevents malformed tools from being registered; it does
@@ -212,6 +217,14 @@ in a call must be covered, so a mixed batch never rides in on a partial
 grant. Deny rules fire on any covered element, and a matching deny rule wins
 over any matching allow rule, so a later "deny always" holds even under an
 older, broader grant.
+
+The list stays one rule per decision. Remembering an answer drops the rules of
+this project it now covers with the same effect (exact commands inside a newly
+remembered command class, edits under a directory inside a newly remembered
+one, anything under a whole-tool rule), and writes nothing when a stored rule
+already covers it. After three exact-command answers for one command class in
+a project, the next prompt offers that class first. An answer to an owner-only
+item is never merged into a rule that was not one.
 
 The answer is remembered from the next call on; the call it answered runs
 as approved. A durable rule is written to disk at once, so it survives a

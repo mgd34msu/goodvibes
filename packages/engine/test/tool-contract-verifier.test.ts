@@ -3,9 +3,9 @@
  *
  * The tool contract verifier: every check is code except whether a tool's
  * description explains what the tool does and when to use it, which
- * `engine.tools.description-quality` reads once per distinct description.
- * Registration gates on the code checks alone; the full verification adds the
- * reading as a warning.
+ * `engine.tools.description-quality` reads once per distinct description, for
+ * one tool verified by name. Registration refuses a malformed definition;
+ * verifying every tool asks no model.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Question } from '@goodvibes-jev/judgment';
@@ -51,12 +51,12 @@ describe('the code checks', () => {
     expect(verifier.verifyStructure(tool('read', GOOD, { type: 'tuple' })).passed).toBe(false);
   });
 
-  test('registration gates on them without asking', () => {
+  test('registration refuses a malformed definition without asking', () => {
     const registry = new ToolRegistry();
-    const result = registry.registerWithContract(tool('read', VAGUE), { strictIdempotency: false });
-    expect(result.passed).toBe(true);
+    registry.register(tool('read', VAGUE));
     expect(registry.has('read')).toBe(true);
-    expect(() => registry.registerWithContract(tool('broken', GOOD, null))).toThrow(/failed contract verification/);
+    expect(() => registry.register(tool('broken', GOOD, null))).toThrow(/cannot be registered/);
+    expect(registry.has('broken')).toBe(false);
   });
 });
 
@@ -75,7 +75,7 @@ describe('the description reading', () => {
     }]);
   });
 
-  test('each distinct description is read once, across tools and verifications', async () => {
+  test('verifying every tool asks nothing; one tool by name is read once', async () => {
     const { port, requests } = descriptionPort();
     installJudgmentPort(port);
     const registry = new ToolRegistry();
@@ -84,9 +84,10 @@ describe('the description reading', () => {
     registry.register(tool('helper', VAGUE));
     const results = await registry.verifyAllContracts({ strictIdempotency: false });
     expect([...results.keys()]).toEqual(['read', 'read_again', 'helper']);
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(0);
     await registry.verifyContract('helper', { strictIdempotency: false });
-    expect(requests).toHaveLength(2);
+    await registry.verifyContract('helper', { strictIdempotency: false });
+    expect(requests).toHaveLength(1);
     expect(await registry.verifyContract('absent')).toBeUndefined();
   });
 

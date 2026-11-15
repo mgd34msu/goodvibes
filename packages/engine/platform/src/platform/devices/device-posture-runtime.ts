@@ -4,8 +4,9 @@
  *
  * What lives here is everything about the feature that is NOT specific to a
  * surface: which peers count as device nodes, how one capability request becomes
- * a work item on that peer's queue, how the confirmation is put to the person
- * through the shared approval path, and how the configuration in
+ * a work item on that peer's queue, how the owner is asked (when no grant
+ * covers a request and `permissions.mode` is not yolo) through the shared
+ * approval path, and how the configuration in
  * device-posture-config.ts reaches the stores and the capability service.
  *
  * It was written once in the agent and nowhere else, which is exactly why the
@@ -24,7 +25,6 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
-import type { DeviceAutonomousOwner, DeviceAdmission } from './device-autonomous.js';
 import {
   DEVICE_CAPABILITY_CONTRACT_VERSION,
   resolveDeviceNodeProfile,
@@ -33,10 +33,12 @@ import {
 } from './device-capability-contract.js';
 import {
   DeviceCapabilityService,
+  type DeviceAdmission,
   type DeviceCapabilityDispatcher,
   type DeviceCapabilityPolicy,
   type DeviceConfirmationHandler,
   type DeviceDispatchResult,
+  type DeviceNoGrantAuthority,
 } from './device-capability-service.js';
 import { DeviceGrantStore } from './device-grants.js';
 import { DeviceCaptureArtifactStore } from './device-capture-artifacts.js';
@@ -53,6 +55,7 @@ import {
   readDeviceGrantPolicy,
   readDeviceRequestTimeoutMs,
   readDeviceSweepIntervalMs,
+  type DevicePostureConfigKey,
   type DevicePostureConfigReader,
 } from './device-posture-config.js';
 import type { PermissionPromptDecision, PermissionPromptRequest } from '../permissions/prompt.js';
@@ -87,8 +90,6 @@ export interface DeviceWorkView {
  */
 export interface DevicePeerTransport {
   listPeers(kind?: string): readonly DevicePeerView[];
-  peerRevision?(nodeId: string): number;
-  peerMutationPending?(nodeId: string): boolean;
   invokePeer(input: {
     readonly peerId: string;
     readonly admission?: DeviceAdmission | undefined;
@@ -117,12 +118,33 @@ export interface DeviceApprovalBridge {
   }): Promise<PermissionPromptDecision>;
 }
 
+/**
+ * The settings whose change can refuse a request still waiting for its phone.
+ * A change to any other key, device or not, leaves requests in flight alone.
+ */
+const REQUEST_ENDING_KEYS = [
+  'device.capabilities.mode',
+  'device.location.precision',
+  'device.clipboard.readMode',
+] as const satisfies readonly DevicePostureConfigKey[];
+
+/** A configuration reader; a real ConfigManager also reports changes. */
+export interface DevicePostureConfigSource extends DevicePostureConfigReader {
+  subscribe?(key: DevicePostureConfigKey, listener: () => void): () => void;
+}
+
 export interface DevicePostureRuntimeOptions {
   readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
   readonly transport: DevicePeerTransport;
-  readonly autonomous?: DeviceAutonomousOwner | undefined;
   readonly approvals: DeviceApprovalBridge;
-  readonly config: DevicePostureConfigReader;
+  readonly config: DevicePostureConfigSource;
+  /**
+   * Who answers a request no live grant covers, from `permissions.mode`:
+   * 'allow' under yolo, otherwise the owner is asked. Absent: the owner is asked.
+   */
+  readonly noGrantAuthority?: (() => DeviceNoGrantAuthority) | undefined;
+  /** The host's lifetime; aborting it withdraws requests no phone has picked up. */
+  readonly signal?: AbortSignal | undefined;
   readonly observeRecovery?: DeviceHousekeepingOptions['observeRecovery'];
   /** Directory the grants ledger, captures, and disclosure log live under. */
   readonly stateDirectory: string;
@@ -355,12 +377,15 @@ export function createDevicePostureRuntime(options: DevicePostureRuntimeOptions)
     artifacts,
     dispatcher: createDispatcher(transport, actor),
     confirm: createConfirmationHandler(options),
-    ...(options.autonomous ? { autonomous: { ...options.autonomous,
-      peerRevision: transport.peerRevision?.bind(transport),
-      peerMutationPending: transport.peerMutationPending?.bind(transport),
-    } } : {}),
     listNodes,
     policy: () => readDeviceCapabilityPolicy(config),
+    ...(options.noGrantAuthority ? { noGrantAuthority: options.noGrantAuthority } : {}),
+    ...(config.subscribe ? { onPolicyChange: (listener: () => void) => {
+      const subscribe = config.subscribe!.bind(config);
+      const stops = REQUEST_ENDING_KEYS.map((key) => subscribe(key, listener));
+      return () => { for (const stop of stops) stop(); };
+    } } : {}),
+    ...(options.signal ? { signal: options.signal } : {}),
   });
 
   return {

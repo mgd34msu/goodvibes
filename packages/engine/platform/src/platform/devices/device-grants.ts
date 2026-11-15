@@ -6,12 +6,13 @@
  * clipboard, as a durable per-capability, per-node grant, visible and
  * revocable in the grants surface." This store is that durable record.
  *
- * A grant is a positive authority and nothing else: if no live, unexpired,
- * unrevoked grant is found, the capability is confirmed with the person. There
- * is no cached "yes" anywhere else in the system, so revocation takes effect on
- * the very next request, the store is re-read from disk on every lookup rather
- * than served from a process-local cache that a second process could not
- * invalidate.
+ * A live grant is the whole authority for a request: it runs with no question
+ * and no model call. If no live, unexpired, unrevoked grant is found, the
+ * capability service lets `permissions.mode` decide (the owner is asked, except
+ * under yolo). There is no cached "yes" anywhere else in the system, so
+ * revocation takes effect on the very next request: the store is re-read from
+ * disk on every lookup rather than served from a process-local cache that a
+ * second process could not invalidate.
  *
  * Persisted state, so the housekeeping rule applies in full:
  *  1. Reap on recovery, grants for a node that no longer exists, and
@@ -29,10 +30,8 @@
  * re-reads the file, recomputes removals from scratch, and writes atomically.
  */
 import { randomUUID } from 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
 import { PersistentStore } from '../state/persistent-store.js';
-import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
-import { logger } from '../utils/logger.js';
+import { withProcessLock } from '../utils/process-lock.js';
 import { isDeviceCapabilityId, type DeviceCapabilityId, type DeviceNodeKind } from './device-capability-contract.js';
 import { resolveDevicePolicySource, type DevicePolicySource } from './device-policy-source.js';
 
@@ -221,53 +220,18 @@ export class DeviceGrantStore {
   private readonly now: () => number;
   private readonly ownership: DeviceGrantOwnership;
   private writeChain: Promise<void> = Promise.resolve();
-  private revocationGeneration = 0;
-  private pendingRevocations = 0;
-  private memoryGeneration = 0;
-  private readonly publicationReceipts = new WeakMap<object, string>();
-  #observationSequence = 0;
-  #fileObservation: { readonly stamp: string | null; readonly bytes: Buffer | null; readonly revision: string } | undefined;
-
-  getRevocationGeneration(): number { return this.revocationGeneration; }
-  hasPendingRevocations(): boolean { return this.pendingRevocations > 0; }
-  /** Observed file incarnation plus contents, not a universal cross-process lock. */
-  getObservationRevision(): string {
-    const lock = this.store.lockPath;
-    if (!lock) { this.#fileObservation = undefined; return `memory:${this.memoryGeneration}`; }
-    const path = lock.slice(0, -5);
-    let observed: { readonly stamp: string | null; readonly bytes: Buffer | null };
-    try {
-      const stat = statSync(path, { bigint: true });
-      if (!stat.isFile()) throw new Error('Device ledger is not a file');
-      const stamp = (entry: typeof stat) => `${entry.dev}:${entry.ino}:${entry.mode}:${entry.size}:${entry.ctimeNs}:${entry.mtimeNs}`;
-      const bytes = readFileSync(path), after = statSync(path, { bigint: true });
-      if (stamp(stat) !== stamp(after)) throw new Error('Device ledger changed while reading');
-      observed = { stamp: stamp(after), bytes };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { this.#fileObservation = undefined; throw error; }
-      observed = { stamp: null, bytes: null };
-    }
-    const previous = this.#fileObservation;
-    if (previous && previous.stamp === observed.stamp && (observed.bytes === null
-      ? previous.bytes === null : previous.bytes?.equals(observed.bytes))) return previous.revision;
-    const revision = `observed-file:${(++this.#observationSequence).toString(36)}`;
-    this.#fileObservation = { ...observed, revision };
-    return revision;
-  }
+  /** Kernel-released writer lock beside the ledger; null for an in-memory store. */
+  private readonly writerLockPath: string | null;
 
   constructor(storeOrPath: PersistentStore<DeviceGrantSnapshot> | string, options: DeviceGrantStoreOptions = {}) {
     this.store = typeof storeOrPath === 'string'
       ? new PersistentStore<DeviceGrantSnapshot>(storeOrPath)
       : storeOrPath;
+    const lock = this.store.lockPath;
+    this.writerLockPath = lock ? `${lock.slice(0, -'.lock'.length)}.writer.sqlite` : null;
     this.resolvePolicy = resolveDevicePolicySource(options.policy, DEFAULT_DEVICE_GRANT_POLICY);
     this.now = options.now ?? (() => Date.now());
     this.ownership = options.ownership ?? {};
-  }
-
-  /** The exact receipt minted at this store's publication boundary, before fsync awaits. */
-  assertObservedGrant(expected: DeviceCapabilityGrant): void {
-    const receipt = this.publicationReceipts.get(expected);
-    if (!receipt || receipt !== this.getObservationRevision()) throw new Error('Admitted device grant publication changed');
   }
 
   /**
@@ -297,39 +261,24 @@ export class DeviceGrantStore {
   }
 
   /**
-   * Serialise writes within this process, and across processes by holding the
-   * store's advisory lock around the whole read-modify-write: a revocation made
-   * by another process between this write's read and its publish would
-   * otherwise be overwritten by a stale snapshot and the revoked grant would
-   * come back.
+   * Serialise writes within this process, and across processes (a daemon and
+   * the one taking over from it) by holding the writer lock around the whole
+   * read-modify-write: a revocation made by another process between this
+   * write's read and its publish would otherwise be overwritten by a stale
+   * snapshot and the revoked grant would come back. The lock is released by
+   * the kernel when its holder exits, so a killed process leaves nothing stale.
    */
   private async mutate<T>(
     fn: (snapshot: DeviceGrantSnapshot, malformed: number) => Promise<{ next: DeviceGrantSnapshot; result: T }>,
-    beforePublish?: () => void,
   ): Promise<T> {
-    const run = this.writeChain.then(async () => {
-      const lock = this.store.lockPath;
-      const release = lock ? await acquireCrossProcessLock(lock, { totalTimeoutMs: GRANT_LOCK_TIMEOUT_MS }) : null;
-      try {
-        const { snapshot, malformed } = await this.readWithDrops();
-        const { next, result } = await fn(snapshot, malformed);
-        await this.store.persist(next, { beforePublish, afterPublish: () => {
-          this.memoryGeneration++;
-          if (result && typeof result === 'object') {
-            const path = this.store.lockPath?.slice(0, -5);
-            if (path && JSON.stringify(JSON.parse(readFileSync(path, 'utf8'))) !== JSON.stringify(next)) {
-              // The write is already durable, so this is not a failed write. No
-              // receipt is minted, which keeps an autonomous admission of this
-              // exact record failing closed.
-              logger.warn('Device grant ledger differs from what was just published; the write stands', { path });
-              return;
-            }
-            this.publicationReceipts.set(result, this.getObservationRevision());
-          }
-        } });
-        return result;
-      } finally { release?.(); }
-    });
+    const cycle = async (): Promise<T> => {
+      const { snapshot, malformed } = await this.readWithDrops();
+      const { next, result } = await fn(snapshot, malformed);
+      await this.store.persist(next);
+      return result;
+    };
+    const lock = this.writerLockPath;
+    const run = this.writeChain.then(() => (lock ? withProcessLock(lock, cycle, { waitMs: GRANT_LOCK_TIMEOUT_MS }) : cycle()));
     this.writeChain = run.then(() => undefined, () => undefined);
     return run;
   }
@@ -386,7 +335,6 @@ export class DeviceGrantStore {
     readonly sessionId?: string | undefined;
     readonly grantedBy: string;
     readonly ttlMs?: number | undefined;
-    readonly beforePersist?: (() => void) | undefined;
   }): Promise<DeviceCapabilityGrant> {
     const now = this.now();
     const ttl = input.ttlMs && input.ttlMs > 0 ? input.ttlMs : this.getPolicy().grantTtlMs;
@@ -423,11 +371,11 @@ export class DeviceGrantStore {
         next: { version: 1, grants: [...kept, grant], audit: [...snapshot.audit, audit] },
         result: grant,
       };
-    }, input.beforePersist);
+    });
   }
 
   /** Note a use of a grant (drives "last used" in the grants surface). */
-  async markUsed(grantId: string, beforePersist?: () => void): Promise<void> {
+  async markUsed(grantId: string): Promise<void> {
     const now = this.now();
     await this.mutate(async (snapshot) => {
       const existing = snapshot.grants.find((grant) => grant.id === grantId);
@@ -444,7 +392,7 @@ export class DeviceGrantStore {
         actor: used.grantedBy,
       };
       return { next: { version: 1, grants, audit: [...snapshot.audit, audit] }, result: undefined };
-    }, beforePersist);
+    });
   }
 
   /**
@@ -459,11 +407,8 @@ export class DeviceGrantStore {
     readonly actor: string;
     readonly note?: string | undefined;
   }): Promise<readonly DeviceGrantRemoval[]> {
-    this.revocationGeneration++;
-    this.pendingRevocations++;
-    try {
     const now = this.now();
-    return await this.mutate(async (snapshot) => {
+    return this.mutate(async (snapshot) => {
       const removals: DeviceGrantRemoval[] = [];
       const kept: DeviceCapabilityGrant[] = [];
       for (const grant of snapshot.grants) {
@@ -501,7 +446,6 @@ export class DeviceGrantStore {
       ];
       return { next: { version: 1, grants: kept, audit }, result: removals };
     });
-    } finally { this.pendingRevocations--; }
   }
 
   /**
@@ -510,14 +454,11 @@ export class DeviceGrantStore {
    * result atomically, so running it twice removes nothing extra.
    */
   async sweep(): Promise<DeviceGrantSweepReport> {
-    this.revocationGeneration++;
-    this.pendingRevocations++;
-    try {
     const now = this.now();
     // Read once for the whole pass, so the caps and cutoffs one sweep applies
     // are internally consistent even if the configuration changes mid-sweep.
     const policy = this.getPolicy();
-    return await this.mutate(async (snapshot, malformedCount) => {
+    return this.mutate(async (snapshot, malformedCount) => {
       const removals: DeviceGrantRemoval[] = [];
       if (malformedCount > 0) {
         removals.push({
@@ -611,6 +552,5 @@ export class DeviceGrantStore {
         } satisfies DeviceGrantSweepReport,
       };
     });
-    } finally { this.pendingRevocations--; }
   }
 }

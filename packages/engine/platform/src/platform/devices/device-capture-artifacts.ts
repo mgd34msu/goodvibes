@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import { PersistentStore } from '../state/persistent-store.js';
 import { ArtifactStorageOwner, type ArtifactCreatedLeaf } from '../artifacts/storage-ownership.js';
 import { fileObservationIdentity, readFileObservation, type FileObservation } from '../utils/file-observation.js';
-import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
+import { acquireProcessLock } from '../utils/process-lock.js';
 import { isDeviceCapabilityId, type DeviceArtifactKind, type DeviceCapabilityId } from './device-capability-contract.js';
 import { resolveDevicePolicySource, type DevicePolicySource } from './device-policy-source.js';
 
@@ -36,21 +36,13 @@ export interface DeviceArtifactSweepReport { readonly sweptAt: number; readonly 
 export interface DeviceArtifactPolicy { readonly retentionMs: number; readonly maxArtifacts: number }
 export const DEFAULT_DEVICE_ARTIFACT_POLICY: DeviceArtifactPolicy = { retentionMs: 24 * 60 * 60 * 1000, maxArtifacts: 200 };
 /**
- * The index lock keeps its single-attempt, descriptor-proven form, but a second
- * writer (the next daemon of a handover, or a plain read that rewrites the
- * index) waits out a short holder instead of failing a request whose device
- * already acted. A holder still present after the wait is reported as busy.
+ * How long a writer waits for another holder of the index lock (the next daemon
+ * of a handover, or a read that rewrites the index) before refusing. The wait
+ * exists for a capture whose device already acted: failing at once would lose
+ * the photo. The lock is released by the kernel when its holder exits, so the
+ * wait is never spent on a dead process.
  */
-const INDEX_LOCK_ATTEMPTS = 40;
-const INDEX_LOCK_RETRY_MS = 50;
-async function acquireIndexLock(lock: string, assertCurrent: () => void): Promise<() => void> {
-  for (let attempt = 0; attempt < INDEX_LOCK_ATTEMPTS; attempt++) {
-    const release = tryAcquireCrossProcessLock(lock, { assertCurrent });
-    if (release) return release;
-    await new Promise<void>((resolve) => { setTimeout(resolve, INDEX_LOCK_RETRY_MS); });
-  }
-  throw new Error('Another device capture writer is active');
-}
+const INDEX_LOCK_WAIT_MS = 2_000;
 interface SavedArtifact extends DeviceCaptureArtifact { readonly sourceObservation?: string }
 interface PendingCapture { readonly id: string; readonly fileName: string; readonly sourceIdentity: string; readonly capturedAt: number }
 const pendingIdentity = (entry: BigIntStats): string => {
@@ -163,15 +155,17 @@ export class DeviceCaptureArtifactStore {
   }
   private mutate<T>(fn: (rows: SavedArtifact[], malformed: number, mutation: Mutation) => Promise<{ next: SavedArtifact[]; result: T }>, beforePublish?: () => void): Promise<T> {
     const run = this.writeChain.then(async () => {
-      const owner = this.storage(), lock = this.index.lockPath; if (!lock) throw new Error('Device capture index requires native storage');
-      const release = await acquireIndexLock(lock, () => owner.assertCurrent());
+      const owner = this.storage(); if (!this.index.lockPath) throw new Error('Device capture index requires native storage');
+      // Beside the directory, not in it: the capture namespace holds captures
+      // and the index only, and a replaced directory keeps the same lock.
+      const held = await acquireProcessLock(`${this.directory}.writer.sqlite`, { waitMs: INDEX_LOCK_WAIT_MS });
       const retained: (() => void)[] = [], created: ArtifactCreatedLeaf[] = [], removals: { path: string; assertion: () => void; removed?: (() => void) | undefined }[] = [];
       let finalPublished = false;
       try {
-        const lease = fileObservationIdentity(lock), saved = this.readIndex(); let expected = saved.image;
+        owner.assertCurrent(); const saved = this.readIndex(); let expected = saved.image;
         let beforeRows = JSON.stringify(saved.rows), beforePreserved = JSON.stringify([...saved.preserved].sort()), beforePending = JSON.stringify([...saved.pending.values()]);
         const physicalCurrent = () => {
-          owner.assertCurrent(); if (fileObservationIdentity(lock) !== lease) throw new Error('Device capture writer lease changed');
+          owner.assertCurrent();
           if (expected ? fileObservationIdentity(join(this.directory, 'capture-index.json')) !== expected.physical
             : lstatSync(join(this.directory, 'capture-index.json'), { throwIfNoEntry: false }) !== undefined) throw new Error('Device capture index changed');
         };
@@ -221,7 +215,7 @@ export class DeviceCaptureArtifactStore {
         // original inode; a foreign replacement never becomes an owned orphan.
         if (!finalPublished) for (const leaf of created) leaf.cleanup();
         throw error;
-      } finally { release(); }
+      } finally { held.release(); }
     });
     this.writeChain = run.then(() => undefined, () => undefined); return run;
   }

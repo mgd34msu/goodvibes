@@ -36,13 +36,13 @@
  * DeviceCaptureArtifactStore / DeviceHousekeeper underneath. Two seams are
  * stubbed, both of them the ones the composition takes from outside: the peer
  * transport (records what the phone was asked to do, answers contract-shaped)
- * and a recorded synthetic Jev transport (selects exact offered outcomes).
- * The human approval bridge is a throwing sentinel and cannot decide actions.
+ * and the approval bridge (records each question put to the owner and answers
+ * it as the test chose).
  * No camera, clipboard or location source is involved, and the clock is driven
  * with `setSystemTime` rather than by waiting.
  */
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONFIG_SCHEMA, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
@@ -61,12 +61,9 @@ import type {
   DevicePostureRuntime,
   DeviceWorkView,
 } from '@goodvibes-jev/engine/platform/platform/devices';
-import type { PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { createDevicePostureServices } from '../../runtime/device-posture-composition.ts';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.ts';
 import { makeOwnedTempDir as makeProjectTempDir } from '../helpers/owned-temp.js';
-import { useDeviceJudgmentRuntime, deviceJudgmentFixture, type DeviceReading } from '../helpers/device-judgment-fixture.js';
-useDeviceJudgmentRuntime();
 import { useGatewayFixture } from '../helpers/gateway-fixture.js';
 
 
@@ -209,11 +206,17 @@ interface DispatchCall {
 
 type Answer = 'once' | 'always' | 'deny';
 
+/** One question put to the owner, as the approval path received it. */
+interface OwnerAsk {
+  readonly request: { readonly nodeId: unknown; readonly capabilityId: unknown; readonly reason: unknown; readonly allowAlwaysOffered: unknown };
+  readonly policy: { readonly requestTimeoutMs: number | undefined };
+}
+
 interface Harness {
   readonly service: DevicePostureRuntime;
   readonly gateway: GatewayMethodCatalog;
-  readonly grantEvaluations: DeviceReading[];
-  readonly judgments: ReturnType<typeof deviceJudgmentFixture>;
+  /** The owner's questions: requests no live grant covered. */
+  readonly grantEvaluations: OwnerAsk[];
   readonly dispatches: DispatchCall[];
   answer(decision: Answer): void;
   returnCapture(enabled: boolean): void;
@@ -227,18 +230,17 @@ function payloadTimeout(payload: unknown): number | undefined {
 }
 
 function harness(configManager: ConfigManager, stateDirectory: string): Harness {
-  const judgments = deviceJudgmentFixture();
   const dispatches: DispatchCall[] = [];
+  const asks: OwnerAsk[] = [];
+  let answer: Answer = 'always';
   const peers = [devicePeer()];
   const gateway = new GatewayMethodCatalog();
-  judgments.answer('always');
   let capture = false;
 
   const { devicePosture } = createDevicePostureServices({
     configManager,
     stateDirectory,
     gatewayMethods: gateway,
-    judgmentPort: judgments.port,
     distributedRuntime: {
       listPeers: (kind) => peers.filter((peer) => kind === undefined || peer.kind === kind),
       invokePeer: async (input): Promise<{ work: DeviceWorkView; completed: boolean }> => {
@@ -266,32 +268,39 @@ function harness(configManager: ConfigManager, stateDirectory: string): Harness 
         };
       },
     },
-    approvals: { requestApproval: async () => { throw new Error('Human device approval must not run'); } },
+    approvals: { requestApproval: async (input) => {
+      const metadata = input.metadata ?? {};
+      asks.push({
+        request: { nodeId: metadata.deviceNodeId, capabilityId: metadata.deviceCapability,
+          reason: (input.request.args as Record<string, unknown>).reason, allowAlwaysOffered: metadata.allowAlwaysOffered },
+        policy: { requestTimeoutMs: input.timeoutMs },
+      });
+      if (answer === 'deny') return { approved: false };
+      return answer === 'always' ? { approved: true, rememberTier: 'tool' } : { approved: true };
+    } },
   });
 
   return {
     service: devicePosture,
     gateway,
-    get grantEvaluations() { return judgments.grantEvaluations; },
-    judgments,
+    grantEvaluations: asks,
     dispatches,
-    answer(decision: Answer): void { judgments.answer(decision); },
+    answer(decision: Answer): void { answer = decision; },
     returnCapture(enabled: boolean): void { capture = enabled; },
     run(capabilityId: DeviceCapabilityId, reason = 'behaviour test'): Promise<DeviceCapabilityOutcome> {
       const required = REQUIRED_INPUT[capabilityId];
-      return judgments.run(() => devicePosture.capabilities.request({
+      return devicePosture.capabilities.request({
         nodeId: 'phone-1',
         capabilityId,
         reason,
         ...(required ? { input: required } : {}),
-      }));
+      });
     },
   };
 }
 
 /** Readable one-liner for an outcome, so a failure says what actually happened. */
 function label(outcome: DeviceCapabilityOutcome): string {
-  if (!outcome.ok && outcome.refusal === 'denied-by-jev') return `refused:${outcome.refusal}: ${outcome.detail}`;
   return outcome.ok ? `ok:${outcome.authority}` : `refused:${outcome.refusal}`;
 }
 
@@ -394,36 +403,6 @@ describe('device.* posture: behaviour in this daemon', () => {
     expect(ask.grantEvaluations).toHaveLength(2);
   });
 
-  test.each(['01a10407-1f79-7006-8320-47790069cb8a', '4111111111111111'])(
-    'device grant identity preserves native ownership and privacy screening: %s', async id => {
-      const state = join(root, 'state-grant-identity');
-      const item = harness(freshConfig(), state);
-      await item.service.grants.record({ nodeId: 'phone-1', nodeKind: 'web-pwa', capabilityId: SCREEN,
-        scope: 'always', grantedBy: 'synthetic-owner' });
-      // Exercise an existing persisted grant, including UUIDs whose numeric
-      // components accidentally form a valid PAN when joined with hyphens.
-      const path = join(state, 'device-grants.json');
-      const ledger = JSON.parse(readFileSync(path, 'utf8')) as { grants: { id: string }[] };
-      const grant = ledger.grants[0];
-      if (!grant) throw new Error('Missing persisted device grant');
-      grant.id = id;
-      writeFileSync(path, JSON.stringify(ledger));
-      if (id.includes('-')) {
-        expect(label(await item.run(SCREEN))).toBe('ok:existing-grant');
-        expect(item.judgments.readings[0]?.grant).toMatchObject({ id: id.split('-') });
-        expect((await item.service.grants.list())[0]?.id).toBe(id);
-        expect(item.dispatches).toHaveLength(1);
-        const before = item.judgments.requests.length;
-        expect(label(await item.run(SCREEN, '4111111111111111'))).toContain('refused:denied-by-jev:');
-        expect(item.judgments.requests).toHaveLength(before);
-        expect(item.dispatches).toHaveLength(1);
-      } else {
-        expect(label(await item.run(SCREEN))).toContain('refused:denied-by-jev:');
-        expect(item.judgments.requests).toHaveLength(0);
-        expect(item.dispatches).toHaveLength(0);
-      }
-    });
-
   // -------------------------------------------------------------------------
   // device.capabilities.allowAlwaysOffer
   // -------------------------------------------------------------------------
@@ -432,7 +411,6 @@ describe('device.* posture: behaviour in this daemon', () => {
     const every = harness(freshConfig(), join(root, 'state-every'));
     every.answer('always');
     expect(label(await every.run(CAMERA_FRONT))).toBe('ok:confirmed-always');
-    expect(Object.keys(every.judgments.requests[0]!.questions.disposition!.type === 'choice' ? every.judgments.requests[0]!.questions.disposition!.criteria : {})).toContain('revise_0');
     expect(every.grantEvaluations[0]?.request.allowAlwaysOffered).toBe(true);
     expect(await every.service.grants.list()).toHaveLength(1);
     expect(label(await every.run(CAMERA_FRONT))).toBe('ok:existing-grant');
@@ -445,7 +423,6 @@ describe('device.* posture: behaviour in this daemon', () => {
     // Front camera is elevated: the prompt must not offer a durable grant, and
     // an "always" answer must not be turned into one.
     expect(label(await standard.run(CAMERA_FRONT))).toBe('ok:confirmed-once');
-    expect(Object.keys(standard.judgments.requests[0]!.questions.disposition!.type === 'choice' ? standard.judgments.requests[0]!.questions.disposition!.criteria : {})).not.toContain('revise_0');
     expect(standard.grantEvaluations[0]?.request.allowAlwaysOffered).toBe(false);
     expect(await standard.service.grants.list()).toHaveLength(0);
 
@@ -818,9 +795,9 @@ describe('device.* posture: the wiring that makes the keys reachable', () => {
     registerDevicePhoneTool(registry, h.service);
     expect(registry.has('phone')).toBe(true);
 
-    const result = await h.judgments.run(() => registry.execute('call-1', 'phone', { action: 'notify', title: 'hello', reason: 'wiring test' }));
+    const result = await registry.execute('call-1', 'phone', { action: 'notify', title: 'hello', reason: 'wiring test' });
     expect(result.success).toBe(true);
-    // The request went through the real service and recorded Jev decision.
+    // The request went through the real service, which asked the owner once.
     expect(h.dispatches.map((dispatch) => dispatch.command)).toEqual([NOTIFY]);
     expect(h.grantEvaluations).toHaveLength(1);
   });

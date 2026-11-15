@@ -144,17 +144,13 @@ await store.retain({ nodeId: 'phone', capabilityId: 'device.screen.capture', kin
   else { expect(report.removed.some(entry => entry.reason === 'orphan-file')).toBe(true); expect(report.bytesReclaimed).toBe(3); expect(existsSync(join(f.directory, leaf))).toBe(false); }
 });
 
- test('retiring the physical capture parent cannot release a replacement writer lease', async () => {
+ test('retiring the physical capture parent mid-write publishes nothing into the replacement', async () => {
   const f = fixture(); let swapped = false; const retired = join(f.root, 'retired');
   const store = new DeviceCaptureArtifactStore(f.directory, { beforeObservationWrite() {
     if (swapped) return; swapped = true;
-    const lock = readdirSync(f.directory).find(name => name.endsWith('.lock'))!;
-    const lease = readFileSync(join(f.directory, lock));
     renameSync(f.directory, retired); mkdirSync(f.directory, { mode: 0o700 });
-    writeFileSync(join(f.directory, lock), lease, { mode: 0o600 });
   } });
   await expect(store.retain(originalInput)).rejects.toThrow();
   expect(swapped).toBe(true);
-  expect(readdirSync(f.directory).some(name => name.endsWith('.lock'))).toBe(true);
   expect(existsSync(join(f.directory, 'capture-index.json'))).toBe(false);
 });

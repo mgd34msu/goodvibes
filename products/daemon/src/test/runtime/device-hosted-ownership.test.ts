@@ -1,4 +1,8 @@
-/** Reconstructed canonical caller proof; no external-operation scope is created by this suite. */
+/**
+ * A phone action from a hosted turn: a live grant runs it with no question, no
+ * grant asks the owner once, and neither path asks a decision model about the
+ * device action itself.
+ */
 import { expect, spyOn, test } from 'bun:test';
 import { withDecisionLog, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -10,7 +14,6 @@ import { createHostedSessionOptions } from '../../runtime/hosted-session-composi
 import { useGatewayFixture } from '../helpers/gateway-fixture.js';
 
 const fixture = useGatewayFixture({ hostSessions: false });
-function barrier() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
 async function until(check: () => boolean) { const deadline = Date.now() + 5000; while (!check()) { if (Date.now() > deadline) throw new Error('Device work was not queued'); await new Promise(done => setTimeout(done, 5)); } }
 
 async function hosted() {
@@ -30,7 +33,7 @@ async function hosted() {
   const rootPort = record(services.judgment.decisionLog); const floorPort = record(floor.services.judgment.decisionLog);
   const rootSpy = spyOn(services.judgment.port, 'ask').mockImplementation(request => rootPort.ask(request));
   const floorSpy = spyOn(floor.services.judgment.port, 'ask').mockImplementation(request => floorPort.ask(request));
-  const human = spyOn(services.approvalBroker, 'requestApproval').mockImplementation(async () => { throw new Error('No human device fallback'); });
+  const human = spyOn(services.approvalBroker, 'requestApproval').mockImplementation(async () => ({ approved: true }));
   const manager = services.distributedRuntime;
   const pair = await manager.requestPairing({ peerKind: 'device', label: 'Canonical synthetic phone', capabilities: DEVICE_CAPABILITY_IDS,
     metadata: { [DEVICE_NODE_ANNOUNCEMENT_KEY]: { nodeKind: 'web-pwa', contractVersion: 1, capabilities: DEVICE_CAPABILITY_IDS, secureContext: true } } });
@@ -42,55 +45,38 @@ async function hosted() {
     hookDispatcher: null, runtimeBus: services.runtimeBus, sessionId: runtime.sessionId,
     emitterContext: () => ({ sessionId: runtime.sessionId, traceId: 'device-fixture', source: 'orchestrator' }),
   };
-  return { manager, auth, runtime, readings, human, turn, onReading(next: typeof hook) { hook = next; },
+  return { manager, auth, runtime, readings, human, turn, services, onReading(next: typeof hook) { hook = next; },
     run() { return executeToolCalls(deps, crypto.randomUUID(), [{ id: crypto.randomUUID(), name: 'phone', arguments: { action: 'screenshot', nodeId: auth.peer.id, reason: 'Original screenshot request' } }]); },
     async close() { turn.abort(); rootSpy.mockRestore(); floorSpy.mockRestore(); human.mockRestore(); runtime.dispose(); await floor.dispose(); await manager.writes.drain(); },
   };
 }
 
-test('actual hosted phone registry carries original source through canonical execution and real paired queue', async () => {
+const deviceReadings = (readings: readonly JudgmentRequest<Questions>[]) => readings.filter(request => String(request.context?.site ?? '').startsWith('engine.device'));
+
+async function answerOnce(h: Awaited<ReturnType<typeof hosted>>) {
+  const pending = h.run(); await until(() => h.manager.listWork().some(work => work.peerId === h.auth.peer.id && work.status === 'queued'));
+  const [work] = await h.manager.claimWork(h.auth); expect(work?.command).toBe('device.screen.capture');
+  await h.manager.completeWork(h.auth, work!.id, { result: { contractVersion: 1, capabilityId: 'device.screen.capture', ok: true, mediaBase64: Buffer.from('owned synthetic pixels').toString('base64'), mediaType: 'image/png' } });
+  return pending;
+}
+
+test('with no grant a hosted phone action asks the owner once and no decision model', async () => {
   const h = await hosted();
   try {
     expect(h.runtime.toolRegistry.has('phone')).toBe(true);
-    const pending = h.run(); await until(() => h.manager.listWork().some(work => work.peerId === h.auth.peer.id && work.status === 'queued'));
-    const [work] = await h.manager.claimWork(h.auth); expect(work?.command).toBe('device.screen.capture');
-    await h.manager.completeWork(h.auth, work!.id, { result: { contractVersion: 1, capabilityId: 'device.screen.capture', ok: true, mediaBase64: Buffer.from('owned synthetic pixels').toString('base64'), mediaType: 'image/png' } });
-    const result = await pending; expect(result[0]?.success).toBe(true); expect(h.human).not.toHaveBeenCalled();
-    expect(h.readings.some(request => request.context?.site === 'engine.device.autonomous')).toBe(true);
-    expect(JSON.stringify(h.readings.filter(request => request.context?.site === 'engine.device.autonomous'))).toContain('Take the requested synthetic phone screenshot');
+    const result = await answerOnce(h); expect(result[0]?.success).toBe(true);
+    expect(h.human).toHaveBeenCalledTimes(1);
+    expect(deviceReadings(h.readings)).toEqual([]);
     expect(await fixture().services.devicePosture.artifacts.list(h.auth.peer.id)).toHaveLength(1);
   } finally { await h.close(); }
 });
 
-test('canonical turn cancellation while device judgment is held reaches no peer queue', async () => {
-  const h = await hosted(); const entered = barrier(); const release = barrier();
-  try {
-    h.onReading(async request => { if (request.context?.site === 'engine.device.autonomous') { entered.resolve(); await release.promise; } });
-    const pending = h.run(); const settled = pending.then(value => ({ value }), error => ({ error })); await entered.promise;
-    h.turn.abort(); release.resolve(); const result = await settled;
-    expect('error' in result ? result.error.name : '').toBe('AbortError');
-    expect(h.manager.listWork().filter(work => work.peerId === h.auth.peer.id)).toEqual([]); expect(h.human).not.toHaveBeenCalled();
-  } finally { release.resolve(); await h.close(); }
-});
-
-test('actual peer disconnect and reconnect ABA while Jev is held invalidates the operation', async () => {
-  const h = await hosted(); const entered = barrier(); const release = barrier();
-  try {
-    h.onReading(async request => { if (request.context?.site === 'engine.device.autonomous') { entered.resolve(); await release.promise; } });
-    const pending = h.run(); await entered.promise;
-    const before = h.manager.peers.get(h.auth.peer.id)!;
-    await h.manager.disconnectPeer(h.auth.peer.id);
-    h.manager.peers.set(h.auth.peer.id, before);
-    release.resolve(); expect((await pending)[0]?.success).toBe(false);
-    expect(h.manager.listWork().filter(work => work.peerId === h.auth.peer.id)).toEqual([]);
-  } finally { release.resolve(); await h.close(); }
-});
-
-test('raw hosted registry invocation has no original source and refuses', async () => {
+test('a live grant runs a hosted phone action with no question at all', async () => {
   const h = await hosted();
   try {
-    const result = await h.runtime.toolRegistry.execute('raw-phone', 'phone', { action: 'screenshot', nodeId: h.auth.peer.id, reason: 'Prose is not authority' });
-    expect(result.success).toBe(false); expect(h.manager.listWork().filter(work => work.peerId === h.auth.peer.id)).toEqual([]);
-    expect(h.readings).toEqual([]); expect(h.human).not.toHaveBeenCalled();
+    await h.services.devicePosture.grants.record({ nodeId: h.auth.peer.id, nodeKind: 'web-pwa', capabilityId: 'device.screen.capture', scope: 'always', grantedBy: 'operator' });
+    const result = await answerOnce(h); expect(result[0]?.success).toBe(true);
+    expect(h.human).not.toHaveBeenCalled();
+    expect(deviceReadings(h.readings)).toEqual([]);
   } finally { await h.close(); }
 });

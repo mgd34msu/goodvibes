@@ -14,9 +14,10 @@
  * retention disclosure.
  *
  * The tool holds no authority and caches no decision: it shapes arguments, calls
- * the service, and renders the outcome. The confirmation gate, the durable-grant
- * lookup, the capture retention, and the housekeeping disclosure all belong to
- * the service.
+ * the service, and renders the outcome. Who authorises a request (a live grant,
+ * or with none the owner unless `permissions.mode` is yolo), input validation,
+ * the capture retention, and the housekeeping disclosure all belong to the
+ * service.
  */
 import type { Tool } from '../types/tools.js';
 import {
@@ -24,28 +25,45 @@ import {
   describeDeviceNodeKind,
   getDeviceCapability,
   isDeviceCapabilityId,
+  type DeviceCapabilityDescriptor,
   type DeviceCapabilityId,
 } from './device-capability-contract.js';
-import { validateDeviceCapabilityInput } from './device-peer-work.js';
-import type { DeviceCapabilityOutcome } from './device-capability-service.js';
+import {
+  capabilityDisabledReason,
+  isAllowAlwaysOffered,
+  type DeviceCapabilityOutcome,
+  type DeviceCapabilityPolicy,
+  type DeviceNoGrantAuthority,
+} from './device-capability-service.js';
 import type { DevicePostureRuntime } from './device-posture-runtime.js';
 
-type PhoneAction =
-  | 'nodes'
-  | 'capabilities'
-  | 'run'
-  | 'photo'
-  | 'screenshot'
-  | 'location'
-  | 'clipboard_read'
-  | 'clipboard_write'
-  | 'notify'
-  | 'open_url'
-  | 'vibrate'
-  | 'grants'
-  | 'revoke'
-  | 'artifacts'
-  | 'housekeeping';
+/** Every action the tool takes; the schema enum and the refusal list read this. */
+const PHONE_ACTIONS = [
+  'nodes', 'capabilities', 'run', 'photo', 'screenshot', 'location',
+  'clipboard_read', 'clipboard_write', 'notify', 'open_url', 'vibrate',
+  'grants', 'revoke', 'artifacts', 'housekeeping',
+] as const;
+
+type PhoneAction = typeof PHONE_ACTIONS[number];
+
+/** Other words a caller may use for an action. */
+const PHONE_ACTION_ALIASES: Readonly<Record<string, PhoneAction>> = {
+  devices: 'nodes', list: 'nodes', status: 'nodes',
+  catalog: 'capabilities',
+  request: 'run', invoke: 'run',
+  camera: 'photo', picture: 'photo', take_photo: 'photo',
+  screen: 'screenshot', screen_capture: 'screenshot',
+  where: 'location', gps: 'location',
+  read_clipboard: 'clipboard_read', paste: 'clipboard_read',
+  write_clipboard: 'clipboard_write', copy: 'clipboard_write',
+  notification: 'notify', alert: 'notify',
+  open: 'open_url', open_link: 'open_url',
+  buzz: 'vibrate',
+  grant_list: 'grants', permissions: 'grants',
+  revoke_grant: 'revoke', forget: 'revoke',
+  captures: 'artifacts',
+  sweep: 'housekeeping', gc: 'housekeeping',
+};
 
 interface PhoneToolArgs {
   readonly action?: unknown;
@@ -91,28 +109,30 @@ function readRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+/** The action asked for: 'nodes' when none was given, null when the word is not an action. */
 function normalizeAction(value: unknown): PhoneAction | null {
   const action = readString(value).toLowerCase().replace(/[- ]/g, '_');
-  if (!action) return null;
-  if (action === 'nodes' || action === 'devices' || action === 'list' || action === 'status') return 'nodes';
-  if (action === 'capabilities' || action === 'catalog') return 'capabilities';
-  if (action === 'run' || action === 'request' || action === 'invoke') return 'run';
-  if (action === 'photo' || action === 'camera' || action === 'picture' || action === 'take_photo') return 'photo';
-  if (action === 'screenshot' || action === 'screen' || action === 'screen_capture') return 'screenshot';
-  if (action === 'location' || action === 'where' || action === 'gps') return 'location';
-  if (action === 'clipboard_read' || action === 'read_clipboard' || action === 'paste') return 'clipboard_read';
-  if (action === 'clipboard_write' || action === 'write_clipboard' || action === 'copy') return 'clipboard_write';
-  if (action === 'notify' || action === 'notification' || action === 'alert') return 'notify';
-  if (action === 'open_url' || action === 'open' || action === 'open_link') return 'open_url';
-  if (action === 'vibrate' || action === 'buzz') return 'vibrate';
-  if (action === 'grants' || action === 'grant_list' || action === 'permissions') return 'grants';
-  if (action === 'revoke' || action === 'revoke_grant' || action === 'forget') return 'revoke';
-  if (action === 'artifacts' || action === 'captures') return 'artifacts';
-  if (action === 'housekeeping' || action === 'sweep' || action === 'gc') return 'housekeeping';
-  return null;
+  if (!action) return 'nodes';
+  if ((PHONE_ACTIONS as readonly string[]).includes(action)) return action as PhoneAction;
+  return PHONE_ACTION_ALIASES[action] ?? null;
 }
 
-function renderOutcome(outcome: DeviceCapabilityOutcome): PhonePayload {
+/** What happens to a request for this capability under the current settings, in words. */
+function describeAuthority(
+  descriptor: DeviceCapabilityDescriptor,
+  policy: DeviceCapabilityPolicy,
+  noGrant: DeviceNoGrantAuthority,
+): string {
+  const disabled = capabilityDisabledReason(descriptor, policy);
+  if (disabled) return `refused: ${disabled}`;
+  if (noGrant === 'allow') return 'runs without asking (permissions.mode is yolo)';
+  if (policy.mode === 'ask-every-time') return 'asks the owner every time (device.capabilities.mode = ask-every-time)';
+  return isAllowAlwaysOffered(descriptor, policy)
+    ? 'runs at once under a live grant; otherwise asks the owner, who may allow it always'
+    : 'runs at once under a live grant; otherwise asks the owner each time';
+}
+
+function renderOutcome(service: DevicePostureRuntime, outcome: DeviceCapabilityOutcome): PhonePayload {
   if (!outcome.ok) {
     return {
       success: false,
@@ -128,23 +148,31 @@ function renderOutcome(outcome: DeviceCapabilityOutcome): PhonePayload {
     nodeId: outcome.nodeId,
     capabilityId: outcome.capabilityId,
     capability: descriptor?.title ?? outcome.capabilityId,
-    // Stated on every result so a reader can see WHY it was allowed: an
-    // existing durable grant, or a fresh confirmation.
+    // Stated on every result so a reader can see WHY it was allowed: a live
+    // durable grant, the owner's answer, or permissions.mode.
     authority: outcome.authority,
     ...(outcome.grantId ? { grantId: outcome.grantId } : {}),
     ...(outcome.data === undefined ? {} : { data: outcome.data }),
-    ...(outcome.artifact
-      ? {
-        artifact: {
-          id: outcome.artifact.id,
-          mediaType: outcome.artifact.mediaType,
-          byteLength: outcome.artifact.byteLength,
-          capturedAt: new Date(outcome.artifact.capturedAt).toISOString(),
-          expiresAt: new Date(outcome.artifact.expiresAt).toISOString(),
-          retentionNote: 'Deleted automatically at expiry; the removal is recorded in the device housekeeping log.',
-        },
-      }
-      : {}),
+    ...(outcome.artifact ? { artifact: renderArtifact(service, outcome.artifact) } : {}),
+  };
+}
+
+/** A retained capture as the caller needs it: where it is and how to look at it. */
+function renderArtifact(
+  service: DevicePostureRuntime,
+  artifact: NonNullable<Extract<DeviceCapabilityOutcome, { ok: true }>['artifact']>,
+): Record<string, unknown> {
+  const path = service.artifacts.pathFor(artifact);
+  return {
+    id: artifact.id,
+    kind: artifact.kind,
+    mediaType: artifact.mediaType,
+    byteLength: artifact.byteLength,
+    path,
+    howToRead: `Call the read tool with files:[{ path: ${JSON.stringify(path)} }] to see the ${artifact.kind === 'image' ? 'image' : 'capture'}.`,
+    capturedAt: new Date(artifact.capturedAt).toISOString(),
+    expiresAt: new Date(artifact.expiresAt).toISOString(),
+    retentionNote: 'Deleted automatically at expiry; the removal is recorded in the device housekeeping log.',
   };
 }
 
@@ -180,30 +208,16 @@ async function runCapability(
   capabilityId: DeviceCapabilityId,
   capabilityInput: Record<string, unknown>,
 ): Promise<PhonePayload> {
-  const reason = readString(args.reason);
-  if (!reason) {
-    return fail(
-      'A reason is required: it is shown verbatim on the confirmation prompt so the person knows what they are allowing.',
-      'Pass reason:"…" describing what the capability is for.',
-    );
-  }
   const nodeId = resolveNodeId(service, args, capabilityId);
   if (typeof nodeId !== 'string') return nodeId;
-
-  const problems = validateDeviceCapabilityInput(capabilityId, { ...capabilityInput, reason });
-  if (problems.length > 0) {
-    return fail(
-      `Invalid input for ${capabilityId}: ${problems.map((problem) => `${problem.field} (${problem.problem}, expected ${problem.expected})`).join('; ')}.`,
-    );
-  }
-
+  // Inputs, the reason included, are validated once, by the capability service.
   const outcome = await service.capabilities.request({
     nodeId,
     capabilityId,
     input: capabilityInput,
-    reason,
+    reason: readString(args.reason),
   });
-  return renderOutcome(outcome);
+  return renderOutcome(service, outcome);
 }
 
 export function createDevicePhoneTool(service: DevicePostureRuntime): Tool {
@@ -220,16 +234,12 @@ export function createDevicePhoneTool(service: DevicePostureRuntime): Tool {
         properties: {
           action: {
             type: 'string',
-            enum: [
-              'nodes', 'capabilities', 'run', 'photo', 'screenshot', 'location',
-              'clipboard_read', 'clipboard_write', 'notify', 'open_url', 'vibrate',
-              'grants', 'revoke', 'artifacts', 'housekeeping',
-            ],
+            enum: [...PHONE_ACTIONS],
             description: 'What to do. Defaults to "nodes" (paired phones and abilities).',
           },
           nodeId: { type: 'string', description: 'Which paired phone. Optional when only one offers it.' },
           capabilityId: { type: 'string', description: 'Capability id for action:"run" or the grant to revoke.' },
-          reason: { type: 'string', description: 'Why it is needed. Shown verbatim on the confirmation prompt.' },
+          reason: { type: 'string', description: 'Why it is needed; shown to the owner when they are asked.' },
           input: { type: 'object', description: 'Capability inputs for action:"run".' },
           camera: { type: 'string', enum: ['rear', 'front'], description: 'Which camera action:"photo" uses. Defaults to rear.' },
           precision: { type: 'string', enum: ['coarse', 'precise'], description: 'Location precision for action:"location". Defaults to coarse.' },
@@ -260,7 +270,13 @@ export function createDevicePhoneTool(service: DevicePostureRuntime): Tool {
 
 /** Every action, returning the tool's own payload before it is serialised. */
 async function handleAction(service: DevicePostureRuntime, args: PhoneToolArgs): Promise<PhonePayload> {
-  const action = normalizeAction(args.action) ?? 'nodes';
+  const action = normalizeAction(args.action);
+  if (action === null) {
+    return fail(
+      `${JSON.stringify(readString(args.action))} is not a phone action; nothing was done.`,
+      `Valid actions: ${PHONE_ACTIONS.join(', ')}.`,
+    );
+  }
   const limit = typeof args.limit === 'number' && args.limit > 0 ? Math.floor(args.limit) : 50;
 
   if (action === 'nodes') {
@@ -291,6 +307,7 @@ async function handleAction(service: DevicePostureRuntime, args: PhoneToolArgs):
   if (action === 'capabilities') {
     const nodes = service.listNodes();
     const policy = service.capabilities.getPolicy();
+    const noGrant = service.capabilities.getNoGrantAuthority();
     return {
       success: true,
       mode: policy.mode,
@@ -304,8 +321,8 @@ async function handleAction(service: DevicePostureRuntime, args: PhoneToolArgs):
         effect: descriptor.effect,
         sensitivity: descriptor.sensitivity,
         retainsCapture: descriptor.producesArtifact,
-        confirmation: 'asks every time unless a durable grant exists',
-        allowAlwaysOffered: descriptor.allowAlwaysOffered,
+        whenRequested: describeAuthority(descriptor, policy, noGrant),
+        allowAlwaysOffered: isAllowAlwaysOffered(descriptor, policy),
         servedBy: nodes.filter((node) => node.supported.includes(descriptor.id)).map((node) => node.nodeId),
       })),
     };
@@ -361,7 +378,7 @@ async function handleAction(service: DevicePostureRuntime, args: PhoneToolArgs):
       grants: removed.map((entry) => ({ grantId: entry.grantId, nodeId: entry.nodeId, capabilityId: entry.capabilityId })),
       note: removed.length === 0
         ? 'Nothing matched; no grant was revoked.'
-        : 'Revoked grants are deleted, not flagged, the next request for these capabilities asks again.',
+        : 'Revoked grants are deleted, not flagged; the next request for these capabilities asks the owner again, unless permissions.mode is yolo.',
     };
   }
 
@@ -435,33 +452,25 @@ async function handleAction(service: DevicePostureRuntime, args: PhoneToolArgs):
   }
 
   if (action === 'clipboard_write') {
-    const text = readString(args.text);
-    if (!text) return fail('Pass text:"…", the text to place on the phone\'s clipboard.');
-    return runCapability(service, args, 'device.clipboard.write', { text });
+    return runCapability(service, args, 'device.clipboard.write', { text: readString(args.text) });
   }
 
   if (action === 'notify') {
-    const title = readString(args.title);
-    if (!title) return fail('Pass title:"…", the notification title.');
     return runCapability(service, args, 'device.command.notify', {
-      title,
+      title: readString(args.title),
       ...(readString(args.body) ? { body: readString(args.body) } : {}),
     });
   }
 
   if (action === 'open_url') {
-    const url = readString(args.url);
-    if (!/^https?:\/\//i.test(url)) return fail('Pass url:"https://…", only http and https links are opened on the phone.');
-    return runCapability(service, args, 'device.command.open_url', { url });
+    return runCapability(service, args, 'device.command.open_url', { url: readString(args.url) });
   }
 
-  if (action === 'vibrate') {
-    return runCapability(service, args, 'device.command.vibrate', {
-      ...(typeof args.durationMs === 'number' ? { durationMs: args.durationMs } : {}),
-    });
-  }
-
-  return fail('Unknown phone action.', 'Use action:"nodes" to list paired phones, or action:"capabilities" for the catalog.');
+  // Every other action returned above; what is left is 'vibrate'.
+  const last: 'vibrate' = action;
+  return runCapability(service, args, `device.command.${last}`, {
+    ...(typeof args.durationMs === 'number' ? { durationMs: args.durationMs } : {}),
+  });
 }
 
 /** Register the tool, leaving an existing `phone` registration alone. */

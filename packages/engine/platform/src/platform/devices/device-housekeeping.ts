@@ -36,13 +36,6 @@ interface HousekeepingLog extends Record<string, unknown> {
 /** Keep the disclosure log itself bounded, it is persisted state too. */
 const MAX_DISCLOSURE_REPORTS = 20;
 
-/** The most recent sweep that threw, kept so a status surface can say so. */
-export interface DeviceHousekeepingFailure {
-  readonly at: number;
-  readonly trigger: DeviceHousekeepingReport['trigger'];
-  readonly error: string;
-}
-
 export type DeviceRecoveryStage = 'grant-sweep' | 'capture-sweep' | 'disclosure-read' | 'disclosure-persist';
 
 export interface DeviceHousekeepingOptions {
@@ -88,7 +81,6 @@ export class DeviceHousekeeper {
   private readonly observeRecovery: DeviceHousekeepingOptions['observeRecovery'];
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastReport: DeviceHousekeepingReport | null = null;
-  private lastFailure: DeviceHousekeepingFailure | null = null;
   /** The sweep in progress, joined by a caller that arrives while it runs. */
   private inFlight: Promise<DeviceHousekeepingReport> | null = null;
   /** Set while a timer runs; re-read after each sweep to follow a live setting. */
@@ -106,14 +98,6 @@ export class DeviceHousekeeper {
   /** The most recent report this process produced, or null before the first sweep. */
   getLastReport(): DeviceHousekeepingReport | null {
     return this.lastReport;
-  }
-
-  /**
-   * The most recent sweep that failed and has not been followed by a good one,
-   * or null. A stale `getLastReport()` alone would read as healthy.
-   */
-  getLastFailure(): DeviceHousekeepingFailure | null {
-    return this.lastFailure;
   }
 
   /** Disclosure history from disk, newest last. */
@@ -134,14 +118,7 @@ export class DeviceHousekeeper {
    */
   sweep(trigger: DeviceHousekeepingReport['trigger']): Promise<DeviceHousekeepingReport> {
     if (this.inFlight) return this.inFlight;
-    const run = this.runSweep(trigger).then(
-      (report) => { this.lastFailure = null; return report; },
-      (error: unknown) => {
-        this.lastFailure = { at: this.now(), trigger, error: error instanceof Error ? error.message : String(error) };
-        throw error;
-      },
-    );
-    const settled = run.finally(() => { if (this.inFlight === settled) this.inFlight = null; });
+    const settled = this.runSweep(trigger).finally(() => { if (this.inFlight === settled) this.inFlight = null; });
     this.inFlight = settled;
     return settled;
   }
@@ -222,8 +199,7 @@ export class DeviceHousekeeper {
     this.timer = setInterval(() => {
       void this.sweep('periodic')
         .catch((error: unknown) => {
-          // The timer callback has no caller to throw to; the failure is logged
-          // and kept for getLastFailure().
+          // The timer callback has no caller to throw to, so the failure is logged.
           logger.warn('Periodic device housekeeping failed; expired captures and grants may not have been removed', {
             error: error instanceof Error ? error.message : String(error),
           });

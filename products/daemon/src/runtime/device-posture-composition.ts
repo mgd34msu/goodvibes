@@ -10,14 +10,16 @@
  *
  * The feature itself is platform-owned (`platform/devices`): the settings→policy
  * mapping, the grants ledger, the capture store, the housekeeping sweeps, the
- * confirmation flow, and the `phone` tool. This module supplies the three seams
- * that are actually ours and nothing else:
+ * owner question, and the `phone` tool. This module supplies the seams that are
+ * actually ours and nothing else:
  *
  *   - the peer transport, the same DistributedRuntimeManager the remote surface
  *     pairs devices onto, so a phone paired here is a node here,
- *   - the approval path, the shared approval broker, so the confirmation
- *     appears wherever the person is looking (terminal, web app, companion),
- *   - the storage root and the live config manager.
+ *   - the approval path, the shared approval broker, so the owner's question
+ *     (asked only when no live grant covers a request and `permissions.mode` is
+ *     not yolo) appears wherever the owner is looking (terminal, web app,
+ *     companion),
+ *   - the storage root, the live config manager and the daemon's lifetime.
  *
  * Constructing this starts nothing. `startHousekeeping()` is called from the
  * bootstrap tail: grants and captures both outlive a restart, so a grant whose
@@ -27,7 +29,6 @@
  * and the app still runs: housekeeping failing is a reason to say so, not a
  * reason to refuse to start.
  */
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { nativeDeviceRecoveryObserver } from './startup-observation.js';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createDevicePostureRuntime, registerDevicePhoneTool } from '@goodvibes-jev/engine/platform/platform/devices';
@@ -39,14 +40,14 @@ import type {
 } from '@goodvibes-jev/engine/platform/platform/devices';
 import { registerDevicesGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { isEffectiveDangerMode, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 /** Who this surface records in the device audit trail. */
 export const DAEMON_DEVICE_ACTOR = 'daemon:phone-tool';
 
 export interface DevicePostureCompositionOptions {
   readonly configManager: ConfigManager;
-  readonly judgmentPort?: JudgmentPort | undefined;
+  /** The daemon's lifetime; aborting it withdraws requests no phone has picked up. */
   readonly signal?: AbortSignal | undefined;
   /** The runtime devices pair onto; its listPeers/invokePeer are the transport. */
   readonly distributedRuntime: DevicePeerTransport;
@@ -63,7 +64,7 @@ export interface DevicePostureCompositionOptions {
    *
    * The runtime is handed over whole because the verbs and the tool must reach
    * the SAME service: a second path to a phone would be a second place the
-   * confirmation prompt and the durable grants could be decided differently.
+   * owner's question and the durable grants could be decided differently.
    */
   readonly gatewayMethods?: GatewayMethodCatalog | undefined;
   readonly getSessionId?: (() => string | undefined) | undefined;
@@ -85,8 +86,6 @@ function listingEveryPeer(source: DevicePeerTransport): DevicePeerTransport {
   return {
     listPeers: (kind) => (source.listPeers as (kind?: string, limit?: number) => ReturnType<DevicePeerTransport['listPeers']>).call(source, kind, ALL_PEERS),
     invokePeer: (input) => source.invokePeer(input),
-    ...(source.peerRevision ? { peerRevision: (nodeId: string) => source.peerRevision!(nodeId) } : {}),
-    ...(source.peerMutationPending ? { peerMutationPending: (nodeId: string) => source.peerMutationPending!(nodeId) } : {}),
     ...(source.cancelWork ? { cancelWork: (workId: string, input?: Parameters<NonNullable<DevicePeerTransport['cancelWork']>>[1]) => source.cancelWork!(workId, input) } : {}),
   };
 }
@@ -101,9 +100,10 @@ export function createDevicePostureServices(options: DevicePostureCompositionOpt
     ...(nativeDeviceRecoveryObserver ? { observeRecovery: nativeDeviceRecoveryObserver } : {}),
     stateDirectory: options.stateDirectory,
     actor: DAEMON_DEVICE_ACTOR,
-    autonomous: { port: options.judgmentPort, signal: options.signal,
-      onDidInvalidate: listener => options.configManager.onDidInvalidate(listener),
-    },
+    // Granting a phone access is the owner's question; only yolo runs a request
+    // no live grant covers without asking.
+    noGrantAuthority: () => (isEffectiveDangerMode(options.configManager) ? 'allow' : 'ask-owner'),
+    ...(options.signal ? { signal: options.signal } : {}),
     ...(options.getSessionId ? { getSessionId: options.getSessionId } : {}),
   });
   if (options.gatewayMethods) registerDevicesGatewayMethods(options.gatewayMethods, devicePosture);

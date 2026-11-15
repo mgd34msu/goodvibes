@@ -86,7 +86,7 @@ export type {
 } from './device-capture-artifacts.js';
 
 export { DeviceHousekeeper } from './device-housekeeping.js';
-export type { DeviceHousekeepingFailure, DeviceHousekeepingOptions, DeviceHousekeepingReport } from './device-housekeeping.js';
+export type { DeviceHousekeepingOptions, DeviceHousekeepingReport } from './device-housekeeping.js';
 
 export {
   DeviceCapabilityService,
@@ -123,6 +123,7 @@ export type {
   DeviceApprovalBridge,
   DevicePeerTransport,
   DevicePeerView,
+  DevicePostureConfigSource,
   DevicePostureRuntime,
   DevicePostureRuntimeOptions,
   DeviceWorkView,
@@ -147,6 +148,8 @@ export type {
   DeviceCapabilityServiceOptions,
   DeviceCapabilityOutcome,
   DeviceRequestRefusal,
+  DeviceRequestAuthority,
+  DeviceNoGrantAuthority,
+  DeviceAdmission,
 } from './device-capability-service.js';
 
-export type { DeviceAutonomousOwner, DeviceAdmission } from './device-autonomous.js';

@@ -1,21 +1,24 @@
-import { types as nodeTypes } from 'node:util';
 import { logger } from '../utils/logger.js';
-import { captureOwnedJson } from '../gate/judgment-input.js';
-import { beginDeviceRequest, type DeviceAutonomousOwner, type DeviceAdmission, type DeviceRequestOwner } from './device-autonomous.js';
 /**
  * device-capability-service.ts, the one path a paired device's camera, screen,
  * location, clipboard, or device command is reached through.
  *
- * Every request walks the same seven steps, in this order, with no shortcuts:
+ * Every request walks the same steps, in this order:
  *   1. the node must be paired and must have announced the capability,
  *   2. configuration must allow the capability at all,
  *   3. the request's inputs must satisfy the capability's declared fields,
- *   4. a live grant is looked up (re-read from disk, never cached in process),
- *   5. with no grant, the person is asked, ask-every-time is the default for
- *      EVERY capture and effect, and "always allow" is offered on every
- *      capability per the owner ruling of 2026-07-25,
+ *   4. a live grant is looked up; a live grant IS the authority, the request
+ *      runs with no question and no model call,
+ *   5. with no grant, `permissions.mode` decides who answers: under yolo the
+ *      request runs; in every other mode the owner is asked through the shared
+ *      approval path, with "always allow" offered so the answer is remembered
+ *      as a durable grant (granting access is the owner's question, asked once),
  *   6. the work is dispatched to the node over the peer transport,
  *   7. bytes that came back are retained under the capture TTL and disclosed.
+ *
+ * Only a change to the `device.*` settings that would refuse this request, or
+ * the host shutting down, ends a request in flight, and only before the phone
+ * has picked the work up: what a phone already did is never thrown away.
  *
  * The dispatcher and the confirmation handler are injected, which is what keeps
  * this node-kind neutral: the same service serves a web PWA node and a native
@@ -55,9 +58,8 @@ export interface DeviceCapabilityPolicy {
 }
 
 /**
- * Stock policy, matches the owner rulings exactly: ask every time by default,
- * "always allow" offered on every capability, 24h capture retention, clipboard
- * read present and grantable.
+ * Stock policy: grants are honoured, "always allow" is offered on every
+ * capability, 24h capture retention, clipboard read present and grantable.
  */
 export const DEFAULT_DEVICE_CAPABILITY_POLICY: DeviceCapabilityPolicy = {
   mode: 'honor-grants',
@@ -67,6 +69,12 @@ export const DEFAULT_DEVICE_CAPABILITY_POLICY: DeviceCapabilityPolicy = {
   requestTimeoutMs: 60_000,
   captureRetentionMs: 24 * 60 * 60 * 1000,
 };
+
+/**
+ * Who answers a request no live grant covers, read from `permissions.mode` per
+ * request: 'allow' under yolo, 'ask-owner' in every other mode.
+ */
+export type DeviceNoGrantAuthority = 'ask-owner' | 'allow';
 
 /** What the person chose when asked. */
 export type DeviceConfirmationDecision = 'once' | 'always' | 'deny';
@@ -86,7 +94,6 @@ export interface DeviceConfirmationRequest {
    * capability under stock configuration.
    */
   readonly allowAlwaysOffered: boolean;
-  readonly dispatchTimeoutMs?: number | undefined;
   readonly sessionId?: string | undefined;
 }
 
@@ -99,6 +106,17 @@ export interface DeviceConfirmationResponse {
 export type DeviceConfirmationHandler = (
   request: DeviceConfirmationRequest,
 ) => Promise<DeviceConfirmationResponse>;
+
+/**
+ * The hold one request keeps on its queued work. The peer transport withdraws
+ * the work when `signal` aborts before the phone has picked it up, and calls
+ * `claim()` when the phone picks it up.
+ */
+export interface DeviceAdmission {
+  readonly signal: AbortSignal;
+  assertCurrent(): void;
+  claim(): void;
+}
 
 /** What came back from the node. */
 export interface DeviceDispatchResult {
@@ -134,16 +152,21 @@ export type DeviceRequestRefusal =
   | 'disabled-by-config'
   | 'invalid-input'
   | 'denied-by-person'
-  | 'denied-by-jev'
   | 'dispatch-failed';
+
+/**
+ * How authority was established for one request: a live durable grant, the
+ * owner's answer (once, or always, which recorded a grant), or
+ * `permissions.mode` set to yolo.
+ */
+export type DeviceRequestAuthority = 'existing-grant' | 'confirmed-once' | 'confirmed-always' | 'permissions-mode';
 
 export type DeviceCapabilityOutcome =
   | {
     readonly ok: true;
     readonly capabilityId: DeviceCapabilityId;
     readonly nodeId: string;
-    /** How authority was established for this specific request. */
-    readonly authority: 'existing-grant' | 'confirmed-once' | 'confirmed-always';
+    readonly authority: DeviceRequestAuthority;
     readonly grantId?: string | undefined;
     readonly data?: unknown | undefined;
     readonly artifact?: DeviceCaptureArtifact | undefined;
@@ -161,7 +184,6 @@ export interface DeviceCapabilityServiceOptions {
   readonly artifacts: DeviceCaptureArtifactStore;
   readonly dispatcher: DeviceCapabilityDispatcher;
   readonly confirm: DeviceConfirmationHandler;
-  readonly autonomous?: DeviceAutonomousOwner | undefined;
   /** Paired device nodes, resolved from the peer registry. */
   readonly listNodes: () => readonly DeviceNodeProfile[];
   /**
@@ -171,6 +193,15 @@ export interface DeviceCapabilityServiceOptions {
    * device-policy-source.ts.
    */
   readonly policy?: DevicePolicySource<DeviceCapabilityPolicy> | undefined;
+  /** Who answers a request no grant covers. Absent: the owner is asked. */
+  readonly noGrantAuthority?: (() => DeviceNoGrantAuthority) | undefined;
+  /**
+   * Subscribe to a change of the `device.*` settings; returns the unsubscribe.
+   * A change that would refuse a request still waiting for its phone ends it.
+   */
+  readonly onPolicyChange?: ((listener: () => void) => () => void) | undefined;
+  /** Aborts every request whose phone has not picked it up (host shutdown). */
+  readonly signal?: AbortSignal | undefined;
 }
 
 /**
@@ -234,28 +265,51 @@ export function capabilityDisabledReason(
   return null;
 }
 
+/** Why a settings change ends a request that rests on `authority`, or null when it does not. */
+function endedBySettings(
+  descriptor: DeviceCapabilityDescriptor,
+  policy: DeviceCapabilityPolicy,
+  authority: DeviceRequestAuthority,
+): string | null {
+  const disabled = capabilityDisabledReason(descriptor, policy);
+  if (disabled) return `${disabled} The request was withdrawn before the phone picked it up.`;
+  if (authority === 'existing-grant' && policy.mode !== 'honor-grants') {
+    return 'Durable grants are no longer honoured (device.capabilities.mode = ask-every-time); the request was withdrawn before the phone picked it up. Ask again to be confirmed by the owner.';
+  }
+  return null;
+}
+
 export class DeviceCapabilityService {
   private readonly grants: DeviceGrantStore;
   private readonly artifacts: DeviceCaptureArtifactStore;
   private readonly dispatcher: DeviceCapabilityDispatcher;
   private readonly confirm: DeviceConfirmationHandler;
-  private readonly autonomous: DeviceAutonomousOwner | undefined;
   private readonly listNodes: () => readonly DeviceNodeProfile[];
   private readonly resolvePolicy: () => DeviceCapabilityPolicy;
+  private readonly noGrantAuthority: () => DeviceNoGrantAuthority;
+  private readonly onPolicyChange: DeviceCapabilityServiceOptions['onPolicyChange'];
+  private readonly signal: AbortSignal | undefined;
 
   constructor(options: DeviceCapabilityServiceOptions) {
     this.grants = options.grants;
     this.artifacts = options.artifacts;
     this.dispatcher = options.dispatcher;
     this.confirm = options.confirm;
-    this.autonomous = options.autonomous;
     this.listNodes = options.listNodes;
     this.resolvePolicy = resolveDevicePolicySource(options.policy, DEFAULT_DEVICE_CAPABILITY_POLICY);
+    this.noGrantAuthority = options.noGrantAuthority ?? (() => 'ask-owner');
+    this.onPolicyChange = options.onPolicyChange;
+    this.signal = options.signal;
   }
 
   /** The posture in force right now (re-read when given a resolver). */
   getPolicy(): DeviceCapabilityPolicy {
     return this.resolvePolicy();
+  }
+
+  /** Who answers a request no grant covers, under the current `permissions.mode`. */
+  getNoGrantAuthority(): DeviceNoGrantAuthority {
+    return this.noGrantAuthority();
   }
 
   /** Paired nodes with the capabilities each can actually serve right now. */
@@ -266,10 +320,9 @@ export class DeviceCapabilityService {
   /**
    * Run one capability on one node.
    *
-   * A grant is consulted but never assumed: `grants.find()` re-reads the store,
-   * so a grant revoked from any surface, or expired, or belonging to a node
-   * that has since been unpaired, falls through to the confirmation prompt
-   * instead of being honoured.
+   * `grants.find()` reads the ledger, so a grant revoked from any surface, or
+   * expired, or belonging to a node that has since been unpaired, is not
+   * honoured: the request falls through to `permissions.mode`.
    */
   async request(input: {
     readonly nodeId: string;
@@ -286,9 +339,6 @@ export class DeviceCapabilityService {
     // One read for the whole request: the posture that gates the capability, the
     // posture that decides whether a durable grant may be offered, and the
     // deadline the device is given are all the same snapshot.
-    // Borrowed wire arguments cannot mutate or execute getters during judgment.
-    try { input = captureOwnedJson(input, nodeTypes.isProxy) as typeof input; }
-    catch { return { ok: false, nodeId: '', capabilityId: '', refusal: 'invalid-input', detail: 'Device request must be owned JSON data.' }; }
     const policy = this.getPolicy();
     const node = this.listNodes().find((candidate) => candidate.nodeId === input.nodeId);
     if (!node) {
@@ -297,7 +347,7 @@ export class DeviceCapabilityService {
         capabilityId: input.capabilityId,
         nodeId: input.nodeId,
         refusal: 'node-unknown',
-        detail: `No paired device node with id ${JSON.stringify(input.nodeId)}.`,
+        detail: `No paired device node with id ${JSON.stringify(input.nodeId)}. List paired phones with the phone tool's "nodes" action or devices.nodes.list.`,
       };
     }
 
@@ -342,18 +392,11 @@ export class DeviceCapabilityService {
       };
     }
 
-    // The host half of the two-sided input check device-peer-work.ts describes
-    // ("runs on the host before dispatch AND on the node, so neither side has
-    // to trust the other's validation"). It lives here rather than in a caller
-    // because this is the one path a capability is reached through: the `phone`
-    // tool checked its own arguments, and when the control-plane verb became a
-    // second caller the host half would otherwise have been simply absent from
-    // it, a malformed request travelling to somebody's phone before anything
-    // noticed.
-    //
-    // Ordered before the confirmation prompt on purpose. Asking a person to
-    // approve a request that cannot run, and only then refusing it, spends
-    // their attention on nothing.
+    // The host half of the two-sided input check device-peer-work.ts describes.
+    // It lives here, and only here on the host, because this is the one path a
+    // capability is reached through: the `phone` tool and the control-plane verb
+    // both arrive here. Ordered before the confirmation prompt so the owner is
+    // never asked to approve a request that cannot run.
     const problems = validateDeviceCapabilityInput(descriptor.id, { ...(input.input ?? {}), reason: input.reason });
     if (problems.length > 0) {
       return {
@@ -367,77 +410,70 @@ export class DeviceCapabilityService {
       };
     }
 
-    let owner: DeviceRequestOwner | undefined;
-    let deviceActed = false;
-    let authorityEnded = false;
-    try {
-    if (this.autonomous) owner = beginDeviceRequest(this.autonomous, this.grants, node.nodeId, this.resolvePolicy, this.listNodes, policy, node, resolveDeviceRequestTimeoutMs(policy, input.timeoutMs));
-    let authority: 'existing-grant' | 'confirmed-once' | 'confirmed-always' = 'confirmed-once';
+    let authority: DeviceRequestAuthority = 'confirmed-once';
     let grant: DeviceCapabilityGrant | null = null;
-
-    if (policy.mode === 'honor-grants') {
-      grant = await this.grants.find({
-        nodeId: node.nodeId,
+    // Set once the phone has picked the work up; from then on nothing but the
+    // host shutting down ends the request, so a finished action is never lost.
+    let claimed = false;
+    const ended = new AbortController();
+    const signal = this.signal ? AbortSignal.any([ended.signal, this.signal]) : ended.signal;
+    const unsubscribe = this.onPolicyChange?.(() => {
+      if (claimed || ended.signal.aborted) return;
+      const why = endedBySettings(descriptor, this.getPolicy(), authority);
+      if (why) ended.abort(new Error(why));
+    }) ?? (() => {});
+    const refusedBySettings = (): DeviceCapabilityOutcome | null => {
+      if (!signal.aborted) return null;
+      const reason: unknown = signal.reason;
+      return {
+        ok: false,
         capabilityId: descriptor.id,
-        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-      });
-    }
-
-    let dispatchAdmission: DeviceAdmission | undefined;
-    let dispatchClaimed = false;
-    if (owner) {
-      owner.assertCurrent();
-      const request: DeviceConfirmationRequest = { nodeId: node.nodeId, nodeKind: node.nodeKind, nodeLabel: node.label,
-        capabilityId: descriptor.id, descriptor, reason: input.reason, input: input.input ?? {},
-        allowAlwaysOffered: isAllowAlwaysOffered(descriptor, policy), dispatchTimeoutMs: resolveDeviceRequestTimeoutMs(policy, input.timeoutMs), ...(input.sessionId ? { sessionId: input.sessionId } : {}) };
-      authority = grant ? 'existing-grant' : 'confirmed-once';
-      let decision = await owner.decide(request, grant, 'dispatch', !grant && request.allowAlwaysOffered);
-      if (decision.decision.outcome === 'revise' && !grant && request.allowAlwaysOffered) {
-        const grantDecision = await owner.decide(request, null, 'grant', false);
-        if (grantDecision.decision.outcome !== 'act') throw new Error('Jev refused durable device grant');
-        const grantAdmission = owner.admission(grantDecision);
-        grant = await this.grants.record({ nodeId: node.nodeId, nodeKind: node.nodeKind, capabilityId: descriptor.id,
-          scope: 'always', grantedBy: 'jev:device', beforePersist: () => grantAdmission.claim() });
-        owner.acceptOwnLedgerWrite(grant); authority = 'confirmed-always';
-        decision = await owner.decide(request, grant, 'dispatch', false);
-      }
-      if (decision.decision.outcome !== 'act') throw new Error('Jev declined the exact device dispatch');
-      const admitted = owner.admission(decision);
-      dispatchAdmission = { signal: admitted.signal, assertCurrent: admitted.assertCurrent,
-        claim() { admitted.claim(); dispatchClaimed = true; } };
-    } else {
-    if (grant) {
-      authority = 'existing-grant';
-
-    } else {
-      const allowAlwaysOffered = isAllowAlwaysOffered(descriptor, policy);
-      const response = await this.confirm({
         nodeId: node.nodeId,
-        nodeKind: node.nodeKind,
-        nodeLabel: node.label,
-        capabilityId: descriptor.id,
-        descriptor,
-        reason: input.reason,
-        input: input.input ?? {},
-        allowAlwaysOffered,
-        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-      });
-      if (response.decision === 'deny') {
-        return {
-          ok: false,
-          capabilityId: descriptor.id,
+        refusal: ended.signal.aborted ? 'disabled-by-config' : 'dispatch-failed',
+        detail: ended.signal.aborted && reason instanceof Error
+          ? reason.message
+          : 'The host is shutting down; the request was withdrawn before the phone picked it up.',
+      };
+    };
+
+    try {
+      if (policy.mode === 'honor-grants') {
+        grant = await this.grants.find({
           nodeId: node.nodeId,
-          refusal: 'denied-by-person',
-          detail: response.note?.trim() ? response.note.trim() : `${descriptor.title} was declined.`,
-        };
+          capabilityId: descriptor.id,
+          ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        });
       }
-      if (response.decision === 'always') {
-        if (!allowAlwaysOffered) {
-          // The prompt never offered it, so an 'always' answer is honoured for
-          // this request only, a durable grant is not written behind a policy
-          // that says it may not exist.
-          authority = 'confirmed-once';
-        } else {
+
+      if (grant) {
+        authority = 'existing-grant';
+      } else if (this.noGrantAuthority() === 'allow') {
+        authority = 'permissions-mode';
+      } else {
+        const allowAlwaysOffered = isAllowAlwaysOffered(descriptor, policy);
+        const response = await this.confirm({
+          nodeId: node.nodeId,
+          nodeKind: node.nodeKind,
+          nodeLabel: node.label,
+          capabilityId: descriptor.id,
+          descriptor,
+          reason: input.reason,
+          input: input.input ?? {},
+          allowAlwaysOffered,
+          ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        });
+        if (response.decision === 'deny') {
+          return {
+            ok: false,
+            capabilityId: descriptor.id,
+            nodeId: node.nodeId,
+            refusal: 'denied-by-person',
+            detail: response.note?.trim() ? response.note.trim() : `${descriptor.title} was declined by the owner.`,
+          };
+        }
+        const settled = refusedBySettings();
+        if (settled) return settled;
+        if (response.decision === 'always' && allowAlwaysOffered) {
           grant = await this.grants.record({
             nodeId: node.nodeId,
             nodeKind: node.nodeKind,
@@ -447,79 +483,80 @@ export class DeviceCapabilityService {
           });
           authority = 'confirmed-always';
         }
+        // An 'always' the prompt never offered is honoured for this request only:
+        // a durable grant is not written behind a policy that says it may not exist.
       }
-    }
 
-    }
-    owner?.assertCurrent();
-    const dispatched = await this.dispatcher.dispatch({
-      nodeId: node.nodeId,
-      capabilityId: descriptor.id,
-      input: { ...(input.input ?? {}), reason: input.reason },
-      timeoutMs: resolveDeviceRequestTimeoutMs(policy, input.timeoutMs),
-      ...(dispatchAdmission ? { admission: dispatchAdmission } : {}),
-    });
-    if (owner && !dispatchClaimed) throw new Error('Device transport did not claim its exact admission');
-    // From here the device has acted unless it failed. A revocation, a
-    // cancellation or an expired deadline still discards the result, but a
-    // failure to record it is not a refusal: a refusal tells the caller nothing
-    // happened, and it would repeat a photo, a notification or a link.
-    deviceActed = dispatched.ok;
-    // The ledger bytes are not re-compared here: another request's use of its
-    // own grant rewrites that file while this phone was answering, and that is
-    // not a change to this request's authority (revocations are tracked apart).
-    const stillCurrent = (): void => {
-      try { owner?.assertCurrent(false, true); } catch (error) { authorityEnded = true; throw error; }
-    };
-    stillCurrent();
-    if (!dispatched.ok) {
-      return {
-        ok: false,
-        capabilityId: descriptor.id,
-        nodeId: node.nodeId,
-        refusal: 'dispatch-failed',
-        detail: dispatched.error?.trim() ? dispatched.error.trim() : `${node.label} did not complete ${descriptor.title}.`,
-      };
-    }
-
-    let artifact: DeviceCaptureArtifact | undefined;
-    if (descriptor.producesArtifact && dispatched.bytes && dispatched.bytes.byteLength > 0) {
-      artifact = await this.artifacts.retain({
+      const before = refusedBySettings();
+      if (before) return before;
+      const dispatched = await this.dispatcher.dispatch({
         nodeId: node.nodeId,
         capabilityId: descriptor.id,
-        kind: descriptor.artifactKind,
-        mediaType: dispatched.mediaType ?? 'application/octet-stream',
-        bytes: dispatched.bytes,
-        ttlMs: Math.min(policy.captureRetentionMs, this.getPolicy().captureRetentionMs),
-        ...(owner ? { assertCurrent: stillCurrent } : {}),
-        ...(dispatched.workId ? { workId: dispatched.workId } : {}),
-        reason: input.reason,
+        input: { ...(input.input ?? {}), reason: input.reason },
+        timeoutMs: resolveDeviceRequestTimeoutMs(policy, input.timeoutMs),
+        admission: {
+          signal,
+          assertCurrent: () => { if (!claimed) signal.throwIfAborted(); },
+          claim: () => { signal.throwIfAborted(); claimed = true; },
+        },
       });
-    }
-
-    if (grant) {
-      // Usage bookkeeping must not turn a completed action into an error.
-      try { await this.grants.markUsed(grant.id); }
-      catch (error) { logger.warn('Device grant use could not be recorded', { grantId: grant.id, error: error instanceof Error ? error.message : String(error) }); }
-    }
-    return {
-      ok: true,
-      capabilityId: descriptor.id,
-      nodeId: node.nodeId,
-      authority,
-      ...(grant ? { grantId: grant.id } : {}),
-      ...(dispatched.data === undefined ? {} : { data: dispatched.data }),
-      ...(artifact ? { artifact } : {}),
-    };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Device ownership refused';
-      if (deviceActed && !authorityEnded) {
-        return { ok: false, nodeId: node.nodeId, capabilityId: descriptor.id, refusal: 'dispatch-failed',
-          detail: `${node.label} carried out ${descriptor.title}, but the result could not be recorded (${message}). Do not repeat the request without checking the device.` };
+      if (!dispatched.ok) {
+        return refusedBySettings() ?? {
+          ok: false,
+          capabilityId: descriptor.id,
+          nodeId: node.nodeId,
+          refusal: 'dispatch-failed',
+          detail: dispatched.error?.trim() ? dispatched.error.trim() : `${node.label} did not complete ${descriptor.title}.`,
+        };
       }
-      if (!this.autonomous) throw error;
-      return { ok: false, nodeId: input.nodeId, capabilityId: input.capabilityId, refusal: 'denied-by-jev',
-        detail: deviceActed ? `${message}. ${node.label} had already acted; its result was discarded.` : message };
-    } finally { owner?.close(); }
+
+      let artifact: DeviceCaptureArtifact | undefined;
+      if (descriptor.producesArtifact && dispatched.bytes && dispatched.bytes.byteLength > 0) {
+        try {
+          artifact = await this.artifacts.retain({
+            nodeId: node.nodeId,
+            capabilityId: descriptor.id,
+            kind: descriptor.artifactKind,
+            mediaType: dispatched.mediaType ?? 'application/octet-stream',
+            bytes: dispatched.bytes,
+            ttlMs: Math.min(policy.captureRetentionMs, this.getPolicy().captureRetentionMs),
+            ...(dispatched.workId ? { workId: dispatched.workId } : {}),
+            reason: input.reason,
+          });
+        } catch (error) {
+          // The device acted. A refusal would tell the caller nothing happened and
+          // invite a repeated photo, so the failure says what did happen.
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            ok: false,
+            nodeId: node.nodeId,
+            capabilityId: descriptor.id,
+            refusal: 'dispatch-failed',
+            detail: `${node.label} carried out ${descriptor.title}, but the capture could not be saved (${message}). Do not repeat the request without checking the device.`,
+          };
+        }
+      }
+
+      if (grant) {
+        // Usage bookkeeping must not turn a completed action into an error.
+        try { await this.grants.markUsed(grant.id); }
+        catch (error) { logger.warn('Device grant use could not be recorded', { grantId: grant.id, error: error instanceof Error ? error.message : String(error) }); }
+      }
+      return {
+        ok: true,
+        capabilityId: descriptor.id,
+        nodeId: node.nodeId,
+        authority,
+        ...(grant ? { grantId: grant.id } : {}),
+        ...(dispatched.data === undefined ? {} : { data: dispatched.data }),
+        ...(artifact ? { artifact } : {}),
+      };
+    } catch (error) {
+      const settled = refusedBySettings();
+      if (settled) return settled;
+      throw error;
+    } finally {
+      unsubscribe();
+    }
   }
 }

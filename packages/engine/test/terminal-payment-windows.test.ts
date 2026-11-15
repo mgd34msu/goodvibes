@@ -144,13 +144,14 @@ test.each(['approve', 'deny'] as const)('the selected %s is bound to the display
   const old = f.ui.selectionCallback;
   f.choose(action);
   old?.({ item: { id: action, label: 'Old callback' }, action: 'select' });
-  await until(() => !f.modal.active);
+  const said = action === 'approve' ? 'Approved purchase' : 'Denied purchase';
+  await until(() => f.messages.join(' ').includes(said));
   const mutations = f.requests.filter(request => request.headers.has('x-goodvibes-explicit-user-request'));
   expect(mutations).toHaveLength(1);
   expect(mutations[0]?.body).toEqual({ purchaseId: window.purchaseId, windowId: window.windowId, confirm: true });
   expect(mutations[0]?.url.origin).toBe('https://host-one.invalid');
-  expect(f.messages).toContain('[payments] Purchase-window answer accepted.');
   expect(f.messages.join(' ')).not.toContain('fixture-operator-bearer');
+  f.ui.handleEscape();
 });
 
 test('veto cancellation uses the cancel verb; Escape merely closes the local view', async () => {
@@ -158,8 +159,10 @@ test('veto cancellation uses the cancel verb; Escape merely closes the local vie
   expect(f.modal.items.map(item => item.id)).toEqual(['approve', 'cancel']);
   f.ui.handleEscape();
   expect(f.requests.filter(request => request.headers.has('x-goodvibes-explicit-user-request'))).toHaveLength(0);
-  await f.open(); f.choose('window-0'); f.choose('cancel'); await until(() => !f.modal.active);
+  await f.open(); f.choose('window-0'); f.choose('cancel');
+  await until(() => f.messages.join(' ').includes('Cancelled purchase'));
   expect(f.requests.filter(request => request.url.pathname.endsWith('/cancel'))).toHaveLength(1);
+  f.ui.handleEscape();
 });
 
 test.each(['host', 'environment', 'credential-restoration', 'configuration'] as const)('%s changes retire an old choice without retargeting it', async change => {
@@ -183,7 +186,7 @@ test('a changed live principal cannot consume the saved window, and server confl
   await until(() => !stale.modal.active);
   expect(stale.requests.filter(request => request.headers.has('x-goodvibes-explicit-user-request'))).toHaveLength(1);
   expect(stale.messages.join(' ')).not.toContain('private transport diagnostic');
-  expect(stale.messages).not.toContain('[payments] Purchase-window answer accepted.');
+  expect(stale.messages.join(' ')).not.toContain('Approved purchase');
 });
 
 test('terminal exit cancels an accepted read even when its transport ignores the signal', async () => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from '../../helpers/project-temp.ts';
 import {
@@ -7,7 +7,6 @@ import {
   writeOnboardingAcknowledgementState,
 } from '@/runtime/onboarding/state.ts';
 import type { OnboardingShellPaths } from '@/runtime/onboarding/types.ts';
-import { createOnboardingStateStorage } from '@goodvibes-jev/engine/terminal-shell/onboarding-state';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -136,8 +135,8 @@ describe('onboarding state', () => {
   // ── merging successive writes ───────────────────────────────────────────
   //
   // These run one write after another in one process, so they prove the merge
-  // (a write keeps the keys already in the file), not exclusion. Exclusion
-  // between writers is the lock tests below.
+  // (a write keeps the keys already in the file), not exclusion between
+  // processes, which the kernel-released process lock provides.
 
   test('a write to another target keeps the acknowledgement already stored', () => {
     writeOnboardingAcknowledgementState(shellPaths, {
@@ -163,73 +162,5 @@ describe('onboarding state', () => {
     const result = readOnboardingRuntimeState(shellPaths);
     // Last writer wins on same key.
     expect(result.payload!.acknowledgements['providers']).toBe(false);
-  });
-
-  // ── lock primitive tests ────────────────────────────────────────────────
-
-  test('stale lockfile is taken over and write succeeds', () => {
-    // Write an initial ack so there is a state file to lock against.
-    writeOnboardingAcknowledgementState(shellPaths, {
-      target: 'providers', acknowledged: true, source: 'setup',
-    });
-
-    // Create the lockfile and backdate its mtime by 6s (> LOCK_STALE_MS=5s).
-    const stateDir = join(tmpDir, 'project', 'tui');
-    const lockPath = join(stateDir, 'onboarding-state.json.lock');
-    const fd = openSync(lockPath, 'wx');
-    closeSync(fd);
-    const staleTs = new Date(Date.now() - 6_000);
-    utimesSync(lockPath, staleTs, staleTs);
-
-    // Despite the lockfile existing, writeOnboardingAcknowledgementState must
-    // take over the stale lock and complete successfully.
-    writeOnboardingAcknowledgementState(shellPaths, {
-      target: 'subscriptions', acknowledged: true, source: 'stale-lock-test',
-    });
-
-    const result = readOnboardingRuntimeState(shellPaths);
-    expect(result.payload!.acknowledgements['subscriptions']).toBe(true);
-    // Stale lock should have been removed (or replaced and released).
-    expect(existsSync(lockPath)).toBe(false);
-  });
-
-  test('a lock that stays held is waited for, then the write proceeds and leaves the holder\'s lock alone', () => {
-    const stateDir = join(tmpDir, 'project', 'tui');
-    mkdirSync(stateDir, { recursive: true });
-    const lockPath = join(stateDir, 'onboarding-state.json.lock');
-    writeFileSync(lockPath, 'another-process-token');
-    let sleeps = 0;
-    // A clock that never advances keeps the holder's lock fresh, so the wait
-    // runs out without any real time passing.
-    const storage = createOnboardingStateStorage('tui', { now: () => 0, sleep: () => { sleeps += 1; } });
-
-    const record = storage.writeOnboardingAcknowledgementState(shellPaths, {
-      target: 'auth', acknowledged: true, source: 'degraded-path-test',
-    });
-
-    // It waited between attempts rather than spinning through them.
-    expect(sleeps).toBeGreaterThan(1);
-    expect(record.payload!.acknowledgements['auth']).toBe(true);
-    expect(readFileSync(lockPath, 'utf8')).toBe('another-process-token');
-  });
-
-  test('a lock another writer took over while this one worked is not removed on release', () => {
-    const stateDir = join(tmpDir, 'project', 'tui');
-    const lockPath = join(stateDir, 'onboarding-state.json.lock');
-    // The workspace root is read inside the locked read-modify-write, which is
-    // where a slow writer finds its stale lock replaced by a new owner's.
-    const takenOver: OnboardingShellPaths = {
-      ...shellPaths,
-      get workingDirectory(): string {
-        writeFileSync(lockPath, 'the-new-owner');
-        return tmpDir;
-      },
-    };
-
-    writeOnboardingAcknowledgementState(takenOver, {
-      target: 'providers', acknowledged: true, source: 'slow-writer',
-    });
-
-    expect(readFileSync(lockPath, 'utf8')).toBe('the-new-owner');
   });
 });

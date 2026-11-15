@@ -24,11 +24,10 @@
  * never missing when that switch flips.
  */
 import type { Notification, RoutingDecision } from './types.js';
-import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 export interface NotificationFeedEntry {
-    /** Raw notice is visible while semantic severity remains unclassified. */
+    /** Never set: every notice arrives with its writer's level. Kept until the toast center stops reading it. */
     readonly severityPending?: boolean | undefined;
     readonly key: string;
     readonly domain: string;
@@ -76,13 +75,9 @@ export type NoticeInput = {
     readonly restored?: boolean | undefined;
     /** The runtime event this notice restates (the platform's runtimeEventOfNotice key), if any. */
     readonly eventKey?: string | undefined;
-} & ({
-    readonly severityPending: true;
-    readonly level?: undefined | undefined;
-} | {
-    readonly severityPending?: false | undefined;
+    /** The level the notice's writer gave it. */
     readonly level: Notification['level'];
-});
+};
 /** Domains whose notifications are about something the Agents modal shows. */
 const AGENT_DOMAINS: ReadonlySet<string> = new Set(['agents', 'tasks', 'workflows', 'automation', 'wrfc', 'orchestration', 'plan']);
 /** The view a notification is about, or undefined. */
@@ -130,18 +125,6 @@ const COLLAPSING_REASON_CODES: ReadonlySet<RoutingDecision['reasonCode']> = new 
     'batch_window_collapsed',
 ]);
 export class NotificationFeed {
-    private noticePublications = new AbortController();
-    /** A cleared history cannot be repopulated by an older pending reading. */
-    captureNoticePublication(): {
-        readonly signal: AbortSignal;
-        readonly assertCurrent: () => void;
-    } {
-        const controller = this.noticePublications;
-        return { signal: controller.signal, assertCurrent: () => {
-                if (controller.signal.aborted || controller !== this.noticePublications)
-                    throw new JudgmentAuthorityRetiredError();
-            } };
-    }
     private readonly entries = new Map<string, NotificationFeedEntry>();
     /** Insertion order of `entries` keys (oldest first), for bounded eviction. */
     private order: string[] = [];
@@ -232,8 +215,6 @@ export class NotificationFeed {
      */
     recordNotice(input: NoticeInput): NotificationFeedEntry {
         if (input.eventKey) {
-            // A notice whose severity is still pending folds too: it is the same
-            // event, and a second row would orphan the first.
             const folded = this.foldEvent(input.eventKey, { level: input.level, body: input.body, timestamp: input.timestamp, fromNotice: true, restored: input.restored === true });
             if (folded)
                 return folded;
@@ -247,7 +228,6 @@ export class NotificationFeed {
             body: input.body,
             timestamp: input.timestamp,
             reasonCode: 'system_notice',
-            ...(input.severityPending ? { severityPending: true } : {}),
             collapsedCount: 1,
             subject: AGENT_DOMAINS.has(input.domain) ? 'agents' : undefined,
             toast: input.restored ? 'never' : 'always',
@@ -349,13 +329,6 @@ export class NotificationFeed {
         this.entries.set(key, entry);
         this.emitChange();
     }
-    /** A delayed reading may only decorate the exact notice still in this feed. */
-    settleNoticeSeverity(entry: NotificationFeedEntry, level: Notification['level']): void {
-        if (this.entries.get(entry.key) !== entry || !entry.severityPending)
-            return;
-        this.entries.set(entry.key, { ...entry, level, severityPending: false });
-        this.emitChange();
-    }
     /** Every entry, most recently updated first. */
     list(): readonly NotificationFeedEntry[] {
         const items: NotificationFeedEntry[] = [];
@@ -367,9 +340,6 @@ export class NotificationFeed {
         return items.reverse();
     }
     clear(): void {
-        const previous = this.noticePublications;
-        this.noticePublications = new AbortController();
-        previous.abort();
         this.entries.clear();
         this.groupTitles.clear();
         this.eventEntries.clear();

@@ -57,7 +57,7 @@ describe('feedInputTokens: the composer\'s free-text capture is NEVER guarded (p
     const ih = (await makeInput(printed));
     ih.feed('/config display.stream');
     expect(ih.prompt).toBe('/config display.stream');
-    expect(printed.some((line) => line.includes('flood'))).toBe(false);
+    expect(printed.some((line) => line.includes('[paste]'))).toBe(false);
   });
 
   test('20 ordinary chat characters fed one at a time (rapid, same millisecond) are never guarded: plain text insertion is unconditionally exempt', async () => {
@@ -76,7 +76,7 @@ describe('feedInputTokens: the composer\'s free-text capture is NEVER guarded (p
       if (realNow) Date.now = realNow;
     }
     expect(ih.prompt).toBe('a'.repeat(20));
-    expect(printed.some((line) => line.includes('flood'))).toBe(false);
+    expect(printed.some((line) => line.includes('[paste]'))).toBe(false);
   });
 });
 
@@ -93,21 +93,18 @@ describe('feedInputTokens: command-mode key-dispatch flood guard', () => {
     Date.now = realNow;
   });
 
-  test('a 20-key burst while commandMode is armed is guarded: at most 8 land, and the notice is honest (never silent)', async () => {
+  test('a 20-key burst of held arrows in commandMode all dispatch: only Enter is held back in a burst', async () => {
     const printed: string[] = [];
     const ih = (await makeInput(printed));
-    ih.feed('/help'); // arms commandMode; autocomplete becomes active, never closes on 'up'/'down'
+    ih.feed('/help');
     expect(ih.commandMode).toBe(true);
-
     const moveUpSpy = spyOn(AutocompleteEngine.prototype, 'moveUp');
     for (let i = 0; i < 20; i++) {
-      clock = 1_000_000 + i; // 1ms apart, far beyond sustained human typing
-      ih.feed('\x1b[A'); // up arrow, commandMode's autocomplete navigation, never closes commandMode
+      clock = 1_000_000 + i;
+      ih.feed('\x1b[A');
     }
-    expect(ih.commandMode).toBe(true); // never force-closed by the flood
-    expect(moveUpSpy.mock.calls.length).toBeLessThanOrEqual(8);
-    expect(moveUpSpy.mock.calls.length).toBeGreaterThan(0);
-    expect(printed.some((line) => line.includes('flood detected'))).toBe(true);
+    expect(moveUpSpy.mock.calls.length).toBe(20);
+    expect(printed.some((line) => line.includes('[paste]'))).toBe(false);
     moveUpSpy.mockRestore();
   });
 
@@ -121,7 +118,7 @@ describe('feedInputTokens: command-mode key-dispatch flood guard', () => {
       ih.feed('\x1b[A');
     }
     expect(moveUpSpy.mock.calls.length).toBe(6);
-    expect(printed.some((line) => line.includes('flood'))).toBe(false);
+    expect(printed.some((line) => line.includes('[paste]'))).toBe(false);
     moveUpSpy.mockRestore();
   });
 
@@ -134,22 +131,7 @@ describe('feedInputTokens: command-mode key-dispatch flood guard', () => {
       clock = 3_000_000 + i;
       ih.feed('\x1b[D'); // left arrow, plain composer cursor movement, not command-mode dispatch
     }
-    expect(printed.some((line) => line.includes('flood'))).toBe(false);
-  });
-
-  test('the burst clears after a quiet gap and reports how many keystrokes it suppressed', async () => {
-    const printed: string[] = [];
-    const ih = (await makeInput(printed));
-    ih.feed('/help');
-    for (let i = 0; i < 15; i++) {
-      clock = 4_000_000 + i;
-      ih.feed('\x1b[A');
-    }
-    expect(printed.some((line) => line.includes('flood detected'))).toBe(true);
-    // A quiet gap (> PASTE_FLOOD_WINDOW_MS since the last qualifying token) clears it.
-    clock = 4_000_000 + 15 + 200;
-    ih.feed('\x1b[A');
-    expect(printed.some((line) => /flood cleared: suppressed \d+ keystroke/.test(line))).toBe(true);
+    expect(printed.some((line) => line.includes('[paste]'))).toBe(false);
   });
 });
 

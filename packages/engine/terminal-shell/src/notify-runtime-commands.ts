@@ -82,25 +82,25 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
             return;
           }
           if (!parsed.yes) {
-            requireYesFlag(ctx, `add webhook notification URL ${url}`, `/notify add <url>${suffix}`);
+            requireYesFlag(ctx, `add webhook notification URL ${shownUrl(url)}`, `/notify add <url>${suffix}`);
             return;
           }
           let target: URL;
           try {
             target = new URL(url);
           } catch {
-            ctx.print(`Invalid URL: ${url}`);
+            ctx.print(`Nothing was added: that is not a URL. Give the full address, for example https://ntfy.sh/my-topic.`);
             return;
           }
           if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-            ctx.print(`Invalid URL (only http and https webhooks can be delivered): ${url}`);
+            ctx.print(`Nothing was added: ${target.protocol} addresses cannot be delivered to; use an http or https webhook URL.`);
             return;
           }
           // Delivery refuses these hosts, so a stored URL for one would only ever fail silently.
           const hostname = extractHostname(url);
           const trust = hostname === null ? null : classifyHostTrustTier(hostname);
           if (trust !== null && (trust.tier === 'blocked' || trust.tier === 'localhost')) {
-            ctx.print(`Refusing to add a webhook that delivery would block (${trust.reason}): ${url}`);
+            ctx.print(`Nothing was added: delivery never sends to ${shownUrl(url)} (${trust.reason}). Use a public http or https webhook URL.`);
             return;
           }
           if (urls.includes(url)) {
@@ -192,9 +192,10 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           }
           notifier.setUrls(urls);
           const result = await notifier.send(message);
+          const reached = result.failed === 0 ? 'Notification sent' : result.delivered === 0 ? 'Notification not delivered' : 'Notification partly delivered';
           ctx.print(
             [
-              'Notification sent',
+              `${reached}: delivered to ${result.delivered} of ${result.attempted} target${result.attempted === 1 ? '' : 's'}`,
               `  attempted ${result.attempted}`,
               `  delivered ${result.delivered}`,
               `  failed ${result.failed}`,

@@ -1,12 +1,11 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** System notices retain their full text in saved conversation history.
  * Declared runtime occurrences publish immediately and deduplicate with the bus.
  * Every other notice publishes at the level its writer stored on it (information
- * when it stored none); no model reads a notice.
+ * when it stored none); no model reads a notice, and nothing screens its text.
+ * Publication is synchronous: the entry is recorded in the same call that
+ * received the notice, so there is no later point at which it could be stale.
  * Restored notices enter history without another toast.
  */
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { JudgmentAuthorityRetiredError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { runtimeEventOfNotice, type RuntimeEventProvenance } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import type { NotificationFeed } from '@goodvibes-jev/engine/platform/platform/runtime/notification-feed';
 import type { NoticeMeta } from '@goodvibes-jev/engine/platform/platform/core';
@@ -36,7 +35,11 @@ export function noticeParts(text: string): NoticeParts {
   const rest = newline < 0 ? '' : trimmed.slice(newline + 1).replace(/^\n+/, '');
   return { domain, title, body: rest.length > 0 ? rest : undefined };
 }
-export interface NoticeOptions extends Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> {
+export interface NoticeOptions {
+  /** An aborted signal means the conversation that sent the notice is gone: nothing is recorded. */
+  readonly signal?: AbortSignal | undefined;
+  /** Accepted for the sink's shape; publication is synchronous, so it is not consulted. */
+  readonly assertCurrent?: (() => void) | undefined;
   /** Restored from a saved session: kept in history, not toasted. */
   readonly restored?: boolean | undefined;
   readonly now?: (() => number) | undefined;
@@ -61,47 +64,20 @@ export interface NoticePublicationPolicy {
           }
         | undefined)
     | undefined;
-  readonly screenBeforeLocalPublication: boolean;
 }
 export function createNoticePublisher(policy: NoticePublicationPolicy) {
-  return function publishNotice(feed: NotificationFeed, text: string, options: NoticeOptions = {}): void | Promise<void> {
-    if (text.trim().length === 0) return;
-    if (policy.screenBeforeLocalPublication) {
-      try {
-        snapshotJudgmentInput({ text });
-      } catch (error) {
-        return Promise.reject(error);
-      }
-    }
+  return function publishNotice(feed: NotificationFeed, text: string, options: NoticeOptions = {}): void {
+    if (text.trim().length === 0 || options.signal?.aborted) return;
     const restored = options.restored === true;
-    const assertCallerCurrent = options.assertCurrent;
-    const callerSignal = options.signal;
     const runtimeEvent = options.runtimeEvent;
-    const now = options.now ?? Date.now;
+    const timestamp = (options.now ?? Date.now)();
     const parts = noticeParts(text);
-    const publication = feed.captureNoticePublication();
-    const signal = callerSignal ? AbortSignal.any([publication.signal, callerSignal]) : publication.signal;
-    const current = () => {
-      if (signal.aborted) throw new JudgmentAuthorityRetiredError();
-      publication.assertCurrent();
-      const result: unknown = assertCallerCurrent?.();
-      if (result !== undefined) {
-        drainOwned(result);
-        throw new JudgmentAuthorityRetiredError();
-      }
-      publication.assertCurrent();
-      if (signal.aborted) throw new JudgmentAuthorityRetiredError();
-    };
-    current();
-    const timestamp = now();
-    current();
     const event = policy.resolveEvent
       ? policy.resolveEvent(text, runtimeEvent)
       : runtimeEvent
         ? runtimeEventOfNotice(text, runtimeEvent)
         : undefined;
     if (event && (policy.resolveEvent || event.type === runtimeEvent?.type)) {
-      current();
       feed.recordNotice({
         domain: parts.domain,
         level: event.level,

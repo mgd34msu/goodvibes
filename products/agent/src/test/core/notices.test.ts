@@ -109,9 +109,8 @@ describe('system notices become toasts and history entries', () => {
   });
 
   test('a multi-line notice keeps every line: the first is the title, the rest the body', () => {
-    const parts = noticeParts("[Agents] Cohort 'a' complete: 1 completed, 1 failed, 0 cancelled (2 total)\n  ✓ aaaa: completed in 3s (2 tool calls)\n  ✗ bbbb: failed in 5s (1 tool calls) — boom", 'warning');
+    const parts = noticeParts("[Agents] Cohort 'a' complete: 1 completed, 1 failed, 0 cancelled (2 total)\n  ✓ aaaa: completed in 3s (2 tool calls)\n  ✗ bbbb: failed in 5s (1 tool calls) — boom");
     expect(parts.domain).toBe('agents');
-    expect(parts.level).toBe('warning');
     expect(parts.title).toBe("[Agents] Cohort 'a' complete: 1 completed, 1 failed, 0 cancelled (2 total)");
     expect(parts.body).toBe('  ✓ aaaa: completed in 3s (2 tool calls)\n  ✗ bbbb: failed in 5s (1 tool calls) — boom');
   });

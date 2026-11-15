@@ -7,38 +7,38 @@
 import type { ProfileInfo, ProfileData, ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { CONFIG_SCHEMA, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-/** Known display setting keys (subset of ConfigKey that maps to display.*). */
-const DISPLAY_KEYS: ConfigKey[] = [
-  'display.stream',
-  'display.lineNumbers',
-  'display.collapseThreshold',
-  'display.theme',
-  'display.showThinking',
-  'display.showReasoningSummary',
-  'display.showTokenSpeed',
-  'display.showToolPreview',
-] as const;
 /**
- * Known behavior setting keys (subset of ConfigKey that maps to behavior.*).
- * Approval behaviour (`autoApprove`, `hitlMode`) is deliberately absent: a
- * profile from another host must not change what runs without asking.
+ * Approval behaviour (`autoApprove`, `hitlMode`) is never carried: a profile
+ * from another host must not change what runs without asking.
  */
-const BEHAVIOR_KEYS: ConfigKey[] = [
-  'behavior.autoCompactThreshold',
-  'behavior.saveHistory',
-  'behavior.notifyOnComplete',
-] as const;
+const NOT_IN_PROFILES: ReadonlySet<string> = new Set(['behavior.autoApprove', 'behavior.hitlMode']);
+/**
+ * The settings a profile carries, from the schema: every `display.<name>` and
+ * `behavior.<name>` setting except the approval ones. Saving and loading read
+ * this one list, so whatever is saved is what a load restores.
+ */
+function profileKeys(section: 'display' | 'behavior'): readonly ConfigKey[] {
+  return CONFIG_SCHEMA
+    .map((setting) => setting.key)
+    .filter((key) => key.startsWith(`${section}.`) && key.split('.').length === 2 && !NOT_IN_PROFILES.has(key));
+}
+const DISPLAY_KEYS = profileKeys('display');
+const BEHAVIOR_KEYS = profileKeys('behavior');
 interface ProfileApplyOutcome {
   readonly applied: string[];
   readonly failed: string[];
+  /** Keys in the file that a profile does not carry (older or newer release, or approval settings). */
+  readonly skipped: string[];
 }
 /**
  * Apply a profile data category to the config manager.
  * Iterates only known/valid keys rather than open-ended Object.entries.
  */
-function applyProfileCategory(cm: ConfigManager, data: object, keys: ConfigKey[], outcome: ProfileApplyOutcome): void {
+function applyProfileCategory(cm: ConfigManager, section: 'display' | 'behavior', data: object, keys: readonly ConfigKey[], outcome: ProfileApplyOutcome): void {
+  const known = new Set(keys.map((key) => key.split('.')[1]));
+  for (const field of Object.keys(data)) if (!known.has(field)) outcome.skipped.push(`${section}.${field}`);
   for (const key of keys) {
     const field = key.split('.')[1];
     if (field && Object.prototype.hasOwnProperty.call(data, field)) {
@@ -152,10 +152,10 @@ export class ProfilePickerModal {
         this.statusMessage = refusal;
         return false;
       }
-      const outcome: ProfileApplyOutcome = { applied: [], failed: [] };
+      const outcome: ProfileApplyOutcome = { applied: [], failed: [], skipped: [] };
       // Apply display settings using validated key list
       if (data.display) {
-        applyProfileCategory(configManager, data.display, DISPLAY_KEYS, outcome);
+        applyProfileCategory(configManager, 'display', data.display, DISPLAY_KEYS, outcome);
       }
       // Apply provider settings (model + reasoningEffort only)
       if (data.provider) {
@@ -180,7 +180,7 @@ export class ProfilePickerModal {
       }
       // Apply behavior settings using validated key list
       if (data.behavior) {
-        applyProfileCategory(configManager, data.behavior, BEHAVIOR_KEYS, outcome);
+        applyProfileCategory(configManager, 'behavior', data.behavior, BEHAVIOR_KEYS, outcome);
       }
       if (outcome.failed.length > 0) {
         // Nothing applied means nothing to persist; a partial load keeps what did apply.
@@ -190,7 +190,8 @@ export class ProfilePickerModal {
         return false;
       }
       configManager.save();
-      this.statusMessage = `${this.policy.loadedPrefix ?? 'Loaded profile: '}${profile.name}`;
+      const skipped = outcome.skipped.length > 0 ? ` (not applied, this release does not take them from a profile: ${outcome.skipped.join(', ')})` : '';
+      this.statusMessage = `${this.policy.loadedPrefix ?? 'Loaded profile: '}${profile.name}${skipped}`;
       return true;
     } catch (e) {
       this.statusMessage = `${this.policy.errorPrefix ?? 'Error: '}${summarizeError(e)}`;
@@ -255,15 +256,15 @@ export class ProfilePickerModal {
       return false;
     }
     try {
-      const all = configManager.getAll();
-      const { autoApprove: _autoApprove, hitlMode: _hitlMode, ...behavior } = all.behavior;
+      const section = (keys: readonly ConfigKey[]): Record<string, unknown> =>
+        Object.fromEntries(keys.map((key) => [key.split('.')[1]!, configManager.get(key)]));
       const data: ProfileData = {
-        display: { ...all.display },
+        display: section(DISPLAY_KEYS) as unknown as NonNullable<ProfileData['display']>,
         provider: {
-          model: all.provider.model,
-          reasoningEffort: all.provider.reasoningEffort,
+          model: configManager.get('provider.model'),
+          reasoningEffort: configManager.get('provider.reasoningEffort'),
         },
-        behavior,
+        behavior: section(BEHAVIOR_KEYS) as unknown as NonNullable<ProfileData['behavior']>,
       };
       this.profileManager.save(name, data);
       // Reload list

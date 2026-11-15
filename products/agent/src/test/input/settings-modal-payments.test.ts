@@ -68,7 +68,7 @@ describe('SettingsModal payments category (no connected host: local fallback)', 
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test('the payments category exists, is navigable, and lists every payments.* key including the four card-material fields', () => {
+  test('the payments category exists, is navigable, and lists every payments.* setting and one pointer to /payments card, with no card-material field', () => {
     expect(SETTINGS_CATEGORIES).toContain('payments');
     while (modal.currentCategory !== 'payments') modal.nextCategory();
     const keys = modal.currentItems.map((entry): string => entry.setting.key);
@@ -107,16 +107,8 @@ describe('SettingsModal payments category (no connected host: local fallback)', 
       'payments.shippingAddress.region',
       'payments.windows.approvalMinutes',
       'payments.windows.vetoMinutes',
-      // Synthetic card-material keys, injected by the modal (input/payments-config.ts).
-      // CONFIG_SCHEMA deliberately declares none of these: card material lives
-      // write-only in the daemon secret store and config holds only a
-      // goodvibes:// reference. They are listed here so the person at the
-      // terminal gets a visible set / not-set row and a masked edit path; the
-      // primary entry point is the guided `/payments card` flow.
-      'payments.cardCvv',
-      'payments.cardExpiry',
-      'payments.cardNumber',
-      'payments.cardholderName',
+      // Cards are not settings: one locked row points to /payments card.
+      'payments.cardsOnFile',
     ].sort());
   });
 

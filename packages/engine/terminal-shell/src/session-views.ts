@@ -250,24 +250,22 @@ export class SessionViews implements SessionViewControls {
                 this.steers.splice(i, 1);
         return ended;
     }
-    /** Read new process output; true when anything arrived. */
+    /** Read new process output; true when anything arrived. Only the process whose view is open gets a model reading. */
     poll(): boolean {
         const records = new Map<string, {
             stdout: readonly string[];
             stderr: readonly string[];
             done: boolean;
             identity: string;
+            failed: boolean;
         }>();
         for (const p of this.deps.processManager.list()) {
             const rec = this.deps.processManager.getStatus(p.id);
             if (rec)
-                records.set(p.id, { stdout: rec.stdout, stderr: rec.stderr, done: rec.done, identity: `${rec.pid}:${rec.startTime}` });
+                records.set(p.id, { stdout: rec.stdout, stderr: rec.stderr, done: rec.done, identity: `${rec.pid}:${rec.startTime}`, failed: rec.done && processMark(rec) === 'err' });
         }
-        return this.log.poll(records, this.now(), (id, captured, phase) => {
-            const current = this.deps.processManager.getStatus(id);
-            if (!current || current.stdout !== captured.stdout || current.stderr !== captured.stderr || (phase === 'generation' && current.done !== captured.done) || `${current.pid}:${current.startTime}` !== captured.identity)
-                throw new Error('Process output source is no longer current');
-        });
+        const current = this.focus.current;
+        return this.log.poll(records, this.now(), current.kind === 'process' ? current.id : undefined);
     }
     // ── SessionViewControls ────────────────────────────────────────────────────
     get kind(): 'main' | 'agent' | 'process' { return this.focus.current.kind; }

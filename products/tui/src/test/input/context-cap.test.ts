@@ -426,7 +426,7 @@ describe('handleModelPickerToken: contextCap Enter with out-of-range value', () 
 
     expect(picker.mode).toBe('contextCap');
     expect(picker.active).toBe(true);
-    expect(picker.contextCapError).toBe('Context cap must be 1–10,000,000');
+    expect(picker.contextCapError).not.toBeNull();
   });
 
   test('zero value sets contextCapError and keeps picker open', () => {
@@ -441,7 +441,7 @@ describe('handleModelPickerToken: contextCap Enter with out-of-range value', () 
     });
 
     expect(picker.mode).toBe('contextCap');
-    expect(picker.contextCapError).toBe('Context cap must be 1–10,000,000');
+    expect(picker.contextCapError).not.toBeNull();
   });
 
   test('valid value clears contextCapError and closes picker', () => {

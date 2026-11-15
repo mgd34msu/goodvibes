@@ -139,7 +139,7 @@ export class ModelPickerModal {
   public pinnedIds: Set<string> = new Set();
   /** Counts local pin flips, so a slow load of the stored pins can tell it is out of date. */
   public pinEdits = 0;
-  /** IDs of recently used models, shown after pinned, before the rest. */
+  /** Registry keys of recently used models, shown after pinned, before the rest. */
   public recentIds: string[] = [];
   /** Benchmark score sort order. */
   public benchmarkSort: BenchmarkSort = 'none';
@@ -323,7 +323,10 @@ export class ModelPickerModal {
     this.capabilityFilter = 'none';
     if (this.presentation.resetAvailabilityOnOpen) this.availableOnly = true;
     const filtered = this.getFilteredModels();
-    const idx = filtered.findIndex((m) => m.id === currentModelId);
+    // The session names its model by registry key (`provider:id`); a bare id is
+    // ambiguous across providers and only stands in when no key matches.
+    let idx = filtered.findIndex((m) => m.registryKey === currentModelId);
+    if (idx < 0 && !currentModelId.includes(':')) idx = filtered.findIndex((m) => m.id === currentModelId);
     this.selectedIndex = idx >= 0 ? idx : 0;
     this.scrollOffset = 0;
   }

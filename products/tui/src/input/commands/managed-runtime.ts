@@ -3,7 +3,6 @@ import { dirname, resolve } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { profileDataToConfigSnapshot } from '@goodvibes-jev/engine/platform/platform/profiles';
 import { CONFIG_SCHEMA, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ManagedSettingsBundle } from '@/runtime/index.ts';
 import {
@@ -35,14 +34,6 @@ function buildConfigSnapshot(
     }
   }
   return snapshot;
-}
-
-/** The session's model fields mirror three config keys; refresh them after any change to the config. */
-function syncRuntimeMirror(ctx: CommandContext): void {
-  const config = ctx.platform.configManager;
-  ctx.session.runtime.model = String(config.get('provider.model'));
-  ctx.session.runtime.provider = getProviderIdFromModel(config.get('provider.model'));
-  ctx.session.runtime.reasoningEffort = config.get('provider.reasoningEffort') as string;
 }
 
 function splitKeyArguments(values: readonly string[]): { requestedKeys: ConfigKey[]; invalidKeys: string[] } {
@@ -228,7 +219,6 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
         }
         try {
           const result = await applyStagedManagedBundle(ctx.platform.configManager, requestedKeys);
-          syncRuntimeMirror(ctx);
           ctx.print(`Staged managed settings applied (${result.appliedCount} changes, rollback ${result.rollbackToken}${result.remainingCount > 0 ? `, ${result.remainingCount} still staged` : ''}).`);
         } catch (error) {
           recordSettingsSyncFailure('managed', summarizeError(error), controlPlaneConfigDir);
@@ -245,7 +235,6 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
         }
         try {
           const restored = rollbackManagedApply(ctx.platform.configManager, token);
-          syncRuntimeMirror(ctx);
           ctx.print(`Managed rollback ${token} restored ${restored} setting(s).`);
         } catch (error) {
           recordSettingsSyncFailure('managed', summarizeError(error), controlPlaneConfigDir);
@@ -289,7 +278,6 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
         }
 
         const result = await applyStagedManagedBundle(ctx.platform.configManager, keyArguments.requestedKeys);
-        syncRuntimeMirror(ctx);
         ctx.print(`Managed settings bundle applied from ${sourcePath} (${result.appliedCount} changes, risk=${stage.risk}, rollback ${result.rollbackToken}${result.remainingCount > 0 ? `, ${result.remainingCount} still staged` : ''}).${ignoredNote}`);
       } catch (error) {
         recordSettingsSyncFailure('managed', summarizeError(error), controlPlaneConfigDir);

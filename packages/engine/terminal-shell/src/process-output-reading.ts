@@ -1,9 +1,11 @@
 import { captureJudgmentPort, decisionModelPolicyState, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { processOutputError, processOutputEndpoint } from './batteries/process-output.js';
+import { processOutputError } from './batteries/process-output.js';
 import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 export const PROCESS_OUTPUT_READING_LIMITS = { questions: 64, concurrency: 4, endpointCandidates: 256 } as const;
+/** Lines before a page's first target sent with that page as context. */
+const PROCESS_OUTPUT_PAGE_CONTEXT_LINES = 16;
 export interface ProcessOutputEvidenceLine { readonly id: string; readonly text: string; readonly raw: string; readonly stream: 'stdout' | 'stderr'; }
 export interface ProcessEndpointCandidate { readonly id: string; readonly lineId: string; readonly start: number; readonly end: number; readonly port: number; }
 export interface ProcessOutputEvidence {
@@ -39,7 +41,10 @@ function captureEvidence(evidence: ProcessOutputEvidence, lineIds: readonly stri
   return { evidence: { lines, partials: { stdout: source.partials.stdout, stderr: source.partials.stderr }, done: source.done }, lineIds: targets };
 }
 
-/** Literal integer spans are candidates, never semantic port announcements. */
+/**
+ * Literal integer spans in output. The log finds a listening port with one
+ * anchored pattern (`listeningPortOf`), so nothing asks a model about these.
+ */
 export function processEndpointCandidates(lines: readonly ProcessOutputEvidenceLine[]): readonly ProcessEndpointCandidate[] | undefined {
   const candidates: ProcessEndpointCandidate[] = [];
   for (const line of lines) for (const match of line.text.matchAll(/(?<![\w.+-])\d{1,5}(?![\w.])/g)) {
@@ -54,64 +59,50 @@ export function processEndpointCandidates(lines: readonly ProcessOutputEvidenceL
 export async function readProcessOutput(evidence: ProcessOutputEvidence, lineIds: readonly string[], options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> & { readonly authoritySignal: AbortSignal }): Promise<ProcessOutputReading> {
   return decisionOrClassic(() => readDecisionProcessOutput(evidence, lineIds, options), () => {
     const captured = captureEvidence(evidence, lineIds);
-    const revision = JSON.stringify(captured);
     const authorityCurrent = () => { options.authoritySignal.throwIfAborted(); decisionModelPolicyState(); };
-    const current = () => {
-      authorityCurrent(); options.signal?.throwIfAborted(); options.assertCurrent?.();
-      if (JSON.stringify(captureEvidence(evidence, lineIds)) !== revision) throw new Error('Process output changed during Classic observation');
-    };
+    const current = () => { authorityCurrent(); options.signal?.throwIfAborted(); options.assertCurrent?.(); };
     current();
-    // Raw output stays visible. No unknown line is called an error and no
-    // numeric span is advertised as a server endpoint without that evidence.
+    // Raw output stays visible. No unknown line is called an error without that evidence.
     return { provenance: 'classic' as const, errors: new Map(captured.lineIds.map(id => [id, undefined])), port: undefined,
       assertCurrent: current, assertAuthorityCurrent: authorityCurrent, recordPublication: current };
   });
 }
 async function readDecisionProcessOutput(evidence: ProcessOutputEvidence, lineIds: readonly string[], options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> & { readonly authoritySignal: AbortSignal }): Promise<ProcessOutputReading> {
-  // Screen complete retained raw evidence before stripping controls or capturing authority.
+  // One screening of the evidence as given; nothing is copied twice.
   const captured = captureEvidence(evidence, lineIds);
   const source = captured.evidence;
-  const candidates = processEndpointCandidates(source.lines);
-  const state = { lines: source.lines.map(({ id, text, stream }) => ({ id, text, stream })), partials: source.partials, done: source.done, candidates: candidates?.map(candidate => ({ ...candidate })) ?? [] };
-  snapshotJudgmentInput(state);
+  // One page failing stops the others: the reading as a whole is then unavailable.
   const batchLifetime = new AbortController();
-  const authority = captureJudgmentPort('terminal-shell.process-output', { signal: options.authoritySignal });
   const owner = captureJudgmentPort('terminal-shell.process-output', { signal: options.signal ? AbortSignal.any([options.signal, batchLifetime.signal]) : batchLifetime.signal, assertCurrent: options.assertCurrent, prepareResultCapture: prepareJudgmentResult });
-  authority.assertCurrent(); owner.assertCurrent();
-  const jobs = [
-    ...captured.lineIds.map(id => ({ id, kind: 'error' as const, key: `error:${id}` })),
-    ...(source.done ? [] : (candidates ?? []).map(candidate => ({ id: candidate.id, kind: 'endpoint' as const, key: `endpoint:${candidate.id}` }))),
-  ];
-  type Job = typeof jobs[number];
-  const pages: Job[][] = [];
-  for (const kind of ['error', 'endpoint']) {
-    const matching = jobs.filter(job => job.kind === kind);
-    for (let start = 0; start < matching.length; start += PROCESS_OUTPUT_READING_LIMITS.questions) pages.push(matching.slice(start, start + PROCESS_OUTPUT_READING_LIMITS.questions));
+  const authorityCurrent = () => { options.authoritySignal.throwIfAborted(); };
+  owner.assertCurrent();
+  const index = new Map(source.lines.map((line, position) => [line.id, position]));
+  const pages: string[][] = [];
+  for (let start = 0; start < captured.lineIds.length; start += PROCESS_OUTPUT_READING_LIMITS.questions) {
+    pages.push(captured.lineIds.slice(start, start + PROCESS_OUTPUT_READING_LIMITS.questions));
   }
   const errors = new Map<string, boolean | undefined>();
-  const endpoints = new Map<string, boolean | undefined>();
   const publications: Array<() => void> = [];
   let cursor = 0;
   const workers = Array.from({ length: Math.min(PROCESS_OUTPUT_READING_LIMITS.concurrency, pages.length) }, async () => {
     while (cursor < pages.length) {
       owner.assertCurrent();
       const page = pages[cursor++];
-      const first = page?.[0];
-      if (!page || !first) continue;
-      const battery = first.kind === 'error' ? processOutputError : processOutputEndpoint;
-      const result = await battery.readPage(owner.port, state, page, { signal: owner.signal, site: battery.name, beforeAttempt: owner.assertCurrent });
+      if (!page || page.length === 0) continue;
+      // Each request carries its own targets and the few lines before them, never the whole log.
+      const from = Math.max(0, (index.get(page[0]!) ?? 0) - PROCESS_OUTPUT_PAGE_CONTEXT_LINES);
+      const to = (index.get(page[page.length - 1]!) ?? source.lines.length - 1) + 1;
+      const state = { lines: source.lines.slice(from, to).map(({ id, text, stream }) => ({ id, text, stream })), done: source.done };
+      const result = await processOutputError.readPage(owner.port, state, page.map((id) => ({ id, key: `error:${id}` })), { signal: owner.signal, site: processOutputError.name, beforeAttempt: owner.assertCurrent });
       owner.assertCurrent();
-      for (const [id, value] of result.observations) (first.kind === 'error' ? errors : endpoints).set(id, value);
-      publications.push(() => { owner.assertCurrent(); result.recordPublication(); owner.assertCurrent(); });
+      for (const [id, value] of result.observations) errors.set(id, value);
+      publications.push(() => { result.recordPublication(); });
     }
   });
   try { await Promise.all(workers); }
   catch (error) { batchLifetime.abort(); await Promise.allSettled(workers); throw error; }
-  owner.assertCurrent(); authority.assertCurrent();
-  const announced = new Set((candidates ?? []).filter(candidate => endpoints.get(candidate.id) === true).map(candidate => candidate.port));
-  const complete = candidates !== undefined && candidates.every(candidate => endpoints.get(candidate.id) !== undefined);
-  const port = !source.done && complete && announced.size === 1 ? announced.values().next().value : undefined;
-  return { errors, port, assertCurrent: owner.assertCurrent, assertAuthorityCurrent: authority.assertCurrent,
-    recordPublication() { owner.assertCurrent(); for (const publish of publications) publish(); owner.assertCurrent(); },
+  owner.assertCurrent();
+  return { errors, port: undefined, assertCurrent: owner.assertCurrent, assertAuthorityCurrent: authorityCurrent,
+    recordPublication() { for (const publish of publications) publish(); },
   };
 }

@@ -129,8 +129,10 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
         ))));
         const expected = window.kind === 'approval' ? (action === 'approve' ? 'approve' : 'deny') : (action === 'approve' ? 'acknowledge' : 'object');
         if (result.purchaseId !== window.purchaseId || result.windowId !== window.windowId || result.answer !== expected) throw new Error('Mismatched answer.');
-        report('[payments] Purchase-window answer accepted.');
-        finish();
+        const said = { approve: 'Approved', deny: 'Denied', acknowledge: 'Proceeding with', object: 'Cancelled' }[result.answer];
+        report(`[payments] ${said} purchase ${text(window.purchaseId)}.`);
+        // Others may be waiting: return to the refreshed list, as stop and reconcile do.
+        await refresh();
       } catch { fail('answer'); }
     };
     const supplyCode = async (request: PaymentSecurityCodeRequestView, code: string) => {

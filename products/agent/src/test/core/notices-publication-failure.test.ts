@@ -9,7 +9,7 @@ describe('publishToSharedFeed', () => {
     const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
     process.on('unhandledRejection', onUnhandled);
     const feed = getSharedNotificationFeed();
-    const capture = spyOn(feed, 'captureNoticePublication').mockImplementation(() => { throw new Error('feed retired'); });
+    const capture = spyOn(feed, 'recordNotice').mockImplementation(() => { throw new Error('feed retired'); });
     const warn = spyOn(logger, 'warn').mockImplementation(() => {});
     try {
       publishToSharedFeed('[Agents] a notice', { restored: false });

@@ -26,11 +26,11 @@ describe('NotificationFeed folding', () => {
     expect(feed.unreadCount()).toBe(0);
   });
 
-  test('a notice whose severity is still pending folds into the entry its event already made', () => {
+  test('a notice folds into the entry its event already made', () => {
     const feed = new NotificationFeed();
     feed.record({ id: 'n1', title: 'Agent', domain: 'agents', level: 'warning', timestamp: 10 }, decision, 'evt-1');
 
-    feed.recordNotice({ domain: 'agents', title: 'Agent', severityPending: true, body: 'detail', timestamp: 11, eventKey: 'evt-1' });
+    feed.recordNotice({ domain: 'agents', title: 'Agent', level: 'info', body: 'detail', timestamp: 11, eventKey: 'evt-1' });
 
     expect(feed.list()).toHaveLength(1);
     expect(feed.list()[0]!.body).toBe('detail');

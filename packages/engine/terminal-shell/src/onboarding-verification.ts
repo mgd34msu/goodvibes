@@ -1,4 +1,4 @@
-import { isGoodVibesSecretReferenceValue } from '@goodvibes-jev/engine/platform/platform/config';
+import { isGoodVibesSecretReferenceValue, type SecretScope } from '@goodvibes-jev/engine/platform/platform/config';
 import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import type { OnboardingAcknowledgementTarget, OnboardingShellPaths, OnboardingStateScope } from './onboarding-state-types.js';
 import type { OnboardingRuntimeStateRecord } from './onboarding-state.js';
@@ -17,7 +17,7 @@ export interface OnboardingVerificationResult {
 }
 export type CommonOnboardingVerificationOperation<Key extends string> =
   | { readonly kind: 'set-config'; readonly key: Key; readonly value: unknown }
-  | { readonly kind: 'set-secret'; readonly key: string; readonly value: string }
+  | { readonly kind: 'set-secret'; readonly key: string; readonly value: string; readonly scope?: SecretScope | undefined }
   | { readonly kind: 'acknowledge'; readonly target: OnboardingAcknowledgementTarget; readonly acknowledged: boolean }
   | {
       readonly kind: 'ensure-auth-user';
@@ -29,7 +29,13 @@ export type CommonOnboardingVerificationOperation<Key extends string> =
 export interface OnboardingVerificationDependencies<Key extends string> {
   readonly clock?: (() => number) | undefined;
   readonly config: { get(key: Key): unknown };
-  readonly secrets?: { get(key: string): Promise<string | null> } | undefined;
+  /**
+   * `getFromScope` reads the scope the write went to; the live secrets manager
+   * always has it (optional only so a narrower host type still passes).
+   */
+  readonly secrets?:
+    | { get(key: string): Promise<string | null>; getFromScope?(key: string, scope: SecretScope): Promise<string | null> }
+    | undefined;
   readonly auth?: Pick<UserAuthManager, 'inspect'> | undefined;
   readonly shellPaths: OnboardingShellPaths;
   readonly acknowledgementScope?: OnboardingStateScope | undefined;
@@ -120,18 +126,41 @@ export function createOnboardingVerifier<
       };
     }
 
-    const actual = await deps.secrets.get(operation.key);
-    const ok = isGoodVibesSecretReferenceValue(operation.value) ? actual !== null : actual === operation.value;
-    return {
-      id: `secret:${operation.key}`,
-      status: ok ? 'pass' : 'fail',
-      message: ok
-        ? isGoodVibesSecretReferenceValue(operation.value)
+    const id = `secret:${operation.key}`;
+    if (isGoodVibesSecretReferenceValue(operation.value)) {
+      const ok = (await deps.secrets.get(operation.key)) !== null;
+      return {
+        id,
+        status: ok ? 'pass' : 'fail',
+        message: ok
           ? `${operation.key} resolves through the stored GoodVibes secret reference.`
-          : `${operation.key} was stored through the secret manager.`
-        : `${operation.key} did not match the requested secret value.`,
-      target: operation.key,
-    };
+          : `${operation.key} was stored as a GoodVibes secret reference, but the reference resolves to nothing.`,
+        target: operation.key,
+      };
+    }
+    if (!deps.secrets.getFromScope) {
+      return { id, status: 'fail', message: 'Secret manager cannot read one scope, so the stored key cannot be checked.', target: operation.key };
+    }
+    // The write targeted one scope; the check reads that scope, not whichever
+    // copy (an exported variable, another store) wins when the key is used.
+    const scope = operation.scope ?? 'project';
+    const stored = await deps.secrets.getFromScope(operation.key, scope);
+    if (stored !== operation.value) {
+      return { id, status: 'fail', message: `${operation.key} was not found in the ${scope} secret store after it was written.`, target: operation.key };
+    }
+    const effective = await deps.secrets.get(operation.key);
+    if (effective !== operation.value) {
+      const overriddenBy = Object.hasOwn(process.env, operation.key)
+        ? `the environment variable ${operation.key}`
+        : 'a copy in another secret store that is read first';
+      return {
+        id,
+        status: 'warn',
+        message: `${operation.key} was stored in the ${scope} secret store, but ${overriddenBy} overrides it in this shell. Remove that copy to use the stored key.`,
+        target: operation.key,
+      };
+    }
+    return { id, status: 'pass', message: `${operation.key} was stored through the secret manager.`, target: operation.key };
   }
 
   function verifyAuthOperation(
@@ -180,6 +209,6 @@ export function createOnboardingVerifier<
     request: Request,
   ): Promise<OnboardingVerificationResult> => {
     const items = await Promise.all(request.operations.map((operation) => verifyOperation(deps, operation)));
-    return { verifiedAt: deps.clock?.() ?? Date.now(), ok: items.every((item) => item.status === 'pass'), items };
+    return { verifiedAt: deps.clock?.() ?? Date.now(), ok: items.every((item) => item.status !== 'fail'), items };
   };
 }

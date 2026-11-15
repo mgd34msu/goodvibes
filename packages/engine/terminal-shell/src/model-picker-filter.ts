@@ -185,11 +185,10 @@ export function buildFilteredModels(params: FilterModelParams, cache: FilteredMo
         // front are tracked by identity and the others keep their place.
         const recent: ModelDefinition[] = [];
         const moved = new Set<ModelDefinition>();
-        for (const id of recentIds) {
-            if (pinnedIds.has(id))
-                continue;
-            const model = result.find(m => m.id === id);
-            if (model && !moved.has(model)) {
+        // Recent entries are registry keys (favorites history).
+        for (const key of recentIds) {
+            const model = result.find(m => m.registryKey === key);
+            if (model && !pinnedIds.has(model.registryKey) && !pinnedIds.has(model.id) && !moved.has(model)) {
                 recent.push(model);
                 moved.add(model);
             }

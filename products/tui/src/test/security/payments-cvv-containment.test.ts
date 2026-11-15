@@ -38,11 +38,11 @@ import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { SettingsModal } from '../../input/settings-modal.ts';
 import { renderSettingsModal } from '../../renderer/settings-modal.ts';
-import { lineToString, linesToText } from '../setup.ts';
+import { lineToString } from '../setup.ts';
 import { buildGoodVibesSecretKey, buildGoodVibesSecretRef, defaultSecretBackedScope, isSecretReferenceValue, persistSecretBackedConfigValue } from '../../config/secret-config.ts';
 import type { SecretScope } from '../../config/secrets.ts';
 import { setSecretBackedSettingValue } from '../../input/settings-modal-secrets.ts';
-import { PAYMENTS_CARD_CVV_CONFIG_KEY, PAYMENTS_CVV_HANDLING_CONFIG_KEY } from '../../input/payments-config.ts';
+import { PAYMENTS_CARD_CVV_CONFIG_KEY, PAYMENTS_CARDS_ROW_KEY, PAYMENTS_CVV_HANDLING_CONFIG_KEY, PAYMENTS_SYNTHETIC_CONFIG_KEYS } from '../../input/payments-config.ts';
 import { runPaymentsCommand, startCardEntryFlow, CARD_ENTRY_SURFACE, CARD_ENTRY_FIELDS } from '../../input/commands/payment-card-intake.ts';
 import { mayEnterCardDetails, mayOfferCardEntryFlow, describeCardEntryRefusal } from '@goodvibes-jev/engine/platform/platform/payments';
 import type { CommandContext } from '../../input/command-registry.ts';
@@ -242,50 +242,14 @@ describe('payments CVV containment', () => {
       modal.open(cm, ffm, subscriptionManager, serviceRegistry, mcpRegistry, secrets);
     });
 
-    function selectCvvEntry(): void {
+    test('the payments category takes no card material: one locked row points to /payments card', () => {
       while (modal.currentCategory !== 'payments') modal.nextCategory();
-      modal.focusRegion = 'settings';
-      modal.selectedIndex = modal.currentItems.findIndex((entry) => entry.setting.key === PAYMENTS_CARD_CVV_CONFIG_KEY);
-      expect(modal.selectedIndex).toBeGreaterThanOrEqual(0);
-    }
-
-    test('the CVV row never renders the typed value while editing; table row and the "Current:" doc line', () => {
-      selectCvvEntry();
-      modal.editingMode = true;
-      modal.editBuffer = FAKE_CVV;
-      const lines = frameFromLayer(renderSettingsModal(modal, W), W, 24);
-      const texts = linesToText(lines).join('\n');
-      expect(texts).not.toContain(FAKE_CVV);
-      // Keystrokes still visibly register: a bullet mask of the same length, plus cursor.
-      expect(texts).toContain('•'.repeat(FAKE_CVV.length) + '█');
-    });
-
-    test('the CVV never renders at rest either, once stored', async () => {
-      await persistSecretBackedConfigValue(cm, secrets, PAYMENTS_CARD_CVV_CONFIG_KEY, FAKE_CVV, { scope: 'daemon' });
-      // The modal snapshots entries at open(); re-open to pick up the
-      // out-of-band write the same way re-opening the settings workspace
-      // after an external change would.
-      const ffm: FeatureFlagManager = createFeatureFlagManager();
-      const subscriptionManager = new SubscriptionManager(join(tmpDir, '.goodvibes', 'tui', 'subscriptions.json'));
-      const serviceRegistry = new ServiceRegistry(join(tmpDir, '.goodvibes', 'tui', 'services.json'), { secretsManager: secrets, subscriptionManager });
-      const mcpRegistry = { listServerSecurity: () => [], setServerTrustMode: () => {} } as unknown as McpRegistry;
-      modal.open(cm, ffm, subscriptionManager, serviceRegistry, mcpRegistry, secrets);
-      selectCvvEntry();
-      const lines = frameFromLayer(renderSettingsModal(modal, W), W, 24);
-      const texts = linesToText(lines).join('\n');
-      expect(texts).not.toContain(FAKE_CVV);
-    });
-
-    test('search results for the CVV setting also mask the typed value while editing', () => {
+      const keys = modal.currentItems.map((entry) => entry.setting.key as string);
+      for (const key of PAYMENTS_SYNTHETIC_CONFIG_KEYS) expect(keys).not.toContain(key);
+      const pointer = modal.currentItems.find((entry) => entry.setting.key === PAYMENTS_CARDS_ROW_KEY);
+      expect(pointer?.locked).toBe(true);
       modal.setSearchQuery('cvv');
-      const result = modal.searchResults.find((entry) => entry.setting.key === PAYMENTS_CARD_CVV_CONFIG_KEY);
-      expect(result).toBeDefined();
-      modal.selectedIndex = modal.searchResults.indexOf(result!);
-      modal.editingMode = true;
-      modal.editBuffer = FAKE_CVV;
-      const lines = frameFromLayer(renderSettingsModal(modal, W), W, 24);
-      const texts = linesToText(lines).join('\n');
-      expect(texts).not.toContain(FAKE_CVV);
+      expect(modal.searchResults.some((entry) => entry.setting.key === PAYMENTS_CARD_CVV_CONFIG_KEY)).toBe(false);
     });
 
     test('selecting cvvHandling = prompt states the unattended-purchasing tradeoff at the moment of selection, using the platform\'s own wording', () => {

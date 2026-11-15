@@ -16,6 +16,13 @@ export function createOnboardingConfigApply<Dependencies, Operation extends Onbo
   readonly reload: (deps: Dependencies) => void;
   readonly get: (deps: Dependencies, key: string) => unknown;
   readonly set: (deps: Dependencies, key: string, value: unknown) => void;
+  /**
+   * Whether the key holds no setting of its own (its value is the default),
+   * and how to take a setting away again. With both, a rollback leaves an
+   * unset key unset instead of writing its default in as a setting.
+   */
+  readonly isUnset?: ((deps: Dependencies, key: string) => boolean) | undefined;
+  readonly unset?: ((deps: Dependencies, key: string) => void) | undefined;
   readonly snapshotFileRollback: (path: string, reload: () => void) => RollbackAction;
   readonly translate?: ((operation: Operation) => readonly { readonly key: string; readonly value: unknown }[] | undefined) | undefined;
 }) {
@@ -51,9 +58,17 @@ export function createOnboardingConfigApply<Dependencies, Operation extends Onbo
   }
   function buildConfigRollbackAction(deps: Dependencies, operation: Operation): RollbackAction {
     if ((operation.scope ?? 'global') === 'project') return ports.snapshotFileRollback(ports.projectPath(deps), () => ports.reload(deps));
-    const previous = captureWrites(operation).writes.map((write) => ({ key: write.key, value: ports.get(deps, write.key) }));
+    const { isUnset, unset } = ports;
+    const previous = captureWrites(operation).writes.map((write) => ({
+      key: write.key,
+      value: ports.get(deps, write.key),
+      unset: isUnset !== undefined && unset !== undefined && isUnset(deps, write.key),
+    }));
     return () => {
-      for (const entry of previous) ports.set(deps, entry.key, entry.value);
+      for (const entry of previous) {
+        if (entry.unset) unset!(deps, entry.key);
+        else ports.set(deps, entry.key, entry.value);
+      }
     };
   }
   return { validateConfigOperation, applyConfigOperation, buildConfigRollbackAction };

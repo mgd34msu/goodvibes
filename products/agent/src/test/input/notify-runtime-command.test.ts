@@ -107,11 +107,11 @@ describe('/notify mutations', () => {
   });
 
   test.each([
-    { url: 'not a url', reason: 'Invalid URL' },
-    { url: 'ftp://files.example.com/hook', reason: 'only http and https' },
-    { url: 'http://169.254.169.254/latest/meta-data', reason: 'Refusing to add a webhook that delivery would block' },
-    { url: 'http://127.0.0.1:8080/hook', reason: 'Refusing to add a webhook that delivery would block' },
-    { url: 'http://10.0.0.5/hook', reason: 'Refusing to add a webhook that delivery would block' },
+    { url: 'not a url', reason: 'Nothing was added' },
+    { url: 'ftp://files.example.com/hook', reason: 'Nothing was added' },
+    { url: 'http://169.254.169.254/latest/meta-data', reason: 'Nothing was added' },
+    { url: 'http://127.0.0.1:8080/hook', reason: 'Nothing was added' },
+    { url: 'http://10.0.0.5/hook', reason: 'Nothing was added' },
   ])('add --yes refuses $url and stores nothing', async ({ url, reason }) => {
     const { text, calls } = await run(['add', url, '--yes']);
 

@@ -49,7 +49,7 @@ export function closeModelPickerRoute(state: {
 }
 export function createModelPickerTokenHandler<Context extends ModelPickerCommandContext, Picker extends ModelPickerModal>(policy: {
   readonly chromeLines: number;
-  /** Ignored: a cap outside 1-10,000,000 is always refused with an error, never dropped silently. */
+  /** Unused: a cap outside 1-10,000,000 is always refused with an error in both apps. */
   readonly validateContextCap?: boolean | undefined;
   readonly extraControls: boolean;
   readonly commitBeforeClose: boolean;
@@ -169,7 +169,7 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
             const raw = picker.contextCapQuery.trim();
             const parsed = raw.length ? parseInt(raw, 10) : null;
             if (parsed !== null && (parsed <= 0 || parsed > 10000000)) {
-              picker.contextCapError = 'Context cap must be 1–10,000,000';
+              picker.contextCapError = `Not saved: ${parsed.toLocaleString()} tokens is outside 1–10,000,000. Type a cap in that range, or clear it to use the detected context.`;
             } else {
               picker.contextCapError = null;
               const valid = parsed;

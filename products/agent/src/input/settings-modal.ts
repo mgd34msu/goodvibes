@@ -24,7 +24,7 @@ import { setSecretBackedSettingValue, type SettingsSecretsManager } from './sett
 import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';
 import { buildMcpEntries } from './settings-modal-mcp-entries.ts';
 import { buildFlagEntries } from './settings-modal-flag-entries.ts';
-import { buildPaymentsSyntheticEntries } from './payments-config.ts';
+import { buildPaymentsCardsRow, PAYMENTS_CARDS_ROW_KEY } from './payments-config.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { FlagState } from '@/runtime/index.ts';
 import '@/runtime/index.ts';
@@ -763,20 +763,11 @@ export class SettingsModal extends TerminalSettingsModalState<
       }
     }
 
-    // Inject the four card-material fields (number, expiry, CVV, cardholder
-    // name). They are synthetic because CONFIG_SCHEMA deliberately carries no
-    // scalar entry for card material, it lives write-only in the daemon
-    // secret store and config holds only a goodvibes:// reference. Listing
-    // them here is what gives the settings modal a visible "set / not set"
-    // row for each and a masked edit path; the primary entry point remains
-    // the guided `/payments card` flow. See input/payments-config.ts.
+    // Cards are not settings: one locked row points to /payments card, where
+    // they are added and removed. Settings takes no card material.
     const paymentsEntries = this.groups.get('payments');
-    if (paymentsEntries) {
-      for (const entry of buildPaymentsSyntheticEntries(configManager)) {
-        if (!paymentsEntries.some((existing) => existing.setting.key === entry.setting.key)) {
-          paymentsEntries.push(entry);
-        }
-      }
+    if (paymentsEntries && !paymentsEntries.some((existing) => existing.setting.key === PAYMENTS_CARDS_ROW_KEY)) {
+      paymentsEntries.push(buildPaymentsCardsRow());
     }
     if (policyError) {
       for (const entries of this.groups.values())

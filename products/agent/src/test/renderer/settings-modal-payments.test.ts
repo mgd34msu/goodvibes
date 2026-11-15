@@ -136,12 +136,7 @@ describe('renderSettingsModal payments category', () => {
     expect(texts).not.toContain(CVV_PROMPT_TRADEOFF_WARNING.slice(0, 40));
   });
 
-  test('the four card-material keys exist only in the payments category, and nowhere else', () => {
-    // They used to exist nowhere at all, because this surface had no card entry.
-    // It has one now (/payments card, input/commands/payment-card-intake.ts), so
-    // the claim worth protecting is no longer "no such key", it is that the
-    // keys are confined to payments and that their VALUES never render, which
-    // the next test asserts.
+  test('no category offers a card-material field; payments has one locked pointer to /payments card', () => {
     for (const category of SETTINGS_CATEGORIES) {
       if (category === 'flags' || category === 'mcp' || category === 'subscriptions') continue;
       const entries = modal.groups.get(category) ?? [];
@@ -149,38 +144,9 @@ describe('renderSettingsModal payments category', () => {
         .map((entry) => String(entry.setting.key))
         .filter((key) => /cvv|\bpan\b|cardnumber|cardholder|cardexpiry/i.test(key))
         .filter((key) => key !== 'payments.cvvHandling');
-      if (category === 'payments') {
-        expect(cardShaped.sort()).toEqual(['payments.cardCvv', 'payments.cardExpiry', 'payments.cardNumber', 'payments.cardholderName'].sort());
-      } else {
-        expect(cardShaped).toEqual([]);
-      }
+      expect(cardShaped).toEqual([]);
     }
-  });
-
-  test('no category ever renders a card value: masked at rest and masked mid-edit', () => {
-    const FAKE_PAN = '4000056655665556';
-    const FAKE_CODE = '731';
-
-    // At rest: a stored value is a goodvibes:// reference, but even a raw
-    // literal (which only a bug could produce) must not reach the frame.
-    cm.setDynamic('payments.cardNumber' as never, FAKE_PAN);
-    cm.setDynamic('payments.cardCvv' as never, FAKE_CODE);
-    reopen();
-
-    const atRest = layerText(renderSettingsModal(modal, W, 40)).join('\n');
-    expect(atRest).not.toContain(FAKE_PAN);
-
-    // Mid-edit: the in-progress buffer is the window that matters, and it is
-    // the one masking at rest alone would leave wide open.
-    const idx = modal.currentItems.findIndex((entry) => String(entry.setting.key) === 'payments.cardNumber');
-    expect(idx).toBeGreaterThanOrEqual(0);
-    while (modal.selectedIndex !== idx) modal.moveDown();
-    modal.activateSelected();
-    expect(modal.editingMode).toBe(true);
-    for (const ch of FAKE_PAN) modal.editChar(ch);
-
-    const midEdit = layerText(renderSettingsModal(modal, W, 40)).join('\n');
-    expect(midEdit).not.toContain(FAKE_PAN);
-    expect(midEdit).toContain('\u2022'.repeat(FAKE_PAN.length));
+    const pointer = (modal.groups.get('payments') ?? []).find((entry) => String(entry.setting.key) === 'payments.cardsOnFile');
+    expect(pointer?.locked).toBe(true);
   });
 });

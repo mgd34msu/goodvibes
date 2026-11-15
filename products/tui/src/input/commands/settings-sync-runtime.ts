@@ -15,7 +15,6 @@ import {
   setManagedSettingLock,
   type SettingsSyncBundle,
 } from '@/runtime/index.ts';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { RefusalError, refusal, toRefusal } from '@goodvibes-jev/engine/errors';
 import { type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/config';
@@ -109,14 +108,6 @@ export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): 
             code: 'NO_CONFLICT', state: 'nothing was changed', reason: `No synced conflict found for ${key}`,
             next: ['/settings-sync conflicts lists the conflicts that are open'],
           }));
-        }
-        // The live selection follows config only for the key that was resolved: a model
-        // chosen this session and not saved must not change because an unrelated key resolved.
-        if (key === 'provider.model') {
-          ctx.session.runtime.model = String(ctx.platform.configManager.get('provider.model'));
-          ctx.session.runtime.provider = getProviderIdFromModel(ctx.platform.configManager.get('provider.model'));
-        } else if (key === 'provider.reasoningEffort') {
-          ctx.session.runtime.reasoningEffort = ctx.platform.configManager.get('provider.reasoningEffort') as string;
         }
         ctx.print(`Resolved synced conflict for ${key} using the ${resolution} value.`);
         return;

@@ -1,7 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
 import {
   isMalformedGoodVibesSecretReferenceValue,
   type LiteralSecretsManager,
+  type SecretsManager,
   type SecretScope,
 } from '@goodvibes-jev/engine/platform/platform/config';
 import type { createOnboardingStateStorage } from './onboarding-state.js';
@@ -15,7 +15,15 @@ import type { RollbackAction } from './onboarding-file-helpers.js';
 import type { OnboardingVerificationResult } from './onboarding-verification.js';
 export interface OnboardingApplyPrimitiveDependencies {
   readonly clock?: (() => number) | undefined;
-  readonly secrets?: Pick<LiteralSecretsManager, 'set' | 'get' | 'delete' | 'inspect'> | undefined;
+  /**
+   * The scoped entry reads are what a rollback restores; the live secrets
+   * manager always has them (the optional typing lets a narrower host type
+   * through until it names them).
+   */
+  readonly secrets?:
+    | (Pick<LiteralSecretsManager, 'set' | 'get' | 'delete' | 'inspect'> &
+        Partial<Pick<SecretsManager, 'getWriteScopeEntry' | 'deleteWriteScopeEntry'>>)
+    | undefined;
   readonly shellPaths: OnboardingShellPaths;
   readonly acknowledgementScope?: OnboardingStateScope | undefined;
 }
@@ -36,7 +44,8 @@ export function getNow(deps: { readonly clock?: (() => number) | undefined }): n
 }
 export function createOnboardingApplyPrimitives(
   storage: Pick<ReturnType<typeof createOnboardingStateStorage>, 'readOnboardingRuntimeState' | 'writeOnboardingAcknowledgementState'>,
-  restoreFile: (path: string, previous: string | null) => void,
+  /** Unused: a stored key is undone through the secrets manager, never by rewriting its files. */
+  _restoreFile?: ((path: string, previous: string | null) => void) | undefined,
 ) {
   function validateSecretOperation(deps: OnboardingApplyPrimitiveDependencies, operation: OnboardingSecretOperation): void {
     if (!deps.secrets) throw new Error('Secret persistence is unavailable.');
@@ -81,16 +90,19 @@ export function createOnboardingApplyPrimitives(
     operation: OnboardingSecretOperation,
   ): Promise<RollbackAction> {
     validateSecretOperation(deps, operation);
+    const secrets = deps.secrets!;
     const scope = operation.scope ?? 'project';
-    const review = await deps.secrets!.inspect();
-    const locations = review.locations.filter((entry) => entry.source.startsWith(`${scope}-`));
-    if (locations.length === 0) throw new Error(`Secret storage locations for ${scope} scope are unavailable.`);
-    const snapshots = locations.map((location) => ({
-      path: location.path,
-      previous: existsSync(location.path) ? readFileSync(location.path, 'utf-8') : null,
-    }));
-    return () => {
-      for (const snapshot of snapshots) restoreFile(snapshot.path, snapshot.previous);
+    if (!secrets.getWriteScopeEntry || !secrets.deleteWriteScopeEntry) {
+      throw new Error(`${operation.key} was not stored: this secret manager cannot read one scope's entry, so a failed setup could not be undone.`);
+    }
+    const readEntry = secrets.getWriteScopeEntry.bind(secrets);
+    const deleteEntry = secrets.deleteWriteScopeEntry.bind(secrets);
+    // Only this key, in the scope the write targets: a key another window or a
+    // login stores meanwhile is left as it is.
+    const previous = await readEntry(operation.key, scope);
+    return async () => {
+      if (previous === null) await deleteEntry(operation.key, scope);
+      else await secrets.set(operation.key, previous, { scope, medium: operation.medium });
     };
   }
   function applyAcknowledgementOperation(
@@ -143,7 +155,8 @@ export async function verifyOnboardingWithRollback<Kind extends string>(
   kindFor: (id: string) => Kind,
 ): Promise<boolean> {
   const verification = await verify();
-  const failures = verification.items.filter((item) => item.status !== 'pass');
+  // A warning (the environment overrides a stored key in this shell) is reported, not undone.
+  const failures = verification.items.filter((item) => item.status === 'fail');
   if (failures.length === 0) return true;
   const rollbackErrors = await rollback();
   applied.length = 0;

@@ -43,9 +43,8 @@ import { enrichDaemonOwnedSettingDescriptions } from './daemon-owned-settings-de
 import { applyFeatureUnitLayout } from './feature-unit-layout.ts';
 import { FEATURE_SETTINGS_BY_ID } from '@goodvibes-jev/engine/terminal-shell';
 import {
-  buildPaymentsSyntheticEntries,
-  isPaymentsSyntheticConfigKey,
-  refreshPaymentsSyntheticEntry,
+  buildPaymentsCardsRow,
+  PAYMENTS_CARDS_ROW_KEY,
 } from './payments-config.ts';
 
 /** Display order of the `ui` category; every key must be a real config key. */
@@ -346,17 +345,11 @@ export function buildSettingGroups(
   injectSandboxExecSyntheticEntries(groups, configManager);
   injectExecEnvScrubSyntheticEntry(groups, configManager);
 
-  // Payment card capability (see payments-config.ts): the CONFIG_SCHEMA loop
-  // above already populated 'payments' with the fourteen real platform settings
-  // (enabled, defaultCardId, currency, cvvHandling, budgets, shipping,
-  // windows, notifyChannels). What's injected here are the four secret-tier
-  // card-material fields and the two ordinary address fields, which are
-  // TUI-local synthetic sub-keys under that real section (not yet platform
-  // CONFIG_SCHEMA entries, see payments-config.ts's header comment), backed
-  // by the same real configManager as everything else in this group.
+  // Payments: the CONFIG_SCHEMA loop above already filled 'payments' with the
+  // real settings. Cards are not settings: one locked row points to /payments card.
   const paymentsEntries = groups.get('payments');
-  if (paymentsEntries && !paymentsEntries.some((e) => isPaymentsSyntheticConfigKey(e.setting.key))) {
-    paymentsEntries.push(...buildPaymentsSyntheticEntries(configManager));
+  if (paymentsEntries && !paymentsEntries.some((e) => e.setting.key === PAYMENTS_CARDS_ROW_KEY)) {
+    paymentsEntries.push(buildPaymentsCardsRow());
   }
 
   // relay.* is a real platform CONFIG_SCHEMA domain; append the threat-model note
@@ -729,10 +722,7 @@ function refreshBuiltinSettingValue(entry: BuiltinSettingEntry, configManager: C
     entry.isDefault = refreshed.isDefault;
     return;
   }
-  if (isPaymentsSyntheticConfigKey(key)) {
-    refreshPaymentsSyntheticEntry(entry, configManager);
-    return;
-  }
+  if (key === PAYMENTS_CARDS_ROW_KEY) return;
   const refreshedLocal = rebuildTuiLocalSyntheticEntry(entry, configManager);
   if (refreshedLocal) {
     entry.currentValue = refreshedLocal.currentValue;

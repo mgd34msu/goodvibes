@@ -1,6 +1,14 @@
-/** Timestamped local output; semantic observations run once per owned generation. */
-import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
-import { readProcessOutput, type ProcessOutputReading } from './process-output-reading.js';
+/**
+ * Timestamped local output of background processes.
+ *
+ * Facts come from code, at once and under every decision-model policy: the
+ * listening port from one anchored pattern over each new line, and a failed
+ * process's stderr lines marked as errors when it ends. A model reading is
+ * asked only to colour lines nothing else decided, only for the process whose
+ * view is open, once per line: a verdict is kept for the life of the line,
+ * and lines leaving the retained window take nothing else with them.
+ */
+import { readProcessOutput } from './process-output-reading.js';
 
 export interface ProcessLine {
   readonly at: number;
@@ -14,45 +22,59 @@ export interface ProcessRecordView {
   readonly stderr: readonly string[];
   readonly done: boolean;
   readonly identity?: string;
+  /** Ended with a non-zero exit, a signal or a timeout. Read only once `done`. */
+  readonly failed?: boolean;
 }
 export const MAX_LINES = 5000;
+/** Lines before the first unjudged line sent with a reading as context. */
+const READING_CONTEXT_LINES = 16;
+/** The newest unjudged lines one reading covers; older ones follow at later quiet windows while the view stays open. */
+const READING_MAX_LINES = 256;
 function clean(text: string): string {
   return text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
     .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
 }
+/**
+ * A local server announcing where it listens: a loopback or any-address URL
+ * with a port (`Local: http://localhost:5173/`), or `listening on [port] N`.
+ */
+const LISTENING_URL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]):(\d{1,5})\b/i;
+const LISTENING_PHRASE = /\blistening (?:on|at) (?:port )?:?(\d{1,5})\b/i;
+export function listeningPortOf(text: string): number | undefined {
+  const match = LISTENING_URL.exec(text) ?? LISTENING_PHRASE.exec(text);
+  const port = match ? Number(match[1]) : NaN;
+  return port >= 1 && port <= 65535 ? port : undefined;
+}
 interface StoredLine { readonly id: string; readonly at: number; readonly text: string; readonly raw: string; readonly stream: ProcessLine['stream']; error: boolean | undefined; }
 interface StreamCursor { chunks: number; partial: string }
 interface Source {
-  readonly record: ProcessRecordView;
   readonly stdout: readonly string[];
   readonly stderr: readonly string[];
-  readonly out: readonly string[];
-  readonly err: readonly string[];
+  readonly out: number;
+  readonly err: number;
   readonly done: boolean;
   readonly identity: string | undefined;
 }
 interface Entry {
-  lifetime: AbortController;
   readonly lines: StoredLine[];
   readonly out: StreamCursor;
   readonly err: StreamCursor;
-  readonly observed: Set<string>;
-  readonly authorities: Set<() => void>;
+  /** Line ids a reading or a fact already decided; never asked again. */
+  readonly judged: Set<string>;
+  readonly lifetime: AbortController;
   source: Source;
-  controller: AbortController;
-  timer: ReturnType<typeof setTimeout> | undefined;
-  start: (() => void) | undefined;
   port: number | undefined;
-  portReading: ProcessOutputReading | undefined;
   dropped: number;
   revision: number;
-  needsReading: boolean;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  start: (() => void) | undefined;
+  reading: boolean;
 }
-const equal = (current: readonly string[], saved: readonly string[]) => current.length === saved.length && saved.every((value, index) => current[index] === value);
-const capture = (record: ProcessRecordView): Source => ({ record, stdout: record.stdout, stderr: record.stderr, out: [...record.stdout], err: [...record.stderr], done: record.done, identity: record.identity });
-const sameSource = (source: Source, record: ProcessRecordView) => record.stdout === source.stdout && record.stderr === source.stderr && record.done === source.done && record.identity === source.identity && equal(record.stdout, source.out) && equal(record.stderr, source.err);
-const appended = (source: Source, record: ProcessRecordView) => record.stdout === source.stdout && record.stderr === source.stderr && record.identity === source.identity && record.stdout.length >= source.out.length && record.stderr.length >= source.err.length && source.out.every((value, index) => record.stdout[index] === value) && source.err.every((value, index) => record.stderr[index] === value);
+const capture = (record: ProcessRecordView): Source => ({ stdout: record.stdout, stderr: record.stderr, out: record.stdout.length, err: record.stderr.length, done: record.done, identity: record.identity });
+/** The same process whose output only grew (the process manager appends to its arrays). */
+const continues = (source: Source, record: ProcessRecordView) => record.stdout === source.stdout && record.stderr === source.stderr && record.identity === source.identity && record.stdout.length >= source.out && record.stderr.length >= source.err;
+const unchanged = (source: Source, record: ProcessRecordView) => continues(source, record) && record.stdout.length === source.out && record.stderr.length === source.err && record.done === source.done;
 
 export class ProcessOutputLog {
   private readonly entries = new Map<string, Entry>();
@@ -61,48 +83,44 @@ export class ProcessOutputLog {
   private disposed = false;
   constructor(private readonly onChange: () => void = () => {}, private readonly quietMs = 750) {}
 
-  poll(records: ReadonlyMap<string, ProcessRecordView>, now = Date.now(), assertSource?: (id: string, record: ProcessRecordView, phase: 'generation' | 'retained') => void): boolean {
+  /**
+   * Read new output of every process. `viewing` is the process whose view is
+   * open: only its unjudged lines are read by a model, after its output has
+   * been quiet for `quietMs`. Returns true when anything visible changed.
+   */
+  poll(records: ReadonlyMap<string, ProcessRecordView>, now = Date.now(), viewing?: string): boolean {
     if (this.disposed) return false;
     let changed = false;
     for (const [id, entry] of this.entries) if (!records.has(id)) { this.entries.delete(id); this.retire(entry); changed = true; }
     for (const [id, record] of records) {
       let entry = this.entries.get(id);
-      if (entry && !appended(entry.source, record)) { this.entries.delete(id); this.retire(entry); entry = undefined; changed = true; }
+      if (entry && !continues(entry.source, record)) { this.entries.delete(id); this.retire(entry); entry = undefined; changed = true; }
       if (!entry) {
-        entry = { lifetime: new AbortController(), lines: [], out: { chunks: 0, partial: '' }, err: { chunks: 0, partial: '' }, source: capture(record), controller: new AbortController(), timer: undefined, start: undefined, observed: new Set(), authorities: new Set(), port: undefined, portReading: undefined, dropped: 0, revision: 0, needsReading: true };
+        entry = { lines: [], out: { chunks: 0, partial: '' }, err: { chunks: 0, partial: '' }, judged: new Set(), lifetime: new AbortController(),
+          source: { stdout: record.stdout, stderr: record.stderr, out: 0, err: 0, done: false, identity: record.identity },
+          port: undefined, dropped: 0, revision: 0, timer: undefined, start: undefined, reading: false };
         this.entries.set(id, entry);
-      } else if (sameSource(entry.source, record) && this.currentAuthority(entry) && !entry.needsReading) continue;
-      const prior = entry.controller;
-      entry.controller = new AbortController();
-      if (entry.timer !== undefined) clearTimeout(entry.timer);
-      entry.timer = undefined; entry.start = undefined;
-      prior.abort();
-      const before = entry.dropped;
-      const outChanged = this.read(entry, entry.out, record.stdout, 'stdout', record.done, now);
-      const errChanged = this.read(entry, entry.err, record.stderr, 'stderr', record.done, now);
-      if (entry.dropped !== before) this.clearObservations(entry);
-      entry.source = capture(record);
-      entry.port = undefined; entry.portReading = undefined; entry.revision++;
-      changed = changed || outChanged || errChanged;
-      this.schedule(id, entry, records, assertSource);
+      }
+      if (!unchanged(entry.source, record)) {
+        const outChanged = this.read(entry, entry.out, record.stdout, 'stdout', record.done, now);
+        const errChanged = this.read(entry, entry.err, record.stderr, 'stderr', record.done, now);
+        if (record.done && !entry.source.done) this.ended(entry, record.failed === true);
+        entry.source = capture(record);
+        entry.revision++;
+        changed = changed || outChanged || errChanged || record.done;
+        // New output restarts the quiet window of a reading not yet started.
+        if (entry.timer !== undefined) { clearTimeout(entry.timer); entry.timer = undefined; entry.start = undefined; }
+      }
+      if (id === viewing) this.schedule(entry);
     }
     return changed;
   }
-  lines(id: string): readonly ProcessLine[] {
-    const entry = this.entries.get(id);
-    if (!entry) return [];
-    this.currentAuthority(entry);
-    return entry.lines;
-  }
+  lines(id: string): readonly ProcessLine[] { return this.entries.get(id)?.lines ?? []; }
   dropped(id: string): number { return this.entries.get(id)?.dropped ?? 0; }
   revision(id: string): number { return this.entries.get(id)?.revision ?? 0; }
-  /** Observed listening information is display only, never an execution grant. */
-  port(id: string): number | undefined {
-    const entry = this.entries.get(id);
-    if (!entry) return undefined;
-    try { entry.portReading?.assertCurrent(); } catch { entry.port = undefined; entry.portReading = undefined; entry.needsReading = true; entry.revision++; }
-    return entry.port;
-  }
+  /** The port the process announced it listens on, while it runs. Display only, never an execution grant. */
+  port(id: string): number | undefined { return this.entries.get(id)?.port; }
+  /** Start any reading waiting for quiet output now, and wait for every reading in flight. */
   async whenSettled(): Promise<void> {
     for (const entry of this.entries.values()) entry.start?.();
     await Promise.all([...this.pending]);
@@ -113,55 +131,57 @@ export class ProcessOutputLog {
     this.entries.clear();
     await Promise.all([...this.pending]);
   }
-  private clearObservations(entry: Entry): void {
-    const lifetime = entry.lifetime;
-    entry.lifetime = new AbortController();
-    lifetime.abort();
-    entry.authorities.clear(); entry.observed.clear();
-    for (const line of entry.lines) line.error = undefined;
-    entry.port = undefined; entry.portReading = undefined; entry.needsReading = true; entry.revision++;
-  }
-  private currentAuthority(entry: Entry): boolean {
-    try { for (const assertCurrent of entry.authorities) assertCurrent(); return true; }
-    catch { this.clearObservations(entry); return false; }
-  }
   private retire(entry: Entry): void {
     if (entry.timer !== undefined) clearTimeout(entry.timer);
     entry.timer = undefined; entry.start = undefined;
-    entry.lifetime.abort(); entry.controller.abort();
+    entry.lifetime.abort();
   }
-  private schedule(id: string, entry: Entry, records: ReadonlyMap<string, ProcessRecordView>, assertSource?: (id: string, record: ProcessRecordView, phase: 'generation' | 'retained') => void): void {
-    entry.needsReading = false;
-    const controller = entry.controller;
-    const source = entry.source;
-    const assertCurrent = () => {
-      if (this.disposed || this.entries.get(id) !== entry || entry.controller !== controller || controller.signal.aborted || records.get(id) !== source.record || !sameSource(source, source.record)) throw new JudgmentAuthorityRetiredError();
-      assertSource?.(id, source.record, 'generation');
-    };
-    const lines = [...entry.lines];
-    const evidence = { lines: lines.map(({ id: lineId, text, raw, stream }) => ({ id: lineId, text, raw, stream })), partials: { stdout: entry.out.partial, stderr: entry.err.partial }, done: source.done };
-    const lineIds = lines.filter(line => !entry.observed.has(line.id)).map(line => line.id);
+  /** A process that ended no longer listens; a failed one's stderr lines report its failure. */
+  private ended(entry: Entry, failed: boolean): void {
+    entry.port = undefined;
+    if (!failed) return;
+    for (const line of entry.lines) {
+      if (line.stream !== 'stderr' || entry.judged.has(line.id)) continue;
+      line.error = true;
+      entry.judged.add(line.id);
+    }
+  }
+  private unjudged(entry: Entry): StoredLine[] {
+    return entry.lines.filter((line) => !entry.judged.has(line.id) && line.text.length > 0);
+  }
+  private schedule(entry: Entry): void {
+    if (entry.reading || entry.timer !== undefined || this.unjudged(entry).length === 0) return;
     const start = () => {
       if (entry.start !== start) return;
       if (entry.timer !== undefined) clearTimeout(entry.timer);
       entry.timer = undefined; entry.start = undefined;
+      const targets = this.unjudged(entry).slice(-READING_MAX_LINES);
+      if (targets.length === 0 || entry.lifetime.signal.aborted) return;
+      const first = entry.lines.indexOf(targets[0]!);
+      const context = entry.lines.slice(Math.max(0, first - READING_CONTEXT_LINES), first).filter((line) => !targets.includes(line));
+      const evidence = {
+        lines: [...context, ...targets].map(({ id, text, raw, stream }) => ({ id, text, raw, stream })),
+        partials: { stdout: '', stderr: '' },
+        done: entry.source.done,
+      };
+      entry.reading = true;
       const work = (async () => {
         try {
-          assertCurrent();
-          const reading = await readProcessOutput(evidence, lineIds, { signal: controller.signal, authoritySignal: entry.lifetime.signal, assertCurrent });
-          assertCurrent(); reading.assertCurrent(); reading.recordPublication(); assertCurrent();
-          const retained = new Set(entry.lines);
-          for (const line of lines) if (retained.has(line) && reading.errors.has(line.id)) { line.error = reading.errors.get(line.id); entry.observed.add(line.id); }
-          // Every reading of an entry shares its lifetime and a source that only ever extends the previous one,
-          // so the newest check covers the older ones; keeping them all would grow with every quiet window.
-          if (reading.errors.size > 0) { entry.authorities.clear(); entry.authorities.add(() => {
-            reading.assertAuthorityCurrent();
-            if (records.get(id) !== source.record || !appended(source, source.record)) throw new JudgmentAuthorityRetiredError();
-            assertSource?.(id, source.record, 'retained');
-          }); }
-          entry.port = reading.port; entry.portReading = reading; entry.revision++;
+          const reading = await readProcessOutput(evidence, targets.map((line) => line.id), { signal: entry.lifetime.signal, authoritySignal: entry.lifetime.signal });
+          if (entry.lifetime.signal.aborted) return;
+          for (const line of targets) {
+            const verdict = reading.errors.get(line.id);
+            if (verdict !== undefined) line.error = verdict;
+          }
+          reading.recordPublication();
+          entry.revision++;
           this.onChange();
-        } catch { /* Missing, private, uncertain or retired observations stay neutral. */ }
+        } catch { /* An unavailable or uncertain reading leaves the lines neutral. */ }
+        finally {
+          // Each line is asked once, whatever the answer: nothing is sent twice.
+          for (const line of targets) entry.judged.add(line.id);
+          entry.reading = false;
+        }
       })();
       this.pending.add(work);
       void work.then(() => this.pending.delete(work));
@@ -183,6 +203,12 @@ export class ProcessOutputLog {
   private push(entry: Entry, raw: string, stream: ProcessLine['stream'], at: number): void {
     const text = clean(raw.includes('\r') ? raw.slice(raw.lastIndexOf('\r') + 1) : raw).trimEnd();
     entry.lines.push({ id: `line-${this.sequence++}`, at, text, raw, stream, error: undefined });
-    if (entry.lines.length > MAX_LINES) { const extra = entry.lines.length - MAX_LINES; entry.lines.splice(0, extra); entry.dropped += extra; }
+    const port = listeningPortOf(text);
+    if (port !== undefined) entry.port = port;
+    if (entry.lines.length > MAX_LINES) {
+      const extra = entry.lines.length - MAX_LINES;
+      for (const line of entry.lines.splice(0, extra)) entry.judged.delete(line.id);
+      entry.dropped += extra;
+    }
   }
 }

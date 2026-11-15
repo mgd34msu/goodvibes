@@ -32,7 +32,7 @@ export interface TerminalModelSelection {
 }
 export function createModelSelectionAction(
   options: {
-    readonly providerRegistry: Pick<ProviderRegistry, 'setCurrentModel' | 'setModelContextCap'>;
+    readonly providerRegistry: Pick<ProviderRegistry, 'setCurrentModel' | 'setModelContextCap' | 'getCurrentModel'>;
     readonly configManager: ConfigManager;
     readonly conversation: { log(message: string, style: { readonly fg: string }): unknown };
     readonly runtime: { model: string; provider: string; reasoningEffort: string };
@@ -48,7 +48,18 @@ export function createModelSelectionAction(
   },
 ) {
   const { providerRegistry, configManager, conversation, runtime, requestRender, completeModelSelectionSideEffect } = options;
-  const select: (selection: TerminalModelSelection) => void = ({ model, effort, contextCap, target, effortChosenByUser }) => {
+  // True while the picker's own switch runs: its writes to `provider.model` and
+  // `provider.reasoningEffort` must not start the reaction below a second time.
+  let selecting = false;
+  const select: (selection: TerminalModelSelection) => void = (selection) => {
+    selecting = true;
+    try {
+      selectModel(selection);
+    } finally {
+      selecting = false;
+    }
+  };
+  const selectModel = ({ model, effort, contextCap, target, effortChosenByUser }: TerminalModelSelection): void => {
     if (!model) return;
     const def = model;
     const key = def.registryKey ?? `${def.provider}:${def.id}`;
@@ -150,5 +161,56 @@ export function createModelSelectionAction(
     completeModelSelectionSideEffect?.();
     requestRender();
   };
+  /**
+   * Every other writer of the model setting (`/config set`, `/managed apply`,
+   * settings sync, a reset in Settings, `/setup transfer import`) changes only
+   * the setting. The session follows it here, through the same steps as the
+   * picker, so the footer, the saved session and the turns name one model.
+   */
+  const followModelSetting = (value: unknown): void => {
+    const reference = typeof value === 'string' ? value.trim() : '';
+    if (selecting || reference === '' || reference === runtime.model) return;
+    const previousRuntime = { model: runtime.model, provider: runtime.provider, reasoningEffort: runtime.reasoningEffort };
+    try {
+      providerRegistry.setCurrentModel(reference);
+      const def = providerRegistry.getCurrentModel();
+      // A bare id naming the model already in use is the same selection.
+      if (def.registryKey === previousRuntime.model) return;
+      runtime.model = def.registryKey;
+      runtime.provider = def.provider;
+      const effortModel = policy.effortModel(def);
+      policy.publishEffortOptions(effortModel);
+      const serving = resolveRequestedEffortForServingModel(configManager, effortModel);
+      runtime.reasoningEffort = serving.effective ?? '';
+      const effortNote =
+        policy.alwaysShowEffort || serving.requested !== '' ? `, effort: ${describeServingEffort(serving, effortModel)}` : '';
+      conversation.log(`Switched to model: ${def.displayName} (${def.provider})${effortNote}, from the provider.model setting`, {
+        fg: activeTokens().secondary,
+      });
+      completeModelSelectionSideEffect?.();
+    } catch (error) {
+      Object.assign(runtime, previousRuntime);
+      conversation.log(
+        `provider.model is now ${reference}, but this session cannot use it: ${summarizeError(error)}. ` +
+          `The session stays on ${previousRuntime.model}; choose a model with /model.`,
+        { fg: activeTokens().error },
+      );
+    }
+    requestRender();
+  };
+  const followEffortSetting = (): void => {
+    if (selecting) return;
+    try {
+      const def = providerRegistry.getCurrentModel();
+      const effortModel = policy.effortModel(def);
+      runtime.reasoningEffort = resolveRequestedEffortForServingModel(configManager, effortModel).effective ?? '';
+    } catch (error) {
+      conversation.log(`Reasoning effort setting not applied to this session: ${summarizeError(error)}.`, { fg: policy.noteColor() });
+    }
+    requestRender();
+  };
+  // A narrow host reader without change notices (as the provider registry allows) gets the picker alone.
+  configManager.subscribe?.('provider.model', followModelSetting);
+  configManager.subscribe?.('provider.reasoningEffort', followEffortSetting);
   return select;
 }

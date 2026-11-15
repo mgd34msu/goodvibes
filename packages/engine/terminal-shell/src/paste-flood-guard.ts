@@ -53,21 +53,25 @@ export interface CommandPasteGuardContext {
   readonly commandContext?: { print(text: string): void } | undefined;
   readonly requestRender: () => void;
 }
-/** Return true only for a suppressed command-mode key, with one notice per burst. */
+/**
+ * Return true only for a suppressed command-mode Enter, with one notice per burst.
+ * Enter is the one key whose burst runs commands; held Backspace or arrows that
+ * arrive together after a slow link are edits and always go through.
+ */
 export function guardCommandPaste(context: CommandPasteGuardContext, token: InputToken, now: number): boolean {
-  if (token.type !== 'key' || !context.commandMode) return false;
+  if (token.type !== 'key' || !context.commandMode || token.logicalName !== 'enter') return false;
   const wasSuspended = context.burstGuard.suspended;
   const guard = trackPasteFloodGuard(context.burstGuard, now);
   if (!guard.dispatch) {
     context.burstSuppressedCount++;
     if (guard.showHintNow) {
-      context.commandContext?.print('[paste] unbracketed paste flood detected: suppressing extra keystrokes until it settles');
+      context.commandContext?.print('[paste] unbracketed paste detected: holding back Enter so pasted lines do not run as commands until it settles');
       context.requestRender();
     }
     return true;
   }
   if (wasSuspended) {
-    context.commandContext?.print(`[paste] flood cleared: suppressed ${context.burstSuppressedCount} keystroke(s)`);
+    context.commandContext?.print(`[paste] paste settled: ${context.burstSuppressedCount} Enter key(s) were not run`);
     context.burstSuppressedCount = 0;
     context.requestRender();
   }

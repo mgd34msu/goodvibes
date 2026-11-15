@@ -5,6 +5,4 @@ export {
   type NoticeOptions,
   type NoticeSink,
 } from '@goodvibes-jev/engine/terminal-shell/notice-publication';
-export const publishNotice = createNoticePublisher({
-  screenBeforeLocalPublication: true,
-});
+export const publishNotice = createNoticePublisher({});

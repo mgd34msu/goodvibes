@@ -11,10 +11,11 @@ export interface WatcherStoreSnapshot {
 
 /**
  * What the `.why` receipt tells a human who finds a quarantined watcher
- * snapshot: nothing needs doing, the state comes back on its own.
+ * snapshot: which watchers come back on their own and which must be created again.
  */
 const WATCHER_STORE_RECOVERY =
-  'Watcher state rebuilds from live registrations on the next load (daemon boot, daemon tick, or a client reconnect), nothing further is required.';
+  'Watchers registered by a component (CI watch, the daemon\'s own pollers) come back when that component starts. '
+  + 'Watchers created through watchers.create (POST /api/watchers) were held only in this file: list them with watchers.list and create again any that are missing.';
 
 function sortWatchers(watchers: readonly WatcherRecord[]): WatcherRecord[] {
   return [...watchers].sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
@@ -41,9 +42,8 @@ export function loadWatcherSnapshot(storePath: string): WatcherStoreSnapshot | n
  * A file this reader cannot trust, unparseable JSON, a torn/zero-tailed
  * write, or the wrong shape, is moved aside by the shared quarantine helper
  * with a `.why` receipt, and this returns null exactly as it does for "no
- * snapshot yet". Callers (daemon boot, daemon tick, TUI, agent) all rebuild
- * watcher state from live registrations on a null return, so a corrupt
- * snapshot degrades to an empty one instead of crash-looping the reader.
+ * snapshot yet". Watchers their components register come back; watchers
+ * created through the API are lost with the file, as the receipt says.
  */
 export function loadWatcherSnapshotFromPath(storePath: string): WatcherStoreSnapshot | null {
   try { return readDocument<WatcherStoreSnapshot>(storePath, {
@@ -61,11 +61,10 @@ export function loadWatcherSnapshotFromPath(storePath: string): WatcherStoreSnap
       return { version: 1, watchers };
     },
   }); } catch (error) {
-    // This snapshot is a rebuildable cache, never the authority for a fresh
-    // registration. An unreadable path must not crash its background host or
-    // turn unverified stored bytes into restored watcher records.
+    // An unreadable path must not crash its background host or turn
+    // unverified stored bytes into restored watcher records.
     const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
-    logger.error('[watchers/store] Snapshot unavailable; rebuilding from live registrations', {
+    logger.error('[watchers/store] Snapshot unavailable; only watchers their components register again will come back', {
       filePath: storePath, code, error: 'Watcher snapshot could not be loaded.',
     });
     return null;
@@ -86,15 +85,14 @@ export function saveWatcherSnapshotToPath(watchers: readonly WatcherRecord[], st
 }
 
 /**
- * Save a watcher snapshot the way a background tick needs it saved: a write
+ * Save a watcher snapshot the way a background save needs it saved: a write
  * that fails is logged at error level with the store path and the errno, and
  * reported in the returned outcome, never thrown.
  *
- * The registry persists on every list refresh, and the fleet registry's
- * coalesced tick calls that list on a timer. An exception raised there has no
- * caller above it to catch anything, so it would reach the top as an uncaught
- * exception and take the process with it. Watcher state costs nothing to lose
- * (see {@link WATCHER_STORE_RECOVERY}); the host process does not.
+ * The registry saves from interval runs and delayed heartbeat saves, which
+ * have no caller above them to catch anything: a throw there would take the
+ * process with it. The registry keeps the failed outcome so the operator
+ * request that changed a watcher can say it was not saved.
  */
 export function saveWatcherSnapshotToPathSafe(
   watchers: readonly WatcherRecord[],

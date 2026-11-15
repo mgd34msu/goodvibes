@@ -20,6 +20,8 @@ import type {
   WatcherKind,
 } from './system-route-types.js';
 import { APPROVAL_REMEMBER_TIERS } from './system-route-types.js';
+import type { WatcherRecord, WatcherRegistryLike } from './system-route-types.js';
+import { RefusalError } from '@goodvibes-jev/engine/errors';
 
 const WATCHER_KIND_VALUES: readonly WatcherKind[] = ['filesystem', 'webhook', 'socket', 'integration', 'polling'];
 const WATCHER_SOURCE_KIND_MAP: Readonly<Record<string, WatcherKind>> = {
@@ -34,7 +36,6 @@ const WATCHER_SOURCE_RECORD_KIND_MAP: Readonly<Record<string, 'webhook' | 'hook'
   stream: 'hook',
   api: 'hook',
 };
-const CUSTOM_RUN_METADATA_KEY = 'customRun';
 const DEFAULT_WATCHER_INTERVAL_MS = 60_000;
 const MIN_WATCHER_INTERVAL_MS = 1_000;
 const MAX_WATCHER_INTERVAL_MS = 86_400_000;
@@ -89,7 +90,7 @@ export function createDaemonSystemRouteHandlers(
       if (admin) return admin;
       const removed = context.watcherRegistry.removeWatcher(watcherId);
       return removed
-        ? Response.json({ removed: true, id: watcherId })
+        ? watcherResponse(context, { removed: true, id: watcherId })
         : jsonErrorResponse({ error: 'Unknown watcher' }, { status: 404 });
     },
     // Admin only: the status carries the installed unit file, which can hold the
@@ -399,11 +400,59 @@ function refuseLiteralWatcherHeaders(body: Record<string, unknown>): Response | 
   );
 }
 
+/**
+ * A `run` text was never executed: the watcher recorded it as a fixed
+ * checkpoint and reported heartbeats that observed nothing.
+ */
+function refuseRunText(body: Record<string, unknown>): Response | null {
+  if (body.run === undefined) return null;
+  return jsonErrorResponse(
+    {
+      error: 'A watcher run text is not executed: the watcher would report heartbeats without observing anything. Nothing was changed.',
+      code: 'WATCHER_RUN_TEXT_UNSUPPORTED',
+      state: 'the watcher was not changed',
+      next: ["Remove run and give the watcher kind 'webhook' or 'polling' with a url, 'filesystem' with a path, or 'manual'"],
+    },
+    { status: 400 },
+  );
+}
+
+interface WatcherSnapshotSaveFailure {
+  readonly filePath: string;
+  readonly code?: string | undefined;
+  readonly error: string;
+}
+
+/**
+ * The watcher answer, saying so when the change holds only until the next
+ * restart because the watcher store could not be saved. Hosts that do not
+ * expose the save state answer as before.
+ */
+function watcherResponse(context: DaemonSystemRouteContext, body: WatcherRecord | Record<string, unknown>, status = 200): Response {
+  const registry = context.watcherRegistry as WatcherRegistryLike & { snapshotSaveFailure?: () => WatcherSnapshotSaveFailure | undefined };
+  const failure = registry.snapshotSaveFailure?.();
+  if (failure === undefined) return Response.json(body, { status });
+  return Response.json({
+    ...body,
+    persisted: false,
+    notice: `The change is in effect now, but the watcher store ${failure.filePath} could not be saved (${failure.code ?? failure.error}), so a restart would not keep it. `
+      + 'Free space or fix the permissions on that path; the next watcher change or run saves it again.',
+  }, { status });
+}
+
+/** A registry refusal (nothing to run, waiting for its owner) as its own status and body. */
+function watcherRefusal(error: unknown): Response {
+  if (error instanceof RefusalError) return jsonErrorResponse(error, { status: error.refusal.status ?? 400 });
+  throw error;
+}
+
 async function handleRegisterWatcher(context: DaemonSystemRouteContext, req: Request): Promise<Response> {
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
   const literalHeaders = refuseLiteralWatcherHeaders(body);
   if (literalHeaders) return literalHeaders;
+  const runText = refuseRunText(body);
+  if (runText) return runText;
   const label = typeof body.label === 'string' && body.label.trim().length > 0 ? body.label.trim() : '';
   const id = typeof body.id === 'string' && body.id.trim().length > 0
     ? body.id.trim()
@@ -438,27 +487,30 @@ async function handleRegisterWatcher(context: DaemonSystemRouteContext, req: Req
       { status: 409 },
     );
   }
-  const record = context.watcherRegistry.registerWatcher({
-    id,
-    label,
-    kind,
-    source: {
-      id: typeof body.sourceId === 'string' && body.sourceId.trim() ? body.sourceId.trim() : `source:${id}`,
-      kind: typeof body.sourceKind === 'string'
-        ? WATCHER_SOURCE_RECORD_KIND_MAP[body.sourceKind] ?? 'watcher'
-        : 'watcher',
+  let record: WatcherRecord;
+  try {
+    record = context.watcherRegistry.registerWatcher({
+      id,
       label,
-      enabled: true,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      kind,
+      source: {
+        id: typeof body.sourceId === 'string' && body.sourceId.trim() ? body.sourceId.trim() : `source:${id}`,
+        kind: typeof body.sourceKind === 'string'
+          ? WATCHER_SOURCE_RECORD_KIND_MAP[body.sourceKind] ?? 'watcher'
+          : 'watcher',
+        label,
+        enabled: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        metadata: sourceMetadata,
+      },
+      intervalMs,
       metadata: sourceMetadata,
-    },
-    intervalMs,
-    // The run text is kept in the metadata so a later PATCH can carry it over.
-    metadata: typeof body.run === 'string' ? { ...sourceMetadata, [CUSTOM_RUN_METADATA_KEY]: body.run } : sourceMetadata,
-    ...(typeof body.run === 'string' ? { run: () => body.run as string } : {}),
-  });
-  return Response.json(record, { status: 201 });
+    });
+  } catch (error) {
+    return watcherRefusal(error);
+  }
+  return watcherResponse(context, record, 201);
 }
 
 async function handleWorkingDirectoryConfig(
@@ -514,44 +566,47 @@ async function handleUpdateWatcher(context: DaemonSystemRouteContext, watcherId:
   if (body instanceof Response) return body;
   const literalHeaders = refuseLiteralWatcherHeaders(body);
   if (literalHeaders) return literalHeaders;
+  const runText = refuseRunText(body);
+  if (runText) return runText;
   const current = context.watcherRegistry.getWatcher(watcherId);
   if (!current) {
     return jsonErrorResponse({ error: 'Unknown watcher' }, { status: 404 });
   }
-  const storedRun = current.metadata?.[CUSTOM_RUN_METADATA_KEY];
-  const customRun = typeof storedRun === 'string' ? storedRun : undefined;
   const nextSourceKind = typeof body.sourceKind === 'string'
     ? WATCHER_SOURCE_RECORD_KIND_MAP[body.sourceKind] ?? 'watcher'
     : current.source.kind;
-  const updated = context.watcherRegistry.registerWatcher({
-    id: watcherId,
-    label: typeof body.label === 'string' ? body.label : current.label,
-    kind: readWatcherKind(body.kind, undefined, current.kind),
-    source: {
-      ...current.source,
-      ...(typeof body.source === 'object' && body.source !== null ? body.source as Partial<typeof current.source> : {}),
-      kind: nextSourceKind,
-      ...(typeof body.sourceId === 'string' && body.sourceId.trim().length > 0 ? { id: body.sourceId.trim() } : {}),
-      ...(typeof body.label === 'string' && body.label.trim().length > 0 ? { label: body.label.trim() } : {}),
-      ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
-      metadata: {
-        ...current.source.metadata,
-        ...(typeof body.url === 'string' ? { url: body.url } : {}),
-        ...(typeof body.method === 'string' ? { method: body.method.toUpperCase() } : {}),
-        ...(typeof body.path === 'string' ? { path: body.path } : {}),
-        ...(typeof body.endpoint === 'string' ? { endpoint: body.endpoint } : {}),
-        ...(typeof body.address === 'string' ? { address: body.address } : {}),
-        ...(typeof body.headers === 'object' && body.headers !== null ? { headers: body.headers } : {}),
-        ...(typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {}),
+  let updated: WatcherRecord;
+  try {
+    updated = context.watcherRegistry.registerWatcher({
+      id: watcherId,
+      label: typeof body.label === 'string' ? body.label : current.label,
+      kind: readWatcherKind(body.kind, undefined, current.kind),
+      source: {
+        ...current.source,
+        ...(typeof body.source === 'object' && body.source !== null ? body.source as Partial<typeof current.source> : {}),
+        kind: nextSourceKind,
+        ...(typeof body.sourceId === 'string' && body.sourceId.trim().length > 0 ? { id: body.sourceId.trim() } : {}),
+        ...(typeof body.label === 'string' && body.label.trim().length > 0 ? { label: body.label.trim() } : {}),
+        ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
+        metadata: {
+          ...current.source.metadata,
+          ...(typeof body.url === 'string' ? { url: body.url } : {}),
+          ...(typeof body.method === 'string' ? { method: body.method.toUpperCase() } : {}),
+          ...(typeof body.path === 'string' ? { path: body.path } : {}),
+          ...(typeof body.endpoint === 'string' ? { endpoint: body.endpoint } : {}),
+          ...(typeof body.address === 'string' ? { address: body.address } : {}),
+          ...(typeof body.headers === 'object' && body.headers !== null ? { headers: body.headers } : {}),
+          ...(typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {}),
+        },
+        updatedAt: Date.now(),
       },
-      updatedAt: Date.now(),
-    },
-    intervalMs: body.intervalMs !== undefined ? readWatcherIntervalMs(body.intervalMs, current.intervalMs) : (current.intervalMs ?? DEFAULT_WATCHER_INTERVAL_MS),
-    metadata: typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : current.metadata,
-    // Re-registering rebuilds the default run strategy unless told otherwise.
-    ...(customRun !== undefined ? { run: () => customRun } : {}),
-  });
-  return Response.json(updated);
+      intervalMs: body.intervalMs !== undefined ? readWatcherIntervalMs(body.intervalMs, current.intervalMs) : (current.intervalMs ?? DEFAULT_WATCHER_INTERVAL_MS),
+      metadata: typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : current.metadata,
+    });
+  } catch (error) {
+    return watcherRefusal(error);
+  }
+  return watcherResponse(context, updated);
 }
 
 async function handleWatcherAction(
@@ -560,21 +615,18 @@ async function handleWatcherAction(
   action: 'start' | 'stop' | 'run',
   _req: Request,
 ): Promise<Response> {
-  if (action === 'start') {
-    const watcher = context.watcherRegistry.startWatcher(watcherId);
-    return watcher
-      ? Response.json(watcher)
-      : jsonErrorResponse({ error: 'Unknown watcher' }, { status: 404 });
+  let watcher: WatcherRecord | null;
+  try {
+    watcher = action === 'start'
+      ? context.watcherRegistry.startWatcher(watcherId)
+      : action === 'stop'
+        ? context.watcherRegistry.stopWatcher(watcherId, 'operator-stop')
+        : await context.watcherRegistry.runWatcherNow(watcherId);
+  } catch (error) {
+    return watcherRefusal(error);
   }
-  if (action === 'stop') {
-    const watcher = context.watcherRegistry.stopWatcher(watcherId, 'operator-stop');
-    return watcher
-      ? Response.json(watcher)
-      : jsonErrorResponse({ error: 'Unknown watcher' }, { status: 404 });
-  }
-  const watcher = await context.watcherRegistry.runWatcherNow(watcherId);
   return watcher
-    ? Response.json(watcher)
+    ? watcherResponse(context, watcher)
     : jsonErrorResponse({ error: 'Unknown watcher' }, { status: 404 });
 }
 

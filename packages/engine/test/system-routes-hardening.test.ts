@@ -175,14 +175,18 @@ describe('watchers', () => {
     expect(f.registered).toHaveLength(1);
   });
 
-  test('changing a watcher created with a run text keeps that run', async () => {
+  test('a run text is refused on register and on change, and nothing is stored', async () => {
     const f = build();
     f.withBody({ label: 'Build', run: 'echo hi' });
+    const refused = await f.handlers.postWatcher(req());
+    expect(refused.status).toBe(400);
+    expect((await refused.json() as { code: string }).code).toBe('WATCHER_RUN_TEXT_UNSUPPORTED');
+    expect(f.registered).toHaveLength(0);
+    f.withBody({ label: 'Build', url: 'https://example.test/' });
     await f.handlers.postWatcher(req());
-    f.withBody({ intervalMs: 5000 });
-    expect((await f.handlers.patchWatcher('watcher-build', req('PATCH'))).status).toBe(200);
-    const patched = f.registered[1] as { run?: () => string };
-    expect(patched.run?.()).toBe('echo hi');
+    f.withBody({ run: 'echo hi' });
+    expect((await f.handlers.patchWatcher('watcher-build', req('PATCH'))).status).toBe(400);
+    expect(f.registered).toHaveLength(1);
   });
 });
 

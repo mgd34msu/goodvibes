@@ -165,7 +165,7 @@ describe('watcher store: quarantine-don\'t-crash load', () => {
     expect(existsSync(whyPath)).toBe(true);
     const whyContent = readFileSync(whyPath, 'utf-8');
     expect(whyContent.length).toBeGreaterThan(0);
-    expect(whyContent).toContain('rebuild');
+    expect(whyContent).toContain('watchers.list');
 
     // Subsequent save + load round-trips clean, with no crash and no leftover temp file.
     saveWatcherSnapshotToPath([makeWatcherRecord('after-recovery')], storePath);

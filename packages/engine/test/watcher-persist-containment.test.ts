@@ -65,10 +65,13 @@ describe('watcher snapshot persistence failures are contained', () => {
       kind: 'polling',
       source: automationSource(),
       intervalMs: 600_000,
+      metadata: { url: 'https://example.test/feed' },
     });
 
     expect(record.id).toBe('poller-1');
     expect(registry.getWatcher('poller-1')?.id).toBe('poller-1');
+    // The caller that changed something can say it was not saved.
+    expect(registry.snapshotSaveFailure()?.code).toBe('ENOTDIR');
   });
 
   test('mutation write failures are logged with path and errno while subsequent reads remain usable', () => {
@@ -80,6 +83,7 @@ describe('watcher snapshot persistence failures are contained', () => {
       kind: 'polling',
       source: automationSource(),
       intervalMs: 600_000,
+      metadata: { url: 'https://example.test/feed' },
     });
 
     const errorSpy = spyOn(logger, 'error') as Mock<typeof logger.error>;
@@ -111,6 +115,7 @@ describe('watcher snapshot persistence failures are contained', () => {
       kind: 'polling',
       source: automationSource(),
       intervalMs: 600_000,
+      metadata: { url: 'https://example.test/feed' },
     });
 
     expect(existsSync(storePath)).toBe(true);
@@ -130,5 +135,21 @@ describe('watcher snapshot persistence failures are contained', () => {
       expect(updates).toBe(0);
       expect(statSync(storePath).mtimeMs).toBe(stamp);
     } finally { clock.mockRestore(); unsubscribe(); }
+  });
+
+  test('a change dispatches only the record it changed', async () => {
+    const registry = track(new WatcherRegistry({ storePath: join(makeProjectTempDir('gv-watcher-persist'), 'watchers.json'), featureFlags: watcherFlagsOn }));
+    const runtimeStore = createRuntimeStore();
+    registry.attachRuntime({ runtimeStore });
+    let updates = 0;
+    const unsubscribe = runtimeStore.subscribe(() => { updates++; });
+    try {
+      for (let i = 0; i < 10; i++) {
+        registry.registerWatcher({ id: `m${i}`, label: `M${i}`, kind: 'manual', source: automationSource() });
+      }
+      expect(updates).toBe(10);
+      await registry.runWatcherNow('m0');
+      expect(updates).toBe(11);
+    } finally { unsubscribe(); }
   });
 });

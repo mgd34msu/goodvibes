@@ -1,8 +1,8 @@
 /**
- * What a watcher run reports: a source that answers with an error, stalls, or
- * has nothing to look at is a failed run; a failure is published even when its
- * reading cannot be made; and a watcher that was not armed by its owner is not
- * reported healthy.
+ * What a watcher run reports: a source that answers with an error or stalls
+ * is a failed run, published with whether a retry can clear it; a watcher
+ * with nothing to run is refused at registration; and a watcher that was not
+ * armed by its owner is not reported healthy.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -45,6 +45,11 @@ async function settle(): Promise<void> {
 }
 
 const answer = (status: number, body = 'body'): Promise<Response> => Promise.resolve(new Response(body, { status }));
+
+function refusalCode(act: () => unknown): string | undefined {
+  try { act(); } catch (error) { return (error as { readonly code?: string }).code; }
+  return undefined;
+}
 
 describe('url and webhook runs', () => {
   test.each(['webhook', 'polling'] as const)('a %s watcher whose url answers 500 is failed and published as failed', async (kind) => {
@@ -122,43 +127,24 @@ describe('url and webhook runs', () => {
     expect(JSON.stringify(registry.getWatcher('ok'))).not.toContain('Bearer resolved');
   });
 
-  test('a webhook watcher with no url and a filesystem watcher with no path are failed, not healthy', async () => {
+  test('a watcher with nothing to run is refused at registration and nothing is stored', () => {
     const { registry } = make();
-    registry.registerWatcher({ id: 'hook', label: 'Hook', kind: 'webhook', source });
-    registry.registerWatcher({ id: 'file', label: 'File', kind: 'filesystem', source });
-    expect((await registry.runWatcherNow('hook'))?.state).toBe('failed');
-    expect((await registry.runWatcherNow('file'))?.state).toBe('failed');
+    for (const kind of ['webhook', 'polling', 'filesystem', 'socket', 'integration'] as const) {
+      expect(refusalCode(() => registry.registerWatcher({ id: kind, label: kind, kind, source }))).toBe('WATCHER_NOTHING_TO_RUN');
+      expect(registry.getWatcher(kind)).toBeNull();
+    }
   });
 });
 
 describe('publishing a failure', () => {
-  test('is done even when the failure reading cannot be made, as retryable', async () => {
-    const { registry, failed } = make({ readTransience: () => Promise.reject(new Error('model unreachable')) });
-    registry.registerWatcher({ id: 'w1', label: 'W1', kind: 'manual', source, run: () => { throw new Error('boom'); } });
-    const record = await registry.runWatcherNow('w1');
-    expect(record?.state).toBe('failed');
-    expect(failed).toEqual([{ retryable: true, error: 'boom' }].map((f) => expect.objectContaining(f)));
-  });
-
-  test('is skipped when the watcher was stopped while the reading ran', async () => {
-    let release!: () => void;
-    let reading!: () => void;
-    const readingStarted = new Promise<void>((resolve) => { reading = resolve; });
-    const { registry, events } = make({
-      readTransience: async () => {
-        reading();
-        await new Promise<void>((resolve) => { release = resolve; });
-        return { failureClass: 'retryable' };
-      },
-    });
-    registry.registerWatcher({ id: 'w1', label: 'W1', kind: 'manual', source, run: () => { throw new Error('boom'); } });
-    registry.startWatcher('w1');
-    const running = registry.runWatcherNow('w1');
-    await readingStarted;
-    registry.stopWatcher('w1');
-    release();
-    await running;
-    expect(events).toEqual(['stopped']);
+  test('whether a retry can clear it comes from the answer status', async () => {
+    let status = 401;
+    const { registry, failed } = make({ fetchUrl: () => answer(status) });
+    registry.registerWatcher({ id: 'w1', label: 'W1', kind: 'webhook', source, metadata: { url: 'https://example.test/feed' } });
+    await registry.runWatcherNow('w1');
+    status = 503;
+    await registry.runWatcherNow('w1');
+    expect(failed.map((f) => f.retryable)).toEqual([false, true]);
   });
 });
 
@@ -218,8 +204,8 @@ describe('arming', () => {
     };
     writeFileSync(join(root, 'watchers.json'), `${JSON.stringify({ version: 1, watchers: [record] })}\n`, 'utf-8');
     const { registry } = make({}, root);
-    await expect(registry.runWatcherNow('poller-2')).rejects.toThrow('registers it');
-    expect(() => registry.startWatcher('poller-2')).toThrow('registers it');
+    await expect(registry.runWatcherNow('poller-2')).rejects.toMatchObject({ code: 'WATCHER_AWAITING_OWNER' });
+    expect(refusalCode(() => registry.startWatcher('poller-2'))).toBe('WATCHER_AWAITING_OWNER');
     await settle();
     expect(registry.getWatcher('poller-2')?.lastCheckpoint).toBe('before-restart');
     expect(registry.getWatcher('poller-2')?.lastHeartbeatAt).toBe(1_000);
@@ -235,7 +221,7 @@ describe('arming', () => {
     writeFileSync(join(root, 'watchers.json'), `${JSON.stringify({ version: 1, watchers: [record] })}\n`, 'utf-8');
     const { registry } = make({}, root);
     registry.registerWatcher({ id: 'i', kind: 'integration', label: 'I renamed', source });
-    await expect(registry.runWatcherNow('i')).rejects.toThrow('registers it');
+    await expect(registry.runWatcherNow('i')).rejects.toMatchObject({ code: 'WATCHER_AWAITING_OWNER' });
     expect(registry.getWatcher('i')?.lastCheckpoint).toBe('before-restart');
     let runs = 0;
     registry.registerWatcher({ id: 'i', kind: 'integration', label: 'I', source, run: () => { runs++; return 'owner'; } });

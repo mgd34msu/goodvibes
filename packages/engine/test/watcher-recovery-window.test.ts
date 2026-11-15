@@ -42,8 +42,8 @@ const watcherFlagsOn = { isEnabled: (id: string): boolean => id === 'watcher-fra
 /** A long interval, so nothing but the catch-up run fires during a test. */
 const LONG_INTERVAL_MS = 10 * 60_000;
 
-/** The checkpoint a run produces: `buildRunStrategy` returns a string `metadata.run` as-is. */
-const CATCH_UP_CHECKPOINT = 'ran-on-restart';
+/** The end of the checkpoint a run produces: a filesystem watcher on a file that does not exist reports `<path>:missing`. */
+const CATCH_UP_CHECKPOINT = 'watched-file:missing';
 
 function automationSource(): AutomationSourceRecord {
   return {
@@ -68,14 +68,14 @@ function restoredRegistry(agoMs: number, recoveryWindowMinutes: number): Watcher
   mkdirSync(root, { recursive: true });
   const record: WatcherRecord = {
     id: 'poller-1',
-    kind: 'polling',
+    kind: 'filesystem',
     label: 'Poller 1',
     state: 'running',
     source: automationSource(),
     intervalMs: LONG_INTERVAL_MS,
     lastHeartbeatAt: Date.now() - agoMs,
     lastCheckpoint: 'checkpoint-from-before-the-restart',
-    metadata: { run: CATCH_UP_CHECKPOINT, runMode: 'polling' },
+    metadata: { path: join(root, 'watched-file') },
   };
   writeFileSync(storePath, `${JSON.stringify({ version: 1, watchers: [record] }, null, 2)}\n`, 'utf-8');
   const registry = new WatcherRegistry({
@@ -106,7 +106,7 @@ async function restoreAndSettle(registry: WatcherRegistry): Promise<WatcherRecor
 describe('a restart inside the recovery window catches up immediately', () => {
   test('a two-minute outage with a ten-minute window runs at once', async () => {
     const record = await restoreAndSettle(restoredRegistry(2 * 60_000, 10));
-    expect(record.lastCheckpoint).toBe(CATCH_UP_CHECKPOINT);
+    expect(record.lastCheckpoint).toEndWith(CATCH_UP_CHECKPOINT);
     expect(record.state).toBe('running');
     expect(record.sourceStatus).toBe('healthy');
   });
@@ -114,10 +114,12 @@ describe('a restart inside the recovery window catches up immediately', () => {
   test('the caught-up heartbeat is persisted, not only held in memory', async () => {
     const registry = restoredRegistry(2 * 60_000, 10);
     const record = await restoreAndSettle(registry);
+    // A run that changed no state shares a delayed save; shutting down writes it.
+    registry.dispose();
     const onDisk = JSON.parse(
       readFileSync(join(roots[roots.length - 1]!, 'watchers.json'), 'utf-8'),
     ) as { watchers: WatcherRecord[] };
-    expect(onDisk.watchers[0]?.lastCheckpoint).toBe(CATCH_UP_CHECKPOINT);
+    expect(onDisk.watchers[0]?.lastCheckpoint).toEndWith(CATCH_UP_CHECKPOINT);
     expect(onDisk.watchers[0]?.lastHeartbeatAt).toBe(record.lastHeartbeatAt);
   });
 
@@ -125,7 +127,7 @@ describe('a restart inside the recovery window catches up immediately', () => {
     // Ninety minutes down. The previous case's default window would refuse this;
     // a 24-hour window is exactly what the key's upper bound is for.
     const record = await restoreAndSettle(restoredRegistry(90 * 60_000, 1440));
-    expect(record.lastCheckpoint).toBe(CATCH_UP_CHECKPOINT);
+    expect(record.lastCheckpoint).toEndWith(CATCH_UP_CHECKPOINT);
   });
 });
 
@@ -159,12 +161,12 @@ describe('a restart outside the recovery window waits for the normal tick', () =
 describe('an unusable configured value falls back to the shipped default', () => {
   test('NaN behaves as the ten-minute default rather than as "never"', async () => {
     const record = await restoreAndSettle(restoredRegistry(2 * 60_000, Number.NaN));
-    expect(record.lastCheckpoint).toBe(CATCH_UP_CHECKPOINT);
+    expect(record.lastCheckpoint).toEndWith(CATCH_UP_CHECKPOINT);
   });
 
   test('a negative value behaves as the default too', async () => {
     const record = await restoreAndSettle(restoredRegistry(2 * 60_000, -5));
-    expect(record.lastCheckpoint).toBe(CATCH_UP_CHECKPOINT);
+    expect(record.lastCheckpoint).toEndWith(CATCH_UP_CHECKPOINT);
   });
 
   test('a registry given no getter uses the shipped default', async () => {
@@ -173,18 +175,18 @@ describe('an unusable configured value falls back to the shipped default', () =>
     const storePath = join(root, 'watchers.json');
     const record: WatcherRecord = {
       id: 'poller-1',
-      kind: 'polling',
+      kind: 'filesystem',
       label: 'Poller 1',
       state: 'running',
       source: automationSource(),
       intervalMs: LONG_INTERVAL_MS,
       lastHeartbeatAt: Date.now() - 2 * 60_000,
       lastCheckpoint: 'checkpoint-from-before-the-restart',
-      metadata: { run: CATCH_UP_CHECKPOINT, runMode: 'polling' },
+      metadata: { path: join(root, 'watched-file') },
     };
     writeFileSync(storePath, `${JSON.stringify({ version: 1, watchers: [record] }, null, 2)}\n`, 'utf-8');
     const registry = new WatcherRegistry({ storePath, featureFlags: watcherFlagsOn });
     registries.push(registry);
-    expect((await restoreAndSettle(registry)).lastCheckpoint).toBe(CATCH_UP_CHECKPOINT);
+    expect((await restoreAndSettle(registry)).lastCheckpoint).toEndWith(CATCH_UP_CHECKPOINT);
   });
 });

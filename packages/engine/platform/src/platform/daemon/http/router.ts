@@ -737,6 +737,7 @@ export class DaemonHttpRouter {
           recordApiResponse: (request, path, response, clientKind) => this.recordApiResponse(request, path, response, clientKind),
           requireAdmin: (request) => this.context.requireAdmin(request),
           requireAuthenticatedSession: (request) => this.context.requireAuthenticatedSession(request),
+          resolveAuthenticatedPrincipal: (request) => this.principalOf(request),
           routeBindings: this.context.routeBindings,
           swapManager: this.context.swapManager,
           watcherRegistry: this.context.watcherRegistry,
@@ -823,7 +824,7 @@ export class DaemonHttpRouter {
         ),
       }),
       ...createDaemonRemoteRouteHandlers({
-        authToken,
+        resolveAuthenticatedPrincipal: (request) => this.principalOf(request),
         parseJsonBody: (request) => this.parseJsonBody(request),
         requireAdmin: (request) => this.context.requireAdmin(request),
         requireRemotePeer: (request, scope) => this.context.requireRemotePeer(request, scope),

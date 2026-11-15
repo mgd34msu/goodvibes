@@ -404,25 +404,22 @@ export interface DaemonRuntimeTaskRouteHandlers {
   getTaskStatus(agentId: string): MaybeResponse;
 }
 
-/** Route handlers for automation job and schedule management: CRUD, runs, heartbeat, and scheduler capacity. */
+/**
+ * Route handlers for automation reads, run actions and run-now. Job and
+ * schedule create, update, delete, enable, disable, pause and resume are gateway
+ * verbs served through the gateway REST table.
+ */
 export interface DaemonRuntimeAutomationRouteHandlers {
-  /** @param url - When present and contains `limit`/`cursor` params, returns a `PaginatedResponse`. Otherwise returns the legacy `{jobs}` array. */
+  /** `{ items, hasMore, nextCursor?, jobs }` with or without `limit`/`cursor` in `url`. */
   getAutomationJobs(url?: URL): MaybeResponse;
-  postAutomationJob(req: Request): MaybeResponse;
-  /** @param url - When present and contains `limit`/`cursor` params, returns a `PaginatedResponse`. Otherwise returns the legacy `{runs}` array. */
+  /** `{ items, hasMore, nextCursor?, runs }` with or without `limit`/`cursor` in `url`. */
   getAutomationRuns(url?: URL): MaybeResponse;
   getAutomationRun(runId: string): MaybeResponse;
   getAutomationHeartbeat(): MaybeResponse;
   postAutomationHeartbeat(req: Request): MaybeResponse;
   automationRunAction(runId: string, action: 'cancel' | 'retry', req: Request): MaybeResponse;
-  patchAutomationJob(jobId: string, req: Request): MaybeResponse;
-  deleteAutomationJob(jobId: string, req: Request): MaybeResponse;
-  setAutomationJobEnabled(jobId: string, enabled: boolean, req: Request): MaybeResponse;
   runAutomationJobNow(jobId: string, req: Request): MaybeResponse;
   getSchedules(): MaybeResponse;
-  postSchedule(req: Request): MaybeResponse;
-  deleteSchedule(scheduleId: string, req: Request): MaybeResponse;
-  setScheduleEnabled(scheduleId: string, enabled: boolean, req: Request): MaybeResponse;
   runScheduleNow(scheduleId: string, req: Request): MaybeResponse;
   getSchedulerCapacity(req: Request): MaybeResponse;
 }

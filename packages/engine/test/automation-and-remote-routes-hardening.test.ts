@@ -1,4 +1,4 @@
-/** Automation job patches and listing, the heartbeat queue, remote payload sizing and error statuses, telemetry read failures. */
+/** Automation listing, the heartbeat queue, remote payload sizing and error statuses, telemetry read failures. */
 import { describe, expect, test } from 'bun:test';
 import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-api/src/runtime-automation-routes.js';
 import type { DaemonRuntimeRouteContext } from '../daemon-api/src/runtime-route-types.js';
@@ -39,43 +39,11 @@ function automationThrowing(error: unknown) {
 }
 const patchRequest = () => new Request('http://daemon.invalid/api/automation/jobs/j1', { method: 'PATCH' });
 
-describe('PATCH /api/automation/jobs/:id', () => {
-  test('a string where a boolean belongs is refused and the job is not touched', async () => {
-    const f = automation([{ id: 'j1' }]);
-    f.withBody({ enabled: 'false' });
-    const response = await f.handlers.patchAutomationJob('j1', patchRequest());
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({ code: 'INVALID_SCHEDULE_PATCH' });
-    expect(f.updates).toEqual([]);
-  });
-
-  test.each([
-    ['autoApprove', 'yes'], ['toolAllowlist', 'bash'], ['target', 'x'], ['timeoutMs', -1], ['prompt', 7],
-  ])('%s with the wrong type is refused', async (field, value) => {
-    const f = automation([{ id: 'j1' }]);
-    f.withBody({ [field]: value });
-    expect((await f.handlers.patchAutomationJob('j1', patchRequest())).status).toBe(400);
-    expect(f.updates).toEqual([]);
-  });
-
-  test('well-typed fields reach the manager', async () => {
-    const f = automation([{ id: 'j1' }]);
-    f.withBody({ enabled: false, prompt: 'new', toolAllowlist: ['read'] });
-    expect((await f.handlers.patchAutomationJob('j1', patchRequest())).status).toBe(200);
-    expect(f.updates).toEqual([{ id: 'j1', patch: { enabled: false, prompt: 'new', toolAllowlist: ['read'] } }]);
-  });
-});
-
 describe('automation service failures', () => {
   const full = Object.assign(new Error('database or disk is full'), { code: 'SQLITE_FULL', retryable: true });
 
-  test('a failure that carries no status while updating a job is a refused request (400)', async () => {
-    const response = await automationThrowing(new Error('Automation route target requires a provider')).patchAutomationJob('j1', patchRequest());
-    expect(response.status).toBe(400);
-  });
-
-  test('a retryable storage failure while updating a job is a 503, not a mistake in the request', async () => {
-    expect((await automationThrowing(full).patchAutomationJob('j1', patchRequest())).status).toBe(503);
+  test('a retryable storage failure while running a job now is a 503, not a mistake in the request', async () => {
+    expect((await automationThrowing(full).runScheduleNow('j1', patchRequest())).status).toBe(503);
   });
 
   test('an error with its own status keeps it when running a job now', async () => {
@@ -93,9 +61,9 @@ describe('automation listing and heartbeat', () => {
     expect((await response.json() as { error: string }).error).toContain('Cursor expired');
   });
 
-  test('other lists keep restarting from the first item by default', () => {
+  test('no list restarts from the first item when its cursor cannot be placed', () => {
     const result = paginateItems([{ id: 'a' }, { id: 'b' }], 5, encodeCursor('gone'), (item) => item.id);
-    expect('items' in result && result.items.map((item) => item.id)).toEqual(['a', 'b']);
+    expect('error' in result && result.error).toContain('Cursor expired');
   });
 
   test('the heartbeat queue lists the jobs waiting for the next heartbeat', async () => {

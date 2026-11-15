@@ -14,14 +14,23 @@
 // Keeping the body as raw bytes (not base64 inside JSON) avoids inflating
 // payloads and keeps binary bodies exact.
 //
-// Streaming frames (a live subscription, e.g. Server-Sent Events) reuse the same
+// Streaming frames (an answer the caller reads as it is produced: Server-Sent
+// Events, streamed speech, a streamed chat completion) reuse the same
 // sealed-frame layout and multiplex over the same pipe by a shared `id`:
-//   - `stream-open`     surface → daemon: open a subscription (like `request`).
-//   - `stream-data`     daemon → surface: one chunk of the event source's bytes.
+//   - `stream-open`     surface → daemon: a request (any method, with its body)
+//                       whose answer is streamed.
+//   - `response`        daemon → surface: the answer's status and headers, sent
+//                       before its first `stream-data`.
+//   - `stream-data`     daemon → surface: one chunk of the answer's bytes.
 //   - `stream-overflow` daemon → surface: the bounded send buffer dropped N
 //                       chunks, an honest notice, never a silent gap.
 //   - `stream-close`    either direction: clean teardown (surface unsubscribes,
 //                       or the daemon's source ended/errored).
+//
+// A relay forwards binary messages up to a size it states (`maxMessageBytes`
+// in its `registered` / `connected` frame). A sealed frame larger than that is
+// sent as consecutive `fragment` frames carrying slices of the whole encoded
+// frame; the receiver joins them and decodes the frame as if it came whole.
 
 import { concatBytes, decodeUtf8, encodeUtf8 } from './crypto.js';
 
@@ -49,7 +58,7 @@ export interface TunnelResponseHeader {
   readonly headers: ReadonlyArray<readonly [string, string]>;
 }
 
-/** Open a live event subscription (surface → daemon). Shape mirrors a request. */
+/** A request whose answer is streamed (surface → daemon). Shape mirrors a request; the frame body is the request body. */
 export interface TunnelStreamOpenHeader {
   readonly id: string;
   readonly kind: 'stream-open';
@@ -81,8 +90,20 @@ export interface TunnelStreamCloseHeader {
   readonly reason?: string;
 }
 
+/**
+ * One slice of a tunnel frame too large for one relay message. `id` is the
+ * whole frame's id; slices arrive in order, `index` 0 to `count - 1`.
+ */
+export interface TunnelFragmentHeader {
+  readonly id: string;
+  readonly kind: 'fragment';
+  readonly index: number;
+  readonly count: number;
+}
+
 /** Any tunnel frame header. */
 export type TunnelHeader =
+  | TunnelFragmentHeader
   | TunnelRequestHeader
   | TunnelRequestCancelHeader
   | TunnelResponseHeader
@@ -152,5 +173,99 @@ function isTunnelHeader(value: unknown): value is TunnelHeader {
   if (v['kind'] === 'stream-data') return typeof v['seq'] === 'number';
   if (v['kind'] === 'stream-overflow') return typeof v['dropped'] === 'number';
   if (v['kind'] === 'stream-close') return v['reason'] === undefined || typeof v['reason'] === 'string';
+  if (v['kind'] === 'fragment') {
+    const { index, count } = v as { index?: unknown; count?: unknown };
+    return Number.isSafeInteger(index) && Number.isSafeInteger(count)
+      && (count as number) >= 2 && (count as number) <= MAX_TUNNEL_FRAGMENTS && (index as number) >= 0 && (index as number) < (count as number);
+  }
   return false;
+}
+
+// ─── Fragments ────────────────────────────────────────────────────────────────
+
+/** Most fragments one frame may be split into (bounds a receiver's bookkeeping, not the frame size). */
+const MAX_TUNNEL_FRAGMENTS = 65_536;
+
+/**
+ * Bytes a relay message carries beyond a tunnel frame: the pipe-id prefix, the
+ * secure channel's counter and tag, and a fragment header, with room to spare.
+ */
+export const RELAY_FRAME_OVERHEAD_BYTES = 1024;
+
+/** The largest sealed-frame plaintext that fits one relay message of `maxMessageBytes`. */
+export function tunnelFrameLimit(maxMessageBytes: number): number {
+  return Math.max(4096, maxMessageBytes - RELAY_FRAME_OVERHEAD_BYTES);
+}
+
+/**
+ * Split an encoded tunnel frame into fragment frames of at most `maxFrameBytes`
+ * each, or return it alone when it fits. The frame's own id is read only when
+ * it has to be split, so a frame that fits costs one length compare.
+ */
+export function fragmentTunnelFrame(frame: Uint8Array<ArrayBuffer>, maxFrameBytes: number): Uint8Array<ArrayBuffer>[] {
+  if (frame.length <= maxFrameBytes) return [frame];
+  const decoded = decodeTunnelFrame(frame);
+  if (!decoded) throw new Error('Cannot fragment a malformed tunnel frame.');
+  const slice = maxFrameBytes - 256;
+  const count = Math.ceil(frame.length / slice);
+  if (count > MAX_TUNNEL_FRAGMENTS) throw new Error('Tunnel frame is too large to fragment.');
+  const parts: Uint8Array<ArrayBuffer>[] = [];
+  for (let index = 0; index < count; index += 1) {
+    parts.push(encodeTunnelFrame({ id: decoded.header.id, kind: 'fragment', index, count }, frame.slice(index * slice, (index + 1) * slice)));
+  }
+  return parts;
+}
+
+/** What {@link TunnelFragmentJoiner.push} made of one fragment. */
+export type TunnelFragmentResult =
+  | { readonly kind: 'pending' }
+  | { readonly kind: 'frame'; readonly header: TunnelHeader; readonly body: Uint8Array<ArrayBuffer> }
+  | { readonly kind: 'too-large'; readonly id: string }
+  | { readonly kind: 'malformed'; readonly id: string };
+
+/**
+ * Joins the fragments of one direction of one secure channel. Fragments of a
+ * frame arrive consecutively and in order (the sender queues them together and
+ * the channel keeps order), so one partial frame per id is held, bounded in
+ * total by `maxBytes`.
+ */
+export class TunnelFragmentJoiner {
+  private readonly partial = new Map<string, { readonly count: number; next: number; bytes: number; readonly parts: Uint8Array<ArrayBuffer>[] }>();
+  private held = 0;
+
+  constructor(private readonly maxBytes: number) {}
+
+  push(header: TunnelFragmentHeader, body: Uint8Array<ArrayBuffer>): TunnelFragmentResult {
+    let entry = this.partial.get(header.id);
+    if (!entry) {
+      if (header.index !== 0) return { kind: 'malformed', id: header.id };
+      entry = { count: header.count, next: 0, bytes: 0, parts: [] };
+      this.partial.set(header.id, entry);
+    }
+    if (header.index !== entry.next || header.count !== entry.count) {
+      this.drop(header.id);
+      return { kind: 'malformed', id: header.id };
+    }
+    if (this.held + body.length > this.maxBytes) {
+      this.drop(header.id);
+      return { kind: 'too-large', id: header.id };
+    }
+    entry.parts.push(body);
+    entry.bytes += body.length;
+    entry.next += 1;
+    this.held += body.length;
+    if (entry.next < entry.count) return { kind: 'pending' };
+    this.drop(header.id);
+    const whole = decodeTunnelFrame(concatBytes(...entry.parts));
+    if (!whole || whole.header.kind === 'fragment' || whole.header.id !== header.id) return { kind: 'malformed', id: header.id };
+    return { kind: 'frame', header: whole.header, body: whole.body };
+  }
+
+  /** Forget a partial frame (its pipe or request ended). */
+  drop(id: string): void {
+    const entry = this.partial.get(id);
+    if (!entry) return;
+    this.partial.delete(id);
+    this.held -= entry.bytes;
+  }
 }

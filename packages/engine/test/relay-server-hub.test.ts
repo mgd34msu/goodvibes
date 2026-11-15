@@ -14,13 +14,18 @@ import {
   type RelayServerSocket,
 } from '../daemon-api/src/relay-server.js';
 import {
+  RELAY_DEFAULT_MAX_MESSAGE_BYTES,
   decodeControlFrame,
   encodeControlFrame,
   fromBase64Url,
   framePipePayload,
+  generateRelayIdentity,
+  proveRelayRegistration,
+  relayIdentityRendezvousId,
   toBase64Url,
   unframePipePayload,
   type RelayControlFrame,
+  type RelayKeyPair,
 } from '../transport-core/src/relay/index.js';
 
 class FakeSocket implements RelayServerSocket {
@@ -40,11 +45,20 @@ class FakeSocket implements RelayServerSocket {
   }
 }
 
-function registerDaemon(hub: RelayHub, rid: string) {
+/** Register a daemon the way a real one does: register, answer the challenge with its key, wait for the verdict. */
+async function registerDaemon(hub: RelayHub, identity?: RelayKeyPair, claimRid?: string) {
+  const key = identity ?? await generateRelayIdentity();
+  const rid = claimRid ?? await relayIdentityRendezvousId(key);
   const sock = new FakeSocket();
   const conn = hub.accept(sock, '10.0.0.1');
   conn.handleText(encodeControlFrame({ t: 'register', role: 'daemon', protocol: 1, rid }));
-  return { sock, conn };
+  const challenge = sock.lastControl();
+  if (challenge?.t === 'challenge') {
+    const sent = sock.texts.length;
+    conn.handleText(encodeControlFrame(await proveRelayRegistration(key, rid, challenge.nonce)));
+    for (let i = 0; i < 200 && sock.texts.length === sent; i += 1) await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  return { sock, conn, rid, key };
 }
 
 function connectClient(hub: RelayHub, rid: string, addr = '10.0.0.2') {
@@ -55,12 +69,12 @@ function connectClient(hub: RelayHub, rid: string, addr = '10.0.0.2') {
 }
 
 describe('RelayHub pairing + opaque forwarding', () => {
-  test('daemon registers and a client pairs, opening a pipe both sides see', () => {
+  test('daemon registers and a client pairs, opening a pipe both sides see', async () => {
     const hub = new RelayHub();
-    const daemon = registerDaemon(hub, 'rid-1');
-    expect(daemon.sock.lastControl()).toEqual({ t: 'registered', rid: 'rid-1' });
+    const daemon = await registerDaemon(hub);
+    expect(daemon.sock.lastControl()).toEqual({ t: 'registered', rid: daemon.rid, maxMessageBytes: RELAY_DEFAULT_MAX_MESSAGE_BYTES });
 
-    const client = connectClient(hub, 'rid-1');
+    const client = connectClient(hub, daemon.rid);
     const clientFrame = client.sock.lastControl();
     expect(clientFrame?.t).toBe('connected');
     const pipe = clientFrame?.t === 'connected' ? clientFrame.pipe : '';
@@ -68,10 +82,10 @@ describe('RelayHub pairing + opaque forwarding', () => {
     expect(hub.stats()).toEqual({ daemons: 1, pipes: 1 });
   });
 
-  test('forwards client bytes to the daemon with a pipe prefix, and back', () => {
+  test('forwards client bytes to the daemon with a pipe prefix, and back', async () => {
     const hub = new RelayHub();
-    const daemon = registerDaemon(hub, 'rid-2');
-    const client = connectClient(hub, 'rid-2');
+    const daemon = await registerDaemon(hub);
+    const client = connectClient(hub, daemon.rid);
     const connected = client.sock.lastControl();
     const pipe = connected?.t === 'connected' ? connected.pipe : '';
     const pipeBytes = fromBase64Url(pipe);
@@ -100,11 +114,27 @@ describe('RelayHub honest failure + caps', () => {
     expect(client.sock.closed).not.toBeNull();
   });
 
-  test('a second daemon claiming a taken rendezvous id is rejected', () => {
+  test('a registration that cannot prove the rendezvous id is refused, and the owner keeps it', async () => {
     const hub = new RelayHub();
-    registerDaemon(hub, 'dup');
-    const second = registerDaemon(hub, 'dup');
-    expect(second.sock.lastControl()).toMatchObject({ t: 'error', code: 'rid-taken' });
+    const owner = await registerDaemon(hub);
+    const squatter = await registerDaemon(hub, await generateRelayIdentity(), owner.rid);
+    expect(squatter.sock.lastControl()).toMatchObject({ t: 'error', code: 'unauthorized' });
+    expect(squatter.sock.closed).not.toBeNull();
+    expect(owner.sock.closed).toBeNull();
+    expect(connectClient(hub, owner.rid).sock.lastControl()?.t).toBe('connected');
+  });
+
+  test('a proven registration replaces the same daemon\'s stale connection', async () => {
+    const hub = new RelayHub();
+    const stale = await registerDaemon(hub);
+    const fresh = await registerDaemon(hub, stale.key);
+    expect(fresh.sock.lastControl()).toMatchObject({ t: 'registered', rid: stale.rid });
+    expect(stale.sock.closed).toMatchObject({ code: 1008, reason: 'replaced' });
+    stale.conn.handleClose();
+    expect(hub.stats().daemons).toBe(1);
+    const client = connectClient(hub, stale.rid);
+    expect(fresh.sock.lastControl()?.t).toBe('pipe-open');
+    expect(client.sock.lastControl()?.t).toBe('connected');
   });
 
   test('protocol-version mismatch is rejected', () => {
@@ -115,49 +145,64 @@ describe('RelayHub honest failure + caps', () => {
     expect(sock.lastControl()).toMatchObject({ t: 'error', code: 'protocol-version' });
   });
 
-  test('per-daemon pipe cap trips capacity', () => {
+  test('per-daemon pipe cap trips capacity', async () => {
     const hub = new RelayHub({ limits: { maxPipesPerDaemon: 1 } });
-    registerDaemon(hub, 'cap');
-    connectClient(hub, 'cap');
-    const overflow = connectClient(hub, 'cap');
+    const daemon = await registerDaemon(hub);
+    connectClient(hub, daemon.rid);
+    const overflow = connectClient(hub, daemon.rid);
     expect(overflow.sock.lastControl()).toMatchObject({ t: 'error', code: 'capacity' });
   });
 
-  test('oversized data frame is rejected', () => {
+  test('oversized data frame is rejected', async () => {
     const hub = new RelayHub({ limits: { maxMessageBytes: 8 } });
-    registerDaemon(hub, 'big');
-    const client = connectClient(hub, 'big');
+    const daemon = await registerDaemon(hub);
+    const client = connectClient(hub, daemon.rid);
     client.conn.handleBinary(new Uint8Array(9));
     expect(client.sock.lastControl()).toMatchObject({ t: 'error', code: 'capacity' });
   });
 
-  test('handshake rate limit trips after the configured budget', () => {
+  test('a daemon frame over the cap closes only its pipe, never the registration or other pipes', async () => {
+    const hub = new RelayHub({ limits: { maxMessageBytes: 64 } });
+    const daemon = await registerDaemon(hub);
+    const big = connectClient(hub, daemon.rid);
+    const other = connectClient(hub, daemon.rid, '10.0.0.3');
+    const pipeOf = (frame: RelayControlFrame | null) => fromBase64Url(frame?.t === 'connected' ? frame.pipe : '');
+    const otherPipe = pipeOf(other.sock.lastControl());
+    daemon.conn.handleBinary(framePipePayload(pipeOf(big.sock.lastControl()), new Uint8Array(100)));
+    expect(big.sock.lastControl()).toMatchObject({ t: 'pipe-close', reason: 'frame-too-large' });
+    expect(daemon.sock.closed).toBeNull();
+    expect(hub.stats()).toEqual({ daemons: 1, pipes: 1 });
+    daemon.conn.handleBinary(framePipePayload(otherPipe, new Uint8Array([1, 2])));
+    expect(Array.from(other.sock.binaries.at(-1)!)).toEqual([1, 2]);
+  });
+
+  test('handshake rate limit trips after the configured budget', async () => {
     const hub = new RelayHub({ limits: { maxHandshakesPerMinutePerAddr: 2 } });
-    registerDaemon(hub, 'r');
+    const { rid } = await registerDaemon(hub);
     // same address dials repeatedly
-    connectClient(hub, 'r', 'spammer'); // 1
-    const third = connectClient(hub, 'r', 'spammer'); // 2 (register used 0 for this addr; this is 2nd client)
+    connectClient(hub, rid, 'spammer'); // 1
+    const third = connectClient(hub, rid, 'spammer'); // 2 (register used 0 for this addr; this is 2nd client)
     // The daemon registered from a different addr, so 'spammer' has 2 connects.
-    const fourth = connectClient(hub, 'r', 'spammer');
+    const fourth = connectClient(hub, rid, 'spammer');
     expect(fourth.sock.lastControl()).toMatchObject({ t: 'error', code: 'rate-limited' });
     expect(third.sock.lastControl()?.t).toBe('connected');
   });
 });
 
 describe('RelayHub lifecycle cleanup', () => {
-  test('client disconnect notifies the daemon and frees the pipe', () => {
+  test('client disconnect notifies the daemon and frees the pipe', async () => {
     const hub = new RelayHub();
-    const daemon = registerDaemon(hub, 'life');
-    const client = connectClient(hub, 'life');
+    const daemon = await registerDaemon(hub);
+    const client = connectClient(hub, daemon.rid);
     client.conn.handleClose();
     expect(daemon.sock.lastControl()?.t).toBe('pipe-close');
     expect(hub.stats().pipes).toBe(0);
   });
 
-  test('daemon disconnect closes its clients and clears registration', () => {
+  test('daemon disconnect closes its clients and clears registration', async () => {
     const hub = new RelayHub();
-    const daemon = registerDaemon(hub, 'gone');
-    const client = connectClient(hub, 'gone');
+    const daemon = await registerDaemon(hub);
+    const client = connectClient(hub, daemon.rid);
     daemon.conn.handleClose();
     expect(client.sock.lastControl()).toMatchObject({ t: 'pipe-close', reason: 'daemon-disconnected' });
     expect(client.sock.closed).not.toBeNull();
@@ -167,11 +212,11 @@ describe('RelayHub lifecycle cleanup', () => {
 
 
 describe('daemon-owned relay pipe close', () => {
-  test('a daemon can close its own pipe but never another daemon pipe', () => {
+  test('a daemon can close its own pipe but never another daemon pipe', async () => {
     const hub = new RelayHub();
-    const owner = registerDaemon(hub, 'close-owner');
-    const other = registerDaemon(hub, 'close-other');
-    const client = connectClient(hub, 'close-owner');
+    const owner = await registerDaemon(hub);
+    const other = await registerDaemon(hub);
+    const client = connectClient(hub, owner.rid);
     const connected = client.sock.lastControl();
     const pipe = connected?.t === 'connected' ? connected.pipe : '';
     other.conn.handleText(encodeControlFrame({ t: 'pipe-close', pipe }));

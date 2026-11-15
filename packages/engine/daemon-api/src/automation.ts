@@ -2,10 +2,11 @@ import type { DaemonAutomationRouteHandlers } from './context.js';
 import { InvalidPathEncodingError, invalidPathEncodingResponse, safeDecodeURIComponent } from './operator.js';
 
 /**
- * Job and schedule create/update/delete/enable/disable are served only by the
- * gateway REST table (`gateway-rest-routes.ts`), which carries the verb gating;
- * they are deliberately absent here. This table keeps the reads, run actions,
- * `pause`/`resume` and the run-now paths.
+ * Job and schedule create/update/delete/enable/disable, and job pause/resume,
+ * are served only by the gateway REST table (`gateway-rest-routes.ts`), which
+ * carries the verb gating and the native handlers' revision check; they are
+ * deliberately absent here. This table keeps the reads, run actions and the
+ * run-now paths.
  */
 export async function dispatchAutomationRoutes(
   req: Request,
@@ -41,13 +42,8 @@ async function dispatchAutomationRoutesInner(
     return handlers.automationRunAction(safeDecodeURIComponent(automationRunActionMatch[1]!), automationRunActionMatch[2]! as 'cancel' | 'retry', req);
   }
 
-  const automationJobActionMatch = pathname.match(/^\/api\/automation\/jobs\/([^/]+)\/(pause|resume|run)$/);
-  if (automationJobActionMatch && method === 'POST') {
-    const [, rawJobId, action] = automationJobActionMatch;
-    const jobId = safeDecodeURIComponent(rawJobId!);
-    if (action === 'run') return handlers.runAutomationJobNow(jobId!, req);
-    return handlers.setAutomationJobEnabled(jobId!, action === 'resume', req);
-  }
+  const automationJobRunMatch = pathname.match(/^\/api\/automation\/jobs\/([^/]+)\/run$/);
+  if (automationJobRunMatch && method === 'POST') return handlers.runAutomationJobNow(safeDecodeURIComponent(automationJobRunMatch[1]!), req);
 
   if (pathname === '/api/deliveries' && method === 'GET') return handlers.getDeliveries();
   const deliveryMatch = pathname.match(/^\/api\/deliveries\/([^/]+)$/);

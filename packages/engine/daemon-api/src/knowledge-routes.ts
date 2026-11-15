@@ -1,8 +1,8 @@
 import type { DaemonKnowledgeRouteHandlers } from './context.js';
 import { resolvePrivateHostFetchOptions } from './http-policy.js';
-import { GoodVibesError, DaemonErrorCategory } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError, DaemonErrorCategory, readRefusal } from '@goodvibes-jev/engine/errors';
 import { jsonErrorResponse, missingScopeRefusal, readServiceErrorResponse } from './error-response.js';
-import { paginateItems, hasPaginationParams } from './pagination.js';
+import { decodeCursor, encodeCursor, listingEnvelope } from './pagination.js';
 import { createArtifactFromUploadRequest, isArtifactUploadRequest } from './artifact-upload.js';
 import {
   createRouteBodySchema,
@@ -15,15 +15,18 @@ import {
   type JsonRecord,
 } from './route-helpers.js';
 import { createDaemonKnowledgeRefinementRouteHandlers } from './knowledge-refinement-routes.js';
-import type {
-  AutomationScheduleDefinition,
-  DaemonKnowledgeRouteContext,
-  KnowledgeCandidateStatus,
-  KnowledgePacketDetail,
-  KnowledgeProjectionTargetKind,
-  KnowledgeSourceType,
-  KnowledgeUsageKind,
-  KnowledgeScopeReadOptions,
+import {
+  KNOWLEDGE_CANDIDATE_STATUSES,
+  KNOWLEDGE_SOURCE_TYPES,
+  KNOWLEDGE_USAGE_KINDS,
+  type AutomationScheduleDefinition,
+  type DaemonKnowledgeRouteContext,
+  type KnowledgeCandidateStatus,
+  type KnowledgePacketDetail,
+  type KnowledgeProjectionTargetKind,
+  type KnowledgeSourceType,
+  type KnowledgeUsageKind,
+  type KnowledgeScopeReadOptions,
 } from './knowledge-route-types.js';
 
 type KnowledgeSearchBody = {
@@ -63,17 +66,6 @@ type KnowledgeRunJobBody = {
 };
 
 const MAX_KNOWLEDGE_INGEST_TAGS = 64;
-/** The paged listings page through at most this many of the newest records (the store has no offset reads). */
-const KNOWLEDGE_PAGED_LOAD_CAP = 5_000;
-
-/**
- * Say so when a paged listing could not reach every record: past the load cap `hasMore` is
- * false for the loaded slice, so without this a cursor walk looks complete. The fields are
- * additive; `hasMore` keeps its meaning for the records that were loaded.
- */
-function withTruncation(page: object, total: number, loaded: number): object {
-  return total > loaded ? { ...page, truncated: true, total, loaded } : page;
-}
 
 export function createDaemonKnowledgeRouteHandlers(
   context: DaemonKnowledgeRouteContext,
@@ -83,12 +75,8 @@ export function createDaemonKnowledgeRouteHandlers(
       Response.json(await context.knowledgeService.getStatus(readKnowledgeSpaceQuery(url), options))),
     getKnowledgeSources: (url, request) => readScopedKnowledgeResponse(context, request, options => handleGetKnowledgeSources(context, url, options)),
     getKnowledgeNodes: (url, request) => readScopedKnowledgeResponse(context, request, options => handleGetKnowledgeNodes(context, url, options)),
-    getKnowledgeIssues: (url, request) => readScopedKnowledgeResponse(context, request, async options => Response.json({
-      issues: (await context.knowledgeService.queryIssues({
-        limit: readLimit(url, 100),
-        ...readKnowledgeSpaceQuery(url),
-      }, options)).items,
-    })),
+    getKnowledgeIssues: (url, request) => readScopedKnowledgeResponse(context, request, options =>
+      readKnowledgeListing(url, 'issues', page => context.knowledgeService.queryIssues({ ...page, ...readKnowledgeSpaceQuery(url) }, options))),
     getKnowledgeItem: (id, url, request) => readScopedKnowledgeResponse(context, request, async options => {
       const item = await context.knowledgeService.getItemScoped(id, readKnowledgeSpaceQuery(url), options);
       return item
@@ -176,8 +164,7 @@ export function createDaemonKnowledgeRouteHandlers(
         : jsonErrorResponse({ error: 'Unknown knowledge consolidation report' }, { status: 404 });
     },
     getKnowledgeExtraction: (id, url, request) => readScopedKnowledgeResponse(context, request, async options => {
-      const candidates = await context.knowledgeService.listExtractions(Number.MAX_SAFE_INTEGER, undefined, readKnowledgeSpaceQuery(url), options);
-      const extraction = candidates.find(value => typeof value === 'object' && value !== null && 'id' in value && value.id === id);
+      const extraction = (await context.knowledgeService.listExtractions(1, undefined, { ...readKnowledgeSpaceQuery(url), extractionId: id }, options))[0];
       return extraction
         ? Response.json({ extraction })
         : jsonErrorResponse({ error: 'Unknown knowledge extraction' }, { status: 404 });
@@ -245,43 +232,106 @@ export function createDaemonKnowledgeRouteHandlers(
   };
 }
 
-/** The exact authenticated request owns every awaited scope reading and response. */
+/**
+ * Run one scoped knowledge read for the request's principal.
+ *
+ * The request is authenticated once, where it entered the daemon; here the
+ * principal is only read back. Whether the read is still wanted is the
+ * request's signal, which the auth layer also aborts when the credential is
+ * revoked, so a check between steps of the read is one property read and never
+ * a second authentication.
+ */
 async function readScopedKnowledgeResponse(
   context: DaemonKnowledgeRouteContext,
   request: Request,
   read: (options: KnowledgeScopeReadOptions) => Promise<Response>,
 ): Promise<Response> {
-  const principal = context.resolveAuthenticatedPrincipal(request);
-  if (!principal) return jsonErrorResponse({ error: 'Unauthorized' }, { status: 401 });
-  const identity = (value: typeof principal) => JSON.stringify({
-    principalId: value.principalId, principalKind: value.principalKind,
-    admin: value.admin, scopes: [...value.scopes].sort(),
-  });
-  const captured = identity(principal);
-  const options: KnowledgeScopeReadOptions = {
-    signal: request.signal,
-    assertCurrent() {
-      request.signal.throwIfAborted();
-      const current = context.resolveAuthenticatedPrincipal(request);
-      if (!current || identity(current) !== captured) throw new Error('Knowledge read authorization is no longer current.');
-    },
-  };
+  if (!context.resolveAuthenticatedPrincipal(request)) return jsonErrorResponse({ error: 'Unauthorized' }, { status: 401 });
+  const signal = context.requestSignal?.(request) ?? request.signal;
+  const options: KnowledgeScopeReadOptions = { signal, assertCurrent: () => signal.throwIfAborted() };
   try {
-    options.assertCurrent();
+    signal.throwIfAborted();
     const response = await read(options);
-    options.assertCurrent();
+    signal.throwIfAborted();
     return response;
   } catch (error) {
     if (request.signal.aborted) return jsonErrorResponse({ error: 'Knowledge read canceled.' }, { status: 499 });
-    const current = context.resolveAuthenticatedPrincipal(request);
-    if (!current || identity(current) !== captured) {
-      return jsonErrorResponse({ error: 'Knowledge read authorization is no longer current.' }, { status: 401 });
+    if (signal.aborted) {
+      return jsonErrorResponse({
+        error: 'The credential this knowledge read was made with was revoked while it ran; nothing was returned.',
+        code: 'CREDENTIAL_REVOKED',
+        state: 'the credential was revoked',
+        next: ['Sign in or pair again, then repeat the read'],
+      }, { status: 401 });
     }
-    if (error instanceof Error && error.name === 'KnowledgeScopeSelectionHeldError') {
-      return jsonErrorResponse({ error: 'Knowledge scope reading is unsettled or no longer current.' }, { status: 503 });
-    }
+    const refused = knowledgeReadRefusal(error, `${request.method} ${new URL(request.url).pathname}`);
+    if (refused) return refused;
     throw error;
   }
+}
+
+interface HeldReadingAdvice {
+  readonly status: number;
+  readonly retryable: boolean;
+  state(recordId: string | undefined): string;
+  next(recordId: string | undefined): readonly string[];
+}
+
+const RETRY_WITHOUT_DECISION_MODEL = 'Set judgment.policy to Preferred (falls back when no decision model answers) or Classic - Off (no decision-model readings), then retry';
+
+/** What each reason a knowledge reading was held means for the caller, and what gets past it. */
+const HELD_READING_ADVICE: Readonly<Record<string, HeldReadingAdvice>> = {
+  unavailable: {
+    status: 503, retryable: true,
+    state: () => 'no decision model answered the reading this read needs',
+    next: () => ['Start or configure a decision model and retry', RETRY_WITHOUT_DECISION_MODEL],
+  },
+  uncertain: {
+    status: 503, retryable: true,
+    state: () => 'the decision model could not settle a reading this read needs',
+    next: () => ['Retry the read', RETRY_WITHOUT_DECISION_MODEL],
+  },
+  stale: {
+    status: 409, retryable: true,
+    state: (id) => id ? `knowledge record ${id} changed while it was being read` : 'the knowledge store changed while it was being read',
+    next: () => ['Retry the read once the write in progress finishes'],
+  },
+  malformed: {
+    status: 500, retryable: false,
+    state: (id) => id ? `knowledge record ${id} is malformed` : 'a stored knowledge record is malformed',
+    next: (id) => id
+      ? [`Fix or forget knowledge record ${id}, then retry`]
+      : ['Run POST /api/knowledge/lint to find the malformed record, fix or forget it, then retry'],
+  },
+  budget: {
+    status: 503, retryable: false,
+    state: () => 'the read reached its limit of decision-model readings',
+    next: () => ['Narrow the read (a smaller limit or one knowledgeSpaceId) and retry', RETRY_WITHOUT_DECISION_MODEL],
+  },
+};
+
+/**
+ * The one refusal a knowledge read answers when the knowledge layer held it:
+ * what was being read, why (naming the record when one record caused it), and
+ * what to do. An error that already carries a refusal (`state` and `next`) is
+ * passed through unchanged.
+ */
+function knowledgeReadRefusal(error: unknown, what: string): Response | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const carried = readRefusal(error);
+  if (carried) return jsonErrorResponse(error, { status: carried.status ?? 503 });
+  if (!/(?:Held|Hold|Stale)Error$/.test(error.name)) return undefined;
+  const { reason, recordId } = error as { reason?: unknown; recordId?: unknown };
+  const key = typeof reason === 'string' && Object.hasOwn(HELD_READING_ADVICE, reason) ? reason : error.name.endsWith('StaleError') ? 'stale' : 'unavailable';
+  const advice = HELD_READING_ADVICE[key]!;
+  const id = typeof recordId === 'string' && recordId ? recordId : undefined;
+  return jsonErrorResponse({
+    error: `${what} was not answered: ${advice.state(id)}.`,
+    code: `KNOWLEDGE_READ_${key.toUpperCase()}`,
+    state: advice.state(id),
+    next: advice.next(id),
+    recoverable: advice.retryable,
+  }, { status: advice.status });
 }
 
 function readLimit(url: URL, fallback: number): number {
@@ -392,8 +442,6 @@ const knowledgeBodySchemas = createRouteBodySchemaRegistry({
 });
 
 const KNOWLEDGE_SUBJECT_KINDS: readonly string[] = ['source', 'node', 'issue'];
-const KNOWLEDGE_USAGE_KINDS: readonly string[] = ['search-hit', 'packet-item', 'item-open', 'neighbor-open', 'projection-read', 'multimodal-writeback'];
-const KNOWLEDGE_CANDIDATE_STATUSES: readonly string[] = ['open', 'accepted', 'rejected', 'superseded'];
 
 /**
  * A query filter checked against its accepted values. An empty value is absent;
@@ -407,6 +455,22 @@ function readKnowledgeFilter(url: URL, name: string, accepted: readonly string[]
   if (accepted.includes(value)) return value;
   return jsonErrorResponse({
     error: `${name} must be one of ${accepted.join(', ')}; got "${value}". No filter was applied.`,
+    code: 'INVALID_ARGUMENT',
+  }, { status: 400 });
+}
+
+/**
+ * An ingest's `sourceType`, checked against the store's list. Absent stays absent (the
+ * service infers it); an unknown value is a 400 naming the accepted values instead of a
+ * source stored under a type no filter or view knows.
+ */
+function readKnowledgeSourceType(value: unknown): { sourceType?: KnowledgeSourceType } | Response {
+  if (value === undefined || value === null || value === '') return {};
+  if (typeof value === 'string' && (KNOWLEDGE_SOURCE_TYPES as readonly string[]).includes(value)) {
+    return { sourceType: value as KnowledgeSourceType };
+  }
+  return jsonErrorResponse({
+    error: `sourceType must be one of ${KNOWLEDGE_SOURCE_TYPES.join(', ')}; got ${JSON.stringify(value)}. Nothing was ingested.`,
     code: 'INVALID_ARGUMENT',
   }, { status: 400 });
 }
@@ -643,6 +707,8 @@ async function handleKnowledgeIngestUrl(context: DaemonKnowledgeRouteContext, re
   const privateHostFetchOptions = buildKnowledgePrivateHostFetchOptions(context, body.allowPrivateHosts);
   if (privateHostFetchOptions instanceof Response) return privateHostFetchOptions;
   const tags = readStringArrayField(body, 'tags', MAX_KNOWLEDGE_INGEST_TAGS);
+  const sourceType = readKnowledgeSourceType(body.sourceType);
+  if (sourceType instanceof Response) return sourceType;
   try {
     return Response.json(await context.knowledgeService.ingestUrl({
       url,
@@ -650,7 +716,7 @@ async function handleKnowledgeIngestUrl(context: DaemonKnowledgeRouteContext, re
       ...(typeof body.folderPath === 'string' ? { folderPath: body.folderPath } : {}),
       ...(tags ? { tags } : {}),
       ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
-      ...(typeof body.sourceType === 'string' ? { sourceType: body.sourceType as KnowledgeSourceType } : {}),
+      ...sourceType,
       ...(typeof body.connectorId === 'string' ? { connectorId: body.connectorId } : {}),
       ...(privateHostFetchOptions ?? {}),
       ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
@@ -672,6 +738,8 @@ async function handleKnowledgeIngestArtifact(context: DaemonKnowledgeRouteContex
       // `allowPrivateHosts` field would let the uploader name the source's provenance or skip
       // the private-host gate that the JSON branch applies.
       const fields = uploaded.fields;
+      const uploadSourceType = readKnowledgeSourceType(fields.sourceType);
+      if (uploadSourceType instanceof Response) return uploadSourceType;
       const uploadTags = Array.isArray(fields.tags) ? fields.tags.filter((entry): entry is string => typeof entry === 'string').slice(0, MAX_KNOWLEDGE_INGEST_TAGS) : undefined;
       return Response.json(await context.knowledgeService.ingestArtifact({
         artifactId: uploaded.artifactId,
@@ -679,7 +747,7 @@ async function handleKnowledgeIngestArtifact(context: DaemonKnowledgeRouteContex
         ...(typeof fields.folderPath === 'string' ? { folderPath: fields.folderPath } : {}),
         ...(uploadTags && uploadTags.length > 0 ? { tags: uploadTags } : {}),
         ...(typeof fields.sessionId === 'string' ? { sessionId: fields.sessionId } : {}),
-        ...(typeof fields.sourceType === 'string' ? { sourceType: fields.sourceType as KnowledgeSourceType } : {}),
+        ...uploadSourceType,
         ...(typeof fields.connectorId === 'string' ? { connectorId: fields.connectorId } : {}),
         ...(typeof fields.metadata === 'object' && fields.metadata !== null ? { metadata: fields.metadata as Record<string, unknown> } : {}),
       }), { status: 201 });
@@ -693,6 +761,8 @@ async function handleKnowledgeIngestArtifact(context: DaemonKnowledgeRouteContex
   const privateHostFetchOptions = buildKnowledgePrivateHostFetchOptions(context, body.allowPrivateHosts);
   if (privateHostFetchOptions instanceof Response) return privateHostFetchOptions;
   const tags = readStringArrayField(body, 'tags', MAX_KNOWLEDGE_INGEST_TAGS);
+  const sourceType = readKnowledgeSourceType(body.sourceType);
+  if (sourceType instanceof Response) return sourceType;
   try {
     return Response.json(await context.knowledgeService.ingestArtifact({
       ...(typeof body.artifactId === 'string' ? { artifactId: body.artifactId } : {}),
@@ -702,7 +772,7 @@ async function handleKnowledgeIngestArtifact(context: DaemonKnowledgeRouteContex
       ...(typeof body.folderPath === 'string' ? { folderPath: body.folderPath } : {}),
       ...(tags ? { tags } : {}),
       ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
-      ...(typeof body.sourceType === 'string' ? { sourceType: body.sourceType as KnowledgeSourceType } : {}),
+      ...sourceType,
       ...(typeof body.connectorId === 'string' ? { connectorId: body.connectorId } : {}),
       ...(privateHostFetchOptions ?? {}),
       ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
@@ -825,7 +895,7 @@ async function handleKnowledgeAsk(context: DaemonKnowledgeRouteContext, request:
   if (body instanceof Response) return body;
   const input = knowledgeBodySchemas.ask.parse(body);
   if (input instanceof Response) return input;
-  return readScopedKnowledgeResponse(context, request, async options => Response.json(await context.knowledgeService.ask(input, options)));
+  return readScopedKnowledgeResponse(context, request, async options => Response.json(await context.knowledgeService.ask(input, { signal: options.signal })));
 }
 
 async function handleKnowledgePacket(context: DaemonKnowledgeRouteContext, request: Request): Promise<Response> {
@@ -1033,84 +1103,62 @@ function extractKnowledgeItemUpdatedAt(item: unknown): number | undefined {
   return undefined;
 }
 
-/**
- * Handle GET /api/knowledge/sources.
- *
- * Without pagination params (`?limit=` / `?cursor=`): returns `{ sources: [...] }` (backward compat).
- * With pagination params: returns `PaginatedResponse`-shaped `{ items, nextCursor, hasMore }`.
- *
- * ### Fetch cap
- * The knowledge store accepts a `limit` argument but does not support
- * cursor/offset range queries, the full in-memory collection must be loaded to
- * perform cursor-based slicing.  We cap the load at 5 000 items.  If the store
- * grows beyond this, source-level pagination on the store API should be added
- * and this cap raised accordingly.
- */
-async function handleGetKnowledgeSources(
-  context: DaemonKnowledgeRouteContext,
-  url: URL,
-  options: KnowledgeScopeReadOptions,
-): Promise<Response> {
-  const spaceQuery = readKnowledgeSpaceQuery(url);
-  if (!hasPaginationParams(url)) {
-    const { items: sources } = await context.knowledgeService.querySources({ limit: readLimit(url, 100), ...spaceQuery }, options);
-    return Response.json({ sources });
-  }
-  const limit = readLimit(url, 100);
-  const rawCursor = url.searchParams.get('cursor');
-  // Load the full in-memory collection (capped at 5_000, see JSDoc note above).
-  const { items: allItems, total } = await context.knowledgeService.querySources({ limit: KNOWLEDGE_PAGED_LOAD_CAP, ...spaceQuery }, options);
-  const items = allItems as readonly unknown[];
-  const result = paginateItems(
-    items,
-    limit,
-    rawCursor,
-    (item) => extractKnowledgeItemId(item) ?? '',
-    // NOTE: cursor position key encodes updatedAt (matches byUpdatedAtDesc store order).
-    extractKnowledgeItemUpdatedAt,
-    { descending: true },
-  );
-  if ('error' in result) {
-    return jsonErrorResponse({ error: result.error }, { status: 400 });
-  }
-  return Response.json(withTruncation(result, total, items.length));
+/** One page request of a newest-first knowledge listing: `after` is null for the first page. */
+interface KnowledgeListingPage {
+  readonly limit: number;
+  readonly after: { readonly updatedAt: number; readonly id: string } | null;
 }
 
 /**
- * Handle GET /api/knowledge/nodes.
+ * One knowledge listing (sources, nodes, issues): always the
+ * `{ items, hasMore, nextCursor?, <legacyKey> }` envelope, with or without
+ * `limit` or `cursor`.
  *
- * Without pagination params (`?limit=` / `?cursor=`): returns `{ nodes: [...] }` (backward compat).
- * With pagination params: returns `PaginatedResponse`-shaped `{ items, nextCursor, hasMore }`.
- *
- * ### Fetch cap
- * Same limitation as `handleGetKnowledgeSources`, capped at 5 000 items.
+ * The service pages by key: records sort newest first by `updatedAt` (id on
+ * ties) and the cursor names the last record's `updatedAt` and id, so a record
+ * deleted or updated mid-walk is passed over, never a restart, and the walk
+ * reaches every record at any store size. A cursor that cannot be read is
+ * refused (400).
  */
-async function handleGetKnowledgeNodes(
+async function readKnowledgeListing(
+  url: URL,
+  legacyKey: string,
+  query: (page: KnowledgeListingPage) => Promise<{ readonly total: number; readonly items: readonly unknown[]; readonly hasMore?: boolean | undefined }>,
+): Promise<Response> {
+  const limit = readLimit(url, 100);
+  const rawCursor = url.searchParams.get('cursor');
+  let after: KnowledgeListingPage['after'] = null;
+  if (rawCursor !== null) {
+    const decoded = decodeCursor(rawCursor);
+    if (!decoded || decoded.createdAt === undefined) {
+      return jsonErrorResponse({ error: `Invalid cursor: ${rawCursor}. Restart the listing without a cursor.`, code: 'INVALID_CURSOR' }, { status: 400 });
+    }
+    after = { updatedAt: decoded.createdAt, id: decoded.id };
+  }
+  const { items, total, hasMore } = await query({ limit, after });
+  const page = items.slice(0, limit);
+  const more = hasMore ?? (after === null && total > page.length);
+  const last = page[page.length - 1];
+  const nextCursor = more && last !== undefined
+    ? encodeCursor(extractKnowledgeItemId(last) ?? '', extractKnowledgeItemUpdatedAt(last))
+    : undefined;
+  return Response.json(listingEnvelope(legacyKey, { items: page, hasMore: more, nextCursor }));
+}
+
+/** GET /api/knowledge/sources, see {@link readKnowledgeListing}. */
+function handleGetKnowledgeSources(
   context: DaemonKnowledgeRouteContext,
   url: URL,
   options: KnowledgeScopeReadOptions,
 ): Promise<Response> {
-  const spaceQuery = readKnowledgeSpaceQuery(url);
-  if (!hasPaginationParams(url)) {
-    const { items: nodes } = await context.knowledgeService.queryNodes({ limit: readLimit(url, 100), ...spaceQuery }, options);
-    return Response.json({ nodes });
-  }
-  const limit = readLimit(url, 100);
-  const rawCursor = url.searchParams.get('cursor');
-  // Load the full in-memory collection (capped at 5_000, see JSDoc note above).
-  const { items: allItems, total } = await context.knowledgeService.queryNodes({ limit: KNOWLEDGE_PAGED_LOAD_CAP, ...spaceQuery }, options);
-  const items = allItems as readonly unknown[];
-  const result = paginateItems(
-    items,
-    limit,
-    rawCursor,
-    (item) => extractKnowledgeItemId(item) ?? '',
-    // NOTE: cursor position key encodes updatedAt (matches byUpdatedAtDesc store order).
-    extractKnowledgeItemUpdatedAt,
-    { descending: true },
-  );
-  if ('error' in result) {
-    return jsonErrorResponse({ error: result.error }, { status: 400 });
-  }
-  return Response.json(withTruncation(result, total, items.length));
+  return readKnowledgeListing(url, 'sources', page => context.knowledgeService.querySources({ ...page, ...readKnowledgeSpaceQuery(url) }, options));
+}
+
+/** GET /api/knowledge/nodes, see {@link readKnowledgeListing}. */
+function handleGetKnowledgeNodes(
+  context: DaemonKnowledgeRouteContext,
+  url: URL,
+  options: KnowledgeScopeReadOptions,
+): Promise<Response> {
+  return readKnowledgeListing(url, 'nodes', page => context.knowledgeService.queryNodes({ ...page, ...readKnowledgeSpaceQuery(url) }, options));
 }

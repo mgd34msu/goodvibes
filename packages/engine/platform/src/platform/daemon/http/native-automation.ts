@@ -31,6 +31,32 @@ function nativeJobMeaning(job: ManagedAutomationJob) {
   };
 }
 
+const STRING_FIELDS = ['name', 'prompt', 'description', 'model', 'provider', 'template', 'thinking'] as const;
+const BOOLEAN_FIELDS = ['enabled', 'autoApprove', 'allowUnsafeExternalContent', 'lightContext', 'deleteAfterRun'] as const;
+const STRING_LIST_FIELDS = ['toolAllowlist', 'fallbackModels'] as const;
+const SHAPED_FIELDS = 'schedule, routing, executionIntent, target, externalContentSource, delivery, failure, reasoningEffort or wakeMode';
+
+/**
+ * Parse a job create or update body, refusing one with a field of the wrong
+ * type with a 400 that names the field: stored, a string "false" for `enabled`
+ * would keep running a job the caller meant to pause. Naming the field runs
+ * only on the refusal path; an accepted body is checked once, by the parser.
+ */
+function parseJobInput<T>(parse: (body: Record<string, unknown>) => T, body: Record<string, unknown>): T {
+  try {
+    return parse(body);
+  } catch {
+    const wrong = (field: string, ok: (value: unknown) => boolean): boolean => body[field] !== undefined && !ok(body[field]);
+    const named: readonly [string, string] | undefined =
+      STRING_FIELDS.filter((field) => wrong(field, (value) => typeof value === 'string')).map((field) => [field, 'a string'] as const)[0]
+      ?? BOOLEAN_FIELDS.filter((field) => wrong(field, (value) => typeof value === 'boolean')).map((field) => [field, 'true or false (a JSON boolean)'] as const)[0]
+      ?? STRING_LIST_FIELDS.filter((field) => wrong(field, (value) => Array.isArray(value) && value.every((entry) => typeof entry === 'string'))).map((field) => [field, 'an array of strings'] as const)[0]
+      ?? (wrong('timeoutMs', (value) => typeof value === 'number' && Number.isFinite(value)) ? ['timeoutMs', 'a finite number'] as const : undefined);
+    const problem = named ? `${named[0]} must be ${named[1]}` : `one of ${SHAPED_FIELDS} does not have an accepted shape`;
+    throw new HandlerError(`${problem}. Nothing was changed.`, 'INVALID_AUTOMATION_JOB', 400, named?.[0]);
+  }
+}
+
 /** Bind the authentic gateway invocation before REST's legacy route fallback. */
 export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCatalog, input: {
   readonly manager: AutomationManager;
@@ -47,7 +73,7 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
     const current = () => { context.signal?.throwIfAborted(); requestCurrent(); };
     try {
       current();
-      const patch = parseUpdateAutomationJobInput(body);
+      const patch = parseJobInput(parseUpdateAutomationJobInput, body);
       const expected = patch.expectedMutationRevision;
       const selected = expected ? manager.retainJobTarget(jobId, expected) : undefined;
       const updated = await runNativeMutation({ host, method: 'automation.jobs.update', body, context,
@@ -75,7 +101,7 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
         : body.kind === 'every' ? normalizeEverySchedule(typeof body.every === 'string' ? body.every : '')
         : body.kind === 'at' ? normalizeAtSchedule(typeof body.at === 'number' ? body.at : Date.parse(String(body.at)))
         : normalizeCronSchedule(typeof body.cron === 'string' ? body.cron : isRecord(body.schedule) && typeof body.schedule.expression === 'string' ? body.schedule.expression : '', typeof body.timezone === 'string' ? body.timezone : undefined, body.staggerMs ?? body.stagger);
-      const patch = parseCreateAutomationJobInput({ ...body, name: typeof body.name === 'string' ? body.name : body.prompt.slice(0, 40), schedule });
+      const patch = parseJobInput(parseCreateAutomationJobInput, { ...body, name: typeof body.name === 'string' ? body.name : body.prompt.slice(0, 40), schedule });
       try {
         const created = await runNativeMutation({ host, method, body, context, target: { schedule: nativeScheduleMeaning(patch.schedule) }, scopes: ['write:automation'], confirmation: 'none', assertTargetCurrent: current,
           mutate: (assertCurrent, _admission, withPublication) => manager.createJob(patch, { signal: context.signal, assertCurrent: () => { current(); assertCurrent(); }, withPublication }),

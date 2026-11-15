@@ -22,6 +22,8 @@ import {
   framePipePayload,
   fromBase64Url,
   generateRelayIdentity,
+  proveRelayRegistration,
+  relayIdentityRendezvousId,
   respondToHandshake,
   RelaySecureChannel,
   startInitiatorHandshake,
@@ -29,7 +31,6 @@ import {
   type RelayHandshakeKeys,
 } from '../transport-core/src/relay/index.js';
 
-const RID = 'rid-integration-abc123';
 let server: ReturnType<typeof createBunRelayServer>;
 let url: string;
 
@@ -59,6 +60,7 @@ describe('relay server end-to-end tunnel', () => {
   test('daemon + client complete an E2E handshake through the relay and exchange bytes', async () => {
     const identity = await generateRelayIdentity();
     const daemonPubRaw = await exportRawPublicKey(identity.publicKey);
+    const RID = await relayIdentityRendezvousId(identity);
     const ridBytes = encodeUtf8(RID);
 
     // ── Daemon side: register, answer handshakes per pipe, echo sealed frames ──
@@ -69,6 +71,8 @@ describe('relay server end-to-end tunnel', () => {
         void (async () => {
           if (typeof ev.data === 'string') {
             const frame = decodeControlFrame(ev.data);
+            // The relay registers the id only after the daemon signs its challenge with the identity key.
+            if (frame?.t === 'challenge') daemonWs.send(encodeControlFrame(await proveRelayRegistration(identity, RID, frame.nonce)));
             if (frame?.t === 'registered') resolve();
             return;
           }

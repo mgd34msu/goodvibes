@@ -12,6 +12,7 @@
 // security of the whole relay path rests on the pairing payload being delivered
 // out-of-band (QR / trusted LAN), exactly like an SSH host key fingerprint.
 
+import { deriveRendezvousId, type RendezvousId } from './protocol.js';
 import {
   exportRawPublicKey,
   RELAY_CURVE,
@@ -84,4 +85,12 @@ export async function deserializeRelayIdentity(serialized: SerializedRelayIdenti
 /** The base64url raw public key for a pairing payload. */
 export async function relayIdentityPublicKeyBase64Url(pair: RelayKeyPair): Promise<string> {
   return toBase64Url(await exportRawPublicKey(pair.publicKey));
+}
+
+/**
+ * The rendezvous id this identity registers under on a relay: derived from its
+ * public key, so the daemon can prove the id is its own and nobody else can.
+ */
+export async function relayIdentityRendezvousId(pair: RelayKeyPair): Promise<RendezvousId> {
+  return deriveRendezvousId(await exportRawPublicKey(pair.publicKey));
 }

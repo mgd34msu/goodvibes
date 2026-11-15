@@ -198,6 +198,7 @@ export function buildSystemRouteContext(input: {
   ) => Response;
   readonly requireAdmin: (request: Request) => Response | null;
   readonly requireAuthenticatedSession: (request: Request) => { username: string; roles: readonly string[] } | null;
+  readonly resolveAuthenticatedPrincipal: NonNullable<DaemonSystemRouteContext['resolveAuthenticatedPrincipal']>;
   readonly routeBindings: RouteBindingManager;
   readonly swapManager: DaemonSystemRouteContext['swapManager'];
   readonly watcherRegistry: WatcherRegistry;
@@ -235,6 +236,7 @@ export function buildSystemRouteContext(input: {
     recordApiResponse: input.recordApiResponse,
     requireAdmin: input.requireAdmin,
     requireAuthenticatedSession: input.requireAuthenticatedSession,
+    resolveAuthenticatedPrincipal: input.resolveAuthenticatedPrincipal,
     swapManager: input.swapManager,
     routeBindings: {
       listBindings: () => input.routeBindings.listBindings(),

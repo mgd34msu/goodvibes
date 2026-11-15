@@ -28,6 +28,12 @@ import { concatBytes, encodeUtf8, fromBase64Url, randomBytes, RELAY_CURVE, RELAY
 /** Wire protocol version. Bumped only on incompatible control-frame changes. */
 export const RELAY_PROTOCOL_VERSION = 1;
 
+/**
+ * The largest binary message a relay forwards when it does not state its own
+ * limit in `registered` / `connected` (the shipped relay's default).
+ */
+export const RELAY_DEFAULT_MAX_MESSAGE_BYTES = 4 * 1024 * 1024;
+
 /** Length in bytes of a multiplexed pipe identifier. */
 export const RELAY_PIPE_ID_BYTES = 16;
 
@@ -84,6 +90,8 @@ export interface RelayProveFrame {
 export interface RelayRegisteredFrame {
   readonly t: 'registered';
   readonly rid: RendezvousId;
+  /** The largest binary message this relay forwards; larger tunnel frames are sent in fragments. */
+  readonly maxMessageBytes?: number;
 }
 
 /** Client → relay: dial a rendezvous id. */
@@ -98,6 +106,24 @@ export interface RelayConnectFrame {
 export interface RelayConnectedFrame {
   readonly t: 'connected';
   readonly pipe: PipeId;
+  /** The largest binary message this relay forwards; larger tunnel frames are sent in fragments. */
+  readonly maxMessageBytes?: number;
+}
+
+/**
+ * Endpoint → relay: is this connection still alive end to end? The relay
+ * answers each with a {@link RelayPongFrame} carrying the same `n`, so a path
+ * that died without a close is noticed by the endpoint.
+ */
+export interface RelayPingFrame {
+  readonly t: 'ping';
+  readonly n: number;
+}
+
+/** Relay → endpoint: the answer to a {@link RelayPingFrame}. */
+export interface RelayPongFrame {
+  readonly t: 'pong';
+  readonly n: number;
 }
 
 /** Relay → daemon: a new client pipe opened for this daemon's rendezvous id. */
@@ -131,7 +157,9 @@ export type RelayControlFrame =
   | RelayConnectedFrame
   | RelayPipeOpenFrame
   | RelayPipeCloseFrame
-  | RelayErrorFrame;
+  | RelayErrorFrame
+  | RelayPingFrame
+  | RelayPongFrame;
 
 /** Serialize a control frame to a WebSocket text payload. */
 export function encodeControlFrame(frame: RelayControlFrame): string {
@@ -172,9 +200,12 @@ export function decodeControlFrame(text: string): RelayControlFrame | null {
         ? { t, key: parsed['key'], sig: parsed['sig'] }
         : null;
     case 'registered':
-      return isRid(parsed) ? { t, rid: parsed['rid'] as string } : null;
+      return isRid(parsed) ? { t, rid: parsed['rid'] as string, ...statedMessageLimit(parsed) } : null;
     case 'connected':
-      return isPipe(parsed) ? { t, pipe: parsed['pipe'] as string } : null;
+      return isPipe(parsed) ? { t, pipe: parsed['pipe'] as string, ...statedMessageLimit(parsed) } : null;
+    case 'ping':
+    case 'pong':
+      return Number.isSafeInteger(parsed['n']) ? { t, n: parsed['n'] as number } : null;
     case 'pipe-open':
       return isPipe(parsed) ? { t, pipe: parsed['pipe'] as string } : null;
     case 'pipe-close':
@@ -193,6 +224,11 @@ export function decodeControlFrame(text: string): RelayControlFrame | null {
     default:
       return null;
   }
+}
+
+function statedMessageLimit(v: Record<string, unknown>): { maxMessageBytes?: number } {
+  const limit = v['maxMessageBytes'];
+  return typeof limit === 'number' && Number.isSafeInteger(limit) && limit > 0 ? { maxMessageBytes: limit } : {};
 }
 
 function isRid(v: Record<string, unknown>): boolean {

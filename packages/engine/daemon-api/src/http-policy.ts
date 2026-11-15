@@ -1,5 +1,5 @@
 import { jsonErrorResponse } from './error-response.js';
-import { missingScopes } from './route-helpers.js';
+import { missingScopes, scopeMatches } from './route-helpers.js';
 
 /** The kind of authenticated principal making a daemon request. */
 export type AuthenticatedPrincipalKind = 'user' | 'bot' | 'service' | 'token';
@@ -49,9 +49,33 @@ export interface RequestContext {
   readonly signal: AbortSignal;
 }
 
-/** True when the principal holds `scope`; an admin holds every scope. */
+/** The two ways a route context can name who made a request. */
+export interface RequestActorSource {
+  /** The principal the daemon's gate authenticated for the request. */
+  readonly resolveAuthenticatedPrincipal?: ((req: Request) => Pick<AuthenticatedPrincipal, 'principalId'> | null) | undefined;
+  readonly requireAuthenticatedSession?: ((req: Request) => { readonly username: string } | null) | undefined;
+}
+
+/**
+ * Who made a request, as history and audit records name them: the principal
+ * the gate resolved (a user name, `pairing:<id>` for a paired device,
+ * `shared-token` for the operator token). A context without the gate's
+ * principal falls back to the login session, then to `operator`.
+ */
+export function requestActor(context: RequestActorSource, req: Request): string {
+  return context.resolveAuthenticatedPrincipal?.(req)?.principalId
+    ?? context.requireAuthenticatedSession?.(req)?.username
+    ?? 'operator';
+}
+
+/**
+ * True when the principal holds `scope`; an admin holds every scope. A grant
+ * covers a scope by the one rule of `scopeMatches` (exact, `*`, or `prefix:*`).
+ */
 export function principalHasScope(principal: Pick<RequestPrincipal, 'admin' | 'scopeSet'>, scope: string): boolean {
-  return principal.admin || principal.scopeSet.has('*') || principal.scopeSet.has(scope);
+  if (principal.admin || principal.scopeSet.has(scope)) return true;
+  for (const granted of principal.scopeSet) if (scopeMatches(granted, scope)) return true;
+  return false;
 }
 
 /** Strategy object for extracting and resolving a daemon auth token to a principal. */

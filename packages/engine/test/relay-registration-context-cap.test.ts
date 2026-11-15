@@ -24,6 +24,7 @@ import {
   finishInitiatorHandshake,
   framePipePayload,
   generateRelayIdentity,
+  relayIdentityRendezvousId,
   randomBytes,
   RelaySecureChannel,
   startInitiatorHandshake,
@@ -116,7 +117,8 @@ describe('relay registration retained-context caps', () => {
   test('pipe cap bounds retained secure-channel contexts under thousands of pipes', async () => {
     const identity = await generateRelayIdentity();
     const staticPubRaw = await daemonStaticPublicRaw(identity);
-    const rid = 'rid-pipe-cap';
+    // The daemon registers under, and binds handshakes to, the id derived from its identity key.
+    const rid = await relayIdentityRendezvousId(identity);
     const ridBytes = encodeUtf8(rid);
     const socket = new MockRelaySocket();
     const maxPipes = 8;
@@ -162,7 +164,8 @@ describe('relay registration retained-context caps', () => {
   test('in-flight request cap refuses (never retains) beyond the ceiling', async () => {
     const identity = await generateRelayIdentity();
     const staticPubRaw = await daemonStaticPublicRaw(identity);
-    const rid = 'rid-inflight-cap';
+    // The daemon registers under, and binds handshakes to, the id derived from its identity key.
+    const rid = await relayIdentityRendezvousId(identity);
     const ridBytes = encodeUtf8(rid);
     const socket = new MockRelaySocket();
     const maxInFlightRequests = 4;

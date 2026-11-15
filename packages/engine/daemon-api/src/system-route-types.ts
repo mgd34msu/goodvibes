@@ -291,6 +291,8 @@ export interface DaemonSystemRouteContext {
   ) => Response;
   readonly requireAdmin: (req: Request) => Response | null;
   readonly requireAuthenticatedSession: (req: Request) => { username: string; roles: readonly string[] } | null;
+  /** The principal the gate authenticated; approval decisions are attributed to it. */
+  readonly resolveAuthenticatedPrincipal?: ((req: Request) => { readonly principalId: string } | null) | undefined;
   readonly routeBindings: RouteBindingManagerLike;
   /** Manages runtime.workingDir swaps. Null when workspace swapping is not available. */
   readonly swapManager: WorkspaceSwapManagerLike | null;

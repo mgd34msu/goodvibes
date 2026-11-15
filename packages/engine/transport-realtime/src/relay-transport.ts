@@ -8,31 +8,40 @@
 // daemon, replayed there, and its response tunneled back. The relay operator
 // never sees any of it.
 //
-// This tunnels unary request/response calls AND live event subscriptions. A
-// request whose `Accept` is `text/event-stream` is opened as a tunneled stream:
-// the returned `Response` carries a `ReadableStream` body fed by `stream-data`
-// frames, so the EXISTING Server-Sent-Events connector idiom
-// (openServerSentEventStream, which just calls `fetch` and reads the streaming
-// body) works over the relay unchanged. Overflow on the daemon's bounded send
-// buffer surfaces as a visible `relay-overflow` SSE event (never a silent gap).
+// This tunnels unary request/response calls AND streamed answers. A request
+// whose caller asked for a streamed answer (`Accept: text/event-stream` or an
+// audio type, or a JSON body with `"stream": true`) is opened as a tunneled
+// stream, with its method and body: the returned `Response` carries the
+// daemon's real status and headers and a `ReadableStream` body fed by
+// `stream-data` frames as the daemon produces them, so the EXISTING
+// Server-Sent-Events connector idiom works over the relay unchanged, and a
+// streamed chat completion or streamed speech starts as soon as its first bytes
+// exist. Overflow on the daemon's bounded send buffer surfaces as a visible
+// `relay-overflow` SSE event (never a silent gap). A frame larger than the
+// relay forwards in one message is sent and received in fragments.
 
-import { GoodVibesError, createHttpStatusError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import { createUuidV4, type FetchLike } from '@goodvibes-jev/engine/transport-core';
 import {
   RelaySecureChannel,
+  TunnelFragmentJoiner,
   decodeControlFrame,
   decodeTunnelFrame,
   encodeControlFrame,
   encodeTunnelFrame,
   encodeUtf8,
   finishInitiatorHandshake,
+  fragmentTunnelFrame,
   fromBase64Url,
+  RELAY_DEFAULT_MAX_MESSAGE_BYTES,
   RELAY_PROTOCOL_VERSION,
   relayErrorAdvice,
   resolveRelayPairing,
   startInitiatorHandshake,
+  tunnelFrameLimit,
   type RelayInitiatorState,
   type RelayPairingPayload,
+  type TunnelHeader,
 } from '@goodvibes-jev/engine/transport-core/relay';
 
 /** Minimal structural WebSocket shape the relay client needs (browser/Bun/Node). */
@@ -78,9 +87,34 @@ interface PendingRequest {
 
 interface PendingStream {
   readonly path: string;
+  readonly body: ReadableStream<Uint8Array>;
   readonly controller: ReadableStreamDefaultController<Uint8Array>;
   readonly detachAbort: () => void;
   closed: boolean;
+  /** Settles the caller's fetch once the daemon answers with the stream's status and headers. */
+  answer?: { resolve(response: Response): void; reject(error: unknown): void } | undefined;
+}
+
+/** Largest JSON request body read for `"stream": true`; larger bodies are sent as plain requests. */
+const STREAM_FLAG_SCAN_BYTES = 64 * 1024;
+
+/**
+ * Whether the caller asked for a streamed answer: an Accept naming an event
+ * stream or audio, or a JSON body with `"stream": true` (the compatible chat
+ * and Home Assistant conversation convention). Decided before the request
+ * leaves, so the daemon never runs a request it then cannot deliver.
+ */
+function wantsStreamedAnswer(request: Request, body: Uint8Array<ArrayBuffer>): boolean {
+  const accept = request.headers.get('accept') ?? '';
+  if (accept.includes('text/event-stream') || accept.includes('audio/')) return true;
+  if (body.length === 0 || body.length > STREAM_FLAG_SCAN_BYTES) return false;
+  if (!(request.headers.get('content-type') ?? '').includes('json')) return false;
+  try {
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(body));
+    return typeof parsed === 'object' && parsed !== null && (parsed as { stream?: unknown }).stream === true;
+  } catch {
+    return false;
+  }
 }
 
 /** Why the daemon ended a tunneled stream, for the reasons that mean it never delivered (or stopped delivering) events. */
@@ -152,6 +186,9 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
   const streams = new Map<string, PendingStream>();
   const outgoing = new WeakMap<RelaySecureChannel, FrameQueue>();
   const incoming = new WeakMap<RelayWebSocketLike, FrameQueue>();
+  const joiners = new WeakMap<RelaySecureChannel, TunnelFragmentJoiner>();
+  // The largest tunnel frame one relay message carries; the relay states its limit when it connects us.
+  let frameLimit = tunnelFrameLimit(RELAY_DEFAULT_MAX_MESSAGE_BYTES);
 
   /** Keep encrypted request/cancel/stream frames in counter order through async crypto. */
   function sendFrame(frame: Uint8Array<ArrayBuffer>, activeChannel: RelaySecureChannel, activeSocket: RelayWebSocketLike,
@@ -163,12 +200,16 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       const error = new GoodVibesError('Relay outgoing frame queue limit exceeded.', { category: 'protocol', source: 'transport', recoverable: true });
       teardown(error); return Promise.reject(error);
     }
+    // A frame larger than one relay message goes as consecutive fragments, queued together.
+    const parts = fragmentTunnelFrame(frame, frameLimit);
     queue.count++; queue.bytes += frame.byteLength;
     const work = queue.tail.then(async () => {
-      if (!current()) return;
-      const sealed = await activeChannel.seal(frame);
-      if (!current()) return;
-      sending(); activeSocket.send(sealed);
+      for (const part of parts) {
+        if (!current()) return;
+        const sealed = await activeChannel.seal(part);
+        if (!current()) return;
+        sending(); activeSocket.send(sealed);
+      }
     });
     queue.tail = work.then(() => {}, () => {}).finally(() => { queue.count--; queue.bytes -= frame.byteLength; });
     outgoing.set(activeChannel, queue);
@@ -195,6 +236,9 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     if (!stream) return;
     streams.delete(id);
     stream.detachAbort();
+    const answer = stream.answer;
+    stream.answer = undefined;
+    answer?.reject(failure?.error ?? new GoodVibesError('The daemon ended the stream before answering.', { category: 'service', source: 'transport', recoverable: true }));
     if (stream.closed) return;
     stream.closed = true;
     try {
@@ -237,21 +281,39 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       return;
     }
     const activeChannel = channel;
-    const framed = decodeTunnelFrame(await activeChannel.open(bytes));
+    let framed: { readonly header: TunnelHeader; readonly body: Uint8Array<ArrayBuffer> } | null = decodeTunnelFrame(await activeChannel.open(bytes));
     if (!framed || socket !== ws || channel !== activeChannel) return;
+    if (framed.header.kind === 'fragment') {
+      const joiner = joiners.get(activeChannel) ?? new TunnelFragmentJoiner(MAX_QUEUED_FRAME_BYTES);
+      joiners.set(activeChannel, joiner);
+      const joined = joiner.push(framed.header, framed.body);
+      if (joined.kind === 'pending') return;
+      if (joined.kind !== 'frame') {
+        const error = new GoodVibesError(joined.kind === 'too-large'
+          ? `A relay response exceeded ${MAX_QUEUED_FRAME_BYTES} bytes and was dropped.`
+          : 'A relay response arrived out of order and was dropped.', { category: 'protocol', source: 'transport', recoverable: true });
+        pending.get(joined.id)?.reject(error);
+        closeStream(joined.id, { error });
+        return;
+      }
+      framed = joined;
+    }
     const header = framed.header;
     if (header.kind === 'response') {
       const waiting = pending.get(header.id);
       if (!waiting) {
-        // A daemon that refuses a tunneled event stream (rejected token, unknown route)
-        // answers with this frame under the stream's id. The 200 the client already
-        // returned was a placeholder, so fail the stream with the daemon's real status.
-        const refused = streams.get(header.id);
-        if (refused) {
-          const text = new TextDecoder().decode(framed.body);
-          let body: unknown = text;
-          try { body = JSON.parse(text); } catch { /* keep the text */ }
-          closeStream(header.id, { error: createHttpStatusError(header.status, refused.path, 'GET', body) });
+        // A stream's answer: its status and headers before its bytes. A refusal
+        // (rejected token, unknown route) is answered as that status and body.
+        const stream = streams.get(header.id);
+        const answer = stream?.answer;
+        if (!stream || !answer) return;
+        stream.answer = undefined;
+        const headers = header.headers.map(([k, v]) => [k, v] as [string, string]);
+        if (header.status >= 200 && header.status < 300) {
+          answer.resolve(new Response(stream.body, { status: header.status, headers }));
+        } else {
+          answer.resolve(new Response(framed.body.length > 0 ? framed.body : null, { status: header.status, headers }));
+          closeStream(header.id);
         }
         return;
       }
@@ -263,6 +325,12 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     }
     if (header.kind === 'stream-data') {
       const stream = streams.get(header.id);
+      // A daemon that sends no answer frame first: the stream is an event stream.
+      if (stream?.answer) {
+        const answer = stream.answer;
+        stream.answer = undefined;
+        answer.resolve(new Response(stream.body, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+      }
       if (stream && !stream.closed && framed.body.length > 0) {
         try { stream.controller.enqueue(framed.body); } catch { /* consumer cancelled */ }
       }
@@ -331,6 +399,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
               const frame = decodeControlFrame(data);
               if (!frame) return;
               if (frame.t === 'connected') {
+                frameLimit = tunnelFrameLimit(frame.maxMessageBytes ?? RELAY_DEFAULT_MAX_MESSAGE_BYTES);
                 const started = await startInitiatorHandshake(daemonPubRaw, ridBytes);
                 if (socket !== ws) return;
                 initiatorState = started.state;
@@ -374,8 +443,10 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
   }
 
   async function openStream(
+    method: string,
     path: string,
     headers: Array<[string, string]>,
+    requestBody: Uint8Array<ArrayBuffer>,
     activeChannel: RelaySecureChannel,
     activeSocket: RelayWebSocketLike,
     signal: AbortSignal,
@@ -394,28 +465,37 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       return closing;
     };
     const abort = (): void => { void cancel({ error: signal.reason }); };
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
     const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        owner = { path, controller, closed: false, detachAbort: () => signal.removeEventListener('abort', abort) };
-        streams.set(id, owner);
-      },
+      start(c) { controller = c; },
       cancel: () => cancel(),
     });
-    const response = new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    const answered = new Promise<Response>((resolve, reject) => {
+      owner = { path, body, controller, closed: false, answer: { resolve, reject }, detachAbort: () => signal.removeEventListener('abort', abort) };
+      streams.set(id, owner);
+    });
+    answered.catch(() => { /* observed through the await below */ });
     signal.addEventListener('abort', abort, { once: true });
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       if (signal.aborted) abort();
       signal.throwIfAborted();
-      const openFrame = encodeTunnelFrame({ id, kind: 'stream-open', method: 'GET', path, headers }, new Uint8Array(0));
+      const openFrame = encodeTunnelFrame({ id, kind: 'stream-open', method, path, headers }, requestBody);
       await whileActive(sendFrame(openFrame, activeChannel, activeSocket, current, () => { sent = true; }), signal);
       signal.throwIfAborted();
       if (channel !== activeChannel || socket !== activeSocket) {
         throw new GoodVibesError('Relay connection changed.', { category: 'network', source: 'transport', recoverable: true });
       }
-      return response;
+      // The daemon answers with the stream's status and headers as soon as its handler responds.
+      const deadline = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new GoodVibesError('The daemon did not answer the relay stream in time.', { category: 'timeout', source: 'transport', recoverable: true })), requestTimeoutMs);
+      });
+      return await whileActive(Promise.race([answered, deadline]), signal);
     } catch (error) {
       void cancel({ error });
       throw error;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -430,15 +510,15 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     const url = new URL(request.url, 'http://relay.local');
     const headers: Array<[string, string]> = [];
     request.headers.forEach((value, key) => headers.push([key, value]));
-    // A Server-Sent-Events request is opened as a tunneled stream rather than a
-    // unary call (its body never ends). The existing SSE connector, which just
-    // calls fetch and reads the streaming body, then works over the relay.
-    const accept = request.headers.get('accept') ?? '';
-    if (request.method === 'GET' && accept.includes('text/event-stream')) {
-      return openStream(`${url.pathname}${url.search}`, headers, activeChannel, activeSocket, request.signal);
-    }
     const body = request.method === 'GET' || request.method === 'HEAD' ? new Uint8Array(0) : new Uint8Array(await whileActive(request.arrayBuffer(), request.signal));
     request.signal.throwIfAborted();
+    // A request whose caller wants a streamed answer is opened as a tunneled
+    // stream rather than a unary call, so its bytes arrive as they are produced
+    // (an event stream's body never ends). The existing SSE connector, which
+    // just calls fetch and reads the streaming body, works over the relay.
+    if (wantsStreamedAnswer(request, body)) {
+      return openStream(request.method, `${url.pathname}${url.search}`, headers, body, activeChannel, activeSocket, request.signal);
+    }
     const id = createUuidV4();
     const frame = encodeTunnelFrame(
       { id, kind: 'request', method: request.method, path: `${url.pathname}${url.search}`, headers },

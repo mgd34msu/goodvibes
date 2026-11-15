@@ -32,6 +32,7 @@ export {
 
 export {
   RELAY_PROTOCOL_VERSION,
+  RELAY_DEFAULT_MAX_MESSAGE_BYTES,
   RELAY_PIPE_ID_BYTES,
   RELAY_CHALLENGE_BYTES,
   RELAY_ERROR_ADVICE,
@@ -59,6 +60,8 @@ export {
   type RelayPipeOpenFrame,
   type RelayPipeCloseFrame,
   type RelayErrorFrame,
+  type RelayPingFrame,
+  type RelayPongFrame,
 } from './protocol.js';
 
 export {
@@ -76,6 +79,7 @@ export {
   serializeRelayIdentity,
   deserializeRelayIdentity,
   relayIdentityPublicKeyBase64Url,
+  relayIdentityRendezvousId,
   type SerializedRelayIdentity,
 } from './identity.js';
 
@@ -91,6 +95,12 @@ export {
 export {
   encodeTunnelFrame,
   decodeTunnelFrame,
+  fragmentTunnelFrame,
+  tunnelFrameLimit,
+  RELAY_FRAME_OVERHEAD_BYTES,
+  TunnelFragmentJoiner,
+  type TunnelFragmentResult,
+  type TunnelFragmentHeader,
   type TunnelHeader,
   type TunnelRequestHeader,
   type TunnelRequestCancelHeader,

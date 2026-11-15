@@ -88,13 +88,6 @@ export interface PaginateItemsOptions {
    * of sort direction.  Defaults to `false` (ascending / oldest-first).
    */
   readonly descending?: boolean | undefined;
-  /**
-   * What to do when the cursor's item is gone and there is no `createdAt` to
-   * find its place: `'restart'` (default) starts again from the first item,
-   * `'error'` refuses so the client restarts the walk on purpose. Use `'error'`
-   * for lists a client could otherwise re-read or loop on.
-   */
-  readonly onMissingCursor?: 'restart' | 'error' | undefined;
 }
 
 /**
@@ -116,8 +109,9 @@ export interface PaginateItemsOptions {
  *   own `createdAt` is **strictly less** than the cursor's `createdAt`, which
  *   is the correct forward position in a newest-first sequence.
  *
- * Without `createdAt` available in the cursor, recovery falls back to the
- * first position (index 0) to avoid returning an empty page.
+ * Without `createdAt` in the cursor the position cannot be found, and the
+ * cursor is refused: restarting at the first item would hand the caller items
+ * it already has, and a walk that keeps restarting never ends.
  *
  * Callers that need stable recovery across deletions should pass `getCreatedAt`
  * and ensure cursors are encoded with `createdAt`.  Callers whose store sorts
@@ -129,7 +123,7 @@ export interface PaginateItemsOptions {
  * @param getId - Extract the item's id.
  * @param getCreatedAt - Optional: extract the item's creation timestamp (ms since epoch).
  * @param options - Optional pagination options (e.g. sort direction).
- * @returns `PaginatedResponse<T>` or an error string for invalid cursors.
+ * @returns `PaginatedResponse<T>`, or an error string for a cursor that is invalid or cannot be placed.
  * @public
  */
 export function paginateItems<T>(
@@ -166,10 +160,8 @@ export function paginateItems<T>(
           },
         );
         startIndex = insertionIndex === -1 ? items.length : insertionIndex;
-      } else if (options?.onMissingCursor === 'error') {
-        return { error: 'Cursor expired: the item it points at no longer exists. Restart the listing without a cursor.' };
       } else {
-        startIndex = 0;
+        return { error: 'Cursor expired: the item it points at no longer exists. Restart the listing without a cursor.' };
       }
     } else {
       startIndex = afterIndex + 1;
@@ -193,11 +185,33 @@ export function paginateItems<T>(
 /**
  * Check whether the request URL contains pagination parameters.
  *
- * Used to distinguish backward-compatible (no params → plain array)
- * from paginated (with params → `PaginatedResponse<T>`) calls.
+ * Every listing answers the same envelope with or without them; this only
+ * tells a listing whether the caller bounded it.
  *
  * @public
  */
 export function hasPaginationParams(url: URL): boolean {
   return url.searchParams.has('limit') || url.searchParams.has('cursor');
+}
+
+/**
+ * One listing's response body: the `PaginatedResponse` envelope plus the
+ * listing's older key (`sources`, `jobs`, ...) holding the same page, so a
+ * client that reads the old key keeps working and one that reads `items`
+ * never sees a different key because it passed `limit`.
+ *
+ * @public
+ */
+export function listingEnvelope<T>(
+  legacyKey: string,
+  page: PaginatedResponse<T>,
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    items: page.items,
+    hasMore: page.hasMore,
+    ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}),
+    [legacyKey]: page.items,
+    ...extra,
+  };
 }

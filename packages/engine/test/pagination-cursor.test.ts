@@ -13,8 +13,7 @@
  * - getAutomationJobs: backward-compat (no params), paginated path, limit clamping
  * - getAutomationRuns: backward-compat (no params), paginated path, limit clamping
  * - getIntegrationSessions: always returns snapshot (pagination not implemented in daemon-api)
- * - knowledge sources: backward-compat and paginated path (via handleGetKnowledgeSources)
- * - knowledge nodes: backward-compat and paginated path (via handleGetKnowledgeNodes)
+ * - knowledge sources and nodes: one envelope with or without params, keyset cursor walk
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -201,22 +200,11 @@ describe('paginateItems', () => {
     expect(page2.hasMore).toBe(true);
   });
 
-  test('deleted-cursor mid-walk: without createdAt restarts at index 0 by default', () => {
-    // Callers that cannot supply a timestamp and do not opt in to an error get a
-    // restart, so items already seen are returned again.
-    const items = makeItems(5);
-    const cursor = encodeCursor('item-2'); // id-only cursor, no createdAt
-    const withoutItem2 = items.filter((x) => x.id !== 'item-2');
-    const result = paginateItems(withoutItem2, 3, cursor, (x) => x.id);
-    if ('error' in result) throw new Error(result.error);
-    expect(result.items.map((x) => x.id)).toEqual(['item-1', 'item-3', 'item-4']);
-  });
-
-  test('deleted-cursor mid-walk: without createdAt and onMissingCursor "error" refuses instead of repeating items', () => {
+  test('deleted-cursor mid-walk: without createdAt the cursor is refused instead of repeating items', () => {
     const items = makeItems(5);
     const cursor = encodeCursor('item-2');
     const withoutItem2 = items.filter((x) => x.id !== 'item-2');
-    const result = paginateItems(withoutItem2, 3, cursor, (x) => x.id, undefined, { onMissingCursor: 'error' });
+    const result = paginateItems(withoutItem2, 3, cursor, (x) => x.id);
     expect('error' in result).toBe(true);
     if ('error' in result) expect(result.error).toContain('Cursor expired');
   });
@@ -285,14 +273,14 @@ function makeAutomationContext(
 }
 
 describe('getAutomationJobs', () => {
-  test('backward-compat: no params returns {jobs} array', async () => {
+  test('no params returns the envelope, with {jobs} carrying the same items', async () => {
     const jobs = [{ id: 'j1' }, { id: 'j2' }];
     const handlers = createDaemonRuntimeAutomationRouteHandlers(makeAutomationContext(jobs));
     const response = await handlers.getAutomationJobs();
     const body = await response.json() as Record<string, unknown>;
     expect(Array.isArray(body.jobs)).toBe(true);
     expect((body.jobs as Array<unknown>)).toHaveLength(2);
-    expect(body.items).toBeUndefined(); // not paginated envelope
+    expect(body.items).toEqual(body.jobs);
   });
 
   test('with ?limit=1: returns paginated envelope, hasMore true', async () => {
@@ -394,12 +382,12 @@ describe('getAutomationJobs', () => {
 describe('getAutomationRuns', () => {
   const runs = Array.from({ length: 5 }, (_, i) => ({ id: `r${i + 1}`, jobId: 'j1', status: 'completed', queuedAt: i }));
 
-  test('backward-compat: no params returns {runs} array', async () => {
+  test('no params returns the envelope, with {runs} carrying the same items', async () => {
     const handlers = createDaemonRuntimeAutomationRouteHandlers(makeAutomationContext([], runs));
     const response = await handlers.getAutomationRuns();
     const body = await response.json() as Record<string, unknown>;
     expect(Array.isArray(body.runs)).toBe(true);
-    expect(body.items).toBeUndefined();
+    expect(body.items).toEqual(body.runs);
   });
 
   test('with ?limit=2: paginated response', async () => {
@@ -557,8 +545,8 @@ describe('getIntegrationSessions', () => {
 // Knowledge route handlers
 // ============================================================
 
-function makeKnowledgeItems(count: number): Array<{ id: string; name: string }> {
-  return Array.from({ length: count }, (_, i) => ({ id: `k${i + 1}`, name: `item ${i + 1}` }));
+function makeKnowledgeItems(count: number): Array<{ id: string; name: string; updatedAt: number }> {
+  return Array.from({ length: count }, (_, i) => ({ id: `k${i + 1}`, name: `item ${i + 1}`, updatedAt: (count - i) * 1000 }));
 }
 
 /**
@@ -584,6 +572,19 @@ function makeKnowledgeItemsWithTs(
 
 const knowledgePrincipal = { principalId: 'pagination-fixture', principalKind: 'operator', admin: true, scopes: ['*'] };
 
+type KnowledgeFixture = { readonly id: string; readonly updatedAt: number };
+type ListingPage = { limit?: number; after?: { updatedAt: number; id: string } | null };
+
+/** The service's keyset page: newest first (id descending on ties), the records after `after`. */
+function keysetPage(records: unknown[], { limit, after }: ListingPage) {
+  const all = records as KnowledgeFixture[];
+  const remaining = all
+    .filter((r) => !after || r.updatedAt < after.updatedAt || (r.updatedAt === after.updatedAt && r.id < after.id))
+    .sort((a, b) => (b.updatedAt - a.updatedAt) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  const size = limit ?? remaining.length;
+  return { total: all.length, items: remaining.slice(0, size), hasMore: remaining.length > size };
+}
+
 function makeKnowledgeContext(
   sources: unknown[] = [],
   nodes: unknown[] = [],
@@ -591,14 +592,8 @@ function makeKnowledgeContext(
   return {
     resolveAuthenticatedPrincipal: () => knowledgePrincipal,
     knowledgeService: {
-      querySources: async ({ limit }: { limit?: number }) => ({
-        total: sources.length,
-        items: sources.slice(0, limit ?? sources.length),
-      }),
-      queryNodes: async ({ limit }: { limit?: number }) => ({
-        total: nodes.length,
-        items: nodes.slice(0, limit ?? nodes.length),
-      }),
+      querySources: async (page: ListingPage) => keysetPage(sources, page),
+      queryNodes: async (page: ListingPage) => keysetPage(nodes, page),
       // Stub out everything else
       queryItem: () => null,
       getSource: () => null,
@@ -638,14 +633,14 @@ function makeKnowledgeContext(
 }
 
 describe('knowledge sources: getKnowledgeSources', () => {
-  test('backward-compat: no params returns {sources} array', async () => {
+  test('no params returns the envelope, with {sources} carrying the same items', async () => {
     const sources = makeKnowledgeItems(3);
     const handlers = createDaemonKnowledgeRouteHandlers(makeKnowledgeContext(sources));
     const url = new URL('http://localhost/api/knowledge/sources');
     const response = await handlers.getKnowledgeSources(url, new Request(url));
     const body = await response.json() as Record<string, unknown>;
     expect(Array.isArray(body.sources)).toBe(true);
-    expect(body.items).toBeUndefined();
+    expect(body.items).toEqual(body.sources);
   });
 
   test('with ?limit=2: returns paginated envelope, hasMore true', async () => {
@@ -756,14 +751,14 @@ describe('knowledge sources: mid-walk deletion recovery', () => {
 });
 
 describe('knowledge nodes: getKnowledgeNodes', () => {
-  test('backward-compat: no params returns {nodes} array', async () => {
+  test('no params returns the envelope, with {nodes} carrying the same items', async () => {
     const nodes = makeKnowledgeItems(3);
     const handlers = createDaemonKnowledgeRouteHandlers(makeKnowledgeContext([], nodes));
     const url = new URL('http://localhost/api/knowledge/nodes');
     const response = await handlers.getKnowledgeNodes(url, new Request(url));
     const body = await response.json() as Record<string, unknown>;
     expect(Array.isArray(body.nodes)).toBe(true);
-    expect(body.items).toBeUndefined();
+    expect(body.items).toEqual(body.nodes);
   });
 
   test('with ?limit=2: returns paginated envelope, hasMore true', async () => {

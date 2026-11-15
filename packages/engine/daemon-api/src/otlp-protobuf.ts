@@ -230,7 +230,27 @@ function decodeKeyValue(bytes: Uint8Array): Record<string, unknown> {
   return out;
 }
 
+/**
+ * How deep array and key-value-list values may nest. Real attributes nest a few
+ * levels; a payload nesting thousands (a few bytes per level) would otherwise
+ * overflow the stack and surface as an internal error instead of a decode error.
+ */
+const MAX_ANY_VALUE_DEPTH = 32;
+let anyValueDepth = 0;
+
 function decodeAnyValue(bytes: Uint8Array): Record<string, unknown> {
+  if (anyValueDepth >= MAX_ANY_VALUE_DEPTH) {
+    throw protobufDecodeError(`OTLP attribute values nest deeper than ${MAX_ANY_VALUE_DEPTH} levels`);
+  }
+  anyValueDepth += 1;
+  try {
+    return decodeAnyValueFields(bytes);
+  } finally {
+    anyValueDepth -= 1;
+  }
+}
+
+function decodeAnyValueFields(bytes: Uint8Array): Record<string, unknown> {
   const reader = new ProtoReader(bytes);
   const out: Record<string, unknown> = {};
   while (!reader.eof()) {
@@ -951,6 +971,30 @@ function decodeGenericDataPoint(bytes: Uint8Array): Record<string, unknown> {
                       : 'max'
         ] = value;
       }
+    } else if (fieldNumber === 6) {
+      // bucket_counts: repeated fixed64 (packed, or one per field); uint64 kept as strings like the JSON encoding.
+      const counts = Array.isArray(out['bucketCounts']) ? out['bucketCounts'] as string[] : [];
+      if (wireType === 2) {
+        const packed = new ProtoReader(reader.readLengthDelimited());
+        while (!packed.eof()) counts.push(String(packed.readFixed64()));
+      } else if (wireType === 1) {
+        counts.push(String(reader.readFixed64()));
+      } else {
+        reader.skip(wireType);
+      }
+      out['bucketCounts'] = counts;
+    } else if (fieldNumber === 7) {
+      // explicit_bounds: repeated double (packed, or one per field).
+      const bounds = Array.isArray(out['explicitBounds']) ? out['explicitBounds'] as number[] : [];
+      if (wireType === 2) {
+        const packed = new ProtoReader(reader.readLengthDelimited());
+        while (!packed.eof()) bounds.push(packed.readDouble());
+      } else if (wireType === 1) {
+        bounds.push(reader.readDouble());
+      } else {
+        reader.skip(wireType);
+      }
+      out['explicitBounds'] = bounds;
     } else if (fieldNumber === 9) {
       readKeyValueArray(out, reader, wireType);
     } else {

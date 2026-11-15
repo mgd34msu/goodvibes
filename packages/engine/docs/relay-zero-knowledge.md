@@ -14,24 +14,51 @@ relay routes traffic the vendor can read; this one cannot.
 ```
   surface (off-LAN)                relay (any VPS)                 daemon (home box)
         |                               |                                |
-        |  connect(rid) ───────────────►|                                |
         |                               |◄────────────── register(rid) ──|  (outbound)
-        |◄──────── connected(pipe) ─────|── pipe-open(pipe) ────────────►|
+        |                               |── challenge(nonce) ───────────►|
+        |                               |◄──────── prove(key, signature) ─|
+        |                               |── registered(maxMessageBytes) ►|
+        |  connect(rid) ───────────────►|                                |
+        |◄── connected(pipe, maxMessageBytes) ─|── pipe-open(pipe) ──────►|
         |                               |                                |
         |═══ E2E handshake (NK) ════════╪════════════════════════════════|
         |═══ ciphertext ════════════════╪═══ ciphertext (═ [pipe]+ct) ═══|
 ```
 
-- The **daemon dials the relay outbound** and registers under an unguessable
-  **rendezvous id**. It needs no inbound port and no public IP. A connection
-  that has not received the relay's `registered` frame within the registration
-  deadline (`registrationTimeoutMs`, 15 seconds by default) is closed and
-  retried through the normal reconnect backoff. An error frame from the relay
-  before registration completes is handled the same way.
+- The **daemon dials the relay outbound** and registers under its
+  **rendezvous id**. It needs no inbound port and no public IP. The id is
+  derived from the daemon's identity key, and the relay registers it only after
+  the daemon signs a fresh challenge with that key, so a device that saw a
+  pairing code (including one whose pairing was later revoked) cannot take the
+  id. A proven registration replaces a stale one for the same id, so a daemon
+  whose network changed is not locked out by its own dead connection. A
+  connection that has not received the relay's `registered` frame within the
+  registration deadline (`registrationTimeoutMs`, 15 seconds by default) is
+  closed and retried through the normal reconnect backoff. An error frame from
+  the relay before registration completes is handled the same way, and the
+  registration keeps the relay's reason and next step (`lastRefusal`).
+- Once registered, the daemon **pings the relay every 25 seconds**
+  (`keepaliveIntervalMs`); the relay answers each. An interval that ends with
+  the last ping unanswered (a network change or suspend that dropped the path
+  without closing it) ends the connection and re-registers, so `registered`
+  means the relay answered within the last two intervals (`lastConfirmedAt`).
 - A **surface dials the same rendezvous id**; the relay pairs the two and
   multiplexes many surface pipes over the one daemon socket.
 - Before any application byte, an **end-to-end (E2E) handshake** runs *inside*
   the pipe. Everything after it is ciphertext the relay forwards verbatim.
+- The relay states the largest message it forwards (`maxMessageBytes`, 4 MiB
+  by default) in `registered` and `connected`. A request or response larger
+  than that is sent as consecutive fragments, so opening a large attachment
+  from a phone reaches it instead of closing the connection. A frame over the
+  limit from a daemon closes only that one pipe, never the registration and
+  the other devices' pipes. One buffered response is capped at 32 MiB (502
+  past it) and one request at 64 MiB (413 past it).
+- A request whose caller asks for a **streamed answer** (an `Accept` of
+  `text/event-stream` or an audio type, or a JSON body with `"stream": true`)
+  is sent with its method and body as a stream: the daemon answers with the
+  real status and headers first, then the bytes as they are produced, so
+  streamed chat completions and streamed speech start as soon as their first
+  bytes exist.
 
 ## The E2E handshake (primitives)
 
@@ -76,7 +103,9 @@ credential**: whoever holds one can reach the daemon through the relay.
 
 **Can see** (connection metadata, stated plainly):
 
-- Which rendezvous id a daemon registered and which surfaces paired with it.
+- Which rendezvous id a daemon registered, the daemon's public identity key
+  (in the registration proof; it is also in every pairing code), and which
+  surfaces paired with it.
 - The multiplexed **pipe ids** it assigns for routing.
 - **Traffic-analysis signals**: message sizes, counts, and timing.
 - Network-level metadata (source IPs, connection lifetimes).

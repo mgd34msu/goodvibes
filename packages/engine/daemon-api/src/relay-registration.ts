@@ -10,24 +10,37 @@
 // Reconnect uses the same capped exponential-backoff shape as the transport
 // stream reconnector (base 500ms, ×2, cap 30s). The channel keys are per-pipe
 // and ephemeral, so a reconnect simply re-registers and old pipes are dropped.
+//
+// The rendezvous id is derived from the identity key, and the daemon proves it
+// by signing the relay's challenge. Once registered, a periodic ping the relay
+// answers keeps `registered` true: a path that died without a close (a network
+// change, a suspend) is noticed within two intervals and re-registered.
 
 import {
+  RELAY_DEFAULT_MAX_MESSAGE_BYTES,
   RELAY_PROTOCOL_VERSION,
   RelaySecureChannel,
+  TunnelFragmentJoiner,
   createRelayPairingPayload,
   decodeControlFrame,
   decodeTunnelFrame,
   encodeControlFrame,
   encodeTunnelFrame,
   encodeUtf8,
+  fragmentTunnelFrame,
   framePipePayload,
+  proveRelayRegistration,
+  relayErrorAdvice,
   relayIdentityPublicKeyBase64Url,
+  relayIdentityRendezvousId,
   respondToHandshake,
   toBase64Url,
+  tunnelFrameLimit,
   unframePipePayload,
   type RelayHandshakeKeys,
   type RelayKeyPair,
   type RelayPairingPayload,
+  type TunnelHeader,
 } from '@goodvibes-jev/engine/transport-core/relay';
 
 /** Structural client WebSocket the daemon uses to dial the relay. */
@@ -77,8 +90,12 @@ export interface RelayRegistrationLogger {
 export interface RelayDaemonRegistrationOptions {
   /** The relay URL to dial (wss://…). */
   readonly relayUrl: string;
-  /** The unguessable rendezvous id this daemon registers under. */
-  readonly rid: string;
+  /**
+   * A configured rendezvous id. The daemon registers under the id derived from
+   * `identity` (the only one it can prove); a different configured id is
+   * replaced and reported through `rendezvousId`.
+   */
+  readonly rid?: string | undefined;
   /** The daemon's persistent relay identity key pair. */
   readonly identity: RelayKeyPair;
   /** Base URL used to resolve tunneled request paths into local Requests. */
@@ -98,6 +115,12 @@ export interface RelayDaemonRegistrationOptions {
    * never registered.
    */
   readonly registrationTimeoutMs?: number;
+  /**
+   * How often a registered daemon pings the relay (default 25000). An interval
+   * that passes with the previous ping unanswered ends the connection and
+   * re-registers through the reconnect backoff.
+   */
+  readonly keepaliveIntervalMs?: number;
   /** Max concurrent event-subscription streams per pipe (default 8). */
   readonly maxStreamsPerPipe?: number;
   /** Bounded per-stream send buffer, in chunks; overflow drops-with-notice (default 256). */
@@ -144,11 +167,25 @@ export interface RelayRegistrationStats {
   readonly droppedRequests: number;
 }
 
+/** Why the relay last refused this registration: what is true and what gets past it. */
+export interface RelayRegistrationRefusal {
+  readonly code: string;
+  readonly message: string;
+  readonly state: string;
+  readonly next: readonly string[];
+}
+
 /** A running daemon-side relay registration. */
 export interface RelayDaemonRegistration {
   start(): void;
   stop(): void;
   readonly status: RelayRegistrationStatus;
+  /** The rendezvous id registered under (derived from the identity), once known. */
+  readonly rendezvousId: string | null;
+  /** When the relay last confirmed the registration (registered, or a keepalive answer), epoch ms. */
+  readonly lastConfirmedAt: number | null;
+  /** The relay's last refusal of this registration, cleared when it registers. */
+  readonly lastRefusal: RelayRegistrationRefusal | null;
   /** Mint a pairing payload a surface can scan to reach this daemon. */
   mintPairing(label?: string): Promise<RelayPairingPayload>;
   /** Retained-context footprint, for ops visibility and cap regression tests. */
@@ -173,7 +210,8 @@ const DEFAULT_MAX_STREAMS_PER_PIPE = 8;
 const DEFAULT_STREAM_BUFFER_CHUNKS = 256;
 const DEFAULT_MAX_PIPES = 512;
 const DEFAULT_MAX_IN_FLIGHT_REQUESTS = 1024;
-/** Ceiling on one tunneled response body; larger (or endless) bodies are refused with 502. */
+const DEFAULT_KEEPALIVE_INTERVAL_MS = 25_000;
+/** Ceiling on one buffered tunneled response body; larger (or endless) bodies are refused with 502. A streamed answer has none. */
 const MAX_TUNNEL_RESPONSE_BYTES = 32 * 1024 * 1024;
 /** Ceiling on the error body that accompanies a refused stream. */
 const MAX_STREAM_REFUSAL_BYTES = 64 * 1024;
@@ -315,7 +353,18 @@ interface DaemonStreamRecord {
 export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOptions): RelayDaemonRegistration {
   const logger = options.logger ?? SILENT;
   const makeSocket = options.webSocketImpl ?? defaultWebSocket;
-  const ridBytes = encodeUtf8(options.rid);
+  let rid: string | null = null;
+  let ridBytes = new Uint8Array(0) as Uint8Array<ArrayBuffer>;
+  const ridReady: Promise<string> = relayIdentityRendezvousId(options.identity).then((derived) => {
+    if (options.rid && options.rid !== derived) {
+      logger.warn('relay rendezvous id differs from the one derived from the identity key; registering under the derived id', { configured: options.rid, rid: derived });
+    }
+    rid = derived;
+    ridBytes = encodeUtf8(derived);
+    return derived;
+  });
+  ridReady.catch((error: unknown) => logger.error('relay rendezvous id could not be derived from the identity key', { error: String(error) }));
+  const keepaliveInterval = Math.max(1, options.keepaliveIntervalMs ?? DEFAULT_KEEPALIVE_INTERVAL_MS);
   const baseDelay = options.reconnectBaseDelayMs ?? 500;
   const maxDelay = options.reconnectMaxDelayMs ?? 30_000;
   const registrationTimeout = Math.max(1, options.registrationTimeoutMs ?? 15_000);
@@ -333,6 +382,15 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
   let inFlightRequests = 0;
   let droppedPipes = 0;
   let droppedRequests = 0;
+  // The largest tunnel frame one relay message carries; the relay states its limit when it registers us.
+  let frameLimit = tunnelFrameLimit(RELAY_DEFAULT_MAX_MESSAGE_BYTES);
+  let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  let pingsSent = 0;
+  let awaitingPong = false;
+  let lastConfirmedAt: number | null = null;
+  let lastRefusal: RelayRegistrationRefusal | null = null;
+  // Partial fragmented frames per channel, bounded like the admission queue.
+  const joiners = new WeakMap<RelaySecureChannel, TunnelFragmentJoiner>();
   // Secure channels keyed by pipe. Map insertion order is the LRU order used
   // to evict the coldest pipe when the maxPipes cap is exceeded; a served frame
   // re-inserts its pipe so active pipes stay warm (see touchPipe).
@@ -369,11 +427,17 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       retire();
       return Promise.reject(new Error('relay outbound frame queue limit exceeded'));
     }
+    // A frame larger than one relay message goes as consecutive fragments; they
+    // are queued together so no other frame lands between them.
+    const parts = fragmentTunnelFrame(frame, frameLimit);
     queue.count++; queue.bytes += frame.byteLength;
     const work = queue.tail.then(async () => {
-      if (!attached() || !wanted()) return;
-      const sealed = await channel.seal(frame);
-      if (attached() && wanted()) ws.send(framePipePayload(pipeIdBytes, sealed));
+      for (const part of parts) {
+        if (!attached() || !wanted()) return;
+        const sealed = await channel.seal(part);
+        if (!attached() || !wanted()) return;
+        ws.send(framePipePayload(pipeIdBytes, sealed));
+      }
     }).catch((error: unknown) => { retire(); throw error; });
     queue.tail = work.then(() => {}, () => {}).finally(() => { queue.count--; queue.bytes -= frame.byteLength; });
     outgoing.set(channel, queue);
@@ -441,11 +505,33 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     registrationTimer = null;
   }
 
-  /** Abandon a connection that never reached `registered` and retry through the normal backoff. */
+  function stopKeepalive(): void {
+    if (keepaliveTimer) clearInterval(keepaliveTimer);
+    keepaliveTimer = null;
+    awaitingPong = false;
+  }
+
+  /** Ping the relay each interval; an interval that ends with the last ping unanswered ends this connection. */
+  function startKeepalive(ws: RelayClientWebSocket): void {
+    stopKeepalive();
+    keepaliveTimer = setInterval(() => {
+      if (socket !== ws || stopped) { stopKeepalive(); return; }
+      if (awaitingPong) {
+        failRegistration(ws, 'the relay did not answer the keepalive');
+        return;
+      }
+      awaitingPong = true;
+      try { ws.send(encodeControlFrame({ t: 'ping', n: ++pingsSent })); }
+      catch { failRegistration(ws, 'the keepalive could not be sent'); }
+    }, keepaliveInterval);
+  }
+
+  /** Abandon a connection that is not (or no longer) registered and retry through the normal backoff. */
   function failRegistration(ws: RelayClientWebSocket, reason: string): void {
     if (socket !== ws || stopped) return;
-    logger.warn('relay registration failed; reconnecting', { rid: options.rid, reason });
+    logger.warn('relay registration failed; reconnecting', { rid, reason });
     clearRegistrationTimer();
+    stopKeepalive();
     socket = null;
     abortAllRequests();
     for (const pipeKey of [...pipeStreams.keys()]) closePipeStreams(pipeKey);
@@ -472,6 +558,8 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     const existing = channels.get(pipeKey);
     if (!existing) {
       // First frame on a new pipe is the client's handshake initiation.
+      await ridReady;
+      if (stopped || socket !== ws) return;
       const { keys, message2 } = await respondToHandshake(options.identity, ridBytes, payload);
       if (stopped || socket !== ws) return;
       channels.set(pipeKey, new RelaySecureChannel(keys, 'daemon'));
@@ -503,8 +591,27 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     ws: RelayClientWebSocket,
   ): Promise<void> {
     if (stopped || socket !== ws || channels.get(pipeKey) !== channel) return;
-    const framed = decodeTunnelFrame(await channel.open(sealed));
+    let framed: { readonly header: TunnelHeader; readonly body: Uint8Array<ArrayBuffer> } | null = decodeTunnelFrame(await channel.open(sealed));
     if (!framed || stopped || socket !== ws || channels.get(pipeKey) !== channel) return;
+    if (framed.header.kind === 'fragment') {
+      const joiner = joiners.get(channel) ?? new TunnelFragmentJoiner(MAX_QUEUED_FRAME_BYTES);
+      joiners.set(channel, joiner);
+      const joined = joiner.push(framed.header, framed.body);
+      if (joined.kind === 'pending') return;
+      if (joined.kind === 'too-large') {
+        const refused = encodeTunnelFrame(
+          { id: joined.id, kind: 'response', status: 413, headers: [['content-type', 'application/json']] },
+          encodeUtf8(JSON.stringify({ error: 'request-too-large', code: 'RELAY_REQUEST_TOO_LARGE', state: 'the request was not run', next: [`Send a request body under ${MAX_QUEUED_FRAME_BYTES} bytes over the relay, or use the daemon's local address`] })),
+        );
+        await sendFrame(refused, channel, pipeIdBytes, ws);
+        return;
+      }
+      if (joined.kind === 'malformed') {
+        logger.warn('relay fragment out of order; frame dropped', { pipe: pipeKey });
+        return;
+      }
+      framed = joined;
+    }
     const header = framed.header;
     if (header.kind === 'request') {
       void serveTunneledRequest(pipeKey, header, framed.body, channel, pipeIdBytes, ws).catch((error: unknown) => {
@@ -518,7 +625,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       return;
     }
     if (header.kind === 'stream-open') {
-      void openTunneledStream(pipeKey, header, channel, pipeIdBytes, ws).catch((error: unknown) => {
+      void openTunneledStream(pipeKey, header, framed.body, channel, pipeIdBytes, ws).catch((error: unknown) => {
         logger.error('relay stream handling failed', { error: String(error) });
       });
       return;
@@ -588,15 +695,16 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       }
       if (!isCurrent()) { void response.body?.cancel().catch(() => {}); return; }
       // A plain tunneled request must never buffer an event stream: refuse
-      // honestly and tear the producer down (the stream-open frame kind is the
-      // supported path for subscriptions).
+      // honestly and tear the producer down. A caller that wants a streamed
+      // answer says so (Accept: text/event-stream, or `stream: true`), and the
+      // client then sends it as a stream-open frame.
       const contentType = response.headers.get('content-type') ?? '';
       if (contentType.includes('text/event-stream')) {
         abort.abort();
         void response.body?.cancel().catch(() => {});
         const refused = encodeTunnelFrame(
           { id: header.id, kind: 'response', status: 501, headers: [['content-type', 'application/json']] },
-          encodeUtf8(JSON.stringify({ error: 'streaming-not-supported', message: 'This path serves an event stream; open it with a stream-open frame instead of a plain request.' })),
+          encodeUtf8(JSON.stringify({ error: 'streaming-not-requested', code: 'RELAY_STREAM_NOT_REQUESTED', state: 'this path answers with an event stream, which a plain request cannot carry', next: ['Repeat the request with the header Accept: text/event-stream'] })),
         );
         await send(refused);
         return;
@@ -632,6 +740,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
   async function openTunneledStream(
     pipeKey: string,
     header: { id: string; method: string; path: string; headers: ReadonlyArray<readonly [string, string]> },
+    body: Uint8Array<ArrayBuffer>,
     channel: RelaySecureChannel,
     pipeIdBytes: Uint8Array<ArrayBuffer>,
     ws: RelayClientWebSocket,
@@ -666,6 +775,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       const request = new Request(new URL(header.path, options.localBaseUrl), {
         method: header.method,
         headers: markRelayTunneledHeaders(header.headers),
+        ...(body.length > 0 && header.method !== 'GET' && header.method !== 'HEAD' ? { body } : {}),
         signal: abort.signal,
       });
       if (!isCurrent()) return;
@@ -676,19 +786,17 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
         if (isCurrent()) logger.error('relay stream dispatch failed', { error: String(err) });
         response = null;
       }
-      const body = response?.body;
+      const source = response?.body;
       if (!isCurrent()) {
         // Cancellation settles native pending reads without waiting for an
         // arbitrary underlying source's cancellation promise to settle.
-        if (body) void body.cancel().catch(() => {});
+        if (source) void source.cancel().catch(() => {});
         return;
       }
       if (response && !response.ok) {
-        // The client already holds a 200 event stream, so a refusal (401, 403,
-        // 404, ...) travels as a response frame carrying the stream's id; the
-        // client fails its reader with that status instead of reading the error
-        // body as event data. A client that predates the frame ignores it and
-        // sees the stream end.
+        // A refusal (401, 403, 404, ...) is the answer's status and body,
+        // carried by a response frame under the stream's id; the client answers
+        // the caller with it instead of an event stream.
         const refusal = await readTunnelBodyBounded(response, MAX_STREAM_REFUSAL_BYTES, abort.signal).catch(() => null);
         if (!isCurrent()) return;
         const refusalHeaders: Array<[string, string]> = [];
@@ -703,11 +811,17 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
         await pump.close('source-ended');
         return;
       }
-      if (!body) {
+      if (!response || !source) {
         await pump.close('no-stream');
         return;
       }
-      const reader = body.getReader();
+      // The answer's own status and headers go first, so the caller reads the
+      // real content type (an audio stream, a chat completion) before its bytes.
+      const answerHeaders: Array<[string, string]> = [];
+      response.headers.forEach((value, key) => answerHeaders.push([key, value]));
+      await sendFrame(encodeTunnelFrame({ id: header.id, kind: 'response', status: response.status, headers: answerHeaders }, new Uint8Array(0)),
+        channel, pipeIdBytes, ws, isCurrent);
+      const reader = source.getReader();
       record.reader = reader;
       if (!isCurrent()) {
         void reader.cancel().catch(() => {});
@@ -776,7 +890,9 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     clearRegistrationTimer();
     registrationTimer = setTimeout(() => failRegistration(ws, 'no registered frame before the deadline'), registrationTimeout);
     ws.addEventListener('open', () => {
-      ws.send(encodeControlFrame({ t: 'register', role: 'daemon', protocol: RELAY_PROTOCOL_VERSION, rid: options.rid }));
+      void ridReady.then((id) => {
+        if (socket === ws && !stopped) ws.send(encodeControlFrame({ t: 'register', role: 'daemon', protocol: RELAY_PROTOCOL_VERSION, rid: id }));
+      }, () => failRegistration(ws, 'the rendezvous id could not be derived from the identity key'));
     });
     ws.addEventListener('message', (event) => {
       if (socket !== ws || stopped) return;
@@ -786,11 +902,22 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
           if (typeof data === 'string') {
             const frame = decodeControlFrame(data);
             if (!frame) return;
-            if (frame.t === 'registered') {
+            if (frame.t === 'challenge') {
+              const id = await ridReady;
+              const proof = await proveRelayRegistration(options.identity, id, frame.nonce);
+              if (socket === ws && !stopped) ws.send(encodeControlFrame(proof));
+            } else if (frame.t === 'registered') {
               attempt = 0;
               clearRegistrationTimer();
+              frameLimit = tunnelFrameLimit(frame.maxMessageBytes ?? RELAY_DEFAULT_MAX_MESSAGE_BYTES);
+              lastConfirmedAt = Date.now();
+              lastRefusal = null;
+              startKeepalive(ws);
               setStatus('registered');
-              logger.info('relay registered', { rid: options.rid });
+              logger.info('relay registered', { rid });
+            } else if (frame.t === 'pong') {
+              awaitingPong = false;
+              lastConfirmedAt = Date.now();
             } else if (frame.t === 'pipe-close') {
               channels.delete(frame.pipe);
               abortPipeRequests(frame.pipe);
@@ -798,7 +925,11 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
             } else if (frame.t === 'error') {
               logger.warn('relay error frame', { code: frame.code, message: frame.message });
               // Before `registered`, an unscoped error means the relay refused this registration.
-              if (status !== 'registered' && frame.pipe === undefined) failRegistration(ws, `relay error ${frame.code}`);
+              if (status !== 'registered' && frame.pipe === undefined) {
+                const advice = relayErrorAdvice(frame.code);
+                lastRefusal = { code: frame.code, message: frame.message, state: advice.state, next: advice.next };
+                failRegistration(ws, `relay error ${frame.code}`);
+              }
             }
             return;
           }
@@ -815,6 +946,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     ws.addEventListener('close', () => {
       if (socket !== ws) return;
       clearRegistrationTimer();
+      stopKeepalive();
       socket = null;
       abortAllRequests();
       for (const pipeKey of [...pipeStreams.keys()]) closePipeStreams(pipeKey);
@@ -822,7 +954,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       if (!stopped) scheduleReconnect();
     });
     ws.addEventListener('error', () => {
-      logger.warn('relay websocket error', { rid: options.rid });
+      logger.warn('relay websocket error', { rid });
     });
   }
 
@@ -838,6 +970,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       if (reconnectTimer) clearTimeout(reconnectTimer);
       reconnectTimer = null;
       clearRegistrationTimer();
+      stopKeepalive();
       abortAllRequests();
       for (const pipeKey of [...pipeStreams.keys()]) closePipeStreams(pipeKey);
       channels.clear();
@@ -852,10 +985,19 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     get status(): RelayRegistrationStatus {
       return status;
     },
+    get rendezvousId(): string | null {
+      return rid;
+    },
+    get lastConfirmedAt(): number | null {
+      return lastConfirmedAt;
+    },
+    get lastRefusal(): RelayRegistrationRefusal | null {
+      return lastRefusal;
+    },
     async mintPairing(label?: string): Promise<RelayPairingPayload> {
       return createRelayPairingPayload({
         relayUrl: options.relayUrl,
-        rid: options.rid,
+        rid: await ridReady,
         daemonPublicKey: await relayIdentityPublicKeyBase64Url(options.identity),
         ...(label !== undefined ? { label } : {}),
       });

@@ -43,6 +43,8 @@ export async function handleSharedSessionLifecycle(
         error: `Session ${sessionId} is a daemon-hosted session that is still running; closing only its shared record would leave it running. `
           + 'End it with sessions.hosted.kill, which also closes this record. Nothing was changed.',
         code: 'HOSTED_SESSION_STILL_RUNNING',
+        state: 'the hosted session is still running',
+        next: [`End it with sessions.hosted.kill (sessionId ${sessionId}), which also closes this record`],
       }, { status: 409 });
     }
   }

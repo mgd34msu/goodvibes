@@ -4,8 +4,12 @@
 // on any VPS with `bun`, point daemons and surfaces at it, and it pairs them
 // without ever being able to read their traffic. It does exactly three things:
 //
-//   1. Lets a daemon connect OUTBOUND and register under an unguessable
-//      rendezvous id (no inbound port on the daemon's network required).
+//   1. Lets a daemon connect OUTBOUND and register under its rendezvous id
+//      (no inbound port on the daemon's network required). The id is derived
+//      from the daemon's identity key, and the daemon proves it by signing a
+//      fresh challenge, so a device that saw a pairing code cannot take the id,
+//      and a proven registration replaces a stale one (a daemon whose network
+//      changed is not locked out by its own dead connection).
 //   2. Lets a client dial that same rendezvous id and opens a multiplexed pipe
 //      between the two.
 //   3. Forwards OPAQUE bytes between the paired endpoints. The end-to-end
@@ -21,14 +25,17 @@
 import {
   RELAY_PROTOCOL_VERSION,
   RELAY_PIPE_ID_BYTES,
+  createRelayChallenge,
   decodeControlFrame,
   encodeControlFrame,
   framePipePayload,
   randomBytes,
   toBase64Url,
   unframePipePayload,
+  verifyRelayRegistration,
   type PipeId,
   type RelayErrorCode,
+  type RelayProveFrame,
   type RendezvousId,
 } from '@goodvibes-jev/engine/transport-core/relay';
 
@@ -53,7 +60,10 @@ export interface RelayServerLimits {
   readonly maxPipes: number;
   /** Maximum concurrent client pipes for a single daemon. */
   readonly maxPipesPerDaemon: number;
-  /** Maximum bytes in a single forwarded data frame. */
+  /**
+   * Maximum bytes in a single forwarded data frame. Stated to every endpoint in
+   * `registered` / `connected`, so endpoints fragment larger tunnel frames.
+   */
   readonly maxMessageBytes: number;
   /** Maximum register/connect attempts per remote address per rolling minute. */
   readonly maxHandshakesPerMinutePerAddr: number;
@@ -169,9 +179,19 @@ export class RelayHub {
     return this.rateLimiter.allow(addr, Date.now());
   }
 
-  /** @internal Register a daemon under a rendezvous id. Returns an error code or null on success. */
+  /**
+   * @internal Register a daemon that proved it owns `rid`. A registration
+   * already held for the id is a stale connection of the same daemon (only
+   * the key holder can prove the id), so it is closed with its pipes and
+   * replaced. Returns an error code or null on success.
+   */
   _register(rid: RendezvousId, socket: RelayServerSocket): RelayErrorCode | null {
-    if (this.daemons.has(rid)) return 'rid-taken';
+    const stale = this.daemons.get(rid);
+    if (stale && stale.socket !== socket) {
+      this._unregister(rid, stale.socket);
+      try { stale.socket.close(1008, 'replaced'); } catch { /* already gone */ }
+      this.logger.info('relay daemon registration replaced', { rid });
+    }
     if (this.daemons.size >= this.limits.maxDaemons) return 'capacity';
     this.daemons.set(rid, { socket, pipes: new Set() });
     this.logger.info('relay daemon registered', { rid, daemons: this.daemons.size });
@@ -212,6 +232,19 @@ export class RelayHub {
     return true;
   }
 
+  /**
+   * @internal A data frame over the size cap closes only the pipe it was
+   * addressed to, never the daemon's registration and every other pipe on it.
+   */
+  _refuseOversizeDaemonFrame(frame: Uint8Array<ArrayBuffer>, daemon: RelayServerSocket): void {
+    const split = unframePipePayload(frame);
+    if (!split) return;
+    const pipeId = toBase64Url(split.pipeId.slice());
+    if (this.pipes.get(pipeId)?.daemon !== daemon) return;
+    daemon.send(errorFrame('capacity', `Data frame exceeds the relay message-size cap of ${this.limits.maxMessageBytes} bytes; send it in fragments.`, pipeId));
+    this._closePipe(pipeId, 'both', 'frame-too-large');
+  }
+
   /** @internal A daemon may close only a pipe owned by its own registered socket. */
   _closeDaemonPipe(pipeId: PipeId, daemon: RelayServerSocket): boolean {
     if (this.pipes.get(pipeId)?.daemon !== daemon) return false;
@@ -230,10 +263,10 @@ export class RelayHub {
     if (notify === 'daemon' || notify === 'both') pipe.daemon.send(closeFrame);
   }
 
-  /** @internal Remove a daemon registration and close all its pipes. */
-  _unregister(rid: RendezvousId): void {
+  /** @internal Remove the registration `socket` holds for `rid` and close all its pipes. */
+  _unregister(rid: RendezvousId, socket: RelayServerSocket): void {
     const daemon = this.daemons.get(rid);
-    if (!daemon) return;
+    if (!daemon || daemon.socket !== socket) return;
     for (const pipeId of [...daemon.pipes]) {
       const pipe = this.pipes.get(pipeId);
       this.pipes.delete(pipeId);
@@ -247,9 +280,11 @@ export class RelayHub {
 
 /** Per-connection state machine. One instance per accepted socket. */
 export class RelayConnection {
-  private role: 'unknown' | 'daemon' | 'client' = 'unknown';
+  private role: 'unknown' | 'proving' | 'daemon' | 'client' = 'unknown';
   private rid: RendezvousId | undefined;
   private pipeId: PipeId | undefined;
+  private nonce: string | undefined;
+  private closed = false;
 
   constructor(
     private readonly hub: RelayHub,
@@ -268,8 +303,17 @@ export class RelayConnection {
       this.onRegister(frame.protocol, frame.rid);
       return;
     }
+    if (frame.t === 'prove' && this.role === 'proving') {
+      void this.onProve(frame);
+      return;
+    }
     if (frame.t === 'connect' && this.role === 'unknown') {
       this.onConnect(frame.protocol, frame.rid);
+      return;
+    }
+    if (frame.t === 'ping' && (this.role === 'daemon' || this.role === 'client')) {
+      // Endpoints ask this so a path that died without a close is noticed.
+      this.socket.send(encodeControlFrame({ t: 'pong', n: frame.n }));
       return;
     }
     if (frame.t === 'pipe-close' && this.role === 'daemon') {
@@ -284,7 +328,8 @@ export class RelayConnection {
   /** Handle a binary (data) frame from this socket. */
   handleBinary(bytes: Uint8Array<ArrayBuffer>): void {
     if (bytes.length > this.hub.maxMessageBytes) {
-      this.fail('capacity', 'Data frame exceeds the relay message-size cap.');
+      if (this.role === 'daemon') this.hub._refuseOversizeDaemonFrame(bytes, this.socket);
+      else this.fail('capacity', `Data frame exceeds the relay message-size cap of ${this.hub.maxMessageBytes} bytes; send it in fragments.`);
       return;
     }
     if (this.role === 'client' && this.pipeId) {
@@ -302,8 +347,9 @@ export class RelayConnection {
 
   /** Handle socket closure. */
   handleClose(): void {
+    this.closed = true;
     if (this.role === 'daemon' && this.rid) {
-      this.hub._unregister(this.rid);
+      this.hub._unregister(this.rid, this.socket);
     } else if (this.role === 'client' && this.pipeId) {
       this.hub._closePipe(this.pipeId, 'daemon', 'client-disconnected');
     }
@@ -318,14 +364,32 @@ export class RelayConnection {
       this.fail('rate-limited', 'Too many handshake attempts.');
       return;
     }
+    // Nothing is registered until the daemon proves it holds the key the id
+    // was derived from, by signing this connection's fresh nonce.
+    const challenge = createRelayChallenge();
+    this.role = 'proving';
+    this.rid = rid;
+    this.nonce = challenge.nonce;
+    this.socket.send(encodeControlFrame(challenge));
+  }
+
+  private async onProve(proof: RelayProveFrame): Promise<void> {
+    const rid = this.rid, nonce = this.nonce;
+    this.nonce = undefined;
+    if (!rid || !nonce) return;
+    const proven = await verifyRelayRegistration(rid, nonce, proof);
+    if (this.closed || this.role !== 'proving' || this.rid !== rid) return;
+    if (!proven) {
+      this.fail('unauthorized', 'The registration did not prove ownership of the rendezvous id.');
+      return;
+    }
     const err = this.hub._register(rid, this.socket);
     if (err) {
-      this.fail(err, err === 'rid-taken' ? 'Rendezvous id already registered.' : 'Relay at capacity.');
+      this.fail(err, 'Relay at capacity.');
       return;
     }
     this.role = 'daemon';
-    this.rid = rid;
-    this.socket.send(encodeControlFrame({ t: 'registered', rid }));
+    this.socket.send(encodeControlFrame({ t: 'registered', rid, maxMessageBytes: this.hub.maxMessageBytes }));
   }
 
   private onConnect(protocol: number, rid: RendezvousId): void {
@@ -345,7 +409,7 @@ export class RelayConnection {
     this.role = 'client';
     this.rid = rid;
     this.pipeId = result.pipeId;
-    this.socket.send(encodeControlFrame({ t: 'connected', pipe: result.pipeId }));
+    this.socket.send(encodeControlFrame({ t: 'connected', pipe: result.pipeId, maxMessageBytes: this.hub.maxMessageBytes }));
   }
 
   private fail(code: RelayErrorCode, message: string): void {

@@ -32,8 +32,11 @@ export interface KnowledgeRouterContext {
   readonly artifactStore: KnowledgeContextInput['artifactStore'];
   readonly configManager: KnowledgeContextInput['configManager'];
   readonly requireAdmin: KnowledgeContextInput['requireAdmin'];
-  /** The request's principal, authenticated once; see the router's context. */
-  authenticateRequest(request: Request): { readonly principal: NonNullable<ReturnType<KnowledgeContextInput['resolveAuthenticatedPrincipal']>> } | null;
+  /** The request's principal, authenticated once, and its signal (aborted on revocation); see the router's context. */
+  authenticateRequest(request: Request): {
+    readonly principal: NonNullable<ReturnType<KnowledgeContextInput['resolveAuthenticatedPrincipal']>>;
+    readonly signal: AbortSignal;
+  } | null;
 }
 
 /** The router's own JSON body helpers, which are instance methods. */
@@ -50,20 +53,23 @@ export function buildRouterKnowledgeContext(
   knowledgeService: KnowledgeContextInput['knowledgeService'],
   knowledgeGraphqlService: KnowledgeContextInput['knowledgeGraphqlService'],
 ): ReturnType<typeof buildKnowledgeRouteContext> {
-  return buildKnowledgeRouteContext({
-    artifactStore: context.artifactStore,
-    configManager: context.configManager,
-    inspectGraphqlAccess: inspectKnowledgeGraphqlAccess,
-    normalizeAtSchedule,
-    normalizeEverySchedule,
-    normalizeCronSchedule,
-    parseJsonBody: parsers.parseJsonBody,
-    parseOptionalJsonBody: parsers.parseOptionalJsonBody,
-    parseJsonText: parsers.parseJsonText,
-    requireAdmin: context.requireAdmin,
-    // Knowledge reads re-check their principal around each await; on a bound context that is an integer compare.
-    resolveAuthenticatedPrincipal: (request) => context.authenticateRequest(request)?.principal ?? null,
-    knowledgeService,
-    knowledgeGraphqlService,
-  });
+  return {
+    ...buildKnowledgeRouteContext({
+      artifactStore: context.artifactStore,
+      configManager: context.configManager,
+      inspectGraphqlAccess: inspectKnowledgeGraphqlAccess,
+      normalizeAtSchedule,
+      normalizeEverySchedule,
+      normalizeCronSchedule,
+      parseJsonBody: parsers.parseJsonBody,
+      parseOptionalJsonBody: parsers.parseOptionalJsonBody,
+      parseJsonText: parsers.parseJsonText,
+      requireAdmin: context.requireAdmin,
+      resolveAuthenticatedPrincipal: (request) => context.authenticateRequest(request)?.principal ?? null,
+      knowledgeService,
+      knowledgeGraphqlService,
+    }),
+    // A knowledge read checks only this signal between its steps; revoking the credential aborts it.
+    requestSignal: (request) => context.authenticateRequest(request)?.signal,
+  };
 }

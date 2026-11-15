@@ -1,5 +1,6 @@
 import type { DaemonRemoteManagementRouteHandlers } from './context.js';
 import { jsonErrorResponse, readJsonErrorResponse, serviceFailureStatus } from './error-response.js';
+import { requestActor } from './http-policy.js';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
@@ -114,7 +115,8 @@ type RemoteInvokeBody = {
 };
 
 interface DaemonRemoteRouteContext {
-  readonly authToken?: string | null | undefined;
+  /** The principal the gate authenticated; pair approvals, token rotation and invokes are attributed to it. */
+  readonly resolveAuthenticatedPrincipal?: ((req: Request) => { readonly principalId: string } | null) | undefined;
   readonly parseJsonBody: (req: Request) => Promise<JsonRecord | Response>;
   readonly requireAdmin: (req: Request) => Response | null;
   readonly requireRemotePeer: (req: Request, scope?: string) => Promise<RemotePeerAuth | Response>;
@@ -492,7 +494,7 @@ function readClientHintForwardedFor(req: Request): ClientHintForwardedFor | unde
 }
 
 function operatorActor(context: DaemonRemoteRouteContext, req: Request): string {
-  return context.authToken ? 'shared-token' : context.requireAuthenticatedSession(req)?.username ?? 'operator';
+  return requestActor(context, req);
 }
 
 async function handleApproveRemotePairRequest(context: DaemonRemoteRouteContext, requestId: string, req: Request): Promise<Response> {

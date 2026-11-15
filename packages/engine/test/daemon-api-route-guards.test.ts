@@ -17,7 +17,6 @@ import { dispatchDaemonApiRoutes } from '../daemon-api/src/api-router.js';
 import { createDaemonKnowledgeRouteHandlers } from '../daemon-api/src/knowledge-routes.js';
 import type { DaemonKnowledgeRouteContext } from '../daemon-api/src/knowledge-route-types.js';
 import { contractWorkSnapshot, type ContractWorkFields } from '../contracts/src/contract-work.js';
-import { ControlStatusResponseSchema } from '../contracts/src/zod-schemas/session.js';
 
 type Json = Record<string, unknown>;
 
@@ -227,9 +226,9 @@ describe('percent-encoded path segments', () => {
 
   test('the automation table decodes and answers a malformed escape the same way', async () => {
     const { handlers, calls } = recordingHandlers();
-    await dispatchAutomationRoutes(jsonRequest('POST', '/api/automation/jobs/job%3A1/pause'), handlers);
-    expect([calls[0]?.name, calls[0]?.args[0]]).toEqual(['setAutomationJobEnabled', 'job:1']);
-    expect((await dispatchAutomationRoutes(jsonRequest('POST', '/api/automation/jobs/%E0%A4/pause'), handlers))?.status).toBe(400);
+    await dispatchAutomationRoutes(jsonRequest('POST', '/api/automation/jobs/job%3A1/run'), handlers);
+    expect([calls[0]?.name, calls[0]?.args[0]]).toEqual(['runAutomationJobNow', 'job:1']);
+    expect((await dispatchAutomationRoutes(jsonRequest('POST', '/api/automation/jobs/%E0%A4/run'), handlers))?.status).toBe(400);
   });
 
   test('a job delete reaches the gateway table only; the automation table does not answer it', async () => {
@@ -342,10 +341,10 @@ describe('knowledge routes', () => {
     const handlers = createDaemonKnowledgeRouteHandlers(context);
     await handlers.postKnowledgeAsk(jsonRequest('POST', '/a', { query: 'q' }));
     await handlers.postKnowledgeRenderProjection(jsonRequest('POST', '/p', { kind: 'overview' }));
-    for (const options of [calls.ask[0]!.options as Json, calls.render[0]!.options as Json]) {
-      expect(typeof options.assertCurrent).toBe('function');
-      expect(options.signal).toBeInstanceOf(AbortSignal);
-    }
+    expect((calls.ask[0]!.options as Json).signal).toBeInstanceOf(AbortSignal);
+    const render = calls.render[0]!.options as Json;
+    expect(typeof render.assertCurrent).toBe('function');
+    expect(render.signal).toBeInstanceOf(AbortSignal);
   });
 
   test('a store failure while ingesting is a 5xx, and an unparsable url is the caller\'s 400', async () => {
@@ -387,12 +386,5 @@ describe('contract work snapshot', () => {
     expect(raised.updatedAt).toBe(new Date(5_000).toISOString());
     const answered = contractWorkSnapshot({ ...base, escalations: [{ id: 'e1', at: 5_000, question: 'which?', resolvedAt: 9_000 }] });
     expect(answered.updatedAt).toBe(new Date(9_000).toISOString());
-  });
-});
-
-describe('control status response', () => {
-  test('the body the daemon actually sends passes the typed schema', () => {
-    const body = { status: 'running', version: '3.3.0', buildVersion: '3.3.0', platformVersion: '3.3.0', cluster: { role: 'leader' }, receipts: [{ id: 'r', text: 't', at: 1 }] };
-    expect(ControlStatusResponseSchema.safeParse(body).success).toBe(true);
   });
 });

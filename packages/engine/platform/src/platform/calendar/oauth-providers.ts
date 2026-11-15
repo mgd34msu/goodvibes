@@ -47,6 +47,11 @@ export const GOOGLE_PROFILE: OAuthProviderProfile = {
   authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
   tokenEndpoint: 'https://oauth2.googleapis.com/token',
   deviceAuthorizationEndpoint: 'https://oauth2.googleapis.com/device/code',
+  // Google's device grant accepts only a short published scope list that has no
+  // calendar scope, and only from a "TVs and Limited Input devices" client.
+  // Headless connect opens the authorization link on any device and pastes the
+  // code back to the Desktop-app client instead.
+  usesDeviceGrant: false,
   revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
   apiBaseUrl: 'https://www.googleapis.com/calendar/v3',
   defaultScopes: GOOGLE_SCOPES_DEFAULT,
@@ -64,6 +69,7 @@ export const MICROSOFT_PROFILE: OAuthProviderProfile = {
   authorizationEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
   tokenEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
   deviceAuthorizationEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/devicecode',
+  usesDeviceGrant: true,
   // Microsoft has no OAuth revocation endpoint; disconnect is local token deletion.
   apiBaseUrl: 'https://graph.microsoft.com/v1.0',
   defaultScopes: MICROSOFT_SCOPES_DEFAULT,
@@ -108,6 +114,7 @@ export function resolveClientConfig(
     authorizationEndpoint: profile.authorizationEndpoint,
     tokenEndpoint: profile.tokenEndpoint,
     deviceAuthorizationEndpoint: profile.deviceAuthorizationEndpoint,
+    usesDeviceGrant: profile.usesDeviceGrant,
     ...(profile.revocationEndpoint ? { revocationEndpoint: profile.revocationEndpoint } : {}),
     apiBaseUrl: profile.apiBaseUrl,
     ...(profile.extraAuthParams ? { extraAuthParams: profile.extraAuthParams } : {}),

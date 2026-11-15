@@ -110,9 +110,10 @@ export interface UntrustedCalendarEventFields {
    */
   readonly organizer?: string | undefined;
   /**
-   * True only when the SOURCE ITSELF states the owner organized this event,
+   * True only when the PROVIDER states the owner organized this event,
    * Google's `organizer.self`, Graph's `isOrganizer`, both read-only and both
-   * relative to the calendar the copy appears on.
+   * relative to the calendar the copy appears on. Read for provider events
+   * only; a CalDAV event is external whatever this says.
    *
    * Absent or false means external. That default direction is deliberate: an
    * event that says nothing about who organized it is treated as somebody
@@ -148,25 +149,19 @@ export type CalendarUntrustedIngestRecorder = (ingest: {
  *
  * Ruled, not inferred:
  *
- *  - An **.ics import** and a **subscribed feed** are external
- *    unconditionally. Both are a body handed in from elsewhere, and neither
- *    carries any statement about who the account is.
+ *  - An **.ics import** or a **subscribed feed** is always external.
+ *  - A **CalDAV** event is always external, including one whose ORGANIZER
+ *    names the configured account. The ORGANIZER line is text inside the event
+ *    body and nothing verifies who wrote it: a shared or delegated collection,
+ *    a server without scheduling, or one that accepts inbound invitations
+ *    without checking the sender will all hand over an event naming the owner
+ *    as organizer. Exempting on that claim would let such an event's text
+ *    steer outward actions unchecked.
  *  - A **provider** event is external unless the provider itself says the
- *    owner organized it (`organizer.self`, `isOrganizer`).
- *  - A **CalDAV** collection is the owner's OWN server, holding both their own
- *    entries and invitations delivered to them, so it is narrowed the same way
- *    a provider account is: external unless the caller established that the
- *    organizer is the configured account. It used to be unconditional, which
- *    meant the owner reading their own calendar recorded an ingest and every
- *    later outward action in that turn was refused, `evaluateOutwardEffect`
- *    is called by `createUntrustedContentPort` with no `content` at all, so
- *    port consumers take the coarse "any origin -> refuse" branch and no
- *    derivation check ever runs.
+ *    owner organized it (`organizer.self`, `isOrganizer`), which the provider
+ *    sets and the event's author cannot.
  *
- * `organizerIsOwner` must come from configuration or from the provider, never
- * from event content the caller has not checked against configuration.
- * Anything absent or unmatched stays external: the default fails towards
- * recording.
+ * Anything absent stays external: the default fails towards recording.
  */
 export function calendarEventIsExternallySourced(
   provenance: CalendarEventProvenance,
@@ -175,47 +170,18 @@ export function calendarEventIsExternallySourced(
   switch (provenance.kind) {
     case 'ics-import':
     case 'subscription':
-      return true;
     case 'caldav':
+      return true;
     case 'provider':
       return event.organizerIsOwner !== true;
   }
 }
 
-/**
- * Strip a `mailto:` prefix and surrounding whitespace from an organizer value.
- *
- * Exported so the CalDAV gateway compares an ORGANIZER against the configured
- * account through the SAME normalisation the origin string is built with, a
- * second, slightly different copy of this is how the two would drift.
- */
+/** A `mailto:` prefix and surrounding whitespace removed from an organizer value. */
 export function organizerLabel(organizer: string | undefined): string {
   const trimmed = (organizer ?? '').trim();
   if (trimmed.length === 0) return '';
   return trimmed.replace(/^mailto:/i, '').trim();
-}
-
-/**
- * True when a claimed ORGANIZER is the owner's own configured identity.
- *
- * Case-insensitive after `organizerLabel`, because mailbox comparison is
- * case-insensitive in practice and an ICS writer may upper-case the scheme or
- * the local part. Both sides must be non-empty: an unset owner identity, or an
- * event with no organizer, is NOT a match, so the exemption cannot fire on
- * "nothing configured" or "nobody named".
- *
- * The owner identity handed in must come from CONFIGURATION. A caller that
- * passed a value read out of event content would be letting the invitation
- * declare itself trusted.
- */
-export function organizerIsOwnerIdentity(
-  organizer: string | undefined,
-  ownerIdentity: string | undefined,
-): boolean {
-  const claimed = organizerLabel(organizer).toLowerCase();
-  const owner = organizerLabel(ownerIdentity).toLowerCase();
-  if (claimed.length === 0 || owner.length === 0) return false;
-  return claimed === owner;
 }
 
 /**

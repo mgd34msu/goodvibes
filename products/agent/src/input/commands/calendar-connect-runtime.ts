@@ -4,10 +4,10 @@
  *
  * The OAuth network dance lives here (not in the workspace card) because a command
  * handler can print the authorization URL / device user-code IMMEDIATELY, then await
- * the browser callback or poll the device code. The default path uses the bundled
- * project client id + PKCE; a power user's own client id/secret come from config +
- * the secret manager (captured by the advanced workspace card). No secret is ever put
- * into a command string.
+ * the browser callback or poll the device code; `--code` completes a pasted sign-in
+ * started with `--device` for Google. The client id is the operator's own, from
+ * config, and its secret from the secret manager (captured by the advanced workspace
+ * card). No secret is ever put into a command string.
  *
  * The service is injectable so tests drive every path against fakes with no real
  * network, port, or browser.
@@ -15,7 +15,7 @@
 import type { CalendarProviderId, DeviceCodeFlowStart, EventWindow, MergedCalendarEvent } from '@goodvibes-jev/engine/platform/platform/calendar';
 import type { CommandContext } from '../command-registry.ts';
 import { requireSecretsManager } from './runtime-services.ts';
-import { CalendarOAuthService, type CalendarConfigReader, type CalendarSecretSlice } from '../../agent/calendar/calendar-oauth-service.ts';
+import { CalendarOAuthService, type CalendarConfigReader, type CalendarSecretSlice, type ConnectResult } from '../../agent/calendar/calendar-oauth-service.ts';
 
 /** Factory seam: production builds the real service from context; tests inject a fake. */
 export type CalendarServiceFactory = (ctx: CommandContext) => CalendarOAuthService;
@@ -53,6 +53,16 @@ function deviceCodeMessage(label: string, start: DeviceCodeFlowStart): string {
   ].filter(Boolean).join('\n');
 }
 
+function pastedCodeMessage(label: string, word: string, url: string): string {
+  return [
+    `Authorize ${label} from any device:`,
+    `  1. Open ${url}`,
+    '  2. Approve. The browser then lands on a 127.0.0.1 address that does not load; that is expected.',
+    `  3. Copy that whole address and run: /calendar connect ${word} --code <address>`,
+    '  The link stays valid for ten minutes in this session.',
+  ].join('\n');
+}
+
 function authUrlMessage(label: string, url: string): string {
   return [
     `Authorize ${label} in your browser:`,
@@ -73,7 +83,8 @@ function connectGuideMessage(): string {
     '  Providers: google (Google Calendar), outlook (Microsoft Outlook)',
     '    /calendar connect google',
     '    /calendar connect outlook',
-    '    (add --device to sign in with a device code instead of a browser)',
+    '    (add --device when this machine has no browser: Outlook shows a device code; Google prints a link to open',
+    '     on any device, then run /calendar connect google --code <address the browser landed on>)',
     '',
     'This build has no built-in Google/Microsoft sign-in configured yet, there is no project ' +
       'client id shipped, so a bare connect will stop at the config step and tell you so. To ' +
@@ -118,7 +129,20 @@ export async function runCalendarConnect(
   }
   const label = PROVIDER_LABEL[provider];
   const device = args.includes('--device');
+  const codeIndex = args.indexOf('--code');
   const service = factory(ctx);
+  const word = provider === 'google' ? 'google' : 'outlook';
+
+  if (codeIndex >= 0) {
+    const pasted = args.slice(codeIndex + 1).join(' ').trim();
+    if (!pasted) {
+      ctx.print(`Usage: /calendar connect ${word} --code <address the browser landed on, or the code>`);
+      return;
+    }
+    const completed = await service.completePastedCode(provider, pasted);
+    printConnectResult(ctx, label, completed);
+    return;
+  }
 
   ctx.print(`Connecting ${label}...`);
   const result = device
@@ -131,6 +155,14 @@ export async function runCalendarConnect(
         onDeviceCode: (s) => ctx.print(deviceCodeMessage(label, s)),
       });
 
+  if (result.pendingAuthorizationUrl) {
+    ctx.print(pastedCodeMessage(label, word, result.pendingAuthorizationUrl));
+    return;
+  }
+  printConnectResult(ctx, label, result);
+}
+
+function printConnectResult(ctx: CommandContext, label: string, result: ConnectResult): void {
   if (!result.ok) {
     ctx.print([
       `Could not connect ${label} (${result.stage ?? 'unknown'} stage).`,
@@ -138,10 +170,11 @@ export async function runCalendarConnect(
     ].join('\n'));
     return;
   }
+  const via = result.transport === 'device-code' ? 'device code' : result.transport === 'pasted-code' ? 'pasted sign-in' : 'browser sign-in';
   ctx.print([
     `Connected ${label}.`,
-    `  account ${result.account?.label ?? provider}`,
-    `  via     ${result.transport === 'device-code' ? 'device code' : 'browser sign-in'}`,
+    `  account ${result.account?.label ?? label}`,
+    `  via     ${via}`,
     `  scopes  ${(result.account?.scopes ?? []).join(', ') || '(none reported)'}`,
   ].join('\n'));
 }
@@ -189,9 +222,9 @@ export async function runCalendarAccounts(
 }
 
 /**
- * Best-effort fetch of provider events for the upcoming window, source-labeled. A
- * provider failure (reconnect needed, rate limit, etc.) is reported as an honest note
- * rather than aborting the whole /calendar upcoming view.
+ * Provider events for the upcoming window, source-labeled. A provider, or one
+ * calendar of it, that could not be read (reconnect needed, rate limit, an
+ * unshared calendar) is reported as a note beside the events of the rest.
  */
 export async function fetchProviderUpcoming(
   ctx: CommandContext,
@@ -199,19 +232,9 @@ export async function fetchProviderUpcoming(
   factory: CalendarServiceFactory = defaultServiceFactory,
 ): Promise<{ readonly events: MergedCalendarEvent[]; readonly notes: string[] }> {
   const service = factory(ctx);
-  const accounts = await service.listAccounts();
-  if (accounts.length === 0) return { events: [], notes: [] };
-  const events: MergedCalendarEvent[] = [];
-  const notes: string[] = [];
-  for (const { account } of accounts) {
-    try {
-      const config = await service.resolveConfig(account.provider);
-      const providerEvents = await service.listEventsForProvider(config, window);
-      events.push(...providerEvents);
-    } catch (error) {
-      notes.push(`  ${PROVIDER_LABEL[account.provider]}: could not load events, ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
+  const { events, failures } = await service.listEventsDetailed(window);
+  const notes = failures.map((failure) =>
+    `  ${PROVIDER_LABEL[failure.provider]}${failure.calendarLabel ? ` (${failure.calendarLabel})` : ''}: could not load events, ${failure.error}`);
   return { events, notes };
 }
 

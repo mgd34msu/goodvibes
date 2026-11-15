@@ -8,7 +8,7 @@ import { readBrowserLaunchCause } from '../platform/src/platform/browser/launch-
 import { missingLibrary, networkBlocked, programNotInstalled } from '../platform/src/platform/browser/browser-failure-reading.js';
 import { ownRecorderFailure, readRecorderFailure } from '../platform/src/platform/voice/capture/recorder-failure-reading.js';
 import { ownLocalEngineFailureLifetime, readLocalEngineFailure, structuredLocalEngineFailure } from '../platform/src/platform/voice/providers/local-failure-reading.js';
-import { readMissingPermission } from '../platform/src/platform/calendar/batteries/missing-permission.js';
+import { errorFromResponse } from '../platform/src/platform/calendar/calendar-api-shared.js';
 
 let restore: (() => void) | undefined;
 afterEach(() => { restore?.(); restore = undefined; });
@@ -62,11 +62,15 @@ test('Classic voice diagnostics retain process facts without claiming an inferre
   expect(requests).toHaveLength(0);
 });
 
-test('Classic calendar permission guidance uses only the declared authentication challenge', async () => {
+test('a calendar 403 is read from the response alone, with no decision request', async () => {
   const requests = outage();
-  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
-    expect(await readMissingPermission('google', 'Provider refused this request.', '')).toBeUndefined();
-    expect(await readMissingPermission('google', 'Provider refused this request.', 'Bearer error="insufficient_scope", scope="calendar.read"')).toBe('calendar.read');
+  const response = (challenge: string) => ({
+    status: 403, ok: false,
+    header: (name: string) => (name.toLowerCase() === 'www-authenticate' ? challenge : null),
+    json: async () => ({}), text: async () => 'Provider refused this request.',
   });
+  expect((await errorFromResponse(response(''), 'google')).degraded.kind).toBe('provider-error');
+  expect((await errorFromResponse(response('Bearer error="insufficient_scope", scope="calendar.read"'), 'google')).degraded)
+    .toMatchObject({ kind: 'insufficient-scope', missingScope: 'calendar.read' });
   expect(requests).toHaveLength(0);
 });

@@ -3,16 +3,21 @@
  * provider profiles, the OAuth flows, the secret-backed token store, and the two API
  * clients into one surface: connect (auth-code or device-code), disconnect, list
  * accounts + their honest state, list calendars, list events (normalized + source-
- * labeled) across a window, and create an event routed to an explicitly chosen
- * provider. The network and (for the loopback flow) the redirect listener are
+ * labeled, calendars read side by side, one failing calendar reported beside the
+ * rest) across a window, and create an event routed to an explicitly chosen
+ * provider. Headless connect is the device code for Microsoft and a pasted
+ * authorization code for Google. The network and (for the loopback flow) the redirect listener are
  * injected, so the whole thing runs against fakes with no real network or port.
  */
 
 import {
   beginAuthCodeFlow,
   beginDeviceCodeFlow,
+  beginPastedCodeFlow,
   completeAuthCodeFlow,
+  OAuthFlowError,
   pollDeviceCodeFlow,
+  readPastedAuthorization,
   type Sleep,
 } from './oauth-flow.js';
 import {
@@ -33,12 +38,15 @@ import {
   listGraphEvents,
 } from './microsoft-graph-api.js';
 import { compareMergedCalendarEventsByStart } from './merged-calendar-model.js';
+import { CalendarApiError } from './calendar-api-shared.js';
 import {
   recordCalendarEventIngest,
   type CalendarUntrustedIngestRecorder,
 } from './untrusted-events.js';
 import type {
+  ApiDegradedState,
   AuthCodeFlowStart,
+  CalendarCreateResult,
   CalendarProviderId,
   CalendarRequestOptions,
   Clock,
@@ -81,6 +89,22 @@ export interface EventWindow {
   readonly timeMin: string;
   readonly timeMax: string;
 }
+
+/** One calendar whose events could not be read, reported beside the others' events. */
+export interface CalendarReadFailure {
+  readonly calendarId: string;
+  readonly calendarLabel: string;
+  readonly degraded: ApiDegradedState;
+}
+
+/** Events across a provider's calendars, and the calendars that could not be read. */
+export interface CalendarEventsRead {
+  readonly events: MergedCalendarEvent[];
+  readonly failures: readonly CalendarReadFailure[];
+}
+
+/** Calendars read at once per account: enough to hide latency, few enough not to trip a provider limit. */
+const CALENDAR_READ_CONCURRENCY = 4;
 
 export class CalendarConnector {
   private readonly secrets: SecretStoreSlice;
@@ -151,7 +175,7 @@ export class CalendarConnector {
     options: { readonly signal?: AbortSignal | undefined } = {},
   ): Promise<{ readonly start: AuthCodeFlowStart; readonly waiter: LoopbackWaiter }> {
     if (!this.listenerFactory) {
-      throw new Error('No loopback listener is available; use the device-code flow for headless connect.');
+      throw new Error('No loopback listener is available on this machine; connect headless instead (a device code for Microsoft, a pasted code for Google).');
     }
     options.signal?.throwIfAborted();
     const flow = await beginAuthCodeFlow(config, this.listenerFactory);
@@ -180,9 +204,37 @@ export class CalendarConnector {
 
   // --- Connect: device-code (headless) flow ---------------------------------
 
-  /** Begin the device-code flow; returns the user code + verification URL to show. */
+  /**
+   * Begin the device-code flow; returns the user code + verification URL to show.
+   * Only for a provider whose device grant covers calendar scopes (Microsoft);
+   * Google's does not, and headless Google connect uses the pasted code below.
+   */
   beginConnectDeviceCode(config: ResolvedClientConfig): Promise<DeviceCodeFlowStart> {
+    // An unconfigured client is refused by name inside the flow, first.
+    if (config.isConfigured && !config.usesDeviceGrant) {
+      return Promise.reject(new OAuthFlowError(
+        'token-request-rejected',
+        `${config.provider} does not grant calendar access through a device code. Connect by opening the sign-in link on any device and pasting back the address it lands on.`,
+      ));
+    }
     return beginDeviceCodeFlow(config, this.fetchImpl, this.clock());
+  }
+
+  // --- Connect: pasted authorization code (headless, no listener) -------------
+
+  /** Begin a sign-in whose code the person pastes back; returns the link to open. */
+  beginConnectPastedCode(config: ResolvedClientConfig): Promise<AuthCodeFlowStart> {
+    return beginPastedCodeFlow(config);
+  }
+
+  /** Complete a pasted-code sign-in from what the person pasted; saves tokens. */
+  async completeConnectPastedCode(
+    config: ResolvedClientConfig,
+    start: AuthCodeFlowStart,
+    pasted: string,
+  ): Promise<ConnectedAccount> {
+    const code = readPastedAuthorization(pasted, start.state);
+    return this.completeConnectAuthCode(config, { code, verifier: start.verifier, redirectUri: start.redirectUri });
   }
 
   /** Poll until the device code is approved, then save tokens. */
@@ -217,34 +269,51 @@ export class CalendarConnector {
 
   /**
    * List events across all of the provider's calendars in a window, normalized into
-   * the merged model, source-labeled, and sorted chronologically (through the ONE
-   * documented cross-zone comparator, `compareMergedCalendarEventsByStart`, see
-   * merged-calendar-model.ts for why a raw string/localeCompare sort of `start.value`
-   * is wrong once utc and tzid/floating events are mixed). Callers merge this with
-   * A9's ICS/local events into the unified /calendar view.
+   * the merged model, source-labeled, and sorted chronologically through
+   * `compareMergedCalendarEventsByStart`. Calendars are read a few at a time, and
+   * a calendar that fails (unshared, a 403, a 404) is reported in `failures`
+   * beside the events of the others instead of discarding them. Failing to list
+   * the calendars at all, or to get a token, still throws: there is nothing to
+   * report beside.
    */
-  async listEvents(config: ResolvedClientConfig, window: EventWindow, options: CalendarRequestOptions = {}): Promise<MergedCalendarEvent[]> {
+  async listEvents(config: ResolvedClientConfig, window: EventWindow, options: CalendarRequestOptions = {}): Promise<CalendarEventsRead> {
     options.signal?.throwIfAborted();
     const token = await this.store.getFreshAccessToken(config.provider, config, this.fetchImpl);
     const calendars = config.provider === 'google'
       ? await listGoogleCalendars(this.fetchImpl, token, options)
       : await listGraphCalendars(this.fetchImpl, token, options);
-    const out: MergedCalendarEvent[] = [];
-    for (const calendar of calendars) {
-      const events = config.provider === 'google'
-        ? await listGoogleEvents(this.fetchImpl, token, {
-            calendarId: calendar.id,
-            calendarLabel: calendar.name,
-            timeMin: window.timeMin,
-            timeMax: window.timeMax,
-          }, options)
-        : await listGraphEvents(this.fetchImpl, token, {
-            calendarId: calendar.id,
-            calendarLabel: calendar.name,
-            start: window.timeMin,
-            end: window.timeMax,
-          }, options);
-      out.push(...events);
+    type CalendarRead =
+      | { readonly calendar: ProviderCalendar; readonly events: MergedCalendarEvent[] }
+      | { readonly calendar: ProviderCalendar; readonly failure: ApiDegradedState };
+    const perCalendar = await mapWithLimit(calendars, CALENDAR_READ_CONCURRENCY, async (calendar): Promise<CalendarRead> => {
+      try {
+        const events = config.provider === 'google'
+          ? await listGoogleEvents(this.fetchImpl, token, {
+              calendarId: calendar.id,
+              calendarLabel: calendar.name,
+              timeMin: window.timeMin,
+              timeMax: window.timeMax,
+            }, options)
+          : await listGraphEvents(this.fetchImpl, token, {
+              calendarId: calendar.id,
+              calendarLabel: calendar.name,
+              start: window.timeMin,
+              end: window.timeMax,
+            }, options);
+        return { calendar, events };
+      } catch (error) {
+        if (!(error instanceof CalendarApiError)) throw error;
+        return { calendar, failure: error.degraded };
+      }
+    });
+    const events: MergedCalendarEvent[] = [];
+    const failures: CalendarReadFailure[] = [];
+    for (const result of perCalendar) {
+      if ('failure' in result) {
+        failures.push({ calendarId: result.calendar.id, calendarLabel: result.calendar.name, degraded: result.failure });
+        continue;
+      }
+      events.push(...result.events);
       // Recorded here, at the READ, and per calendar so the label in an origin
       // names the calendar the invitation landed on. Nothing records at fetch
       // time on a timer, see untrusted-events.ts.
@@ -253,29 +322,35 @@ export class CalendarConnector {
         provenance: {
           kind: 'provider',
           provider: config.provider,
-          calendarLabel: calendar.name,
+          calendarLabel: result.calendar.name,
         },
-        events,
+        events: result.events,
         at: new Date(this.clock()).toISOString(),
       });
     }
-    return [...out].sort(compareMergedCalendarEventsByStart);
+    return { events: events.sort(compareMergedCalendarEventsByStart), failures };
   }
 
   // --- Write: create an event on an explicitly chosen provider --------------
 
+  /**
+   * Create an event on one calendar. `ownerZone` (IANA, 'UTC' when unknown) is
+   * the zone a floating time is read in. A `created-but-unreadable` result means
+   * the provider has the event: report it as created, do not retry.
+   */
   async createEvent(
     config: ResolvedClientConfig,
     calendarId: string,
     calendarLabel: string,
     event: NewCalendarEvent,
+    ownerZone: string,
     options: CalendarRequestOptions = {},
-  ): Promise<MergedCalendarEvent> {
+  ): Promise<CalendarCreateResult> {
     options.signal?.throwIfAborted();
     const token = await this.store.getFreshAccessToken(config.provider, config, this.fetchImpl);
     return config.provider === 'google'
-      ? createGoogleEvent(this.fetchImpl, token, calendarId, calendarLabel, event, options)
-      : createGraphEvent(this.fetchImpl, token, calendarId, calendarLabel, event, options);
+      ? createGoogleEvent(this.fetchImpl, token, calendarId, calendarLabel, event, ownerZone, options)
+      : createGraphEvent(this.fetchImpl, token, calendarId, calendarLabel, event, ownerZone, options);
   }
 
   // --- internals ------------------------------------------------------------
@@ -311,4 +386,19 @@ export class CalendarConnector {
     }
     return config.provider === 'google' ? 'Google Calendar' : 'Microsoft Outlook';
   }
+}
+
+/** Run `fn` over `items` with at most `limit` in flight, keeping input order. */
+async function mapWithLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await fn(items[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }

@@ -1,8 +1,10 @@
 /**
  * caldav-ics-generate.ts, RFC 5545 (iCalendar) writing for the CalDAV backend.
  *
- * The other half of `caldav-ics.ts`: what a PUT of a new event serialises with,
- * and what `calendar.ics.export` renders a whole collection with.
+ * The other half of `caldav-ics.ts`: what a PUT of a new event serialises with
+ * (`generateICS`), and the wrapper that puts components already written by
+ * someone else (an imported file's, the server's own) into one calendar object
+ * without re-serialising them (`buildCalendarObject`).
  *
  * Pure, including the stamp. `dtStamp` is a required input rather than a
  * defaulted `new Date()` so that no clock is read here, the caller passes the
@@ -10,7 +12,7 @@
  * .ics byte-for-byte reproducible under test.
  */
 
-import { escapeText } from './caldav-ics.js';
+import { escapeText, type ICalComponentBlock } from './caldav-ics.js';
 
 export interface GenerateICalInput {
   readonly uid: string;
@@ -238,9 +240,38 @@ export function generateICS(input: GenerateICalInput): string {
   return wrapCalendar(eventToVEvent(input));
 }
 
-/** A full VCALENDAR wrapping many events (what export renders). */
-export function generateCalendar(events: readonly GenerateICalInput[]): string {
-  const lines: string[] = [];
-  for (const event of events) lines.push(...eventToVEvent(event));
-  return wrapCalendar(lines);
+/**
+ * One VCALENDAR holding `components` exactly as they were written. Calendar
+ * properties come from `properties` when given (an imported file's VERSION,
+ * PRODID, CALSCALE); METHOD is dropped because a stored calendar object must
+ * not carry one (RFC 4791 §4.1), and VERSION and PRODID are supplied when
+ * missing.
+ */
+export function buildCalendarObject(
+  components: readonly ICalComponentBlock[],
+  properties: readonly string[] = [],
+): string {
+  const kept: string[] = [];
+  let hasVersion = false;
+  let hasProdId = false;
+  let skipping = false;
+  for (const line of properties) {
+    const continuation = line.startsWith(' ') || line.startsWith('\t');
+    if (!continuation) {
+      const name = line.slice(0, line.search(/[;:]|$/)).toUpperCase();
+      skipping = name === 'METHOD';
+      if (name === 'VERSION') hasVersion = true;
+      if (name === 'PRODID') hasProdId = true;
+    }
+    if (!skipping) kept.push(line);
+  }
+  const lines = [
+    'BEGIN:VCALENDAR',
+    ...(hasVersion ? [] : ['VERSION:2.0']),
+    ...(hasProdId ? [] : [`PRODID:${PRODID}`]),
+    ...kept,
+    ...components.flatMap((component) => component.lines),
+    'END:VCALENDAR',
+  ];
+  return `${lines.join(CRLF)}${CRLF}`;
 }

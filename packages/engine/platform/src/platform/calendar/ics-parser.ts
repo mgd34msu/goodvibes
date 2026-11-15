@@ -13,15 +13,20 @@
  *  - VCALENDAR framing, X-WR-CALNAME for a calendar display name.
  *  - VEVENT: UID, SUMMARY, LOCATION, DESCRIPTION, ORGANIZER, DTSTART, DTEND, RRULE.
  *  - DTSTART/DTEND as VALUE=DATE ('YYYYMMDD') or date-time ('YYYYMMDDTHHMMSS'),
- *    with honest zone anchoring: trailing 'Z' => utc; TZID=... => tzid (wall time
- *    kept, NOT offset-converted, because this build has no tz database); otherwise
- *    floating. RRULE is captured raw and handed to the recurrence expander.
- *  - RFC 5545 line unfolding (a leading space/tab continues the previous line) and
- *    TEXT unescaping (\\n \\, \\; \\, \\\\).
+ *    read through the CalDAV reader's `parseICalDate`, so an impossible date is
+ *    refused and a TZID is checked against the runtime's zone data: trailing 'Z'
+ *    => utc; a known TZID => tzid (wall time kept for recurrence stepping,
+ *    converted wherever events are ordered, see event-time.ts); an unknown TZID
+ *    => floating, with a diagnostic; otherwise floating.
+ *  - RRULE, EXDATE, RDATE and RECURRENCE-ID, handed to the recurrence expander:
+ *    exclusions and overrides are applied, not a reason to skip the series.
+ *  - Line unfolding, content-line splitting and TEXT unescaping are the CalDAV
+ *    reader's (caldav-ics.ts), one implementation of each.
  *
- * Everything unrecognised is ignored quietly EXCEPT the two things a caller must be
- * told about: a VEVENT with no usable DTSTART is `skipped` with a reason, and an
- * RRULE we do not fully expand is flagged on the event (in rrule.ts), never dropped.
+ * Everything unrecognised is ignored quietly EXCEPT what a caller must be told
+ * about: a VEVENT with no usable DTSTART is `skipped` with a reason, and a
+ * recurrence we do not fully expand is flagged on the event (in rrule.ts), never
+ * dropped.
  *
  * PURE: no fs, no network, no process globals. Input is text; output is data.
  */
@@ -33,7 +38,13 @@ import type {
   ParsedCalendar,
 } from './types.js';
 import { describeRecurrence } from './rrule.js';
-import { parseContentLine as parseWireContentLine, unescapeText } from './caldav-ics.js';
+import {
+  isKnownTimeZone,
+  parseContentLine as parseWireContentLine,
+  parseICalDate,
+  unescapeText,
+  unfoldContentLines,
+} from './caldav-ics.js';
 
 interface ContentLine {
   readonly name: string;
@@ -41,24 +52,6 @@ interface ContentLine {
   readonly value: string;
   /** 1-based line number of the first physical line of this (possibly folded) line. */
   readonly line: number;
-}
-
-/**
- * Unfold physical lines into logical content lines (RFC 5545 §3.1). A line beginning
- * with a single space or tab is a continuation of the previous line.
- */
-function unfold(text: string): { raw: string; line: number }[] {
-  const physical = text.split(/\r\n|\r|\n/);
-  const out: { raw: string; line: number }[] = [];
-  for (let i = 0; i < physical.length; i++) {
-    const cur = physical[i] ?? '';
-    if ((cur.startsWith(' ') || cur.startsWith('\t')) && out.length > 0) {
-      out[out.length - 1]!.raw += cur.slice(1);
-    } else {
-      out.push({ raw: cur, line: i + 1 });
-    }
-  }
-  return out;
 }
 
 /**
@@ -78,37 +71,50 @@ function parseContentLine(raw: string, line: number): ContentLine | undefined {
   };
 }
 
-const DATE_ONLY = /^(\d{4})(\d{2})(\d{2})$/;
-const DATE_TIME = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/;
-
-/** Parse a DTSTART/DTEND value + params into an honest EventDateTime, or undefined. */
+/**
+ * Parse one DATE or DATE-TIME value into an EventDateTime, or a reason it
+ * cannot be read. `parseICalDate` refuses impossible dates and unknown zones;
+ * an unknown zone is read as floating, which the caller is told about.
+ */
 function parseDateValue(
   value: string,
   params: ReadonlyMap<string, string>,
-): EventDateTime | undefined {
+): { readonly value: EventDateTime; readonly note?: string } | { readonly error: string } {
   const trimmed = value.trim();
-  const isDateParam = params.get('VALUE') === 'DATE';
   const tzid = params.get('TZID');
-
-  const dateMatch = DATE_ONLY.exec(trimmed);
-  if (dateMatch && (isDateParam || !trimmed.includes('T'))) {
-    const [, y, m, d] = dateMatch;
-    return { value: `${y}-${m}-${d}`, kind: 'date', zone: 'floating' };
+  const knownZone = tzid !== undefined && tzid.length > 0 && isKnownTimeZone(tzid);
+  try {
+    parseICalDate(trimmed, knownZone ? tzid : undefined);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
   }
-
-  const dtMatch = DATE_TIME.exec(trimmed);
-  if (dtMatch) {
-    const [, y, m, d, hh, mm, ss, z] = dtMatch;
-    const local = `${y}-${m}-${d}T${hh}:${mm}:${ss}`;
-    if (z === 'Z') {
-      return { value: `${local}Z`, kind: 'date-time', zone: 'utc' };
-    }
-    if (tzid) {
-      return { value: local, kind: 'date-time', zone: 'tzid', tzid };
-    }
-    return { value: local, kind: 'date-time', zone: 'floating' };
+  const date = /^(\d{4})(\d{2})(\d{2})$/.exec(trimmed);
+  if (date) return { value: { value: `${date[1]}-${date[2]}-${date[3]}`, kind: 'date', zone: 'floating' } };
+  const dt = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/.exec(trimmed);
+  if (!dt) return { error: `Unrecognised iCalendar date value: ${value}` };
+  const local = `${dt[1]}-${dt[2]}-${dt[3]}T${dt[4]}:${dt[5]}:${dt[6]}`;
+  if (dt[7] === 'Z') return { value: { value: `${local}Z`, kind: 'date-time', zone: 'utc' } };
+  if (knownZone && tzid) return { value: { value: local, kind: 'date-time', zone: 'tzid', tzid } };
+  if (tzid) {
+    return {
+      value: { value: local, kind: 'date-time', zone: 'floating' },
+      note: `TZID '${tzid}' is not a time zone this runtime knows; the time is read as floating.`,
+    };
   }
-  return undefined;
+  return { value: { value: local, kind: 'date-time', zone: 'floating' } };
+}
+
+/** Every value of a multi-valued date property (EXDATE, RDATE), and the ones that could not be read. */
+function parseDateList(value: string, params: ReadonlyMap<string, string>): { readonly values: EventDateTime[]; readonly errors: string[] } {
+  const values: EventDateTime[] = [];
+  const errors: string[] = [];
+  for (const part of value.split(',')) {
+    if (part.trim().length === 0) continue;
+    const parsed = parseDateValue(part, params);
+    if ('error' in parsed) errors.push(parsed.error);
+    else values.push(parsed.value);
+  }
+  return { values, errors };
 }
 
 let syntheticCounter = 0;
@@ -131,8 +137,13 @@ interface VEventDraft {
   start?: EventDateTime;
   end?: EventDateTime;
   rrule?: string;
-  /** Properties that change which occurrences a series has (EXDATE, RDATE, RECURRENCE-ID). */
-  seriesParts: string[];
+  exdates: EventDateTime[];
+  rdates: EventDateTime[];
+  recurrenceId?: EventDateTime;
+  /** Series features this build does not apply (an RDATE period, a THISANDFUTURE override). */
+  unsupportedParts: string[];
+  /** True when the VEVENT carried EXDATE or RDATE. */
+  hasDateExceptions: boolean;
   startLine: number;
 }
 
@@ -142,9 +153,10 @@ interface VEventDraft {
  * @param text raw .ics content (file body or fetched feed body).
  */
 export function parseIcs(text: string): ParsedCalendar {
-  const lines = unfold(text);
+  const lines = unfoldContentLines(text).map(({ text: raw, line }) => ({ raw, line }));
   const events: CalendarEvent[] = [];
-  const overrideUids: string[] = [];
+  const overrides: CalendarEvent[] = [];
+  const thisAndFutureUids = new Set<string>();
   const skipped: ParseDiagnostic[] = [];
   const diagnostics: ParseDiagnostic[] = [];
   let calendarName: string | undefined;
@@ -162,7 +174,7 @@ export function parseIcs(text: string): ParsedCalendar {
 
     if (cl.name === 'BEGIN' && cl.value.trim().toUpperCase() === 'VEVENT') {
       inEvent = true;
-      draft = { startLine: line, seriesParts: [] };
+      draft = { startLine: line, exdates: [], rdates: [], unsupportedParts: [], hasDateExceptions: false };
       childDepth = 0;
       continue;
     }
@@ -175,7 +187,7 @@ export function parseIcs(text: string): ParsedCalendar {
       continue;
     }
     if (cl.name === 'END' && cl.value.trim().toUpperCase() === 'VEVENT') {
-      if (draft) finalizeEvent(draft, events, skipped, diagnostics, overrideUids);
+      if (draft) finalizeEvent(draft, events, skipped, diagnostics, overrides, thisAndFutureUids);
       inEvent = false;
       draft = undefined;
       continue;
@@ -216,24 +228,48 @@ export function parseIcs(text: string): ParsedCalendar {
       }
       case 'DTSTART': {
         const parsed = parseDateValue(cl.value, cl.params);
-        if (parsed) draft.start = parsed;
-        else diagnostics.push({ line: cl.line, component: 'DTSTART', message: `Unrecognised DTSTART value '${cl.value.trim()}', event kept without a usable start.` });
+        if ('error' in parsed) {
+          diagnostics.push({ line: cl.line, component: 'DTSTART', message: `${parsed.error}; event kept without a usable start.` });
+          break;
+        }
+        draft.start = parsed.value;
+        if (parsed.note) diagnostics.push({ line: cl.line, component: 'DTSTART', message: parsed.note });
         break;
       }
       case 'DTEND': {
         const parsed = parseDateValue(cl.value, cl.params);
-        if (parsed) draft.end = parsed;
-        else diagnostics.push({ line: cl.line, component: 'DTEND', message: `Unrecognised DTEND value '${cl.value.trim()}', event kept without an end.` });
+        if ('error' in parsed) {
+          diagnostics.push({ line: cl.line, component: 'DTEND', message: `${parsed.error}; event kept without an end.` });
+          break;
+        }
+        draft.end = parsed.value;
         break;
       }
       case 'RRULE':
         draft.rrule = cl.value.trim();
         break;
       case 'EXDATE':
-      case 'RDATE':
-      case 'RECURRENCE-ID':
-        if (!draft.seriesParts.includes(cl.name)) draft.seriesParts.push(cl.name);
+      case 'RDATE': {
+        draft.hasDateExceptions = true;
+        if (cl.name === 'RDATE' && cl.params.get('VALUE') === 'PERIOD') {
+          if (!draft.unsupportedParts.includes('RDATE;VALUE=PERIOD')) draft.unsupportedParts.push('RDATE;VALUE=PERIOD');
+          break;
+        }
+        const { values, errors } = parseDateList(cl.value, cl.params);
+        (cl.name === 'EXDATE' ? draft.exdates : draft.rdates).push(...values);
+        for (const error of errors) diagnostics.push({ line: cl.line, component: cl.name, message: `${error}; that date is not applied.` });
         break;
+      }
+      case 'RECURRENCE-ID': {
+        const parsed = parseDateValue(cl.value, cl.params);
+        if ('error' in parsed) {
+          diagnostics.push({ line: cl.line, component: 'RECURRENCE-ID', message: `${parsed.error}; the override is kept as an event of its own.` });
+          break;
+        }
+        draft.recurrenceId = parsed.value;
+        if (cl.params.get('RANGE')?.toUpperCase() === 'THISANDFUTURE') draft.unsupportedParts.push('RECURRENCE-ID;RANGE=THISANDFUTURE');
+        break;
+      }
       default:
         break;
     }
@@ -241,20 +277,34 @@ export function parseIcs(text: string): ParsedCalendar {
 
   if (inEvent && draft) {
     diagnostics.push({ line: draft.startLine, component: 'VEVENT', message: 'VEVENT was not closed with END:VEVENT before end of feed, finalised anyway.' });
-    finalizeEvent(draft, events, skipped, diagnostics, overrideUids);
+    finalizeEvent(draft, events, skipped, diagnostics, overrides, thisAndFutureUids);
   }
 
-  // A RECURRENCE-ID override moves or replaces one occurrence of the series
-  // sharing its UID, so that series cannot be expanded from its RRULE alone.
-  const overridden = new Set(overrideUids);
+  // A RECURRENCE-ID override replaces one occurrence of the series sharing its
+  // UID. The override is an event of its own, so the series drops that start;
+  // a THISANDFUTURE override moves every later one too, which is not applied.
+  const overridesByUid = new Map<string, CalendarEvent[]>();
+  for (const override of overrides) {
+    const list = overridesByUid.get(override.uid) ?? [];
+    list.push(override);
+    overridesByUid.set(override.uid, list);
+  }
   const finalEvents = events.map((event) => {
-    if (!event.recurrence || event.isOverride === true || !overridden.has(event.uid)) return event;
-    if (event.recurrence.expansion !== 'full') return { ...event, hasSeriesExceptions: true as const };
-    const recurrence = describeRecurrence(event.recurrence.rule, ['RECURRENCE-ID overrides']);
-    if (recurrence.unsupportedReason) {
-      diagnostics.push({ line: 0, component: 'RRULE', message: `Event '${event.summary}': ${recurrence.unsupportedReason}` });
+    const own = overridesByUid.get(event.uid);
+    if (!event.recurrence || event.isOverride === true || own === undefined) return event;
+    const replaced = own.flatMap((override) => (override.recurrenceId ? [override.recurrenceId] : []));
+    const thisAndFuture = thisAndFutureUids.has(event.uid);
+    let recurrence = event.recurrence;
+    if (thisAndFuture && recurrence.expansion === 'full') {
+      recurrence = describeRecurrence(recurrence.rule, ['RECURRENCE-ID;RANGE=THISANDFUTURE']);
+      diagnostics.push({ line: 0, component: 'RECURRENCE-ID', message: `Event '${event.summary}': ${recurrence.unsupportedReason ?? ''}` });
     }
-    return { ...event, recurrence, hasSeriesExceptions: true as const };
+    return {
+      ...event,
+      recurrence,
+      exdates: [...(event.exdates ?? []), ...replaced],
+      hasSeriesExceptions: true as const,
+    };
   });
 
   return {
@@ -270,7 +320,8 @@ function finalizeEvent(
   events: CalendarEvent[],
   skipped: ParseDiagnostic[],
   diagnostics: ParseDiagnostic[],
-  overrideUids: string[],
+  overrides: CalendarEvent[],
+  thisAndFutureUids: Set<string>,
 ): void {
   if (!draft.start) {
     skipped.push({ line: draft.startLine, component: 'VEVENT', message: `Skipped VEVENT '${draft.summary ?? draft.uid ?? 'untitled'}', no usable DTSTART.` });
@@ -278,19 +329,16 @@ function finalizeEvent(
   }
   const summary = draft.summary ?? '(no title)';
   const uid = draft.uid && draft.uid !== '' ? draft.uid : syntheticUid(draft.start, summary);
+  const isOverride = draft.recurrenceId !== undefined;
 
+  // An override is one event; a THISANDFUTURE one marks the series it moves.
+  if (isOverride && draft.unsupportedParts.includes('RECURRENCE-ID;RANGE=THISANDFUTURE')) thisAndFutureUids.add(uid);
+  const seriesUnsupported = draft.unsupportedParts.filter((part) => part !== 'RECURRENCE-ID;RANGE=THISANDFUTURE');
   let recurrence;
-  if (draft.rrule) {
-    recurrence = describeRecurrence(draft.rrule, draft.seriesParts.filter((part) => part !== 'RECURRENCE-ID'));
+  if (!isOverride && (draft.rrule !== undefined || draft.rdates.length > 0 || seriesUnsupported.length > 0)) {
+    recurrence = describeRecurrence(draft.rrule ?? '', seriesUnsupported);
     if (recurrence.expansion === 'unsupported' && recurrence.unsupportedReason) {
       diagnostics.push({ line: draft.startLine, component: 'RRULE', message: `Event '${summary}': ${recurrence.unsupportedReason}` });
-    }
-  } else {
-    // RDATE or EXDATE without an RRULE still makes a series; reading it as a one-off would drop those dates silently.
-    const dateParts = draft.seriesParts.filter((part) => part === 'RDATE' || part === 'EXDATE');
-    if (dateParts.length > 0) {
-      recurrence = describeRecurrence('', dateParts);
-      diagnostics.push({ line: draft.startLine, component: dateParts[0]!, message: `Event '${summary}': ${recurrence.unsupportedReason}` });
     }
   }
 
@@ -304,9 +352,11 @@ function finalizeEvent(
     ...(draft.end !== undefined ? { end: draft.end } : {}),
     ...(recurrence !== undefined ? { recurrence } : {}),
     ...(draft.attendees !== undefined ? { attendees: draft.attendees } : {}),
-    ...(draft.seriesParts.includes('RECURRENCE-ID') ? { isOverride: true as const } : {}),
-    ...(recurrence !== undefined && draft.seriesParts.some((part) => part === 'RDATE' || part === 'EXDATE') ? { hasSeriesExceptions: true as const } : {}),
+    ...(isOverride ? { isOverride: true as const, recurrenceId: draft.recurrenceId } : {}),
+    ...(draft.exdates.length > 0 ? { exdates: draft.exdates } : {}),
+    ...(draft.rdates.length > 0 ? { rdates: draft.rdates } : {}),
+    ...(recurrence !== undefined && draft.hasDateExceptions ? { hasSeriesExceptions: true as const } : {}),
   };
   events.push(event);
-  if (draft.seriesParts.includes('RECURRENCE-ID')) overrideUids.push(uid);
+  if (isOverride) overrides.push(event);
 }

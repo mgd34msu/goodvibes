@@ -13,7 +13,7 @@ import { createCalDavSecretPort } from '../platform/src/platform/calendar/caldav
 import { parseICS, parseICSDetailed } from '../platform/src/platform/calendar/caldav-ics.ts';
 import { generateICS, ICalValueError } from '../platform/src/platform/calendar/caldav-ics-generate.ts';
 import { parseIcs } from '../platform/src/platform/calendar/ics-parser.ts';
-import { expandEvent } from '../platform/src/platform/calendar/rrule.ts';
+import { expandEvent, expandEvents } from '../platform/src/platform/calendar/rrule.ts';
 import { SubscriptionStore } from '../platform/src/platform/calendar/subscription-store.ts';
 import { listGraphEvents } from '../platform/src/platform/calendar/microsoft-graph-api.ts';
 import { pollDeviceCodeFlow } from '../platform/src/platform/calendar/oauth-flow.ts';
@@ -259,31 +259,45 @@ describe('recurrence expansion', () => {
     expect(occurrences.map((occurrence) => occurrence.start.slice(0, 10))).toEqual(['2026-11-02', '2026-11-04']);
   });
 
-  test('a series with an excluded date is not expanded, and says why', () => {
+  test('an excluded date is dropped and the rest of the series is expanded', () => {
     const event = seed('FREQ=DAILY', '20260101T090000', ['EXDATE:20260102T090000']);
-    expect(event.recurrence?.expansion).toBe('unsupported');
-    expect(event.recurrence?.unsupportedReason).toContain('EXDATE');
-    const occurrences = expandEvent(event, { from: '2026-01-01', to: '2026-01-05' });
-    expect(occurrences).toHaveLength(1);
-    expect(occurrences[0]?.isSeed).toBe(true);
+    expect(event.recurrence?.expansion).toBe('full');
+    const starts = expandEvent(event, { from: '2026-01-01', to: '2026-01-04' }).map((o) => o.start);
+    expect(starts).toEqual(['2026-01-01T09:00:00', '2026-01-03T09:00:00', '2026-01-04T09:00:00']);
   });
 
-  test('extra dates without a rule are marked unsupported and noted', () => {
+  test('a weekly series with one cancelled occurrence still appears years later', () => {
+    const event = seed('FREQ=WEEKLY', '20240101T090000', ['EXDATE:20240108T090000']);
+    expect(expandEvent(event, { from: '2026-11-16', to: '2026-11-22' }).map((o) => o.start)).toEqual(['2026-11-16T09:00:00']);
+  });
+
+  test('extra dates without a rule are added to the seed', () => {
     const parsed = parseIcs(ics(['BEGIN:VEVENT', 'UID:rd', 'DTSTART:20260101T090000', 'SUMMARY:rd', 'RDATE:20260110T090000', 'END:VEVENT']));
-    expect(parsed.events[0]?.recurrence?.expansion).toBe('unsupported');
-    expect(parsed.events[0]?.recurrence?.unsupportedReason).toContain('RDATE');
-    expect(parsed.diagnostics.some((d) => d.message.includes('RDATE'))).toBe(true);
-    expect(expandEvent(parsed.events[0]!, { from: '2026-01-01', to: '2026-01-31' })).toHaveLength(1);
+    expect(expandEvent(parsed.events[0]!, { from: '2026-01-01', to: '2026-01-31' }).map((o) => o.start))
+      .toEqual(['2026-01-01T09:00:00', '2026-01-10T09:00:00']);
   });
 
-  test('a series with a moved occurrence is not expanded', () => {
+  test('a moved occurrence replaces the one it moved, once', () => {
     const parsed = parseIcs(ics(
       ['BEGIN:VEVENT', 'UID:m', 'DTSTART:20260101T090000', 'SUMMARY:m', 'RRULE:FREQ=DAILY', 'END:VEVENT'],
       ['BEGIN:VEVENT', 'UID:m', 'RECURRENCE-ID:20260103T090000', 'DTSTART:20260103T150000', 'SUMMARY:m moved', 'END:VEVENT'],
     ));
-    const series = parsed.events.find((event) => event.recurrence !== undefined);
-    expect(series?.recurrence?.expansion).toBe('unsupported');
-    expect(series?.recurrence?.unsupportedReason).toContain('RECURRENCE-ID');
+    const { occurrences } = expandEvents(parsed.events, { from: '2026-01-03', to: '2026-01-03' });
+    expect(occurrences.map((o) => `${o.event.summary} ${o.start}`)).toEqual(['m moved 2026-01-03T15:00:00']);
+  });
+
+  test('a TZID series ends at its UTC UNTIL, not a day later', () => {
+    const parsed = parseIcs(ics(['BEGIN:VEVENT', 'UID:u', 'DTSTART;TZID=America/Los_Angeles:20261110T200000', 'SUMMARY:u',
+      'RRULE:FREQ=DAILY;UNTIL=20261114T035959Z', 'END:VEVENT']));
+    expect(expandEvent(parsed.events[0]!, { from: '2026-11-10', to: '2026-11-20' }).map((o) => o.start))
+      .toEqual(['2026-11-10T20:00:00', '2026-11-11T20:00:00', '2026-11-12T20:00:00']);
+  });
+
+  test('a series that cannot be expanded is listed, not absent', () => {
+    const event = seed('FREQ=MONTHLY;BYMONTHDAY=1,15', '20240101T090000');
+    const { occurrences, unexpandedSeries } = expandEvents([event], { from: '2026-11-16', to: '2026-11-22' });
+    expect(occurrences).toHaveLength(0);
+    expect(unexpandedSeries.map((e) => e.uid)).toEqual([event.uid]);
   });
 });
 

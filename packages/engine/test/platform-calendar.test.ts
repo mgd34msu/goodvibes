@@ -254,18 +254,15 @@ describe('compareEventDateTime / eventDateTimeEpochMs', () => {
     expect(compareEventDateTime(day, timed)).toBeLessThan(0);
   });
 
-  // Reviewer's exact case: a tzid wall-clock reading of 01:00 vs a real UTC instant
-  // of 05:00 on the same calendar day. This build ships no tz database, so it cannot
-  // compute the true offset for America/New_York on this date, the documented
-  // best-effort approximation reads the tzid wall-clock digits AS IF they were UTC.
-  // This pins that documented, deterministic behavior (not a claim of true accuracy).
-  test('01:00 tzid vs 05:00Z: the documented wall-clock-as-UTC approximation is deterministic', () => {
-    const tzidEarly = tzid('2026-07-06T01:00:00', 'America/New_York');
-    const utcLater = utc('2026-07-06T05:00:00Z');
-    expect(eventDateTimeEpochMs(tzidEarly)).toBe(Date.UTC(2026, 6, 6, 1, 0, 0));
-    expect(eventDateTimeEpochMs(utcLater)).toBe(Date.UTC(2026, 6, 6, 5, 0, 0));
-    expect(compareEventDateTime(tzidEarly, utcLater)).toBeLessThan(0);
-    expect([utcLater, tzidEarly].sort(compareEventDateTime)).toEqual([tzidEarly, utcLater]);
+  // A tzid wall time is converted to its true instant: 01:00 in New York in July
+  // (EDT, UTC-4) is 05:00Z, and 09:00 in Los Angeles (PST) is 17:00Z, later than 10:00Z.
+  test('a tzid wall time sorts by its true instant against UTC instants', () => {
+    const newYork = tzid('2026-07-06T01:00:00', 'America/New_York');
+    expect(eventDateTimeEpochMs(newYork)).toBe(Date.UTC(2026, 6, 6, 5, 0, 0));
+    const losAngeles = tzid('2026-11-16T09:00:00', 'America/Los_Angeles');
+    const utcTen = utc('2026-11-16T10:00:00Z');
+    expect(compareEventDateTime(losAngeles, utcTen)).toBeGreaterThan(0);
+    expect([losAngeles, utcTen].sort(compareEventDateTime)).toEqual([utcTen, losAngeles]);
   });
 
   test('floating and tzid values sort by their wall-clock digits within the same zone', () => {
@@ -439,12 +436,10 @@ describe('maskFeedUrl', () => {
 describe('purity', () => {
   test('the complete public calendar graph bundles for a browser without Node IO', async () => {
     const bundle = await bundleBrowserEntrypoint(resolve(__dirname, 'fixtures/calendar-browser-entry.ts'), { conditions: ['bun'] });
-    expect(bundle).toContain('engine.calendar.missing-permission');
     expect(bundle).not.toMatch(/(?:from|require\()\s*['"](?:node:|bun:)/);
-    const consumer: { calendarBundleProbe?: { CalendarConnector: unknown; CalendarScopeReadingError: unknown } } = {};
+    const consumer: { calendarBundleProbe?: { CalendarConnector: unknown } } = {};
     new Function('globalThis', bundle)(consumer);
     expect(typeof consumer.calendarBundleProbe?.CalendarConnector).toBe('function');
-    expect(typeof consumer.calendarBundleProbe?.CalendarScopeReadingError).toBe('function');
   });
   test('calendar source stays IO-free with only the canonical runtime-neutral judgment entries', () => {
     const files = readdirSync(CALENDAR_DIR, { recursive: true }).filter((f): f is string => typeof f === 'string' && f.endsWith('.ts'));

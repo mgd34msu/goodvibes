@@ -3,13 +3,12 @@
  * Microsoft Graph) events into the ONE merged event model shared with A9's .ics
  * path: A9's CalendarEvent shape plus a source label and the provider ids.
  *
- * Time-anchoring honesty follows A9's contract (this build ships no tz database):
+ * Time anchoring:
  *  - An all-day value keeps its 'YYYY-MM-DD' date and is `zone: 'floating'`.
  *  - A timed value carrying an explicit numeric offset or a trailing Z is normalized
- *    to a real UTC instant (`zone: 'utc'`), a fixed-offset -> UTC shift is pure
- *    arithmetic, NOT a named-zone conversion, so it is lossless and honest.
+ *    to a real UTC instant (`zone: 'utc'`).
  *  - A timed value that only names a zone (no offset) is kept as wall time with the
- *    TZID recorded (`zone: 'tzid'`), never converted.
+ *    TZID recorded (`zone: 'tzid'`); ordering converts it (event-time.ts).
  *
  * Recurrence is delegated to the provider: the API clients request expanded single
  * instances (Google singleEvents=true, Graph calendarView), so each normalized event
@@ -18,6 +17,9 @@
 
 import type { EventDateTime } from './types.js';
 import type { CalendarProviderId, MergedCalendarEvent } from './oauth-types.js';
+import { eventDateTimeEpochMs } from './event-time.js';
+
+export { eventDateTimeEpochMs };
 
 // ---------------------------------------------------------------------------
 // Google Calendar API v3
@@ -136,7 +138,7 @@ function graphDateTime(value: GraphDate | undefined, isAllDay: boolean): EventDa
     const iso = value.dateTime.endsWith('Z') ? isoSeconds(value.dateTime) : `${isoSeconds(value.dateTime)}Z`;
     return { value: iso, kind: 'date-time', zone: 'utc' };
   }
-  // A named zone with no offset: keep wall time, record the TZID, do NOT convert.
+  // A named zone with no offset: keep wall time and the TZID; ordering converts it.
   return { value: isoSeconds(value.dateTime), kind: 'date-time', zone: 'tzid', tzid: zone };
 }
 
@@ -213,50 +215,10 @@ function syntheticUid(provider: CalendarProviderId, calendarId: string): string 
 // ---------------------------------------------------------------------------
 
 /**
- * Best-effort epoch (ms) for one {@link EventDateTime}, for sorting a mixed list of
- * merged events across zones/kinds. THIS IS THE ONE DOCUMENTED FUNCTION every
- * consumer should sort through, a raw `localeCompare`/string sort on `.value` looks
- * like it works (ISO strings are lexicographically sortable) but silently produces
- * the wrong order the moment a `zone: 'utc'` value (a real instant) is compared
- * against a `zone: 'tzid'` or `zone: 'floating'` value (a wall-clock reading with an
- * unknown or undeclared offset), e.g. a `tzid` event at `01:00` in
- * `America/New_York` and a `utc` event at `05:00Z` are close to the same real
- * instant (EDT is UTC-4), but a naive string/localeCompare sort of `'01:00:00'` vs
- * `'05:00:00Z'` treats them as 4-5 hours apart on the SAME axis, which they are not.
- *
- * Documented approximation (this build ships no tz database, so a true conversion is
- * not possible):
- *  - `kind: 'date'` (all-day) => midnight UTC of that date.
- *  - `zone: 'utc'` => the real epoch, via `Date.parse` of the (already-normalized,
- *    Z-suffixed) ISO value. Authoritative.
- *  - `zone: 'tzid'` or `zone: 'floating'` => the wall-clock digits are read AS IF
- *    they were UTC (no offset applied). This is an approximation, not the true
- *    instant, it keeps events within the SAME zone in correct relative order, and
- *    gives cross-zone comparisons a deterministic (if approximate) answer instead of
- *    an arbitrary one.
- */
-export function eventDateTimeEpochMs(dt: EventDateTime): number {
-  if (dt.kind === 'date') {
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dt.value);
-    if (!m) return Number.NaN;
-    return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  }
-  if (dt.zone === 'utc') {
-    const ms = Date.parse(dt.value);
-    if (Number.isFinite(ms)) return ms;
-  }
-  // tzid / floating (or an unparsable utc value, defensively): treat the wall-clock
-  // digits as if they were UTC, see the documented approximation above.
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/.exec(dt.value);
-  if (!m) return Number.NaN;
-  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]));
-}
-
-/**
  * Chronological comparator for {@link EventDateTime} values (ascending), suitable
- * for `Array.prototype.sort`. See {@link eventDateTimeEpochMs} for the documented
- * cross-zone approximation this is built on, this is the ONE function every
- * consumer should sort through instead of inventing its own string comparison.
+ * for `Array.prototype.sort`, through {@link eventDateTimeEpochMs} (event-time.ts).
+ * Sort through this rather than comparing `.value` strings: a 'utc' value and a
+ * 'tzid' value are not on the same axis as text.
  */
 export function compareEventDateTime(a: EventDateTime, b: EventDateTime): number {
   return eventDateTimeEpochMs(a) - eventDateTimeEpochMs(b);

@@ -1,21 +1,19 @@
 /**
- * caldav-ics.ts, RFC 5545 (iCalendar) reading for the CalDAV calendar backend.
+ * caldav-ics.ts, the one RFC 5545 (iCalendar) reader.
  *
- * Pure: no network, no filesystem, no clock, no secret. It is what the CalDAV
- * gateway service deserialises REPORT/GET payloads with, and what
- * `calendar.ics.import` parses an uploaded file with.
+ * Pure: no network, no filesystem, no clock, no secret. The CalDAV gateway reads
+ * REPORT/GET payloads and `calendar.ics.import` files with it, and the feed and
+ * file reader (`ics-parser.ts`) uses its line unfolding, content-line split and
+ * date parsing, so a named zone is converted the same way everywhere.
  *
- * The VEVENT subset covered is the one calendar connectors actually need:
- * SUMMARY, DTSTART, DTEND, DESCRIPTION, LOCATION, UID, ATTENDEE, ORGANIZER,
- * STATUS, RRULE, plus all-day (VALUE=DATE) detection. Every other property is
- * kept verbatim in `raw`, so a parse/serialise round-trip does not quietly drop
- * what this module does not model.
+ * The VEVENT fields read here are the ones a calendar answer shows: SUMMARY,
+ * DTSTART, DTEND or DURATION, DESCRIPTION, LOCATION, UID, ATTENDEE, ORGANIZER,
+ * STATUS, RRULE, RECURRENCE-ID, plus all-day (VALUE=DATE) detection. Nothing is
+ * re-serialised from this model: an import writes the file's own components
+ * (`splitICalDocument`), and an export returns the server's own data.
  *
- * Why this exists alongside `ics-parser.ts`: that parser answers "what is on
- * this calendar" for the merged-calendar model and returns `CalendarEvent`s.
- * This one is the CalDAV wire codec, it keeps the raw ATTENDEE/ORGANIZER
- * values a PUT has to re-emit, and the display names a response may show, which
- * are two different things and must not be confused (see `ICalAttendee`).
+ * ATTENDEE/ORGANIZER are kept twice: the display name a response may show and
+ * the raw value, which stays inside the process (see `ICalAttendee`).
  */
 
 /** One ATTENDEE, split into what may be shown and what must be re-emitted. */
@@ -24,8 +22,8 @@ export interface ICalAttendee {
   readonly displayName: string;
   /**
    * The property value exactly as it arrived (e.g. `mailto:a@b.example`).
-   * Re-emitted on a PUT so an import preserves the original addressing; never
-   * surfaced in a gateway response, where display names are all a caller gets.
+   * Never surfaced in a gateway response, where display names are all a caller
+   * gets.
    */
   readonly rawValue: string;
 }
@@ -43,35 +41,48 @@ export interface ParsedICalEvent {
   readonly status?: string;
   /** Raw RRULE value (e.g. "FREQ=WEEKLY;COUNT=10") when present. */
   readonly recurrence?: string;
+  /** ISO-8601 RECURRENCE-ID when this VEVENT is one occurrence of a series (an override, or a server-expanded instance). */
+  readonly recurrenceId?: string;
   readonly attendees: readonly ICalAttendee[];
   /** Organizer display name only (CN or local-part). */
   readonly organizer?: string;
-  /** Raw organizer value, for re-emission only. */
+  /** Raw organizer value, kept inside the process (it names who wrote the event). */
   readonly organizerRaw?: string;
-  /** Every property not modelled above, keyed by upper-case name. */
-  readonly raw: Readonly<Record<string, string>>;
 }
 
 // ---------------------------------------------------------------------------
 // Line unfolding (RFC 5545 §3.1)
 // ---------------------------------------------------------------------------
 
+/** One logical content line and the 1-based physical line it starts on. */
+export interface UnfoldedLine {
+  readonly text: string;
+  readonly line: number;
+}
+
 /**
  * Unfold folded content lines: a line beginning with a space or tab is a
- * continuation of the previous one, not a line of its own. Blank lines are
- * dropped, no iCalendar property is expressible as one.
+ * continuation of the previous one, not a line of its own (RFC 5545 §3.1).
+ * Blank lines are dropped; no iCalendar property is expressible as one.
  */
-export function unfoldLines(content: string): string[] {
-  const rawLines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  const lines: string[] = [];
-  for (const rawLine of rawLines) {
-    if ((rawLine.startsWith(' ') || rawLine.startsWith('\t')) && lines.length > 0) {
-      lines[lines.length - 1] += rawLine.slice(1);
+export function unfoldContentLines(content: string): UnfoldedLine[] {
+  const physical = content.split(/\r\n|\r|\n/);
+  const lines: { text: string; line: number }[] = [];
+  for (let i = 0; i < physical.length; i += 1) {
+    const rawLine = physical[i] ?? '';
+    const last = lines[lines.length - 1];
+    if ((rawLine.startsWith(' ') || rawLine.startsWith('\t')) && last !== undefined) {
+      last.text += rawLine.slice(1);
     } else {
-      lines.push(rawLine);
+      lines.push({ text: rawLine, line: i + 1 });
     }
   }
-  return lines.filter((line) => line.length > 0);
+  return lines.filter((entry) => entry.text.length > 0);
+}
+
+/** {@link unfoldContentLines} without the line numbers. */
+export function unfoldLines(content: string): string[] {
+  return unfoldContentLines(content).map((entry) => entry.text);
 }
 
 // ---------------------------------------------------------------------------
@@ -182,18 +193,30 @@ function assertRealDateTime(
   }
 }
 
+/** One formatter per zone: building an Intl.DateTimeFormat costs far more than using one. */
+const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function zoneFormatter(timeZone: string): Intl.DateTimeFormat {
+  let formatter = zoneFormatters.get(timeZone);
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    zoneFormatters.set(timeZone, formatter);
+  }
+  return formatter;
+}
+
 /** The offset of `timeZone` from UTC, in ms, at the UTC instant `utcMs`. */
 function zoneOffsetMs(utcMs: number, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hourCycle: 'h23',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).formatToParts(new Date(utcMs));
+  const parts = zoneFormatter(timeZone).formatToParts(new Date(utcMs));
   const part = (type: string): number =>
     Number(parts.find((candidate) => candidate.type === type)?.value ?? '0');
   const asUtc = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second'));
@@ -203,14 +226,33 @@ function zoneOffsetMs(utcMs: number, timeZone: string): number {
 /**
  * The UTC instant at which `timeZone`'s wall clock reads `wallMs` (the wall
  * clock expressed as if it were UTC). Two passes settle the offset across a
- * DST boundary.
+ * DST boundary. Throws for a zone this runtime does not know.
  */
-function zonedWallClockToUtcMs(wallMs: number, timeZone: string): number {
+export function zonedWallClockToUtcMs(wallMs: number, timeZone: string): number {
   try {
     const first = wallMs - zoneOffsetMs(wallMs, timeZone);
     return wallMs - zoneOffsetMs(first, timeZone);
   } catch {
     throw new Error(`Unsupported iCalendar TZID '${timeZone}': it is not a time zone this runtime knows.`);
+  }
+}
+
+/** The wall clock of `timeZone` at the UTC instant `utcMs`, expressed as if it were UTC. */
+export function utcToZonedWallClockMs(utcMs: number, timeZone: string): number {
+  try {
+    return utcMs + zoneOffsetMs(utcMs, timeZone);
+  } catch {
+    throw new Error(`Unsupported iCalendar TZID '${timeZone}': it is not a time zone this runtime knows.`);
+  }
+}
+
+/** True when the runtime knows `timeZone`. */
+export function isKnownTimeZone(timeZone: string): boolean {
+  try {
+    zoneFormatter(timeZone);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -309,10 +351,11 @@ interface ParsingEvent {
   recurrence?: string;
   organizer?: string;
   organizerRaw?: string;
+  recurrenceId?: string;
+  durationMs?: number;
   startIsDate?: boolean;
   endIsDate?: boolean;
   readonly attendees: ICalAttendee[];
-  readonly raw: Record<string, string>;
 }
 
 function applyProperty(target: ParsingEvent, line: ContentLine): void {
@@ -362,10 +405,31 @@ function applyProperty(target: ParsingEvent, line: ContentLine): void {
       target.organizer = attendeeDisplayName(line.params, line.value);
       target.organizerRaw = line.value.trim();
       break;
+    case 'RECURRENCE-ID':
+      target.recurrenceId = parseICalDate(line.value, line.params['TZID']).iso;
+      break;
+    case 'DURATION':
+      target.durationMs = parseICalDuration(line.value);
+      break;
     default:
-      target.raw[line.name] = line.value;
       break;
   }
+}
+
+/**
+ * An RFC 5545 §3.3.6 DURATION (`P1D`, `PT1H30M`, `P2W`, `-PT15M`) in ms.
+ * Days are counted as 24 hours, which is what an end computed for display
+ * needs.
+ */
+export function parseICalDuration(value: string): number {
+  const match = /^([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(value.trim());
+  if (!match || value.trim().endsWith('T') || value.trim().replace(/^[+-]/, '') === 'P') {
+    throw new Error(`Unrecognised iCalendar DURATION value: ${value}`);
+  }
+  const [, sign, weeks, days, hours, minutes, seconds] = match;
+  const ms = (((Number(weeks ?? 0) * 7 + Number(days ?? 0)) * 24 + Number(hours ?? 0)) * 60 + Number(minutes ?? 0)) * 60_000
+    + Number(seconds ?? 0) * 1000;
+  return sign === '-' ? -ms : ms;
 }
 
 function finaliseEvent(partial: ParsingEvent): ParsedICalEvent {
@@ -381,8 +445,17 @@ function finaliseEvent(partial: ParsingEvent): ParsedICalEvent {
       'VEVENT DTSTART and DTEND have mismatched VALUE types (one DATE, one DATE-TIME).',
     );
   }
-  const start = partial.start ?? new Date(0).toISOString();
-  const end = partial.end ?? start;
+  // A VEVENT with no DTSTART has no place on a calendar. Dating it 1970 would
+  // write a wrong event; it is reported instead.
+  if (partial.start === undefined) {
+    throw new Error('VEVENT has no DTSTART, so it cannot be placed on a calendar.');
+  }
+  const start = partial.start;
+  const end = partial.end
+    ?? (partial.durationMs !== undefined ? new Date(Date.parse(start) + partial.durationMs).toISOString() : undefined)
+    // RFC 5545 §3.6.1: no DTEND and no DURATION is one day for a DATE start and
+    // the same instant for a DATE-TIME start.
+    ?? (partial.startIsDate ? new Date(Date.parse(start) + 86_400_000).toISOString() : start);
   return {
     uid: partial.uid ?? '',
     summary: partial.summary ?? '',
@@ -393,10 +466,10 @@ function finaliseEvent(partial: ParsingEvent): ParsedICalEvent {
     allDay: partial.allDay ?? false,
     ...(partial.status === undefined ? {} : { status: partial.status }),
     ...(partial.recurrence === undefined ? {} : { recurrence: partial.recurrence }),
+    ...(partial.recurrenceId === undefined ? {} : { recurrenceId: partial.recurrenceId }),
     attendees: partial.attendees,
     ...(partial.organizer === undefined ? {} : { organizer: partial.organizer }),
     ...(partial.organizerRaw === undefined ? {} : { organizerRaw: partial.organizerRaw }),
-    raw: partial.raw,
   };
 }
 
@@ -431,7 +504,7 @@ export function parseICSDetailed(content: string): {
     const upper = line.toUpperCase();
     if (current === null) {
       if (upper === 'BEGIN:VEVENT') {
-        current = { attendees: [], raw: {} };
+        current = { attendees: [] };
         failure = undefined;
         depth = 0;
       }
@@ -439,7 +512,7 @@ export function parseICSDetailed(content: string): {
     }
     if (upper === 'BEGIN:VEVENT' && depth === 0) {
       // A VEVENT left unclosed: the next one starts a fresh event.
-      current = { attendees: [], raw: {} };
+      current = { attendees: [] };
       failure = undefined;
       continue;
     }
@@ -501,4 +574,97 @@ export function extractUid(content: string): string | undefined {
     }
   }
   return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Splitting a document into its components, text untouched
+// ---------------------------------------------------------------------------
+
+/** One top-level component of an iCalendar document, as the physical lines it was written with. */
+export interface ICalComponentBlock {
+  /** Upper-case component name: VEVENT, VTIMEZONE, VTODO, ... */
+  readonly name: string;
+  /** The component's own UID (not a child's), when it has one. */
+  readonly uid?: string;
+  /** The component's TZID (a VTIMEZONE's), when it has one. */
+  readonly tzid?: string;
+  /** Physical lines, folds kept, without line terminators. */
+  readonly lines: readonly string[];
+}
+
+export interface ICalDocumentParts {
+  /** VCALENDAR-level property lines (VERSION, PRODID, METHOD, X-WR-...), folds kept. */
+  readonly properties: readonly string[];
+  readonly components: readonly ICalComponentBlock[];
+}
+
+/**
+ * Split an iCalendar document into its calendar properties and its top-level
+ * components, keeping every component's text exactly as written. This is what
+ * lets an import store a file's own events (series, overrides, alarms,
+ * EXDATE, DURATION, zones and all) instead of a re-serialised subset, and what
+ * lets an export return the server's own data. Several VCALENDARs in one
+ * document, and bare components outside any VCALENDAR, are both accepted.
+ */
+export function splitICalDocument(content: string): ICalDocumentParts {
+  const physical = content.split(/\r\n|\r|\n/);
+  // Group physical lines into logical lines, keeping the folds.
+  const logical: { readonly text: string; readonly lines: string[] }[] = [];
+  for (const rawLine of physical) {
+    const last = logical[logical.length - 1];
+    if ((rawLine.startsWith(' ') || rawLine.startsWith('\t')) && last !== undefined) {
+      last.lines.push(rawLine);
+      (last as { text: string }).text += rawLine.slice(1);
+    } else if (rawLine.length > 0) {
+      logical.push({ text: rawLine, lines: [rawLine] });
+    }
+  }
+  const properties: string[] = [];
+  const components: ICalComponentBlock[] = [];
+  let inCalendar = false;
+  let block: { name: string; uid?: string; tzid?: string; lines: string[]; depth: number } | null = null;
+  for (const entry of logical) {
+    const upper = entry.text.toUpperCase();
+    if (block !== null) {
+      block.lines.push(...entry.lines);
+      if (upper.startsWith('BEGIN:')) {
+        block.depth += 1;
+      } else if (upper.startsWith('END:')) {
+        block.depth -= 1;
+        if (block.depth === 0) {
+          components.push({
+            name: block.name,
+            ...(block.uid === undefined ? {} : { uid: block.uid }),
+            ...(block.tzid === undefined ? {} : { tzid: block.tzid }),
+            lines: block.lines,
+          });
+          block = null;
+        }
+      } else if (block.depth === 1) {
+        const line = parseContentLine(entry.text);
+        if (line.name === 'UID') block.uid = line.value.trim();
+        if (line.name === 'TZID') block.tzid = line.value.trim();
+      }
+      continue;
+    }
+    if (upper === 'BEGIN:VCALENDAR') {
+      inCalendar = true;
+      continue;
+    }
+    if (upper === 'END:VCALENDAR') {
+      inCalendar = false;
+      continue;
+    }
+    if (upper.startsWith('BEGIN:')) {
+      block = { name: upper.slice('BEGIN:'.length).trim(), lines: [...entry.lines], depth: 1 };
+      continue;
+    }
+    if (inCalendar) properties.push(...entry.lines);
+  }
+  // A component left unclosed at the end of the text is kept as written: the
+  // reader reports it, and nothing here invents an END line for it.
+  if (block !== null) {
+    components.push({ name: block.name, ...(block.uid === undefined ? {} : { uid: block.uid }), lines: block.lines });
+  }
+  return { properties, components };
 }

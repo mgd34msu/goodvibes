@@ -179,7 +179,6 @@ describe('CalDAV gateway configuration', () => {
   test('a missing password is reported as a credential-store problem, not a server one', async () => {
     const http = fakeHttp(() => ok(multistatus([])));
     const error = await expectVerbError(() => service(http.port, { secrets: {} }).listEvents({}));
-    expect(error.message).toBe('CalDAV password is not available in the credential store.');
     expect(error.code).toBe('CALENDAR_CREDENTIALS_MISSING');
     expect(error.status).toBe(412);
   });
@@ -508,13 +507,51 @@ describe('calendar.ics import and export', () => {
     expect(exported.eventCount).toBe(1);
     expect(exported.icsContent.startsWith('BEGIN:VCALENDAR\r\n')).toBe(true);
     expect(exported.icsContent).toContain('UID:a@example.com');
-    expect(exported.icsContent).toContain('DTSTAMP:20260727T093000Z');
-    // The export is the payload a calendar app will re-import, so the ORIGINAL
-    // addressing survives here even though a listing response would not carry
-    // it. The CN parameter does not survive: an attendee is re-emitted by its
-    // address, and the address is what the receiving calendar resolves a name
-    // from anyway.
-    expect(exported.icsContent).toContain('ATTENDEE:mailto:jane@example.com');
+    // The export is the server's own data, as stored: nothing is re-serialised,
+    // so the attendee keeps its CN and every property the server holds survives.
+    expect(exported.icsContent).toContain('ATTENDEE;CN=Jane:mailto:jane@example.com');
+  });
+
+  test('import stores a series and its override as one object, and never overwrites unless asked', async () => {
+    const series = [
+      'BEGIN:VCALENDAR', 'VERSION:2.0',
+      'BEGIN:VEVENT', 'UID:s@example.com', 'DTSTART:20260105T090000Z', 'DURATION:PT30M', 'RRULE:FREQ=WEEKLY',
+      'EXDATE:20260112T090000Z', 'SUMMARY:Weekly', 'END:VEVENT',
+      'BEGIN:VEVENT', 'UID:s@example.com', 'RECURRENCE-ID:20260119T090000Z', 'DTSTART:20260119T150000Z',
+      'DURATION:PT30M', 'SUMMARY:Weekly moved', 'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+    const http = fakeHttp(() => ({ status: 201, headers: {}, body: '' }));
+    const result = await service(http.port).importIcs(series);
+    expect(result).toMatchObject({ imported: 1, errors: [] });
+    expect(http.requests).toHaveLength(1);
+    const body = http.requests[0]?.body ?? '';
+    for (const line of ['RRULE:FREQ=WEEKLY', 'EXDATE:20260112T090000Z', 'RECURRENCE-ID:20260119T090000Z', 'DURATION:PT30M']) {
+      expect(body).toContain(line);
+    }
+    expect(http.requests[0]?.headers['If-None-Match']).toBe('*');
+
+    const replaced = fakeHttp(() => ({ status: 204, headers: {}, body: '' }));
+    await service(replaced.port).importIcs(series, undefined, { replace: true });
+    expect(replaced.requests[0]?.headers['If-None-Match']).toBeUndefined();
+  });
+
+  test('an event with no start is reported, not written dated 1970', async () => {
+    const http = fakeHttp(() => ({ status: 201, headers: {}, body: '' }));
+    const result = await service(http.port).importIcs(['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:x@example.com', 'SUMMARY:No start', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n'));
+    expect(result.imported).toBe(0);
+    expect(result.errors[0]).toContain('x@example.com');
+    expect(http.requests).toHaveLength(0);
+  });
+
+  test('a recurring event is listed at its occurrences in the window, not its first date', async () => {
+    const http = fakeHttp(() => ok(multistatus([{
+      href: '/calendars/mike/personal/w.ics',
+      calendarData: vevent({ uid: 'w@example.com', summary: 'Weekly', start: '20230109T090000Z', end: '20230109T093000Z', extra: ['RRULE:FREQ=WEEKLY'] }),
+    }])));
+    const events = await service(http.port).listEvents({ from: '2026-11-14T00:00:00Z', to: '2026-11-21T00:00:00Z' });
+    expect(events.map((event) => event.start)).toEqual(['2026-11-16T09:00:00.000Z']);
+    expect(http.requests[0]?.body).toContain('<C:expand start="20261114T000000Z" end="20261121T000000Z"/>');
   });
 
   test('a generated .ics parses back to the same event (round trip)', () => {

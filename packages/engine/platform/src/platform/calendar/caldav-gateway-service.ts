@@ -23,9 +23,15 @@
  *  - **Attendees are display names.** A gateway response carries the CN (or the
  *    address local-part) and never the address itself. The raw value survives
  *    only inside a PUT, where the server needs it to address an invitation.
- *  - **Import is per-event and honest.** One bad VEVENT in a file does not
- *    fail the whole import or vanish from the result, the rest land and the
- *    failure is named, per event, in `errors`.
+ *  - **Import stores the file's own events.** Components are grouped by UID
+ *    (a series with its overrides is one calendar object), wrapped with the
+ *    file's VTIMEZONEs, and PUT once each as written, never re-serialised, so
+ *    EXDATE, DURATION, alarms and zones survive. An existing event is not
+ *    overwritten unless the caller asks (`replace`). A UID that cannot be
+ *    stored is named in `errors`; the rest land.
+ *  - **Export returns the server's own data**, and **list returns occurrences**:
+ *    a recurring event is answered with its occurrences in the window (the
+ *    server expands, the local expander is the fallback).
  *
  * Everything is injected: the HTTP port, the config port, the secret port, the
  * clock and the uid source. Nothing here reads a socket, a file, or `Date.now`.
@@ -33,6 +39,7 @@
 
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import type {
+  CalendarGatewayCalendarSummary,
   CalendarGatewayCreateInput,
   CalendarGatewayCreated,
   CalendarGatewayEventDetail,
@@ -44,8 +51,11 @@ import type {
 } from '../control-plane/routes/calendar.js';
 import { CalDavClient, type CalDavHttpPort } from '../google/caldav-client.js';
 import { isCalendarResourceType, parseMultistatus } from '../google/caldav-parse.js';
-import { parseICSDetailed, type ParsedICalEvent } from './caldav-ics.js';
-import { generateCalendar, generateICS, ICalValueError, type GenerateICalInput } from './caldav-ics-generate.js';
+import { parseICSDetailed, splitICalDocument, type ICalComponentBlock, type ParsedICalEvent } from './caldav-ics.js';
+import { buildCalendarObject, generateICS, ICalValueError, type GenerateICalInput } from './caldav-ics-generate.js';
+import { parseIcs } from './ics-parser.js';
+import { expandEvents } from './rrule.js';
+import { eventDateTimeEpochMs } from './event-time.js';
 import { logger } from '../utils/logger.js';
 import {
   collectionPathOrRoot,
@@ -98,16 +108,13 @@ export interface CalDavCalendarGatewayServiceOptions {
 }
 
 /** One calendar collection the account can reach. */
-export interface CalDavCalendarSummary {
-  readonly calendarId: string;
-  readonly displayName: string;
-}
+export type CalDavCalendarSummary = CalendarGatewayCalendarSummary;
 
 /**
- * The gateway slice plus discovery. `listCalendars` is not one of the five
- * cataloged verbs, it is what a setup flow calls to fill in
- * `surfaces.calendar.defaultCalendarId` with something real instead of asking
- * an operator to hand-copy a collection path out of a web UI.
+ * The gateway slice with discovery always present: `calendar.calendars.list`
+ * is what a setup flow calls to fill in `surfaces.calendar.defaultCalendarId`
+ * with something real instead of asking an operator to hand-copy a collection
+ * path out of a web UI.
  */
 export interface CalDavCalendarGatewayService extends CalendarGatewayService {
   listCalendars(): Promise<readonly CalDavCalendarSummary[]>;
@@ -144,6 +151,8 @@ function validateIsoDate(value: string, field: string): string {
  */
 /** How far back an unwindowed `listEvents` reaches, so a meeting that just started still shows. */
 const DEFAULT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+/** How far ahead a list reaches when no end is given: occurrences need a bounded window. */
+const DEFAULT_LOOKAHEAD_MS = 30 * 24 * 60 * 60 * 1000;
 
 function resolveLimit(limit: number | undefined): number {
   if (limit === undefined) return 20;
@@ -179,54 +188,98 @@ function toDetail(event: CalDavEvent): CalendarGatewayEventDetail {
   };
 }
 
-/** A parsed event back into generator input, preserving what a PUT must re-emit. */
-function toGenerateInput(
-  event: ParsedICalEvent,
-  uid: string,
-  dtStamp: string,
-): GenerateICalInput {
-  return {
-    uid,
-    summary: event.summary,
-    start: event.start,
-    end: event.end,
-    dtStamp,
-    ...(event.description === undefined ? {} : { description: event.description }),
-    ...(event.location === undefined ? {} : { location: event.location }),
-    // Re-emit attendees by their RAW value so an import preserves the original
-    // addressing. Display-name-only reduction applies to gateway responses, not
-    // to what the calendar server is told.
-    attendees: event.attendees.map((attendee) => attendee.rawValue),
-    ...(event.organizerRaw === undefined ? {} : { organizer: event.organizerRaw }),
-    ...(event.status === undefined ? {} : { status: event.status }),
-    ...(event.recurrence === undefined ? {} : { recurrence: event.recurrence }),
-    allDay: event.allDay,
-  };
+/** One stored calendar object as the server returned it. */
+interface CalDavResource {
+  readonly href: string;
+  readonly calendarData: string;
+}
+
+/** Every calendar object carried by a multistatus body. */
+function resourcesFromMultistatus(xml: string): CalDavResource[] {
+  const resources: CalDavResource[] = [];
+  for (const entry of parseMultistatus(xml)) {
+    const calendarData = entry.props['calendar-data'];
+    if (!calendarData) continue;
+    resources.push({ href: toRelativeHref(entry.href), calendarData });
+  }
+  return resources;
+}
+
+/** The VEVENTs of one resource, tagged with where they came from; unreadable ones are logged. */
+function eventsOfResource(resource: CalDavResource, calendarId: string): CalDavEvent[] {
+  const parsed = parseICSDetailed(resource.calendarData);
+  // One unreadable VEVENT must not make the rest of the collection
+  // unreadable; it is named in the log and left out of the answer.
+  for (const failure of parsed.errors) {
+    logger.warn('CalDAV event skipped: it could not be read', {
+      calendarId,
+      href: resource.href,
+      ...(failure.uid === undefined ? {} : { uid: failure.uid }),
+      reason: failure.message,
+    });
+  }
+  return parsed.events.map((event) => ({ ...event, href: resource.href, calendarId }));
 }
 
 /** Every VEVENT carried by a multistatus body, tagged with where it came from. */
 function eventsFromMultistatus(xml: string, calendarId: string): CalDavEvent[] {
-  const events: CalDavEvent[] = [];
-  for (const entry of parseMultistatus(xml)) {
-    const calendarData = entry.props['calendar-data'];
-    if (!calendarData) continue;
-    const href = toRelativeHref(entry.href);
-    const parsed = parseICSDetailed(calendarData);
-    for (const event of parsed.events) {
-      events.push({ ...event, href, calendarId });
-    }
-    // One unreadable VEVENT must not make the rest of the collection
-    // unreadable; it is named in the log and left out of the answer.
-    for (const failure of parsed.errors) {
-      logger.warn('CalDAV event skipped: it could not be read', {
-        calendarId,
-        href,
-        ...(failure.uid === undefined ? {} : { uid: failure.uid }),
-        reason: failure.message,
-      });
-    }
+  return resourcesFromMultistatus(xml).flatMap((resource) => eventsOfResource(resource, calendarId));
+}
+
+/**
+ * The occurrences of one resource inside [from, to), for a server that did not
+ * expand it (its answer still carries an RRULE). The feed reader's expander
+ * applies the series' EXDATE, RDATE and overrides; display fields come from
+ * the CalDAV reader so a response still carries display names only. A series
+ * the expander cannot expand is answered by its stored first occurrence and
+ * logged, so it does not vanish.
+ */
+function expandResourceLocally(resource: CalDavResource, events: readonly CalDavEvent[], fromMs: number, toMs: number): CalDavEvent[] {
+  const window = {
+    from: new Date(fromMs - 86_400_000).toISOString().slice(0, 10),
+    to: new Date(toMs + 86_400_000).toISOString().slice(0, 10),
+  };
+  const { occurrences, unexpandedSeries } = expandEvents(parseIcs(resource.calendarData).events, window);
+  const master = events.find((event) => event.recurrenceId === undefined) ?? events[0];
+  const out: CalDavEvent[] = [];
+  for (const occurrence of occurrences) {
+    const source = occurrence.event.recurrenceId !== undefined
+      ? events.find((event) => event.recurrenceId === new Date(eventDateTimeEpochMs(occurrence.event.recurrenceId!)).toISOString()) ?? master
+      : master;
+    if (source === undefined) continue;
+    const startMs = eventDateTimeEpochMs({ ...occurrence.event.start, value: occurrence.start });
+    if (!Number.isFinite(startMs)) continue;
+    const lengthMs = Math.max(0, Date.parse(source.end) - Date.parse(source.start));
+    if (startMs >= toMs || startMs + lengthMs < fromMs) continue;
+    out.push({ ...source, start: new Date(startMs).toISOString(), end: new Date(startMs + lengthMs).toISOString() });
   }
-  return events;
+  for (const series of unexpandedSeries) {
+    logger.warn('CalDAV recurring event not expanded: its recurrence is outside what this build expands', {
+      href: resource.href,
+      uid: series.uid,
+      reason: series.recurrence?.unsupportedReason ?? 'unsupported recurrence',
+    });
+    const stored = events.find((event) => event.uid === series.uid && event.recurrenceId === undefined);
+    if (stored !== undefined && Date.parse(stored.start) < toMs && Date.parse(stored.end) >= fromMs) out.push(stored);
+  }
+  return out;
+}
+
+/** The components of a VCALENDAR text worth storing or returning: events and the zones they name. */
+function eventAndZoneComponents(parts: readonly ICalComponentBlock[]): {
+  readonly events: readonly ICalComponentBlock[];
+  readonly zones: readonly ICalComponentBlock[];
+} {
+  return {
+    events: parts.filter((component) => component.name === 'VEVENT'),
+    zones: parts.filter((component) => component.name === 'VTIMEZONE'),
+  };
+}
+
+/** A VEVENT block with a UID line added after its BEGIN line, for an event that came without one. */
+function withUid(block: ICalComponentBlock, uid: string): ICalComponentBlock {
+  const [begin, ...rest] = block.lines;
+  return { ...block, uid, lines: [begin ?? 'BEGIN:VEVENT', `UID:${uid}`, ...rest] };
 }
 
 // ---------------------------------------------------------------------------
@@ -310,9 +363,14 @@ export function createCalDavCalendarGatewayService(
     return `${randomUuid()}@goodvibes`;
   }
 
-  async function readEvents(
+  /**
+   * One calendar-query REPORT over a collection. `expand` asks the server for
+   * occurrences instead of stored series (listing does; export does not).
+   */
+  async function readResources(
     input: CalendarGatewayListInput,
-  ): Promise<{ readonly config: CalDavGatewayConfig; readonly events: CalDavEvent[] }> {
+    expand: boolean,
+  ): Promise<{ readonly calendarId: string; readonly resources: CalDavResource[] }> {
     if (input.from !== undefined) validateIsoDate(input.from, 'from');
     if (input.to !== undefined) validateIsoDate(input.to, 'to');
     const { config, request } = await connect();
@@ -322,10 +380,10 @@ export function createCalDavCalendarGatewayService(
     const response = await request(
       collectionUrlFor(config, calendarId),
       'REPORT',
-      calendarQueryBody(input.from, input.to),
+      calendarQueryBody(input.from, input.to, { expand }),
       { Depth: '1' },
     );
-    return { config, events: eventsFromMultistatus(response.body, calendarId) };
+    return { calendarId, resources: resourcesFromMultistatus(response.body) };
   }
 
   /**
@@ -393,19 +451,34 @@ export function createCalDavCalendarGatewayService(
     },
 
     async listEvents(input: CalendarGatewayListInput): Promise<readonly CalendarGatewayEventSummary[]> {
-      // With no window the answer is what is coming up, not the oldest events
-      // the collection has ever held (export, which shares `readEvents`, keeps
-      // reading everything).
-      const windowed = input.from === undefined && input.to === undefined
-        ? { ...input, from: new Date(now() - DEFAULT_LOOKBACK_MS).toISOString() }
-        : input;
-      const { events } = await readEvents(windowed);
-      const sorted = [...events].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+      // A list is a window of occurrences, so it always has both ends. With no
+      // window the answer is what is coming up: from a day ago (a meeting that
+      // just started still shows) to thirty days ahead.
+      if (input.from !== undefined) validateIsoDate(input.from, 'from');
+      if (input.to !== undefined) validateIsoDate(input.to, 'to');
+      const from = input.from ?? (input.to !== undefined
+        ? new Date(Math.min(now() - DEFAULT_LOOKBACK_MS, Date.parse(input.to) - DEFAULT_LOOKAHEAD_MS)).toISOString()
+        : new Date(now() - DEFAULT_LOOKBACK_MS).toISOString());
+      const to = input.to ?? new Date(Date.parse(from) + DEFAULT_LOOKAHEAD_MS).toISOString();
+      const fromMs = Date.parse(from);
+      const toMs = Date.parse(to);
+      const { calendarId, resources } = await readResources({ ...input, from, to }, true);
+      const events: CalDavEvent[] = [];
+      for (const resource of resources) {
+        const resourceEvents = eventsOfResource(resource, calendarId);
+        // A server that ignored the expand request still answers with the
+        // stored series; it is expanded here instead.
+        if (resourceEvents.some((event) => event.recurrence !== undefined)) {
+          events.push(...expandResourceLocally(resource, resourceEvents, fromMs, toMs));
+        } else {
+          events.push(...resourceEvents);
+        }
+      }
+      const sorted = events.sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
       const page = sorted.slice(0, resolveLimit(input.limit));
       // Only the page is recorded: it is what the caller actually receives, and
       // recording the rest would claim exposure to text nobody was handed.
-      const first = page[0];
-      if (first !== undefined) recordEventsRead(first.calendarId, page);
+      if (page.length > 0) recordEventsRead(calendarId, page);
       return page.map(toSummary);
     },
 
@@ -495,22 +568,33 @@ export function createCalDavCalendarGatewayService(
     },
 
     async exportIcs(input: CalendarGatewayListInput): Promise<CalendarGatewayIcsExport> {
-      const { events } = await readEvents(input);
-      const first = events[0];
-      if (first !== undefined) recordEventsRead(first.calendarId, events);
-      const dtStamp = stampNow();
-      const inputs = events.map((event) =>
-        toGenerateInput(event, event.uid || newUid(), dtStamp),
-      );
-      return { icsContent: generateCalendar(inputs), eventCount: inputs.length };
+      // The server's own calendar objects, as stored: series with their
+      // overrides, zones, alarms and every property, not a re-serialised subset.
+      const { calendarId, resources } = await readResources(input, false);
+      const events: ICalComponentBlock[] = [];
+      const zones = new Map<string, ICalComponentBlock>();
+      const read: CalDavEvent[] = [];
+      for (const resource of resources) {
+        const parts = eventAndZoneComponents(splitICalDocument(resource.calendarData).components);
+        events.push(...parts.events);
+        for (const zone of parts.zones) {
+          const key = zone.tzid ?? zone.lines.join('\n');
+          if (!zones.has(key)) zones.set(key, zone);
+        }
+        read.push(...eventsOfResource(resource, calendarId));
+      }
+      if (read.length > 0) recordEventsRead(calendarId, read);
+      return { icsContent: buildCalendarObject([...zones.values(), ...events]), eventCount: events.length };
     },
 
     async importIcs(
       icsContent: string,
       calendarId?: string | undefined,
+      importOptions: { readonly replace?: boolean | undefined } = {},
     ): Promise<CalendarGatewayIcsImport> {
-      const { events: parsed, errors: unreadable } = parseICSDetailed(icsContent);
-      if (parsed.length === 0 && unreadable.length === 0) {
+      const document = splitICalDocument(icsContent);
+      const { events: eventBlocks, zones } = eventAndZoneComponents(document.components);
+      if (eventBlocks.length === 0) {
         throw new GatewayVerbError(
           'No VEVENT components found in .ics content.',
           'CALENDAR_EMPTY_ICS',
@@ -519,6 +603,7 @@ export function createCalDavCalendarGatewayService(
       }
       // The .ics body is somebody else's text and the caller asked for it to be
       // read, so this is an ingest, recorded before a single PUT is attempted.
+      const { events: parsed } = parseICSDetailed(icsContent);
       recordCalendarEventIngest({
         record: options.recordUntrustedIngest,
         provenance: { kind: 'ics-import' },
@@ -531,23 +616,40 @@ export function createCalDavCalendarGatewayService(
         })),
         at: stampNow(),
       });
+
+      // One calendar object per UID: a series and its overrides share a UID and
+      // must be stored together, or the last one written replaces the rest.
+      const groups = new Map<string, ICalComponentBlock[]>();
+      for (const block of eventBlocks) {
+        const uid = block.uid !== undefined && block.uid.length > 0 ? block.uid : newUid();
+        const list = groups.get(uid) ?? [];
+        list.push(block.uid === uid ? block : withUid(block, uid));
+        groups.set(uid, list);
+      }
+
       const { config, request } = await connect();
       const id = calendarId && calendarId.length > 0 ? calendarId : config.defaultCalendarId;
       const eventIds: string[] = [];
-      const errors: string[] = unreadable.map(
-        (failure) => `${failure.uid ?? '(no uid)'}: ${failure.message}`,
-      );
-      for (const event of parsed) {
-        const uid = event.uid && event.uid.length > 0 ? event.uid : newUid();
+      const errors: string[] = [];
+      for (const [uid, blocks] of groups) {
+        const object = buildCalendarObject([...zones, ...blocks], document.properties);
+        // Checked before the PUT: an event with no start, or with a date that
+        // cannot exist, is reported, not written. A zone this runtime does not
+        // know is not a reason to refuse: the text is stored as written, with
+        // the file's own VTIMEZONE, and the server reads it.
+        const check = parseICSDetailed(object);
+        const zoneOnly = check.errors.filter((failure) => failure.message.startsWith('Unsupported iCalendar TZID'));
+        const unreadable = check.errors.find((failure) => !zoneOnly.includes(failure));
+        if (unreadable !== undefined) {
+          errors.push(`${uid}: not imported, ${unreadable.message}`);
+          continue;
+        }
+        if (check.events.length + zoneOnly.length < blocks.length) {
+          errors.push(`${uid}: not imported, an event in it is not closed with END:VEVENT.`);
+          continue;
+        }
         try {
-          const href = await putEvent(
-            config,
-            request,
-            id,
-            resourceNameFor(uid),
-            generateICS(toGenerateInput(event, uid, stampNow())),
-            false,
-          );
+          const href = await putEvent(config, request, id, resourceNameFor(uid), object, importOptions.replace !== true);
           eventIds.push(href);
         } catch (error) {
           errors.push(`${uid}: ${describeImportFailure(error)}`);
@@ -580,6 +682,9 @@ function notFound(eventId: string): GatewayVerbError {
  * reduced to its message text for the same reason.
  */
 function describeImportFailure(error: unknown): string {
+  if (error instanceof GatewayVerbError && error.status === 412) {
+    return 'already on the calendar, so it was not overwritten. Import again with replace: true to overwrite it.';
+  }
   if (error instanceof GatewayVerbError) return error.message;
   return error instanceof Error ? error.message : String(error);
 }

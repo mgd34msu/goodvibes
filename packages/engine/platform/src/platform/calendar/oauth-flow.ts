@@ -1,8 +1,10 @@
 /**
  * oauth-flow.ts, the OAuth 2.0 machinery for calendar connectivity: the
  * authorization-code flow with a loopback redirect and mandatory PKCE (the standard
- * native-app pattern, RFC 8252/7636), and the device-code flow (RFC 8628) as the
- * headless fallback. Token exchange, refresh, and revocation live here too.
+ * native-app pattern, RFC 8252/7636). Headless connect is the device-code flow
+ * (RFC 8628) where the provider allows it for calendar scopes (Microsoft), and a
+ * pasted authorization code where it does not (Google). Token exchange,
+ * refresh, and revocation live here too.
  *
  * Every network call goes through the injected HttpFetch, this file never imports
  * a real fetch, so the full flow runs against fake servers in tests with no real
@@ -186,6 +188,66 @@ export async function beginAuthCodeFlow(
     start: { authorizationUrl: url.toString(), state, verifier, redirectUri: waiter.redirectUri },
     waiter,
   };
+}
+
+/** Where a pasted-code flow sends the browser: a loopback address nothing listens on. */
+const PASTED_CODE_REDIRECT_HOST = '127.0.0.1';
+
+/**
+ * Begin an authorization-code flow with no listener, for a machine with no
+ * browser. The person opens the URL on any device; after approval the browser
+ * is sent to a loopback address on that device, which does not load, and the
+ * address bar holds the code. They paste that address (or the code) back, and
+ * `readPastedAuthorization` takes the code out of it. PKCE still binds the code
+ * to this flow, so a code read by anyone else is useless to them.
+ */
+export async function beginPastedCodeFlow(config: ResolvedClientConfig): Promise<AuthCodeFlowStart> {
+  assertClientConfigured(config);
+  const state = randomBytesBase64url(24);
+  const { verifier, challenge } = await createPkcePair();
+  const host = config.redirectHost ?? PASTED_CODE_REDIRECT_HOST;
+  const redirectUri = typeof config.redirectPort === 'number' ? `http://${host}:${String(config.redirectPort)}` : `http://${host}`;
+  const url = new URL(config.authorizationEndpoint);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('client_id', config.clientId);
+  url.searchParams.set('redirect_uri', redirectUri);
+  url.searchParams.set('state', state);
+  url.searchParams.set('scope', config.scopes.join(' '));
+  url.searchParams.set('code_challenge', challenge);
+  url.searchParams.set('code_challenge_method', 'S256');
+  for (const [key, value] of Object.entries(config.extraAuthParams ?? {})) {
+    url.searchParams.set(key, value);
+  }
+  return { authorizationUrl: url.toString(), state, verifier, redirectUri };
+}
+
+/**
+ * The authorization code in what the person pasted: the address the browser
+ * landed on, or the bare code. An address must carry this flow's `state`; one
+ * carrying an `error` is the provider's refusal and says so.
+ */
+export function readPastedAuthorization(pasted: string, expectedState: string): string {
+  const text = pasted.trim();
+  if (text.length === 0) throw new OAuthFlowError('token-request-rejected', 'Nothing was pasted. Paste the address the browser landed on after approving.');
+  let url: URL | undefined;
+  try {
+    url = new URL(text);
+  } catch {
+    url = undefined;
+  }
+  if (url === undefined) {
+    if (/\s/.test(text)) throw new OAuthFlowError('token-request-rejected', 'That is not an authorization code or an address. Paste the address the browser landed on after approving.');
+    return text;
+  }
+  const error = url.searchParams.get('error');
+  if (error) throw new OAuthFlowError('token-request-rejected', `The provider refused the authorization (${error}).`);
+  const state = url.searchParams.get('state');
+  if (state !== expectedState) {
+    throw new OAuthFlowError('token-request-rejected', 'That address belongs to a different sign-in attempt. Start the connection again and paste the address from that attempt.');
+  }
+  const code = url.searchParams.get('code');
+  if (!code) throw new OAuthFlowError('token-request-rejected', 'That address carries no authorization code. Paste the address the browser landed on after approving.');
+  return code;
 }
 
 /** Exchange an authorization code for tokens (PKCE). */

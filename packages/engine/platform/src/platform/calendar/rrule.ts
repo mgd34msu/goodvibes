@@ -10,7 +10,11 @@
  *  - FREQ = DAILY | WEEKLY | MONTHLY | YEARLY
  *  - INTERVAL (default 1)
  *  - COUNT  (occurrence cap)
- *  - UNTIL  (inclusive end bound; DATE or date-time, 'Z' or floating)
+ *  - UNTIL  (inclusive end bound; a DATE, or an instant compared with each
+ *             occurrence's true instant, so a TZID series ends when it really ends)
+ *  - EXDATE, RDATE and RECURRENCE-ID overrides (carried on the event as
+ *             `exdates` / `rdates` by the reader): excluded starts are dropped,
+ *             RDATE starts are added
  *  - BYDAY , ONLY for FREQ=WEEKLY with INTERVAL=1 and weekday-only tokens
  *             (MO,TU,WE,TH,FR,SA,SU with no leading ordinal). Under those
  *             conditions WKST does not change the matched set, so it is ignored
@@ -18,7 +22,9 @@
  *
  * Everything else present in the RRULE (BYMONTHDAY, BYMONTH, BYSETPOS, BYHOUR,
  * BYWEEKNO, BYYEARDAY, ordinal BYDAY, BYDAY on non-weekly, INTERVAL>1 with BYDAY,
- * or an unknown FREQ) marks the rule `unsupported` and names the offending part.
+ * or an unknown FREQ), an RDATE period, or an override with RANGE=THISANDFUTURE
+ * marks the series `unsupported` and names the offending part; `expandEvents`
+ * then lists it in `unexpandedSeries` instead of letting it vanish.
  *
  * PURE: no fs, no network, no process globals.
  */
@@ -26,9 +32,13 @@
 import type {
   CalendarEvent,
   DateWindow,
+  EventDateTime,
   EventOccurrence,
   RecurrenceInfo,
+  WindowExpansion,
 } from './types.js';
+import { utcToZonedWallClockMs } from './caldav-ics.js';
+import { eventDateTimeEpochMs } from './event-time.js';
 
 const WEEKDAY_TOKENS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] as const;
 type WeekdayToken = (typeof WEEKDAY_TOKENS)[number];
@@ -57,18 +67,19 @@ function parseRRule(rule: string): RRuleParts {
 /**
  * Classify a raw RRULE into an honest RecurrenceInfo. Called by the parser at read
  * time so the event carries its expansion verdict before any window is known.
+ * `unsupportedParts` names series features the reader found and this build does
+ * not apply (an RDATE period, a THISANDFUTURE override). An empty `rule` is a
+ * series made only of RDATE values, which expands to its seed plus those dates.
  */
-export function describeRecurrence(rule: string, siblingParts: readonly string[] = []): RecurrenceInfo {
+export function describeRecurrence(rule: string, unsupportedParts: readonly string[] = []): RecurrenceInfo {
+  const unsupported = unsupportedParts[0];
+  if (unsupported !== undefined) {
+    return { rule, expansion: 'unsupported', unsupportedReason: `${unsupported} is not applied by this build, so the series is not expanded` };
+  }
+  if (rule.trim() === '') return { rule, expansion: 'full' };
+
   const { map } = parseRRule(rule);
   const freq = (map.get('FREQ') ?? '').toUpperCase();
-
-  // EXDATE, RDATE and RECURRENCE-ID overrides change which occurrences exist.
-  // Expanding the bare RRULE would show a cancelled occurrence or a moved one
-  // twice, so a series that carries any of them is not expanded.
-  const sibling = siblingParts[0];
-  if (sibling !== undefined) {
-    return { rule, expansion: 'unsupported', unsupportedReason: `${sibling} is not applied by this build, so the series is not expanded` };
-  }
 
   if (!KNOWN_FREQ.has(freq)) {
     return { rule, expansion: 'unsupported', unsupportedReason: `RRULE FREQ '${freq || '(missing)'}' is not expanded by this build` };
@@ -113,16 +124,59 @@ function parseInterval(map: ReadonlyMap<string, string>): number {
   return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
-/** Parse an UNTIL value ('YYYYMMDD' or 'YYYYMMDDThhmmss[Z]') to a 'YYYY-MM-DD' date string. */
-function parseUntilDate(raw: string): string | undefined {
-  const m = /^(\d{4})(\d{2})(\d{2})/.exec(raw.trim());
-  if (!m) return undefined;
-  return `${m[1]}-${m[2]}-${m[3]}`;
-}
-
 /** Extract 'YYYY-MM-DD' from an EventDateTime value. */
 function datePart(value: string): string {
   return value.slice(0, 10);
+}
+
+/**
+ * The UNTIL bound. A DATE bounds by date (inclusive). A date-time is an
+ * instant: with 'Z' it is UTC (RFC 5545 requires that when DTSTART has a
+ * TZID); without, it is wall time in the seed's own zone.
+ */
+type UntilBound = { readonly kind: 'date'; readonly ymd: string } | { readonly kind: 'instant'; readonly ms: number };
+
+function parseUntil(raw: string, seed: EventDateTime): UntilBound | undefined {
+  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/.exec(raw.trim());
+  if (!m) return undefined;
+  const ymd = `${m[1]}-${m[2]}-${m[3]}`;
+  if (m[4] === undefined || seed.kind === 'date') return { kind: 'date', ymd };
+  const wall = `${ymd}T${m[4]}:${m[5]}:${m[6]}`;
+  if (m[7] === 'Z') return { kind: 'instant', ms: Date.parse(`${wall}Z`) };
+  return { kind: 'instant', ms: eventDateTimeEpochMs({ ...seed, value: wall }) };
+}
+
+/** A start's identity for EXDATE matching: the date for an all-day value, else the instant. */
+function startKey(dt: EventDateTime): string {
+  return dt.kind === 'date' ? `D${datePart(dt.value)}` : `T${String(eventDateTimeEpochMs(dt))}`;
+}
+
+/** The occurrence a series start string stands for, in the seed's kind and zone. */
+function occurrenceDateTime(event: CalendarEvent, start: string): EventDateTime {
+  return { ...event.start, value: start };
+}
+
+/**
+ * An RDATE value as a start string mirroring the seed's kind and zone. A
+ * value in another zone is moved to the seed's wall clock so it sorts and
+ * de-duplicates with the RRULE's own starts.
+ */
+function rdateStart(event: CalendarEvent, rdate: EventDateTime): string | undefined {
+  const seed = event.start;
+  if (seed.kind === 'date' || rdate.kind === 'date') return seed.kind === 'date' ? datePart(rdate.value) : `${datePart(rdate.value)}${seed.value.slice(10)}`;
+  if (rdate.zone === seed.zone && rdate.tzid === seed.tzid) return rdate.value;
+  const instant = eventDateTimeEpochMs(rdate);
+  if (!Number.isFinite(instant)) return undefined;
+  let wall = instant;
+  if (seed.zone === 'tzid' && seed.tzid) {
+    try {
+      wall = utcToZonedWallClockMs(instant, seed.tzid);
+    } catch {
+      wall = instant;
+    }
+  }
+  const iso = new Date(wall).toISOString().slice(0, 19);
+  return seed.zone === 'utc' ? `${iso}Z` : iso;
 }
 
 /** Hard ceiling so a COUNT-less UNTIL-less rule cannot run away. */
@@ -155,8 +209,9 @@ function occurrenceStart(event: CalendarEvent, ymd: string): string {
  * Expand a (possibly recurring) event into concrete occurrences inside [window.from,
  * window.to] inclusive. A non-recurring event yields at most its single seed. An
  * event whose recurrence is `unsupported` yields ONLY its seed (if in-window),
- * flagged `isSeed`, never a fabricated series, the caller reads
- * `event.recurrence.expansion` to label it "recurrence not fully expanded".
+ * flagged `isSeed`, never a fabricated series; `expandEvents` also lists such a
+ * series in `unexpandedSeries`. EXDATE values and the starts of overrides are
+ * dropped; RDATE values are added.
  */
 export function expandEvent(event: CalendarEvent, window: DateWindow): EventOccurrence[] {
   const seedYmd = datePart(event.start.value);
@@ -172,17 +227,78 @@ export function expandEvent(event: CalendarEvent, window: DateWindow): EventOccu
     return seedOccurrence();
   }
 
-  const { map } = parseRRule(event.recurrence.rule);
+  // EXDATE matches an occurrence by instant; an all-day EXDATE on a timed
+  // series removes that day's occurrence.
+  const excluded = new Set((event.exdates ?? []).map(startKey));
+  const excludedDays = new Set((event.exdates ?? []).filter((dt) => dt.kind === 'date').map((dt) => datePart(dt.value)));
+  const isExcluded = (start: string): boolean =>
+    excludedDays.has(datePart(start)) || excluded.has(startKey(occurrenceDateTime(event, start)));
+
+  const out: EventOccurrence[] = [];
+  if (event.recurrence.rule.trim() !== '') expandRule(event, event.recurrence.rule, { seedMs, fromMs, toMs }, out);
+  else if (inWindow(seedMs)) out.push({ event, start: occurrenceStart(event, seedYmd), isSeed: true });
+
+  const seen = new Set(out.map((occurrence) => occurrence.start));
+  for (const rdate of event.rdates ?? []) {
+    const start = rdateStart(event, rdate);
+    if (start === undefined || seen.has(start)) continue;
+    if (!inWindow(toUtcDate(datePart(start)))) continue;
+    seen.add(start);
+    out.push({ event, start, isSeed: false });
+  }
+  return out
+    .filter((occurrence) => !isExcluded(occurrence.start))
+    .sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+}
+
+/**
+ * Expand every event in a window, and list the recurring series that could not
+ * be expanded and may reach into it (seed on or before the window's end), so a
+ * caller can report them instead of showing nothing.
+ */
+export function expandEvents(events: readonly CalendarEvent[], window: DateWindow): WindowExpansion {
+  const occurrences: EventOccurrence[] = [];
+  const unexpandedSeries: CalendarEvent[] = [];
+  for (const event of events) {
+    occurrences.push(...expandEvent(event, window));
+    if (event.recurrence?.expansion === 'unsupported' && datePart(event.start.value) <= window.to) {
+      unexpandedSeries.push(event);
+    }
+  }
+  return { occurrences, unexpandedSeries };
+}
+
+/** The RRULE's own starts inside the window, in series order. */
+function expandRule(
+  event: CalendarEvent,
+  rule: string,
+  bounds: { readonly seedMs: number; readonly fromMs: number; readonly toMs: number },
+  out: EventOccurrence[],
+): void {
+  const { seedMs, fromMs, toMs } = bounds;
+  const { map } = parseRRule(rule);
   const freq = (map.get('FREQ') ?? '').toUpperCase();
   const interval = parseInterval(map);
   const count = map.has('COUNT') ? Number.parseInt(map.get('COUNT') ?? '', 10) : undefined;
-  const untilYmd = map.has('UNTIL') ? parseUntilDate(map.get('UNTIL') ?? '') : undefined;
-  const untilMs = untilYmd ? toUtcDate(untilYmd) : undefined;
+  const until = map.has('UNTIL') ? parseUntil(map.get('UNTIL') ?? '', event.start) : undefined;
+  // The last date any occurrence can fall on: UNTIL's date, plus a day when it
+  // is an instant (a TZID wall clock can be a day either side of UTC).
+  const untilMs = until === undefined
+    ? undefined
+    : until.kind === 'date'
+      ? toUtcDate(until.ymd)
+      : Number.isFinite(until.ms) ? toUtcDate(new Date(until.ms).toISOString().slice(0, 10)) + DAY_MS : undefined;
+  const pastUntil = (ms: number): boolean => {
+    if (until === undefined) return false;
+    if (until.kind === 'date') return ms > toUtcDate(until.ymd);
+    if (!Number.isFinite(until.ms)) return false;
+    const start = occurrenceStart(event, fromUtcDate(ms));
+    return eventDateTimeEpochMs(occurrenceDateTime(event, start)) > until.ms;
+  };
   const byDay = map.has('BYDAY')
     ? new Set((map.get('BYDAY') ?? '').split(',').map((t) => WEEKDAY_TOKENS.indexOf(t.trim().toUpperCase() as WeekdayToken)))
     : undefined;
 
-  const out: EventOccurrence[] = [];
   let emitted = 0; // series position (counts every occurrence, in or out of window)
 
   // `series` yields candidate UTC-midnight ms values in ascending series order.
@@ -191,7 +307,7 @@ export function expandEvent(event: CalendarEvent, window: DateWindow): EventOccu
   const emit = (ms: number): boolean => {
     // Return false to STOP the whole series (COUNT reached, past UNTIL, past window end).
     if (count !== undefined && emitted >= count) return false;
-    if (untilMs !== undefined && ms > untilMs) return false;
+    if (pastUntil(ms)) return false;
     if (ms > toMs) return false;
     emitted += 1;
     if (ms >= fromMs) {
@@ -216,12 +332,12 @@ export function expandEvent(event: CalendarEvent, window: DateWindow): EventOccu
       }
       cursor += DAY_MS;
     }
-    return out;
+    return;
   }
 
   if (freq === 'MONTHLY' || freq === 'YEARLY') {
     stepMonthlyOrYearly(freq, interval, seedMs, toMs, untilMs, emit);
-    return out;
+    return;
   }
 
   const step = freqStepper(freq, interval);
@@ -235,7 +351,6 @@ export function expandEvent(event: CalendarEvent, window: DateWindow): EventOccu
     if (!emit(cursor)) break;
     cursor = step(cursor);
   }
-  return out;
 }
 
 /** A stepper that advances a UTC-midnight ms cursor by one FREQ*INTERVAL period. DAILY/WEEKLY

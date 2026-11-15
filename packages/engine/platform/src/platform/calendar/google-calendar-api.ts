@@ -6,10 +6,10 @@
  * into the merged model; every failure is a named degraded state via CalendarApiError.
  */
 
-import { authedRequest } from './calendar-api-shared.js';
+import { authedRequest, authedWrite } from './calendar-api-shared.js';
 import { normalizeGoogleEvent } from './merged-calendar-model.js';
-import type { EventDateTime } from './types.js';
-import type { CalendarRequestOptions, HttpFetch, MergedCalendarEvent, NewCalendarEvent, ProviderCalendar } from './oauth-types.js';
+import { resolveNewEventTimes, type ZonedWallTime } from './new-event-times.js';
+import type { CalendarCreateResult, CalendarRequestOptions, HttpFetch, MergedCalendarEvent, NewCalendarEvent, ProviderCalendar } from './oauth-types.js';
 
 const BASE = 'https://www.googleapis.com/calendar/v3';
 
@@ -21,7 +21,7 @@ export async function listGoogleCalendars(fetchImpl: HttpFetch, token: string, o
     const url = new URL(`${BASE}/users/me/calendarList`);
     url.searchParams.set('maxResults', '250');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
-    const body = (await authedRequest(fetchImpl, 'google', { url: url.toString(), method: 'GET', token }, options)) as {
+    const body = (await authedRequest(fetchImpl, 'google', { url: url.toString(), method: 'GET', token, operation: 'list-calendars' }, options)) as {
       items?: unknown[];
       nextPageToken?: unknown;
     };
@@ -70,7 +70,7 @@ export async function listGoogleEvents(
     url.searchParams.set('orderBy', 'startTime');
     url.searchParams.set('maxResults', String(query.pageSize ?? 250));
     if (pageToken) url.searchParams.set('pageToken', pageToken);
-    const body = (await authedRequest(fetchImpl, 'google', { url: url.toString(), method: 'GET', token }, options)) as {
+    const body = (await authedRequest(fetchImpl, 'google', { url: url.toString(), method: 'GET', token, operation: 'list-events' }, options)) as {
       items?: unknown[];
       nextPageToken?: unknown;
     };
@@ -85,34 +85,40 @@ export async function listGoogleEvents(
   return out;
 }
 
-/** Insert a new event; returns it normalized into the merged model. */
+/**
+ * Insert a new event. Times go through `resolveNewEventTimes`, so a floating
+ * time lands in `ownerZone` and an all-day event without an end lasts one day.
+ */
 export async function createGoogleEvent(
   fetchImpl: HttpFetch,
   token: string,
   calendarId: string,
   calendarLabel: string,
   event: NewCalendarEvent,
+  ownerZone: string,
   options: CalendarRequestOptions = {},
-): Promise<MergedCalendarEvent> {
+): Promise<CalendarCreateResult> {
+  const times = resolveNewEventTimes(event, ownerZone);
   const payload: Record<string, unknown> = {
     summary: event.summary,
-    start: googleEventDate(event.start),
-    ...(event.end ? { end: googleEventDate(event.end) } : {}),
+    start: times.allDay ? { date: times.startDate } : googleWallTime(times.start),
+    end: times.allDay ? { date: times.endDate } : googleWallTime(times.end),
     ...(event.location ? { location: event.location } : {}),
     ...(event.description ? { description: event.description } : {}),
   };
   const url = `${BASE}/calendars/${encodeURIComponent(calendarId)}/events`;
-  const created = await authedRequest(fetchImpl, 'google', { url, method: 'POST', token, body: payload }, options);
-  const normalized = normalizeGoogleEvent(created, calendarId, calendarLabel);
-  if (!normalized) throw new Error('Google accepted the event but returned an unreadable body.');
-  return normalized;
+  const created = await authedWrite(fetchImpl, 'google', { url, method: 'POST', token, operation: 'create-event', body: payload }, options);
+  const normalized = created.body === undefined ? null : normalizeGoogleEvent(created.body, calendarId, calendarLabel);
+  if (normalized) return { kind: 'created', event: normalized };
+  const id = (created.body as { id?: unknown } | undefined)?.id;
+  const providerEventId = typeof id === 'string' && id.length > 0 ? id : created.location;
+  return {
+    kind: 'created-but-unreadable',
+    ...(providerEventId ? { providerEventId } : {}),
+    detail: 'Google accepted the event but its answer could not be read. The event exists; check the calendar instead of creating it again.',
+  };
 }
 
-/** Map an EventDateTime to a Google event start/end object. */
-function googleEventDate(dt: EventDateTime): Record<string, string> {
-  if (dt.kind === 'date') return { date: dt.value };
-  if (dt.zone === 'tzid' && dt.tzid) return { dateTime: dt.value, timeZone: dt.tzid };
-  // utc or floating: send an explicit UTC anchor so Google does not guess.
-  const iso = dt.value.endsWith('Z') ? dt.value : `${dt.value}Z`;
-  return { dateTime: iso, timeZone: 'UTC' };
+function googleWallTime(time: ZonedWallTime): Record<string, string> {
+  return { dateTime: time.dateTime, timeZone: time.timeZone };
 }

@@ -1,15 +1,16 @@
 /**
  * @goodvibes-jev/engine/platform/platform/calendar
  *
- * External-calendar READ connectivity, the platform machinery behind the agent's
- * `/calendar import`, `/calendar subscribe`, and the connect wizard (see
- * CHANGELOG 1.0.0). Two pieces, both honest by construction:
+ * External-calendar connectivity, the platform machinery behind the agent's
+ * `/calendar import`, `/calendar subscribe`, the connect wizard, and the
+ * daemon's CalDAV-backed `calendar.*` verbs. Pieces, all honest by construction:
  *
- *  - A vendored iCalendar (RFC 5545) reader: `parseIcs` turns .ics text (a file body
- *    or a fetched feed) into typed events, and `expandEvent` expands the honest RRULE
- *    subset into concrete occurrences. A recurrence outside the subset is NEVER
- *    fabricated, the event keeps its seed and carries an explicit
- *    `recurrence.expansion: 'unsupported'` marker naming the part we declined.
+ *  - The iCalendar (RFC 5545) reader: `parseIcs` turns .ics text (a file body
+ *    or a fetched feed) into typed events, and `expandEvents` / `expandEvent`
+ *    expand the supported RRULE subset into concrete occurrences with EXDATE,
+ *    RDATE and overrides applied. A recurrence outside the subset is NEVER
+ *    fabricated: it carries `recurrence.expansion: 'unsupported'` naming the part
+ *    declined, and `expandEvents` lists it in `unexpandedSeries`.
  *  - `SubscriptionStore`: named external-calendar feed subscriptions with per-feed
  *    honest status (ok / stale-with-age / unreachable / parse-error), etag/
  *    last-modified conditional refresh, and a paste-URL-and-done `add()` that
@@ -19,14 +20,13 @@
  * the network or reads wall-clock on its own, so consumers (and tests, with fake
  * feeds) own the IO boundary entirely. Persistence is the caller's job.
  *
- * The daemon `calendar.*` operator methods stay `invokable: false`, they are
- * CalDAV-backed contracts with no live route, a separate concern from this
- * read-focused file/feed machinery. See
- * docs/decisions/2026-07-05-calendar-connectivity-platform-extraction.md.
+ * The daemon serves `calendar.events.*` and `calendar.ics.*` through
+ * `control-plane/routes/calendar-composition.ts`, over the CalDAV gateway
+ * service in this directory (or the Google grant service in `platform/google`).
  */
 
 export { parseIcs } from './ics-parser.js';
-export { describeRecurrence, expandEvent } from './rrule.js';
+export { describeRecurrence, expandEvent, expandEvents } from './rrule.js';
 
 // Externally-sourced event content is untrusted content. The policy, what
 // counts as external, what an origin says, what text is retained, lives in one
@@ -63,6 +63,7 @@ export type {
   ParseDiagnostic,
   EventOccurrence,
   DateWindow,
+  WindowExpansion,
   CalendarSubscription,
   SubscriptionHealth,
   SubscriptionSnapshot,
@@ -112,6 +113,8 @@ export {
   beginAuthCodeFlow,
   completeAuthCodeFlow,
   beginDeviceCodeFlow,
+  beginPastedCodeFlow,
+  readPastedAuthorization,
   pollDeviceCodeFlow,
   refreshAccessToken,
   revokeToken,
@@ -137,8 +140,19 @@ export {
 export {
   CalendarApiError,
   authedRequest,
+  authedWrite,
   errorFromResponse,
+  requiredCalendarScope,
+  type AuthedRequestInput,
+  type CalendarOperation,
 } from './calendar-api-shared.js';
+
+export {
+  NewEventTimeError,
+  resolveNewEventTimes,
+  type ResolvedEventTimes,
+  type ZonedWallTime,
+} from './new-event-times.js';
 
 export {
   listGoogleCalendars,
@@ -157,10 +171,12 @@ export {
 export {
   CalendarConnector,
   type CalendarConnectorOptions,
+  type CalendarEventsRead,
+  type CalendarReadFailure,
   type EventWindow,
 } from './calendar-connector.js';
 
-export { fetchAdapter } from './http-fetch-adapter.js';
+export { CALENDAR_READ_DEADLINE_MS, CALENDAR_WRITE_DEADLINE_MS, fetchAdapter } from './http-fetch-adapter.js';
 
 export type {
   CalendarProviderId,
@@ -181,10 +197,10 @@ export type {
   AuthCodeFlowStart,
   DeviceCodeFlowStart,
   ApiDegradedState,
+  CalendarCreateResult,
   MergedCalendarEvent,
   ProviderCalendar,
   NewCalendarEvent,
   ConnectedAccount,
 } from './oauth-types.js';
 
-export { CalendarScopeReadingError } from './batteries/missing-permission.js';

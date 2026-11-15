@@ -610,8 +610,8 @@ describe('a CalDAV event is recorded whatever ORGANIZER it claims', () => {
     expect(ledger.all()[0]?.origin).toBe('calendar:Avery@Example.com (claimed organizer)');
   });
 
-  test('an .ics import and a subscription stay external unconditionally', () => {
-    // A provider account verifies the organizer itself; CalDAV never sets the flag.
+  test('an .ics import, a subscription and a CalDAV event stay external unconditionally', () => {
+    // Only a provider account verifies the organizer itself.
     expect(
       calendarEventIsExternallySourced({ kind: 'ics-import' }, { organizerIsOwner: true }),
     ).toBe(true);
@@ -626,7 +626,7 @@ describe('a CalDAV event is recorded whatever ORGANIZER it claims', () => {
         { kind: 'caldav', calendarId: 'personal' },
         { organizerIsOwner: true },
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       calendarEventIsExternallySourced({ kind: 'caldav', calendarId: 'personal' }, {}),
     ).toBe(true);

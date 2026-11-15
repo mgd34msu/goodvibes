@@ -173,7 +173,10 @@ export async function resolveCalDavGatewayConfig(
     : await secrets.resolveConfigSecret(CALDAV_PASSWORD_KEY);
   if (!password) {
     throw new GatewayVerbError(
-      'CalDAV password is not available in the credential store.',
+      passwordConfig
+        ? `The CalDAV password ${CALDAV_PASSWORD_KEY} points at is not available: it must name a stored secret whose key starts with ${CALENDAR_SECRET_PREFIX}. `
+          + `Point ${CALDAV_PASSWORD_KEY} at such a secret, or enter the password itself for ${CALDAV_PASSWORD_KEY} in settings, which stores it in the secret store.`
+        : `No CalDAV password is stored. Enter it for ${CALDAV_PASSWORD_KEY} in settings, which stores it in the secret store.`,
       'CALENDAR_CREDENTIALS_MISSING',
       412,
     );
@@ -264,7 +267,7 @@ export function resolveResourceUrl(collectionUrl: string, baseUrl: string, event
   const collectionPath = stripTrailingSlash(collection.pathname);
   if (resolved.origin !== collection.origin
     || (collectionPath.length > 0 && !resolved.pathname.startsWith(`${collectionPath}/`))) {
-    throw new GatewayVerbError(`Event id '${eventId}' is not inside the requested calendar.`, 'INVALID_ARGUMENT', 400);
+    throw new GatewayVerbError(`Event id '${eventId}' is not inside the requested calendar. Use an event id calendar.events.list returned for this calendar.`, 'INVALID_ARGUMENT', 400);
   }
   return resolved.href;
 }
@@ -287,7 +290,7 @@ export function collectionPathFor(
   if (id === config.defaultCalendarId) return '';
   // Unknown logical id with no mapping: treat the id as a child collection name.
   if (id === '.' || id === '..') {
-    throw new GatewayVerbError(`Calendar id '${id}' is not a calendar name.`, 'INVALID_ARGUMENT', 400);
+    throw new GatewayVerbError(`Calendar id '${id}' is not a calendar name. Use a calendar id from ${CALDAV_CALENDARS_KEY} or ${CALDAV_DEFAULT_CALENDAR_KEY}.`, 'INVALID_ARGUMENT', 400);
   }
   return `/${encodeURIComponent(id)}/`;
 }

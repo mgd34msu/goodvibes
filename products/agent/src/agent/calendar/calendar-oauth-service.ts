@@ -13,13 +13,27 @@
  * authorize, or token, the same honesty shape the email connect wizard uses. The
  * connector is injectable so tests drive the whole flow against fakes with no real
  * network, port, or browser.
+ *
+ * Headless connect: Microsoft uses the device code; Google's device grant does
+ * not cover calendar scopes, so Google prints the sign-in link and the person
+ * pastes back the address the browser landed on (`beginPastedCode` /
+ * `completePastedCode`). The pending sign-in is held in this process for ten
+ * minutes, so the two steps can be two commands.
+ *
+ * Writing: `createEvent` creates an event on a connected Google or Microsoft
+ * calendar; a time given without a zone is read in the owner's zone
+ * (`daemon.timezone`, or this machine's zone when that is unset).
  */
 
 import {
+  CalendarApiError,
   CalendarConnector,
   fetchAdapter,
   providerProfile,
   resolveClientConfig,
+  type AuthCodeFlowStart,
+  type CalendarCreateResult,
+  type CalendarEventsRead,
   type CalendarProviderId,
   type CalendarRequestOptions,
   type ConnectedAccount,
@@ -28,7 +42,9 @@ import {
   type EventWindow,
   type LoopbackListenerFactory,
   type MergedCalendarEvent,
+  type NewCalendarEvent,
   type OAuthClientOverrides,
+  type ProviderCalendar,
   type ResolvedClientConfig,
 } from '@goodvibes-jev/engine/platform/platform/calendar';
 import { createOAuthLocalListener } from '@goodvibes-jev/engine/platform/platform/config';
@@ -108,7 +124,48 @@ export interface ConnectResult {
   readonly stage?: ConnectStage;
   readonly error?: string;
   readonly account?: ConnectedAccount;
-  readonly transport?: 'loopback' | 'device-code';
+  readonly transport?: 'loopback' | 'device-code' | 'pasted-code';
+  /**
+   * Present when the sign-in waits for the person: the link to open on any
+   * device, after which they paste back where the browser landed with
+   * `/calendar connect <provider> --code <address>`.
+   */
+  readonly pendingAuthorizationUrl?: string;
+}
+
+/** A pasted-code sign-in waiting for its code. */
+interface PendingPastedSignIn {
+  readonly start: AuthCodeFlowStart;
+  readonly clientId: string;
+  readonly expiresAt: number;
+}
+
+/** How long a printed sign-in link stays completable. */
+const PASTED_SIGN_IN_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * Pending pasted-code sign-ins, by provider. Module-level because a command
+ * builds a fresh service per call and the link and the code arrive in two
+ * commands; in memory only, so the PKCE verifier never reaches a disk.
+ */
+const pendingPastedSignIns = new Map<CalendarProviderId, PendingPastedSignIn>();
+
+/** One calendar of a connected account. */
+export interface ConnectedCalendar extends ProviderCalendar {
+  readonly accountLabel: string;
+}
+
+/** What `createEvent` did, with the calendar it wrote to. */
+export interface CreateEventOutcome {
+  readonly result: CalendarCreateResult;
+  readonly calendar: ProviderCalendar;
+  readonly ownerZone: string;
+}
+
+/** Events across every connected account, and what could not be read, per account or per calendar. */
+export interface ConnectedEventsRead {
+  readonly events: MergedCalendarEvent[];
+  readonly failures: readonly { readonly provider: CalendarProviderId; readonly calendarLabel?: string; readonly error: string }[];
 }
 
 export interface AccountStatus {
@@ -232,7 +289,12 @@ export class CalendarOAuthService {
     }
   }
 
-  /** Connect via the device-code flow (headless fallback). */
+  /**
+   * Connect without a browser on this machine: the device code for a provider
+   * that grants calendar access that way (Microsoft), otherwise a sign-in link
+   * whose landing address the person pastes back (Google, see
+   * `beginPastedCode`).
+   */
   async connectDeviceCode(
     provider: CalendarProviderId,
     hooks: { onDeviceCode?: (start: DeviceCodeFlowStart) => void } = {},
@@ -242,6 +304,7 @@ export class CalendarOAuthService {
     const config = resolved.config;
     const guard = this.guardConfigured(config);
     if (guard) return guard;
+    if (!config.usesDeviceGrant) return this.beginPastedCodeWith(config);
     let start: DeviceCodeFlowStart;
     try {
       start = await this.connector.beginConnectDeviceCode(config);
@@ -297,6 +360,63 @@ export class CalendarOAuthService {
     }
   }
 
+  /**
+   * Begin a pasted-code sign-in: returns the link to open on any device. After
+   * approving, the browser lands on a local address that does not load; that
+   * address goes back through `completePastedCode`.
+   */
+  async beginPastedCode(provider: CalendarProviderId): Promise<ConnectResult> {
+    const resolved = await this.resolveConfigOrFailure(provider);
+    if ('failure' in resolved) return resolved.failure;
+    const guard = this.guardConfigured(resolved.config);
+    if (guard) return guard;
+    return this.beginPastedCodeWith(resolved.config);
+  }
+
+  /** Complete the pending pasted-code sign-in with what the person pasted (the address, or the code). */
+  async completePastedCode(provider: CalendarProviderId, pasted: string): Promise<ConnectResult> {
+    const pending = pendingPastedSignIns.get(provider);
+    if (pending === undefined || pending.expiresAt < Date.now()) {
+      pendingPastedSignIns.delete(provider);
+      return {
+        ok: false,
+        stage: 'authorize',
+        error: `No ${provider === 'google' ? 'Google' : 'Microsoft'} sign-in is waiting for a code (none was started, it expired after ten minutes, or the app restarted). `
+          + `Run /calendar connect ${provider === 'google' ? 'google' : 'outlook'} --device for a new link.`,
+      };
+    }
+    const resolved = await this.resolveConfigOrFailure(provider);
+    if ('failure' in resolved) return resolved.failure;
+    if (resolved.config.clientId !== pending.clientId) {
+      pendingPastedSignIns.delete(provider);
+      return { ok: false, stage: 'config', error: 'The OAuth client id changed after the sign-in link was printed. Run the connect command again for a new link.' };
+    }
+    try {
+      const account = await this.connector.completeConnectPastedCode(resolved.config, pending.start, pasted);
+      pendingPastedSignIns.delete(provider);
+      return { ok: true, account, transport: 'pasted-code' };
+    } catch (error) {
+      return { ok: false, stage: 'token', error: `The sign-in could not be completed: ${describe(error)}` };
+    }
+  }
+
+  private async beginPastedCodeWith(config: ResolvedClientConfig): Promise<ConnectResult> {
+    let start: AuthCodeFlowStart;
+    try {
+      start = await this.connector.beginConnectPastedCode(config);
+    } catch (error) {
+      return { ok: false, stage: 'authorize', error: `Could not start the sign-in: ${describe(error)}` };
+    }
+    pendingPastedSignIns.set(config.provider, { start, clientId: config.clientId, expiresAt: Date.now() + PASTED_SIGN_IN_TTL_MS });
+    return {
+      ok: false,
+      stage: 'authorize',
+      transport: 'pasted-code',
+      pendingAuthorizationUrl: start.authorizationUrl,
+      error: 'Waiting for the sign-in to be approved and its address pasted back.',
+    };
+  }
+
   /** Disconnect a provider: revoke where possible + clear stored tokens. */
   async disconnect(provider: CalendarProviderId): Promise<{ readonly revokedRemotely: boolean }> {
     const overrides = await this.resolveOverrides(provider);
@@ -313,8 +433,8 @@ export class CalendarOAuthService {
     return out;
   }
 
-  /** Events for one already-resolved provider config over a window (source-labeled). */
-  async listEventsForProvider(config: ResolvedClientConfig, window: EventWindow, options: CalendarRequestOptions = {}): Promise<MergedCalendarEvent[]> {
+  /** Events for one already-resolved provider config over a window, with the calendars that could not be read. */
+  async listEventsForProvider(config: ResolvedClientConfig, window: EventWindow, options: CalendarRequestOptions = {}): Promise<CalendarEventsRead> {
     return this.connector.listEvents(config, window, options);
   }
 
@@ -324,26 +444,104 @@ export class CalendarOAuthService {
   }
 
   /**
-   * {@link listEvents} that also says which providers could not be read, so one
-   * broken provider neither hides the others' events nor goes unmentioned.
+   * {@link listEvents} that also says what could not be read: a provider that
+   * failed outright, or one calendar of an account, so one broken calendar
+   * neither hides the others' events nor goes unmentioned. Accounts are read
+   * side by side.
    */
-  async listEventsDetailed(window: EventWindow, options: CalendarRequestOptions = {}): Promise<{
-    readonly events: MergedCalendarEvent[];
+  async listEventsDetailed(window: EventWindow, options: CalendarRequestOptions = {}): Promise<ConnectedEventsRead> {
+    const accounts = await this.connector.listAccounts();
+    type AccountRead =
+      | { readonly provider: CalendarProviderId; readonly read: CalendarEventsRead }
+      | { readonly provider: CalendarProviderId; readonly error: string };
+    const reads = await Promise.all(accounts.map(async (account): Promise<AccountRead> => {
+      try {
+        const config = await this.resolveConfig(account.provider);
+        return { provider: account.provider, read: await this.connector.listEvents(config, window, options) };
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
+        return { provider: account.provider, error: describe(error) };
+      }
+    }));
+    const events: MergedCalendarEvent[] = [];
+    const failures: { provider: CalendarProviderId; calendarLabel?: string; error: string }[] = [];
+    for (const entry of reads) {
+      if ('error' in entry) {
+        failures.push({ provider: entry.provider, error: entry.error });
+        continue;
+      }
+      events.push(...entry.read.events);
+      for (const failure of entry.read.failures) {
+        failures.push({ provider: entry.provider, calendarLabel: failure.calendarLabel, error: failure.degraded.detail });
+      }
+    }
+    return { events, failures };
+  }
+
+  /** The calendars of every connected account, with whether each can be written to. */
+  async listCalendars(options: CalendarRequestOptions = {}): Promise<{
+    readonly calendars: readonly ConnectedCalendar[];
     readonly failures: readonly { readonly provider: CalendarProviderId; readonly error: string }[];
   }> {
     const accounts = await this.connector.listAccounts();
-    const events: MergedCalendarEvent[] = [];
+    const calendars: ConnectedCalendar[] = [];
     const failures: { provider: CalendarProviderId; error: string }[] = [];
     for (const account of accounts) {
       try {
         const config = await this.resolveConfig(account.provider);
-        events.push(...await this.connector.listEvents(config, window, options));
+        for (const calendar of await this.connector.listCalendars(config, options)) {
+          calendars.push({ ...calendar, accountLabel: account.label });
+        }
       } catch (error) {
         if (options.signal?.aborted) throw error;
         failures.push({ provider: account.provider, error: describe(error) });
       }
     }
-    return { events, failures };
+    return { calendars, failures };
+  }
+
+  /**
+   * Create an event on a connected account's calendar: the one named by
+   * `calendarId`, else the account's primary calendar when it can be written,
+   * else the first writable one. A floating time is read in the owner's zone.
+   */
+  async createEvent(
+    provider: CalendarProviderId,
+    event: NewCalendarEvent,
+    target: { readonly calendarId?: string | undefined } = {},
+    options: CalendarRequestOptions = {},
+  ): Promise<CreateEventOutcome> {
+    const config = await this.resolveConfig(provider);
+    const calendars = await this.connector.listCalendars(config, options);
+    const calendar = target.calendarId
+      ? calendars.find((candidate) => candidate.id === target.calendarId || candidate.name === target.calendarId)
+      : calendars.find((candidate) => candidate.primary === true && candidate.canWrite) ?? calendars.find((candidate) => candidate.canWrite);
+    if (calendar === undefined) {
+      throw new CalendarApiError({
+        kind: 'provider-error',
+        status: 404,
+        detail: target.calendarId
+          ? `No calendar '${target.calendarId}' on the connected ${provider} account. List the calendars to pick one.`
+          : `The connected ${provider} account has no calendar it may write to. Reconnect with /calendar connect ${provider === 'google' ? 'google' : 'outlook'} and allow calendar writes.`,
+      });
+    }
+    if (!calendar.canWrite) {
+      throw new CalendarApiError({
+        kind: 'insufficient-scope',
+        missingScope: provider === 'google' ? 'https://www.googleapis.com/auth/calendar.events' : 'Calendars.ReadWrite',
+        detail: `The calendar '${calendar.name}' is read-only for this account. Pick a calendar it can write to.`,
+      });
+    }
+    const ownerZone = this.ownerZone();
+    const result = await this.connector.createEvent(config, calendar.id, calendar.name, event, ownerZone, options);
+    return { result, calendar, ownerZone };
+  }
+
+  /** The owner's zone: `daemon.timezone` when set, else this machine's zone, else UTC. */
+  ownerZone(): string {
+    const configured = this.readString('daemon.timezone');
+    if (configured) return configured;
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   }
 
   // --- internals ------------------------------------------------------------

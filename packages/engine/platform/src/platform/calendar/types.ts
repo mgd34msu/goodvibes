@@ -7,16 +7,17 @@
  * caller sees is described here.
  *
  * Honesty contract (see docs/decisions/2026-07-05-calendar-connectivity-platform-extraction.md):
- *  - date-time zone handling is stated, never faked. A DTSTART with a TZID is kept
- *    as its wall-clock value with the TZID recorded; NO offset conversion is applied
- *    (this build ships no tz database), so `zone: 'tzid'` means "local wall time in
- *    the named zone, not converted to UTC". A trailing-Z value is real UTC
- *    (`zone: 'utc'`); a bare date-time with neither is floating (`zone: 'floating'`).
- *  - recurrence is either fully expanded or explicitly not. A VEVENT whose RRULE
- *    uses only the supported subset expands to real occurrences; anything else keeps
- *    the seed event and carries an explicit `expansion: 'unsupported'` marker naming
- *    the part we declined to expand. Occurrences are never fabricated from a rule we
- *    do not fully honor.
+ *  - date-time zone handling is stated. A DTSTART with a TZID the runtime knows is
+ *    kept as its wall-clock value with the TZID recorded (`zone: 'tzid'`), which is
+ *    what recurrence steps on, and is converted to the true instant wherever events
+ *    are ordered or compared (event-time.ts). A trailing-Z value is UTC
+ *    (`zone: 'utc'`); a bare date-time, or one naming a zone the runtime does not
+ *    know, is floating (`zone: 'floating'`) and is read in the runtime's local zone.
+ *  - recurrence is either fully expanded or explicitly not. A series whose RRULE
+ *    uses only the supported subset expands to real occurrences, with EXDATE,
+ *    RDATE and RECURRENCE-ID overrides applied; anything else carries an explicit
+ *    `expansion: 'unsupported'` marker naming the part declined, and `expandEvents`
+ *    lists it separately so it is never silently absent.
  */
 
 /** How a date/date-time value is anchored in time. */
@@ -78,6 +79,16 @@ export interface CalendarEvent {
   readonly attendees?: readonly string[];
   /** True when the VEVENT carried RECURRENCE-ID: it replaces one occurrence of the series with the same UID rather than being an event of its own. */
   readonly isOverride?: true;
+  /** The occurrence an override replaces (its RECURRENCE-ID). Present only with `isOverride`. */
+  readonly recurrenceId?: EventDateTime;
+  /**
+   * Occurrence starts the series must not produce: its EXDATE values, plus the
+   * RECURRENCE-ID of every override of it in the same source (the override is
+   * an event of its own, so the series must not also show that occurrence).
+   */
+  readonly exdates?: readonly EventDateTime[];
+  /** Extra occurrence starts from RDATE. */
+  readonly rdates?: readonly EventDateTime[];
   /** True when the series changes which occurrences exist (EXDATE, RDATE, or a RECURRENCE-ID override elsewhere in the feed), so its RRULE alone would be wrong. */
   readonly hasSeriesExceptions?: true;
 }
@@ -112,6 +123,17 @@ export interface EventOccurrence {
   readonly start: string;
   /** True only for the seed occurrence of a recurring event. */
   readonly isSeed: boolean;
+}
+
+/** Occurrences in a window, and the recurring series that could not be expanded into it. */
+export interface WindowExpansion {
+  readonly occurrences: readonly EventOccurrence[];
+  /**
+   * Series whose recurrence this build does not expand and that may have
+   * occurrences in the window. Listed so a caller can say "this meeting repeats
+   * and is not shown" instead of the meeting being absent.
+   */
+  readonly unexpandedSeries: readonly CalendarEvent[];
 }
 
 /** An inclusive [from, to] window for occurrence expansion, as 'YYYY-MM-DD' strings. */

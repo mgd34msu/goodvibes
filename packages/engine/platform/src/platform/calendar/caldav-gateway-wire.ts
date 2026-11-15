@@ -40,17 +40,28 @@ export function toCalDavStamp(iso: string): string {
   );
 }
 
-/** `calendar-query` REPORT body, optionally bounded by a time range. */
-export function calendarQueryBody(from?: string, to?: string): string {
+/**
+ * `calendar-query` REPORT body, optionally bounded by a time range.
+ *
+ * With `expand` (both bounds required) the server is asked to return each
+ * recurring event as its concrete occurrences inside the window, overrides and
+ * exclusions already applied (RFC 4791 §9.6.5), so a weekly meeting answers
+ * with this week's occurrence and not the date the series began. Export does
+ * not expand: it wants the series as stored.
+ */
+export function calendarQueryBody(from?: string, to?: string, options: { readonly expand?: boolean } = {}): string {
   const timeFilter = from || to
     ? `<C:time-range${from ? ` start="${toCalDavStamp(from)}"` : ''}${to ? ` end="${toCalDavStamp(to)}"` : ''}/>`
     : '';
+  const calendarData = options.expand && from && to
+    ? `    <C:calendar-data><C:expand start="${toCalDavStamp(from)}" end="${toCalDavStamp(to)}"/></C:calendar-data>`
+    : '    <C:calendar-data/>';
   return [
     '<?xml version="1.0" encoding="utf-8" ?>',
     '<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">',
     '  <D:prop>',
     '    <D:getetag/>',
-    '    <C:calendar-data/>',
+    calendarData,
     '  </D:prop>',
     '  <C:filter>',
     '    <C:comp-filter name="VCALENDAR">',

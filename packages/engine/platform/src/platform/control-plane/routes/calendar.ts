@@ -80,6 +80,12 @@ export interface CalendarGatewayIcsExport {
   readonly eventCount: number;
 }
 
+/** One calendar collection a backend can reach, for a setup flow to offer. */
+export interface CalendarGatewayCalendarSummary {
+  readonly calendarId: string;
+  readonly displayName: string;
+}
+
 export interface CalendarGatewayIcsImport {
   readonly imported: number;
   readonly eventIds: readonly string[];
@@ -99,7 +105,18 @@ export interface CalendarGatewayService {
   getEvent(eventId: string, calendarId?: string | undefined): Promise<CalendarGatewayEventDetail>;
   createEvent(input: CalendarGatewayCreateInput): Promise<CalendarGatewayCreated>;
   exportIcs(input: CalendarGatewayListInput): Promise<CalendarGatewayIcsExport>;
-  importIcs(icsContent: string, calendarId?: string | undefined): Promise<CalendarGatewayIcsImport>;
+  /**
+   * The calendars the configured account can reach, so setup can offer them
+   * instead of asking for a collection path. Optional: a backend that cannot
+   * discover calendars leaves it out and the verb says so.
+   */
+  listCalendars?(): Promise<readonly CalendarGatewayCalendarSummary[]>;
+  /** Stores each event of the file; an event already on the calendar is kept unless `replace` is true. */
+  importIcs(
+    icsContent: string,
+    calendarId?: string | undefined,
+    options?: { readonly replace?: boolean | undefined },
+  ): Promise<CalendarGatewayIcsImport>;
 }
 
 function readOptionalString(value: unknown): string | undefined {
@@ -184,6 +201,19 @@ export function createCalendarEventsCreateHandler(service: CalendarGatewayServic
   };
 }
 
+export function createCalendarCalendarsListHandler(service: CalendarGatewayService): GatewayMethodHandler {
+  return async () => {
+    if (service.listCalendars === undefined) {
+      throw new GatewayVerbError(
+        'The configured calendar backend cannot list its calendars. Set surfaces.calendar.defaultCalendarId to the calendar to use.',
+        'CALENDAR_NOT_SUPPORTED',
+        501,
+      );
+    }
+    return { calendars: await service.listCalendars() };
+  };
+}
+
 export function createCalendarIcsExportHandler(service: CalendarGatewayService): GatewayMethodHandler {
   return async (invocation) => service.exportIcs(listInputFrom(readInvocationParams(invocation)));
 }
@@ -196,6 +226,7 @@ export function createCalendarIcsImportHandler(service: CalendarGatewayService):
     return service.importIcs(
       readRequiredString(params.icsContent, 'icsContent'),
       readOptionalString(params.calendarId),
+      { replace: params.replace === true },
     );
   };
 }
@@ -212,6 +243,7 @@ export function registerCalendarGatewayMethods(
   attach('calendar.events.list', createCalendarEventsListHandler(service));
   attach('calendar.events.get', createCalendarEventsGetHandler(service));
   attach('calendar.events.create', createCalendarEventsCreateHandler(service));
+  attach('calendar.calendars.list', createCalendarCalendarsListHandler(service));
   attach('calendar.ics.export', createCalendarIcsExportHandler(service));
   attach('calendar.ics.import', createCalendarIcsImportHandler(service));
 }

@@ -39,7 +39,7 @@ describe('listing events across providers', () => {
   test('events from the readable provider are returned and the broken one is reported', async () => {
     const connector = {
       listAccounts: async () => [{ provider: 'google' }, { provider: 'microsoft' }],
-      listEvents: async (cfg: { provider: string }) => [event(`from ${cfg.provider}`)],
+      listEvents: async (cfg: { provider: string }) => ({ events: [event(`from ${cfg.provider}`)], failures: [] }),
     } as unknown as CalendarConnector;
     const service = new CalendarOAuthService({
       config: config({ ...MALFORMED, 'calendar.microsoft.clientId': 'ms-id' }), secrets: secrets(), connector,

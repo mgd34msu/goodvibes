@@ -51,8 +51,15 @@ export interface OAuthProviderProfile {
   readonly displayName: string;
   readonly authorizationEndpoint: string;
   readonly tokenEndpoint: string;
-  /** Device-authorization endpoint; both providers support the device-code grant. */
+  /**
+   * Device-authorization endpoint (RFC 8628). Microsoft accepts the calendar
+   * scopes there; Google's device grant does not cover calendar scopes, so
+   * headless Google connect pastes the authorization code back instead (see
+   * `usesDeviceGrant`).
+   */
   readonly deviceAuthorizationEndpoint: string;
+  /** True when headless connect uses the device grant; false when it uses a pasted code. */
+  readonly usesDeviceGrant: boolean;
   /** Token-revocation endpoint, when the provider offers one (Google does; MS does not). */
   readonly revocationEndpoint?: string;
   /** The API base the calendar client talks to after auth. */
@@ -120,6 +127,7 @@ export interface ResolvedClientConfig {
   readonly authorizationEndpoint: string;
   readonly tokenEndpoint: string;
   readonly deviceAuthorizationEndpoint: string;
+  readonly usesDeviceGrant: boolean;
   readonly revocationEndpoint?: string;
   readonly apiBaseUrl: string;
   readonly extraAuthParams?: Readonly<Record<string, string>>;
@@ -333,6 +341,21 @@ export interface NewCalendarEvent {
   readonly location?: string;
   readonly description?: string;
 }
+
+/**
+ * What creating an event produced. The provider has accepted the event in both
+ * cases; `created-but-unreadable` means its answer could not be read back, so
+ * the caller must report the event as created and must not retry (a retry
+ * makes a duplicate).
+ */
+export type CalendarCreateResult =
+  | { readonly kind: 'created'; readonly event: MergedCalendarEvent }
+  | {
+      readonly kind: 'created-but-unreadable';
+      /** The provider's id or resource link for the event, when the answer carried one. */
+      readonly providerEventId?: string;
+      readonly detail: string;
+    };
 
 /** A connected account record (metadata; tokens live in the secret store). */
 export interface ConnectedAccount {

@@ -7,10 +7,10 @@
  * @odata.nextLink; failures are named degraded states via CalendarApiError.
  */
 
-import { authedRequest, CalendarApiError } from './calendar-api-shared.js';
+import { authedRequest, authedWrite, CalendarApiError } from './calendar-api-shared.js';
 import { normalizeGraphEvent } from './merged-calendar-model.js';
-import type { EventDateTime } from './types.js';
-import type { CalendarRequestOptions, HttpFetch, MergedCalendarEvent, NewCalendarEvent, ProviderCalendar } from './oauth-types.js';
+import { resolveNewEventTimes } from './new-event-times.js';
+import type { CalendarCreateResult, CalendarRequestOptions, HttpFetch, MergedCalendarEvent, NewCalendarEvent, ProviderCalendar } from './oauth-types.js';
 
 const BASE = 'https://graph.microsoft.com/v1.0';
 const UTC_PREFER = { Prefer: 'outlook.timezone="UTC"' } as const;
@@ -55,7 +55,7 @@ export async function listGraphCalendars(fetchImpl: HttpFetch, token: string, op
   let pages = 0;
   while (next) {
     pages += 1;
-    const body = (await authedRequest(fetchImpl, 'microsoft', { url: next, method: 'GET', token }, options)) as {
+    const body = (await authedRequest(fetchImpl, 'microsoft', { url: next, method: 'GET', token, operation: 'list-calendars' }, options)) as {
       value?: unknown[];
       '@odata.nextLink'?: unknown;
     };
@@ -107,6 +107,7 @@ export async function listGraphEvents(
       url: next,
       method: 'GET',
       token,
+      operation: 'list-events',
       extraHeaders: UTC_PREFER,
     }, options)) as { value?: unknown[]; '@odata.nextLink'?: unknown };
     for (const raw of body.value ?? []) {
@@ -118,44 +119,46 @@ export async function listGraphEvents(
   return out;
 }
 
-/** Create an event; returns it normalized into the merged model. */
+/**
+ * Create an event. Times go through `resolveNewEventTimes`: a floating time is
+ * sent in `ownerZone`, and an all-day event is midnight to a later midnight in
+ * that zone, which is what Graph requires of `isAllDay`.
+ */
 export async function createGraphEvent(
   fetchImpl: HttpFetch,
   token: string,
   calendarId: string,
   calendarLabel: string,
   event: NewCalendarEvent,
+  ownerZone: string,
   options: CalendarRequestOptions = {},
-): Promise<MergedCalendarEvent> {
-  const isAllDay = event.start.kind === 'date';
+): Promise<CalendarCreateResult> {
+  const times = resolveNewEventTimes(event, ownerZone);
+  const allDayZone = ownerZone.trim().length > 0 ? ownerZone.trim() : 'UTC';
   const payload: Record<string, unknown> = {
     subject: event.summary,
-    isAllDay,
-    start: graphEventDate(event.start),
-    end: graphEventDate(event.end ?? event.start),
+    isAllDay: times.allDay,
+    start: times.allDay ? { dateTime: `${times.startDate}T00:00:00`, timeZone: allDayZone } : times.start,
+    end: times.allDay ? { dateTime: `${times.endDate}T00:00:00`, timeZone: allDayZone } : times.end,
     ...(event.location ? { location: { displayName: event.location } } : {}),
     ...(event.description ? { body: { contentType: 'text', content: event.description } } : {}),
   };
   const url = `${BASE}/me/calendars/${encodeURIComponent(calendarId)}/events`;
-  const created = await authedRequest(fetchImpl, 'microsoft', {
+  const created = await authedWrite(fetchImpl, 'microsoft', {
     url,
     method: 'POST',
     token,
+    operation: 'create-event',
     body: payload,
     extraHeaders: UTC_PREFER,
   }, options);
-  const normalized = normalizeGraphEvent(created, calendarId, calendarLabel);
-  if (!normalized) throw new Error('Microsoft Graph accepted the event but returned an unreadable body.');
-  return normalized;
-}
-
-/** Map an EventDateTime to a Graph {dateTime,timeZone} object. */
-function graphEventDate(dt: EventDateTime): { dateTime: string; timeZone: string } {
-  if (dt.kind === 'date') return { dateTime: `${dt.value}T00:00:00`, timeZone: 'UTC' };
-  if (dt.zone === 'tzid' && dt.tzid) return { dateTime: stripZ(dt.value), timeZone: dt.tzid };
-  return { dateTime: stripZ(dt.value), timeZone: 'UTC' };
-}
-
-function stripZ(value: string): string {
-  return value.endsWith('Z') ? value.slice(0, -1) : value;
+  const normalized = created.body === undefined ? null : normalizeGraphEvent(created.body, calendarId, calendarLabel);
+  if (normalized) return { kind: 'created', event: normalized };
+  const id = (created.body as { id?: unknown } | undefined)?.id;
+  const providerEventId = typeof id === 'string' && id.length > 0 ? id : created.location;
+  return {
+    kind: 'created-but-unreadable',
+    ...(providerEventId ? { providerEventId } : {}),
+    detail: 'Microsoft Graph accepted the event but its answer could not be read. The event exists; check the calendar instead of creating it again.',
+  };
 }

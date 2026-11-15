@@ -114,9 +114,22 @@ GoodVibes ships no client id of its own: register your own OAuth app with the
 provider, then set calendar.google.clientId to its client id. ...
 ```
 
-That is a normal state with a next step, not a failure to debug. Both connect paths
-(the loopback authorization-code flow and the headless device-code flow) refuse the
-same way, so a headless install cannot slip past the check.
+That is a normal state with a next step, not a failure to debug. Every connect path
+(the loopback authorization-code flow and both headless flows) refuses the same way,
+so a headless install cannot slip past the check.
+
+## Connecting from a machine with no browser
+
+`/calendar connect <google|outlook> --device` connects without a browser on this
+machine.
+
+- **Outlook** shows a device code: open the link it prints on any device and enter
+  the code.
+- **Google** does not grant calendar access through a device code, so it prints a
+  sign-in link instead. Open it on any device and approve. The browser then lands on
+  a `127.0.0.1` address that does not load; copy that whole address and run
+  `/calendar connect google --code <address>` within ten minutes. The same Desktop-app
+  client works for both the browser and the pasted sign-in.
 
 ## Verifying it took
 

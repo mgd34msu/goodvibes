@@ -18,7 +18,6 @@ import { probeCapturedExecAvailability, runCapturedCommand, type CapturedExecAut
 import { createCapturedExecBunRuntimeAdmission } from '../exec/captured-bun-runtime-input.js';
 import { REPL_TOOL_SCHEMA } from './schema.js';
 import { capturedReplScript } from './captured-script.js';
-import type { ReplToolInput } from './schema.js';
 
 const tools = new WeakMap<Tool, ContractInputAuthority>();
 const HELD = 'Captured REPL held: original-owner/view authority is unavailable, changed or restricted. Output withheld.';
@@ -31,7 +30,7 @@ export function resolveEvalTimeoutMs(requested: unknown): number | undefined {
   const timeoutMs = requested ?? DEFAULT_EVAL_TIMEOUT_MS;
   return typeof timeoutMs === 'number' && Number.isSafeInteger(timeoutMs) && timeoutMs >= 0 ? timeoutMs : undefined;
 }
-type Runtime = NonNullable<ReplToolInput['runtime']>;
+type Runtime = 'javascript' | 'typescript';
 interface HistoryEntry {
   readonly ts: number;
   readonly runtime: Runtime;
@@ -179,8 +178,8 @@ export function createCapturedReplTool(
         if (args.mode !== 'eval' || typeof args.expression !== 'string' || args.expression.length === 0)
           return { success: false, error: 'Captured REPL requires mode eval and a nonempty expression.' };
         const runtime = args.runtime ?? 'javascript';
-        if (typeof runtime !== 'string' || !['javascript', 'typescript', 'python', 'sql', 'graphql'].includes(runtime))
-          return { success: false, error: 'Captured REPL runtime is invalid.' };
+        if (runtime !== 'javascript' && runtime !== 'typescript')
+          return { success: false, error: `runtime ${String(runtime)} is not available; repl evaluates javascript and typescript.` };
         const timeoutMs = resolveEvalTimeoutMs(args.timeout_ms);
         if (timeoutMs === undefined) return { success: false, error: 'timeout_ms must be a nonnegative integer.' };
         const attempt = { ts: Date.now(), runtime: runtime as Runtime, expression: args.expression, sessionId: `captured_repl_${randomUUID()}` };
@@ -190,8 +189,6 @@ export function createCapturedReplTool(
           if (!result.cancelled) retain(historyOf(historyOwner, binding.authority), { ...attempt, ...details, error: result.error ?? details.error }, check, signal);
           return result;
         };
-        if (runtime !== 'javascript' && runtime !== 'typescript')
-          return await finish({ success: false, error: 'Captured REPL currently supports only stateless JavaScript and TypeScript evaluation.' });
         if (!process.versions.bun)
           return await finish({ success: false, error: 'Captured REPL requires the trusted Bun runtime. Host evaluation is unavailable as a fallback.' });
         if (args.bindings !== undefined && (args.bindings === null || typeof args.bindings !== 'object' || Array.isArray(args.bindings)))
@@ -200,10 +197,8 @@ export function createCapturedReplTool(
         const scriptName = `.goodvibes-repl-${randomUUID()}.ts`;
         const command = `bun --no-env-file ./${scriptName}`;
         const guard = await guardExecCommand(command, featureFlags, signal);
-        await check(signal);
         if (!guard.allowed) return await finish({ success: false, error: guard.denialMessage ?? 'Captured REPL command denied by policy.' });
         const availability = await probeCapturedExecAvailability();
-        await check(signal);
         if (!availability.available) return await finish({
           success: false, error: availability.message,
           output: JSON.stringify({ runtime, result: '', error: availability.message,
@@ -215,12 +210,12 @@ export function createCapturedReplTool(
         if (!bunRuntimeInput) {
           try { bunRuntimeInput = await admitRuntime(signal); }
           catch {
-            await check(signal);
             return await finish({ success: false, error: 'Captured REPL ordinary Bun runtime is unavailable, changed or access-restricted. Host evaluation is unavailable as a fallback.' });
           }
         }
-        const result = await runCapturedCommand({ ...binding, bunRuntimeInput }, command, {}, binding.root, timeoutMs, signal, 'disabled', {}, { script: { name: scriptName, content: script } });
+        // The view is proved once more just before the command runs, and again when the result is kept (finish).
         await check(signal);
+        const result = await runCapturedCommand({ ...binding, bunRuntimeInput }, command, {}, binding.root, timeoutMs, signal, 'disabled', {}, { script: { name: scriptName, content: script } });
         const error = result.timed_out ? `Captured REPL evaluation timed out after ${timeoutMs}ms.`
           : result.stderr || (!result.success && !result.denied && result.exit_code !== null
             ? `Captured REPL evaluation exited with code ${result.exit_code} and printed no error output.` : '');

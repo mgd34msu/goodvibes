@@ -1,10 +1,12 @@
 /** The actual local-turn producer shared by bootstrap and product regressions. */
-import { registerAllTools, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { registerAllTools, type QuestionInbox, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { createOwnerInboxClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { trustGatedAsk, type WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { readExecEnvScrubAllowlist } from '../input/exec-env-scrub-config.ts';
 import { createSandboxExecAsk, sandboxExecAskDepsFromRuntime } from '../permissions/sandbox-exec-gate.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
+import { createDaemonVerbCaller } from './client/operator-endpoint.ts';
 import { controlSurfacesFor } from './control-surfaces.ts';
 import type { RuntimeServices } from './services.ts';
 
@@ -22,7 +24,13 @@ export function registerTuiTurnTools(toolRegistry: ToolRegistry, services: Runti
   /** Approval for a model-requested hook change; the turn's permission manager is built after the tools, so the host binds it late. */
   readonly hookChangeGate?: NonNullable<Parameters<typeof registerAllTools>[1]>['hookChangeGate'] | undefined;
 }) {
+  // The query tool's questions go to the daemon's owner inbox; the client is built on first use.
+  let questions: QuestionInbox | undefined;
   return registerAllTools(toolRegistry, {
+    ownerQuestions: () => (questions ??= createOwnerInboxClient(createDaemonVerbCaller({
+      configManager: services.configManager,
+      homeDirectory: () => services.shellPaths.homeDirectory,
+    }))),
     controlSurfaces: controlSurfacesFor(services),
     // A keyed state file is reclaimed only once no saved conversation carries its session id.
     isSessionResumable: (sessionToken) => services.sessionManager.has(sessionToken),

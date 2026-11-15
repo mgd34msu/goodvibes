@@ -1,107 +1,56 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { type ConfigManagerLike } from '../../runtime/sandbox/manager.js';
-import { SandboxSessionRegistry } from '../../runtime/sandbox/session-registry.js';
-import { requireSurfaceRoot } from '../../runtime/surface-root.js';
-import type { Tool } from '../../types/tools.js';
+import type { Tool, ToolExecuteOptions, ToolResult } from '../../types/tools.js';
+import { runResolvedCommand, type ValidatorRunner } from '../shared/validators.js';
+import { capturedReplScript } from './captured-script.js';
+import { resolveEvalTimeoutMs } from './captured.js';
 import { REPL_TOOL_SCHEMA, type ReplToolInput } from './schema.js';
 
 /**
- * Why every eval refuses. The only sandbox backend is local host execution,
- * which runs a command directly on the host and does not isolate what it runs,
- * so evaluating arbitrary code there would be evaluating it on the host. The
- * refusal is a fixed security boundary, not a judgment.
+ * The `repl` tool of an ordinary session. It is registered only where the
+ * per-command exec sandbox is available (tools/index.ts), and each eval is one
+ * `bun -e` command through the exec tool's own path, so the sandbox plan, the
+ * containment decision and the credential scrub apply exactly as to a command
+ * the model runs with exec. Each eval is stateless; the history is this
+ * session's attempts, held in memory.
  */
-export const REPL_NO_ISOLATING_BACKEND_ERROR =
-  'REPL eval needs an isolating sandbox backend, and none is available: the only sandbox backend is local host execution (sandbox.vmBackend "local"), which does not isolate evaluated code.';
+
+/** Attempts the history keeps, newest last. */
+const HISTORY_LIMIT = 200;
+/** A snippet is one command-line argument; past this the host refuses the argument, so the tool says so first. */
+const MAX_SCRIPT_BYTES = 120_000;
 
 interface ReplHistoryEntry {
   readonly ts: number;
-  readonly runtime: 'javascript' | 'typescript' | 'python' | 'sql' | 'graphql';
+  readonly runtime: 'javascript' | 'typescript';
   readonly expression: string;
-  readonly sessionId?: string | undefined;
-  readonly backend?: string | undefined;
-  readonly launchSummary?: string | undefined;
   readonly result?: string | undefined;
   readonly error?: string | undefined;
 }
 
 export interface ReplToolOptions {
-  readonly surfaceRoot: string;
-  /** The host's project directory, where the attempt history is kept. The model never supplies it. */
-  readonly workingDirectory?: string | undefined;
+  /** The host's project directory, where evaluations run. The model never supplies it. */
+  readonly workingDirectory: string;
 }
 
-function resolveHistoryPath(workspaceRoot: string, surfaceRoot: string): string {
-  return join(workspaceRoot, '.goodvibes', surfaceRoot, 'repl-history.json');
-}
-
-/** A missing file is an empty history; a file that cannot be parsed is reported, never overwritten. */
-async function loadHistory(historyPath: string): Promise<ReplHistoryEntry[]> {
-  let raw: string;
-  try {
-    raw = await readFile(historyPath, 'utf-8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw error;
-  }
-  const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed)) throw new Error('history file is not a list');
-  return parsed as ReplHistoryEntry[];
-}
-
-async function saveHistory(historyPath: string, entries: readonly ReplHistoryEntry[]): Promise<void> {
-  await mkdir(dirname(historyPath), { recursive: true });
-  const temporary = `${historyPath}.${process.pid}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(entries, null, 2)}\n`, 'utf-8');
-  await rename(temporary, historyPath);
-}
-
-function mapRuntimeToSandboxProfile(runtime: NonNullable<ReplToolInput['runtime']>) {
-  switch (runtime) {
-    case 'javascript': return 'eval-js' as const;
-    case 'typescript': return 'eval-ts' as const;
-    case 'python': return 'eval-py' as const;
-    case 'sql': return 'eval-sql' as const;
-    case 'graphql': return 'eval-graphql' as const;
-  }
-}
-
-export function createReplTool(
-  configManager: ConfigManagerLike,
-  sandboxSessionRegistry: SandboxSessionRegistry,
-  options: ReplToolOptions,
-): Tool {
-  const surfaceRoot = requireSurfaceRoot(options.surfaceRoot, 'ReplTool surfaceRoot');
+export function createReplTool(runner: ValidatorRunner, options: ReplToolOptions): Tool {
+  const history: ReplHistoryEntry[] = [];
+  const remember = (entry: ReplHistoryEntry): void => {
+    history.push(entry);
+    if (history.length > HISTORY_LIMIT) history.splice(0, history.length - HISTORY_LIMIT);
+  };
   return {
     definition: {
       name: 'repl',
       description: REPL_TOOL_SCHEMA.description,
       parameters: REPL_TOOL_SCHEMA.parameters,
-      sideEffects: ['exec', 'state', 'write_fs'],
+      sideEffects: ['exec', 'read_fs', 'write_fs'],
       concurrency: 'serial',
     },
 
-    async execute(args: Record<string, unknown>) {
+    async execute(args: Record<string, unknown>, executeOptions?: ToolExecuteOptions): Promise<Omit<ToolResult, 'callId'>> {
       if (!args || typeof args !== 'object' || typeof args.mode !== 'string') {
         return { success: false, error: 'Invalid args: mode is required.' };
       }
       const input = args as unknown as ReplToolInput;
-      const workingDirectory = options.workingDirectory;
-      if (input.mode === 'eval' && input.expression && !workingDirectory) {
-        // Without a project directory nothing can be recorded, and the real reason is the missing backend.
-        return { success: false, error: REPL_NO_ISOLATING_BACKEND_ERROR };
-      }
-      if (!workingDirectory) {
-        return { success: false, error: 'repl history is unavailable: this host did not give the tool a project directory to keep it in.' };
-      }
-      const historyPath = resolveHistoryPath(workingDirectory, surfaceRoot);
-      let history: ReplHistoryEntry[];
-      try {
-        history = await loadHistory(historyPath);
-      } catch (error) {
-        return { success: false, error: `repl history file ${historyPath} cannot be read (${error instanceof Error ? error.message : String(error)}). Move or delete it to start a new history.` };
-      }
 
       if (input.mode === 'history') {
         const offset = input.offset ?? 0;
@@ -113,28 +62,37 @@ export function createReplTool(
           ...(offset > 0 || page.length < history.length ? { offset, returned: page.length, has_more: offset + page.length < history.length } : {}),
         }) };
       }
-
-      if (!input.expression) return { success: false, error: 'eval requires expression.' };
+      if (input.mode !== 'eval') return { success: false, error: `Unknown mode: ${String(input.mode)}. Use eval or history.` };
+      if (typeof input.expression !== 'string' || input.expression.length === 0) return { success: false, error: 'eval requires expression.' };
       const runtime = input.runtime ?? 'javascript';
-      const existingSessions = new Set(sandboxSessionRegistry.list().map((session) => session.id));
-      const sandboxSession = await sandboxSessionRegistry.start(
-        mapRuntimeToSandboxProfile(runtime),
-        `repl:${runtime}`,
-        configManager,
-      );
-      // Nothing runs in the session, so one this eval started is stopped again;
-      // a shared session that was already running belongs to someone else.
-      if (!existingSessions.has(sandboxSession.id)) sandboxSessionRegistry.stop(sandboxSession.id);
-      await saveHistory(historyPath, [...history, {
-        ts: Date.now(),
-        runtime,
-        expression: input.expression,
-        sessionId: sandboxSession.id,
-        backend: sandboxSession.resolvedBackend ?? sandboxSession.backend,
-        launchSummary: sandboxSession.launchPlan?.summary,
-        error: REPL_NO_ISOLATING_BACKEND_ERROR,
-      }]);
-      return { success: false, error: REPL_NO_ISOLATING_BACKEND_ERROR };
+      if (runtime !== 'javascript' && runtime !== 'typescript') {
+        return { success: false, error: `runtime ${String(runtime)} is not available; repl evaluates javascript and typescript.` };
+      }
+      if (input.bindings !== undefined && (input.bindings === null || typeof input.bindings !== 'object' || Array.isArray(input.bindings))) {
+        return { success: false, error: 'bindings must be an object of JSON values.' };
+      }
+      const timeoutMs = resolveEvalTimeoutMs(input.timeout_ms);
+      if (timeoutMs === undefined) return { success: false, error: 'timeout_ms must be a nonnegative integer.' };
+      const script = await capturedReplScript(input.expression, JSON.stringify(input.bindings ?? {}));
+      if (Buffer.byteLength(script) > MAX_SCRIPT_BYTES) {
+        return { success: false, error: `The snippet is too long to evaluate here (over ${MAX_SCRIPT_BYTES} bytes). Write it to a file and run it with exec.` };
+      }
+      const signal = executeOptions?.signal;
+      const command = ['bun', '--no-env-file', '-e', script];
+      const result = await runResolvedCommand(runner, command, options.workingDirectory, {
+        assertCurrent: () => signal?.throwIfAborted(),
+        ...(signal ? { signal } : {}),
+        timeoutMs,
+      });
+      if (signal?.aborted) return { success: false, error: 'repl evaluation was cancelled.', cancelled: true };
+      const error = result.passed ? undefined
+        : (result.stderr.replace(/^Validator 'test'/, 'The evaluation').trim() || `The evaluation exited with code ${result.exitCode} and printed no error output.`);
+      remember({ ts: Date.now(), runtime, expression: input.expression, ...(result.stdout ? { result: result.stdout } : {}), ...(error ? { error } : {}) });
+      return {
+        success: result.passed,
+        ...(error ? { error } : {}),
+        output: JSON.stringify({ runtime, result: result.stdout, ...(error ? { error } : {}), stateless: true }),
+      };
     },
   };
 }

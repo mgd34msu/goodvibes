@@ -2,7 +2,7 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
-  assertContractInputAuthority, contractInputAuthoritySourceRoot, registerContractInputReadAssertion,
+  assertContractInputAuthority, contractInputAuthoritySourceRoot,
   type ContractInputAuthority,
 } from '../../contract/input-authority.js';
 import { CONTRACT_INPUT_EXCLUSIONS } from '../../contract/input-snapshot.js';
@@ -86,9 +86,12 @@ export async function admitCapturedRegistryContext(
     await checkAuthority(signal);
     checkPath(path);
   };
+  // The owner's view is proved at the start and end of a call: one authority
+  // check each, and an lstat of every file the call used. Read access was asked
+  // when each file was read and is not asked again.
   const checkUsed = async (signal?: AbortSignal): Promise<void> => {
     await checkAuthority(signal);
-    for (const path of used) await checkRead(path, signal);
+    for (const path of used) checkPath(path);
   };
   const visit = async (path: string, depth: number): Promise<void> => {
     if (!inScope(path)) { withheld.add(path); return; }
@@ -115,46 +118,56 @@ export async function admitCapturedRegistryContext(
   const token = Object.freeze({ kind: 'captured-registry-context' as const });
   const admission: Admission = {
     authority: binding.authority, workingDirectory, homeDirectory,
-    source: (signal) => ({
-      signal: binding.signal && signal ? AbortSignal.any([binding.signal, signal]) : (binding.signal ?? signal),
-      exists: async (raw) => { await checkAuthority(signal); return files.has(resolve(raw)) || directories.has(resolve(raw)); },
-      includeExists: async (raw) => {
-        await checkAuthority(signal);
-        const path = resolve(raw);
-        if (!inScope(path) || [...withheld].some((blocked) => contained(blocked, path)))
-          throw new Error('registry include was not admitted; content is withheld');
-        return files.has(path) || directories.has(path);
-      },
-      list: async (raw) => {
-        const path = resolve(raw);
-        used.add(path);
-        await checkRead(path, signal);
-        const entries = directories.get(path);
-        if (!entries) throw new Error('registry directory was not admitted');
-        return entries;
-      },
-      read: async (raw) => {
-        const path = resolve(raw);
-        const file = files.get(path);
-        if (!file) throw new Error('registry file was not admitted');
-        used.add(path);
-        await checkRead(path, signal);
-        const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-        let data: string;
-        try {
-          if (fingerprint(fstatSync(fd, { bigint: true })) !== file.fingerprint) throw new Error('registry source changed during read');
-          data = readFileSync(fd, 'utf8');
-          if (fingerprint(fstatSync(fd, { bigint: true })) !== file.fingerprint) throw new Error('registry source changed during read');
-        } finally { closeSync(fd); }
-        await checkRead(path, signal);
-        return data;
-      },
-      assertCurrent: () => checkUsed(signal),
-    }),
+    source: (signal) => {
+      // Inside one call the authority was proved when the call began (assertCurrent);
+      // each read checks its own path and access, and the call ends with assertCurrent again.
+      const allowed = new Set<string>();
+      const readOnce = async (path: string): Promise<void> => {
+        signal?.throwIfAborted();
+        checkPath(path);
+        if (!allowed.has(path)) {
+          if (!await filter(path)) throw new Error('registry source is access-restricted');
+          allowed.add(path);
+        }
+      };
+      return {
+        signal: binding.signal && signal ? AbortSignal.any([binding.signal, signal]) : (binding.signal ?? signal),
+        exists: async (raw) => { signal?.throwIfAborted(); return files.has(resolve(raw)) || directories.has(resolve(raw)); },
+        includeExists: async (raw) => {
+          signal?.throwIfAborted();
+          const path = resolve(raw);
+          if (!inScope(path) || [...withheld].some((blocked) => contained(blocked, path)))
+            throw new Error('registry include was not admitted; content is withheld');
+          return files.has(path) || directories.has(path);
+        },
+        list: async (raw) => {
+          const path = resolve(raw);
+          used.add(path);
+          await readOnce(path);
+          const entries = directories.get(path);
+          if (!entries) throw new Error('registry directory was not admitted');
+          return entries;
+        },
+        read: async (raw) => {
+          const path = resolve(raw);
+          const file = files.get(path);
+          if (!file) throw new Error('registry file was not admitted');
+          used.add(path);
+          await readOnce(path);
+          const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+          let data: string;
+          try {
+            if (fingerprint(fstatSync(fd, { bigint: true })) !== file.fingerprint) throw new Error('registry source changed during read');
+            data = readFileSync(fd, 'utf8');
+            if (fingerprint(fstatSync(fd, { bigint: true })) !== file.fingerprint) throw new Error('registry source changed during read');
+          } finally { closeSync(fd); }
+          return data;
+        },
+        assertCurrent: () => checkUsed(signal),
+      };
+    },
   };
   admissions.set(token, Object.freeze(admission));
-  // Cached registry-derived messages are checked before every later model request.
-  registerContractInputReadAssertion(binding.authority, () => checkUsed());
   return token;
 }
 

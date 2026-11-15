@@ -18,7 +18,7 @@ export const REGISTRY_TOOL_SCHEMA = {
     },
     query: {
       type: 'string',
-      description: '(mode: search) Search words; each item is judged against them by its name and description, and matching items are returned best first.',
+      description: '(mode: search) Search words, matched against each item\'s name and description; matching items are returned best first. An exact name is returned at once; otherwise the top few matches are ordered in one ranking step.',
     },
     type: {
       type: 'string',

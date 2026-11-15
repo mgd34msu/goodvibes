@@ -161,7 +161,7 @@ async function rankAgainst(
   query: string,
   source: RegistryToolSource,
 ): Promise<RegistryRanking> {
-  source.signal?.throwIfAborted(); await source.assertCurrent();
+  source.signal?.throwIfAborted();
   const wanted = query.trim().toLocaleLowerCase();
   const exact = items.filter(item => item.name.toLocaleLowerCase() === wanted || registryId(item).toLocaleLowerCase() === wanted);
   if (exact.length > 0) {
@@ -197,7 +197,7 @@ async function rankDecisionAgainst(
     logger.debug('registry: ranking reading failed; returning the literal-match order', { error: summarizeError(error) });
     return { ...ranking, note: 'Ordered by literal word match: the ranking reading did not complete.' };
   }
-  await source.assertCurrent(); owner.assertCurrent();
+  source.signal?.throwIfAborted(); owner.assertCurrent();
   const fitting = ranked.filter(entry => entry.reading.outcome === 'act' && entry.reading.verdict === 'yes').map(entry => byId.get(entry.id)!);
   const refused = new Set(ranked.filter(entry => entry.reading.outcome === 'act' && entry.reading.verdict === 'no').map(entry => byId.get(entry.id)!));
   const placed = new Set(fitting);

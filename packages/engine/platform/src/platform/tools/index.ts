@@ -211,6 +211,7 @@ export { repairToolCall } from './auto-repair.js';
 export { createMcpTool } from './mcp/index.js';
 export { createPacketTool } from './packet/index.js';
 export { createQueryTool } from './query/index.js';
+export type { QuestionInbox } from './query/index.js';
 export { createRegistryTool } from './registry-tool/index.js';
 export { createRemoteTool } from './remote-trigger/index.js';
 export { createReplTool } from './repl/index.js';
@@ -344,6 +345,12 @@ export function registerAllTools(
     capturedReadAccess?: import('./shared/read-access.js').ReadAccessFilter | undefined;
     capturedExec?: import('./exec/captured-exec.js').CapturedExecAuthority | undefined;
     capturedReplHistory?: import('./repl/captured.js').CapturedReplHistory | undefined;
+    /**
+     * The owner inbox the `query` tool leaves questions in (in process in the
+     * daemon, or the inbox.* client in a terminal app). Absent: no query tool,
+     * since a question nobody can see is not a question.
+     */
+    ownerQuestions?: import('./query/index.js').QuestionInbox | (() => import('./query/index.js').QuestionInbox) | undefined;
     capturedRegistry?: import('./registry-tool/captured-source.js').CapturedRegistryContext | undefined;
     /**
      * Settable holder for the context_accounting tool's session source. The tool
@@ -715,18 +722,19 @@ export function registerAllTools(
     registerTool(createMcpTool(mcpRegistry));
   }
   registerTool(createPacketTool({ workingDirectory, surfaceRoot: deps.surfaceRoot }));
-  registerTool(createQueryTool({ workingDirectory, surfaceRoot: deps.surfaceRoot }));
+  if (deps.ownerQuestions) {
+    registerTool(createQueryTool({ inbox: deps.ownerQuestions, ...(deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}) }));
+  }
   if (remoteRunnerRegistry) {
     registerTool(createRemoteTool(remoteRunnerRegistry, { importRoot: workingDirectory }));
   }
-  registerTool(
-    deps.capturedExec
-      ? createCapturedReplTool(deps.capturedExec, deps.featureFlags, deps.capturedReplHistory)
-      : createReplTool(deps.configManager, deps.sandboxSessionRegistry, {
-          surfaceRoot: deps.surfaceRoot,
-          workingDirectory,
-        }),
-  );
+  // An ordinary session evaluates through exec's path, so repl is offered only
+  // where that path is contained: the per-command sandbox is on and this host has it.
+  if (deps.capturedExec) {
+    registerTool(createCapturedReplTool(deps.capturedExec, deps.featureFlags, deps.capturedReplHistory));
+  } else if (execSandbox?.availability.available) {
+    registerTool(createReplTool(validatorRunner, { workingDirectory }));
+  }
   // A composition that supplies no lists (hosted, daemon) has no command surface; the tool says so instead of an empty list.
   registerTool(createControlTool(deps.controlSurfaces ?? {}));
   registerTool(createChannelTool(channelRegistry));

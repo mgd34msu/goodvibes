@@ -42,3 +42,29 @@ export function declaredTestRunner(manifest: Record<string, unknown>): string | 
   };
   return read('test');
 }
+
+export type DeclaredPackageManager = 'npm' | 'bun' | 'yarn' | 'pnpm';
+
+/** Lockfiles and the one package manager that writes each. */
+export const PACKAGE_MANAGER_LOCKFILES: ReadonlyArray<readonly [file: string, manager: DeclaredPackageManager]> = [
+  ['bun.lockb', 'bun'],
+  ['bun.lock', 'bun'],
+  ['yarn.lock', 'yarn'],
+  ['pnpm-lock.yaml', 'pnpm'],
+  ['package-lock.json', 'npm'],
+];
+
+export const isDeclaredPackageManager = (value: string): value is DeclaredPackageManager =>
+  value === 'npm' || value === 'bun' || value === 'yarn' || value === 'pnpm';
+
+/**
+ * The package manager a project declares: the package.json `packageManager`
+ * field (corepack), else the only manager among the lockfiles present.
+ * Undefined when the facts leave it open (none, or several lockfiles).
+ */
+export function declaredPackageManager(manifest: Record<string, unknown>, lockfilesPresent: readonly string[]): DeclaredPackageManager | undefined {
+  const field = typeof manifest.packageManager === 'string' ? manifest.packageManager.split('@')[0] : undefined;
+  if (field !== undefined && isDeclaredPackageManager(field)) return field;
+  const managers = [...new Set(PACKAGE_MANAGER_LOCKFILES.filter(([file]) => lockfilesPresent.includes(file)).map(([, manager]) => manager))];
+  return managers.length === 1 ? managers[0] : undefined;
+}

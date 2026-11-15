@@ -641,6 +641,8 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   // Retained now that the graph has a shutdown seam: a subscription that
   // outlives the daemon fans pushes out of a torn-down graph.
   const pushSubscriptions: (() => void)[] = [pushService.attachApprovalSource(deps.approvalBroker)];
+  // A question an agent leaves the owner reaches his phone too, once, when push is on.
+  if (deps.ownerInbox) pushSubscriptions.push(pushService.attachQuestionSource(deps.ownerInbox));
 
   // Second event source: a fleet node blocked on the operator -> a 'needs-input'
   // push carrying the session/node deep link, suppressed when an operator is

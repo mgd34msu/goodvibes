@@ -8,7 +8,7 @@ import { dirname, extname, join, relative, resolve as resolvePath, sep } from 'n
 import { randomBytes } from 'node:crypto';
 import type { Tool, ToolDefinition, ToolExecuteOptions } from '../../types/tools.js';
 import { WRITE_SCHEMA, WRITE_TEXT_ENCODINGS, type WriteInput, type WriteFileInput, type WriteMode } from './schema.js';
-import { runValidators, formatValidatorFailure, type ValidatorName, type ValidatorRunner } from '../shared/validators.js';
+import { runValidators, capValidatorOutput, describeUndeclaredValidators, undeclaredValidators, type ValidatorName, type ValidatorRunner } from '../shared/validators.js';
 import { FileStateCache } from '../../state/file-cache.js';
 import { ProjectIndex } from '../../state/project-index.js';
 import { FileUndoManager } from '../../state/file-undo.js';
@@ -484,6 +484,12 @@ export function createWriteTool(options?: {
       const input = args as unknown as WriteInput;
       const verbosity = input.verbosity ?? 'count_only';
       const dryRun = input.dry_run ?? false;
+      const requestedValidators = (input.validate?.after ?? []) as ValidatorName[];
+      // A validator the project does not declare is reported before anything is written, not after.
+      if (!dryRun && requestedValidators.length > 0 && options.validatorRunner) {
+        const missing = undeclaredValidators(requestedValidators, projectRoot);
+        if (missing.length > 0) return { success: false, error: describeUndeclaredValidators(missing, projectRoot) };
+      }
 
       const results: FileWriteResult[] = [];
       const errors: string[] = [];
@@ -951,8 +957,9 @@ export function createWriteTool(options?: {
       }
 
       // Post-write validation, run after all files are written, even if partial errors occurred
-      if (!dryRun && results.length > 0 && input.validate?.after && input.validate.after.length > 0) {
-        const validatorNames = input.validate.after as ValidatorName[];
+      let validationFailed: string | undefined;
+      if (!dryRun && results.length > 0 && requestedValidators.length > 0) {
+        const validatorNames = requestedValidators;
         logger.debug('write tool: running post-write validators', { validators: validatorNames });
         try {
           const failures = await runValidators(validatorNames, projectRoot, options.validatorRunner, assertCurrent, executeOptions?.signal);
@@ -961,18 +968,14 @@ export function createWriteTool(options?: {
               validator: f.validator,
               passed: false,
               exit_code: f.exitCode,
-              stdout: f.stdout.trim(),
-              stderr: f.stderr.trim(),
-              message: formatValidatorFailure(f),
+              ...(f.stderr.trim() ? { stderr: capValidatorOutput(f.stderr) } : {}),
+              ...(f.stdout.trim() ? { stdout: capValidatorOutput(f.stdout) } : {}),
             }));
             logger.warn('write tool: post-write validators failed', {
               count: failures.length,
               validators: failures.map((f) => f.validator),
             });
-            appendWarning(
-              warnings,
-              `Post-write validation failed for validator(s): ${failures.map((f) => f.validator).join(', ')}. The ${results.length} written file(s) were kept on disk, not rolled back; fix them or restore them yourself.`,
-            );
+            validationFailed = `Post-write validation failed for validator(s): ${failures.map((f) => f.validator).join(', ')}. The ${results.length} written file(s) were kept on disk, not rolled back; fix them or restore them yourself. The output is in validation_failures.`;
           } else {
             finalOutput.validation_passed = true;
           }
@@ -980,7 +983,7 @@ export function createWriteTool(options?: {
           const validationMessage = summarizeError(validationErr);
           logger.warn('write tool: validator execution error', { error: validationMessage });
           finalOutput.validation_error = validationMessage;
-          appendWarning(warnings, `Post-write validator execution failed: ${validationMessage}`);
+          validationFailed = `Post-write validation did not complete: ${validationMessage}. The ${results.length} written file(s) were kept on disk.`;
         }
       }
 
@@ -1004,11 +1007,11 @@ export function createWriteTool(options?: {
       }
 
       return {
-        success: errors.length === 0,
+        success: errors.length === 0 && validationFailed === undefined,
         output: JSON.stringify(finalOutput),
         ...(errors.length > 0
-          ? { error: `${errors.length} of ${input.files.length} file(s) failed; ${results.length} written. First failure: ${errors[0]}` }
-          : {}),
+          ? { error: `${errors.length} of ${input.files.length} file(s) failed; ${results.length} written. First failure: ${errors[0]}${validationFailed ? ` ${validationFailed}` : ''}` }
+          : validationFailed ? { error: validationFailed } : {}),
         ...(warnings.length > 0 ? { warnings } : {}),
       };
     },

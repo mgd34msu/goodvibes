@@ -168,7 +168,7 @@ export const editSchema = {
     },
     validate: {
       type: 'object',
-      description: 'Run validators (fixed project commands) before and/or after applying edits. They run through the exec tool\'s path, under the same sandbox, containment and credential rules as an exec command; a session without one refuses validate.',
+      description: 'Run validators (the project\'s own typecheck, lint, test or build command: its package.json script through its package manager, or the Cargo/Go toolchain) before and/or after applying edits. One the project does not declare is refused before anything changes. They run through the exec tool\'s path, under the same sandbox, containment and credential rules as an exec command; a session without one refuses validate.',
       properties: {
         before: {
           type: 'array',

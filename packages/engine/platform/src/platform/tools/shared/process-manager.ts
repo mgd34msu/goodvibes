@@ -1,6 +1,7 @@
 import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { mkdtemp, open, rm, type FileHandle } from 'node:fs/promises';
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -26,8 +27,8 @@ export interface BackgroundProcess {
   /**
    * Output chunks collected so far. Appended AS THE PROCESS RUNS, not only at
    * exit, so `bg_output` on a still-running process returns what it has printed
-   * up to now. This is also what supplies the output tail an on-exit trigger
-   * payload carries.
+   * up to now. It holds the most recent output (a bounded window; see
+   * readProcessStream), which is also the tail an on-exit trigger payload carries.
    */
   stdout: string[];
   stderr: string[];
@@ -72,6 +73,54 @@ const MAX_PROCESS_SPILL_BYTES = 64 * 1024 * 1024;
 const OUTPUT_DRAIN_GRACE_MS = 500;
 const MAX_COMPLETED_PROCESSES = 100;
 const COMPLETED_PROCESS_TTL_MS = 30 * 60 * 1000;
+/** How many expired ids are remembered, so a late `bg_output` hears "finished, output discarded" rather than "unknown". */
+const MAX_EXPIRED_PROCESSES = 500;
+/** The most one ranged `bg_output` read returns. */
+const MAX_OUTPUT_READ_BYTES = MAX_PROCESS_OUTPUT_BYTES;
+
+/** A `bg_output` range: bytes from an offset, or the last N bytes. */
+interface OutputRange { readonly from?: number | undefined; readonly tail?: number | undefined }
+
+function parseOutputRange(text: string): OutputRange | string {
+  const range: { from?: number; tail?: number } = {};
+  for (const part of text.trim().split(/\s+/).filter(Boolean)) {
+    const match = /^(from|tail)=(\d+)$/.exec(part);
+    if (!match) return `bg_output takes "from=<byte>" or "tail=<bytes>", not "${part}".`;
+    range[match[1] as 'from' | 'tail'] = Number(match[2]);
+  }
+  if (range.from !== undefined && range.tail !== undefined) return 'bg_output takes from= or tail=, not both.';
+  return range;
+}
+
+/** Reads one range of a stream: from its spill file when it has one, else from the in-memory window (which is then the whole stream). */
+function readOutputRange(window: readonly string[], spillPath: string | undefined, range: OutputRange): string {
+  let total: number;
+  let read: (start: number, length: number) => string;
+  let fd: number | undefined;
+  if (spillPath) {
+    fd = openSync(spillPath, 'r');
+    total = fstatSync(fd).size;
+    read = (start, length) => {
+      const buffer = Buffer.alloc(length);
+      let got = 0;
+      while (got < length) { const n = readSync(fd!, buffer, got, length - got, start + got); if (n === 0) break; got += n; }
+      return buffer.subarray(0, got).toString('utf-8');
+    };
+  } else {
+    const whole = Buffer.from(window.join(''), 'utf-8');
+    total = whole.length;
+    read = (start, length) => whole.subarray(start, start + length).toString('utf-8');
+  }
+  try {
+    const start = range.tail !== undefined ? Math.max(0, total - Math.min(range.tail, MAX_OUTPUT_READ_BYTES)) : Math.min(range.from ?? 0, total);
+    const length = Math.min(total - start, range.tail !== undefined ? Math.min(range.tail, MAX_OUTPUT_READ_BYTES) : MAX_OUTPUT_READ_BYTES);
+    const text = read(start, length);
+    const end = start + length;
+    return `[goodvibes: bytes ${start}-${end} of ${total} saved${end < total ? `; continue with from=${end}` : ''}]\n${text}`;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
 
 /** An admission check cannot promise to authorize a process after it exists. */
 function assertSynchronousAdmission(check: (() => void) | undefined, operation = 'admission'): void {
@@ -199,6 +248,10 @@ export class ProcessManager {
   private readonly _inputs = new Map<string, ManagedProcessInput>();
   /** Private spill directories a large output was written to, removed with the record. */
   private readonly _spills = new Map<string, string[]>();
+  /** The spill file of each stream that outgrew its in-memory window; read only by `bg_output` ranges. */
+  private readonly _spillFiles = new Map<string, { stdout?: string; stderr?: string }>();
+  /** Ids whose records expired, with when the process finished. */
+  private readonly _expired = new Map<string, number>();
   private readonly _launches = new Set<Promise<BgCommandResult>>();
   private _closed = false;
   private _closing: Promise<void> | undefined;
@@ -431,8 +484,10 @@ export class ProcessManager {
     const spills: string[] = [];
     this._spills.set(id, spills);
     const streams = Promise.allSettled([
-      readProcessStream(proc.stdout as ReadableStream<Uint8Array>, entry.stdout, drain.signal, publishOutput('stdout'), spills),
-      readProcessStream(proc.stderr as ReadableStream<Uint8Array>, entry.stderr, drain.signal, publishOutput('stderr'), spills),
+      readProcessStream(proc.stdout as ReadableStream<Uint8Array>, entry.stdout, drain.signal, publishOutput('stdout'), spills, undefined,
+        (path) => { this._spillFiles.set(id, { ...this._spillFiles.get(id), stdout: path }); }),
+      readProcessStream(proc.stderr as ReadableStream<Uint8Array>, entry.stderr, drain.signal, publishOutput('stderr'), spills, undefined,
+        (path) => { this._spillFiles.set(id, { ...this._spillFiles.get(id), stderr: path }); }),
     ]).then((results) => {
       for (const result of results) if (result.status === 'rejected') {
         logger.debug('Background process output collection ended early', {
@@ -833,7 +888,7 @@ export class ProcessManager {
    */
   handleCommand(cmd: string): BgCommandResult | null {
     this.pruneCompletedProcesses();
-    const boundaryMatch = cmd.match(/^bg_(?:status|output|stop)\s+(\S+)$/);
+    const boundaryMatch = cmd.match(/^bg_(?:status|output|stop)\s+(\S+)(?:\s.*)?$/);
     if (boundaryMatch && this._boundaryExecutions.has(boundaryMatch[1]!))
       return { cmd, exit_code: 1, stdout: '', stderr: 'This process requires its captured execution authority', success: false };
     // bg_status <id>
@@ -841,7 +896,7 @@ export class ProcessManager {
     if (statusMatch) {
       const entry = this._processes.get(statusMatch[1]!);
       if (!entry) {
-        return { cmd, exit_code: 1, stdout: '', stderr: `Unknown process: ${statusMatch[1]!}`, success: false };
+        return { cmd, exit_code: 1, stdout: '', stderr: this.unknownProcess(statusMatch[1]!), success: false };
       }
       const status = describeProcessStatus(entry);
       return {
@@ -862,20 +917,30 @@ export class ProcessManager {
       };
     }
 
-    // bg_output <id>
-    const outputMatch = cmd.match(/^bg_output\s+(\S+)$/);
+    // bg_output <id> [from=<byte> | tail=<bytes>]
+    const outputMatch = cmd.match(/^bg_output\s+(\S+)((?:\s+\S+)*)\s*$/);
     if (outputMatch) {
       const entry = this._processes.get(outputMatch[1]!);
       if (!entry) {
-        return { cmd, exit_code: 1, stdout: '', stderr: `Unknown process: ${outputMatch[1]!}`, success: false };
+        return { cmd, exit_code: 1, stdout: '', stderr: this.unknownProcess(outputMatch[1]!), success: false };
       }
-      return {
-        cmd,
-        exit_code: 0,
-        stdout: entry.stdout.join(''),
-        stderr: entry.stderr.join(''),
-        success: true,
-      };
+      const range = parseOutputRange(outputMatch[2] ?? '');
+      if (typeof range === 'string') return { cmd, exit_code: 1, stdout: '', stderr: range, success: false };
+      if (range.from === undefined && range.tail === undefined) {
+        return { cmd, exit_code: 0, stdout: entry.stdout.join(''), stderr: entry.stderr.join(''), success: true };
+      }
+      const files = this._spillFiles.get(entry.id);
+      try {
+        return {
+          cmd,
+          exit_code: 0,
+          stdout: readOutputRange(entry.stdout, files?.stdout, range),
+          stderr: readOutputRange(entry.stderr, files?.stderr, range),
+          success: true,
+        };
+      } catch (error) {
+        return { cmd, exit_code: 1, stdout: '', stderr: `The saved output of ${entry.id} could not be read (${summarizeError(error)}); "bg_output ${entry.id}" shows the most recent output.`, success: false };
+      }
     }
 
     // bg_stop <id>
@@ -883,7 +948,7 @@ export class ProcessManager {
     if (stopMatch) {
       const found = this.stop(stopMatch[1]!);
       if (!found) {
-        return { cmd, exit_code: 1, stdout: '', stderr: `Unknown process: ${stopMatch[1]!}`, success: false };
+        return { cmd, exit_code: 1, stdout: '', stderr: this.unknownProcess(stopMatch[1]!), success: false };
       }
       return { cmd, exit_code: 0, stdout: `Stop requested for ${stopMatch[1]!}; its termination was signalled and has not been confirmed.`, stderr: '', success: true };
     }
@@ -907,14 +972,25 @@ export class ProcessManager {
       this._processes.delete(entry.id);
       this._inputs.delete(entry.id);
       this._boundaryExecutions.delete(entry.id);
+      this._expired.set(entry.id, completedAt);
+      if (this._expired.size > MAX_EXPIRED_PROCESSES) this._expired.delete(this._expired.keys().next().value!);
       void this.releaseSpills(entry.id);
     }
+  }
+
+  /** An id with no record: one that expired says when it finished and that its output is gone. */
+  private unknownProcess(id: string): string {
+    const completedAt = this._expired.get(id);
+    if (completedAt === undefined) return `Unknown process: ${id}. List the current ones with "bg_list".`;
+    return `Process ${id} finished at ${new Date(completedAt).toISOString()}; its record and output were discarded `
+      + `(finished processes are kept for ${COMPLETED_PROCESS_TTL_MS / 60_000} minutes, at most ${MAX_COMPLETED_PROCESSES} of them). Run the command again to see its output.`;
   }
 
   /** Once its record is gone nothing can name the spill file again, so it is removed. */
   private async releaseSpills(id: string): Promise<void> {
     const directories = this._spills.get(id);
     this._spills.delete(id);
+    this._spillFiles.delete(id);
     await Promise.all((directories ?? []).map((directory) => rm(directory, { recursive: true, force: true }).catch((error: unknown) => {
       logger.debug('Background output spill directory could not be removed', { processId: id, error: summarizeError(error) });
     })));
@@ -956,19 +1032,15 @@ function killTrackedProcess(proc: ReturnType<typeof Bun.spawn>, signal: Paramete
 }
 
 /**
- * Drains a child stream into `sink` as chunks arrive.
+ * Drains a child stream into `sink` as chunks arrive, so `bg_output` on a
+ * running process and an on-exit trigger's tail see what it printed up to now.
  *
- * The defect this replaces: the previous implementation accumulated the whole
- * stream into a local string and returned it only when the stream closed, and
- * the caller pushed that single string into `entry.stdout` after `proc.exited`
- * resolved. Until the process ended, `entry.stdout` was empty, so `bg_output`
- * on a running process reported nothing, which is exactly the case a person
- * runs it in. Pushing each decoded chunk into the live array as it is read
- * makes `bg_output` reflect the process's output up to that moment, and gives
- * an on-exit trigger a real output tail to put in its payload.
- *
- * Large streams spill to a private local file. The bounded in-memory preview
- * names that file; subsequent output is retained there with backpressure.
+ * `sink` holds the most recent `previewBytes` of the stream: once the stream
+ * is longer, the oldest chunks are dropped from the front and `sink[0]` is a
+ * one-line note saying how much was left out and how to read it. The complete
+ * stream is kept in a private spill file (up to `spillBytes`), which only the
+ * process manager reads, for `bg_output <id> from=` and `tail=`; the spill
+ * path is reported through `onSpillFile`, never shown to the model.
  */
 export async function readProcessStream(
   stream: ReadableStream<Uint8Array>,
@@ -977,6 +1049,7 @@ export async function readProcessStream(
   onChunk?: (chunk: string) => void,
   spillDirectories?: string[],
   limits: { readonly previewBytes: number; readonly spillBytes: number } = { previewBytes: MAX_PROCESS_OUTPUT_BYTES, spillBytes: MAX_PROCESS_SPILL_BYTES },
+  onSpillFile?: (path: string) => void,
 ): Promise<void> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -984,15 +1057,37 @@ export async function readProcessStream(
   let spill: FileHandle | undefined;
   let spilled = 0;
   let spillFull = false;
-  // Writes up to the spill cap, then records once that the rest is discarded.
+  // The recent-output window: `held` bytes in sink chunks after the note, `dropped` bytes shifted out.
+  let held = 0;
+  let dropped = 0;
+  const limitNote = (): string => (spillFull ? ` [goodvibes: output limit of ${limits.spillBytes} bytes reached; later output was not saved]` : '');
+  const note = (): string => `[goodvibes: ${dropped} earlier bytes are not shown here; this is the most recent output.`
+    + ' Read the saved output with "bg_output <id> from=<byte>" or "bg_output <id> tail=<bytes>".]' + limitNote() + '\n';
+  const keep = (text: string): void => {
+    if (text.length === 0) return;
+    sink.push(text);
+    held += Buffer.byteLength(text);
+    while (held > limits.previewBytes) {
+      const first = dropped > 0 ? 1 : 0;
+      // The newest chunk always stays, whatever its size.
+      if (sink.length - first <= 1) break;
+      const oldest = sink.splice(first, 1)[0]!;
+      const bytes = Buffer.byteLength(oldest);
+      held -= bytes;
+      if (dropped === 0) sink.unshift('');
+      dropped += bytes;
+    }
+    if (dropped > 0) sink[0] = note();
+  };
+  // Writes up to the spill cap, then stops keeping a copy; the window still shows the latest output.
   const writeSpill = async (text: string): Promise<void> => {
     if (!spill || spillFull || text.length === 0) return;
     const bytes = Buffer.byteLength(text);
     if (spilled + bytes > limits.spillBytes) {
       spillFull = true;
-      const note = `\n[goodvibes: output limit of ${limits.spillBytes} bytes reached; later output was discarded]\n`;
-      await spill.writeFile(note);
-      sink.push(note);
+      await spill.writeFile(`\n[goodvibes: output limit of ${limits.spillBytes} bytes reached; later output was not saved]\n`);
+      if (dropped > 0) sink[0] = note();
+      else sink.push(`${limitNote().trim()}\n`);
       return;
     }
     spilled += bytes;
@@ -1020,17 +1115,18 @@ export async function readProcessStream(
         spillDirectories?.push(directory);
         const path = join(directory, 'output.log');
         spill = await open(path, 'wx', 0o600);
+        onSpillFile?.(path);
+        // Nothing has been dropped yet, so the window is the whole stream so far.
         await writeSpill(sink.join(''));
-        sink.push(`\n[goodvibes: complete output continues in ${path}]\n`);
       }
       if (spill) await writeSpill(decoded);
-      else if (decoded.length > 0) sink.push(decoded);
+      keep(decoded);
       total += value.byteLength;
       if (decoded.length > 0) onChunk?.(decoded);
     }
     const tail = decoder.decode();
     if (spill) await writeSpill(tail);
-    else if (tail.length > 0) sink.push(tail);
+    keep(tail);
     if (tail.length > 0) onChunk?.(tail);
   } finally {
     try { await spill?.close(); }

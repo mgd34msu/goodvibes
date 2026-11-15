@@ -26,7 +26,7 @@ The tool registry is part of the main runtime and is shared across the TUI, agen
 | `write` | Atomic writes, overwrite modes, and auto-heal pipelines |
 | `edit` | Structural code edits with validation and rollback |
 | `find` | Files, content, symbols, references, and structural search |
-| `repo_map` | A ranked map of the repository's source files and their exports, with an optional token budget |
+| `repo_map` | A ranked map of the repository's source files and their exports, within a default token budget that says what it left out |
 
 ### Execution and analysis
 
@@ -43,7 +43,8 @@ The tool registry is part of the main runtime and is shared across the TUI, agen
 | `fetch` | HTTP retrieval and extraction |
 | `web_search` | Provider-backed search and evidence shaping |
 | `packet` | Compact knowledge/context packets |
-| `query` and `repl` | Bounded query/eval work |
+| `query` | Leave the owner a question and carry on; read his answer later |
+| `repl` | Evaluate a JavaScript or TypeScript snippet inside the command sandbox |
 
 ### Coordination and product control
 
@@ -61,14 +62,11 @@ Deeper detail on the built-in tool families introduced above.
 
 ### REPL and eval runtimes
 
-The `repl` tool provides bounded, live evaluation backed by the sandbox/session layer:
+The `repl` tool evaluates one JavaScript or TypeScript snippet with Bun and returns its printed value and console output. Each evaluation is one command through the same path as `exec`, so the command sandbox, its containment and the credential scrub apply to it unchanged. It is offered only where that path is contained: the per-command sandbox is on (`sandbox.enabled` and the `exec-sandbox` feature) and the host has bubblewrap. Elsewhere the tool is not in the model's tool list.
 
-- JavaScript and TypeScript evaluate inside the sandbox exec path
-- Python runs in an ephemeral virtualenv
-- SQL evaluates against an ephemeral in-memory SQLite database
-- GraphQL provides bounded GraphQL expression analysis/normalization through the REPL path, not a live GraphQL server
-
-REPL history persists to `.goodvibes/tui/repl-history.json`.
+- Each evaluation is stateless: no variables carry over between calls; `bindings` passes JSON values in as globals
+- `timeout_ms` bounds an evaluation (default 120000; 0 waits for it to finish or be cancelled)
+- `history` lists this session's evaluations; it is kept in memory, not written to disk
 
 ### read
 
@@ -90,6 +88,7 @@ Write files with atomic operations, backup modes, and auto-heal.
 - Diagnostics after a write or edit: syntax errors from the built-in parser, plus type errors from a language server that is already running for the file's language
 - Base64 content support for files with special characters
 - Batch writes in a single call with per-file mode control
+- `validate.after` (`typecheck`, `lint`, `test`, `build`) runs the project's own command for each check: its `package.json` script (`typecheck`, `lint`, `test`, `build`) through the project's package manager (from the `packageManager` field or its one lockfile, npm otherwise), or the Cargo or Go toolchain's own command. A check the project does not declare is refused before anything is written. A failed check makes the call unsuccessful; the written files stay on disk, and each check's output is returned once, its last 8000 characters per stream. `edit` takes the same `validate.before` and `validate.after`
 
 ### edit
 
@@ -120,8 +119,9 @@ Multi-mode search across files, content, symbols, references, and structural AST
 A model-invoked orientation tool, not passive always-on context injection. It returns a map of the repository: a per-directory source-file count plus the source files, ranked by import-graph centrality with file size as a tie-break, each with its top-level exported symbols. Call it to get oriented in an unfamiliar codebase before reading individual files.
 
 - Optional `path` argument scopes the map to a subdirectory; default is the whole project
-- Optional `budgetTokens` argument sets an approximate token budget for the symbol detail; omit it or pass 0 to list every indexed source file with its exports, which can be large on a big repository. Any positive value is used as given and the map stops at that size, naming how many files were omitted
-- Optional `detail` argument: `symbols` (default) is the ranked import graph with exported symbols; `structure` lists every source path grouped by directory without reading source bodies, for a first look at a large repository
+- Optional `budgetTokens` argument sets an approximate token budget for the symbol detail; the default is 25000 tokens. The map stops at that size and says how many files it left out and how to see them (a `path`, a larger budget, or `structure`). Pass 0 to list every indexed source file with its exports, which can be large on a big repository
+- Optional `detail` argument: `symbols` (default) is the ranked import graph with exported symbols; `structure` reads no source bodies and lists directories with their source-file counts, plus every file name when a `path` is given or the project has at most 400 source files
+- The import graph is built once per project and reused until files change; a second call does not rescan the tree
 - Files the owner has denied reads for keep their path but are flagged `[access-restricted]` with their symbols withheld; files that could not be read are flagged `[unreadable]`, and what the scan skipped is listed under "Discovery warnings"
 - Read-only, safe to run in parallel with other tool calls
 - Covers TypeScript and JavaScript source files
@@ -130,7 +130,7 @@ A model-invoked orientation tool, not passive always-on context injection. It re
 
 Shell execution with background processes, retry, progress tracking, and file operations.
 
-- Background execution with process tracking: spawn, poll status, read output, kill
+- Background execution with process tracking: spawn, poll status, read output, kill. `bg_output <id>` shows the most recent 256 KB of a process's output; for a chattier process the full output is saved privately and `bg_output <id> tail=<bytes>` or `bg_output <id> from=<byte>` reads any part of it. A finished process's record is kept for 30 minutes (at most 100 of them); after that `bg_output` says when it finished and that its output was discarded
 - Retry with exponential backoff on transient failures
 - `until` pattern: watch stdout for a regex match, then stop or promote to background
 - Pre-command file operations: copy, move, delete files before running commands
@@ -221,13 +221,13 @@ Structured execution and coordination beyond a single conversation turn.
 Durable planning and note-keeping artifacts.
 
 - `packet`: keep your own notes as implementation packets / execution packets (create, revise, publish, list); they are stored in a file and are not sent to or consumed by anything else
-- `query`: keep notes on questions, answers, and closure state (stored in a file; asking does not deliver the question to an operator)
+- `query`: leave the owner a question and carry on working. `ask` posts it to the owner inbox and returns its id at once; the owner sees it in `/questions` (alias `/inbox`) in either terminal app and, when push is on, as a notification on his phone, and answers it there. `show` and `list` read the answer back in the asking session; `withdraw` takes back a question that no longer matters. A `key` makes a repeated ask return the first open question instead of posting a second one. The tool is offered where the daemon's inbox is reachable
 
 ### mcp / remote / control
 
 Product-control tools that expose runtime breadth directly. See [MCP integration](#mcp-integration) below for the connection and config model.
 
-- `mcp`: inspect MCP servers, tools, schema freshness, security posture, auth posture, and quarantine controls
+- `mcp`: call a connected server's tool (`mode: "call"` with `qualifiedName` and `input`), and inspect MCP servers, tools, schemas, schema freshness, security posture, auth posture, and quarantine controls
 - `remote`: inspect and manage distributed peers, node-host contracts, work queues, artifacts, and review flows
 - `control`: list this app's own slash commands (every visible one, with its description) and views, built-in subscription providers, and sandbox presets; a session with no command surface answers `available: false`
 
@@ -644,7 +644,7 @@ GoodVibes also reads MCP servers already configured for other tools, read-only: 
 
 A server with a `url` instead of a `command` is a remote HTTP server. Give it a `headers` object (for example `"headers": { "Authorization": "Bearer ..." }`) to send credentials on every request; the headers are never shown by the read routes, and an edit that does not resend them keeps them. Fields GoodVibes does not model are kept when it rewrites the file. A server name may not contain `:` or `/`; such an entry is skipped with a warning rather than blocking other edits. `trustMode: "allow-all"` is honoured only from the global config: in a project file it is ignored (with a warning) and the default trust mode applies, so a checked-out repository cannot grant its own servers unrestricted trust.
 
-MCP tools appear in the tool registry as `mcp:<server-name>:<tool-name>`. Tool schemas load progressively: names and descriptions at startup, full parameter schemas on first use. A stdio server that exits unexpectedly is restarted, up to three attempts with a growing delay. The attempt count resets only after the restarted server completes protocol negotiation, so a server that keeps crashing before it negotiates is given up on and left disconnected. A stdio server that starts but never answers the handshake is given up on after 30 seconds (its process is stopped), so one silent server cannot hold up the others; configured servers connect a few at a time rather than one after another. A server whose output stream closes while its process keeps running is stopped and restarted the same way as a crash. The MCP server list reports each server's phase (`starting`, `negotiating`, `ready`, `restart-wait`, `gave-up`, `closed`) and its last error, and a tool call to a server that is not connected says which of these it is in and what to do next: wait for a restart, or fix the server and run `/mcp reload`.
+MCP tools are named `mcp:<server-name>:<tool-name>`; the assistant lists them with the `mcp` tool (`mode: "tools"`) and runs one with `mode: "call"`, passing that name as `qualifiedName` and the tool's arguments as `input`. The call goes through the server's trust mode, quarantine state and permissions, and its answer is treated as untrusted content. Tool schemas load progressively: names and descriptions at startup, full parameter schemas on first use. A stdio server that exits unexpectedly is restarted, up to three attempts with a growing delay. The attempt count resets only after the restarted server completes protocol negotiation, so a server that keeps crashing before it negotiates is given up on and left disconnected. A stdio server that starts but never answers the handshake is given up on after 30 seconds (its process is stopped), so one silent server cannot hold up the others; configured servers connect a few at a time rather than one after another. A server whose output stream closes while its process keeps running is stopped and restarted the same way as a crash. The MCP server list reports each server's phase (`starting`, `negotiating`, `ready`, `restart-wait`, `gave-up`, `closed`) and its last error, and a tool call to a server that is not connected says which of these it is in and what to do next: wait for a restart, or fix the server and run `/mcp reload`.
 
 MCP tool calls respect the `permissions.tools.mcp` setting (default: `prompt`).
 

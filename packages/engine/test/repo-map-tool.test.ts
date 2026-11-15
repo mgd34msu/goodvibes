@@ -108,12 +108,12 @@ describe('repo_map execution', () => {
 });
 
 
-test('an omitted map budget includes every file and export beyond the former caps', async () => {
+test('a budget of 0 includes every file and export', async () => {
   const root = makeRepo();
   for (let file = 0; file < 80; file++) writeFileSync(join(root, `src/large-${file}.ts`),
     Array.from({ length: 30 }, (_, index) => `export const symbol_${file}_${index} = ${index};`).join('\n'));
   const tool = createRepoMapTool({ projectRoot: root });
-  const result = await tool.execute({});
+  const result = await tool.execute({ budgetTokens: 0 });
   expect(result.success).toBe(true);
   expect(estimateTokens(result.output!)).toBeGreaterThan(2_000);
   for (let file = 0; file < 80; file++) expect(result.output).toContain(`symbol_${file}_29`);

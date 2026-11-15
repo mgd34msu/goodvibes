@@ -567,7 +567,7 @@ export function listArchiveContents(
       decompressed = zlib.gunzipSync(buffer, { maxOutputLength: maxGunzipBytes });
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ERR_BUFFER_TOO_LARGE') {
-        throw new Error(`gzip file expands beyond ${humanSize(maxGunzipBytes)}; it was not decompressed.`);
+        throw new Error(`gzip file expands beyond ${humanSize(maxGunzipBytes)}; it was not decompressed. List or extract part of it with exec (for example tar -tzf or zcat | head).`);
       }
       throw err;
     }

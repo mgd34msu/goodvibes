@@ -17,7 +17,7 @@ import {
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 
-export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'postedBy' | 'revision'>;
+export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'postedBy' | 'revision' | 'subscribe'>;
 
 const LIST_STATUSES = new Set(['open', 'closed', 'all']);
 const KINDS = new Set<string>(['approval', 'question', 'claim', 'purchase', 'queued-action']);

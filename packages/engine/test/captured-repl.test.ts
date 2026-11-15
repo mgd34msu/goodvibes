@@ -7,11 +7,8 @@ import { join } from 'node:path';
 import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
 import { createContractInputAuthority, revokeContractInputAuthority } from '../platform/src/platform/contract/input-authority.js';
 import type { Contract } from '../platform/src/platform/contract/types.js';
-import { ConfigManager } from '../platform/src/platform/config/manager.js';
-import { SandboxSessionRegistry } from '../platform/src/platform/runtime/sandbox/session-registry.js';
 import { probeCapturedExecAvailability, type CapturedExecAuthority } from '../platform/src/platform/tools/exec/captured-exec.js';
 import { createCapturedReplHistory, createCapturedReplTool, disposeCapturedReplHistory, isCapturedReplTool, resolveEvalTimeoutMs } from '../platform/src/platform/tools/repl/captured.js';
-import { createReplTool } from '../platform/src/platform/tools/repl/index.js';
 import { capturedReplScript } from '../platform/src/platform/tools/repl/captured-script.js';
 import { capturedInputTool } from '../platform/src/platform/tools/shared/captured-input-tools.js';
 import { useToolReadings } from './_helpers/tool-readings.js';
@@ -212,8 +209,6 @@ test('construction binding rejects forged/copied/ordinary tools and foreign auth
   expect(calls).toBe(0);
   expect((await createCapturedReplTool({ ...f.binding, authority: { kind: 'contract-input-authority' } }).execute({ mode: 'eval', expression: '42' })).success).toBe(false);
   expect((await createCapturedReplTool({ ...f.binding, readAccessFilter: undefined }).execute({ mode: 'eval', expression: '42' })).success).toBe(false);
-  const ordinary = createReplTool(new ConfigManager({ configDir: join(f.owner, '.config') }), new SandboxSessionRegistry(f.owner), { surfaceRoot: 'agent' });
-  expect((await ordinary.execute({ mode: 'history', workspaceRoot: f.root })).success).toBe(false);
 });
 
 test('unsupported runtimes do not start evaluation or import host history', async () => {
@@ -232,9 +227,7 @@ test('unsupported runtimes do not start evaluation or import host history', asyn
     }
     const result = await f.tool.execute({ mode: 'history' });
     expect(result.success).toBe(true);
-    const entries = JSON.parse(result.output!).history;
-    expect(entries.map((entry: { runtime: string }) => entry.runtime)).toEqual(['python', 'sql', 'graphql']);
-    expect(entries.every((entry: { error: string }) => entry.error.includes('only stateless JavaScript and TypeScript'))).toBe(true);
+    expect(JSON.parse(result.output!).history).toEqual([]);
     expect(JSON.stringify(result)).not.toContain('UNRELATED_HISTORY_BYTES');
     expect(spawn).not.toHaveBeenCalled();
     expect(read.mock.calls.some(args => String(args[0]) === history)).toBe(false);

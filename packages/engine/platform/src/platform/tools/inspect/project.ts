@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'nod
 import { dirname, extname, isAbsolute, join, relative } from 'node:path';
 import { safeRead, scanRead, resolvePath, SKIPPED_DIRS } from './shared.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { declaredTestRunner } from '../../utils/project-test-runner.js';
+import { declaredTestRunner, isDeclaredPackageManager, PACKAGE_MANAGER_LOCKFILES, type DeclaredPackageManager } from '../../utils/project-test-runner.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { entryPointView, projectTooling } from '../batteries/project-tooling.js';
@@ -40,18 +40,10 @@ const MANIFESTS: ReadonlyArray<readonly [file: string, type: Exclude<ProjectInfo
   ['Makefile', 'make'],
 ];
 
-/** Lockfiles and the one package manager that writes each. */
-const LOCKFILES: ReadonlyArray<readonly [file: string, manager: Exclude<ProjectInfo['packageManager'], 'none'>]> = [
-  ['bun.lockb', 'bun'],
-  ['bun.lock', 'bun'],
-  ['yarn.lock', 'yarn'],
-  ['pnpm-lock.yaml', 'pnpm'],
-  ['package-lock.json', 'npm'],
-];
+const LOCKFILES = PACKAGE_MANAGER_LOCKFILES;
 
-type PackageManager = Exclude<ProjectInfo['packageManager'], 'none'>;
-const isPackageManager = (value: string): value is PackageManager =>
-  value === 'npm' || value === 'bun' || value === 'yarn' || value === 'pnpm';
+type PackageManager = DeclaredPackageManager;
+const isPackageManager = isDeclaredPackageManager;
 
 /** Count source files across the complete project tree. */
 function countSourceFiles(root: string): Record<string, number> {

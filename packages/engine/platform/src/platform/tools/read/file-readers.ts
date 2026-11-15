@@ -112,7 +112,7 @@ function oversizeReadError(target: ReadTarget): FileReadResult | undefined {
   if (size <= MAX_READ_FILE_BYTES) return undefined;
   return createReadErrorResult(
     target,
-    `File is ${humanSize(size)}, over the ${humanSize(MAX_READ_FILE_BYTES)} read limit, so it was not read. Search it with find or read a smaller file.`,
+    `File is ${humanSize(size)}, over the ${humanSize(MAX_READ_FILE_BYTES)} read limit, so it was not read. Search it with find (content mode), or read part of it with exec (for example head, tail or sed -n).`,
     size,
   );
 }
@@ -464,7 +464,9 @@ async function readTextFile(target: ReadTarget, context: ReadExecutionContext, f
   const tokenEstimate = Math.ceil(byteSize / 4);
   indexReadFile(context, target.resolvedPath, tokenEstimate);
 
-  const lines = rawContent.split('\n');
+  // A CRLF file's rows carry no trailing \r: the row text is the line, and
+  // recorded reads of it compare equal to the file's lines.
+  const lines = rawContent.split(/\r?\n/);
   // The element after a final newline is not a line.
   const lineCount = lines.length > 1 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length;
 

@@ -1,83 +1,62 @@
-import { mkdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import type { Tool } from '../../types/tools.js';
-import { resolveScopedDirectory } from '../../runtime/surface-root.js';
-import { defineLifecycle } from '../../utils/lifecycle-machine.js';
-import { writeFileAtomic } from '../../utils/atomic-json-store.js';
+import type {
+  NewOwnerItem,
+  OwnerAnswerOutcome,
+  OwnerInboxListFilter,
+  OwnerItem,
+  OwnerPostOutcome,
+} from '../../control-plane/owner-inbox.js';
+import { OWNER_ITEM_LIMITS } from '../../control-plane/owner-inbox.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { QUERY_TOOL_SCHEMA, type QueryToolInput } from './schema.js';
 
-interface QueryRecord {
-  readonly id: string;
-  readonly prompt: string;
-  readonly askedBy?: string | undefined;
-  readonly target?: string | undefined;
-  readonly answer?: string | undefined;
-  readonly resolution?: string | undefined;
-  readonly status: 'open' | 'answered' | 'closed';
-  readonly createdAt: number;
-  readonly updatedAt: number;
+/**
+ * Where the `query` tool leaves its questions: the owner inbox (the daemon's
+ * one list), in process inside the daemon or over the `inbox.*` verbs from a
+ * terminal app. The inbox keeps the record, shows it on every surface, pushes
+ * it to the owner's phone when push is on, and keeps the first answer.
+ */
+export interface QuestionInbox {
+  post(item: NewOwnerItem & { readonly kind: 'question' }): Promise<OwnerPostOutcome>;
+  find(id: string): Promise<OwnerItem | undefined>;
+  list(filter?: OwnerInboxListFilter): Promise<readonly OwnerItem[]>;
+  withdraw(id: string, reason: string): OwnerAnswerOutcome | Promise<OwnerAnswerOutcome>;
 }
 
-/** A query is asked (open), may be answered (and its answer revised), and is closed for good; a closed query is never reopened. */
-const queryLifecycle = defineLifecycle<QueryRecord['status']>('query', {
-  open: ['answered', 'closed'],
-  answered: ['answered', 'closed'],
-  closed: [],
-});
+export interface QueryToolOptions {
+  readonly inbox: QuestionInbox | (() => QuestionInbox);
+  /** The asking session, read per call; its questions are the ones list returns. */
+  readonly resolveSessionId?: (() => string | undefined) | undefined;
+  /** Who is asking, shown to the owner beside the question. */
+  readonly askedBy?: string | undefined;
+}
 
-function summarizeQuery(record: QueryRecord) {
+function view(item: OwnerItem) {
   return {
-    id: record.id,
-    prompt: record.prompt,
-    askedBy: record.askedBy,
-    target: record.target,
-    status: record.status,
-    hasAnswer: typeof record.answer === 'string' && record.answer.length > 0,
-    hasResolution: typeof record.resolution === 'string' && record.resolution.length > 0,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
+    questionId: item.id,
+    status: item.status,
+    question: item.title,
+    ...(item.detail ? { detail: item.detail } : {}),
+    ...(item.options.length > 0 ? { options: item.options } : {}),
+    ...(item.answer ? { answer: item.answer } : {}),
+    ...(item.answeredBy ? { answeredFrom: item.answeredBy.surface } : {}),
+    ...(item.withdrawnReason ? { withdrawnReason: item.withdrawnReason } : {}),
+    askedAt: new Date(item.createdAt).toISOString(),
+    ...(item.closedAt !== undefined ? { closedAt: new Date(item.closedAt).toISOString() } : {}),
   };
 }
 
-export function createQueryTool(
-  options: string | { readonly workingDirectory: string; readonly surfaceRoot?: string },
-): Tool {
-  const workingDirectory = typeof options === 'string' ? options : options.workingDirectory;
-  const surfaceRoot = typeof options === 'string' ? undefined : options.surfaceRoot;
-  const workspaceRoot = resolve(workingDirectory);
-  const queriesDir = resolveScopedDirectory(workspaceRoot, surfaceRoot);
-  const queriesPath = join(queriesDir, 'queries.json');
+function refusalText(outcome: Extract<OwnerAnswerOutcome, { applied: false }>): string {
+  const next = outcome.refusal.next[0];
+  return `${outcome.refusal.reason}${next ? ` ${next}` : ''}`;
+}
 
-  // Only a missing file is an empty store. An unreadable or malformed file must
-  // fail the call: treating it as empty would let the next write replace every record.
-  function loadQueries(): QueryRecord[] {
-    let raw: string;
-    try {
-      raw = readFileSync(queriesPath, 'utf-8');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
-      throw new Error(`Cannot read ${queriesPath}: ${summarizeError(err)}. Nothing was changed.`);
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      throw new Error(`${queriesPath} is not valid JSON (${summarizeError(err)}). Nothing was changed; repair or move the file aside.`);
-    }
-    if (!Array.isArray(parsed)) throw new Error(`${queriesPath} does not hold a list of querys. Nothing was changed; repair or move the file aside.`);
-    return parsed as QueryRecord[];
-  }
-
-  function saveQueries(records: readonly QueryRecord[]): void {
-    mkdirSync(queriesDir, { recursive: true });
-    writeFileAtomic(queriesPath, `${JSON.stringify(records, null, 2)}\n`);
-  }
-
+export function createQueryTool(options: QueryToolOptions): Tool {
+  const inbox = (): QuestionInbox => typeof options.inbox === 'function' ? options.inbox() : options.inbox;
   return {
     definition: {
       name: 'query',
-      description: 'Keep your own notes on questions, answers, and closure. Queries are stored in a file; asking one does not deliver it to an operator or any surface, and the answer is whatever you record.',
+      description: QUERY_TOOL_SCHEMA.description,
       parameters: QUERY_TOOL_SCHEMA.parameters,
       sideEffects: ['workflow', 'state'],
       concurrency: 'serial',
@@ -88,85 +67,55 @@ export function createQueryTool(
         return { success: false, error: 'Invalid args: mode is required.' };
       }
       const input = args as unknown as QueryToolInput;
-      let records: QueryRecord[];
+      const sessionId = options.resolveSessionId?.() || undefined;
       try {
-        records = loadQueries();
-      } catch (err) {
-        return { success: false, error: summarizeError(err) };
-      }
-      const view = input.view ?? 'summary';
-
-      if (input.mode === 'ask') {
-        if (!input.queryId || !input.prompt) {
-          return { success: false, error: 'ask requires queryId and prompt.' };
+        if (input.mode === 'ask') {
+          const question = typeof input.question === 'string' ? input.question.trim() : '';
+          if (!question) return { success: false, error: 'ask needs question: one line the owner can answer. Nothing was posted.' };
+          // A long question keeps its full text in the detail the owner opens.
+          const title = question.length > OWNER_ITEM_LIMITS.titleChars ? `${question.slice(0, OWNER_ITEM_LIMITS.titleChars - 1)}…` : question;
+          const detail = [question.length > OWNER_ITEM_LIMITS.titleChars ? question : '', input.detail?.trim() ?? ''].filter(Boolean).join('\n\n');
+          const { created, item } = await inbox().post({
+            kind: 'question',
+            title,
+            ...(detail ? { detail } : {}),
+            ...(input.options && input.options.length > 0 ? { options: input.options } : {}),
+            ...(input.key ? { key: input.key } : {}),
+            ...(sessionId ? { sessionId } : {}),
+            ...(options.askedBy ? { askedBy: options.askedBy } : {}),
+          });
+          return { success: true, output: JSON.stringify({
+            ...view(item),
+            ...(created ? {} : { note: 'A question under this key was already open; this is that question, not a new one.' }),
+            next: 'Carry on with what does not depend on the answer. Read it later with query mode "show".',
+          }) };
         }
-        const existing = records.find((entry) => entry.id === input.queryId);
-        if (existing) {
-          return {
-            success: false,
-            error: `Query ${existing.id} already exists (status ${existing.status}); ask would replace it. Use show to read it, answer or close to change it, or choose a new queryId.`,
-          };
+
+        if (input.mode === 'list') {
+          const items = await inbox().list({ kinds: ['question'], status: input.status ?? 'all', ...(sessionId ? { sessionId } : {}) });
+          const answered = items.filter((item) => item.status === 'answered').length;
+          return { success: true, output: JSON.stringify({ count: items.length, answered, questions: items.map(view) }) };
         }
-        const now = Date.now();
-        const record: QueryRecord = {
-          id: input.queryId,
-          prompt: input.prompt,
-          ...(input.askedBy ? { askedBy: input.askedBy } : {}),
-          ...(input.target ? { target: input.target } : {}),
-          status: 'open',
-          createdAt: now,
-          updatedAt: now,
-        };
-        saveQueries([...records, record]);
-        return { success: true, output: JSON.stringify(record) };
+
+        const id = typeof input.questionId === 'string' ? input.questionId.trim() : '';
+        if (!id) return { success: false, error: `${input.mode} needs questionId: the id ask returned (list shows them).` };
+
+        if (input.mode === 'show') {
+          const item = await inbox().find(id);
+          if (!item || item.kind !== 'question') return { success: false, error: `No question has the id ${id}. List this session's questions with query mode "list".` };
+          return { success: true, output: JSON.stringify(view(item)) };
+        }
+
+        if (input.mode === 'withdraw') {
+          const outcome = await inbox().withdraw(id, input.reason?.trim() || 'no longer needed');
+          if (!outcome.applied) return { success: false, error: refusalText(outcome) };
+          return { success: true, output: JSON.stringify(view(outcome.item)) };
+        }
+      } catch (error) {
+        return { success: false, error: `The owner inbox could not be reached: ${summarizeError(error)} Nothing was changed.` };
       }
 
-      if (input.mode === 'list') {
-        return {
-          success: true,
-          output: JSON.stringify({
-            view,
-            count: records.length,
-            queries: view === 'full' ? records : records.map(summarizeQuery),
-          }),
-        };
-      }
-
-      const record = records.find((entry) => entry.id === input.queryId);
-      if (!record) return { success: false, error: `Unknown query: ${input.queryId ?? '(missing)'}` };
-
-      if (input.mode === 'show') {
-        return { success: true, output: JSON.stringify(view === 'full' ? record : summarizeQuery(record)) };
-      }
-
-      if (input.mode === 'answer') {
-        if (!input.answer) return { success: false, error: 'answer requires answer text.' };
-        const move = queryLifecycle.check(record.status, 'answered');
-        if (!move.ok) return { success: false, error: move.reason };
-        const next: QueryRecord = {
-          ...record,
-          answer: input.answer,
-          status: 'answered',
-          updatedAt: Date.now(),
-        };
-        saveQueries(records.map((entry) => (entry.id === next.id ? next : entry)));
-        return { success: true, output: JSON.stringify(next) };
-      }
-
-      if (input.mode === 'close') {
-        const move = queryLifecycle.check(record.status, 'closed');
-        if (!move.ok) return { success: false, error: move.reason };
-        const next: QueryRecord = {
-          ...record,
-          ...(input.resolution ? { resolution: input.resolution } : {}),
-          status: 'closed',
-          updatedAt: Date.now(),
-        };
-        saveQueries(records.map((entry) => (entry.id === next.id ? next : entry)));
-        return { success: true, output: JSON.stringify(next) };
-      }
-
-      return { success: false, error: `Unknown mode: ${input.mode}` };
+      return { success: false, error: `Unknown mode: ${String(input.mode)}. Use ask, show, list or withdraw.` };
     },
   };
 }

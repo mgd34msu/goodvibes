@@ -70,7 +70,7 @@ export const WRITE_SCHEMA = {
             type: 'string',
             enum: ['typecheck', 'lint', 'test', 'build'],
           },
-          description: 'Validators to run after writing. Failures are reported but do NOT undo writes.',
+          description: 'Validators to run after writing: the project\'s own typecheck, lint, test or build command (its package.json script through its package manager, or the Cargo/Go toolchain). One the project does not declare is refused before anything is written. A failure makes the call unsuccessful but does NOT undo writes.',
         },
       },
       additionalProperties: false,

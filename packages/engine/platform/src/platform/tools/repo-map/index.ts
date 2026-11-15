@@ -1,9 +1,10 @@
 import { resolveAndValidatePath } from '../../utils/path-safety.js';
 import { assertCapturedInputPathContext } from '../../contract/input-authority.js';
-// Model-invoked repository map. Every indexed source file and export is
-// included by default; a caller can explicitly request a smaller token budget.
-// Structure detail discovers complete paths without reading source bodies.
-// Import-graph centrality determines ordering in symbol detail only.
+// Model-invoked repository map. Symbol detail is ranked by import-graph
+// centrality and fits a default token budget, saying how many files it left
+// out and how to see them. Structure detail discovers paths without reading
+// source bodies: directories with counts first, file names for a requested
+// path or a small project.
 import { statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, sep, relative, resolve } from 'node:path';
@@ -16,6 +17,10 @@ import { accessRestrictedNote, partitionByReadAccess, type ReadAccessFilter } fr
 
 /** Ranked files whose read access is asked together. */
 const READ_ACCESS_WINDOW = 16;
+/** The symbol map's default size: the read class's ceiling, so the default answer fits what a model can take. */
+export const DEFAULT_REPO_MAP_BUDGET_TOKENS = 25_000;
+/** Up to this many paths, structure detail lists every file; past it, directories with counts unless a path is asked for. */
+export const STRUCTURE_FILE_LISTING_LIMIT = 400;
 
 
 interface RankedFile {
@@ -94,8 +99,34 @@ function formatBytes(bytes: number): string {
   return `${bytes}B`;
 }
 
+/** The symbol budget: omitted means the default, 0 means no limit (every file), anything else is that many tokens. */
 function requestedBudget(raw: unknown): number | undefined {
-  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : undefined;
+  if (raw === 0) return undefined;
+  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_REPO_MAP_BUDGET_TOKENS;
+}
+
+/** Directories (recursive) with their source-file counts, largest subtree order kept stable by path. */
+export function formatDirectoryCounts(root: string, files: readonly string[], warnings: readonly string[] = []): string {
+  const counts = new Map<string, number>();
+  for (const file of files) {
+    const path = relative(root, file).split(sep).join('/');
+    const parts = path.split('/').slice(0, -1);
+    counts.set('.', (counts.get('.') ?? 0) + 1);
+    for (let depth = 1; depth <= parts.length; depth++) {
+      const directory = parts.slice(0, depth).join('/');
+      counts.set(directory, (counts.get(directory) ?? 0) + 1);
+    }
+  }
+  const lines = [
+    '# Repository structure',
+    `${files.length} source file(s) in ${counts.size - (counts.has('.') ? 1 : 0)} director${counts.size === 2 ? 'y' : 'ies'}. Each row is [directory, source files under it, including subdirectories].`,
+    `File names are listed for a project of up to ${STRUCTURE_FILE_LISTING_LIMIT} files; for this one, call repo_map with detail="structure" and path=<directory> to list a directory's files.`,
+    '',
+    ...[...counts.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([directory, count]) => JSON.stringify([directory, count])),
+  ];
+  if (warnings.length) lines.push('', 'Discovery warnings:', ...warnings);
+  return lines.join('\n');
 }
 
 /** Every path is reconstructible from its directory and exact JSON basename. */
@@ -131,12 +162,12 @@ const REPO_MAP_SCHEMA: Record<string, unknown> = {
     },
     budgetTokens: {
       type: 'number',
-      description: 'Optional approximate token budget for symbol detail. Omit or set 0 to include every indexed source file and its exported symbols. Structure detail always includes every discovered source path.',
+      description: `Approximate token budget for symbol detail. Default ${DEFAULT_REPO_MAP_BUDGET_TOKENS}; the map says how many files it left out. 0 includes every indexed source file and its exported symbols.`,
     },
     detail: {
       type: 'string',
       enum: ['symbols', 'structure'],
-      description: 'Default symbols includes the full ranked import graph and exported symbols. Structure lists all source paths grouped by directory without reading source bodies; use it for initial orientation.',
+      description: `Default symbols: files ranked by how many others import them, with exported symbols, within the budget. Structure lists directories with source-file counts without reading source bodies (every file name for a path, or a project of up to ${STRUCTURE_FILE_LISTING_LIMIT} files); use it for initial orientation.`,
     },
   },
   additionalProperties: false,
@@ -166,10 +197,10 @@ export function createRepoMapTool(options: {
   const definition: ToolDefinition = {
     name: 'repo_map',
     description:
-      'Return a map of the repository: a per-directory source-file count plus all indexed '
+      'Return a map of the repository: a per-directory source-file count plus the most central '
       + 'source files (ranked by how many other files import them, size as a '
-      + 'tie-break) with their top-level exported symbols. Call this to orient in an unfamiliar '
-      + 'codebase before reading files. Use detail="structure" for complete source paths without reading bodies or building an import graph. Read-only; covers TypeScript/JavaScript source files.',
+      + `tie-break) with their top-level exported symbols, within about ${DEFAULT_REPO_MAP_BUDGET_TOKENS} tokens by default; it says how many files it left out. Call this to orient in an unfamiliar `
+      + 'codebase before reading files; narrow it with path. Use detail="structure" for directories and source paths without reading bodies or building an import graph. Read-only; covers TypeScript/JavaScript source files.',
     parameters: REPO_MAP_SCHEMA,
     sideEffects: ['read_fs'],
     concurrency: 'parallel',
@@ -193,7 +224,10 @@ export function createRepoMapTool(options: {
         const discovered = await discoverProjectSourceFiles(root);
         assertModeCurrent();
         assertCapturedInputPathContext(root);
-        return { success: true, output: formatRepositoryStructure(root, discovered.files, discovered.warnings) };
+        const listFiles = rawPath.length > 0 || discovered.files.length <= STRUCTURE_FILE_LISTING_LIMIT;
+        return { success: true, output: listFiles
+          ? formatRepositoryStructure(root, discovered.files, discovered.warnings)
+          : formatDirectoryCounts(root, discovered.files, discovered.warnings) };
       }
       // A captured view builds its own graph through its read access; every other caller reads the one
       // graph per root that edit and find share.
@@ -211,7 +245,7 @@ export function createRepoMapTool(options: {
 
       const header = [
         `# Repository map: ${relative(projectRoot, root) || '.'}`,
-        `${stats.files} source file(s), ${stats.edges} import edge(s).${budgetTokens === undefined ? '' : ` Requested budget: ${budgetTokens} tokens.`}`,
+        `${stats.files} source file(s), ${stats.edges} import edge(s).${budgetTokens === undefined ? ' No budget: every file.' : ` Budget: ${budgetTokens} tokens.`}`,
         '',
         'Directories:',
         ...directorySummary(ranked),
@@ -273,7 +307,8 @@ export function createRepoMapTool(options: {
       }
 
       if (included < ranked.length) {
-        output += `\n  … ${ranked.length - included} more file(s) omitted to stay within the token budget.`;
+        output += `\n  … ${ranked.length - included} more file(s) left out to stay within the ${budgetTokens ?? 0}-token budget. `
+          + 'See them by mapping a subdirectory (path), raising budgetTokens, or detail="structure".';
       }
 
       assertModeCurrent();

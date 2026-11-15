@@ -1142,7 +1142,12 @@ describe('spawn mode', () => {
         createTeamTool({ workingDirectory: storeRoot }),
         createWorklistTool({ workingDirectory: storeRoot }),
         createPacketTool(storeRoot),
-        createQueryTool(storeRoot),
+        createQueryTool({ inbox: {
+          post: async () => { throw new Error('not reached'); },
+          find: async () => undefined,
+          list: async () => [],
+          withdraw: () => { throw new Error('not reached'); },
+        } }),
       ]) registry.register(withStubExecute(tool));
 
       const originalDefinitions = structuredClone(registry.getToolDefinitions());

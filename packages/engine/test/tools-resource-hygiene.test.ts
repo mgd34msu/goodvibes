@@ -21,7 +21,9 @@ const tempRoot = (): string => { const root = mkdtempSync(join(tmpdir(), 'gv-hyg
 test('runValidators hands the cancel signal to the runner', async () => {
   const controller = new AbortController();
   let seen: AbortSignal | undefined;
-  await runValidators(['test'], tempRoot(), async (name, _cwd, execution) => {
+  const root = tempRoot();
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ scripts: { test: 'true' } }));
+  await runValidators(['test'], root, async (name, _cwd, execution) => {
     seen = execution?.signal;
     return { validator: name, passed: true, stdout: '', stderr: '', exitCode: 0 };
   }, () => {}, controller.signal);

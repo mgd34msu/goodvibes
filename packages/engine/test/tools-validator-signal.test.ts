@@ -13,7 +13,13 @@ import { FileStateCache } from '../platform/src/platform/state/file-cache.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-const project = (): string => { const root = realpathSync(mkdtempSync(join(tmpdir(), 'gv-validator-signal-'))); roots.push(root); return root; };
+const project = (): string => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'gv-validator-signal-')));
+  roots.push(root);
+  // Validators run the project's own declared scripts.
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ scripts: { lint: 'true', test: 'true' } }));
+  return root;
+};
 
 function recordingRunner(): { runner: ValidatorRunner; seen: Array<{ name: ValidatorName; signal: AbortSignal | undefined }> } {
   const seen: Array<{ name: ValidatorName; signal: AbortSignal | undefined }> = [];

@@ -38,6 +38,8 @@ import { toRecord } from '../../utils/record-coerce.js';
 import {
   runValidators as runSharedValidators,
   formatValidatorFailure,
+  describeUndeclaredValidators,
+  undeclaredValidators,
   type ValidatorResult,
   type ValidatorRunner,
 } from '../shared/validators.js';
@@ -526,6 +528,10 @@ async function executeTextEdits(
 
   if ((validateBefore.length > 0 || validateAfter.length > 0) && !env.validatorRunner) {
     return failed(`validate is not available in this session: it has no exec path to run validators through. Nothing was changed; resend without validate and run the check with the exec tool.`, 'failed');
+  }
+  if (!dryRun && (validateBefore.length > 0 || validateAfter.length > 0)) {
+    const missing = undeclaredValidators([...new Set([...validateBefore, ...validateAfter])], cwd);
+    if (missing.length > 0) return failed(describeUndeclaredValidators(missing, cwd), 'failed');
   }
 
   if (!dryRun && validateBefore.length > 0) {

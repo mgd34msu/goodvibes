@@ -1,4 +1,4 @@
-import type { Tool } from '../../types/tools.js';
+import type { Tool, ToolExecuteOptions, ToolResult } from '../../types/tools.js';
 import type { McpDecisionRecord } from '../../runtime/mcp/types.js';
 import type { McpRegistry } from '../../mcp/registry.js';
 import { MCP_TOOL_SCHEMA, type McpToolInput } from './schema.js';
@@ -41,22 +41,77 @@ function summarizeDecision(decision: McpDecisionRecord) {
   };
 }
 
+const REASON_LIMIT = 600;
+
+function boundedReason(error: unknown): string {
+  const text = (error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ').trim() || 'the server gave no reason';
+  const bounded = text.length > REASON_LIMIT ? `${text.slice(0, REASON_LIMIT - 3)}...` : text;
+  return /[.!?]$/.test(bounded) ? bounded : `${bounded}.`;
+}
+
+function stringifyResult(result: unknown): string {
+  if (typeof result === 'string') return result;
+  try {
+    return JSON.stringify(result ?? null);
+  } catch {
+    return String(result);
+  }
+}
+
+/**
+ * Runs one server tool through the registry, which owns every gate on the way
+ * out: connection, quarantine, trust mode, server permissions, the recorded
+ * admission, hooks and the call deadline. This mode only shapes the answer.
+ */
+async function callServerTool(mcpRegistry: McpRegistry, input: McpToolInput, options: ToolExecuteOptions | undefined): Promise<Omit<ToolResult, 'callId'>> {
+  const qualifiedName = typeof input.qualifiedName === 'string' ? input.qualifiedName.trim() : '';
+  if (!qualifiedName) {
+    return { success: false, error: 'mode "call" needs qualifiedName. List the callable tools with mode "tools", then pass one of their qualifiedName values.' };
+  }
+  if (!/^mcp:[^:]+:.+$/.test(qualifiedName)) {
+    return { success: false, error: `"${qualifiedName}" is not a qualified MCP tool name. Use the mcp:<server>:<tool> form mode "tools" reports. Nothing was sent.` };
+  }
+  const args = input.input ?? {};
+  if (typeof args !== 'object' || args === null || Array.isArray(args)) {
+    return { success: false, error: 'input must be an object of the tool\'s arguments (read them with mode "schema"). Nothing was sent.' };
+  }
+  const signal = options?.signal;
+  if (signal?.aborted) return { success: false, error: 'MCP call was cancelled before it was sent.' };
+  try {
+    // Whether the call is still wanted is the signal; the registry owns every other check.
+    const result = await mcpRegistry.callTool(qualifiedName, { ...args }, signal ? { signal } : {});
+    const output = stringifyResult(result);
+    if (result && typeof result === 'object' && !Array.isArray(result) && (result as { isError?: unknown }).isError === true) {
+      return { success: false, output, error: `The MCP server reported an error from ${qualifiedName}; its answer is in the output.` };
+    }
+    return { success: true, output };
+  } catch (error) {
+    if (signal?.aborted) {
+      return { success: false, error: `MCP call to ${qualifiedName} was cancelled. It may already have reached the server; check the server's state before calling again.` };
+    }
+    // The registry's own words name the state (not connected, quarantined, denied, schema changed, deadline) and what lifts it.
+    return { success: false, error: `MCP call to ${qualifiedName} failed: ${boundedReason(error)}` };
+  }
+}
+
 export function createMcpTool(mcpRegistry: McpRegistry): Tool {
   return {
     definition: {
       name: 'mcp',
-      description: 'Inspect MCP servers, tools, schemas, and trust state. set-trust, set-role and approve-quarantine change what a server is allowed to do.',
+      description: 'Call tools on connected MCP servers (mode "call"), and inspect servers, tools, schemas and trust state. set-trust, set-role and approve-quarantine change what a server is allowed to do.',
       parameters: MCP_TOOL_SCHEMA.parameters,
-      sideEffects: ['state'],
+      sideEffects: ['state', 'network'],
       concurrency: 'serial',
     },
 
-    async execute(args: Record<string, unknown>) {
+    async execute(args: Record<string, unknown>, options?: ToolExecuteOptions) {
     if (!args || typeof args !== 'object' || typeof args.mode !== 'string') {
       return { success: false, error: 'Invalid args: mode is required.' };
     }
     const input = args as unknown as McpToolInput;
     const view = input.view ?? 'descriptor';
+
+    if (input.mode === 'call') return callServerTool(mcpRegistry, input, options);
 
     if (input.mode === 'servers') {
       const security = mcpRegistry.listServerSecurity();
@@ -104,14 +159,6 @@ export function createMcpTool(mcpRegistry: McpRegistry): Tool {
         return { success: false, error: `Unknown MCP tool: ${input.qualifiedName}: ${cause}. List current names with mode=tools.` };
       }
       return { success: true, output: JSON.stringify(schema) };
-    }
-
-    if (input.mode === 'resources') {
-      // The registry does not expose resource inventories here; reporting zero would read as "none".
-      return {
-        success: false,
-        error: 'resources mode is not available: this tool cannot list MCP resources, so it cannot say whether a server has any. Use mode=tools for tools and mode=servers for server state.',
-      };
     }
 
     if (input.mode === 'security') {

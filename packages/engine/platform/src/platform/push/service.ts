@@ -48,6 +48,20 @@ export interface ApprovalSource {
   subscribe(listener: (approval: ApprovalNotice) => void): () => void;
 }
 
+/** The slice of the owner inbox the question push source subscribes to. */
+export interface QuestionSource {
+  subscribe(listener: (item: QuestionNotice) => void): () => void;
+}
+
+/** The minimum an owner-inbox item needs to expose to become a question push. */
+export interface QuestionNotice {
+  readonly id: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly title: string;
+  readonly sessionId?: string | undefined;
+}
+
 /** The minimum an approval record needs to expose to become a push. */
 export interface ApprovalNotice {
   readonly id: string;
@@ -224,6 +238,7 @@ export class PushService {
   private readonly failureThreshold?: (() => number) | undefined;
   /** Approval ids already pushed, so re-publishes (claim/approve) don't re-notify. */
   private readonly notifiedApprovals = new Set<string>();
+  private readonly notifiedQuestions = new Set<string>();
   /** Fleet node ids already pushed as needs-input, cleared when they unblock/finish. */
   private readonly notifiedNeedsInput = new Set<string>();
   /** Fleet node ids already pushed as completed, a terminal state fires once. */
@@ -402,6 +417,26 @@ export class PushService {
         body: `${tool}: ${summary}`,
         data: { kind: 'approval', approvalId: approval.id },
         urgency: 'high',
+      });
+    });
+  }
+
+  /**
+   * Wire the owner inbox: when an agent leaves the owner a question (an open
+   * `question` item), push it once to every registered device under the
+   * needs-input category. Answers and withdrawals do not notify.
+   */
+  attachQuestionSource(source: QuestionSource): () => void {
+    return source.subscribe((item) => {
+      if (item.kind !== 'question' || item.status !== 'open') return;
+      if (!this.isCategoryEnabled('needs-input')) return;
+      if (this.notifiedQuestions.has(item.id)) return;
+      remember(this.notifiedQuestions, item.id);
+      this.announce('needs-input', { questionId: item.id }, {
+        title: 'Question for you',
+        body: item.title,
+        data: { kind: 'needs-input', ...(item.sessionId ? { sessionId: item.sessionId } : {}) },
+        urgency: 'normal',
       });
     });
   }

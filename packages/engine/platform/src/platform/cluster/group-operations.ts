@@ -103,7 +103,14 @@ export interface NodeReport {
   readonly nodeId: string;
   readonly displayName: string;
   readonly admittedAt: number;
+  /**
+   * When this machine last heard it. When `heardSinceStart` is false nothing
+   * has been heard from it since this machine started listening, and this is
+   * when it started listening (or now, when it is not on the network).
+   */
   readonly lastSeenAt: number;
+  /** False when nothing has been heard from it since this machine started listening. */
+  readonly heardSinceStart: boolean;
   readonly isThisMachine: boolean;
 }
 
@@ -173,7 +180,7 @@ export function groupStatus(context: GroupOperationsContext): GroupOperationResu
     : membership === 'no-group'
       ? 'this machine is not in a group yet, run `cluster create` here, or `cluster join` to join one that already exists'
       : membership === 'unreadable-key-material'
-        ? 'group membership storage could not be confirmed; check the secrets store and keyfile, then restart and inspect `cluster status` before joining again'
+        ? 'group membership storage could not be confirmed; it is read again every 30 seconds, so check the secrets store and keyfile; a restart reads it at once. Inspect `cluster status` before joining again'
         : null;
   return {
     ok: true,
@@ -449,13 +456,18 @@ export function groupNodes(context: GroupOperationsContext): GroupOperationResul
     data: {
       groupId: material.groupId,
       groupName: state.displayName,
-      members: state.members.map((member) => ({
-        nodeId: member.nodeId,
-        displayName: member.displayName,
-        admittedAt: member.admittedAt,
-        lastSeenAt: member.lastSeenAt,
-        isThisMachine: member.nodeId === context.nodeId,
-      })),
+      members: state.members.map((member) => {
+        const isThisMachine = member.nodeId === context.nodeId;
+        const heard = isThisMachine ? context.now() : context.runtime.lastHeardFrom(member.nodeId);
+        return {
+          nodeId: member.nodeId,
+          displayName: member.displayName,
+          admittedAt: member.admittedAt,
+          lastSeenAt: heard ?? context.runtime.listeningStartedAt ?? context.now(),
+          heardSinceStart: heard !== null,
+          isThisMachine,
+        };
+      }),
       removed: state.tombstones.map((entry) => ({
         nodeId: entry.nodeId,
         removedAt: entry.at,

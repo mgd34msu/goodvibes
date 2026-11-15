@@ -23,7 +23,6 @@ export interface GroupMember {
   /** x25519 public key, where a new group key is sealed to. */
   readonly agreementKey: string;
   readonly admittedAt: number;
-  readonly lastSeenAt: number;
   /**
    * Membership generation for this node id. Monotonic per node: an add sets
    * it, a later removal sets it higher, a later re-add higher still.
@@ -128,14 +127,14 @@ function readMember(value: unknown): GroupMember | null {
   if (!isNonEmptyString(candidate['identityKey'], 128)) return null;
   if (!isNonEmptyString(candidate['agreementKey'], 128)) return null;
   if (!isFiniteNumber(candidate['admittedAt']) || !isFiniteNumber(candidate['gen'])) return null;
-  const lastSeenAt = isFiniteNumber(candidate['lastSeenAt']) ? candidate['lastSeenAt'] : candidate['admittedAt'];
+  // A `lastSeenAt` written by an older build is ignored: when a member was
+  // last heard is kept in memory by the runtime, never in this document.
   return {
     nodeId: candidate['nodeId'],
     displayName: normalizeDisplayName(candidate['displayName'], candidate['nodeId'].slice(0, 8)),
     identityKey: candidate['identityKey'],
     agreementKey: candidate['agreementKey'],
     admittedAt: Math.trunc(candidate['admittedAt']),
-    lastSeenAt: Math.trunc(lastSeenAt),
     gen: Math.max(0, Math.trunc(candidate['gen'])),
   };
 }
@@ -271,7 +270,6 @@ function normalizeGroupState(state: GroupStateDocument): GroupStateDocument {
  *    "removed" is the only direction that cannot resurrect a machine the
  *    operator deliberately ejected. The reverse rule would mean a node that
  *    was partitioned away during the removal could re-add it on heal;
- *  - `lastSeenAt` takes the later of the two, since both are true observations;
  *  - the display name takes the higher `displayNameGen`, and at equal
  *    generation the lexicographically smaller name, so the tie resolves the
  *    same way on every node rather than flapping between them.
@@ -289,11 +287,7 @@ export function mergeGroupState(local: GroupStateDocument, remote: GroupStateDoc
       members.set(member.nodeId, member);
       continue;
     }
-    const winner = member.gen > existing.gen ? member : existing;
-    members.set(member.nodeId, {
-      ...winner,
-      lastSeenAt: Math.max(existing.lastSeenAt, member.lastSeenAt),
-    });
+    if (member.gen > existing.gen) members.set(member.nodeId, member);
   }
 
   const tombstones = new Map<string, GroupTombstone>();
@@ -383,7 +377,6 @@ export function admitMember(state: GroupStateDocument, input: AdmitMemberInput):
     identityKey: input.identityKey,
     agreementKey: input.agreementKey,
     admittedAt: existing?.admittedAt ?? Math.trunc(input.now),
-    lastSeenAt: Math.trunc(input.now),
     gen,
   };
   return {
@@ -425,7 +418,6 @@ export function readmitMember(state: GroupStateDocument, input: AdmitMemberInput
         identityKey: input.identityKey,
         agreementKey: input.agreementKey,
         admittedAt: Math.trunc(input.now),
-        lastSeenAt: Math.trunc(input.now),
         gen,
       }],
     }),
@@ -456,17 +448,6 @@ export function removeMember(
       { nodeId, gen, at: Math.trunc(now), reason: normalizeDisplayName(reason, 'removed'), ...(removedUnder ? { removedUnder } : {}) },
     ],
   });
-}
-
-/** Record that a member was heard from. */
-export function touchMember(state: GroupStateDocument, nodeId: string, now: number): GroupStateDocument {
-  if (!isCurrentMember(state, nodeId)) return state;
-  return {
-    ...state,
-    members: state.members.map((entry) => (
-      entry.nodeId === nodeId ? { ...entry, lastSeenAt: Math.max(entry.lastSeenAt, Math.trunc(now)) } : entry
-    )),
-  };
 }
 
 /** Rename the group everywhere. The new name is replicated on the next gossip. */

@@ -4,7 +4,11 @@ Creating, joining, rejoining and leaving reserve one operation per daemon. A sec
 
 A membership change that has already received a successful storage acknowledgement finishes its matching roster record during shutdown. It does not re-enable the stopped daemon's signing keys.
 
-`persistence-unknown` means a storage write or deletion started and its complete result could not be confirmed. The operation may have taken effect. GoodVibes disables live group authority and preserves the saved files; it does not retry the effect, restore old keys or claim that nothing changed. Inspect `cluster status` and the membership store, then restart to reconcile saved membership before deciding whether another operation is necessary. HTTP cluster refusals return status 409 with the structured `failure` field.
+`persistence-unknown` means a storage write or deletion started and its complete result could not be confirmed. The operation may have taken effect. GoodVibes disables live group authority and preserves the saved files; it does not retry the effect, restore old keys or claim that nothing changed. While sharing is on, the stored membership is read again every 30 seconds, exactly as a restart reads it, and the machine is back in its group as soon as the store answers; a restart reads it at once. Inspect `cluster status` and the membership store before deciding whether another operation is necessary. HTTP cluster refusals return status 409 with the structured `failure` field.
+
+When a save of the group key during a rotation, a key sweep or the adoption of another machine's rotation is refused, the secrets store is read back once. If it holds the new key, the machine continues with it. If it still holds the previous key, the machine keeps that key and the save is tried again by the next pass; the cause is logged once when the failures start and again when a save succeeds. Only when the store cannot be read back is the membership reported as `unreadable-key-material`, recovered as above.
+
+The member list file changes only when a machine is added or removed, the group is renamed or the group signing key is replaced. When each machine was last heard is kept in memory: `cluster nodes` shows it as `lastSeenAt`, with `heardSinceStart: false` for a machine nothing has been heard from since this daemon started listening.
 
 A saved configuration replica is used only with its own group ID. Changing groups does not cause a previous group's replica to become the new group's configuration after restart.
 

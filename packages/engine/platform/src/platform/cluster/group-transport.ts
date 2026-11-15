@@ -85,6 +85,11 @@ export interface GroupWireRouterOptions {
    * catch-up, never act on the datagram.
    */
   readonly onGenerationNotHeld?: (() => void) | undefined;
+  /**
+   * Why this machine holds no group key, when it holds none: it is in no group,
+   * or its stored membership could not be confirmed. Absent means "no group".
+   */
+  readonly membership?: (() => 'no-group' | 'member' | 'unreadable-key-material') | undefined;
 }
 
 /**
@@ -110,7 +115,8 @@ export class GroupWireRouter {
       finally { this.clearElectionListener(); }
     },
   );
-  private announcedNoGroup = false;
+  /** The reason for holding no key that was last said; null while a key is held. */
+  private announcedNoGroup: 'no-group' | 'unreadable-key-material' | null = null;
   private electionListener: ((raw: string) => void) | null = null;
   private electionListenerGeneration = 0;
   private seq = 0;
@@ -199,20 +205,29 @@ export class GroupWireRouter {
     // as it did before clustering existed, and `cluster status` says so and
     // names the two commands that fix it.
     //
-    // Said ONCE. The election heartbeats every few seconds, so warning per
-    // datagram would bury the machine's logs in a message whose answer never
-    // changes, which is what the first live run of this code actually did.
+    // Said once per change of reason. The election heartbeats every few
+    // seconds, so warning per datagram would bury the machine's logs in a
+    // message whose answer never changes.
     if (this.options.keyring.acceptedGenerations().length === 0) {
       this.counters.droppedNoGroup += 1;
-      if (!this.announcedNoGroup) {
-        this.announcedNoGroup = true;
-        this.options.logger.info(
-          'cluster: this machine is not in a group, so it is coordinating with nobody and reading its own inbox',
-          { action: 'create a group with `cluster create`, or join one with `cluster join`' },
-        );
+      const reason = this.options.membership?.() === 'unreadable-key-material' ? 'unreadable-key-material' : 'no-group';
+      if (this.announcedNoGroup !== reason) {
+        this.announcedNoGroup = reason;
+        if (reason === 'no-group') {
+          this.options.logger.info(
+            'cluster: this machine is not in a group, so it is coordinating with nobody and reading its own inbox',
+            { action: 'create a group with `cluster create`, or join one with `cluster join`' },
+          );
+        } else {
+          this.options.logger.warn(
+            'cluster: this machine\'s group membership could not be confirmed, so it is coordinating with nobody and reading its own inbox',
+            { action: 'the stored membership is read again every 30 seconds; see `cluster status`' },
+          );
+        }
       }
       return null;
     }
+    this.announcedNoGroup = null;
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);

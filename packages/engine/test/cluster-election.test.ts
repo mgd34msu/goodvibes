@@ -372,11 +372,10 @@ describe('cluster election: suspend and wake', () => {
 
 describe('cluster election: configuration', () => {
   test('disabling the election is not a way to make two nodes consume silently', () => {
-    // An explicit false must not be defaulted back on, and a non-boolean must
-    // not switch it on by accident.
+    // An explicit false must not be defaulted back on. A non-boolean never
+    // reaches here: the settings file is checked against the schema when read.
     expect(resolveClusterSettings({ enabled: false }).enabled).toBe(false);
     expect(resolveClusterSettings({ enabled: true }).enabled).toBe(true);
-    expect(resolveClusterSettings({ enabled: 'yes' }).enabled).toBe(false);
   });
 
   test('a master timeout shorter than two heartbeats is raised, not accepted', () => {

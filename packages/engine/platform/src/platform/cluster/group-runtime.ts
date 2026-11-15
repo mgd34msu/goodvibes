@@ -49,7 +49,6 @@ import {
   normalizeDisplayName,
   readGroupStateDocument,
   sweepGroupState,
-  touchMember,
   withGroupSigningKey,
   type GroupStateDocument,
 } from './group-state.js';
@@ -63,6 +62,8 @@ import {
   loadReplicaDocument,
   saveGroupKeyMaterial,
   clearGroupKeyMaterial,
+  readGroupKeyMaterial,
+  GROUP_MATERIAL_SECRET_KEY,
   GROUP_STATE_FILENAME,
   GROUP_REPLICA_FILENAME,
   sweepKeyHistory,
@@ -165,6 +166,19 @@ export interface RevocationPlan {
 /** Membership as `cluster status` reports it. */
 export type GroupMembershipState = 'no-group' | 'member' | 'unreadable-key-material';
 
+/**
+ * A key material write was refused and the store still holds the previous
+ * material, so this machine keeps using it. The write is tried again by the
+ * work that wanted it (the next housekeeping pass, the next rotation check, a
+ * resent announcement); the cause is logged once when the failures start.
+ */
+export class GroupKeyNotSavedError extends Error {
+  override readonly name = 'GroupKeyNotSavedError';
+  constructor(cause: string) {
+    super(`the group key could not be saved (${cause}); this machine keeps using the key it already holds`);
+  }
+}
+
 export class ClusterGroupRuntime {
   private material: GroupKeyMaterial | null = null;
   private state: GroupStateDocument | null = null;
@@ -194,6 +208,15 @@ export class ClusterGroupRuntime {
   private readonly incoming: ClusterIngressWork;
   /** Key generations whose announcement is being adopted, so a second copy does not derive and write again. */
   private readonly adoptingRekeys = new Set<number>();
+  /**
+   * When each member was last heard, by this process. Kept in memory: writing
+   * it into the roster rewrote the roster file on every beacon.
+   */
+  private readonly lastHeard = new Map<string, number>();
+  /** When this process started listening to the group, or null before it has. */
+  private listeningSince: number | null = null;
+  /** A key material write is failing; its cause has been logged. */
+  private materialWriteFailing = false;
 
   constructor(private readonly options: ClusterGroupRuntimeOptions) {
     this.incoming = new ClusterIngressWork(options.logger, () => options.clock.monotonicNow());
@@ -222,6 +245,7 @@ export class ClusterGroupRuntime {
       onOutOfBandMessage: (raw, type) => void this.admissions.handle(raw, type),
       onForeignBeacon: (groupId, body, version) => this.recordDiscoveredGroup(groupId, body, version),
       onGenerationNotHeld: () => options.onKeyGenerationLost?.(),
+      membership: () => this.membership,
     });
     this.configChanges = new GroupConfigChanges({
       config: options.config, secrets: options.secrets, logger: options.logger,
@@ -314,6 +338,7 @@ export class ClusterGroupRuntime {
     signal.throwIfAborted();
     this.incoming.open();
     this.networkStarted = true;
+    this.listeningSince = this.options.clock.now();
     this.configChanges.start();
     this.admissions.start();
     this.periodic.schedule(this.options.settings.beaconSeconds * 1_000, () => this.sendBeacon());
@@ -330,6 +355,8 @@ export class ClusterGroupRuntime {
     // Also the cleanup of a start that failed after opening the network, which
     // runs without stop() and must not leave the group believed to be online.
     this.networkStarted = false;
+    this.listeningSince = null;
+    this.lastHeard.clear();
     this.incoming.close();
     await this.incoming.join();
     this.configChanges.stop();
@@ -393,6 +420,16 @@ export class ClusterGroupRuntime {
     return this.material;
   }
 
+  /** When this process last heard `nodeId` over the group, or null if it has not since it started listening. */
+  lastHeardFrom(nodeId: string): number | null {
+    return this.lastHeard.get(nodeId) ?? null;
+  }
+
+  /** When this process started listening to the group, or null when it is not on the network. */
+  get listeningStartedAt(): number | null {
+    return this.listeningSince;
+  }
+
   get wireCounters(): GroupWireRouter['counters'] {
     return this.router.counters;
   }
@@ -414,11 +451,11 @@ export class ClusterGroupRuntime {
   // ── material ──────────────────────────────────────────────────────────────
 
   /** Re-read key material and roster from their stores. */
-  async reloadMaterial(signal?: AbortSignal): Promise<void> {
+  async reloadMaterial(signal?: AbortSignal, quiet = false): Promise<void> {
     if (this.membershipOperations.busy || this.materialWork.size > 0 || this.groupWork.size > 0 || this.incoming.status.active > 0) throw new ClusterMembershipOperationError('not-sent');
     this.stateOwner.assertCurrent();
     const revision = this.membershipRevision;
-    const observation = await observeGroupKeyMaterial(this.options.secrets, this.options.logger);
+    const observation = await observeGroupKeyMaterial(this.options.secrets, quiet ? undefined : this.options.logger);
     signal?.throwIfAborted();
     this.stateOwner.assertCurrent();
     if (this.runtimeStopping || revision !== this.membershipRevision || this.membershipOperations.busy || this.materialWork.size > 0 || this.groupWork.size > 0 || this.incoming.status.active > 0) throw new ClusterMembershipOperationError('abandoned');
@@ -476,7 +513,8 @@ export class ClusterGroupRuntime {
     this.groupWork.add(task);
     void task.then(() => { this.groupWork.delete(task); }, error => {
       this.groupWork.delete(task);
-      if (!(error instanceof ClusterMembershipOperationError) && !(error instanceof GroupConfigChangeRetiredError) && !(error instanceof ConfigReplicationPrivacyError)) {
+      if (!(error instanceof ClusterMembershipOperationError) && !(error instanceof GroupConfigChangeRetiredError)
+        && !(error instanceof ConfigReplicationPrivacyError) && !(error instanceof GroupKeyNotSavedError)) {
         this.options.logger.warn('cluster: owned group work failed', { error: summarizeError(error) });
       }
     });
@@ -566,6 +604,7 @@ export class ClusterGroupRuntime {
     this.admissions.abandon('this machine left its group');
     this.replication?.adopt(createConfigReplicaDocument(''));
     this.material = null; this.keyringInstance = null; this.state = null; this.unreadableMaterial = false;
+    this.lastHeard.clear();
     this.membershipRevision += 1;
   }
 
@@ -701,10 +740,55 @@ export class ClusterGroupRuntime {
         || material.groupId !== expected?.groupId) throw new ClusterMembershipOperationError('abandoned');
       try {
         await saveGroupKeyMaterial(this.options.secrets, material);
-        this.material = material;
-        if (this.runtimeStopping) this.keyringInstance = null;
-      } catch { throw this.persistenceUnknown(); }
+      } catch (error) {
+        await this.settleRefusedMaterialWrite(error, material, expected);
+        return;
+      }
+      if (this.materialWriteFailing) {
+        this.materialWriteFailing = false;
+        this.options.logger.info('cluster: the group key was saved again');
+      }
+      this.material = material;
+      if (this.runtimeStopping) this.keyringInstance = null;
     });
+  }
+
+  /**
+   * A key material write was refused. The secrets store owns the fact of what
+   * it holds, so ask it once: the new material means the write landed and is
+   * adopted; the previous material means nothing changed, this machine keeps
+   * its keys and the caller's next pass writes again. Only when the store
+   * cannot be read, or holds something else, is the outcome unknown; then
+   * housekeeping reads it again on every pass until it answers.
+   */
+  private async settleRefusedMaterialWrite(error: unknown, written: GroupKeyMaterial, previous: GroupKeyMaterial | null): Promise<void> {
+    const cause = summarizeError(error);
+    let stored: GroupKeyMaterial | null | 'unreadable';
+    try {
+      const raw = await this.options.secrets.get(GROUP_MATERIAL_SECRET_KEY);
+      stored = raw === null ? null : readGroupKeyMaterial(JSON.parse(raw) as unknown) ?? 'unreadable';
+    } catch { stored = 'unreadable'; }
+    if (stored !== 'unreadable' && stored !== null && sameMaterial(stored, written)) {
+      this.material = written; this.materialWriteFailing = false;
+      if (this.runtimeStopping) this.keyringInstance = null;
+      this.options.logger.warn('cluster: a group key save reported a failure but the store holds the new key; continuing with it', { error: cause });
+      return;
+    }
+    if (stored !== 'unreadable' && stored !== null && previous !== null && sameMaterial(stored, previous)) {
+      if (!this.materialWriteFailing) {
+        this.materialWriteFailing = true;
+        this.options.logger.warn('cluster: the group key could not be saved; this machine keeps the key it holds and saves again on the next pass', {
+          error: cause,
+          action: 'if this repeats, check the secrets store and its keyfile',
+        });
+      }
+      throw new GroupKeyNotSavedError(cause);
+    }
+    this.options.logger.error('cluster: a group key save failed and the store could not confirm what it holds; this machine is out of its group until it can', {
+      error: cause,
+      action: 'the store is read again every 30 seconds; check the secrets store and its keyfile',
+    });
+    throw this.persistenceUnknown();
   }
 
   // ── outbound ──────────────────────────────────────────────────────────────
@@ -792,9 +876,28 @@ export class ClusterGroupRuntime {
   runHousekeeping(): Promise<void> {
     if (this.runtimeStopping || this.membershipTransition || this.housekeeping) return Promise.resolve();
     this.housekeeping = true;
-    const task = this.runGroupWork(() => this.housekeepingPass());
+    const task = this.unreadableMaterial && this.networkStarted
+      ? this.readMaterialAgain()
+      // A refused key save was logged when it started and is retried by the
+      // next pass; it is not a failure of the pass to report again.
+      : this.runGroupWork(() => this.housekeepingPass()).catch((error: unknown) => {
+        if (!(error instanceof GroupKeyNotSavedError)) throw error;
+      });
     void task.then(() => { this.housekeeping = false; }, () => { this.housekeeping = false; });
     return task;
+  }
+
+  /**
+   * The stored membership could not be confirmed. Read it again, exactly as
+   * a restart would, so one failed read or write does not keep this machine
+   * out of its group until somebody restarts the daemon.
+   */
+  private async readMaterialAgain(): Promise<void> {
+    try { await this.reloadMaterial(undefined, true); }
+    catch { return; }
+    if (this.material) {
+      this.options.logger.info('cluster: the stored group membership was read again; this machine is back in its group', { groupId: this.material.groupId });
+    }
   }
 
   private async housekeepingPass(): Promise<void> {
@@ -804,6 +907,7 @@ export class ClusterGroupRuntime {
       if (now - entry.lastSeenAt > 10 * 60 * 1_000) this.discovered.delete(groupId);
     }
     if (!this.material || !this.state) return;
+    for (const nodeId of this.lastHeard.keys()) if (!isCurrentMember(this.state, nodeId)) this.lastHeard.delete(nodeId);
 
     const swept = sweepGroupState(this.state, now);
     if (swept.droppedTombstones > 0) {
@@ -851,8 +955,12 @@ export class ClusterGroupRuntime {
     // into a generation nobody else holds.
     if (!state || !state.members.some((member) => member.nodeId === this.options.nodeId)) return null;
     const aliveCutoff = now - Math.max(3 * this.options.settings.beaconSeconds * 1_000, 60_000);
+    // Until this process has listened for a whole window it cannot know who is
+    // silent, so it counts every member as alive rather than taking the role.
+    const warmingUp = this.listeningSince === null || this.listeningSince > aliveCutoff;
     const candidates = state.members
-      .filter((member) => member.nodeId !== excluding && (member.lastSeenAt >= aliveCutoff || member.nodeId === this.options.nodeId))
+      .filter((member) => member.nodeId !== excluding
+        && (member.nodeId === this.options.nodeId || warmingUp || (this.lastHeard.get(member.nodeId) ?? -Infinity) >= aliveCutoff))
       .map((member) => member.nodeId)
       .sort();
     return candidates[0] ?? null;
@@ -1005,6 +1113,10 @@ export class ClusterGroupRuntime {
 
   private onGroupMessage(envelope: ClusterEnvelope): void {
     if (this.runtimeStopping || this.membershipTransition || !this.membershipOperations.available) return;
+    // Every datagram that verified under the group key is proof of life.
+    if (this.state && envelope.groupId === this.state.groupId && isCurrentMember(this.state, envelope.nodeId)) {
+      this.lastHeard.set(envelope.nodeId, this.options.clock.now());
+    }
     this.incoming.admit(() => this.runGroupWork(() => this.handleGroupMessage(envelope)));
   }
 
@@ -1012,7 +1124,7 @@ export class ClusterGroupRuntime {
     if (envelope.groupId !== this.material?.groupId) return;
     switch (envelope.type) {
       case GROUP_MESSAGE_TYPES.beacon:
-        await this.onBeacon(envelope);
+        // Liveness only, already noted in onGroupMessage; nothing is written.
         return;
       case GROUP_MESSAGE_TYPES.roster:
         await this.onRoster(envelope);
@@ -1031,24 +1143,21 @@ export class ClusterGroupRuntime {
     }
   }
 
-  private async onBeacon(envelope: ClusterEnvelope): Promise<void> {
-    if (!this.state) return;
-    const touched = touchMember(this.state, envelope.nodeId, this.options.clock.now());
-    if (touched !== this.state) await this.commitState(touched, false);
-  }
-
   private async onRoster(envelope: ClusterEnvelope): Promise<void> {
-    const local = this.state;
-    if (!local) return;
     const remote = readGroupStateDocument(envelope.body['state']);
     if (!remote) {
       this.options.logger.debug('cluster: a roster message did not parse and was ignored');
       return;
     }
+    // Merged into the roster as it is now, with no wait in between, so a
+    // removal, admission or rename committed meanwhile is never overwritten.
+    // The file is written only when the merge changed a member, a removal, the
+    // name or the signing key.
+    const local = this.state;
+    if (!local) return;
+    const merged = mergeGroupState(local, remote);
+    if (JSON.stringify(merged) !== JSON.stringify(local)) await this.commitState(merged, false);
     await this.replication?.notePeerReplica(envelope.nodeId, envelope.body['configRevision'], envelope.body['configDigest']);
-    const merged = touchMember(mergeGroupState(local, remote), envelope.nodeId, this.options.clock.now());
-    if (JSON.stringify(merged) === JSON.stringify(local)) return;
-    await this.commitState(merged, false);
   }
 
   /**
@@ -1078,10 +1187,14 @@ export class ClusterGroupRuntime {
       return;
     }
     const announced = envelope.body['generation'];
-    if (typeof announced !== 'number' || !Number.isInteger(announced) || announced < 0 || announced > material.currentGeneration + 1) {
-      this.options.logger.warn('cluster: ignored a key rotation that skipped a generation', {
+    if (typeof announced !== 'number' || !Number.isInteger(announced) || announced < 0) {
+      this.options.logger.debug('cluster: ignored a key rotation with no usable generation', { nodeId: envelope.nodeId });
+      return;
+    }
+    if (announced > material.currentGeneration + 1) {
+      this.options.logger.warn('cluster: ignored a key rotation that skipped a generation; asking the group for its current key', {
         generation: announced,
-        action: 'this machine may have missed an earlier rotation; check `cluster status`',
+        held: material.currentGeneration,
       });
       this.options.onKeyGenerationLost?.();
       return;
@@ -1204,4 +1317,10 @@ export class ClusterGroupRuntime {
     if (!material) return [];
     return sweepKeyHistory(material.keys, material.currentGeneration, now).keys;
   }
+}
+
+/** Two copies of key material hold the same facts, compared in the store's own format. */
+function sameMaterial(a: GroupKeyMaterial, b: GroupKeyMaterial): boolean {
+  const canonical = (material: GroupKeyMaterial) => JSON.stringify(readGroupKeyMaterial(JSON.parse(JSON.stringify(material)) as unknown));
+  return canonical(a) === canonical(b);
 }

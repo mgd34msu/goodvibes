@@ -5,7 +5,7 @@ import { CONFIG_MESSAGE_TYPES } from '../platform/src/platform/cluster/config-re
 import { encodeEnvelope } from '../platform/src/platform/cluster/protocol-envelope.js';
 import { findReplicaEntry } from '../platform/src/platform/cluster/config-replica.js';
 import { listReplicatedConfigPaths, replicatedSecretKeyFor } from '../platform/src/platform/cluster/config-replication-policy.js';
-import { admitMember, removeMember, touchMember } from '../platform/src/platform/cluster/group-state.js';
+import { admitMember, removeMember, renameGroup } from '../platform/src/platform/cluster/group-state.js';
 import { addGroupNode, createGroupWorld, destroyGroupWorld, MemorySecretStore, settle, stopGroupWorld } from './cluster-group-harness.js';
 function barrier() {
   let resolve!: () => void;
@@ -30,7 +30,7 @@ function sealedMessages(wire: readonly { from: string; raw: string }[], sender: 
     .filter(message => message.type === CONFIG_MESSAGE_TYPES.delta && message.body?.sealed !== undefined);
 }
 
-for (const change of ['remove', 'readmit', 'rotate', 'heartbeat'] as const) {
+for (const change of ['remove', 'readmit', 'rotate', 'rename'] as const) {
   test(`a delayed snapshot secret read stays bound to its original requester across ${change}`, async () => {
     const world = createGroupWorld(), secrets = new PausedSecrets(), entered = barrier(), release = barrier();
     try {
@@ -53,10 +53,10 @@ for (const change of ['remove', 'readmit', 'rotate', 'heartbeat'] as const) {
           identityKey: member.identityKey, agreementKey: member.agreementKey, now: world.clock.now() + 1 });
         await master.runtime.commitState(readded.state, false);
       } else if (change === 'rotate') await master.runtime.rotate('revocation', 'fixture immediate key retirement');
-      else await master.runtime.commitState(touchMember(state, peer.id, world.clock.now() + 1), false);
+      else await master.runtime.commitState(renameGroup(state, 'renamed while sending'), false);
       release.resolve(); await request; await settle();
       const sent = sealedMessages(world.wire.slice(start), master.id);
-      expect(sent.length).toBe(change === 'heartbeat' ? 1 : 0);
+      expect(sent.length).toBe(change === 'rename' ? 1 : 0);
     } finally { release.resolve(); await stopGroupWorld(world); destroyGroupWorld(world); }
   });
 }

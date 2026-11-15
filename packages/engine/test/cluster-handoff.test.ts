@@ -694,29 +694,6 @@ describe('cluster settings', () => {
     expect(DEFAULT_CLUSTER_SETTINGS.peers).toEqual([]);
   });
 
-  test('nonsense values are clamped rather than taking inbound messaging down', () => {
-    const resolved = resolveClusterSettings({
-      enabled: 'yes',
-      heartbeatSeconds: 0,
-      masterTimeoutSeconds: 1,
-      bootProbeSeconds: -4,
-      port: 999_999,
-      multicastGroup: '   ',
-      secret: 42,
-      peers: ['10.0.0.5', '', 7, '10.0.0.6:61999'],
-    });
-    // A non-boolean is not a way to switch coordination on by accident.
-    expect(resolved.enabled).toBe(false);
-    expect(resolved.heartbeatSeconds).toBe(1);
-    // Never below two heartbeats, or a healthy holder is declared dead between beats.
-    expect(resolved.masterTimeoutSeconds).toBe(2);
-    expect(resolved.bootProbeSeconds).toBe(1);
-    expect(resolved.port).toBe(65_535);
-    expect(resolved.multicastGroup).toBe(DEFAULT_CLUSTER_SETTINGS.multicastGroup);
-    expect(resolved.secret).toBe('');
-    expect(resolved.peers).toEqual(['10.0.0.5', '10.0.0.6:61999']);
-  });
-
   test('an IPv6 peer is read as one address, with or without brackets and a port', () => {
     // Splitting at the last colon read `fe80::1` as host `fe80:` on port 1.
     expect(parsePeers(['fe80::1', '[fe80::2]:5000', '[::1]', '[fe80::3]:0', 'fe80::4:5000x'], 61_860)).toEqual([

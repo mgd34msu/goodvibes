@@ -15,6 +15,19 @@ export function hasCurrentClusterRanking(version: string): boolean {
   const metadata = version.indexOf('+');
   return metadata >= 0 && version.slice(metadata + 1).split('.').at(-1) === CLUSTER_RANK_FEATURE;
 }
+/**
+ * True only for a build that predates ranking negotiation: its version carries
+ * neither feature tag. A current node relaying compatibility advertises the
+ * sha256 tag and is not itself evidence that an old build is still present, so
+ * compatibility ranking follows the live peers that declare nothing and ends
+ * when the last of them is gone.
+ */
+export function declaresNoClusterRanking(version: string): boolean {
+  const metadata = version.indexOf('+');
+  if (metadata < 0) return true;
+  const feature = version.slice(metadata + 1).split('.').at(-1);
+  return feature !== CLUSTER_RANK_FEATURE && feature !== CLUSTER_V1_PEER_RANK_FEATURE;
+}
 /** Remove only this producer's final reserved feature tag for product display.
  * Pre-release and unrelated existing build metadata are preserved exactly. */
 export function clusterProductVersion(version: string): string {

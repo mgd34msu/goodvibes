@@ -68,9 +68,14 @@ export class ClusterPeriodicTasks {
   schedule(intervalMs: number, task: () => Promise<void>): void {
     let active = true;
     let cancel: () => void;
+    // Said when a run of failures starts, not on every tick: the task's own
+    // owner logs the cause, and the same line every 30 seconds adds nothing.
+    let failing = false;
     const tick = (): void => {
       if (!active) return;
-      const work = Promise.resolve().then(task).catch(() => {
+      const work = Promise.resolve().then(task).then(() => { failing = false; }, () => {
+        if (failing) return;
+        failing = true;
         this.logger.warn('cluster: a periodic group task failed');
       }).finally(() => { this.pending.delete(work); });
       this.pending.add(work);

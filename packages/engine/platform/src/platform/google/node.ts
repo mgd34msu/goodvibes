@@ -24,6 +24,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { GoogleFilePort } from './credential-adoption.js';
 import type { GoogleCommandPort } from './types.js';
 import { GCLOUD_DEFAULT_TIMEOUT_MS } from './gcloud.js';
+import { runProcess } from '../utils/process-runner.js';
 import {
   classifyLoopbackRedirect,
   type LoopbackCodeResult,
@@ -44,19 +45,29 @@ export const nodeGoogleFilePort: GoogleFilePort = {
   },
 };
 
-/** The real command port: spawns a subprocess with a hard timeout. */
+/**
+ * The real command port. gcloud and its installer are shell launchers that
+ * start Python as a child, so the shared runner owns the command: it starts in
+ * its own process group, the whole group is stopped at the timeout, and the
+ * call returns at the timeout with the output read so far instead of waiting
+ * for a grandchild that still holds the pipes.
+ */
 export function createProcessCommandPort(): GoogleCommandPort {
   return {
     async run(command, args, options) {
-      const timeoutMs = options?.timeoutMs ?? GCLOUD_DEFAULT_TIMEOUT_MS;
-      const env = options?.env;
-      let proc: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
       try {
-        proc = Bun.spawn([command, ...args], {
-          stdout: 'pipe',
-          stderr: 'pipe',
-          env: { ...process.env, ...(env ?? {}) },
+        const result = await runProcess({
+          args: [command, ...args],
+          timeoutMs: options?.timeoutMs ?? GCLOUD_DEFAULT_TIMEOUT_MS,
+          ...(options?.env ? { env: { ...options.env } } : {}),
         });
+        return {
+          code: result.timedOut ? null : result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          timedOut: result.timedOut,
+          spawnError: null,
+        };
       } catch (error) {
         return {
           code: null,
@@ -66,18 +77,6 @@ export function createProcessCommandPort(): GoogleCommandPort {
           spawnError: error instanceof Error ? error.message : String(error),
         };
       }
-      let timedOut = false;
-      const timer = setTimeout(() => {
-        timedOut = true;
-        proc.kill();
-      }, timeoutMs);
-      const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ]);
-      const code = await proc.exited;
-      clearTimeout(timer);
-      return { code, stdout, stderr, timedOut, spawnError: null };
     },
   };
 }
@@ -188,11 +187,22 @@ async function readCappedText(response: Response, maxBytes: number): Promise<str
   return text + decoder.decode();
 }
 
+/** Most same-origin redirects the port follows for one request. */
+const CALDAV_MAX_SAME_ORIGIN_REDIRECTS = 5;
+const CALDAV_REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
+
 /**
  * The only place the CalDAV client performs real network I/O: a thin wrapper
  * over the global `fetch`. A server that stops answering ends in a thrown
  * error (which the client reports as "could not reach the calendar server")
  * instead of holding the calling tool open.
+ *
+ * Redirects are never followed by the runtime. A redirect within the origin
+ * the caller addressed (a trailing-slash fix, a moved path) is followed here
+ * with the same method, headers and body, since nothing leaves the server the
+ * caller chose. A redirect to any other origin is handed back as the 3xx with
+ * an absolute `location` header, so the caller's credential rule decides it
+ * and no request body reaches that host first.
  */
 export function createFetchCalDavHttpPort(options: FetchCalDavHttpPortOptions = {}): CalDavHttpPort {
   const timeoutMs = options.timeoutMs ?? CALDAV_REQUEST_TIMEOUT_MS;
@@ -201,18 +211,39 @@ export function createFetchCalDavHttpPort(options: FetchCalDavHttpPortOptions = 
     async request(input: CalDavHttpRequest): Promise<CalDavHttpResponse> {
       const timeout = AbortSignal.timeout(timeoutMs);
       const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
-      const response = await fetch(input.url, {
-        method: input.method,
-        headers: input.headers as Record<string, string>,
-        signal,
-        ...(input.body !== undefined ? { body: input.body } : {}),
-      });
-      const headers: Record<string, string> = {};
-      response.headers.forEach((value, key) => {
-        headers[key] = value;
-      });
-      const body = await readCappedText(response, maxBodyBytes);
-      return { status: response.status, headers, body };
+      let url = input.url;
+      for (let hop = 0; ; hop += 1) {
+        const response = await fetch(url, {
+          method: input.method,
+          headers: input.headers as Record<string, string>,
+          signal,
+          redirect: 'manual',
+          ...(input.body !== undefined ? { body: input.body } : {}),
+        });
+        const headers: Record<string, string> = {};
+        response.headers.forEach((value, key) => {
+          headers[key] = value;
+        });
+        const location = CALDAV_REDIRECT_STATUSES.has(response.status) ? headers['location'] : undefined;
+        if (location !== undefined) {
+          let next: URL | null = null;
+          try {
+            next = new URL(location, url);
+          } catch {
+            next = null;
+          }
+          if (next !== null) {
+            headers['location'] = next.toString();
+            if (next.origin === new URL(url).origin && hop < CALDAV_MAX_SAME_ORIGIN_REDIRECTS) {
+              await response.body?.cancel().catch(() => undefined);
+              url = next.toString();
+              continue;
+            }
+          }
+        }
+        const body = await readCappedText(response, maxBodyBytes);
+        return { status: response.status, headers, body, url };
+      }
     },
   };
 }

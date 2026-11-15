@@ -440,7 +440,7 @@ const OAUTH_STEPS: readonly GoogleSetupStepSpec[] = [
     path: 'oauth',
     title: 'Filling in the OAuth consent screen',
     purpose:
-      'Google exposes no API for the consent screen, so this is one of the two places the browser has to be driven. Without it the client cannot be created.',
+      'Google exposes no API for the consent screen, so it is filled in once in the browser. Without it the client cannot be created. The flow recognises a filled-in consent screen from the Google Auth Platform console (or from a client already stored), so a re-run carries on past this step.',
     actor: 'human-assisted',
     url: AUTH_BRANDING_URL,
     manualSteps: [
@@ -451,6 +451,7 @@ const OAUTH_STEPS: readonly GoogleSetupStepSpec[] = [
       'Audience: choose "External".',
       'Contact email: your own address',
       'Agree to the user data policy and click "Create".',
+      'Re-run the setup. It sees the consent screen in the console and goes on to publishing and the client.',
     ],
     requires: ['apis-enabled'],
   },

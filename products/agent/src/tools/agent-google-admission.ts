@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { secretReferenceFor, type ConfigManager, type SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, clientCredentialsFromInput, readClientCredentialsFromJson } from '@goodvibes-jev/engine/platform/platform/google';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, clientCredentialsFromInput, googleClientConfigEntries, readClientCredentialsFromJson } from '@goodvibes-jev/engine/platform/platform/google';
 import { assertCurrentToolEffect, assertProjectionExecution, commitCurrentToolSettingsPlan, ToolInputProjectionError,
   type ToolInputProjector, type ToolPreparedSettingsMutation } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
@@ -161,10 +161,8 @@ export function createGoogleSettingsProjector(owners: GoogleAdmissionOwners, pen
       sourceCurrent();
     };
     assertSourceCurrent();
-    const mutation = config.prepareSettingMutationPlan([
-      { operation: 'set', key: GOOGLE_CONFIG_KEYS.oauthClientId, value: clientId },
-      { operation: 'set', key: GOOGLE_CONFIG_KEYS.oauthClientSecretRef, value: secretReferenceFor(GOOGLE_SECRET_KEYS.oauthClientSecret) },
-    ]);
+    // The same configuration every route that stores a client leaves (the platform's storeClientCredentials).
+    const mutation = config.prepareSettingMutationPlan(googleClientConfigEntries(clientId).map((entry) => ({ operation: 'set' as const, key: entry.key, value: entry.value })));
     const secretImport = importedSecret ? { owner: secrets, mutation: secrets.prepareImport([importedSecret]) } : undefined;
     const plan: ToolPreparedSettingsMutation = { owner: config, mutation, ...(secretImport ? { secretImport } : {}), assertSourceCurrent };
     const facts = config.inspectPreparedMutation(mutation);

@@ -126,6 +126,23 @@ describe('the fetch-backed CalDAV port', () => {
     if (!result.ok) expect(result.problem).toContain('larger than');
   });
 
+  test('a redirect to another origin is refused by name and nothing reaches it', async () => {
+    let reached = 0;
+    const other = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => { reached += 1; return new Response('', { status: 207 }); } });
+    servers.push(other);
+    const first = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: () => new Response(null, { status: 307, headers: { location: `http://127.0.0.1:${other.port}/dav/` } }),
+    });
+    servers.push(first);
+    const client = new CalDavClient({ http: createFetchCalDavHttpPort(), auth: AUTH });
+    const result = await client.discoverPrincipal(`http://127.0.0.1:${first.port}/dav/`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.problem).toContain(`127.0.0.1:${other.port}`);
+    expect(reached).toBe(0);
+  });
+
   test('an aborted caller signal stops the request', async () => {
     const silent = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Promise<Response>(() => undefined) });
     servers.push(silent);

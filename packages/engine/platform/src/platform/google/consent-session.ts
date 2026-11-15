@@ -1,26 +1,23 @@
 /**
- * Registering an OAuth client the owner just handed over, and getting the
- * consent link back in the same breath.
+ * Registering an OAuth client the owner just handed over, and the one consent
+ * exchange every caller uses.
  *
- * ── Why this is not the setup-flow runner ──────────────────────────────────
+ * ── One exchange, two ways to wait ─────────────────────────────────────────
  *
- * `oauthAuthorizeRunner` awaits the redirect: it blocks for up to five minutes
- * while a person visits Google. That is right for a command someone is
- * watching, and wrong for a conversational turn, which has to answer NOW. A
- * turn that blocks for five minutes is a turn that looks broken.
- *
- * So the consent is split in two. `beginGoogleConsent` binds the listener,
+ * The consent is split in two. `beginGoogleConsent` binds the listener,
  * builds the URL and returns immediately; the exchange finishes on the
- * `completed` promise whenever the person actually approves. The caller hands
- * back the link in its reply. Native user flows store the refresh token when
- * consent completes. Registered model flows receive it privately and require
- * a freshly admitted storage action.
+ * `completed` promise whenever the person actually approves. A conversational
+ * turn hands back the link and answers now; the setup flow's authorize step,
+ * which a person is watching, awaits `completed`. Both get the same wait, the
+ * same state check and the same handling of a missing refresh token. Native
+ * user flows store the refresh token when consent completes. Registered model
+ * flows receive it privately and require a freshly admitted storage action.
  *
  * ── The rule about the secret ─────────────────────────────────────────────
  *
  * A client secret arrives here because the owner pasted it into a conversation.
  * It goes into the encrypted store and it is never returned, never echoed and
- * never put in a detail line. `registerGoogleClient` hands back the client id's
+ * never put in a detail line. `storeClientCredentials` hands back the client id's
  * last few characters and nothing else, which is enough for a person to confirm
  * the right client was registered and useless to anyone reading the transcript
  * later. Google shows the full secret exactly once, at creation, so the value
@@ -28,7 +25,7 @@
  * and echoing it means it lives in a log.
  */
 
-import { clientCredentialsFromInput, type GoogleClientCredentials } from './client-intake.js';
+import type { GoogleClientCredentials } from './client-intake.js';
 import {
   buildAuthorizationUrl,
   exchangeCodeForTokens,
@@ -37,6 +34,7 @@ import {
   type GoogleLoopbackListenerFactory,
 } from './oauth-loopback.js';
 import { safeConfigString } from './config-access.js';
+import { secretReferenceFor } from '../config/plaintext-credential-sweep.js';
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, OAUTH_SCOPES } from './setup-plan.js';
 import type { GoogleConfigPort, GoogleSecretPort } from './types.js';
 import { assertDeliveryCurrent, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
@@ -83,25 +81,25 @@ export function clientIdTail(clientId: string): string {
 }
 
 /**
- * Store a client id and secret the owner supplied.
- *
- * The id goes to config, the secret to the encrypted store, and the reply
- * carries neither in full. Validation is `clientCredentialsFromInput`, the same
- * check every other intake route uses, so a mistyped pair is refused here
- * rather than at the consent screen.
+ * The config half of a stored client: its id, and the reference to the secret
+ * in the encrypted store. The agent tool's admitted settings plan writes these
+ * same entries, so both routes leave the same configuration.
  */
-export async function registerGoogleClient(
-  deps: { readonly config: GoogleConfigPort; readonly secrets: GoogleSecretPort },
-  input: { readonly clientId: string; readonly clientSecret: string },
-): Promise<GoogleClientRegistrationResult> {
-  const intake = clientCredentialsFromInput(input);
-  if (!intake.ok) {
-    return { ok: false, problem: intake.problem, fix: intake.fix };
-  }
-  return storeClientCredentials(deps, intake.credentials);
+export function googleClientConfigEntries(clientId: string): readonly {
+  readonly key: typeof GOOGLE_CONFIG_KEYS.oauthClientId | typeof GOOGLE_CONFIG_KEYS.oauthClientSecretRef;
+  readonly value: string;
+}[] {
+  return [
+    { key: GOOGLE_CONFIG_KEYS.oauthClientId, value: clientId },
+    { key: GOOGLE_CONFIG_KEYS.oauthClientSecretRef, value: secretReferenceFor(GOOGLE_SECRET_KEYS.oauthClientSecret) },
+  ];
 }
 
-/** Shared by both intake routes: config half, secret half, safe confirmation. */
+/**
+ * The one way a Google OAuth client is stored, for every route that hands one
+ * over (typed values, a client JSON, the console walkthrough): config half,
+ * secret half, safe confirmation.
+ */
 export async function storeClientCredentials(
   deps: { readonly config: GoogleConfigPort; readonly secrets: GoogleSecretPort },
   credentials: GoogleClientCredentials,
@@ -110,8 +108,7 @@ export async function storeClientCredentials(
   // The secret first: if the store refuses it, the configured client is
   // untouched, instead of an id whose secret belongs to another client.
   await deps.secrets.set(GOOGLE_SECRET_KEYS.oauthClientSecret, credentials.clientSecret);
-  deps.config.set(GOOGLE_CONFIG_KEYS.oauthClientId, credentials.clientId);
-  deps.config.set(GOOGLE_CONFIG_KEYS.oauthClientSecretRef, GOOGLE_CONFIG_KEYS.oauthClientSecretRef);
+  for (const entry of googleClientConfigEntries(credentials.clientId)) deps.config.set(entry.key, entry.value);
   // A refresh token is tied to the client that requested it. Left in place
   // beside a different client it would be paired with it, fail with
   // `invalid_grant` on first use, and the status would still say connected.
@@ -133,6 +130,15 @@ export interface GoogleConsentCompletion {
   readonly detail: string;
   readonly problem?: string;
   readonly fix?: string;
+  /**
+   * Why it did not complete: the person did not finish in time or Google sent
+   * no code (`not-completed`), Google refused the code (`refused`), Google
+   * returned no refresh token (`no-refresh-token`), or the run stopped or its
+   * storage failed (`stopped`).
+   */
+  readonly reason?: 'not-completed' | 'refused' | 'no-refresh-token' | 'stopped';
+  /** The error that stopped it, for a caller that must keep unwinding. Never displayed. */
+  readonly cause?: unknown;
 }
 
 export interface GoogleConsentSession {
@@ -221,12 +227,14 @@ export function beginGoogleConsent(deps: BeginGoogleConsentDeps): GoogleConsentS
         const received = await listener.waitForCode(deps.timeoutMs ?? CONSENT_WAIT_MS);
         assertCurrent();
         code = received.code;
-      } catch {
+      } catch (error) {
         return {
           ok: false,
+          reason: 'not-completed',
+          cause: error,
           detail: 'The Google consent was not completed.',
           problem: 'No authorization code came back before consent stopped.',
-          fix: 'Open the consent link again and approve it; the link is good until it is used.',
+          fix: 'Ask for a new consent link and approve it.',
         };
       }
 
@@ -249,7 +257,7 @@ export function beginGoogleConsent(deps: BeginGoogleConsentDeps): GoogleConsentS
       );
       assertCurrent();
       if (!tokens.ok) {
-        return { ok: false, detail: 'Google refused the authorization code.', problem: tokens.problem, fix: tokens.fix };
+        return { ok: false, reason: 'refused', detail: 'Google refused the authorization code.', problem: tokens.problem, fix: tokens.fix };
       }
       // Google issues a refresh token only on a fresh consent. Without one
       // there is nothing durable to keep, so this is reported rather than
@@ -257,6 +265,7 @@ export function beginGoogleConsent(deps: BeginGoogleConsentDeps): GoogleConsentS
       if (tokens.refreshToken === undefined) {
         return {
           ok: false,
+          reason: 'no-refresh-token',
           detail: 'Google returned no refresh token.',
           problem: 'Google issues a refresh token only on a fresh consent, and this authorization reused an existing grant.',
           fix: 'Remove the app at https://myaccount.google.com/permissions, then approve a new consent link.',
@@ -269,8 +278,8 @@ export function beginGoogleConsent(deps: BeginGoogleConsentDeps): GoogleConsentS
       assertCurrent();
       if (deps.receiveRefreshToken) return { ok: true, detail: 'Google approved. The credential is awaiting its admitted storage action.' };
       return { ok: true, detail: 'Google approved. The credential is in the encrypted store.' };
-    } catch {
-      return { ok: false, detail: 'The Google consent stopped before completion.', problem: 'The authorization owner changed or its storage was unavailable.', fix: 'Start a new connection with the current client.' };
+    } catch (error) {
+      return { ok: false, reason: 'stopped', cause: error, detail: 'The Google consent stopped before completion.', problem: 'The authorization owner changed or its storage was unavailable.', fix: 'Start a new connection with the current client.' };
     } finally {
       close();
     }

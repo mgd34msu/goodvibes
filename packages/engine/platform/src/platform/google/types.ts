@@ -9,8 +9,8 @@ import type { GoogleMutationOwnership } from './setup-effect.js';
  *   over the private iCal address. This is the fast lane and the default.
  *
  *   Path B ("oauth"), a Google Cloud project, the Gmail API and Calendar API,
- *   and an OAuth Desktop client. Needed for calendar writes, push/watch
- *   channels and richer queries.
+ *   and an OAuth Desktop client. Needed for calendar writes and for Gmail
+ *   search queries richer than IMAP allows.
  *
  * Everything in this module is pure data and interfaces. All I/O arrives
  * through injected ports so the flows are testable without a browser, a

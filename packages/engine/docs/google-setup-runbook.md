@@ -8,7 +8,7 @@ Say "connect my Google account". That is the whole of it.
 
 The agent works out the shortest route on its own: a credential already stored, an OAuth client that only needs your consent, or the gcloud CLI for the project and APIs. It asks you for at most one thing: opening a consent link and approving it. It reports what it is doing at every step, hands you only the pages that must genuinely be yours, and finishes by reading your mail and your calendar to prove the connection works.
 
-If a step needs a value only you can see, such as the client id and secret Google shows once when you create the client, an app password, or a private calendar address, paste it into the conversation and the agent stores it. You are never asked to type a command to hand a value over.
+Where a step needs a value only you can see, it says how to hand it over: the private calendar address with `/google calendar-address <url>`, and an OAuth client (the id and secret Google shows once when you create it) with `/google client <client-id> <client-secret>` or by naming the downloaded client JSON. Each goes straight to the encrypted store; a client secret never passes through the model.
 
 <details><summary>Self-service equivalents</summary>
 
@@ -30,7 +30,6 @@ These exist for anyone who prefers driving it themselves. They are not the inten
 | Send Gmail | yes | yes |
 | Read calendar | yes (read-only) | yes |
 | Write calendar | no | yes |
-| Gmail push notifications | no | yes |
 | Google Cloud project needed | no | yes |
 | Credential expires | no | only if you skip the publishing step |
 | Setup time | ~3 min | ~15 min |
@@ -57,7 +56,7 @@ This is the fast lane and the default. There is no Google Cloud project, no API 
 
 **What you get:** Gmail read and send over IMAP/SMTP, and read-only calendar.
 
-**What you don't get:** writing calendar events, and Gmail push notifications. Those need the OAuth path below.
+**What you don't get:** writing calendar events. That needs the OAuth path below.
 
 A note on calendar, because it is the one place this path is narrower than it looks. Google refuses HTTP Basic authentication on its CalDAV endpoint. Its own documentation says "Attempting to connect over HTTP or using Basic Authentication results in an HTTP `401 Unauthorized` status code" ([CalDAV guide](https://developers.google.com/workspace/calendar/caldav/v2/guide)). So an app password cannot reach Google Calendar over CalDAV, no matter how it is configured. The private iCal address is used instead. It works without any credential setup, and it is read-only.
 
@@ -186,7 +185,7 @@ A note on calendar, because it is the one place this path is narrower than it lo
 
 ## Path B: OAuth (full Gmail and Calendar APIs)
 
-Take this path when you need to write calendar events, use Gmail push/watch channels, or run richer queries than IMAP allows.
+Take this path when you need to write calendar events or run richer Gmail searches than IMAP allows. New mail arrives the same way on both paths: the agent checks for it about once a minute.
 
 It is longer because Google exposes no API for two of the steps: the consent screen and creating an OAuth client. Those are done in the browser. Everything else is scripted through `gcloud`.
 
@@ -265,7 +264,7 @@ Skipping the publishing-status step means this integration silently stops workin
 
 **Who does it:** Needs one action from you. The flow opens the page and tells you what to click.
 
-**Why:** Google exposes no API for the consent screen, so this is one of the two places the browser has to be driven. Without it the client cannot be created.
+**Why:** Google exposes no API for the consent screen, so it is filled in once in the browser. Without it the client cannot be created. The flow recognises a filled-in consent screen from the Google Auth Platform console (or from a client already stored), so a re-run carries on past this step.
 
 **Page:** https://console.cloud.google.com/auth/branding
 
@@ -278,6 +277,7 @@ Skipping the publishing-status step means this integration silently stops workin
 5. Audience: choose "External".
 6. Contact email: your own address
 7. Agree to the user data policy and click "Create".
+8. Re-run the setup. It sees the consent screen in the console and goes on to publishing and the client.
 
 ### 6. Setting publishing status to In production
 
@@ -351,7 +351,7 @@ Before it opens, expect a red "Google hasn't verified this app" warning. That is
 
 ## If something goes wrong
 
-**Re-run the command.** It detects what already exists and skips it, so re-running after fixing something never duplicates work or creates a second project, client, or app password.
+**Re-run the command.** Each step first checks what already exists (a stored credential, the Cloud project, the enabled APIs, a consent screen the Google Auth Platform console shows) and skips it, so re-running after fixing something never duplicates work or creates a second project, client, or app password. If you already have a Desktop OAuth client, hand it over with `/google client <client-id> <client-secret>` and only the consent is left.
 
 **"This browser or app may not be secure"**: Google is refusing the automated browser at sign-in. Sign in by hand in the window that opened, then re-run. The session persists after that.
 

@@ -126,17 +126,6 @@ describe('installGcloud', () => {
     expect(commands).toContain(`${HOME}/google-cloud-sdk/install.sh`);
   });
 
-  test('refuses a non-https download URL before fetching or running anything', async () => {
-    const port = fakePort((command) => {
-      if (command === FALLBACK_GCLOUD) return spawnFailResult();
-      throw new Error(`unexpected command: ${command}`);
-    });
-    const result = await installGcloud(port, { homeDirectory: HOME, platform: LINUX_X64, downloadUrl: 'http://mirror.example.test/gcloud.tar.gz' });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.problem).toContain('https');
-    expect(port.calls.map((call) => call.command)).toEqual([FALLBACK_GCLOUD]);
-  });
-
   test('reports a clear problem when the download step fails', async () => {
     const port = fakePort((command) => {
       if (command === FALLBACK_GCLOUD) return spawnFailResult();

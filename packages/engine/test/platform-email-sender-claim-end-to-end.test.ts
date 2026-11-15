@@ -87,7 +87,9 @@ async function startFakeImap(headerBlock: readonly string[]): Promise<FakeServer
 function configFor(port: number): Record<string, unknown> {
   return {
     'email.enabled': true,
-    'email.imapHost': '127.0.0.1',
+    // A Gmail mailbox, so its server's own verdict (`mx.google.com`) is read;
+    // the socket factory below sends the connection to the fake server.
+    'email.imapHost': 'imap.gmail.com',
     'email.imapPort': port,
     'email.smtpHost': '127.0.0.1',
     'email.smtpPort': 587,
@@ -124,7 +126,7 @@ function buildHarness(port: number): Harness {
       checksSeen.push(checks);
       return testDescribeSenderClaim(fromHeader, checks);
     },
-    imapSocketFactory: async (host, p) => connect({ host, port: p }),
+    imapSocketFactory: async (_host, p) => connect({ host: '127.0.0.1', port: p }),
     recordUntrustedIngest: (ingest) => { ingests.push(ingest); },
   });
   return { service, ingests, checksSeen };

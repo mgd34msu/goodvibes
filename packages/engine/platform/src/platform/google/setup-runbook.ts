@@ -2,10 +2,12 @@
  * Renders the written fallback runbook from the step plan.
  *
  * The automation and the runbook read the same records in
- * `google-setup-plan.ts`, so they cannot drift. `docs/google-setup-runbook.md`
- * is the checked-in output of `renderGoogleSetupRunbook()`, and a test
- * regenerates it and fails if the committed copy is stale. When automation
- * gives up, its error message points at the anchor for the step that stopped.
+ * `setup-plan.ts`, so they cannot drift. `packages/engine/docs/google-setup-runbook.md`
+ * is the one checked-in output of `renderGoogleSetupRunbook()` (regenerate it
+ * with `bun packages/engine/scripts/generate-google-runbook.ts`), and a test
+ * fails if the committed copy is stale. `/google runbook` prints the same
+ * text. When automation gives up, its error message points at the anchor for
+ * the step that stopped.
  */
 
 import {
@@ -16,7 +18,7 @@ import {
 } from './setup-plan.js';
 import type { GoogleSetupPath, GoogleSetupStepSpec, GoogleStepActor } from './types.js';
 
-/** Path to the generated runbook, relative to the repository root. */
+/** Path to the generated runbook, relative to `packages/engine`. */
 export const RUNBOOK_RELATIVE_PATH = 'docs/google-setup-runbook.md';
 
 function actorLabel(actor: GoogleStepActor): string {
@@ -66,13 +68,13 @@ function renderPathSection(path: GoogleSetupPath, heading: string, preamble: rea
 const APP_PASSWORD_PREAMBLE: readonly string[] = [
   'This is the fast lane and the default. There is no Google Cloud project, no API to enable, no OAuth client, no consent screen, and no token that expires. One app password, and Gmail works.',
   '**What you get:** Gmail read and send over IMAP/SMTP, and read-only calendar.',
-  "**What you don't get:** writing calendar events, and Gmail push notifications. Those need the OAuth path below.",
+  "**What you don't get:** writing calendar events. That needs the OAuth path below.",
   'A note on calendar, because it is the one place this path is narrower than it looks. Google refuses HTTP Basic authentication on its CalDAV endpoint. Its own documentation says "Attempting to connect over HTTP or using Basic Authentication results in an HTTP `401 Unauthorized` status code" ([CalDAV guide](https://developers.google.com/workspace/calendar/caldav/v2/guide)). So an app password cannot reach Google Calendar over CalDAV, no matter how it is configured. The private iCal address is used instead. It works without any credential setup, and it is read-only.',
   `**Time:** about three minutes, most of it waiting for a 2-Step Verification prompt.`,
 ];
 
 const OAUTH_PREAMBLE: readonly string[] = [
-  'Take this path when you need to write calendar events, use Gmail push/watch channels, or run richer queries than IMAP allows.',
+  'Take this path when you need to write calendar events or run richer Gmail searches than IMAP allows. New mail arrives the same way on both paths: the agent checks for it about once a minute.',
   'It is longer because Google exposes no API for two of the steps: the consent screen and creating an OAuth client. Those are done in the browser. Everything else is scripted through `gcloud`.',
   '**Read this before you start.** An OAuth app left in **Testing** publishing status is issued refresh tokens that expire after **seven days**. Google documents this plainly: "A Google Cloud Platform project with an OAuth consent screen configured for an external user type and a publishing status of \'Testing\' is issued a refresh token expiring in 7 days" ([OAuth 2.0 guide](https://developers.google.com/identity/protocols/oauth2)). The exemption for apps requesting only `openid`/`email`/`profile` does not apply here. Gmail and Calendar scopes are sensitive or restricted.',
   'Skipping the publishing-status step means this integration silently stops working one week later, and the failure looks like an unrelated auth error. Step 6 is the one that matters most.',
@@ -101,7 +103,7 @@ export function renderGoogleSetupRunbook(): string {
   );
   lines.push('');
   lines.push(
-    'If a step needs a value only you can see, such as the client id and secret Google shows once when you create the client, an app password, or a private calendar address, paste it into the conversation and the agent stores it. You are never asked to type a command to hand a value over.',
+    'Where a step needs a value only you can see, it says how to hand it over: the private calendar address with `/google calendar-address <url>`, and an OAuth client (the id and secret Google shows once when you create it) with `/google client <client-id> <client-secret>` or by naming the downloaded client JSON. Each goes straight to the encrypted store; a client secret never passes through the model.',
   );
   lines.push('');
   lines.push('<details><summary>Self-service equivalents</summary>');
@@ -126,7 +128,6 @@ export function renderGoogleSetupRunbook(): string {
   lines.push('| Send Gmail | yes | yes |');
   lines.push('| Read calendar | yes (read-only) | yes |');
   lines.push('| Write calendar | no | yes |');
-  lines.push('| Gmail push notifications | no | yes |');
   lines.push('| Google Cloud project needed | no | yes |');
   lines.push('| Credential expires | no | only if you skip the publishing step |');
   lines.push('| Setup time | ~3 min | ~15 min |');
@@ -151,7 +152,7 @@ export function renderGoogleSetupRunbook(): string {
   lines.push(renderPathSection('oauth', 'Path B: OAuth (full Gmail and Calendar APIs)', OAUTH_PREAMBLE));
   lines.push('## If something goes wrong');
   lines.push('');
-  lines.push('**Re-run the command.** It detects what already exists and skips it, so re-running after fixing something never duplicates work or creates a second project, client, or app password.');
+  lines.push('**Re-run the command.** Each step first checks what already exists (a stored credential, the Cloud project, the enabled APIs, a consent screen the Google Auth Platform console shows) and skips it, so re-running after fixing something never duplicates work or creates a second project, client, or app password. If you already have a Desktop OAuth client, hand it over with `/google client <client-id> <client-secret>` and only the consent is left.');
   lines.push('');
   lines.push('**"This browser or app may not be secure"**: Google is refusing the automated browser at sign-in. Sign in by hand in the window that opened, then re-run. The session persists after that.');
   lines.push('');

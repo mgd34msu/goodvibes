@@ -12,18 +12,20 @@
  * cannot be anything else. Nothing in this module returns a permission, and
  * nothing downstream may branch on its output to widen one.
  *
- * The top-most-only rule, again
- * ----------------------------
+ * Whose header is read
+ * ---------------------
  * A sender can put their own `Authentication-Results:` line in the message
- * they submit. It lands BELOW the one the receiving server prepends, exactly
- * like a forged `Delivered-To`. So only the top-most header is read, and every
- * occurrence after it is discarded rather than searched for a better answer,
- * searching would hand the forgery back the moment a real check said `fail`.
+ * they submit. On a server that stamps its own, the forgery lands BELOW the
+ * one the server prepends, exactly like a forged `Delivered-To`, so only the
+ * top-most header is read and every occurrence after it is discarded rather
+ * than searched for a better answer.
  *
- * This is only as trustworthy as the server that stamped it. Reading Gmail
- * over IMAP, that is Gmail. Pointed at a mail server that stamps nothing, the
- * result is `unverified`, which is the honest answer rather than a default of
- * "fine".
+ * On a server that stamps nothing, the top-most header IS the sender's. So the
+ * top-most header is accepted only when its authserv-id (the token that opens
+ * it, RFC 8601 section 2.2) names the server the mailbox is read from:
+ * `mx.google.com` for Gmail. For any other mailbox no server is known to stamp
+ * its own verdict, and the result is `unverified`, which is the honest answer
+ * rather than a forged "passed".
  */
 
 /**
@@ -113,16 +115,52 @@ export function parseAuthenticationResults(headerValue: string): SenderAuthentic
 }
 
 /**
- * Parse the top-most `Authentication-Results` header, and only that one.
+ * The authserv-id that opens an `Authentication-Results` value, lower-cased:
+ * the text before the first `;`, without comments and without the optional
+ * version number. Empty when the value has no authserv-id (it opens with a
+ * result such as `spf=pass`).
+ */
+export function readAuthservId(headerValue: string): string {
+  const head = headerValue.replace(/\([^()]*\)/g, ' ').split(';', 1)[0] ?? '';
+  const id = head.trim().split(/\s+/, 1)[0] ?? '';
+  return id.includes('=') ? '' : id.toLowerCase();
+}
+
+/** IMAP hosts whose server prepends its own verdict, and the authserv-id it writes. */
+const STAMPING_SERVERS: ReadonlyArray<{ readonly imapHost: string; readonly authservId: string }> = [
+  { imapHost: 'imap.gmail.com', authservId: 'mx.google.com' },
+  { imapHost: 'imap.googlemail.com', authservId: 'mx.google.com' },
+];
+
+/**
+ * The authserv-ids whose verdict this mailbox may be shown: the id its own
+ * receiving server writes, by the IMAP host it is read from. Empty for a host
+ * not known to stamp one, which makes every verdict read `unverified`.
+ */
+export function mailboxAuthservIds(imapHost: string): readonly string[] {
+  const host = imapHost.trim().toLowerCase().replace(/\.$/, '');
+  return STAMPING_SERVERS.filter((server) => server.imapHost === host).map((server) => server.authservId);
+}
+
+/**
+ * Parse the top-most `Authentication-Results` header, and only that one, when
+ * the mailbox's own server wrote it.
  *
  * @param headerValues every occurrence in the message, top-most first, exactly
  *   as `ImapEnvelope.authenticationResults` supplies them.
+ * @param authservIds the ids the mailbox's own server writes
+ *   (`mailboxAuthservIds`). A top-most header naming any other server is the
+ *   sender's own, and yields no result.
  */
 export function readSenderAuthentication(
   headerValues: readonly string[],
+  authservIds: readonly string[],
 ): SenderAuthenticationChecks {
   const topMost = headerValues[0];
-  return topMost === undefined ? {} : parseAuthenticationResults(topMost);
+  if (topMost === undefined) return {};
+  const id = readAuthservId(topMost);
+  if (id === '' || !authservIds.includes(id)) return {};
+  return parseAuthenticationResults(topMost);
 }
 
 /**

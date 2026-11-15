@@ -41,7 +41,8 @@ import {
 } from '../calendar/untrusted-events.js';
 import type { CalendarEvent, EventDateTime } from '../calendar/types.js';
 import type { GoogleApiFailure, GoogleApiResult, CalendarEventRecord } from './api-client.js';
-import { openGoogleConnection, type GoogleConnection, type GoogleConnectionSources } from './connection.js';
+import type { GoogleConnection, GoogleConnectionSources } from './connection.js';
+import { GoogleConnectionOwner } from './connection-owner.js';
 import type { GoogleFetchPort } from './oauth-loopback.js';
 import type { GoogleApiFetchPort } from './api-client.js';
 import { grantsCalendarWrite } from './credential-adoption.js';
@@ -50,6 +51,11 @@ import { grantsCalendarWrite } from './credential-adoption.js';
 export interface GoogleCalendarGatewayServiceOptions {
   readonly sources: GoogleConnectionSources;
   readonly fetch: GoogleFetchPort & GoogleApiFetchPort;
+  /**
+   * The process's Google connection, when the composition holds one to share
+   * (and to run the start-up check on). Absent, the service holds its own.
+   */
+  readonly connectionOwner?: GoogleConnectionOwner | undefined;
   /** Wall clock, injected so `createdAt` is deterministic under test. */
   readonly now?: () => number;
   /**
@@ -207,12 +213,14 @@ export function createGoogleCalendarGatewayService(
   const DEFAULT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
   /**
-   * Opened per call rather than cached: credentials can be connected, adopted
-   * or revoked while the daemon is running, and a cached client would keep
-   * answering from a credential the owner has already withdrawn.
+   * One held connection: calls share the access token and one refresh, and a
+   * dead grant is latched instead of re-asked. The owner re-reads the stored
+   * credential on each call and builds a new connection when it was replaced,
+   * so a credential connected or revoked while the daemon runs is followed.
    */
+  const owner = options.connectionOwner ?? new GoogleConnectionOwner({ sources: options.sources, fetch: options.fetch, now });
   async function connect(): Promise<GoogleConnection> {
-    const connection = await openGoogleConnection(options.sources, { fetch: options.fetch }, now());
+    const connection = await owner.connection();
     if (connection === null) {
       throw new GatewayVerbError(NOT_CONNECTED, 'CALENDAR_NOT_CONFIGURED', 400);
     }

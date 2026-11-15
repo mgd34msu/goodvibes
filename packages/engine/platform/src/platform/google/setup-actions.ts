@@ -5,7 +5,6 @@ import { ownGoogleSetupDeps, ownGoogleSetupRunners } from './setup-reading-scope
  * store; reports and progress messages never include their values.
  */
 
-import { randomBytes } from 'node:crypto';
 import {
   APP_PASSWORD_LABEL,
   GMAIL_IMAP_HOST,
@@ -14,8 +13,6 @@ import {
   GMAIL_SMTP_PORT,
   GOOGLE_CONFIG_KEYS,
   GOOGLE_SECRET_KEYS,
-  OAUTH_SCOPES,
-  REQUIRED_SERVICES,
 } from './setup-plan.js';
 import { GoogleReadingError } from './browser-readings.js';
 import { GoogleSetupWriteCommittedError } from './setup-effect.js';
@@ -32,20 +29,11 @@ import {
   type GoogleClientIntakeResult,
 } from './client-intake.js';
 import { collectDownloadedClientFile } from './client-download.js';
-import {
-  buildAuthorizationUrl,
-  exchangeCodeForTokens,
-  generatePkcePair,
-} from './oauth-loopback.js';
+import { beginGoogleConsent, storeClientCredentials, type GoogleClientRegistrationResult } from './consent-session.js';
 import { looksLikeGoogleSignIn, readGoogleTwoStepState } from './browser-elements.js';
 import { safeConfigGet, safeConfigString } from './config-access.js';
-
-/** How long to wait for the person to finish Google's consent screen. */
-const CONSENT_TIMEOUT_MS = 300_000;
-
-function base64UrlRandom(): string {
-  return randomBytes(32).toString('base64url');
-}
+import { readGoogleSecretState } from './setup-state.js';
+import { secretReferenceFor } from '../config/plaintext-credential-sweep.js';
 
 function readString(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -55,24 +43,10 @@ function readString(value: unknown): string | null {
 
 /** True when a secret exists and is non-empty. Never returns the value. */
 async function secretPresent(secrets: GoogleSecretPort, key: string): Promise<boolean> {
-  return (await secretState(secrets, key)) === 'present';
+  return (await readGoogleSecretState(secrets, key)) === 'present';
 }
 
-/**
- * Whether a secret is there, not there, or could not be read. A read failure is
- * not an absence: acting on it as one would create a second credential and
- * overwrite the stored one.
- */
-async function secretState(secrets: GoogleSecretPort, key: string): Promise<'present' | 'absent' | 'unreadable'> {
-  try {
-    const value = await secrets.get(key);
-    return typeof value === 'string' && value.trim().length > 0 ? 'present' : 'absent';
-  } catch (error) {
-    // A superseded request is not a store failure; it must keep unwinding.
-    if (error instanceof GoogleReadingError) throw error;
-    return 'unreadable';
-  }
-}
+const secretState = readGoogleSecretState;
 
 /**
  * What to say about the seven-day Testing expiry. Only a status that was read
@@ -205,7 +179,7 @@ function appPasswordRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
         `Remove the unused "${APP_PASSWORD_LABEL}" app password at https://myaccount.google.com/apppasswords, fix the secret store, then re-run.`,
       );
     }
-    deps.config.set(GOOGLE_CONFIG_KEYS.emailPasswordRef, GOOGLE_CONFIG_KEYS.emailPasswordRef);
+    deps.config.set(GOOGLE_CONFIG_KEYS.emailPasswordRef, secretReferenceFor(GOOGLE_SECRET_KEYS.appPassword));
     return done('Created a Gmail app password and stored it in the encrypted secret store.');
   };
 }
@@ -233,7 +207,7 @@ function gmailConfigRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
     deps.config.set(GOOGLE_CONFIG_KEYS.emailSmtpPort, GMAIL_SMTP_PORT);
     deps.config.set(GOOGLE_CONFIG_KEYS.emailSmtpSecurity, 'starttls');
     deps.config.set(GOOGLE_CONFIG_KEYS.emailFromAddress, username);
-    deps.config.set(GOOGLE_CONFIG_KEYS.emailPasswordRef, GOOGLE_CONFIG_KEYS.emailPasswordRef);
+    deps.config.set(GOOGLE_CONFIG_KEYS.emailPasswordRef, secretReferenceFor(GOOGLE_SECRET_KEYS.appPassword));
     deps.config.set(GOOGLE_CONFIG_KEYS.emailEnabled, true);
     return done(`Pointed the mail surface at Gmail for ${username}.`);
   };
@@ -296,10 +270,8 @@ function calendarVerifyRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
 // Path B, OAuth
 // ---------------------------------------------------------------------------
 
-/** Remembered between the gcloud steps of a single run. */
 /** Turn whichever intake route was chosen into client credentials. */
-async function obtainClientCredentials(deps: GoogleSetupActionDeps): Promise<GoogleClientIntakeResult> {
-  const choice: GoogleClientIntakeChoice = deps.clientIntake ?? { kind: 'console-walkthrough' };
+async function obtainClientCredentials(deps: GoogleSetupActionDeps, choice: GoogleClientIntakeChoice): Promise<GoogleClientIntakeResult> {
 
   if (choice.kind === 'manual-entry') {
     return clientCredentialsFromInput({ clientId: choice.clientId, clientSecret: choice.clientSecret });
@@ -341,6 +313,23 @@ async function obtainClientCredentials(deps: GoogleSetupActionDeps): Promise<Goo
   return clientCredentialsFromInput({ clientId: created.clientId, clientSecret: created.clientSecret });
 }
 
+/**
+ * Read a client from the chosen intake route and store it, the one way a
+ * client the owner hands over (typed values, a client JSON, a downloaded file)
+ * or the console walkthrough produced reaches the store. `/google client` and
+ * `/google client-file` call this and then run the existing-client path; the
+ * OAuth path's client step calls it too.
+ */
+export async function registerGoogleClientFromIntake(
+  deps: GoogleSetupActionDeps,
+  choice: GoogleClientIntakeChoice,
+): Promise<GoogleClientRegistrationResult & { readonly route?: string }> {
+  const intake = await obtainClientCredentials(deps, choice);
+  if (!intake.ok) return { ok: false, problem: intake.problem, fix: intake.fix };
+  const stored = await storeClientCredentials(deps, intake.credentials);
+  return { ...stored, route: intake.route };
+}
+
 function oauthClientRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   return async () => {
     const storedId = safeConfigString(deps.config, GOOGLE_CONFIG_KEYS.oauthClientId);
@@ -356,29 +345,23 @@ function oauthClientRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
       return alreadyDone('An OAuth client is already configured.');
     }
 
-    const intake = await obtainClientCredentials(deps);
-    if (!intake.ok) {
+    const choice: GoogleClientIntakeChoice = deps.clientIntake ?? { kind: 'console-walkthrough' };
+    const registered = await registerGoogleClientFromIntake(deps, choice);
+    if (!registered.ok) {
       // A console walkthrough that stops at a sign-in or a dialog is a human
       // handoff, not a failure, the other routes are genuine failures.
-      const route = deps.clientIntake?.kind ?? 'console-walkthrough';
-      return route === 'console-walkthrough'
-        ? needsHuman('The OAuth client was not created.', intake.problem, intake.fix)
-        : failed('The OAuth client credentials could not be read.', intake.problem, intake.fix);
+      return choice.kind === 'console-walkthrough'
+        ? needsHuman('The OAuth client was not created.', registered.problem, registered.fix)
+        : failed('The OAuth client credentials could not be read.', registered.problem, registered.fix);
     }
-
-    deps.config.set(GOOGLE_CONFIG_KEYS.oauthClientId, intake.credentials.clientId);
-    deps.config.set(GOOGLE_CONFIG_KEYS.oauthClientSecretRef, GOOGLE_CONFIG_KEYS.oauthClientSecretRef);
-    await deps.secrets.set(GOOGLE_SECRET_KEYS.oauthClientSecret, intake.credentials.clientSecret);
-    return done(`Stored the Desktop OAuth client (via ${intake.route}); the secret went to the encrypted store.`);
+    return done(`Stored the Desktop OAuth client ${registered.clientIdTail} (via ${registered.route ?? choice.kind}); the secret went to the encrypted store.`);
   };
 }
 
 /**
- * The consent exchange.
- *
- * Runs a loopback listener, opens the consent URL, and trades the returned code
- * for a refresh token. PKCE is used so the code cannot be replayed by anything
- * else that sees the redirect.
+ * The consent step. The exchange itself is `beginGoogleConsent`, the same one
+ * the agent tool uses (listener, PKCE, state check, code exchange, storing the
+ * refresh token); this step hands the person the link and waits on it.
  */
 function oauthAuthorizeRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   return async () => {
@@ -395,8 +378,8 @@ function oauthAuthorizeRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
     }
 
     const clientId = safeConfigString(deps.config, GOOGLE_CONFIG_KEYS.oauthClientId);
-    const clientSecret = await deps.secrets.get(GOOGLE_SECRET_KEYS.oauthClientSecret);
-    if (clientId === null || readString(clientSecret) === null) {
+    const secret = readString(await deps.secrets.get(GOOGLE_SECRET_KEYS.oauthClientSecret));
+    if (clientId === null || secret === null) {
       return failed(
         'No OAuth client is configured.',
         'Authorization needs a client id and secret, and one or both are missing.',
@@ -404,89 +387,47 @@ function oauthAuthorizeRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
       );
     }
 
-    const secret = readString(clientSecret);
-    if (secret === null) {
-      return failed(
-        'No OAuth client secret is stored.',
-        'Authorization needs the client secret and the encrypted store does not hold one.',
-        'Nothing to authorize against yet, say the word and I will set the client up first.',
-      );
-    }
-
-    const pkce = generatePkcePair();
-    // The `state` value is this run's CSRF token: the listener rejects any
-    // redirect that does not carry it back.
-    const state = base64UrlRandom();
-    const listener = deps.loopback({ expectedState: state });
+    const session = beginGoogleConsent({
+      clientId,
+      clientSecret: secret,
+      config: deps.config,
+      secrets: deps.secrets,
+      loopback: deps.loopback,
+      fetchPort: deps.fetchPort,
+      signal: deps.signal,
+      assertCurrent: deps.assertCurrent,
+      ...(deps.loginHint === undefined ? {} : { loginHint: deps.loginHint }),
+    });
     try {
-      const url = buildAuthorizationUrl({
-        clientId,
-        redirectUri: listener.redirectUri,
-        // Every scope the platform's Google features need, in ONE consent.
-        // Asking for mail now and calendar later is what produced a stored
-        // credential that worked for mail and refused calendar.
-        scopes: OAUTH_SCOPES,
-        codeChallenge: pkce.codeChallenge,
-        state,
-        ...(deps.loginHint === undefined ? {} : { loginHint: deps.loginHint }),
-      });
-
       // Printing beats driving. Google's sign-in wall rejects automated
       // browsers, so a printed link is both the most reliable route and the
       // smallest ask, one click, which is the entire budget for this flow.
       if (deps.announceConsentUrl !== undefined) {
-        deps.announceConsentUrl(url);
+        deps.announceConsentUrl(session.consentUrl);
       } else if (deps.openUrl !== undefined) {
-        await deps.openUrl(url);
+        await deps.openUrl(session.consentUrl);
       } else {
         const browser = await deps.browser();
-        await browser.navigate(url);
+        await browser.navigate(session.consentUrl);
       }
+    } catch (error) {
+      session.cancel();
+      throw error;
+    }
 
-      let code: string;
-      try {
-        // Rejects on mismatch, error redirect, or timeout, all of which mean
-        // the person did not finish, which is a clean stop rather than a fault.
-        const received = await listener.waitForCode(CONSENT_TIMEOUT_MS);
-        code = received.code;
-      } catch (error) {
-        return needsHuman(
-          'Consent was not completed.',
-          `The browser did not return an authorization code: ${error instanceof Error ? error.message : String(error)}`,
-          'Say so and I will start a fresh consent and hand you the link.',
-        );
-      }
-
-      const tokens = await exchangeCodeForTokens(
-        {
-          clientId,
-          clientSecret: secret,
-          code,
-          codeVerifier: pkce.codeVerifier,
-          redirectUri: listener.redirectUri,
-        },
-        deps.fetchPort,
-      );
-      if (!tokens.ok) {
-        return failed('Google refused the authorization code.', tokens.problem, tokens.fix);
-      }
-      // Google omits the refresh token when it has already issued one for this
-      // client; without it there is nothing durable to store, so it is reported
-      // rather than recorded as success.
-      if (tokens.refreshToken === undefined) {
-        return failed(
-          'Google returned no refresh token.',
-          'Google issues a refresh token only on a fresh consent, and this authorization reused an existing grant.',
-          'Remove the agent at https://myaccount.google.com/permissions, then tell me and I will start a fresh consent.',
-        );
-      }
-
-      await deps.secrets.set(GOOGLE_SECRET_KEYS.oauthRefreshToken, tokens.refreshToken);
+    const outcome = await session.completed;
+    if (outcome.ok) {
       const warnings = publishingWarnings(deps.config, 'The app is in Testing, so this refresh token expires seven days after it was issued. Publish the app and authorize again.');
       return done('Authorized. The refresh token went straight into the encrypted store.', warnings);
-    } finally {
-      listener.close();
     }
+    // A superseded request or a write that committed keeps unwinding to the truthful report.
+    if (outcome.cause instanceof GoogleReadingError || outcome.cause instanceof GoogleSetupWriteCommittedError) throw outcome.cause;
+    const problem = outcome.problem ?? outcome.detail;
+    const fix = outcome.fix ?? 'Say so and I will start a fresh consent and hand you the link.';
+    // The person not finishing is a clean stop, not a fault.
+    return outcome.reason === 'not-completed'
+      ? needsHuman('Consent was not completed.', problem, 'Say so and I will start a fresh consent and hand you the link.')
+      : failed(outcome.detail, problem, fix);
   };
 }
 

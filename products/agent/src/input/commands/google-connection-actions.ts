@@ -35,6 +35,7 @@ import { subscriptionRegistryForWrite } from './calendar-subscription-runtime.ts
 import {
   GOOGLE_CONFIG_KEYS,
   GOOGLE_SECRET_KEYS,
+  GoogleConnectionOwner,
   adoptExistingGoogleCredentials,
   buildGoogleSetupRunners,
   createGoogleBrowserPort,
@@ -42,11 +43,12 @@ import {
   describeGoogleConnectionProof,
   describeGoogleSetupState,
   detectGoogleSetupState,
-  openGoogleConnection,
   planGoogleConnection,
   proveGoogleConnection,
+  registerGoogleClientFromIntake,
   removeGoogleCredentials,
   runGoogleSetupFlow,
+  sharedGoogleConnectionOwner,
   type GoogleBrowserPort,
   type GoogleClientIntakeChoice,
   type GoogleConfigPort,
@@ -200,17 +202,47 @@ export function googleActionDeps(ctx: CommandContext, intake?: GoogleClientIntak
 // Actions
 // ---------------------------------------------------------------------------
 
-/** The live Google client, or null when nothing is connected. */
+/**
+ * The live Google client, or null when nothing is connected. Held by the
+ * session's connection owner, which the `google` tool shares, so a command
+ * after a tool call (or another command) reuses the access token.
+ */
 async function openConnection(ctx: CommandContext, signedInAccount: string | null) {
-  return await openGoogleConnection(
-    {
-      files: googleFilePort,
-      homeDirectory: requireShellPaths(ctx).homeDirectory,
-      configGet: (key) => googleConfigPort(ctx).get(key),
-      secretGet: (key) => googleSecretPort(ctx).get(key),
-    },
-    { fetch: { fetch: (url: string, init: RequestInit) => fetch(url, init) }, signedInAccount },
-  );
+  const sources = {
+    files: googleFilePort,
+    homeDirectory: requireShellPaths(ctx).homeDirectory,
+    configGet: (key: string) => googleConfigPort(ctx).get(key),
+    secretGet: (key: string) => googleSecretPort(ctx).get(key),
+  };
+  const owner = sharedGoogleConnectionOwner(requireSecretsManager(ctx), () => new GoogleConnectionOwner({
+    sources,
+    fetch: { fetch: (url: string, init: RequestInit) => fetch(url, init) },
+  }));
+  return await owner.connection({ sources, signedInAccount });
+}
+
+/** Reads mail and calendar with the stored credential, for the verify step. */
+function proveConnectionFor(ctx: CommandContext, signedInAccount: string | null): NonNullable<GoogleSetupActionDeps['proveConnection']> {
+  return async () => {
+    const connection = await openConnection(ctx, signedInAccount);
+    if (connection === null) {
+      return {
+        ok: false,
+        detail: 'The credential was stored but could not be assembled into a working client.',
+        problem: 'The stored client id, client secret and refresh token did not combine into a usable credential.',
+        fix: 'Run /google status to see which half is missing.',
+      };
+    }
+    const proof = await proveGoogleConnection(connection.client);
+    return proof.ok
+      ? { ok: true, detail: proof.summary }
+      : {
+        ok: false,
+        detail: proof.summary,
+        problem: proof.mail.problem ?? proof.calendar.problem ?? proof.summary,
+        fix: proof.mail.fix ?? proof.calendar.fix ?? 'Run /google reauthorize.',
+      };
+  };
 }
 
 /**
@@ -232,6 +264,7 @@ export async function describeGoogleConnection(ctx: CommandContext): Promise<str
   const state = await detectGoogleSetupState({ config, secrets });
   const lines = ['Google connection', ...describeGoogleSetupState(state).map((entry) => `  ${entry}`)];
 
+  if (state.secretStoreUnreadable) return lines.join('\n');
   if (!state.hasRefreshToken) {
     lines.push('', 'Connect it with: /google connect');
     return lines.join('\n');
@@ -303,7 +336,14 @@ export async function adoptGoogleCredentials(
   };
 }
 
-/** Run one setup path end to end. The caller supplies where progress goes. */
+/**
+ * Run one setup path end to end. The caller supplies where progress goes.
+ *
+ * A client the owner handed over (typed id and secret, or a client JSON) is
+ * stored and followed by the existing-client path whatever `path` says: the
+ * client's project, APIs and consent screen already exist, so gcloud and the
+ * console have nothing to do.
+ */
 export async function runGoogleSetup(
   path: GoogleSetupPath,
   ctx: CommandContext,
@@ -311,6 +351,9 @@ export async function runGoogleSetup(
   intake?: GoogleClientIntakeChoice,
   options: GoogleSetupExecutionOptions = {},
 ): Promise<GoogleSetupReport> {
+  if (intake !== undefined && (intake.kind === 'manual-entry' || intake.kind === 'client-json-file')) {
+    return (await runHandedOverClient(ctx, intake, progress, {}, options)).report;
+  }
   return await runGoogleSetupFlow(path, {
     progress,
     runners: buildGoogleSetupRunners(path, googleActionDeps(ctx, intake, options)),
@@ -372,26 +415,7 @@ export async function connectGoogle(
     ...googleActionDeps(ctx),
     announceConsentUrl,
     ...(plan.intendedAccount === null ? {} : { loginHint: plan.intendedAccount }),
-    proveConnection: async () => {
-      const connection = await openConnection(ctx, plan.gcloud?.account ?? null);
-      if (connection === null) {
-        return {
-          ok: false,
-          detail: 'The credential was stored but could not be assembled into a working client.',
-          problem: 'The stored client id, client secret and refresh token did not combine into a usable credential.',
-          fix: 'Run /google status to see which half is missing.',
-        };
-      }
-      const proof = await proveGoogleConnection(connection.client);
-      return proof.ok
-        ? { ok: true, detail: proof.summary }
-        : {
-          ok: false,
-          detail: proof.summary,
-          problem: proof.mail.problem ?? proof.calendar.problem ?? proof.summary,
-          fix: proof.mail.fix ?? proof.calendar.fix ?? 'Run /google reauthorize.',
-        };
-    },
+    proveConnection: proveConnectionFor(ctx, plan.gcloud?.account ?? null),
   };
 
   const report = await runGoogleSetupFlow(setupPath, {
@@ -400,6 +424,57 @@ export async function connectGoogle(
   });
 
   return { connected: report.ok, text: [...lines, '', report.summary].join('\n') };
+}
+
+/**
+ * `/google client <id> <secret>` and `/google client-file <path>`: store the
+ * client the owner handed over, then run the existing-client path (consent and
+ * proof). No gcloud step: a client that exists means its project, its APIs and
+ * its consent screen exist.
+ */
+export async function connectGoogleClient(
+  ctx: CommandContext,
+  intake: HandedOverClient,
+  progress: GoogleProgressPort,
+  announceConsentUrl: (url: string) => void,
+): Promise<GoogleConnectOutcome> {
+  // What was stored is already on the progress port; the outcome is the summary.
+  const { report } = await runHandedOverClient(ctx, intake, progress, { announceConsentUrl });
+  return { connected: report.ok, text: report.summary };
+}
+
+type HandedOverClient = Extract<GoogleClientIntakeChoice, { kind: 'manual-entry' | 'client-json-file' }>;
+
+/** Store a handed-over client, then consent and proof (the existing-client path). */
+async function runHandedOverClient(
+  ctx: CommandContext,
+  intake: HandedOverClient,
+  progress: GoogleProgressPort,
+  extras: Pick<GoogleSetupActionDeps, 'announceConsentUrl'>,
+  options: GoogleSetupExecutionOptions = {},
+): Promise<{ readonly report: GoogleSetupReport }> {
+  const base = googleActionDeps(ctx, undefined, options);
+  const registered = await registerGoogleClientFromIntake(base, intake);
+  if (!registered.ok) {
+    const summary = `Nothing was stored: ${registered.problem} ${registered.fix}`;
+    return { report: { path: 'existing-client', ok: false, steps: [], waitingOn: null, warnings: [], summary } };
+  }
+  const stored = [`Stored the OAuth client ${registered.clientIdTail}; the secret is in the encrypted store and is not shown again.`];
+  if (registered.consentRequired === true) {
+    stored.push('It replaces a different client, so the refresh token that belonged to the old one was removed and a new consent is needed.');
+  }
+  progress.note(stored.join(' '));
+  const account = base.config.get(GOOGLE_CONFIG_KEYS.emailUsername);
+  const report = await runGoogleSetupFlow('existing-client', {
+    progress,
+    runners: buildGoogleSetupRunners('existing-client', {
+      ...base,
+      ...extras,
+      ...(typeof account === 'string' && account.trim().length > 0 ? { loginHint: account.trim() } : {}),
+      proveConnection: proveConnectionFor(ctx, null),
+    }),
+  });
+  return { report };
 }
 
 /**
@@ -453,14 +528,7 @@ export async function reauthorizeGoogle(
     secrets: secretsForConsent,
     announceConsentUrl,
     ...(plan.intendedAccount === null ? {} : { loginHint: plan.intendedAccount }),
-    proveConnection: async () => {
-      const connection = await openConnection(ctx, plan.gcloud?.account ?? null);
-      if (connection === null) return { ok: false, detail: 'No usable credential after consent.' };
-      const proof = await proveGoogleConnection(connection.client);
-      return proof.ok
-        ? { ok: true, detail: proof.summary }
-        : { ok: false, detail: proof.summary, problem: proof.calendar.problem ?? proof.mail.problem ?? proof.summary };
-    },
+    proveConnection: proveConnectionFor(ctx, plan.gcloud?.account ?? null),
     ...portOverrides,
   };
 

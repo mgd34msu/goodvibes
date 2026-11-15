@@ -15,7 +15,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   beginGoogleConsent,
   clientIdTail,
-  registerGoogleClient,
+  storeClientCredentials,
 } from '../platform/src/platform/google/consent-session.ts';
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, OAUTH_SCOPES } from '../platform/src/platform/google/setup-plan.ts';
 import type { GoogleConfigPort, GoogleSecretPort } from '../platform/src/platform/google/types.ts';
@@ -74,7 +74,7 @@ describe('registering a client the owner handed over', () => {
   test('the id goes to config and the secret to the encrypted store', async () => {
     const config = configPort();
     const secrets = secretPort();
-    const result = await registerGoogleClient({ config, secrets }, { clientId: CLIENT_ID, clientSecret: CLIENT_SECRET });
+    const result = await storeClientCredentials({ config, secrets }, { clientId: CLIENT_ID, clientSecret: CLIENT_SECRET, authUri: 'https://accounts.google.com/o/oauth2/auth', tokenUri: 'https://oauth2.googleapis.com/token' });
 
     expect(result.ok).toBe(true);
     expect(config.values[GOOGLE_CONFIG_KEYS.oauthClientId]).toBe(CLIENT_ID);
@@ -82,9 +82,9 @@ describe('registering a client the owner handed over', () => {
   });
 
   test('the confirmation carries the id tail and never the secret', async () => {
-    const result = await registerGoogleClient(
+    const result = await storeClientCredentials(
       { config: configPort(), secrets: secretPort() },
-      { clientId: CLIENT_ID, clientSecret: CLIENT_SECRET },
+      { clientId: CLIENT_ID, clientSecret: CLIENT_SECRET, authUri: 'https://accounts.google.com/o/oauth2/auth', tokenUri: 'https://oauth2.googleapis.com/token' },
     );
 
     expect(result.ok).toBe(true);
@@ -96,13 +96,6 @@ describe('registering a client the owner handed over', () => {
     expect(JSON.stringify(result)).not.toContain(CLIENT_SECRET);
   });
 
-  test('a mistyped pair is refused here rather than at the consent screen', async () => {
-    const secrets = secretPort();
-    const result = await registerGoogleClient({ config: configPort(), secrets }, { clientId: '', clientSecret: '' });
-
-    expect(result.ok).toBe(false);
-    expect(Object.keys(secrets.values)).toEqual([]);
-  });
 
   test('clientIdTail never returns more than it was given', () => {
     expect(clientIdTail('short')).toBe('short');

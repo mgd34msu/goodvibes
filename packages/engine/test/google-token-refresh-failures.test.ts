@@ -1,4 +1,4 @@
-/** A refresh that cannot finish or cannot be saved must still answer, never reject. */
+/** A refresh that cannot finish must still answer, never reject. */
 import { describe, expect, test } from 'bun:test';
 import type { GoogleOAuthCredentials } from '../platform/src/platform/google/credential-adoption.ts';
 import { checkGoogleCredentialsAtBoot, GoogleTokenManager, type GoogleRefreshOutcome } from '../platform/src/platform/google/token-manager.ts';
@@ -20,18 +20,6 @@ function credentials(): GoogleOAuthCredentials {
 const fresh = async (): Promise<GoogleRefreshOutcome> => ({ ok: true, result: { accessToken: 'fresh', expiresInSeconds: 3600, scopes: null } });
 
 describe('token refresh failures', () => {
-  test('a token that refreshed but could not be saved is still returned, marked unsaved', async () => {
-    const manager = new GoogleTokenManager(credentials(), { refresh: fresh, persist: async () => { throw new Error('secret store is locked'); } });
-    const outcome = await manager.accessToken();
-    expect(outcome.ok && outcome.token.accessToken).toBe('fresh');
-    expect(outcome.ok && outcome.token.persisted).toBe(false);
-  });
-
-  test('the boot check reports a usable credential even when saving the token failed', async () => {
-    const manager = new GoogleTokenManager(credentials(), { refresh: fresh, persist: async () => { throw new Error('locked'); } });
-    expect((await checkGoogleCredentialsAtBoot(manager)).usable).toBe(true);
-  });
-
   test('a refresh function that rejects is a transient failure, not a thrown error or a dead grant', async () => {
     let calls = 0;
     const manager = new GoogleTokenManager(credentials(), {

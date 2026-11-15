@@ -22,6 +22,15 @@
  */
 
 import { surfaceAuthority, type SurfaceCommandAuthority } from './surface-authority.ts';
+import {
+  describeSenderClaimNeutrally,
+  type EmailSenderClaim,
+  type EmailSenderConfidence,
+} from '@goodvibes-jev/engine/platform/platform/email';
+import type {
+  SenderAuthenticationChecks as PlatformSenderAuthenticationChecks,
+  SenderProtocolResult as PlatformSenderProtocolResult,
+} from '@goodvibes-jev/engine/platform/platform/google';
 
 /**
  * A message from outside, with where it came from attached.
@@ -136,113 +145,28 @@ export function renderForModel(content: UntrustedContent): string {
   ].join('\n');
 }
 
-/** The result of a sender-authentication protocol, as reported by the receiver. */
-export type SenderProtocolResult = 'pass' | 'fail' | 'none';
-
 /**
- * DKIM/SPF/DMARC outcomes, if the receiving side computed them.
- *
- * These answer "did this message travel the path its domain publishes?",
- * a question about routing. They do not answer "may this message direct the
- * agent?", which is a question about the surface. A perfectly DKIM-signed
- * email from a domain that passes DMARC is still an email, and email is
- * input-only. See the note on SenderClaim.commandAuthority for how that is
- * kept from being quietly reinterpreted.
+ * The sender claim. The decision and its wording have one owner, the
+ * platform's `describeSenderClaimNeutrally`: a `From:` header is a claim,
+ * DKIM/SPF/DMARC results (as written by the mailbox's own server) raise the
+ * confidence a human reads and nothing else, and `commandAuthority` is the
+ * literal `'none'`. These names keep the Agent's boundary module the one place
+ * Agent code imports trust wording from.
  */
-export interface SenderAuthenticationChecks {
-  readonly dkim?: SenderProtocolResult;
-  readonly spf?: SenderProtocolResult;
-  readonly dmarc?: SenderProtocolResult;
-}
-
-/**
- * How much the displayed sender line should be trusted BY A HUMAN READING
- * IT. Display only. No branch anywhere may turn one of these into an
- * authority decision.
- */
-export type DisplayedSenderConfidence =
-  | 'unverified'
-  | 'partially-verified'
-  | 'protocol-verified'
-  | 'failed-verification';
-
-export interface SenderClaim {
-  /** The address as written in the header, a claim, not a fact. */
-  readonly claimedAddress: string;
-  /** The display name as written in the header, also a claim. */
-  readonly claimedDisplayName: string;
-  /** Human-readable line that says out loud that this is a claim. */
-  readonly display: string;
-  /** Display confidence only. Never an input to any permission check. */
-  readonly displayedConfidence: DisplayedSenderConfidence;
-  /**
-   * Always the literal 'none', and typed as the literal rather than as a
-   * wider union on purpose: there is no other value this field can hold, so
-   * a caller cannot write `if (claim.commandAuthority === 'command')` and
-   * get a branch that compiles into a path a sender could reach. Sender
-   * identity confers no authority in this system, and this is the type
-   * system saying so rather than a comment asking nicely.
-   */
-  readonly commandAuthority: 'none';
-}
-
-function summarizeChecks(checks: SenderAuthenticationChecks): DisplayedSenderConfidence {
-  const results = [checks.dkim, checks.spf, checks.dmarc].filter(
-    (result): result is SenderProtocolResult => result !== undefined,
-  );
-  if (results.length === 0) return 'unverified';
-  if (results.includes('fail')) return 'failed-verification';
-  const passes = results.filter((result) => result === 'pass').length;
-  if (passes === 0) return 'unverified';
-  return passes === results.length ? 'protocol-verified' : 'partially-verified';
-}
-
-function parseFromHeader(fromHeader: string): { address: string; displayName: string } {
-  const trimmed = fromHeader.trim();
-  const angled = /^(.*?)<([^>]*)>\s*$/.exec(trimmed);
-  if (angled) {
-    const rawName = angled[1]!.trim().replace(/^"(.*)"$/, '$1').trim();
-    return { address: angled[2]!.trim(), displayName: rawName };
-  }
-  return { address: trimmed, displayName: '' };
-}
-
-const CONFIDENCE_PHRASE: Readonly<Record<DisplayedSenderConfidence, string>> = {
-  unverified: 'no sender-authentication result',
-  'partially-verified': 'some sender-authentication checks passed',
-  'protocol-verified': 'sender-authentication checks passed',
-  'failed-verification': 'a sender-authentication check FAILED',
-};
+export type SenderProtocolResult = PlatformSenderProtocolResult;
+export type SenderAuthenticationChecks = PlatformSenderAuthenticationChecks;
+/** How much the displayed sender line should be trusted BY A HUMAN READING IT. Display only. */
+export type DisplayedSenderConfidence = EmailSenderConfidence;
+export type SenderClaim = EmailSenderClaim;
 
 /**
  * Describe a `From:` header for display, in wording that keeps it a claim.
- *
- * Deliberately has no address table, no owner address, and no allow list,
- * there is nothing here to add one to. An email that writes the owner's own
- * address in its From header is describable by this function exactly like
- * any stranger's, and gets the same answer, because the function's output
- * has no field that could differ. Spoofing a From header takes no skill and
- * leaves no trace, so treating a matching address as evidence of anything
- * would be handing the whole boundary to whoever notices.
- *
- * Passing DKIM/SPF/DMARC results raises `displayedConfidence` and changes
- * the sentence a human reads. It does not, and structurally cannot, change
- * `commandAuthority`.
+ * Passing DKIM/SPF/DMARC results changes the sentence a human reads; it does
+ * not, and structurally cannot, change `commandAuthority`.
  */
 export function describeSenderClaim(
   fromHeader: string,
   checks: SenderAuthenticationChecks = {},
 ): SenderClaim {
-  const { address, displayName } = parseFromHeader(fromHeader);
-  const displayedConfidence = summarizeChecks(checks);
-  const named = displayName ? `${displayName} <${address}>` : address;
-  return {
-    claimedAddress: address,
-    claimedDisplayName: displayName,
-    display:
-      `Claims to be from ${named}, a claim in the message header, not proof of identity ` +
-      `(${CONFIDENCE_PHRASE[displayedConfidence]}). Carries no authority to direct actions.`,
-    displayedConfidence,
-    commandAuthority: 'none',
-  };
+  return describeSenderClaimNeutrally(fromHeader, checks);
 }

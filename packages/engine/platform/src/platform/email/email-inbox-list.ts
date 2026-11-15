@@ -1,6 +1,6 @@
 /** The compatible inbox listing; mailbox provenance stays out of its wire data. */
 import { IMAP_MAX_FETCH_UIDS } from './imap-client.js';
-import { readSenderAuthentication } from '../google/sender-authentication.js';
+import { mailboxAuthservIds, readSenderAuthentication } from '../google/sender-authentication.js';
 import { withEmailReadConnection } from './email-read-connection.js';
 import type { EmailConfig, EmailInboxListInput, EmailInboxListResult, EmailServiceDeps } from './email-service.js';
 import type { EmailReplySubjectRead } from './reply-subject-source.js';
@@ -13,6 +13,7 @@ export async function listEmailInbox(deps: EmailServiceDeps, config: EmailConfig
   const requested = input.limit ?? 10;
   const limit = Number.isFinite(requested) ? Math.max(1, Math.floor(requested)) : 10;
   const unreadOnly = input.unreadOnly ?? true;
+  const authservIds = mailboxAuthservIds(config.imapHost);
   return withEmailReadConnection(deps, config, sourceRead, input.signal, async (client, current) => {
     const uids = unreadOnly
       ? await client.searchUnseen(input.since)
@@ -89,7 +90,7 @@ export async function listEmailInbox(deps: EmailServiceDeps, config: EmailConfig
             unverifiedToHeaderClaim: env.unverifiedToHeaderClaim,
             senderClaim: deps.describeSenderClaim(
               env.from,
-              readSenderAuthentication(env.authenticationResults),
+              readSenderAuthentication(env.authenticationResults, authservIds),
             ),
           };
           current();

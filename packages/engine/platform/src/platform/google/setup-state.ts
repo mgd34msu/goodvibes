@@ -10,12 +10,33 @@
  *
  * The one thing that cannot be probed locally is the OAuth publishing status,
  * which lives only in the Cloud Console. It is cached in config after being
- * read, and re-read from the console during a verification run.
+ * read; the OAuth path reads it from the console before the client is created.
  */
 
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from './setup-plan.js';
 import type { GoogleConfigPort, GoogleSecretPort } from './types.js';
 import { safeConfigGet, safeConfigString } from './config-access.js';
+import { GoogleReadingError } from './browser-readings.js';
+
+/** Whether a secret is stored, not stored, or could not be read. */
+export type GoogleSecretState = 'present' | 'absent' | 'unreadable';
+
+/**
+ * The one reading of a Google secret's presence, for status, repair and the
+ * setup steps alike. A read failure is not an absence: acting on it as one
+ * would offer a new setup over a working credential, or create a second
+ * credential and overwrite the stored one. Never returns the value.
+ */
+export async function readGoogleSecretState(secrets: GoogleSecretPort, key: string): Promise<GoogleSecretState> {
+  try {
+    const value = await secrets.get(key);
+    return typeof value === 'string' && value.trim().length > 0 ? 'present' : 'absent';
+  } catch (error) {
+    // A superseded request is not a store failure; it must keep unwinding.
+    if (error instanceof GoogleReadingError) throw error;
+    return 'unreadable';
+  }
+}
 
 /** A snapshot of what already exists, all of it probed rather than remembered. */
 export interface GoogleSetupState {
@@ -39,23 +60,16 @@ export interface GoogleSetupState {
   readonly projectId: string | null;
   /** Last known publishing status. 'unknown' until the console has been read. */
   readonly publishingStatus: 'testing' | 'in-production' | 'unknown';
+  /**
+   * True when the secret store could not be read, so the `has*` answers above
+   * are unknown rather than "not stored".
+   */
+  readonly secretStoreUnreadable: boolean;
 }
 
 function readPublishingStatus(value: unknown): GoogleSetupState['publishingStatus'] {
   if (value === 'testing' || value === 'in-production') return value;
   return 'unknown';
-}
-
-/** True when a secret exists and is non-empty. Never returns the value itself. */
-async function secretPresent(secrets: GoogleSecretPort, key: string): Promise<boolean> {
-  try {
-    const value = await secrets.get(key);
-    return typeof value === 'string' && value.trim().length > 0;
-  } catch {
-    // An unreadable secret store is treated as "not present" so the flow
-    // offers to set the value again rather than failing opaquely.
-    return false;
-  }
 }
 
 /** Probe everything the Google flows care about. */
@@ -70,24 +84,26 @@ export async function detectGoogleSetupState(deps: {
   const smtpHost = safeConfigString(config, GOOGLE_CONFIG_KEYS.emailSmtpHost);
   const passwordRef = safeConfigString(config, GOOGLE_CONFIG_KEYS.emailPasswordRef);
 
-  const [hasAppPassword, hasCalendarAddress, hasOAuthClientSecret, hasRefreshToken] = await Promise.all([
-    secretPresent(secrets, GOOGLE_SECRET_KEYS.appPassword),
-    secretPresent(secrets, GOOGLE_SECRET_KEYS.calendarIcsUrl),
-    secretPresent(secrets, GOOGLE_SECRET_KEYS.oauthClientSecret),
-    secretPresent(secrets, GOOGLE_SECRET_KEYS.oauthRefreshToken),
+  const secretStates = await Promise.all([
+    readGoogleSecretState(secrets, GOOGLE_SECRET_KEYS.appPassword),
+    readGoogleSecretState(secrets, GOOGLE_SECRET_KEYS.calendarIcsUrl),
+    readGoogleSecretState(secrets, GOOGLE_SECRET_KEYS.oauthClientSecret),
+    readGoogleSecretState(secrets, GOOGLE_SECRET_KEYS.oauthRefreshToken),
   ]);
+  const [hasAppPassword, hasCalendarAddress, hasOAuthClientSecret, hasRefreshToken] = secretStates.map((state) => state === 'present');
 
   return {
-    hasAppPassword,
+    hasAppPassword: hasAppPassword === true,
     hasGmailConfig: username !== null && imapHost !== null && smtpHost !== null && passwordRef !== null,
     gmailEnabled: safeConfigGet(config, GOOGLE_CONFIG_KEYS.emailEnabled) === true,
     gmailUsername: username,
-    hasCalendarAddress,
+    hasCalendarAddress: hasCalendarAddress === true,
     oauthClientId: safeConfigString(config, GOOGLE_CONFIG_KEYS.oauthClientId),
-    hasOAuthClientSecret,
-    hasRefreshToken,
+    hasOAuthClientSecret: hasOAuthClientSecret === true,
+    hasRefreshToken: hasRefreshToken === true,
     projectId: safeConfigString(config, GOOGLE_CONFIG_KEYS.oauthProjectId),
     publishingStatus: readPublishingStatus(safeConfigGet(config, GOOGLE_CONFIG_KEYS.oauthPublishingStatus)),
+    secretStoreUnreadable: secretStates.includes('unreadable'),
   };
 }
 
@@ -97,6 +113,15 @@ export async function detectGoogleSetupState(deps: {
  * secret values, only whether each one is present.
  */
 export function describeGoogleSetupState(state: GoogleSetupState): readonly string[] {
+  if (state.secretStoreUnreadable) {
+    // Every line below would read "not connected" from a store that answered
+    // nothing, and send the reader to set up over a working connection.
+    return [
+      'The credential store could not be read, so whether Gmail, Calendar and OAuth credentials are stored is unknown.',
+      'Unlock or repair the secret store (a locked keyring or a signed-out password manager), then check again.',
+      ...(state.oauthClientId === null ? [] : [`OAuth: a client is configured (${state.oauthClientId.slice(-12)}).`]),
+    ];
+  }
   const lines: string[] = [];
 
   if (state.hasGmailConfig && state.hasAppPassword) {
@@ -141,8 +166,8 @@ export function appPasswordPathComplete(state: GoogleSetupState): boolean {
 
 /**
  * Whether the OAuth path is complete *and* not known to be on a seven-day fuse.
- * An unread publishing status counts as complete: no step reads it, so holding
- * the path open for it could never end.
+ * An unread publishing status counts as complete: a client handed over by the
+ * owner skips the console, so holding the path open for it could never end.
  */
 export function oauthPathComplete(state: GoogleSetupState): boolean {
   return (

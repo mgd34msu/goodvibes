@@ -1,4 +1,4 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { isClassicOperation, requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
  * The Cloud-project half of the OAuth path: gcloud and the console pages.
  *
@@ -10,18 +10,24 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  * which is the whole point of the `existing-client` path.
  *
  * Every one of these is scriptable through gcloud except the two Google exposes
- * no API for: the consent screen and the audience/publishing setting. Those two
- * report `needs-human` and say exactly what to click.
+ * no API for: the consent screen and the audience/publishing setting. The
+ * consent screen is recognised as done from evidence (a stored client, or an
+ * audience page that shows a publishing status, which Google shows only once
+ * the consent screen exists); only when neither is there does it stop and say
+ * exactly what to fill in.
  */
 
 import {
+  AUTH_CLIENTS_URL,
   GOOGLE_CONFIG_KEYS,
+  GOOGLE_SECRET_KEYS,
   REQUIRED_SERVICES,
 } from './setup-plan.js';
+import { readGoogleSecretState } from './setup-state.js';
 import type { GoogleStepRunner, GoogleStepRunnerResult } from './setup-flow.js';
 import type { GoogleStepId } from './types.js';
 import type { GoogleSetupActionDeps } from './setup-action-deps.js';
-import { publishApp, readPublishingStatus } from './console-flow.js';
+import { publishApp, readPublishingStatus, type PublishingStatus } from './console-flow.js';
 import {
   checkAuthenticated,
   detectGcloud,
@@ -53,6 +59,8 @@ function failed(detail: string, problem: string, fix: string): GoogleStepRunnerR
 
 interface GcloudState {
   path: string | null;
+  /** The publishing status the consent-screen step read this run, so the audience step does not read it again. */
+  publishing: Exclude<PublishingStatus, 'unknown'> | null;
 }
 
 function gcloudInstalledRunner(deps: GoogleSetupActionDeps, state: GcloudState): GoogleStepRunner {
@@ -143,16 +151,39 @@ function apisEnabledRunner(deps: GoogleSetupActionDeps, state: GcloudState): Goo
   };
 }
 
-function brandingRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
+/**
+ * The consent screen. Google exposes no API for it, so whether it is filled in
+ * is read from evidence: a stored client (Google creates one only after the
+ * consent screen exists), or the audience page showing a publishing status
+ * (it shows none until the consent screen exists). Only when neither is there
+ * does the run stop at the branding page, and then a re-run finds the
+ * evidence and goes on.
+ */
+function brandingRunner(deps: GoogleSetupActionDeps, state: GcloudState): GoogleStepRunner {
   return async (spec) => {
-    // Google exposes no API for the consent screen; this is one of the two
-    // places a person genuinely has to click.
+    const clientId = safeConfigString(deps.config, GOOGLE_CONFIG_KEYS.oauthClientId);
+    if (clientId !== null && await readGoogleSecretState(deps.secrets, GOOGLE_SECRET_KEYS.oauthClientSecret) === 'present') {
+      return alreadyDone('An OAuth client is stored, which Google allows only once the consent screen is filled in.');
+    }
     const browser = await deps.browser();
+    if (!isClassicOperation()) {
+      const status = await readPublishingStatus(browser);
+      if (status.kind === 'ok' && status.status !== 'unknown') {
+        state.publishing = status.status;
+        deps.config.set(GOOGLE_CONFIG_KEYS.oauthPublishingStatus, status.status);
+        return alreadyDone('The consent screen is filled in: the Google Auth Platform shows this app\'s publishing status.');
+      }
+      // A sign-in wall or an unselected project says nothing about the
+      // consent screen; it is what stands in the way, so it is what is asked.
+      if (status.kind === 'needs-human') {
+        return needsHuman('The Google Auth Platform console could not be read yet.', status.problem, status.fix);
+      }
+    }
     if (spec.url !== undefined) await browser.navigate(spec.url);
     return needsHuman(
       'The OAuth consent screen needs filling in.',
       'Google exposes no API for the consent screen, so it has to be completed in the browser once.',
-      `The browser is open at ${spec.url ?? 'the branding page'}. Fill in the app name and your support email, choose the "External" audience, then re-run.`,
+      `The browser is open at ${spec.url ?? 'the branding page'}. Fill in the app name and your support email, choose the "External" audience and click "Create". Then re-run: the consent screen is recognised from the console and the run carries on. If you create the Desktop client yourself at ${AUTH_CLIENTS_URL}, enter it with /google client <client-id> <client-secret> instead.`,
     );
   };
 }
@@ -162,18 +193,23 @@ function brandingRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
  * survives a week, so it is read from the console rather than assumed, and a
  * `testing` status is carried out as a loud warning even when the run succeeds.
  */
-function audienceProductionRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
+function audienceProductionRunner(deps: GoogleSetupActionDeps, state: GcloudState): GoogleStepRunner {
   return async () => {
     requireDecisionFeature('automatic publishing-status interpretation; check and publish the app manually in Google settings');
     const browser = await deps.browser();
-    const status = await readPublishingStatus(browser);
-    if (status.kind === 'needs-human') {
-      return needsHuman('The publishing status could not be read.', status.problem, status.fix);
+    // Read once per run: the consent-screen step may already have read it.
+    let current = state.publishing;
+    if (current === null) {
+      const status = await readPublishingStatus(browser);
+      if (status.kind === 'needs-human') {
+        return needsHuman('The publishing status could not be read.', status.problem, status.fix);
+      }
+      if (status.kind === 'failed') {
+        return failed('The publishing status could not be read.', status.problem, status.fix);
+      }
+      current = status.status === 'unknown' ? null : status.status;
     }
-    if (status.kind === 'failed') {
-      return failed('The publishing status could not be read.', status.problem, status.fix);
-    }
-    if (status.status === 'in-production') {
+    if (current === 'in-production') {
       deps.config.set(GOOGLE_CONFIG_KEYS.oauthPublishingStatus, 'in-production');
       return alreadyDone('The app is already published, so its refresh token does not expire.');
     }
@@ -192,8 +228,6 @@ function audienceProductionRunner(deps: GoogleSetupActionDeps): GoogleStepRunner
   };
 }
 
-/** Turn whichever intake route was chosen into client credentials. */
-
 /**
  * Bind the six project-and-console steps.
  *
@@ -204,13 +238,13 @@ function audienceProductionRunner(deps: GoogleSetupActionDeps): GoogleStepRunner
 export function buildCloudProjectRunners(
   deps: GoogleSetupActionDeps,
 ): ReadonlyMap<GoogleStepId, GoogleStepRunner> {
-  const state: GcloudState = { path: null };
+  const state: GcloudState = { path: null, publishing: null };
   return new Map<GoogleStepId, GoogleStepRunner>([
     ['gcloud-installed', gcloudInstalledRunner(deps, state)],
     ['gcloud-authenticated', gcloudAuthRunner(deps, state)],
     ['gcloud-project', gcloudProjectRunner(deps, state)],
     ['apis-enabled', apisEnabledRunner(deps, state)],
-    ['oauth-branding', brandingRunner(deps)],
-    ['oauth-audience-production', audienceProductionRunner(deps)],
+    ['oauth-branding', brandingRunner(deps, state)],
+    ['oauth-audience-production', audienceProductionRunner(deps, state)],
   ]);
 }

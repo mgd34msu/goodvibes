@@ -29,12 +29,12 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { subscriptionRegistryForWrite } from './calendar-subscription-runtime.ts';
 import { requireSecretsManager } from './runtime-services.ts';
 import { renderGoogleSetupReport } from '@goodvibes-jev/engine/platform/platform/google';
-import type { GoogleClientIntakeChoice } from '@goodvibes-jev/engine/platform/platform/google';
 import { renderGoogleSetupRunbook } from '@goodvibes-jev/engine/platform/platform/google';
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
 import {
   adoptGoogleCredentials,
   connectGoogle,
+  connectGoogleClient,
   describeGoogleConnection,
   forgetGoogleCredentials,
   GOOGLE_CALENDAR_SUBSCRIPTION_NAME,
@@ -56,9 +56,10 @@ const USAGE = [
   '                                  something reports a missing scope or a dead credential.',
   '  forget [--yes]                  Remove stored Google credentials. Says what would go and waits.',
   '  adopt [--yes]                   Take up Google credentials from files on this machine (~/.gmail-mcp).',
-  '  client-file <path>              Use an OAuth client JSON you already have.',
+  '  client-file <path>              Store an OAuth client JSON you already have, then ask for consent.',
   '  client <client-id> <client-secret>',
-  '                                  Use an OAuth client id and secret you copied from the console.',
+  '                                  Store an OAuth client id and secret you copied from the console,',
+  '                                  then ask for consent. No Cloud project or gcloud step is run.',
   '  account <address>               Set the Gmail address to connect as.',
   '  calendar-address <url>          Store the private iCal address and subscribe to it for read-only calendar access.',
   '  setup [--path app-password|oauth|existing-client]',
@@ -116,13 +117,13 @@ function consentAnnouncer(ctx: CommandContext): (url: string) => void {
   };
 }
 
-async function runSetup(args: readonly string[], ctx: CommandContext, intake?: GoogleClientIntakeChoice): Promise<void> {
+async function runSetup(args: readonly string[], ctx: CommandContext): Promise<void> {
   const path = parsePath(args);
   if (path === null) {
     ctx.print('Unknown setup path. Use /google setup --path app-password|oauth|existing-client. Nothing was run.');
     return;
   }
-  const report = await runGoogleSetup(path, ctx, progressPort(ctx), intake);
+  const report = await runGoogleSetup(path, ctx, progressPort(ctx));
   ctx.print(renderGoogleSetupReport(report));
 }
 
@@ -325,7 +326,9 @@ export async function runGoogleCommand(args: readonly string[], ctx: CommandCont
         ctx.print('Give the path to the downloaded client JSON: /google client-file <path>');
         return;
       }
-      return await runSetup(['--path', 'oauth'], ctx, { kind: 'client-json-file', path });
+      const outcome = await connectGoogleClient(ctx, { kind: 'client-json-file', path }, progressPort(ctx), consentAnnouncer(ctx));
+      ctx.print(outcome.text);
+      return;
     }
     if (sub === 'client') {
       const clientId = (rest[0] ?? '').trim();
@@ -334,7 +337,9 @@ export async function runGoogleCommand(args: readonly string[], ctx: CommandCont
         ctx.print('Give both values: /google client <client-id> <client-secret>');
         return;
       }
-      return await runSetup(['--path', 'oauth'], ctx, { kind: 'manual-entry', clientId, clientSecret });
+      const outcome = await connectGoogleClient(ctx, { kind: 'manual-entry', clientId, clientSecret }, progressPort(ctx), consentAnnouncer(ctx));
+      ctx.print(outcome.text);
+      return;
     }
     ctx.print(USAGE);
   } catch (error) {

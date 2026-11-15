@@ -133,6 +133,8 @@ export {
 export {
   detectGoogleSetupState,
   describeGoogleSetupState,
+  readGoogleSecretState,
+  type GoogleSecretState,
   appPasswordPathComplete,
   oauthPathComplete,
   type GoogleSetupState,
@@ -140,6 +142,7 @@ export {
 
 export {
   buildGoogleSetupRunners,
+  registerGoogleClientFromIntake,
   adoptExistingGoogleCredentials,
   type GoogleClientIntakeChoice,
   type GoogleSetupActionDeps,
@@ -188,7 +191,6 @@ export {
   type GoogleRefreshFailure,
   type GoogleRefreshOutcome,
   type GoogleRefreshFn,
-  type GooglePersistFn,
   type GoogleTokenManagerDeps,
   type GoogleAccessToken,
   type GoogleAccessTokenOutcome,
@@ -247,9 +249,17 @@ export {
   readDiskCredentials,
   describeGoogleConnection,
   openGoogleConnection,
+  buildGoogleConnection,
   type GoogleConnection,
+  type GoogleConnectionPorts,
   type GoogleConnectionSources,
 } from './connection.js';
+
+export {
+  GoogleConnectionOwner,
+  sharedGoogleConnectionOwner,
+  type GoogleConnectionOwnerOptions,
+} from './connection-owner.js';
 
 // ---------------------------------------------------------------------------
 // Registering a client the owner handed over, and the consent that follows
@@ -257,8 +267,8 @@ export {
 
 export {
   beginGoogleConsent,
-  registerGoogleClient,
   storeClientCredentials,
+  googleClientConfigEntries,
   clientIdTail,
   CONSENT_WAIT_MS,
   type GoogleClientRegistration,
@@ -460,6 +470,8 @@ export {
 export {
   parseAuthenticationResults,
   readSenderAuthentication,
+  readAuthservId,
+  mailboxAuthservIds,
   hasAnySenderVerdict,
   type SenderProtocolResult,
   type SenderAuthenticationChecks,

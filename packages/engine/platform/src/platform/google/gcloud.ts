@@ -79,7 +79,6 @@ async function tryVersion(port: GoogleCommandPort, executable: string): Promise<
 
 export interface InstallOptions {
   readonly homeDirectory: string;
-  readonly downloadUrl?: string;
   /** The machine to pick the archive for. Defaults to this process's platform and architecture. */
   readonly platform?: { readonly os: string; readonly arch: string };
 }
@@ -116,25 +115,17 @@ export async function installGcloud(port: GoogleCommandPort, options: InstallOpt
 
   const platform = options.platform ?? { os: process.platform, arch: process.arch };
   const archive = gcloudArchiveName(platform.os, platform.arch);
-  if (options.downloadUrl === undefined && archive === null) {
+  if (archive === null) {
     return {
       ok: false,
       problem: `There is no no-root Google Cloud CLI archive for ${platform.os} on ${platform.arch}, so it was not downloaded.`,
       fix: 'Install the Google Cloud CLI with your system package manager, or from https://cloud.google.com/sdk/docs/install, then re-run this step.',
     };
   }
-  const downloadUrl = options.downloadUrl
-    ?? `https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/${archive}`;
-  // The archive's install script is executed, and TLS is the only integrity check on it,
-  // so a plain-http or non-URL override is refused before anything is fetched.
-  if (!downloadUrl.startsWith('https://')) {
-    return {
-      ok: false,
-      problem: 'The Google Cloud CLI download URL is not an https URL, so nothing was downloaded or run.',
-      fix: 'Use an https download URL, or install the Google Cloud CLI with your system package manager and re-run this step.',
-    };
-  }
-  const tarballPath = `${homeDirectory}/${archive ?? 'google-cloud-cli.tar.gz'}`;
+  // A fixed https address: the archive's install script is executed, and TLS
+  // to Google's own host is the integrity check on it.
+  const downloadUrl = `https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/${archive}`;
+  const tarballPath = `${homeDirectory}/${archive}`;
   try {
     // -f: an HTTP error must fail the download, not be saved as the "archive".
     const download = await port.run('curl', ['-fsSL', '-o', tarballPath, downloadUrl], { timeoutMs: 300_000 });

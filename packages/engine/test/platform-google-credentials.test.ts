@@ -246,41 +246,6 @@ describe('keeping an access token usable', () => {
     expect(refreshes).toBe(1);
   });
 
-  test('an adopted credential is never written back, because another tool owns the file', async () => {
-    let persisted = 0;
-    const manager = new GoogleTokenManager(
-      credentials({ origin: 'gmail-mcp', expiresAtMs: null }),
-      {
-        refresh: async (): Promise<GoogleRefreshOutcome> => ({
-          ok: true,
-          result: { accessToken: 'fresh', expiresInSeconds: 3600, scopes: null },
-        }),
-        persist: async (): Promise<void> => {
-          persisted += 1;
-        },
-      },
-    );
-
-    await manager.accessToken();
-    expect(persisted).toBe(0);
-  });
-
-  test('a credential the agent owns is persisted after refresh so restarts reuse it', async () => {
-    let persisted = 0;
-    const manager = new GoogleTokenManager(credentials({ origin: 'secret-store', expiresAtMs: null }), {
-      refresh: async (): Promise<GoogleRefreshOutcome> => ({
-        ok: true,
-        result: { accessToken: 'fresh', expiresInSeconds: 3600, scopes: null },
-      }),
-      persist: async (): Promise<void> => {
-        persisted += 1;
-      },
-    });
-
-    await manager.accessToken();
-    expect(persisted).toBe(1);
-  });
-
   test('a revoked grant is reported as needing re-authorization, not as a network blip', async () => {
     const manager = new GoogleTokenManager(credentials({ expiresAtMs: null }), {
       refresh: async (): Promise<GoogleRefreshOutcome> => ({

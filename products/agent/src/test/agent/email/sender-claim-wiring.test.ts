@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { parseAuthenticationResults, readSenderAuthentication } from '@goodvibes-jev/engine/platform/platform/google';
+import { mailboxAuthservIds, parseAuthenticationResults, readSenderAuthentication } from '@goodvibes-jev/engine/platform/platform/google';
 import { describeSenderClaim } from '../../../agent/untrusted-content.ts';
 import {
   assertCanConfirm,
@@ -28,17 +28,28 @@ const FULLY_ALIGNED = 'mx.google.com; dkim=pass header.i=@example.com; spf=pass 
 
 const OWNER_ADDRESS = 'owner@example.com';
 
+/** A Gmail mailbox: its own server writes `mx.google.com`. */
+const GMAIL = mailboxAuthservIds('imap.gmail.com');
+
 describe('confidence reaches the display', () => {
   test('a fully aligned message reads as protocol-verified', () => {
-    const claim = describeSenderClaim(`Alice <alice@example.com>`, readSenderAuthentication([FULLY_ALIGNED]));
+    const claim = describeSenderClaim(`Alice <alice@example.com>`, readSenderAuthentication([FULLY_ALIGNED], GMAIL));
     expect(claim.displayedConfidence).toBe('protocol-verified');
     expect(claim.display).toContain('sender-authentication checks passed');
   });
 
   test('a message nobody checked reads as unverified, and says so', () => {
-    const claim = describeSenderClaim('bank@example.com', readSenderAuthentication([]));
+    const claim = describeSenderClaim('bank@example.com', readSenderAuthentication([], GMAIL));
     expect(claim.displayedConfidence).toBe('unverified');
     expect(claim.display).toContain('no sender-authentication result');
+  });
+
+  test('a verdict the mailbox server did not write reads as unverified', () => {
+    const forged = 'attacker.example; dkim=pass; spf=pass; dmarc=pass';
+    expect(readSenderAuthentication([forged], GMAIL)).toEqual({});
+    // A server that stamps nothing: the top-most header is the sender's own.
+    expect(readSenderAuthentication([FULLY_ALIGNED], mailboxAuthservIds('mail.mailhost.example'))).toEqual({});
+    expect(describeSenderClaim('bank@example.com', readSenderAuthentication([forged], GMAIL)).displayedConfidence).toBe('unverified');
   });
 
   test('a failed check is called out loudly rather than blended into the others', () => {
@@ -60,7 +71,7 @@ describe('THE POINT: verification never becomes authority', () => {
   test('a perfectly authenticated email claiming to be the owner still has NO command authority', () => {
     const claim = describeSenderClaim(
       `The Owner <${OWNER_ADDRESS}>`,
-      readSenderAuthentication([FULLY_ALIGNED]),
+      readSenderAuthentication([FULLY_ALIGNED], GMAIL),
     );
 
     // The confidence went up...
@@ -71,7 +82,7 @@ describe('THE POINT: verification never becomes authority', () => {
   });
 
   test('a fully authenticated owner-claiming email cannot confirm anything', () => {
-    const claim = describeSenderClaim(OWNER_ADDRESS, readSenderAuthentication([FULLY_ALIGNED]));
+    const claim = describeSenderClaim(OWNER_ADDRESS, readSenderAuthentication([FULLY_ALIGNED], GMAIL));
     expect(claim.commandAuthority).toBe('none');
 
     const decision = assertCanConfirm('email');
@@ -92,8 +103,8 @@ describe('THE POINT: verification never becomes authority', () => {
 
   test('an authenticated email and an unauthenticated one get IDENTICAL authority', () => {
     // The only difference between these two is the sentence a human reads.
-    const verified = describeSenderClaim(OWNER_ADDRESS, readSenderAuthentication([FULLY_ALIGNED]));
-    const stranger = describeSenderClaim('someone@elsewhere.test', readSenderAuthentication([]));
+    const verified = describeSenderClaim(OWNER_ADDRESS, readSenderAuthentication([FULLY_ALIGNED], GMAIL));
+    const stranger = describeSenderClaim('someone@elsewhere.test', readSenderAuthentication([], GMAIL));
 
     expect(verified.commandAuthority).toBe(stranger.commandAuthority);
     expect(verified.displayedConfidence).not.toBe(stranger.displayedConfidence);
@@ -102,7 +113,7 @@ describe('THE POINT: verification never becomes authority', () => {
   test('the claim object exposes no field an authority check could branch on', () => {
     // If a future change adds a boolean like `isOwner` or `trusted`, this fails
     // and someone has to justify it in review rather than slipping it in.
-    const claim = describeSenderClaim(OWNER_ADDRESS, readSenderAuthentication([FULLY_ALIGNED]));
+    const claim = describeSenderClaim(OWNER_ADDRESS, readSenderAuthentication([FULLY_ALIGNED], GMAIL));
     expect(Object.keys(claim).sort()).toEqual([
       'claimedAddress',
       'claimedDisplayName',

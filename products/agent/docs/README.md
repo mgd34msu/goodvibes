@@ -13,7 +13,7 @@ These are the package-facing docs for the GoodVibes Agent `3.2.x` release line.
 - [Channels, remote access, and API](channels-remote-and-api.md)
 - [Providers and routing](providers-and-routing.md)
 - [Voice and live TTS](voice-and-live-tts.md)
-- [Google setup runbook](google-setup-runbook.md)
+- [Google setup runbook](../../../packages/engine/docs/google-setup-runbook.md) (also printed by `/google runbook`)
 - [Google scope strategy](google-scope-strategy.md)
 - [Model catalog search](model-catalog-search.md)
 - [Personal operations and routing](personal-operations-and-routing.md)

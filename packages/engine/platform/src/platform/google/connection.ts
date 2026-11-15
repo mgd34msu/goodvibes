@@ -232,28 +232,40 @@ export interface GoogleConnection {
   readonly summary: GoogleCredentialSummary;
 }
 
+export interface GoogleConnectionPorts {
+  readonly fetch: GoogleFetchPort & GoogleApiFetchPort;
+  /**
+   * The account this machine is signed in as, when something knows it,
+   * normally gcloud's active account. Supplied so an `invalid_grant` can be
+   * diagnosed as an account mix-up instead of a shrug.
+   */
+  readonly signedInAccount?: string | null;
+}
+
 /**
  * Build a live Google client, or explain why there is not one.
  *
- * Adopted credentials get no persist function: they belong to another tool and
- * are never written back.
+ * Each call builds a new token manager. A caller that makes more than one
+ * Google call in its life holds a `GoogleConnectionOwner` instead, so the calls
+ * share one access token and one refresh.
  */
 export async function openGoogleConnection(
   sources: GoogleConnectionSources,
-  ports: {
-    readonly fetch: GoogleFetchPort & GoogleApiFetchPort;
-    /**
-     * The account this machine is signed in as, when something knows it,
-     * normally gcloud's active account. Supplied so an `invalid_grant` can be
-     * diagnosed as an account mix-up instead of a shrug.
-     */
-    readonly signedInAccount?: string | null;
-  },
+  ports: GoogleConnectionPorts,
   now: number = Date.now(),
 ): Promise<GoogleConnection | null> {
   const credentials = await resolveGoogleCredentials(sources);
   if (credentials === null) return null;
+  return buildGoogleConnection(credentials, sources, ports, now);
+}
 
+/** A client and token manager over credentials already resolved. */
+export function buildGoogleConnection(
+  credentials: GoogleOAuthCredentials,
+  sources: GoogleConnectionSources,
+  ports: GoogleConnectionPorts,
+  now: number = Date.now(),
+): GoogleConnection {
   const context: GrantContext = {
     intendedAccount: safeConfigString({ get: sources.configGet }, GOOGLE_CONFIG_KEYS.emailUsername),
     signedInAccount: ports.signedInAccount ?? null,

@@ -9,16 +9,17 @@
  *   2. Never refresh concurrently. Several tool calls arriving at once must
  *      share one refresh, or Google sees a burst of identical grants and the
  *      losers race to overwrite each other's token.
- *   3. Persist the result where it was safe to persist it, the encrypted
- *      secret store. Credentials adopted from another tool's files are
- *      **never written back**; that tool owns them and is still using them.
- *   4. Report a dead refresh token in plain language. A revoked grant is the
- *      one failure a human must act on, and it must not look like a network
- *      blip.
+ *   3. Report a dead refresh token in plain language, once. A revoked grant is
+ *      the one failure a human must act on, and it must not look like a
+ *      network blip.
+ *
+ * The access token lives in memory only. A manager lives as long as the
+ * `GoogleConnectionOwner` that holds it (the daemon, an Agent session), so a
+ * restart costs one refresh and nothing is written back to any store; adopted
+ * credentials in particular belong to another tool and are only ever read.
  */
 
 import type { GoogleOAuthCredentials } from './credential-adoption.js';
-import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
 /** Result of exchanging a refresh token for a new access token. */
@@ -49,16 +50,8 @@ export type GoogleRefreshFn = (input: {
   readonly tokenUri: string;
 }) => Promise<GoogleRefreshOutcome>;
 
-/** Persists a refreshed access token. Only ever called for store-owned credentials. */
-export type GooglePersistFn = (input: {
-  readonly accessToken: string;
-  readonly expiresAtMs: number;
-}) => Promise<void>;
-
 export interface GoogleTokenManagerDeps {
   readonly refresh: GoogleRefreshFn;
-  /** Omitted for adopted credentials, which must not be written back. */
-  readonly persist?: GooglePersistFn;
   readonly now?: () => number;
 }
 
@@ -68,8 +61,6 @@ export interface GoogleAccessToken {
   readonly expiresAtMs: number | null;
   /** True when this call performed a refresh rather than reusing a cached token. */
   readonly refreshed: boolean;
-  /** Present and false when the fresh token is usable now but could not be saved, so a restart will refresh again. */
-  readonly persisted?: false;
 }
 
 export type GoogleAccessTokenOutcome =
@@ -97,7 +88,8 @@ export class GoogleTokenManager {
    * So the first `grant-invalid` is remembered and every later call returns it
    * from here without touching the network. This is a latch rather than a
    * counter because the correct number of repeat attempts is zero, not fewer.
-   * `clearGrantFailure()` lifts it, and only re-authorization should call that.
+   * It belongs to this refresh token: a re-authorization stores a new one, and
+   * the connection owner builds a new manager for it.
    */
   private deadGrant: { readonly problem: string; readonly fix: string } | null = null;
 
@@ -113,17 +105,6 @@ export class GoogleTokenManager {
    */
   grantIsDead(): boolean {
     return this.deadGrant !== null;
-  }
-
-  /**
-   * Forget a recorded dead grant so refreshes are attempted again.
-   *
-   * Only meaningful after the credential itself has been replaced, a fresh
-   * consent produces a different refresh token, and holding the old verdict
-   * against it would make a successful re-authorization look like a failure.
-   */
-  clearGrantFailure(): void {
-    this.deadGrant = null;
   }
 
   /** The recorded verdict, so a caller can restate it without re-asking Google. */
@@ -237,22 +218,9 @@ export class GoogleTokenManager {
       ...(outcome.result.scopes === null ? {} : { scopes: outcome.result.scopes }),
     };
 
-    // Adopted credentials belong to another tool that is still running against
-    // them. Reading them is fine; writing them back is not.
-    let persisted = true;
-    if (this.deps.persist !== undefined && this.credentials.origin === 'secret-store') {
-      try {
-        await this.deps.persist({ accessToken: outcome.result.accessToken, expiresAtMs });
-      } catch (error) {
-        // The token in hand works; failing the caller would hide that. The next start refreshes again.
-        persisted = false;
-        logger.warn('Google access token refreshed but could not be saved', { error: summarizeError(error) });
-      }
-    }
-
     return {
       ok: true,
-      token: { accessToken: outcome.result.accessToken, expiresAtMs, refreshed: true, ...(persisted ? {} : { persisted: false as const }) },
+      token: { accessToken: outcome.result.accessToken, expiresAtMs, refreshed: true },
     };
   }
 }

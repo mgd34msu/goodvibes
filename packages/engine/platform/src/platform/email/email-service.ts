@@ -77,7 +77,7 @@ import type {
 import type { EmailInboxUnreadableResponse, EmailMessageRead } from './email-read-results.js';
 import type { SmtpSendResult } from './smtp-client.js';
 import type { EmailSenderClaim, EmailSenderClaimDescriber } from './sender-claim.js';
-import { readSenderAuthentication } from '../google/sender-authentication.js';
+import { mailboxAuthservIds, readSenderAuthentication } from '../google/sender-authentication.js';
 import type { Socket } from 'node:net';
 
 // Re-exported so this module stays the one entry point callers already import.
@@ -348,10 +348,9 @@ export interface EmailServiceDeps {
   /**
    * Describes a `From:` header as a claim, for display.
    *
-   * Injected because the wording of a trust boundary belongs to the surface
-   * that renders it, and because a second copy in the platform would drift from the
-   * product's own. Its `commandAuthority` is the literal `'none'`; see
-   * `sender-claim.ts`.
+   * Every product passes `describeSenderClaimNeutrally` (directly or through
+   * its boundary module); it is a port so a test can see what it was handed.
+   * Its `commandAuthority` is the literal `'none'`; see `sender-claim.ts`.
    */
   readonly describeSenderClaim: EmailSenderClaimDescriber;
   /** Optional socket factory override for IMAP (injected in tests). */
@@ -411,7 +410,7 @@ export class EmailService {
   /**
    * Message-ID -> the sender address of a message this process read whose
    * receiving server vouched for the sender (DKIM, SPF and DMARC all passed in
-   * the top-most `Authentication-Results`). `null` marks an ID two different
+   * the `Authentication-Results` the mailbox's own server wrote). `null` marks an ID two different
    * senders have claimed, which proves nothing. A `Message-ID` is written by
    * the sender, so it only ever SELECTS a stored entry; the address returned
    * comes from the verified read, never from what a later message says.
@@ -447,10 +446,16 @@ export class EmailService {
     return address === undefined || address === null ? [] : [address];
   }
 
-  #noteDetail(detail: { readonly messageId: string; readonly from: string; readonly authenticationResults: readonly string[] }): void {
+  #noteDetail(
+    config: EmailConfig,
+    detail: { readonly messageId: string; readonly from: string; readonly authenticationResults: readonly string[] },
+  ): void {
     this.#noteReplyEvidence(
       detail.messageId,
-      this.deps.describeSenderClaim(detail.from, readSenderAuthentication(detail.authenticationResults)),
+      this.deps.describeSenderClaim(
+        detail.from,
+        readSenderAuthentication(detail.authenticationResults, mailboxAuthservIds(config.imapHost)),
+      ),
     );
   }
 
@@ -557,7 +562,7 @@ export class EmailService {
     // only its screened previews reach one, through a tool whose result is
     // recorded then. Recording the raw text here would charge every session's
     // next send with mail none of them read.
-    for (const message of result.messages) { current(); this.#noteDetail(message.source.detail); }
+    for (const message of result.messages) { current(); this.#noteDetail(config, message.source.detail); }
     current();
     this.#inboxObservations.set(result, this.bindObservation(observation, input.signal));
     return result;
@@ -586,7 +591,7 @@ export class EmailService {
     const observation = sourceRead.completeMailboxObservation();
     if (!observation) return Object.freeze({ outcome: 'incomplete', reason: 'Mailbox identity is unavailable.' });
     // Screening input, not model input: see readInboxBatch.
-    if (result.outcome === 'complete') for (const message of result.messages) { current(); this.#noteDetail(message.source.detail); }
+    if (result.outcome === 'complete') for (const message of result.messages) { current(); this.#noteDetail(config, message.source.detail); }
     current();
     this.#inboxObservations.set(result, this.bindObservation(observation, signal));
     return result;
@@ -628,11 +633,12 @@ export class EmailService {
    * separate outcomes instead of one thrown error and one null.
    */
   async readMessageResult(uid: number): Promise<EmailMessageRead> {
+    const config = this.getValidatedConfig('read');
     const read = await readEmailMessage(
-      this.deps, this.getValidatedConfig('read'), uid, this.#replySubjectSources,
+      this.deps, config, uid, this.#replySubjectSources,
       (messages, current) => this.recordIngest(messages, current),
     );
-    if (read.outcome === 'read') this.#noteDetail(read.detail);
+    if (read.outcome === 'read') this.#noteDetail(config, read.detail);
     return read;
   }
 

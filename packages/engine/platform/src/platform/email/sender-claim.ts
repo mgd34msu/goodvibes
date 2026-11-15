@@ -1,17 +1,17 @@
 /**
- * The sender-claim port: how the mail service asks a product to describe a
- * `From:` header, without owning the description itself.
+ * The sender claim: how a `From:` header plus the receiving server's verdict
+ * is described to the person and the agent reading it.
  *
- * ── Why this is a port and not an implementation ──────────────────────────
+ * ── One describer ─────────────────────────────────────────────────────────
  *
  * Turning a `From:` header plus a routing verdict into a sentence a human
- * reads is a TRUST-BOUNDARY concern, and each surface owns its own boundary
- * module. The platform deliberately does not ship a second copy of that logic,
- * a duplicate would drift, and two answers to "who is this claiming to be"
- * is exactly one answer too many. What the platform owns is the plumbing: read the
- * top-most `Authentication-Results` (see `platform/google/sender-authentication`),
- * hand the resulting checks to the product's describer, and carry whatever it
- * returns onto the message summary unchanged.
+ * reads is a TRUST-BOUNDARY concern, and two answers to "who is this claiming
+ * to be" is exactly one answer too many. So the decision and its wording live
+ * here once, in `describeSenderClaimNeutrally`, and every product uses it (the
+ * Agent's boundary module wraps it under its own name). The mail service still
+ * takes the describer as a port so a test can observe what it was handed; the
+ * verdict it is handed comes from the `Authentication-Results` header the
+ * mailbox's own server wrote (see `platform/google/sender-authentication`).
  *
  * ── The one thing this file does pin ──────────────────────────────────────
  *
@@ -74,18 +74,18 @@ export type EmailSenderClaimDescriber = (
 ) => EmailSenderClaim;
 
 /**
- * The neutral describer, for a product with no wording of its own.
+ * The one describer of a sender claim.
  *
- * The port exists because the SENTENCE a person reads belongs to the product,
- * the agent says "Claims to be from …" in its own voice. But the *decision* the
- * sentence reports is not a product choice and must not be re-derived per
- * surface: a `From:` header is a claim, sender authentication raises display
- * confidence and nothing else, and `commandAuthority` is the literal `'none'`.
+ * The decision the sentence reports is not a product choice and is not
+ * re-derived per surface: a `From:` header is a claim, sender authentication
+ * raises display confidence and nothing else, and `commandAuthority` is the
+ * literal `'none'`. Passing DKIM, SPF and DMARC changes the sentence a human
+ * reads and cannot change authority; the return type makes any other value a
+ * compile error.
  *
- * So a product that has no reason to phrase it differently uses this rather
- * than writing a second implementation of a security-relevant rule. Passing DKIM,
- * SPF and DMARC changes the sentence a human reads and cannot change authority,
- * the return type makes any other value a compile error.
+ * Deliberately has no address table, no owner address and no allow list: an
+ * email that writes the owner's own address in its From header gets the same
+ * answer as any stranger's, because spoofing a From header takes no skill.
  */
 export function describeSenderClaimNeutrally(
   fromHeader: string,

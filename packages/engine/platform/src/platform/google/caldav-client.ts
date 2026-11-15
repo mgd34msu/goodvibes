@@ -42,6 +42,8 @@ export interface CalDavHttpResponse {
   readonly status: number;
   readonly headers: Readonly<Record<string, string>>;
   readonly body: string;
+  /** The address that gave this answer, when the port followed a same-origin redirect to it. */
+  readonly url?: string;
 }
 
 export interface CalDavHttpRequest {
@@ -60,6 +62,12 @@ export interface CalDavHttpRequest {
  */
 export const CALDAV_BODY_TOO_LARGE_ERROR = 'CalDavBodyTooLargeError';
 
+/**
+ * A port never lets its runtime follow a redirect. It may follow one within
+ * the origin it was asked for; one to another origin comes back as the 3xx
+ * with an absolute `location` header, and the client's credential rule
+ * decides whether a request goes there.
+ */
 export interface CalDavHttpPort {
   request(input: CalDavHttpRequest): Promise<CalDavHttpResponse>;
 }
@@ -208,6 +216,21 @@ export interface CalDavClientOptions {
   readonly signal?: AbortSignal;
 }
 
+const REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
+const MAX_REDIRECTS = 5;
+
+function readLocation(headers: Readonly<Record<string, string>>, base: string): URL | null {
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() !== 'location') continue;
+    try {
+      return new URL(value, base);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 function isLoopbackHost(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
 }
@@ -263,7 +286,7 @@ export class CalDavClient {
     const entries = parseMultistatus(sent.body);
     for (const entry of entries) {
       const raw = entry.props['current-user-principal'];
-      if (raw) return { ok: true, principalUrl: resolveHref(raw, baseUrl) };
+      if (raw) return { ok: true, principalUrl: resolveHref(raw, sent.url) };
     }
     return {
       ok: false,
@@ -279,7 +302,7 @@ export class CalDavClient {
     const entries = parseMultistatus(sent.body);
     for (const entry of entries) {
       const raw = entry.props['calendar-home-set'];
-      if (raw) return { ok: true, homeUrl: resolveHref(raw, principalUrl) };
+      if (raw) return { ok: true, homeUrl: resolveHref(raw, sent.url) };
     }
     return {
       ok: false,
@@ -297,7 +320,7 @@ export class CalDavClient {
     for (const entry of entries) {
       if (!entry.href || !isCalendarResourceType(entry.props['resourcetype'])) continue;
       calendars.push({
-        href: resolveHref(entry.href, homeUrl),
+        href: resolveHref(entry.href, sent.url),
         displayName: entry.props['displayname'] ?? '',
         ...(entry.props['getetag'] !== undefined ? { etag: entry.props['getetag'] } : {}),
       });
@@ -320,7 +343,7 @@ export class CalDavClient {
     for (const entry of entries) {
       const calendarData = entry.props['calendar-data'];
       if (!calendarData) continue;
-      const href = resolveHref(entry.href, calendarUrl);
+      const href = resolveHref(entry.href, sent.url);
       for (const record of parseCalendarDataEvents(calendarData)) {
         events.push({
           ...record,
@@ -360,17 +383,21 @@ export class CalDavClient {
 
   /**
    * Sends one PROPFIND/REPORT request and classifies the outcome. Returns
-   * `{ ok: true, body }` on a CalDAV-successful response, or a
+   * `{ ok: true, body, url }` on a CalDAV-successful response (`url` is the
+   * address that answered, for resolving its hrefs), or a
    * `{ ok: false, problem, fix }` result for both transport failures (the
    * request never completed) and HTTP-level failures (it completed with a
    * non-2xx/207 status), the caller never has to distinguish the two.
+   *
+   * A redirect to another origin is followed only inside the credential pin;
+   * one outside it is refused by name before anything is sent there.
    */
   private async send(
     method: string,
     url: string,
     body: string,
     depth: '0' | '1',
-  ): Promise<CalDavResult<{ readonly body: string }>> {
+  ): Promise<CalDavResult<{ readonly body: string; readonly url: string }>> {
     let target: URL;
     try {
       target = new URL(url);
@@ -388,36 +415,50 @@ export class CalDavClient {
         };
       }
       this.pin = credentialPin(target);
-    } else if (!withinPin(this.pin, target)) {
-      // Hrefs come from the server's own answers: one naming a host outside
-      // the domain the person chose must not receive the Authorization header.
-      return {
-        ok: false,
-        problem: `the calendar server pointed to an address outside the domain it was given (${target.origin}), and the account credentials were not sent there`,
-        fix: 'this server hands calendars to another provider; connect to that provider\'s own calendar address instead',
-      };
     }
+    const pin = this.pin;
     const headers: Record<string, string> = {
       'Content-Type': 'application/xml; charset=utf-8',
       Depth: depth,
       Authorization: buildAuthHeader(this.auth),
     };
-    let response: CalDavHttpResponse;
-    try {
-      response = await this.http.request({ method, url, headers, body, ...(this.signal ? { signal: this.signal } : {}) });
-    } catch (error) {
-      return {
-        ok: false,
-        problem: `could not reach the calendar server: ${describeError(error)}`,
-        fix: error instanceof Error && error.name === 'TimeoutError'
-          ? 'the server did not answer in time; try again later'
-          : error instanceof Error && error.name === CALDAV_BODY_TOO_LARGE_ERROR
-            ? 'the server sent more than one request may carry; ask for a shorter time range'
-            : 'check the server address and the network connection',
-      };
+    for (let hop = 0; ; hop += 1) {
+      if (!withinPin(pin, target)) {
+        // Hrefs and redirects come from the server's own answers: one naming a
+        // host outside the domain the person chose must not receive the
+        // Authorization header or the request body.
+        return {
+          ok: false,
+          problem: `the calendar server pointed to an address outside the domain it was given (${target.origin}), and the account credentials were not sent there`,
+          fix: `if ${target.origin} is your calendar provider, connect with that address instead`,
+        };
+      }
+      let response: CalDavHttpResponse;
+      try {
+        response = await this.http.request({ method, url: target.toString(), headers, body, ...(this.signal ? { signal: this.signal } : {}) });
+      } catch (error) {
+        return {
+          ok: false,
+          problem: `could not reach the calendar server: ${describeError(error)}`,
+          fix: error instanceof Error && error.name === 'TimeoutError'
+            ? 'the server did not answer in time; try again later'
+            : error instanceof Error && error.name === CALDAV_BODY_TOO_LARGE_ERROR
+              ? 'the server sent more than one request may carry; ask for a shorter time range'
+              : 'check the server address and the network connection',
+        };
+      }
+      const answeredBy = response.url ?? target.toString();
+      const location = REDIRECT_STATUSES.has(response.status) ? readLocation(response.headers, answeredBy) : null;
+      if (location !== null) {
+        if (hop >= MAX_REDIRECTS) {
+          return { ok: false, problem: `the calendar server redirected more than ${MAX_REDIRECTS} times`, fix: 'confirm the server address is the calendar address itself' };
+        }
+        target = location;
+        continue;
+      }
+      const failure = classifyHttpFailure(response.status);
+      if (failure) return { ok: false, ...failure };
+      return { ok: true, body: response.body, url: answeredBy };
     }
-    const failure = classifyHttpFailure(response.status);
-    if (failure) return { ok: false, ...failure };
-    return { ok: true, body: response.body };
   }
 }

@@ -28,6 +28,34 @@
   color: var(--text-2);
 }
 
+/* A question an agent left the owner, answered in place. */
+.work-question__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  min-width: 0;
+}
+
+.work-question__detail {
+  margin: 0;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.work-question__answer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.work-question__answer .gv-input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
 .work-prose {
   margin: 0;
   color: var(--text);

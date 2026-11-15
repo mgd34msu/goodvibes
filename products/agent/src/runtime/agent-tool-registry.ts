@@ -39,6 +39,7 @@ import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { RuntimeServices } from './services.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
+import { agentOwnerQuestions } from './client/owner-questions.ts';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 
 /**
@@ -94,6 +95,8 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     readAccessFilter: async (absolutePath) => (await services.permissionManager.readAccess(absolutePath, resolveSessionId())) === 'allow',
     // goodvibes_context reads Cloudflare tokens held in the secret store.
     secretsManager: services.secretsManager,
+    // The query tool's questions go to the connected host's owner inbox; answers come back into this conversation.
+    ownerQuestions: () => agentOwnerQuestions(services, { configManager, homeDirectory }, resolveSessionId),
     // and counts the daemon's own token as the Worker operator token, as the daemon's status route does.
     cloudflareAuthToken: () => readDaemonOperatorToken(homeDirectory),
     execPromptAnswerHandler: services.execPromptAnswerHandler,

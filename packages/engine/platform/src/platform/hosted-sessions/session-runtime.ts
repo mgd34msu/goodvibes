@@ -29,6 +29,9 @@ import { HostedSessionUnavailableError } from './errors.js';
 import type { HostedWorkspaceFloor } from './workspace-floor.js';
 import { createContractIntake } from '../contract/intake-route.js';
 import { observeSessionContracts } from './session-contracts.js';
+import type { QuestionInbox } from '../tools/query/index.js';
+import type { OwnerItem } from '../control-plane/owner-inbox.js';
+import { questionClosedText, withAnswerDelivery } from '../runtime/client/owner-inbox-updates.js';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import { getProcessUntrustedContentLedger, withUntrustedContentScope } from '../security/untrusted-content.js';
 import {
@@ -105,6 +108,8 @@ export interface HostedSessionRuntimeOptions {
   readonly originSurface?: string | undefined;
   /** The daemon's bearer token, read live; the context tool's Cloudflare status counts it as the Worker operator token. */
   readonly cloudflareAuthToken?: (() => string | null) | undefined;
+  /** The daemon's owner inbox: the session's `query` tool asks there and the answer comes back into this conversation. Absent: no `query`. */
+  readonly ownerQuestions?: (QuestionInbox & { subscribe(listener: (item: OwnerItem) => void): () => void }) | undefined;
   /**
    * What this run's exec tool may do, when the caller decides per session
    * rather than per floor. Omitted ⇒ the floor's own decider, and
@@ -208,7 +213,19 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     announcementStore,
   });
 
+  const inbox = options.ownerQuestions;
+  // An answer to this session's question reaches its next model request.
+  const ownerQuestions = inbox ? withAnswerDelivery(inbox, {
+    watch: (onItem) => {
+      const unsubscribe = inbox.subscribe(onItem);
+      return { close: unsubscribe };
+    },
+    deliver: (item) => conversation.hostInstructions.set('replay', questionClosedText(item), { once: true, append: true }),
+    sessionId: () => sessionId,
+  }) : undefined;
+
   const registeredTools = registerAllTools(toolRegistry, {
+    ...(ownerQuestions ? { ownerQuestions } : {}),
     // Shared per WORKSPACE, deliberately: two sessions editing one tree must
     // agree about the file they both just wrote (see workspace-floor.ts).
     fileCache: services.fileCache,

@@ -93,7 +93,15 @@ export type OwnerPostOutcome =
 export type OwnerInboxListener = (item: OwnerItem) => void;
 
 /** The part of the approval broker the inbox reads and answers through. */
-export type OwnerInboxApprovalSource = Pick<ApprovalBroker, 'listApprovals' | 'getApproval' | 'resolveApproval' | 'subscribe'>;
+export type OwnerInboxApprovalSource = Pick<ApprovalBroker, 'listApprovals' | 'getApproval' | 'resolveApproval' | 'subscribe'>
+  & { readonly eventPublisher?: Pick<NonNullable<ApprovalBroker['eventPublisher']>, 'publishEvent'> | null | undefined };
+
+/**
+ * The wire event a question, claim, purchase window or queued action is
+ * published on when it is posted, answered, withdrawn or expires by an answer
+ * attempt. Approvals keep their own `approval-update`.
+ */
+export const OWNER_INBOX_UPDATE_WIRE_EVENT = 'owner-inbox-update';
 
 /** What a surface needs to show and answer the inbox, in process or over the wire. */
 export interface OwnerInboxPort {
@@ -587,6 +595,15 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
   }
 
   #emit(item: OwnerItem): void {
+    // Surfaces outside the daemon (a terminal waiting on its question, the web UI)
+    // learn of the change from the stream; an approval is already on approval-update.
+    if (item.kind !== 'approval') {
+      try {
+        this.#approvals?.eventPublisher?.publishEvent(OWNER_INBOX_UPDATE_WIRE_EVENT, { item, createdAt: this.#now() });
+      } catch (error) {
+        logger.warn('[owner-inbox] the update could not be published', { itemId: item.id, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
     for (const listener of [...this.#listeners]) {
       try {
         listener(item);

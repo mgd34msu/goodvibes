@@ -221,7 +221,7 @@ Structured execution and coordination beyond a single conversation turn.
 Durable planning and note-keeping artifacts.
 
 - `packet`: keep your own notes as implementation packets / execution packets (create, revise, publish, list); they are stored in a file and are not sent to or consumed by anything else
-- `query`: leave the owner a question and carry on working. `ask` posts it to the owner inbox and returns its id at once; the owner sees it in `/questions` (alias `/inbox`) in either terminal app and, when push is on, as a notification on his phone, and answers it there. `show` and `list` read the answer back in the asking session; `withdraw` takes back a question that no longer matters. A `key` makes a repeated ask return the first open question instead of posting a second one. The tool is offered where the daemon's inbox is reachable
+- `query`: leave the owner a question and carry on working. `ask` posts it to the owner inbox and returns its id at once; the owner sees it in `/questions` (alias `/inbox`) in either terminal app and, when push is on, as a notification on his phone, and answers it there. When the owner answers, the answer is passed to the asking conversation on its next model request (a spawned agent's question goes back to the conversation that spawned it); `show` and `list` read it back at any time; `withdraw` takes back a question that no longer matters. A `key` makes a repeated ask return the first open question instead of posting a second one. The tool is offered where the daemon's inbox is reachable
 
 ### mcp / remote / control
 

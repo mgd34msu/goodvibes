@@ -137,6 +137,8 @@ export function clientMaySeeScopedChannel(client: ScopedClientView, requiredScop
 export const EVENT_DOMAIN: Readonly<Record<string, RuntimeEventDomain>> = {
   'session-update': 'session',
   'approval-update': 'gate',
+  // Questions and other owner-inbox items, beside the approvals they are listed with.
+  'owner-inbox-update': 'gate',
   // `session-detached` and `session-deleted` are payload discriminants inside
   // `session-update` today; tagged here so a promotion to a top-level broadcast
   // stays in the session domain.

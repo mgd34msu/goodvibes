@@ -54,6 +54,7 @@ import { CiWatchDetail } from './CiWatchDetail';
 import { useHostedAttachment } from './HostedSessionDetail';
 import { HostedSessionWorkDetail } from './HostedSessionWorkDetail';
 import { NewWorkMenu } from './NewWorkMenu';
+import { OwnerQuestions } from './OwnerQuestions';
 import { useContractScope } from '../../hooks/useContracts';
 import type { ClientLifetime } from '../../lib/client-lifetime';
 import { ContractDetail } from './ContractDetail';
@@ -352,6 +353,8 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
 
       {!data.firstLoad && scope !== 'archived' && data.contracts.isPending && data.contracts.isFetching && <SkeletonRows count={2} label="Loading contracts" />}
       {data.firstLoad && <SkeletonRows count={6} label="Loading work" />}
+
+      {!data.firstLoad && <OwnerQuestions enabled={scope !== 'archived'} />}
 
       {!data.firstLoad && groups.needs.length > 0 && (
         <RowGroup label="Needs you" count={groups.needs.length}>

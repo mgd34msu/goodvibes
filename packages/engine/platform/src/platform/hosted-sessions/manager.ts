@@ -138,6 +138,8 @@ export interface HostedSessionManagerOptions {
   readonly spine?: HostedSessionSpine | undefined;
   /** The daemon's bearer token, read live, handed to each session's tools for the Cloudflare status. */
   readonly cloudflareAuthToken?: (() => string | null) | undefined;
+  /** The daemon's owner inbox, handed to each session for its `query` tool. */
+  readonly ownerQuestions?: import('./session-runtime.js').HostedSessionRuntimeOptions['ownerQuestions'];
   /** Whether a workspace root is acceptable. Omitted ⇒ any absolute path. */
   readonly isWorkspaceUsable?: ((workspaceRoot: string) => boolean) | undefined;
   /**
@@ -508,6 +510,7 @@ export class HostedSessionManager {
         isSessionResumable: token => this.isSessionHeld(token),
         permissionModeChanged: mode => this.savePermissionMode(sessionId, mode),
         ...(this.options.cloudflareAuthToken ? { cloudflareAuthToken: this.options.cloudflareAuthToken } : {}),
+        ...(this.options.ownerQuestions ? { ownerQuestions: this.options.ownerQuestions } : {}),
       });
       const record: HostedSessionRecord = {
         id: sessionId,
@@ -1034,6 +1037,7 @@ export class HostedSessionManager {
         isSessionResumable: token => this.isSessionHeld(token),
         permissionModeChanged: mode => this.savePermissionMode(live.record.id, mode),
         ...(this.options.cloudflareAuthToken ? { cloudflareAuthToken: this.options.cloudflareAuthToken } : {}),
+        ...(this.options.ownerQuestions ? { ownerQuestions: this.options.ownerQuestions } : {}),
       });
       live.runtime = runtime;
       live.lease = lease;

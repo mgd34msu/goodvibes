@@ -701,6 +701,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       toolExecutionObserver: (tool: string, args: Record<string, unknown>, success: boolean) => ciAutoWatchObserver?.(tool, args, success),
       contractRunner, contractHooks: contractRunner.hooks(),
       agentManager,
+      // A background agent's `query` tool leaves its questions in the same inbox.
+      ownerQuestions: ownerInbox,
       surfaceRoot: surface.surfaceRoot,
       permissionManager,
       execPromptAnswerHandler,
@@ -844,6 +846,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       channelDeliveryRouter,
       watcherRegistry,
       approvalBroker,
+      ownerInbox,
       localhostFetchApproval,
       execPromptAnswerHandler,
       userPermissionRuleStore,

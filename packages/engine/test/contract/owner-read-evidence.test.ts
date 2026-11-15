@@ -41,7 +41,7 @@ test('earlier owner reads retain only actual returned lines matching the immutab
   writeFileSync(join(f.root, 'source.ts'), 'changed\n');
   git(f.root, 'commit', '-qam', 'Changed source');
   const changed = { ...f.contract, inputSnapshot: { ...f.contract.inputSnapshot!, inputTree: git(f.root, 'rev-parse', 'HEAD^{tree}').trim() } };
-  expect(f.read(changed, 'source.ts:1')).toMatchObject({ sourceReads: [] });
+  expect(f.read(changed, 'source.ts:1')).toBeUndefined();
 });
 
 test('host-bound plain owner returns still require a match to immutable original source', () => {
@@ -63,7 +63,7 @@ test('new line metadata cannot qualify same-length substituted owner source text
   f.messages[2]!.content = JSON.stringify({ success: true, files: [{ path: 'source.ts', extract: 'lines',
     content: 'FIRST\nSECOND', readObservation }] });
   writeFileSync(f.saved, f.messages.map(message => JSON.stringify(message)).join('\n') + '\n');
-  expect(f.read(f.contract, 'source.ts:1-2')).toMatchObject({ sourceReads: [] });
+  expect(f.read(f.contract, 'source.ts:1-2')).toBeUndefined();
 });
 
 test('old co-serialized checksum metadata cannot qualify substituted rows against immutable input', () => {
@@ -72,7 +72,7 @@ test('old co-serialized checksum metadata cannot qualify substituted rows agains
   f.messages[2]!.content = JSON.stringify({ success: true, files: [{ path: 'source.ts', extract: 'lines',
     content: 'FIRST\nSECOND', readObservation }] });
   writeFileSync(f.saved, f.messages.map(message => JSON.stringify(message)).join('\n') + '\n');
-  expect(f.read(f.contract, 'source.ts:1-2')).toMatchObject({ sourceReads: [] });
+  expect(f.read(f.contract, 'source.ts:1-2')).toBeUndefined();
   f.messages[2]!.content = JSON.stringify({ success: true, files: [{ path: 'source.ts', extract: 'lines',
     content: 'first\nsecond', readObservation }] });
   writeFileSync(f.saved, f.messages.map(message => JSON.stringify(message)).join('\n') + '\n');
@@ -108,7 +108,7 @@ test('cached owner observations follow exact journal bytes through same-size edi
   const changed = original.toString('utf8').replace('1 | first', '1 | FIRST');
   expect(Buffer.byteLength(changed)).toBe(original.length);
   writeFileSync(f.saved, changed);
-  expect(f.read(f.contract, '')).toMatchObject({ sourceReads: [] });
+  expect(f.read(f.contract, '')).toBeUndefined();
   writeFileSync(f.saved, original);
   expect(f.read(f.contract, '')).toMatchObject({ sourceReads: [{ returnedRanges: ['1'] }] });
 });

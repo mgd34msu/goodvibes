@@ -24,6 +24,7 @@ export {
   type CompanionMessagePayload,
 } from '@goodvibes-jev/engine/terminal-shell/companion-input';
 import { createTuiTurnPermissionManager, registerTuiTurnTools } from './turn-tool-composition.ts';
+import { terminalOwnerQuestions } from './client/owner-questions.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
 import { ConversationManager } from '../core/conversation';
@@ -346,6 +347,8 @@ export async function initializeBootstrapCore(
     surfaceRoot: services.surface.surfaceRoot,
     knowledgeService: services.knowledgeService,
     cloudflareAuthToken: () => readDaemonOperatorToken(services.shellPaths.homeDirectory),
+    // A spawned agent asks the owner in the same inbox; the answer comes back to this conversation.
+    ownerQuestions: () => terminalOwnerQuestions(services, () => runtimeSessionIdRef.value),
   });
 
   const bootstrapUnsubs: Array<() => void | Promise<void>> = [];

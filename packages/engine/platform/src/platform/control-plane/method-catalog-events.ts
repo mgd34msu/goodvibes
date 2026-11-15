@@ -2,6 +2,7 @@ import type { GatewayEventDescriptor } from './method-catalog-shared.js';
 import { STRING_SCHEMA,NUMBER_SCHEMA,JSON_OBJECT_SCHEMA,arraySchema,objectSchema,eventDescriptor,runtimeDomainEvent } from './method-catalog-shared.js';
 import { CONTROL_PLANE_SURFACE_MESSAGE_SCHEMA } from './operator-contract-schemas.js';
 import { SHARED_APPROVAL_RECORD_SCHEMA } from './operator-contract-schemas-approvals.js';
+import { OWNER_ITEM_SCHEMA } from './operator-contract-schemas-owner-inbox.js';
 import { HOSTED_SESSION_RECORD_SCHEMA } from './method-catalog-hosted-sessions.js';
 import { RUNTIME_EVENT_DOMAINS, type RuntimeEventDomain } from '../../events/domain-map.js';
 
@@ -176,6 +177,7 @@ const BROADCAST_EVENT_ACCESS: Readonly<Record<string, GatewayEventAccess>> = {
   'control.surface_message': 'authenticated',
   'control.remote_update': 'authenticated',
   'control.approval_update': 'admin',
+  'control.owner_inbox_update': 'admin',
   'control.hosted_session_update': 'admin',
   'control.session_update': 'admin',
 };
@@ -270,6 +272,25 @@ export const builtinGatewayEventDescriptors: readonly GatewayEventDescriptor[] =
       approval: SHARED_APPROVAL_RECORD_SCHEMA,
       createdAt: NUMBER_SCHEMA,
     }, ['approval', 'createdAt']),
+  }),
+  eventDescriptor({
+    id: 'control.owner_inbox_update',
+    title: 'Owner Inbox Update',
+    description:
+      'A question, claim, purchase window or queued action in the owner inbox was posted, answered or '
+      + 'withdrawn. The payload is the whole `item` plus the `createdAt` of the notice, so a surface '
+      + 'renders the change and an agent waiting on its question reads the answer without a follow-up '
+      + 'inbox.list. Approvals are not repeated here; they arrive on control.approval_update. '
+      + 'Domain-tagged `gate`, like approvals: a client narrowing with ?domains=… must include `gate`.',
+    category: 'transport',
+    transport: ['sse', 'ws'],
+    scopes: ['read:events'],
+    wireEvents: ['owner-inbox-update'],
+    domains: ['gate'],
+    outputSchema: objectSchema({
+      item: OWNER_ITEM_SCHEMA,
+      createdAt: NUMBER_SCHEMA,
+    }, ['item', 'createdAt']),
   }),
   eventDescriptor({
     id: 'control.hosted_session_update',

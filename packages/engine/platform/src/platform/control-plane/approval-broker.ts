@@ -358,6 +358,11 @@ export class ApprovalBroker {
     this.publisher = publisher;
   }
 
+  /** The gateway this broker publishes on; the owner inbox built over it publishes its own items there too. */
+  get eventPublisher(): Pick<ApprovalPublisher, 'publishEvent'> | null {
+    return this.publisher;
+  }
+
   async start(): Promise<void> {
     if (this.loaded) return;
     this.loading ??= this.load().catch((error: unknown) => {

@@ -47,6 +47,7 @@ import {
   HostedSessionManager,
   HostedSessionStore,
   type HostedSessionEventPublisher,
+  type HostedSessionManagerOptions,
   type HostedSessionLoadReport,
   type HostedSessionSpine,
   type HostedWorkspaceFloorFactory,
@@ -88,6 +89,8 @@ export interface HostedSessionCompositionInput {
   readonly spine?: HostedSessionSpine | undefined;
   /** The daemon's bearer token, read live; a hosted session's Cloudflare status counts it as the Worker operator token. */
   readonly cloudflareAuthToken?: (() => string | null) | undefined;
+  /** The daemon's owner inbox; each hosted session's `query` tool asks there. */
+  readonly ownerQuestions?: HostedSessionManagerOptions['ownerQuestions'];
 }
 
 /** The default prompt: what this session is, stated plainly. */
@@ -146,6 +149,7 @@ export function composeHostedSessions(input: HostedSessionCompositionInput): Hos
     liveTurns: input.liveTurns,
     ...(input.spine === undefined ? {} : { spine: input.spine }),
     ...(input.cloudflareAuthToken === undefined ? {} : { cloudflareAuthToken: input.cloudflareAuthToken }),
+    ...(input.ownerQuestions === undefined ? {} : { ownerQuestions: input.ownerQuestions }),
     isWorkspaceUsable: input.options.isWorkspaceUsable ?? isExistingDirectory,
     allowedWorkspaceRoots: () => allowedWorkspaceRoots(input.shellPaths.workingDirectory, sharedWorkspaceRegisterPath(input.shellPaths)),
   });
@@ -196,6 +200,7 @@ export function composeHostedSessionsForFacade(
     eventPublisher,
     spine: runtimeServices.sessionBroker,
     ...(cloudflareAuthToken === undefined ? {} : { cloudflareAuthToken }),
+    ...(runtimeServices.ownerInbox === undefined ? {} : { ownerQuestions: runtimeServices.ownerInbox }),
   });
   // Hand the broker's idle reaper a way to ask this engine whether a hosted
   // session is mid-turn. Without it the reaper judges a hosted session only by

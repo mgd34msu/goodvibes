@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, type BigIntStats } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { sourceReadsFromTurns, type ContractTurnRecord, type SourceReadEvidence } from '../contract/evidence.js';
 import { readBodyWithHostEvidence, returnedReadRows } from '../tools/read/observation.js';
@@ -7,7 +7,17 @@ import type { ToolResult } from '../types/tools.js';
 import type { OwnerEvidenceReader } from '../contract/owner-evidence.js';
 import { sanitizeSessionName } from '../sessions/manager.js';
 import { recoveryFilePath } from './recovery-path.js';
+import { logger } from '../utils/logger.js';
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/** No owner evidence for this call; one debug line says why, so "none read" and "reader refused" can be told apart. */
+function none(reason: string, sessionId?: string): undefined {
+  logger.debug('owner read evidence: none', { reason, ...(sessionId ? { sessionId } : {}) });
+  return undefined;
+}
+
+const sameFile = (before: BigIntStats, after: BigIntStats): boolean => after.dev === before.dev && after.ino === before.ino && after.mode === before.mode
+  && after.nlink === 1n && after.size === before.size && after.mtimeNs === before.mtimeNs && after.ctimeNs === before.ctimeNs;
 
 /** Where the owner's read results come from. */
 export interface OwnerReadSource {
@@ -33,8 +43,9 @@ export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): O
     originals: readonly { path: string; buffer: Buffer }[]; byteLength: number;
     liveStamp?: { readonly count: number; readonly last: unknown } | undefined }>();
   return (contract, citationText) => {
-    if (!contract.sessionId || !contract.inputSnapshot
-      || !/^[a-f0-9]{40,64}$/.test(contract.inputSnapshot.inputTree)) return undefined;
+    if (!contract.sessionId) return none('contract has no owner session');
+    if (!contract.inputSnapshot || !/^[a-f0-9]{40,64}$/.test(contract.inputSnapshot.inputTree)) return none('contract has no input tree', contract.sessionId);
+    const sessionId = contract.sessionId;
     const sources: { path: string; buffer: Buffer; bytes: number; contents: string }[] = [];
     let messages: Record<string, unknown>[] | undefined;
     const live = source.liveMessages?.(contract.sessionId);
@@ -42,28 +53,31 @@ export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): O
       messages = live.filter(object);
     } else {
       const surfaceDirectory = source.surfaceDirectory;
-      if (!surfaceDirectory) return undefined;
+      if (!surfaceDirectory) return none('session not loaded here and no surface directory', sessionId);
       const within = relative(contract.projectRoot, surfaceDirectory);
-      if (isAbsolute(within) || within.split('/').includes('..') || !within.startsWith('.goodvibes/')) return undefined;
+      if (isAbsolute(within) || within.split('/').includes('..') || !within.startsWith('.goodvibes/')) return none('surface directory is outside the project .goodvibes directory', sessionId);
       let directory = contract.projectRoot;
       for (const part of within.split('/')) {
         directory = join(directory, part);
-        if (existsSync(directory) && (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())) return undefined;
+        if (existsSync(directory) && (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())) return none('surface directory path is not a plain directory', sessionId);
       }
       // The names the session store and the recovery writer give these files.
       const sessionFiles = [join(surfaceDirectory, 'sessions', `${sanitizeSessionName(contract.sessionId)}.jsonl`)];
       try { sessionFiles.push(recoveryFilePath(join(surfaceDirectory, 'recovery'), contract.sessionId)); } catch { /* no recovery name for this id */ }
       for (const path of sessionFiles) {
         if (!existsSync(path)) continue;
-        const info = lstatSync(path, { bigint: true });
-        if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n || lstatSync(join(path, '..')).isSymbolicLink()) return undefined;
-        const bytes = readFileSync(path);
-        const after = lstatSync(path, { bigint: true });
-        if (after.dev !== info.dev || after.ino !== info.ino || after.mode !== info.mode || after.nlink !== 1n
-          || after.size !== info.size || after.mtimeNs !== info.mtimeNs || after.ctimeNs !== info.ctimeNs) return undefined;
+        let bytes: Buffer | undefined;
+        // A session save can land between the two stats; one more read then sees the saved file.
+        for (let attempt = 0; attempt < 2 && bytes === undefined; attempt++) {
+          const info = lstatSync(path, { bigint: true });
+          if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n || lstatSync(join(path, '..')).isSymbolicLink()) return none('session journal is not a single-link regular file', sessionId);
+          const read = readFileSync(path);
+          if (sameFile(info, lstatSync(path, { bigint: true }))) bytes = read;
+        }
+        if (bytes === undefined) return none('session journal changed while it was read, twice', sessionId);
         sources.push({ path, buffer: bytes, bytes: bytes.length, contents: bytes.toString('utf8') });
       }
-      if (!sources.length) return undefined;
+      if (!sources.length) return none('no session journal on disk', sessionId);
     }
     // A live conversation is keyed by its length and last message; files by their bytes.
     const liveStamp = messages ? { count: messages.length, last: messages[messages.length - 1] } : undefined;
@@ -84,7 +98,7 @@ export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): O
         messages = [];
         for (const item of sources) {
           for (const line of item.contents.split('\n').filter(Boolean)) {
-            try { const parsed: unknown = JSON.parse(line); if (object(parsed)) messages.push(parsed); } catch { return undefined; }
+            try { const parsed: unknown = JSON.parse(line); if (object(parsed)) messages.push(parsed); } catch { return none('a session journal line is not JSON', sessionId); }
           }
         }
       }
@@ -122,19 +136,19 @@ export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): O
         const blobs = spawnSync('git', ['-C', contract.projectRoot, 'cat-file', '--batch'], {
           input: batch.map(path => `${contract.inputSnapshot!.inputTree}:${path}\n`).join(''), maxBuffer: 32 * 1024 * 1024,
         });
-        if (blobs.status !== 0) return undefined;
+        if (blobs.status !== 0) return none('git cat-file failed on the input tree', sessionId);
         let position = 0;
         for (const path of batch) {
           const end = blobs.stdout.indexOf(10, position);
-          if (end < 0) return undefined;
+          if (end < 0) return none('git cat-file output ended early', sessionId);
           const header = blobs.stdout.subarray(position, end).toString('utf8');
           const match = /^[a-f0-9]{40,64} (\w+) (\d+)$/.exec(header);
           if (!match) {
-            if (!header.endsWith(' missing')) return undefined;
+            if (!header.endsWith(' missing')) return none('git cat-file returned an unreadable header', sessionId);
             originals.set(path, null); position = end + 1; continue;
           }
           const size = Number(match[2]);
-          if (!Number.isSafeInteger(size) || end + 1 + size >= blobs.stdout.length) return undefined;
+          if (!Number.isSafeInteger(size) || end + 1 + size >= blobs.stdout.length) return none('git cat-file output ended early', sessionId);
           originals.set(path, match[1] === 'blob' ? blobs.stdout.subarray(end + 1, end + 1 + size).toString('utf8').split(/\r?\n/) : null);
           position = end + 1 + size + 1;
         }
@@ -189,6 +203,8 @@ export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): O
       const content = saved.rows.get(read.path)?.filter(([line]) => ranges.some(([start, end]) => line >= start && line <= end)).map(([, row]) => row).join('\n');
       return content ? { ...read, returnedContent: content, contentKind: 'cited-source' as const } : read;
     });
+    // Nothing qualified: no evidence object, so briefs and prompts gain nothing.
+    if (!reads.length) return none('no owner read matched the input tree', sessionId);
     return { kind: 'original-owner-read-observations', ownerSessionId: contract.sessionId,
       inputTree: contract.inputSnapshot.inputTree, callIds: [...new Set(saved.calls)],
       hostValidation: { operation: 'verify-recorded-owner-reads', source: 'native-host', success: true,

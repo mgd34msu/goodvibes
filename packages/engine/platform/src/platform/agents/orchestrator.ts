@@ -138,6 +138,8 @@ type AgentOrchestratorToolDeps = {
     | undefined;
   /** The contract runner's agent-loop seams (`runner.hooks()`), passed into every run context; see AgentOrchestratorRunContext.contractHooks. */
   readonly contractHooks: import('../contract/agent-hooks.js').ContractAgentHooks;
+  /** The owner inbox a spawned agent's `query` tool leaves questions in (registerAllTools); absent, it has no `query`. */
+  readonly ownerQuestions?: import('../tools/query/index.js').QuestionInbox | (() => import('../tools/query/index.js').QuestionInbox) | undefined;
   /** Starts the contracts the agent and workflow tools hand work to (registerAllTools). */
   readonly contractRunner: Pick<import('../contract/runner.js').ContractRunner, 'start' | 'list' | 'get'>;
   readonly sessionOrchestration: import('../sessions/orchestration/index.js').CrossSessionTaskRegistry;

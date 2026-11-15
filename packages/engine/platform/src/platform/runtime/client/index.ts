@@ -55,6 +55,19 @@ export type {
 
 export { createOwnerInboxClient } from './owner-inbox-client.js';
 export type { OwnerInboxClient } from './owner-inbox-client.js';
+export {
+  OWNER_INBOX_UPDATE_DOMAIN,
+  OWNER_INBOX_UPDATE_WIRE_EVENT,
+  questionClosedText,
+  watchOwnerInboxUpdates,
+  withAnswerDelivery,
+} from './owner-inbox-updates.js';
+export type {
+  AnswerDeliveryOptions,
+  OwnerInboxUpdateSubscription,
+  OwnerInboxUpdateWatch,
+  WatchOwnerInboxUpdatesOptions,
+} from './owner-inbox-updates.js';
 
 export { createDaemonCredentialsClient } from './credentials-client.js';
 export type { CredentialWriteReceipt, DaemonCredentialsClient } from './credentials-client.js';

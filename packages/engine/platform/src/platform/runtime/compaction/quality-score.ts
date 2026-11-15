@@ -1,5 +1,5 @@
 import { prepareJudgmentResult } from '../../gate/judgment-result.js';
-import { requireActingReading, JudgmentHeldError } from '../../types/judgment-held.js';
+import { requireActingReading } from '../../types/judgment-held.js';
 /**
  * quality-score.ts
  *
@@ -142,12 +142,11 @@ async function readRetention(
     };
   }
 
+  // Bounded views: the two readings cost the same however long the conversation
+  // was. Whether the conversation changed meanwhile is the caller's check
+  // (`options.assertCurrent`), made against its own revision.
   const views = compactionViews(input.messages, output.messages);
-  const version = JSON.stringify({ input: input.messages, output: output.messages });
-  const owner = captureJudgmentPort(COMPACTION_QUALITY_SITE, { ...options, prepareResultCapture: prepareJudgmentResult, assertCurrent: () => {
-    options.assertCurrent?.();
-    if (JSON.stringify({ input: input.messages, output: output.messages }) !== version) throw new JudgmentHeldError();
-  } });
+  const owner = captureJudgmentPort(COMPACTION_QUALITY_SITE, { ...options, prepareResultCapture: prepareJudgmentResult });
   const port = owner.port, current = owner.assertCurrent;
   const run = { beforeAttempt: current, site: COMPACTION_QUALITY_SITE, signal: owner.signal };
   const [retention, fidelity] = await Promise.all([

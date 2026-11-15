@@ -9,6 +9,7 @@ import type { SessionMemory } from './session-memory.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import type { ContractView } from '../contract/types.js';
 import type { ExecutionPlan } from './execution-plan.js';
+import type { CompactionQualityScore } from '../runtime/compaction/quality-score.js';
 
 /**
  * Which conversation-compaction strategy produces the handoff.
@@ -218,6 +219,12 @@ export interface CompactionReceipt {
   qualityGrade: string;
   /** Whether the quality scorer flagged the compaction as low quality. */
   lowQuality: boolean;
+  /**
+   * The full score behind `qualityScore` and `qualityGrade` (compression,
+   * retention, signals), present when a score was taken. A caller shows this
+   * one instead of scoring the run again.
+   */
+  quality?: CompactionQualityScore | undefined;
   /** Whether the standing instruction chain / active skill was re-injected. */
   instructionsReinjected: boolean;
   /** Whether post-compaction structural validation passed (no warnings). */

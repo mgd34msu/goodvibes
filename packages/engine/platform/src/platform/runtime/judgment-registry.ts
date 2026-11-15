@@ -80,11 +80,9 @@ registry.register(forensicsSlowPhase);
 
 // Runtime: observed fleet agents.
 
-// Runtime: credentials at rest and in config events.
+// Runtime: credentials at rest.
 import { atRestCredential } from './batteries/at-rest-credential.js';
 registry.register(atRestCredential);
-import { eventCredentialKey } from './config/batteries/event-credential-key.js';
-registry.register(eventCredentialKey);
 
 // Structured compaction source membership.
 import { conversationSubstance, toolResultRelevance, resolvedProblemEvidence, compactionEvidenceDependency } from './compaction/batteries/section-selection.js';

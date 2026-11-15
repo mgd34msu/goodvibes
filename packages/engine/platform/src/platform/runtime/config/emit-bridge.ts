@@ -31,15 +31,14 @@
  * A secret-bearing key's value. The notice names the key and sets
  * `secret: true`; `value` is omitted entirely. See events/config.ts.
  *
- * Whether a key is secret-bearing: a key on the declared SECRET_BEARING list
+ * Whether a key is secret-bearing is declared in code, never read by a model,
+ * so a notice is emitted at once: a key on the declared SECRET_BEARING list
  * is, and any other CONFIG_SCHEMA key is not (the pre-commit credential-scope
  * check compares every schema key's stored reading against that list, so the
- * list is whole for the schema). Any other watched path, a daemon-owned
- * non-schema path or a product's additional key, is read once per process
- * through `engine.runtime.config-event-credential-key` (critical stakes), and
- * its value is carried only on a no verdict. The notice waits for that
- * reading; on a yes, an uncertain reading, or no reading at all it leaves the
- * value out.
+ * list is whole for the schema). Each daemon-owned non-schema path is classified
+ * in {@link NON_SCHEMA_PATH_SECRET}, typed over the declared list, so a new path
+ * does not compile until it is classified. A product's additional key carries
+ * its own `secret` declaration.
  * Declared structured reference arrays carry only their detached validated
  * fields. Malformed structured values are omitted without invoking accessors.
  */
@@ -53,18 +52,15 @@ import { CONFIG_SCHEMA } from '../../config/schema.js';
 import {
   DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS,
   configKeyScope,
+  type DaemonOwnedNonSchemaConfigPath,
 } from '../../config/config-ownership.js';
 import {
   SECRET_BEARING_CONFIG_PATHS,
   isSecretBearingConfigKey,
 } from '../../config/secret-bearing-config-keys.js';
 import { isStructuredCredentialReferenceConfigKey, captureStructuredCredentialReferenceConfigValue } from '../../config/structured-credential-config.js';
-import { configKeyDescription } from '../../config/credential-key-reading.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { eventCredentialKey } from './batteries/event-credential-key.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { decisionOrClassic } from '../decision-policy.js';
 
 /**
  * The narrow config surface this needs: one subscription per key, and nothing
@@ -74,6 +70,23 @@ export interface ConfigChangeSource {
   subscribe(key: string, callback: (newValue: unknown, previousValue: unknown) => void): () => void;
 }
 
+/** A product's own config path and whether its value is a credential (a credential's value never crosses). */
+export interface AdditionalConfigKey {
+  readonly key: string;
+  readonly secret: boolean;
+}
+
+/**
+ * Whether each daemon-owned path that is not a scalar schema key holds a
+ * credential. Keyed by the declared list's own type, so adding a path to it
+ * fails to compile here until someone says whether it is a secret.
+ */
+const NON_SCHEMA_PATH_SECRET: Readonly<Record<DaemonOwnedNonSchemaConfigPath, boolean>> = {
+  'conversationGate.gatedSurfaces': false,
+  'cluster.peers': false,
+  'cluster.groupMaterial': true,
+};
+
 export interface ConfigEmitBridgeDeps {
   /** The live ConfigManager, only its per-key subscription is used. */
   readonly config: ConfigChangeSource;
@@ -81,9 +94,10 @@ export interface ConfigEmitBridgeDeps {
   readonly bus: Pick<RuntimeEventBus, 'emit'>;
   /**
    * Extra config paths a product knows about that the platform set does not
-   * name. Merged with the platform set; duplicates are collapsed.
+   * name, each with whether its value is a credential. Merged with the platform
+   * set; duplicates are collapsed, and a platform declaration wins.
    */
-  readonly additionalKeys?: readonly string[] | undefined;
+  readonly additionalKeys?: readonly AdditionalConfigKey[] | undefined;
   /**
    * Trace id source for the emitted envelopes. A settings change is not born of
    * a single caller turn, so absent a real trace a fresh id per event is honest
@@ -98,13 +112,20 @@ export interface ConfigEmitBridgeDeps {
  * Every config path this bridge watches: the declared scalar schema keys, the
  * daemon-owned non-scalar paths, and the declared secret-bearing paths.
  */
-export function listWatchableConfigPaths(additionalKeys: readonly string[] = []): readonly string[] {
+export function listWatchableConfigPaths(additionalKeys: readonly AdditionalConfigKey[] = []): readonly string[] {
   return [...new Set<string>([
     ...CONFIG_SCHEMA.map((setting) => setting.key),
     ...DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS,
     ...SECRET_BEARING_CONFIG_PATHS,
-    ...additionalKeys,
+    ...additionalKeys.map((entry) => entry.key),
   ])];
+}
+
+/** Whether a watched path's value is a credential, from declarations only. */
+function isDeclaredSecret(key: string, additional: ReadonlyMap<string, boolean>): boolean {
+  if (isSecretBearingConfigKey(key)) return true;
+  if (Object.hasOwn(NON_SCHEMA_PATH_SECRET, key)) return NON_SCHEMA_PATH_SECRET[key as DaemonOwnedNonSchemaConfigPath];
+  return additional.get(key) ?? false;
 }
 
 /**
@@ -126,44 +147,6 @@ export function toConfigEventValue(value: unknown): ConfigEventValue | undefined
   }
 }
 
-/** The decision site the undeclared-key readings are logged under. */
-export const CONFIG_EVENT_CREDENTIAL_SITE = 'runtime.config.emit-bridge.credential-key';
-
-const SCHEMA_KEYS: ReadonlySet<string> = new Set(CONFIG_SCHEMA.map((setting) => setting.key));
-
-/** Readings of undeclared keys, one per key for the life of the process; a failed reading is forgotten. */
-const undeclaredKeyReadings = new Map<string, Promise<boolean>>();
-
-/**
- * Whether a change notice for this undeclared key may carry the value: only on
- * a no verdict from `engine.runtime.config-event-credential-key`, which the
- * critical band gives at 0.9 confidence or more. Rejects when no reading can
- * be made.
- */
-export function readConfigEventCarriesValue(key: string): Promise<boolean> {
-  return decisionOrClassic(() => readDecisionConfigEventCarriesValue(key), () => false);
-}
-function readDecisionConfigEventCarriesValue(key: string): Promise<boolean> {
-  let reading = undeclaredKeyReadings.get(key);
-  if (reading === undefined) {
-    reading = (async (): Promise<boolean> => {
-      const state = { key, description: configKeyDescription(key) };
-      const run = await eventCredentialKey.run(judgmentPort(CONFIG_EVENT_CREDENTIAL_SITE), state, { site: CONFIG_EVENT_CREDENTIAL_SITE });
-      const carries = run.readings.credential.verdict === 'no';
-      run.recordAction(carries ? 'carry-value' : 'omit-value');
-      return carries;
-    })();
-    undeclaredKeyReadings.set(key, reading);
-    reading.catch(() => undeclaredKeyReadings.delete(key));
-  }
-  return reading;
-}
-
-/** Forgets the remembered undeclared-key readings (tests). */
-export function clearConfigEventKeyReadings(): void {
-  undeclaredKeyReadings.clear();
-}
-
 /**
  * Attach the bridge. Returns a function that detaches every subscription.
  *
@@ -176,11 +159,11 @@ export function attachConfigEmitBridge(deps: ConfigEmitBridgeDeps): () => void {
   const nextTraceId = deps.traceId ?? ((): string => randomUUID());
   const clock = deps.now ?? ((): number => Date.now());
   const unsubscribes: (() => void)[] = [];
+  const additional = new Map((deps.additionalKeys ?? []).map((entry) => [entry.key, entry.secret]));
 
   for (const key of listWatchableConfigPaths(deps.additionalKeys ?? [])) {
-    const declaredSecret = isSecretBearingConfigKey(key);
+    const declaredSecret = isDeclaredSecret(key, additional);
     const structuredReference = isStructuredCredentialReferenceConfigKey(key);
-    const needsReading = !declaredSecret && !SCHEMA_KEYS.has(key);
     const scope = configKeyScope(key);
     try {
       unsubscribes.push(deps.config.subscribe(key, (newValue) => {
@@ -193,8 +176,6 @@ export function attachConfigEmitBridge(deps: ConfigEmitBridgeDeps): () => void {
           source: 'config-emit-bridge',
           sessionId: 'config-manager',
         };
-        // Taken at change time, so a notice that waits on a reading still
-        // reports the value and time of this change.
         let value: ConfigEventValue | undefined;
         let invalidStructuredReference = false;
         if (structuredReference) {
@@ -203,40 +184,24 @@ export function attachConfigEmitBridge(deps: ConfigEmitBridgeDeps): () => void {
         } else {
           value = toConfigEventValue(newValue);
         }
-        const changedAt = clock();
-        const emit = (secret: boolean): void => {
-          try {
-            emitConfigKeyChanged(deps.bus as RuntimeEventBus, ctx, {
-              key,
-              scope,
-              secret,
-              // Omitted, never nulled, for a credential: the absence IS the
-              // contract, and a null would read as "the credential was cleared".
-              ...(secret ? {} : { value }),
-              changedAt,
-            });
-          } catch (error) {
-            // A failed emit must never break the write that triggered it.
-            logger.warn('Config event bridge: emitting a change notice failed', {
-              key,
-              error: summarizeError(error),
-            });
-          }
-        };
-        if (!needsReading) {
-          emit(declaredSecret || invalidStructuredReference);
-          return;
+        const secret = declaredSecret || invalidStructuredReference;
+        try {
+          emitConfigKeyChanged(deps.bus as RuntimeEventBus, ctx, {
+            key,
+            scope,
+            secret,
+            // Omitted, never nulled, for a credential: the absence IS the
+            // contract, and a null would read as "the credential was cleared".
+            ...(secret ? {} : { value }),
+            changedAt: clock(),
+          });
+        } catch (error) {
+          // A failed emit must never break the write that triggered it.
+          logger.warn('Config event bridge: emitting a change notice failed', {
+            key,
+            error: summarizeError(error),
+          });
         }
-        readConfigEventCarriesValue(key).then(
-          (carriesValue) => emit(!carriesValue),
-          (error: unknown) => {
-            logger.warn('Config event bridge: reading whether a key holds a credential failed; its value is left out', {
-              key,
-              error: summarizeError(error),
-            });
-            emit(true);
-          },
-        );
       }));
     } catch (error) {
       // A manager that refuses one key must not cost the other several hundred.

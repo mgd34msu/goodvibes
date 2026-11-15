@@ -35,6 +35,13 @@ test('a reachable daemon that fails a read is reported as a failure, not as an e
   }
 });
 
+test('a daemon that answers without the list is a failure, not an empty list', async () => {
+  const devices = createDevicesClient(verbsWith(() => ({})));
+  await expect(devices.listNodes()).rejects.toThrow('devices.nodes.list answered without nodes');
+  await expect(devices.listGrants()).rejects.toThrow('devices.grants.list answered without grants');
+  await expect(devices.listArtifacts()).rejects.toThrow('devices.artifacts.list answered without artifacts');
+});
+
 test('an unreachable daemon still reads as an honest empty list with its reason', async () => {
   const verbs = verbsWith(() => { throw new Error('no daemon'); }, false);
   const devices = createDevicesClient(verbs);
@@ -58,8 +65,8 @@ test('the calling conversation id rides the capability request', async () => {
 
 test('a capture too large for the model is refused with the way to get a smaller one', async () => {
   const verbs = verbsWith(() => ({
-    artifact: { artifactId: 'a1', daemonPath: '/var/captures/a1.png' },
-    dataBase64: 'A'.repeat(5 * 1024 * 1024),
+    artifact: { artifactId: 'a1', mediaType: 'image/png', daemonPath: '/var/captures/a1.png' },
+    dataBase64: 'A'.repeat(8 * 1024 * 1024),
   }));
   const result = await run(createClientPhoneTool(createDevicesClient(verbs)), { action: 'read', artifactId: 'a1' });
   expect(result.success).toBe(false);

@@ -13,6 +13,7 @@ import type { CompactionQualityScore } from '../runtime/compaction/quality-score
 import type { SessionMemoryStore } from './session-memory.js';
 import type { SessionLineageTracker } from './session-lineage.js';
 import { summarizeError } from '../utils/error-display.js';
+import { captureRevisions, isCurrent, type RevisionSource } from '../utils/revision.js';
 
 /**
  * Score a compaction result through the shared compaction quality scorer.
@@ -67,6 +68,8 @@ async function produceCompaction(
   strategy: CompactionStrategyChoice;
   requestedStrategy: CompactionStrategyChoice;
   fallbackReason?: string;
+  /** The score already taken of `result`, so the caller does not take it twice. */
+  quality?: CompactionQualityScore | null;
 }> {
   const requested: CompactionStrategyChoice = compactionContext.strategy ?? 'structured';
 
@@ -78,7 +81,7 @@ async function produceCompaction(
       work.assertCurrent();
       const noReduction = distilled.tokensAfterEstimate >= distilled.tokensBeforeEstimate;
       if (!quality?.isLowQuality && !noReduction) {
-        return { result: distilled, strategy: 'distiller', requestedStrategy: 'distiller' };
+        return { result: distilled, strategy: 'distiller', requestedStrategy: 'distiller', quality };
       }
       const reason = quality?.isLowQuality
         ? `distillation quality ${quality.score.toFixed(2)} (${quality.grade}) below floor ${LOW_QUALITY_THRESHOLD}; fell back to structured`
@@ -126,6 +129,8 @@ export interface ConversationCompactionHost {
   replaceMessagesForLLM(newMessages: ProviderMessage[]): void;
   getSessionMemoryStore(): Pick<SessionMemoryStore, 'list'> | null;
   getSessionLineageTracker(): Pick<SessionLineageTracker, 'addCompactionEntry'>;
+  /** The conversation's revision; with it, "did the conversation change" is an integer compare instead of a re-serialisation. */
+  readonly revisionSource?: RevisionSource | undefined;
 }
 
 const activeCompactions = new WeakMap<ConversationCompactionHost, OwnedJudgmentWork>();
@@ -143,26 +148,33 @@ export async function compactConversation(
   if (host.getMessageCount() === 0) return undefined;
   activeCompactions.get(host)?.retire();
   let applied = false;
+  let started = false;
+  // One owner answers "did the conversation change": its revision, captured once and compared as an integer.
+  // A host without one (a test double) is compared by content once per check.
+  const conversationRevision = host.revisionSource ? captureRevisions([host.revisionSource]) : undefined;
   let originalMessages: string | undefined;
-  const contextRevision = JSON.stringify(context);
   const work = new OwnedJudgmentWork({ signal: context?.signal, assertCurrent: () => {
     context?.assertCurrent?.();
-    if (JSON.stringify(context) !== contextRevision) throw new Error('Compaction context changed');
     if (activeCompactions.get(host) !== work) throw new Error('Conversation compaction was superseded');
-    if (!applied && originalMessages !== undefined && JSON.stringify(host.getMessagesForLLM()) !== originalMessages) {
-      throw new Error('Conversation changed during compaction');
-    }
+    if (applied || !started) return;
+    const changed = conversationRevision
+      ? !isCurrent(conversationRevision)
+      : JSON.stringify(host.getMessagesForLLM()) !== originalMessages;
+    if (changed) throw new Error('Conversation changed during compaction');
   } });
   activeCompactions.set(host, work);
 
   try {
     work.assertCurrent();
     const llmMessages = host.getMessagesForLLM();
-    originalMessages = JSON.stringify(llmMessages);
-    if (context && JSON.stringify(context.messages) !== originalMessages) {
+    if (!conversationRevision) originalMessages = JSON.stringify(llmMessages);
+    // The caller's context was read from this conversation; the same array means the same revision.
+    if (context && context.messages !== llmMessages && JSON.stringify(context.messages) !== JSON.stringify(llmMessages)) {
       throw new Error('Conversation changed before compaction');
     }
-    const compactionContext: CompactionContext = { ...(context ?? {
+    started = true;
+    // The work reads this copy only; nothing re-serialises it to prove it did not change.
+    const compactionContext: CompactionContext = Object.freeze({ ...(context ?? {
       messages: llmMessages,
       trigger,
       extractionModelId: modelId,
@@ -174,7 +186,7 @@ export async function compactConversation(
       lineageEntries: [],
       compactionCount: 0,
       contextWindow: 0,
-    }), signal: work.signal, assertCurrent: work.assertCurrent };
+    }), signal: work.signal, assertCurrent: work.assertCurrent });
     // Select and run the compaction strategy. The distiller (fresh-context)
     // strategy falls back to structured, through the SAME quality scorer,
     // when its distillation is unavailable or scores below the floor; the
@@ -183,11 +195,14 @@ export async function compactConversation(
     work.assertCurrent();
     const { result } = produced;
 
-    // Quality guard: score the compaction before committing it. A low-quality
-    // result (e.g. no compression, or a destroyed handoff) is rejected, the
-    // full conversation is kept and the failure is surfaced honestly rather
-    // than silently swapping in a bad summary.
-    const quality = await work.wait(() => scoreResult(llmMessages, result, compactionContext.contextWindow, work));
+    // Quality guard: score the compaction before committing it, once. A
+    // low-quality result (e.g. no compression, or a destroyed handoff) is
+    // rejected, the full conversation is kept and the failure is surfaced
+    // honestly rather than silently swapping in a bad summary. A distillation
+    // the strategy step already scored is not scored again.
+    const quality = produced.quality !== undefined
+      ? produced.quality
+      : await work.wait(() => scoreResult(llmMessages, result, compactionContext.contextWindow, work));
     work.assertCurrent();
 
     const strategyFellBack = produced.strategy !== produced.requestedStrategy;
@@ -231,7 +246,7 @@ export async function compactConversation(
     const receipt: CompactionReceipt = {
       ...receiptBase,
       outcome: 'applied',
-      ...(quality === null ? { detail: 'Classic compaction: no independent semantic quality score was taken.' } : {}),
+      ...(quality === null ? { detail: 'Classic compaction: no independent semantic quality score was taken.' } : { quality }),
     };
     // The conversation is already replaced. A failure in the bookkeeping below
     // (memory read, lineage entry, log) must not turn an applied compaction

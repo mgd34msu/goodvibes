@@ -271,6 +271,8 @@ The compacted output is assembled from named sections, each with its own token b
 | Resolved problems | 300 tokens |
 | **Total ceiling** | **6,500 tokens** |
 
+Which messages fill the recent-conversation, tool-results and resolved-problems sections is decided in bounded chunks: one decision-model request per chunk of about 8,000 tokens (24 messages at most) asks which of that chunk's messages to keep, and the call behind a kept tool result or the user turn behind a kept reply comes along from code. A pass needing more than 24 requests, running past 30 seconds, or unable to reach the decision model quotes the sections mechanically instead, so compaction still completes. A selected tool call is quoted as its name, the path it touched and the size of its arguments; the arguments stay in saved history. When a section's selected lines exceed its budget the newest are kept and the rest are named in an `[n earlier lines omitted]` marker. The quality score is taken once per compaction, over views of the conversation capped at 80,000 characters, and travels on the compaction receipt.
+
 `CompactionConfig` is an exported type with that shape, but structured compaction (`compactMessages` / `checkAndCompact`) always runs against `DEFAULT_COMPACTION_CONFIG` internally. `CompactionContext` has no `config` field, so there is currently no supported way to override these budgets per call; the type exists for the internal section builders, not as a public override surface.
 
 ### Token estimation

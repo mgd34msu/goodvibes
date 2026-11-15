@@ -40,10 +40,19 @@
  * Every failure path resolves. A request that throws while being answered is
  * answered `unavailable` with the error text rather than left to time out, so
  * the waiting `rewind.plan` gets a reason instead of a stall.
+ *
+ * A rewind applied here whose outcome the daemon refused (the question expired,
+ * or this surface is no longer its host) is put back from its undo snapshot, so
+ * the conversation never ends up shorter than the receipt the person was shown.
+ * When the outcome may have reached the daemon (the first report got no answer
+ * and the retry was refused as already settled), it is left as it is and the
+ * undo id is logged, because putting it back could contradict a receipt that
+ * says it was rewound.
  */
 import { logger, summarizeError } from '../../utils/index.js';
 import type { RewindAnchor, RewindConversationPort } from '../../rewind/types.js';
-import { discardTurnAnchorsAfter } from '../../rewind/turn-anchors.js';
+import { discardTurnAnchorsAfter, restoreAnchorsDroppedBy } from '../../rewind/turn-anchors.js';
+import { CONVERSATION_HOST_TAKEN_OVER_CODE } from '../../rewind/conversation-host-broker.js';
 import type { SessionSurface } from '../session-surface.js';
 import type { DaemonVerbCaller } from './daemon-verbs.js';
 
@@ -67,10 +76,29 @@ interface HostRequest {
   readonly expiresAt: number;
 }
 
+/** Whether the daemon refused the call itself (a 4xx other than a timeout), so it certainly did not record it. */
+function isDefiniteRefusal(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500 && status !== 408;
+}
+
+/** The daemon's code on a refused verb call, as both product verb callers carry it. */
+function refusalCode(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
 export interface ConversationRewindHostOptions {
   readonly verbs: DaemonVerbCaller;
-  /** The port that answers, this process's own conversations, by session id. */
-  readonly port: RewindConversationPort;
+  /**
+   * The port that answers, this process's own conversations, by session id.
+   * With `restoreBefore`, a rewind whose outcome the daemon refused is put back
+   * (only while nothing was added since, per `messagesSinceRewind`).
+   */
+  readonly port: RewindConversationPort & {
+    restoreBefore?(undoSnapshotId: string): boolean;
+    messagesSinceRewind?(undoSnapshotId: string): number | null;
+  };
   /** Whether this process is actually holding that session's conversation. */
   readonly hosts: (sessionId: string) => boolean;
   /** How this surface names itself in the refusals a person reads. */
@@ -209,8 +237,25 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
     // waiting for the dropped count and the undo handle, so the outcome is
     // reported even when this offer was withdrawn while the rewind ran.
     state.applied = true;
-    if (anchor.turnId !== undefined) discardTurnAnchorsAfter(anchor.sessionId, anchor.turnId, options.surface);
+    // Kept under the undo id, so putting the rewind back also puts the anchors back.
+    if (anchor.turnId !== undefined) discardTurnAnchorsAfter(anchor.sessionId, anchor.turnId, options.surface, outcome.undoSnapshotId);
     return { droppedMessages: outcome.droppedMessages, undoSnapshotId: outcome.undoSnapshotId };
+  };
+
+  /** A rewind applied here that the daemon has no record of: put it back when that is certain. */
+  const settleUnreported = (request: HostRequest, undoSnapshotId: unknown, mayHaveLanded: boolean, error: unknown): void => {
+    const undoId = typeof undoSnapshotId === 'string' ? undoSnapshotId : '';
+    const untouched = undoId !== '' && (options.port.messagesSinceRewind?.(undoId) ?? 0) === 0;
+    if (!mayHaveLanded && untouched && options.port.restoreBefore?.(undoId)) {
+      restoreAnchorsDroppedBy(undoId, options.surface);
+      log.warn('[rewind] the daemon refused the outcome of a rewind applied here, so the conversation was put back as it was', {
+        requestId: request.requestId, sessionId: request.sessionId, error: summarizeError(error),
+      });
+      return;
+    }
+    log.warn('[rewind] the conversation was rewound here but the daemon has no confirmed record of it; its undo id restores it', {
+      requestId: request.requestId, sessionId: request.sessionId, undoSnapshotId: undoId, error: summarizeError(error),
+    });
   };
 
   const answer = async (offer: Offer, hostId: string, request: HostRequest): Promise<void> => {
@@ -226,7 +271,9 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
         payload = { unavailableReason: `the surface hosting this conversation could not answer: ${summarizeError(error)}` };
       }
       if (!payload || (!isCurrent(offer) && !state.applied)) return;
-      // An applied rewind is worth one more try: the undo handle exists nowhere else.
+      // An applied rewind whose report got no answer is worth one more try: the
+      // undo handle exists nowhere else. A report the daemon refused is not.
+      let mayHaveLanded = false;
       for (let attempt = 1; ; attempt += 1) {
         try {
           await options.verbs.invoke('rewind.conversation.requests.answer', {
@@ -234,11 +281,11 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
           });
           return;
         } catch (error) {
-          if (state.applied && attempt === 1) continue;
+          const refused = isDefiniteRefusal(error);
+          if (!refused) mayHaveLanded = true;
+          if (state.applied && attempt === 1 && !refused) continue;
           if (state.applied) {
-            log.warn('[rewind] the conversation was rewound here but the daemon would not accept the outcome', {
-              requestId: request.requestId, undoSnapshotId: payload['undoSnapshotId'], error: summarizeError(error),
-            });
+            settleUnreported(request, payload['undoSnapshotId'], mayHaveLanded, error);
           } else if (isCurrent(offer)) {
             log.debug('[rewind] the daemon would not accept this answer', {
               requestId: request.requestId, error: summarizeError(error),
@@ -277,7 +324,7 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
         // A daemon that says another surface took the session over is not a
         // transport failure: claiming again would only take it back. The loop
         // ends; the next `start` for this session (a command run here) claims it.
-        if (/took over/i.test(summarizeError(error))) {
+        if (refusalCode(error) === CONVERSATION_HOST_TAKEN_OVER_CODE) {
           offer.running = false;
           offer.takenOver = true;
           log.warn('[rewind] another surface took over this session\'s conversation; this surface stopped offering it');

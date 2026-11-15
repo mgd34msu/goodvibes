@@ -221,11 +221,18 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
     throw new Error('Native composition requires both authenticated owners and the original read authorization');
   }
   const writer = options.nativeDataWriter;
-  const publishFormat = (format: import('./native-reader-compatibility.js').NativeDataFormat, refusal: string): void => {
+  type Format = import('./native-reader-compatibility.js').NativeDataFormat;
+  // A format, once published, stays published, so a contract write looks only
+  // for the formats not yet published and stops looking once all are.
+  const published = new Set<Format>();
+  const pending = (format: Format): boolean => writer !== undefined && !published.has(format);
+  const publishFormat = (format: Format, refusal: string): void => {
+    if (!pending(format)) return;
     let result: unknown;
     try { result = writer?.declare(format); }
     catch (error) { drainOwned(error); throw error; }
     if (result !== undefined) { drainOwned(result); throw new Error(refusal); }
+    published.add(format);
   };
   const store = new ContractStore({ projectRoot: options.projectRoot,
     beforeCreate: id => {
@@ -234,9 +241,8 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
       }
     },
     beforeWrite: contract => {
-      const formats: import('./native-reader-compatibility.js').NativeDataFormat[] = ['contract-review-observations-v1', 'contract-answer-claim-scopes-v2'];
-      if (contract) {
-        const units = [...contract.units];
+      const formats: Format[] = ['contract-review-observations-v1', 'contract-answer-claim-scopes-v2'];
+      if (contract && (pending('contract-tree-baselines-v2') || pending('contract-tree-baselines-v3'))) {
         const baselines = [contract.baseline, ...contract.groups.map(group => group.baseline)];
         const baselineUnits = [...contract.units];
         while (baselineUnits.length) {
@@ -247,6 +253,9 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
         }
         if (baselines.some(baseline => baseline?.version === 2)) formats.push('contract-tree-baselines-v2');
         if (baselines.some(baseline => baseline?.version === 3)) formats.push('contract-tree-baselines-v3');
+      }
+      if (contract && pending('contract-optional-check-digests-v1')) {
+        const units = [...contract.units];
         let optionalDigest = [...contract.checks, ...contract.groups.flatMap(group => group.checks)]
           .some(check => check.evidenceDigest === undefined);
         while (units.length && !optionalDigest) {
@@ -255,6 +264,8 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
           units.push(...(unit.attemptUnits ?? []));
         }
         if (optionalDigest) formats.push('contract-optional-check-digests-v1');
+      }
+      if (contract && pending('optional-review-binding-v1')) {
         if (contract.decisions.some(decision => {
           if (![`${contract.id}.final-answer-review`, `${contract.id}.goal-obligations`, `${contract.id}.original-obligations`].includes(decision.targetId)) return false;
           try {

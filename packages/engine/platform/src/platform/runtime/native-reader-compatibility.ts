@@ -196,20 +196,19 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
   const path = pathFor(execPath); version(runningVersion);
   let physicalCurrent: () => void;
   try { physicalCurrent = retainPublisherDirectory(execPath); } catch { throw new NativeDataCompatibilityError('unavailable'); }
-  let observedFile = false, failed = false;
+  let observedFile = false;
   // A requirement only grows: once this process has published or observed a
   // format in the file it stays there, so a second declaration of it is a set
   // lookup instead of a directory walk, a lock and three file reads.
   const declared = new Set<NativeDataFormat>();
   const current = () => {
-    if (failed || publisher.execPath !== execPath || publisher.version !== runningVersion || publisher.assertCurrent !== guard || publisher.readerCohort !== captureCohort) throw new NativeDataCompatibilityError('unavailable');
+    if (publisher.execPath !== execPath || publisher.version !== runningVersion || publisher.assertCurrent !== guard || publisher.readerCohort !== captureCohort) throw new NativeDataCompatibilityError('unavailable');
     const result: unknown = guard.call(publisher);
     if (result !== undefined) { drainOwned(result); throw new NativeDataCompatibilityError('unavailable'); }
   };
   return Object.freeze({ declare(format: NativeDataFormat): void {
-    if (failed) throw new NativeDataCompatibilityError('unavailable');
     if (declared.has(format)) return;
-    let release: (() => void) | null = null, published = false;
+    let release: (() => void) | null = null;
     try {
       if (!Object.hasOwn(requirements, format)) throw new Error();
       physicalCurrent();
@@ -252,7 +251,6 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
           const now = read(path);
           if (now.observed?.physical !== previous.observed?.physical || (now.observed !== null && !now.observed.bytes.equals(previous.observed?.bytes ?? Buffer.alloc(0)))) throw new Error();
         } });
-        published = true;
         if (!readFileObservation(path).bytes.equals(Buffer.from(contents))) throw new Error();
         observedFile = true;
         current(); assertCohort();
@@ -263,17 +261,16 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
       // drains after cancellation; no new requirement is published there.
       declared.add(format);
     } catch (error) {
-      // A refusal made before anything was written (a lock held too long, a
-      // running version below the floor, a reader cohort that cannot confirm the
-      // new format) leaves the requirement file exactly as it was, so it must not
-      // stop later declarations of formats it already holds. Anything else leaves
-      // the file in an unknown state and fails closed.
-      const refusedBeforeWrite = !published && error instanceof NativeDataCompatibilityError
-        && (error.kind === 'busy' || error.kind === 'incompatible' || error.kind === 'unconfirmed-reader' || error.kind === 'mixed-readers');
-      if (!refusedBeforeWrite) failed = true;
+      // This declaration fails and the write that needed it fails with it. The
+      // file is replaced atomically, so it holds either the old requirement or
+      // the new one, and the next declaration re-reads it under the lock; a
+      // transient error (a full disk, too many open files) does not outlive the
+      // call that met it.
       throw error instanceof NativeDataCompatibilityError ? error : new NativeDataCompatibilityError('unavailable');
     } finally {
-      try { release?.(); } catch { failed = true; throw new NativeDataCompatibilityError('unavailable'); }
+      // The declaration's outcome is already settled; a lock this call could
+      // not release is reclaimed by the lock's own stale-holder rule.
+      try { release?.(); } catch { /* see above */ }
     }
   } });
 }

@@ -44,9 +44,13 @@
  *
  * A photo or screenshot is retained by the daemon, not written here. The result
  * names the artifact and when it expires; `action:"read"` fetches the bytes
- * over `devices.artifacts.read`, base64-encoded. The `daemonPath` on an
- * artifact is a path on the DAEMON's disk, reported because an operator on
- * that machine may want it, and never opened from here.
+ * over `devices.artifacts.read` and attaches an image to the result as an image
+ * the model sees, the same way the `read` tool attaches a picture file, instead
+ * of putting base64 text into the conversation. A photo is capped at
+ * {@link DEFAULT_PHOTO_MAX_WIDTH} pixels on its longest edge unless the call
+ * names another width, so an ordinary capture fits on the first try. The
+ * `daemonPath` on an artifact is a path on the DAEMON's disk, reported because
+ * an operator on that machine may want it, and never opened from here.
  */
 import {
   DEVICE_CAPABILITY_CATALOG,
@@ -60,11 +64,24 @@ import type { Tool } from '../../types/index.js';
 import type { DeviceCapabilityOutcomeWire, DeviceNodeSummary, DevicesClient } from './devices-client.js';
 
 /**
- * The longest base64 payload `action:"read"` puts into the tool output. A
- * capture is returned whole or not at all (half an image is not an image), so a
- * larger one is refused with the way to get a smaller one.
+ * The longest base64 payload `action:"read"` puts into the tool output as text,
+ * for a capture that is not an image. A capture is returned whole or not at all,
+ * so a larger one is refused with the way to get it.
  */
 const MAX_READ_BASE64_CHARS = 262_144;
+
+/**
+ * The largest image `action:"read"` attaches (base64 characters of a 5 MB
+ * image, the size the `read` tool also attaches at most and providers accept
+ * per image). A larger capture is refused with the way to get a smaller one.
+ */
+const MAX_IMAGE_BASE64_CHARS = Math.ceil((5 * 1024 * 1024) / 3) * 4;
+
+/** Longest-edge pixels a photo is taken at when the call names no width: sharp enough to read, small enough to attach. */
+export const DEFAULT_PHOTO_MAX_WIDTH = 1568;
+
+/** An image the conversation loop attaches to the model's next request, in the shape the `read` tool uses. */
+interface AttachedImage { readonly path: string; readonly base64: string; readonly mediaType: string; readonly description: string }
 
 export interface ClientPhoneToolOptions {
   /** The conversation the phone tool is serving, so a confirmation prompt and a session-scoped grant bind to it. */
@@ -163,7 +180,7 @@ function renderOutcome(outcome: DeviceCapabilityOutcomeWire): PhonePayload {
           capturedAt: isoOrNull(artifact['capturedAt']),
           expiresAt: isoOrNull(artifact['expiresAt']),
           retentionNote: 'Held by the daemon and deleted automatically at expiry; the removal is recorded in its device housekeeping log.',
-          readWith: `action:"read", artifactId:"${artifact.artifactId}" returns the bytes base64-encoded.`,
+          readWith: `action:"read", artifactId:"${artifact.artifactId}" shows the capture.`,
         },
       }
       : {}),
@@ -265,7 +282,7 @@ export function createClientPhoneTool(devices: DevicesClient, toolOptions: Clien
           body: { type: 'string', description: 'Notification body for action:"notify".' },
           url: { type: 'string', description: 'Link to open for action:"open_url".' },
           durationMs: { type: 'number', description: 'Buzz length for action:"vibrate".' },
-          maxWidth: { type: 'number', description: 'Longest-edge pixel cap applied on the phone before upload.' },
+          maxWidth: { type: 'number', description: `Photo longest-edge pixel cap on the phone. Default ${DEFAULT_PHOTO_MAX_WIDTH}.` },
           maxAgeSeconds: { type: 'number', description: 'Accept a cached location fix no older than this.' },
           grantId: { type: 'string', description: 'Grant to revoke for action:"revoke".' },
           artifactId: { type: 'string', description: 'Capture to fetch for action:"read".' },
@@ -284,13 +301,18 @@ export function createClientPhoneTool(devices: DevicesClient, toolOptions: Clien
         // A reachable daemon that failed a read: say so, never report it as "no phone" or "no grants".
         payload = fail(error instanceof Error ? error.message : String(error), 'The daemon answered the connection but not this request; retry, or check the daemon from the web app.');
       }
-      const output = JSON.stringify(payload, null, 2);
-      return payload.success
-        ? { success: true, output }
-        : { success: false, error: String(payload['error'] ?? 'The phone request failed.'), output };
+      const { [IMAGES]: attached, ...visible } = payload;
+      const images = Array.isArray(attached) ? attached as readonly AttachedImage[] : undefined;
+      const output = JSON.stringify(visible, null, 2);
+      if (!payload.success) return { success: false, error: String(payload['error'] ?? 'The phone request failed.'), output };
+      // `_images` is the loop's channel for pictures a tool hands the model.
+      return images && images.length > 0 ? { success: true, output, _images: images } as { success: true; output: string } : { success: true, output };
     },
   };
 }
+
+/** Where a payload carries images to attach; taken out before the payload is serialised. */
+const IMAGES = '__attachImages';
 
 /** Every action, returning the tool's own payload before it is serialised. */
 async function handleAction(devices: DevicesClient, sessionId: string | undefined, args: Record<string, unknown>): Promise<PhonePayload> {
@@ -387,13 +409,33 @@ async function handleAction(devices: DevicesClient, sessionId: string | undefine
     if (!artifactId) return fail('Pass artifactId:"…", use action:"artifacts" to list them.');
     try {
       const read = await devices.readArtifact(artifactId);
-      if (read.dataBase64.length > MAX_READ_BASE64_CHARS) {
+      const mediaType = typeof read.artifact.mediaType === 'string' ? read.artifact.mediaType : '';
+      const isImage = mediaType.startsWith('image/');
+      const limit = isImage ? MAX_IMAGE_BASE64_CHARS : MAX_READ_BASE64_CHARS;
+      if (read.dataBase64.length > limit) {
         const daemonPath = typeof read.artifact['daemonPath'] === 'string' ? read.artifact['daemonPath'] : undefined;
         return {
           success: false,
-          error: `The capture is too large to return here (${read.dataBase64.length} base64 characters, the limit is ${MAX_READ_BASE64_CHARS}).`,
-          hint: `Capture it again with a smaller maxWidth${daemonPath ? `, or read it on the daemon machine at ${daemonPath}` : ''}.`,
+          error: `The capture is too large to return here (${read.dataBase64.length} base64 characters, the limit is ${limit}).`,
+          hint: isImage
+            ? `Capture it again with a smaller maxWidth${daemonPath ? `, or read it on the daemon machine at ${daemonPath}` : ''}.`
+            : `Read it on the daemon machine${daemonPath ? ` at ${daemonPath}` : ''}.`,
           artifact: read.artifact,
+        };
+      }
+      if (isImage) {
+        const image: AttachedImage = {
+          path: `phone:${artifactId}`,
+          base64: read.dataBase64,
+          mediaType,
+          description: `Phone capture ${artifactId}`,
+        };
+        return {
+          success: true,
+          artifact: read.artifact,
+          attached: 'image',
+          note: 'The capture is attached as an image for a model that can see images. It stays on the daemon until its retention window closes.',
+          [IMAGES]: [image],
         };
       }
       return {
@@ -431,7 +473,7 @@ async function handleAction(devices: DevicesClient, sessionId: string | undefine
   if (action === 'photo') {
     const front = readString(args['camera']).toLowerCase() === 'front';
     return runCapability(devices, sessionId, args, front ? 'device.camera.front.capture' : 'device.camera.rear.capture', {
-      ...(typeof args['maxWidth'] === 'number' ? { maxWidth: args['maxWidth'] } : {}),
+      maxWidth: typeof args['maxWidth'] === 'number' ? args['maxWidth'] : DEFAULT_PHOTO_MAX_WIDTH,
     });
   }
 

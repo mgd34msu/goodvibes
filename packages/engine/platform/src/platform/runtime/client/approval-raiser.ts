@@ -28,11 +28,13 @@
  *    takes. A product wires the stream in through `subscribeApprovalUpdates`.
  *
  *    Polling `approvals.list` remains as the FALLBACK, and it is a real one, not
- *    a formality: a client with no stream seam wired, or one whose stream the
- *    daemon refused, still gets its answer. There is also one read immediately
- *    after subscribing, because a decision can land between the raise and the
- *    subscription and a push channel cannot deliver what happened before it
- *    opened.
+ *    a formality: a client with no stream seam wired, one whose stream the
+ *    daemon refused, or one whose stream ended (the subscriber reports that
+ *    through `onTerminate`; the stream itself turns a silent connection into an
+ *    end by its heartbeat deadline) still gets its answer. There is also one
+ *    read immediately after subscribing, because a decision can land between
+ *    the raise and the subscription and a push channel cannot deliver what
+ *    happened before it opened.
  * 4. The daemon is the arbiter once its record exists. A remote answer that
  *    arrives first is the decision. A local answer is sent to the daemon
  *    (`approvals.approve`/`approvals.deny`) and the record's final state is
@@ -86,9 +88,10 @@ import type { ApprovalUpdateNotice, ApprovalUpdateSubscription } from './approva
  *
  * Returning null means "no stream right now", which is a supported answer:
  * the raiser falls back to reading the record on an interval. `onTerminate`
- * is how a subscriber says the stream ended for good after it opened; the raiser
- * then falls back the same way instead of waiting on a stream that will never
- * deliver.
+ * is how a subscriber says the stream ended after it opened (closed, refused on
+ * reconnect, or silent past its heartbeat deadline); the raiser then falls back
+ * the same way instead of waiting on a stream that will never deliver. A
+ * subscriber that can end must call it: nothing else watches an open stream.
  */
 export type ApprovalUpdateSubscriber = (
   onUpdate: (notice: ApprovalUpdateNotice) => void,
@@ -107,13 +110,6 @@ const DEFAULT_ARBITER_WAIT_MS = 2_000;
 
 /** How often the raised id is re-read while the local prompt is open. */
 const DEFAULT_POLL_INTERVAL_MS = 750;
-
-/**
- * How often an open stream is cross-checked against the record. A stream that
- * dies without telling its subscriber would otherwise leave the ask waiting on a
- * decision that was made elsewhere and never arrived.
- */
-const DEFAULT_STREAM_RECONCILE_INTERVAL_MS = 60_000;
 
 /**
  * How long a raised record waits for an answer before the daemon expires it.
@@ -144,8 +140,6 @@ export interface ClientApprovalRaiserOptions {
   readonly subscribeApprovalUpdates?: ApprovalUpdateSubscriber | undefined;
   /** Poll interval override (tests), and the fallback interval. */
   readonly pollIntervalMs?: number;
-  /** How often an open stream is cross-checked against the record (tests). */
-  readonly streamReconcileIntervalMs?: number;
   /** Injectable sleep (tests). */
   readonly sleep?: (ms: number) => Promise<void>;
   /** How long the daemon keeps a raised record open before expiring it. */
@@ -239,7 +233,6 @@ function localDecisionSnapshot(decision: PermissionPromptDecision): PermissionPr
 
 export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions): ApprovalRaiser {
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-  const reconcileIntervalMs = options.streamReconcileIntervalMs ?? DEFAULT_STREAM_RECONCILE_INTERVAL_MS;
   const sleep = async (ms: number, signal: AbortSignal): Promise<void> => {
     if (options.sleep) return awaitPermission(() => options.sleep!(ms), signal);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -370,24 +363,13 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
       const alreadyDecided = readRemoteDecision(await readRaised(approvalId, signal));
       if (alreadyDecided) return { subscribed: true, decision: alreadyDecided };
       if (done()) return { subscribed: true, decision: null };
-      for (;;) {
-        // The stream is the fast path; this read is the net under it.
-        const ticker = new AbortController();
-        const waiting = sleep(reconcileIntervalMs, AbortSignal.any([signal, ticker.signal])).then(() => 'reconcile' as const);
-        waiting.catch(() => {});
-        let outcome: PermissionPromptDecision | null | 'reconcile';
-        try {
-          outcome = await awaitPermission(() => Promise.race([decided, waiting]), signal);
-        } finally { ticker.abort(); }
-        if (outcome !== 'reconcile') {
-          // A stream that ended for good has nothing more to deliver.
-          if (outcome === null && terminated && !done()) return { subscribed: false, decision: null };
-          return { subscribed: true, decision: outcome };
-        }
-        if (done()) return { subscribed: true, decision: null };
-        const found = readRemoteDecision(await readRaised(approvalId, signal));
-        if (found) return { subscribed: true, decision: found };
-      }
+      // The stream owns its own liveness (heartbeat deadline, end reported through
+      // `onTerminate`), so nothing re-reads the record while it is open. When the
+      // local prompt wins, the caller aborts `signal` and this wait ends with it.
+      const outcome = await awaitPermission(() => decided, signal);
+      // A stream that ended has nothing more to deliver: read the record instead.
+      if (outcome === null && terminated && !done()) return { subscribed: false, decision: null };
+      return { subscribed: true, decision: outcome };
     } finally {
       signal.removeEventListener('abort', close);
       close();

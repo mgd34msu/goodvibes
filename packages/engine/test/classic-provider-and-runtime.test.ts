@@ -11,7 +11,6 @@ import { prepareReasoningEffort } from '../platform/src/platform/providers/reaso
 import { extractOpenAIStreamTextDelta } from '../platform/src/platform/providers/openai-stream-delta.js';
 import { holdsCredential } from '../platform/src/platform/config/credential-key-reading.js';
 import { unknownSettingNotices } from '../platform/src/platform/config/settings-unknown-forms.js';
-import { readConfigEventCarriesValue } from '../platform/src/platform/runtime/config/emit-bridge.js';
 import { readBundleRisk } from '../platform/src/platform/runtime/settings/control-plane-store.js';
 import { readCommandNeeds, decideSandboxedExec } from '../platform/src/platform/runtime/permissions/sandbox-policy.js';
 import { createSandboxEscalationApprovalHandler } from '../platform/src/platform/runtime/permissions/sandbox-escalation.js';
@@ -88,7 +87,6 @@ test('Classic settings preserve unknown keys, mask undeclared fields and report 
   const requests = outage();
   await withDecisionModelPolicy(() => 'Classic - Off', async () => {
     expect(await holdsCredential('custom.unclassified', '', 'test.classic.credential')).toBe(true);
-    expect(await readConfigEventCarriesValue('custom.unclassified')).toBe(false);
     expect(unknownSettingNotices('synthetic-settings.json', [{ section: 'provider', name: 'futureModel', key: 'provider.futureModel' }]))
       .toMatchObject([{ key: 'provider.futureModel', action: 'skipped' }]);
     expect(await readBundleRisk([{

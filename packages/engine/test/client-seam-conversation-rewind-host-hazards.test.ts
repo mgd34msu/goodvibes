@@ -19,6 +19,7 @@ async function until(predicate: () => boolean): Promise<void> {
   if (!predicate()) throw new Error('did not settle');
 }
 const parked = (): Promise<never> => new Promise<never>(() => {});
+const takenOver = (): Error => Object.assign(new Error('the session is served elsewhere now'), { status: 409, code: 'HOST_TAKEN_OVER' });
 
 function fakeDaemon(take: (call: number, park: () => Promise<never>) => Promise<unknown>) {
   // Like the broker, releasing the host wakes a take that is parked on it.
@@ -111,7 +112,7 @@ test('a session that keeps being taken over is claimed less and less often', asy
 });
 
 test('a take refused because another surface took the session over ends the offer instead of claiming it back', async () => {
-  const daemon = fakeDaemon(async () => { throw new Error('another surface took over hosting this session\'s conversation'); });
+  const daemon = fakeDaemon(async () => { throw takenOver(); });
   const warnings: string[] = [];
   const client = createConversationRewindHost({
     verbs: daemon.verbs, hosts: () => true, log: { ...quiet, warn: (message: string) => { warnings.push(message); } },
@@ -128,7 +129,7 @@ test('a take refused because another surface took the session over ends the offe
 
 test('a surface that lost the session to another one offers it again once its person acts on it', async () => {
   const daemon = fakeDaemon(async (call, park) => {
-    if (call === 1) throw new Error('another surface took over hosting this session\'s conversation');
+    if (call === 1) throw takenOver();
     return park();
   });
   const warnings: string[] = [];
@@ -172,4 +173,31 @@ test('a rewind answered by the host also drops the rewound anchors from the side
     clearTurnAnchors('s1');
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('a rewind applied here whose outcome the daemon refused is put back from its undo snapshot', async () => {
+  const daemon = fakeDaemon(async (call, park) => (call === 1 ? { requests: [REQUEST] } : park()));
+  const original = daemon.verbs.invoke;
+  let answers = 0;
+  daemon.verbs.invoke = async <T,>(method: string, input?: unknown): Promise<T> => {
+    if (method !== 'rewind.conversation.requests.answer') return await original<T>(method, input);
+    answers += 1;
+    throw Object.assign(new Error('the request stopped waiting'), { status: 409, code: 'CONFLICT' });
+  };
+  const restored: string[] = [];
+  const client = createConversationRewindHost({
+    verbs: daemon.verbs, hosts: () => true, log: quiet,
+    port: {
+      preview: async () => ({ messagesToDrop: 0, messagesRemaining: 0 }),
+      rewind: async () => ({ droppedMessages: 3, undoSnapshotId: 'undo-9' }),
+      messagesSinceRewind: () => 0,
+      restoreBefore: (id) => { restored.push(id); return true; },
+    },
+  });
+  client.offer('s1');
+  await client.pump();
+  await client.stop();
+  // A definite refusal is not retried, and the cut does not outlive it.
+  expect(answers).toBe(1);
+  expect(restored).toEqual(['undo-9']);
 });

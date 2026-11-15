@@ -165,13 +165,16 @@ export function resolveConnectedHostConnection(
   return resolveConnection(options);
 }
 
-/** A non-2xx from the host, carrying the status so callers can classify it. */
+/** A non-2xx from the host, carrying the status and the host's code so callers can classify it. */
 export class ConnectedHostVerbError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  /** The code the host's error body named, when it named one. */
+  readonly code: string | undefined;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = 'ConnectedHostVerbError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -312,10 +315,10 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
         throw error;
       }
       if (!response.ok) {
-        const described = payload && typeof payload === 'object' && 'error' in payload
-          ? String((payload as { error: unknown }).error)
-          : `HTTP ${response.status}`;
-        throw new ConnectedHostVerbError(`'${methodId}' failed: ${described}`, response.status);
+        const body = payload && typeof payload === 'object' ? payload as { error?: unknown; code?: unknown } : undefined;
+        const described = body && 'error' in body ? String(body.error) : `HTTP ${response.status}`;
+        const code = typeof body?.code === 'string' && body.code.length > 0 ? body.code : undefined;
+        throw new ConnectedHostVerbError(`'${methodId}' failed: ${described}`, response.status, code);
       }
       return payload as T;
     },

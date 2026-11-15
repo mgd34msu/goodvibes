@@ -82,26 +82,6 @@ test('a stream that ends after opening falls back to reading the record', async 
   expect(await pending).toEqual({ approved: true, remember: false });
 });
 
-test('a stream that dies silently is cross-checked against the record', async () => {
-  let answered = false;
-  const { caller } = wire(() => (answered ? [{ id: 'approval-1', status: 'denied', decision: { approved: false } }] : []));
-  let release: (() => void) | null = null;
-  let sleeps = 0;
-  const raise = createClientApprovalRaiser({
-    verbs: caller, actor: 'tui', pollIntervalMs: 1,
-    subscribeApprovalUpdates: async () => ({ close: () => {} }),
-    // The first sleep is the reconcile wait; the test decides when it elapses.
-    sleep: () => { sleeps += 1; return new Promise<void>((resolve) => { release = resolve; }); },
-    localPrompt: () => () => new Promise<never>(() => {}),
-  });
-  const pending = raise({ request: REQUEST });
-  await until(() => release !== null);
-  expect(sleeps).toBe(1);
-  answered = true;
-  release!();
-  expect(await pending).toEqual({ approved: false, remember: false });
-});
-
 test('awaitApprovalDecision resolves null when the stream ends without a decision', async () => {
   const result = await awaitApprovalDecision({
     subscribe: async (_onUpdate, onTerminate) => { queueMicrotask(() => onTerminate?.()); return { close: () => {} }; },

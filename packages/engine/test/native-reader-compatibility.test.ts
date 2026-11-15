@@ -140,9 +140,10 @@ test.each(['directory', 'symlink', 'dangling'] as const)('an unsafe %s cannot ma
   expect(() => assertNativeReaderCompatible(f.execPath, '4.0.0', realUpdateFileIo)).toThrow(NativeDataCompatibilityError);
 });
 
-test('deleting observed evidence retires the writer rather than resetting the reader floor', () => {
+test('deleting observed evidence refuses new formats rather than resetting the reader floor', () => {
   const f = fixture(); f.owner.declare('payment-retained-holds-v2'); rmSync(f.file);
-  expect(() => f.owner.declare('payment-retained-holds-v2')).toThrow(NativeDataCompatibilityError);
+  expect(() => f.owner.declare('knowledge-schema-v17')).toThrow(NativeDataCompatibilityError);
+  expect(() => f.owner.declare('knowledge-schema-v17')).toThrow(NativeDataCompatibilityError);
   expect(existsSync(f.file)).toBe(false);
 });
 
@@ -311,10 +312,14 @@ test('a refused new format leaves the requirement file alone and later declarati
   expect(JSON.parse(readFileSync(file, 'utf8')).formats).toContain('native-conversation-settled-v1');
 });
 
-test('a requirement file that cannot be read still retires the writer after a refusal elsewhere', () => {
+test('a requirement file that cannot be read fails that declaration only; the next one retries', () => {
   const f = fixture(); f.owner.declare('payment-retained-holds-v2');
   writeFileSync(f.file, '{');
-  expect(() => f.owner.declare('payment-retained-holds-v2')).toThrow(NativeDataCompatibilityError);
+  expect(() => f.owner.declare('knowledge-schema-v17')).toThrow(NativeDataCompatibilityError);
   writeFileSync(f.file, requirement());
-  expect(() => f.owner.declare('payment-retained-holds-v2')).toThrow(NativeDataCompatibilityError);
+  f.owner.declare('knowledge-schema-v17');
+  expect(JSON.parse(readFileSync(f.file, 'utf8')).formats).toContain('knowledge-schema-v17');
+  // A format already published costs nothing to declare again.
+  rmSync(f.file);
+  f.owner.declare('knowledge-schema-v17');
 });

@@ -10,8 +10,14 @@
  *
  * What lands: one JSON record per fault carrying the stack, the surface
  * version, the pid, the session that was active at the moment of the fault,
- * and the timestamp, the five fields forensics actually needed and did not
- * have.
+ * the timestamp, and whether the fault ended the process (`fatal`): an
+ * unhandled rejection the surface survives is recorded too, and is told apart
+ * from a crash by that field.
+ *
+ * Where it is read: {@link summarizeCrashLog} gives the count, the newest
+ * record and the path, and {@link describeCrashLog} the one line a status or
+ * doctor output prints. The daemon installs the same capture through
+ * {@link installProcessCrashCapture}.
  *
  * Persisted-state doctrine (bounded / content-validated / disclosed):
  *  - Bounded twice. `appendCrashRecord` keeps at most
@@ -33,17 +39,23 @@
  * `uncaughtException` handler where the process is about to exit, so a
  * promise-based write would lose the race with `process.exit`.
  */
-import { appendFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, statSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { redactAtRestLine } from './at-rest-persistence.js';
 import { withSyncFileLock } from '../config/sync-file-lock.js';
+import { resolveScopedDirectory } from './surface-root.js';
 
 /** Which process-level fault produced a record. */
 export type CrashKind = 'uncaughtException' | 'unhandledRejection';
 
 /** Filename of the crash log within a surface's home-anchored root. */
 export const CRASH_LOG_FILENAME = 'crashes.jsonl';
+
+/** Where a surface's crash log lives: its home-anchored storage root, where the retention janitor also looks. */
+export function surfaceCrashLogPath(homeDirectory: string, surfaceRoot: string): string {
+  return resolveScopedDirectory(homeDirectory, surfaceRoot, CRASH_LOG_FILENAME);
+}
 
 /**
  * Count cap on retained crash records. Small on purpose: the newest crashes
@@ -78,6 +90,8 @@ export interface CrashRecord {
   readonly sessionId: string | null;
   /** Surface that faulted, e.g. `'agent'`. */
   readonly surface: string;
+  /** Whether the fault ended the process. Records written before this field existed read it from `kind`. */
+  readonly fatal: boolean;
 }
 
 /** Inputs for {@link buildCrashRecord} other than the thrown value itself. */
@@ -88,6 +102,8 @@ export interface CrashContext {
   readonly pid?: number;
   /** Injectable clock for deterministic tests. */
   readonly now?: () => Date;
+  /** Whether the fault ends the process; defaults to true for an uncaught exception and false for a rejection the surface survives. */
+  readonly fatal?: boolean;
 }
 
 function truncateStack(stack: string): string {
@@ -123,6 +139,7 @@ export function buildCrashRecord(kind: CrashKind, thrown: unknown, context: Cras
     pid: context.pid ?? process.pid,
     sessionId: context.sessionId,
     surface: context.surface,
+    fatal: context.fatal ?? kind === 'uncaughtException',
   };
 }
 
@@ -137,7 +154,8 @@ function isCrashRecord(value: unknown): value is CrashRecord {
     typeof record['version'] === 'string' &&
     typeof record['pid'] === 'number' &&
     (record['sessionId'] === null || typeof record['sessionId'] === 'string') &&
-    typeof record['surface'] === 'string'
+    typeof record['surface'] === 'string' &&
+    (record['fatal'] === undefined || typeof record['fatal'] === 'boolean')
   );
 }
 
@@ -166,9 +184,42 @@ export function readCrashRecords(filePath: string): CrashRecord[] {
     } catch {
       continue;
     }
-    if (isCrashRecord(parsed)) records.push(parsed);
+    if (!isCrashRecord(parsed)) continue;
+    const fatal = (parsed as { fatal?: unknown }).fatal;
+    records.push(typeof fatal === 'boolean' ? parsed : { ...parsed, fatal: parsed.kind === 'uncaughtException' });
   }
   return records;
+}
+
+/** What a status or doctor output says about a surface's crash log. */
+export interface CrashLogSummary {
+  readonly path: string;
+  /** Records held, fatal or not. */
+  readonly count: number;
+  /** Records of faults that ended the process. */
+  readonly fatalCount: number;
+  /** The newest record, or null when the log is empty or absent. */
+  readonly newest: CrashRecord | null;
+}
+
+/** Read a crash log into the few facts a status line needs. A missing log is an empty one. */
+export function summarizeCrashLog(filePath: string): CrashLogSummary {
+  const records = readCrashRecords(filePath);
+  return {
+    path: filePath,
+    count: records.length,
+    fatalCount: records.filter((record) => record.fatal).length,
+    newest: records.at(-1) ?? null,
+  };
+}
+
+/** The status/doctor line for a crash log, or null when it holds nothing. */
+export function describeCrashLog(summary: CrashLogSummary): string | null {
+  if (summary.count === 0 || summary.newest === null) return null;
+  const newest = summary.newest;
+  const what = newest.fatal ? 'crash' : 'survived error';
+  return `crash log: ${summary.fatalCount} crash${summary.fatalCount === 1 ? '' : 'es'} and ${summary.count - summary.fatalCount} survived error${summary.count - summary.fatalCount === 1 ? '' : 's'} recorded; `
+    + `newest ${what} ${newest.timestamp} (${newest.message.slice(0, 120)}); see ${summary.path}`;
 }
 
 /**
@@ -221,4 +272,64 @@ export function appendCrashRecord(filePath: string, record: CrashRecord): boolea
   } catch {
     return false;
   }
+}
+
+/**
+ * The terminal line that follows a crash: where the record is, or that it is
+ * not anywhere, so nobody is sent to a file that does not hold it.
+ */
+export function crashRecordLine(filePath: string, written: boolean): string {
+  return written
+    ? `crash record written to ${filePath}`
+    : `crash record could not be written to ${filePath}; the stack above is the only copy`;
+}
+
+export interface ProcessCrashCaptureOptions {
+  readonly surface: string;
+  readonly version: string;
+  /** Where the records go. */
+  readonly crashLogPath: string;
+  /** The session active at the moment of the fault, when the process has one. */
+  readonly sessionId?: (() => string | null) | undefined;
+  /** Injectable for tests; the default writes to file descriptor 2, which no output guard intercepts. */
+  readonly writeStderr?: ((line: string) => void) | undefined;
+  /** Injectable for tests; the default is `process.exit`. */
+  readonly exit?: ((code: number) => void) | undefined;
+}
+
+/**
+ * Install the crash capture for a process that has no handler of its own (the
+ * daemon): an uncaught exception is recorded as fatal, reported on stderr with
+ * where the record went, and ends the process with status 1; an unhandled
+ * rejection is recorded as survived and the process carries on. Returns the
+ * function that removes both listeners.
+ */
+export function installProcessCrashCapture(options: ProcessCrashCaptureOptions): () => void {
+  const writeStderr = options.writeStderr ?? ((line: string): void => { writeSync(2, `${line}\n`); });
+  const exit = options.exit ?? ((code: number): void => { process.exit(code); });
+  const capture = (kind: CrashKind, thrown: unknown): boolean => {
+    let sessionId: string | null = null;
+    try { sessionId = options.sessionId?.() ?? null; } catch { /* a broken accessor must not cost the record */ }
+    return appendCrashRecord(options.crashLogPath, buildCrashRecord(kind, thrown, { version: options.version, surface: options.surface, sessionId }));
+  };
+  const onUncaughtException = (error: unknown): void => {
+    const written = capture('uncaughtException', error);
+    try {
+      writeStderr(`${options.surface} crashed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
+      writeStderr(crashRecordLine(options.crashLogPath, written));
+    } catch { /* the record is the durable part */ }
+    exit(1);
+  };
+  const onUnhandledRejection = (reason: unknown): void => {
+    const written = capture('unhandledRejection', reason);
+    try {
+      writeStderr(`${options.surface} unhandled rejection (still running): ${reason instanceof Error ? reason.message : String(reason)}; ${crashRecordLine(options.crashLogPath, written)}`);
+    } catch { /* the record is the durable part */ }
+  };
+  process.on('uncaughtException', onUncaughtException);
+  process.on('unhandledRejection', onUnhandledRejection);
+  return () => {
+    process.removeListener('uncaughtException', onUncaughtException);
+    process.removeListener('unhandledRejection', onUnhandledRejection);
+  };
 }

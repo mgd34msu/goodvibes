@@ -2,12 +2,11 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { compactMessages, getCompactionEvents } from '../platform/src/platform/core/context-compaction.js';
+import { compactMessages } from '../platform/src/platform/core/context-compaction.js';
 import type { CompactionContext } from '../platform/src/platform/core/compaction-types.js';
 import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
-import { compactConversation, type ConversationCompactionHost } from '../platform/src/platform/core/conversation-compaction.js';
-import { renderSelected } from '../platform/src/platform/runtime/compaction/section-readings.js';
-import { makeContract } from './contract/fixtures.ts';
+import type { ProviderMessage } from '../platform/src/platform/providers/interface.js';
+import { COMPACTION_SELECTION_LIMITS, renderSelected } from '../platform/src/platform/runtime/compaction/section-readings.js';
 import { logger } from '../platform/src/platform/utils/logger.js';
 import { registry } from '../platform/src/platform/runtime/judgment-registry.js';
 
@@ -20,227 +19,135 @@ const context = (overrides: Partial<CompactionContext> = {}): CompactionContext 
   sessionMemories: [], agents: [], contracts: [], activePlan: null, lineageEntries: [], compactionCount: 0,
   contextWindow: 100_000, trigger: 'manual', extractionModelId: 'test/model', ...overrides,
 });
-function installed(answer: (battery: string, state: unknown) => unknown) {
+type Question = { candidateSourcePosition?: number };
+/** Answers each selection question from the battery and the candidate's source position. */
+function installed(answer: (battery: string, position: number) => unknown) {
   const { port, requests } = fakePort(() => noulAnswer(0.95));
   const wrapped: JudgmentPort = { ...port, async ask(request) {
     const result = await port.ask(request);
     if (!request.context?.battery?.startsWith('engine.compaction.')) return result;
-    return { ...result, answers: Object.fromEntries(Object.keys(request.questions).map(key => [key, answer(request.context?.battery ?? '', request.state)])) as never };
+    return { ...result, answers: Object.fromEntries(Object.entries(request.questions).map(([key, question]) => {
+      const position = ((question as { instructions?: Question }).instructions?.candidateSourcePosition) ?? 0;
+      return [key, answer(request.context?.battery ?? '', position)];
+    })) as never };
   } };
   installJudgmentPort(wrapped);
-  return { requests, port: wrapped };
+  return { requests: requests.filter(request => request.context?.battery?.startsWith('engine.compaction.')), all: requests };
 }
-describe('structured compaction canonical source selection', () => {
+const section = (result: Awaited<ReturnType<typeof compactMessages>>, id: string) => result.sections.find(entry => entry.id === id)?.content;
+
+describe('structured compaction source selection', () => {
   test('registers three named decisions', () => {
     const names = registry.list().map(decision => decision.name);
     expect(names).toContain('engine.compaction.conversation-substance');
     expect(names).toContain('engine.compaction.tool-result-relevance');
     expect(names).toContain('engine.compaction.resolved-problem-evidence');
   });
-  test('typed yes survives contrary old sentinel wording and preserves prompting user/order', async () => {
-    const { requests } = installed((_battery, state) => noulAnswer(JSON.stringify(state).includes('unused') ? 0.05 : 0.95));
+
+  test('a typed yes keeps the message and a typed no leaves it out', async () => {
+    installed((battery) => noulAnswer(battery.endsWith('resolved-problem-evidence') ? 0.01 : 0.99));
     const result = await compactMessages(context(), providers);
-    expect(result.sections.find(section => section.id === 'resolved-problems')?.content).toContain('"no resolved problems"');
-    expect(result.sections.find(section => section.id === 'recent-conversation')?.content).toBe('[user]: Preserve the API.\n\n[assistant]: Fixed the parser that printed "no resolved problems"; tests pass.');
-    assertReadingPartition(requests, ['engine.compaction.conversation-substance', 'engine.compaction.conversation-substance', 'engine.compaction.resolved-problem-evidence', 'engine.compaction.resolved-problem-evidence']);
+    expect(section(result, 'recent-conversation')).toBe('[user]: Preserve the API.\n\n[assistant]: Fixed the parser that printed "no resolved problems"; tests pass.');
+    expect(section(result, 'resolved-problems')).toBeUndefined();
   });
-  test('typed no suppresses positive-looking prose without lexical guesses', async () => {
-    installed(battery => noulAnswer(battery.endsWith('resolved-problem-evidence') ? 0.01 : 0.99));
-    const result = await compactMessages(context({ messages: [{ role: 'assistant', content: 'The issue is resolved! (This claim is false.)' }] }), providers);
-    expect(result.sections.some(section => section.id === 'resolved-problems')).toBe(false);
-  });
-  test('retains paired user even when only assistant selected', async () => {
-    installed((battery, state) => noulAnswer(battery.endsWith('conversation-substance') && (state as {candidateSourcePosition:number}).candidateSourcePosition === 2 ? 0.99 : 0.01));
+
+  test('a kept reply brings the user turn that prompted it', async () => {
+    installed((battery, position) => noulAnswer(battery.endsWith('conversation-substance') && position === 2 ? 0.99 : 0.01));
     const result = await compactMessages(context(), providers);
-    expect(result.sections.find(section => section.id === 'recent-conversation')?.content).toContain('[user]: Preserve the API.\n\n[assistant]:');
+    expect(section(result, 'recent-conversation')).toContain('[user]: Preserve the API.\n\n[assistant]:');
   });
-  test('tool membership and output come from canonical reading and exact source', async () => {
-    installed(() => noulAnswer(0.99));
-    const result = await compactMessages(context({ messages: [{ role: 'tool', callId: 'test', content: 'Modified src/parser.ts; regression passed.' }] }), providers);
-    expect(result.sections.find(section => section.id === 'tool-results')?.content).toBe('[tool; call test]: Modified src/parser.ts; regression passed.');
-  });
-  for (const [name, answer] of [
-    ['prose', 'keep it'], ['missing', undefined], ['wrong type', { type: 'choice', choice: 'yes' }],
-    ['NaN', noulAnswer(NaN)], ['range', noulAnswer(2)], ['weak', noulAnswer(0.5)],
-  ] as const) test(`rejects ${name}, without publishing a compaction`, async () => {
-    installed(() => answer);
-    const ctx = context(); const before = JSON.stringify(ctx.messages); const events = getCompactionEvents().length;
-    await expect(compactMessages(ctx, providers)).rejects.toThrow(/Compaction semantic selection/);
-    expect(JSON.stringify(ctx.messages)).toBe(before);
-    expect(getCompactionEvents().length).toBe(events);
-  });
-  test('missing canonical port cannot fall back to provider interpretation', async () => {
-    await expect(compactMessages(context(), providers)).rejects.toThrow('selection unavailable');
-  });
-  test('production caller keeps original messages and lineage when canonical reading is unavailable', async () => {
-    const ctx = context(); let replacements = 0; let lineage = 0;
-    const host: ConversationCompactionHost = {
-      getMessageCount: () => ctx.messages.length, getMessagesForLLM: () => ctx.messages,
-      replaceMessagesForLLM: () => { replacements++; }, getSessionMemoryStore: () => null,
-      getSessionLineageTracker: () => ({ addCompactionEntry: () => { lineage++; } }),
-    };
-    const original = JSON.stringify(ctx.messages);
-    await expect(compactConversation(host, providers, 'test/model', 'manual', 'test', ctx)).rejects.toThrow('selection unavailable');
-    expect(replacements).toBe(0); expect(lineage).toBe(0); expect(JSON.stringify(ctx.messages)).toBe(original);
-  });
-  test('each actual read contains earlier identity evidence and the later contrary correction', async () => {
+
+  test('selection is one request per bounded chunk, not one per message', async () => {
     const { requests } = installed(() => noulAnswer(0.99));
-    const messages = [
-      { role: 'assistant' as const, content: 'The parser timeout is ticket A; B is unrelated.' },
-      { role: 'assistant' as const, content: 'Fixed the parser timeout.' },
-      { role: 'user' as const, content: 'A is reopened; B remains fixed.' },
-    ];
+    const messages: ProviderMessage[] = Array.from({ length: 120 }, (_, index) => (index % 2 === 0
+      ? { role: 'user' as const, content: `Requirement ${index}: ${'detail '.repeat(40)}` }
+      : { role: 'assistant' as const, content: `Done ${index}: ${'note '.repeat(40)}` }));
     await compactMessages(context({ messages }), providers);
-    const selected = assertReadingPartition(requests, [...Array<string>(3).fill('engine.compaction.conversation-substance'), ...Array<string>(3).fill('engine.compaction.resolved-problem-evidence')]);
-    for (const request of selected) {
-      expect(Object.keys(request.questions)).toEqual(['selected']);
-      const source = (request.state as { conversation: string }).conversation;
-      for (const message of messages) expect(source).toContain(message.content);
+    expect(requests.length).toBeGreaterThan(0);
+    expect(requests.length).toBeLessThanOrEqual(COMPACTION_SELECTION_LIMITS.maxCalls);
+    // Each request asks about several candidates and carries only its own chunk.
+    expect(requests.some(request => Object.keys(request.questions).length > 1)).toBe(true);
+    for (const request of requests) {
+      expect(JSON.stringify(request.state).length).toBeLessThan(COMPACTION_SELECTION_LIMITS.chunkTokens * 3 + 2 * COMPACTION_SELECTION_LIMITS.messageChars);
     }
   });
-  test('large source and its later contradiction reach every reading in full', async () => {
+
+  test('a selection over the request limit quotes the sections and asks nothing', async () => {
     const { requests } = installed(() => noulAnswer(0.99));
-    const text = 'x'.repeat(100_000);
-    const correction = 'The fix is not complete.';
-    const result = await compactMessages(context({ messages: [{ role: 'user', content: text }, { role: 'assistant', content: correction }] }), providers);
-    const selected = requests.filter(request => request.context?.battery?.startsWith('engine.compaction.'));
-    expect(selected.length).toBeGreaterThan(0);
-    for (const request of selected) {
-      const source = (request.state as { conversation: string }).conversation;
-      expect(source).toContain(text); expect(source).toContain(correction);
-    }
-    expect(result.sections.find(section => section.id === 'recent-conversation')?.content).toContain(correction);
+    const messages: ProviderMessage[] = Array.from({ length: (COMPACTION_SELECTION_LIMITS.maxCalls + 2) * 4 }, (_, index) => (
+      { role: index % 2 === 0 ? 'user' as const : 'assistant' as const, content: `Step ${index}: ${'x'.repeat(COMPACTION_SELECTION_LIMITS.chunkTokens * 2)}` }));
+    const result = await compactMessages(context({ messages }), providers);
+    expect(requests).toHaveLength(0);
+    expect(section(result, 'recent-conversation')).toContain('Excerpt clipped');
   });
-  test('transport failure propagates without source-bearing logging', async () => {
+
+  test('an unreachable decision model quotes the sections instead of failing, and logs no source text', async () => {
     const { port } = fakePort(() => { throw new Error('synthetic unavailable'); });
     installJudgmentPort(port);
     const spies = (['debug', 'info', 'warn', 'error'] as const).map(level => spyOn(logger, level));
     try {
-      await expect(compactMessages(context(), providers)).rejects.toThrow('selection unavailable');
+      const result = await compactMessages(context(), providers);
+      expect(section(result, 'recent-conversation')).toContain('Preserve the API.');
       const logged = JSON.stringify(spies.flatMap(spy => spy.mock.calls));
       expect(logged).not.toContain('Preserve the API.');
       expect(logged).not.toContain('Fixed the parser');
     } finally { for (const spy of spies) spy.mockRestore(); }
   });
-  test('cancellation returns promptly even for an uncooperative dependency', async () => {
+
+  test('cancellation ends the pass even for an uncooperative dependency', async () => {
     let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
     const { port } = fakePort(() => noulAnswer(0.99));
-    installJudgmentPort({ ...port, ask: async request => { expect(request.context?.battery).toBe('engine.compaction.conversation-substance'); expect(Object.keys(request.questions)).toEqual(['selected']); entered(); return new Promise(() => {}); } });
+    installJudgmentPort({ ...port, ask: async () => { entered(); return new Promise(() => {}); } });
     const controller = new AbortController();
     const result = compactMessages(context({ signal: controller.signal }), providers);
     await started; controller.abort(new Error('cancelled'));
     await expect(result).rejects.toThrow('cancelled');
   });
-  test('source replacement retires delayed readings', async () => {
+
+  test('a source that changes during the pass ends it without a compaction', async () => {
     let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
     let release!: () => void; const ready = new Promise<void>(resolve => { release = resolve; });
     const { port } = fakePort(() => noulAnswer(0.99));
-    installJudgmentPort({ ...port, async ask(request) { expect(request.context?.battery).toBe('engine.compaction.conversation-substance'); expect(Object.keys(request.questions)).toEqual(['selected']); entered(); await ready; return port.ask(request); } });
+    installJudgmentPort({ ...port, async ask(request) { entered(); await ready; return port.ask(request); } });
     const ctx = context(); const result = compactMessages(ctx, providers);
     await started; ctx.messages.push({ role: 'user', content: 'New requirement.' }); release();
     await expect(result).rejects.toThrow('Compaction source changed');
   });
-  test('standing instruction mutation rejects a delayed production caller', async () => {
-    let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
-    let release!: () => void; const ready = new Promise<void>(resolve => { release = resolve; });
-    const { port } = fakePort(() => noulAnswer(0.99));
-    installJudgmentPort({ ...port, async ask(request) { expect(request.context?.battery).toBe('engine.compaction.conversation-substance'); expect(Object.keys(request.questions)).toEqual(['selected']); entered(); await ready; return port.ask(request); } });
-    const ctx = context({ instructionChain: 'Original instruction.' }); let replacements = 0;
-    const host: ConversationCompactionHost = { getMessageCount: () => ctx.messages.length, getMessagesForLLM: () => ctx.messages,
-      replaceMessagesForLLM: () => { replacements++; }, getSessionMemoryStore: () => null,
-      getSessionLineageTracker: () => ({ addCompactionEntry() {} }) };
-    const result = compactConversation(host, providers, 'test/model', 'manual', 'test', ctx);
-    await started; ctx.instructionChain = 'New instruction.'; release();
-    await expect(result).rejects.toThrow(); expect(replacements).toBe(0);
-  });
-  test('canonical failure retires older prose request and suppresses its late private error', async () => {
-    let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
-    let reject!: (error: Error) => void; const delayed = new Promise<never>((_, fail) => { reject = fail; });
-    const { port } = fakePort(() => noulAnswer(0.99));
-    installJudgmentPort({ ...port, async ask() { await started; throw new Error('SYNTHETIC_PRIVATE_SELECTION'); } });
-    let providerSignal: AbortSignal | undefined;
-    const older = { getForModel: () => ({ chat: (request: { signal?: AbortSignal }) => {
-      providerSignal = request.signal; entered(); return delayed;
-    } }), listModels: () => [{ id: 'model', provider: 'test', registryKey: 'test/model' }] } as unknown as ProviderRegistry;
-    const warn = spyOn(logger, 'warn'); const info = spyOn(logger, 'info');
-    try {
-      const ctx = context({ contracts: Array.from({ length: 150 }, (_, index) => makeContract({ id: `contract-${index}` })) });
-      await expect(compactMessages(ctx, older)).rejects.toThrow('selection unavailable');
-      expect(providerSignal?.aborted).toBe(true);
-      const count = warn.mock.calls.length + info.mock.calls.length;
-      reject(new Error('SYNTHETIC_PRIVATE_OLDER_SOURCE'));
-      for (let i = 0; i < 20; i++) await Promise.resolve();
-      expect(warn.mock.calls.length + info.mock.calls.length).toBe(count);
-      expect(JSON.stringify(warn.mock.calls)).not.toContain('SYNTHETIC_PRIVATE');
-    } finally { reject(new Error('late cleanup')); warn.mockRestore(); info.mockRestore(); }
-  });
-  test('tool call identity and arguments survive source selection', async () => {
-    const { requests } = installed(() => noulAnswer(0.99));
-    const result = await compactMessages(context({ messages: [
-      { role: 'assistant', content: '', toolCalls: [{ id: 'call-7', name: 'write_file', arguments: { path: 'src/parser.ts', content: 'fix' } }] },
-      { role: 'tool', callId: 'call-7', name: 'write_file', content: 'Done' },
-    ] }), providers);
-    const tools = result.sections.find(section => section.id === 'tool-results')!.content;
-    expect(tools).toContain('call-7'); expect(tools).toContain('src/parser.ts'); expect(tools).toContain('Done');
-    const selected = assertReadingPartition(requests, ['engine.compaction.conversation-substance', 'engine.compaction.tool-result-relevance', 'engine.compaction.resolved-problem-evidence']);
-    for (const request of selected) {
-      expect(Object.keys(request.questions)).toEqual(['selected']);
-      expect(JSON.stringify(request.state)).toContain('call-7');
-      expect(JSON.stringify(request.state)).toContain('src/parser.ts');
-      expect(JSON.stringify(request.state)).toContain('Done');
-    }
-  });
-  test('tool identity and complete arguments survive clipping a long assistant body', async () => {
-    installed(() => noulAnswer(0.99));
-    const result = await compactMessages(context({ messages: [
-      { role: 'assistant', content: 'Long explanation. '.repeat(1200), toolCalls: [{ id: 'call-long', name: 'write_file', arguments: { path: 'src/parser.ts', content: 'fix' } }] },
-      { role: 'tool', callId: 'call-long', name: 'write_file', content: 'Done' },
-    ] }), providers);
-    const tools = result.sections.find(section => section.id === 'tool-results')!.content;
-    expect(tools).toContain('[call call-long; write_file]: {"path":"src/parser.ts","content":"fix"}');
-    expect(tools).toContain('[tool write_file; call call-long]: Done');
-    expect(tools).toContain('[clipped]');
-  });
-  test('cannot clip required tool arguments into misleading provenance', () => {
-    expect(() => renderSelected([{ role: 'assistant', content: '', toolCalls: [{ id: 'call-large', name: 'write_file', arguments: { content: 'x'.repeat(1000) } }] }], new Set([0]), 40)).toThrow('selection budget');
-  });
-  test('assistant gathered at the budget edge keeps its full-source prompting user', async () => {
-    installed(() => noulAnswer(0.99));
-    const result = await compactMessages(context({ messages: [
-      { role: 'user', content: 'Boundary requirement. ' + 'x'.repeat(12_001) },
-      { role: 'assistant', content: 'Implemented the requirement.' },
-    ] }), providers);
-    const recent = result.sections.find(section => section.id === 'recent-conversation')!.content;
-    expect(recent).toContain('[user]: Boundary requirement.'); expect(recent).toContain('[assistant]: Implemented');
-  });
-  test('port replacement retires an in-flight selection', async () => {
-    let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
-    const { port } = fakePort(() => noulAnswer(0.99));
-    installJudgmentPort({ ...port, ask: async request => { expect(request.context?.battery).toBe('engine.compaction.conversation-substance'); expect(Object.keys(request.questions)).toEqual(['selected']); entered(); return new Promise(() => {}); } });
-    const result = compactMessages(context(), providers);
-    await started; installJudgmentPort(port);
-    await expect(result).rejects.toThrow();
-  });
+
   test('standing instructions are not fed into membership decisions', async () => {
-    const { requests } = installed(() => noulAnswer(0.99));
+    const { all } = installed(() => noulAnswer(0.99));
     const result = await compactMessages(context({ instructionChain: 'SYNTHETIC_STANDING_ONLY', activeSkillFrontmatter: 'SYNTHETIC_SKILL_ONLY' }), providers);
     expect(result.summary).toContain('SYNTHETIC_STANDING_ONLY');
-    expect(JSON.stringify(requests)).not.toContain('SYNTHETIC_STANDING_ONLY');
-    expect(JSON.stringify(requests)).not.toContain('SYNTHETIC_SKILL_ONLY');
-  });
-  test('source quotes stay ordered and inside deterministic budgets', () => {
-    const messages = [{ role: 'user' as const, content: 'a'.repeat(200) }, { role: 'assistant' as const, content: 'b'.repeat(200) }];
-    const rendered = renderSelected(messages, new Set([1, 0]), 30);
-    expect(rendered.length).toBeLessThanOrEqual(120);
-    expect(rendered).toStartWith('[user]:');
-    expect(rendered).toContain('[assistant]:');
-    expect(rendered).toContain('[clipped]');
+    expect(JSON.stringify(all)).not.toContain('SYNTHETIC_STANDING_ONLY');
+    expect(JSON.stringify(all)).not.toContain('SYNTHETIC_SKILL_ONLY');
   });
 });
 
-function assertReadingPartition(requests: ReadonlyArray<{ context?: { battery?: string }; questions: object; state: unknown }>, batteries: readonly string[]) {
-  expect(requests).toHaveLength(batteries.length);
-  expect(requests.map(request => request.context?.battery)).toEqual([...batteries]);
-  expect(requests.some(request => Object.hasOwn(request.questions, 'kind'))).toBe(false);
-  return requests;
-}
+describe('quoting selected messages', () => {
+  test('a tool call is quoted as name, path and size; its arguments stay in saved history', () => {
+    const rendered = renderSelected([{ role: 'assistant', content: '', toolCalls: [{ id: 'call-7', name: 'edit', arguments: { path: 'src/parser.ts', new_string: 'x'.repeat(1500) } }] }], new Set([0]), 1000);
+    expect(rendered).toContain('call-7');
+    expect(rendered).toContain('edit src/parser.ts');
+    expect(rendered).not.toContain('x'.repeat(100));
+  });
+
+  test('a section over its budget keeps the newest lines and names how many it left out', () => {
+    const messages: ProviderMessage[] = Array.from({ length: 6 }, (_, index) => ({ role: 'user' as const, content: `line ${index} ${'y'.repeat(200)}` }));
+    const rendered = renderSelected(messages, new Set([0, 1, 2, 3, 4, 5]), 150);
+    expect(rendered.length).toBeLessThanOrEqual(600);
+    expect(rendered).toStartWith('[');
+    expect(rendered).toContain('earlier lines omitted');
+    expect(rendered).toContain('line 5');
+    expect(rendered).not.toContain('line 0');
+  });
+
+  test('four edit exchanges no longer exhaust a section budget', () => {
+    const messages: ProviderMessage[] = [];
+    for (let index = 0; index < 4; index++) {
+      messages.push({ role: 'assistant', content: '', toolCalls: [{ id: `c${index}`, name: 'edit', arguments: { path: `src/f${index}.ts`, edits: [{ find: 'a'.repeat(700), replace: 'b'.repeat(700) }] } }] });
+      messages.push({ role: 'tool', callId: `c${index}`, name: 'edit', content: `Edited src/f${index}.ts` });
+    }
+    const rendered = renderSelected(messages, new Set(messages.map((_, index) => index)), 300);
+    expect(rendered).toContain('Edited src/f3.ts');
+  });
+});

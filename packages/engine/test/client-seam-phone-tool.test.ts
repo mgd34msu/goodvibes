@@ -203,10 +203,15 @@ describe('the phone tool reaches a real device runtime over the verbs', () => {
     const listed = await run(h.tool, { action: 'artifacts' });
     expect(Number(listed['retained'])).toBeGreaterThan(0);
 
-    const read = await run(h.tool, { action: 'read', artifactId: String(artifact['artifactId']) });
+    const raw = await h.tool.execute({ action: 'read', artifactId: String(artifact['artifactId']) });
+    const read = JSON.parse(String(raw.output ?? '{}')) as Record<string, unknown>;
     expect(read['success']).toBe(true);
-    // Base64 over the wire, and the same bytes that went in.
-    expect(Buffer.from(String(read['dataBase64']), 'base64').equals(Buffer.from(CAPTURE_BYTES))).toBe(true);
+    // The picture is attached as an image the model sees, not pasted into the text, and it is the same bytes that went in.
+    expect(read['dataBase64']).toBeUndefined();
+    const images = (raw as { _images?: Array<{ base64: string; mediaType: string }> })._images ?? [];
+    expect(images).toHaveLength(1);
+    expect(images[0]!.mediaType).toBe('image/png');
+    expect(Buffer.from(images[0]!.base64, 'base64').equals(Buffer.from(CAPTURE_BYTES))).toBe(true);
   });
 
   test('a capture id nobody retained is an error, because there are no bytes', async () => {

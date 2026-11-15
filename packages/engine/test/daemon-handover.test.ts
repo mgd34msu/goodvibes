@@ -22,12 +22,13 @@ import {
   type UpdateFetchLike,
   type UpdateFileIo,
 } from '../platform/src/platform/runtime/self-update.ts';
+import type { DaemonServiceControl, DaemonServiceSnapshot, DaemonServiceStartResult } from '../platform/src/platform/runtime/client/daemon-autostart.ts';
 import { nativeCohortFixture, nativeCohortReleaseFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
 
 // The legacy banner and filesystem are retained while the complete native
 // daemon installation is prepared. Every seam is local: the `--version`
 // probe never spawns a binary, fetch never reaches the network, the filesystem
-// is a map, and systemctl is a recorded call list. Versions are fixtures
+// is a map, and the service manager is a recorded fake. Versions are fixtures
 // ('1.27.1' as a legacy build, 'v2.0.23' as the native release), never the live
 // build VERSION.
 
@@ -461,43 +462,47 @@ describe('resolveHandoverServiceName', () => {
   });
 });
 
+function serviceControl(entry: Partial<DaemonServiceSnapshot> | null, restart: DaemonServiceStartResult = { ok: true }) {
+  const restarts: string[] = [];
+  const control: DaemonServiceControl = {
+    snapshot: () => (entry ? [{ serviceName: 'goodvibes', platform: 'launchd', unitPath: '/u', installed: true, running: true, startSupported: true, ...entry }] : []),
+    start: () => ({ ok: true }),
+    restart: (name) => { restarts.push(name); return restart; },
+  };
+  return { control, restarts };
+}
+
 describe('restartHandedOverDaemon', () => {
   const config = { get: (key: string) => (key === 'service.serviceName' ? 'goodvibes' : undefined) };
 
-  test('restarts an active systemd user unit', () => {
-    const calls: string[][] = [];
-    const outcome = restartHandedOverDaemon('linux', config, stubRunCommand({ calls }));
+  test('restarts a running service entry through the service manager on any platform', () => {
+    const { control, restarts } = serviceControl({});
+    const outcome = restartHandedOverDaemon(config, { control });
     expect(outcome.restarted).toBe(true);
     expect(outcome.unitName).toBe('goodvibes');
-    expect(calls).toContainEqual(['systemctl', '--user', 'restart', 'goodvibes.service']);
+    expect(restarts).toEqual(['goodvibes']);
   });
 
-  test('does not restart a unit that is not active, and says so honestly', () => {
-    const calls: string[][] = [];
-    const outcome = restartHandedOverDaemon(
-      'linux',
-      config,
-      stubRunCommand({ calls, isActive: { status: 3, stdout: 'inactive\n' } }),
-    );
+  test('does not restart an entry that is not running, and says so honestly', () => {
+    const { control, restarts } = serviceControl({ running: false });
+    const outcome = restartHandedOverDaemon(config, { control });
     expect(outcome.restarted).toBe(false);
-    expect(outcome.detail).toContain('next time the daemon starts');
-    expect(calls.some((call) => call.includes('restart'))).toBe(false);
+    expect(outcome.detail).toContain('next time it starts');
+    expect(restarts).toEqual([]);
   });
 
   test('a failed restart names the command to run rather than claiming success', () => {
-    const outcome = restartHandedOverDaemon(
-      'linux',
-      config,
-      stubRunCommand({ restart: { status: 1, stdout: '' } }),
-    );
+    const { control } = serviceControl({}, { ok: false, error: 'denied' });
+    const outcome = restartHandedOverDaemon(config, { control });
     expect(outcome.restarted).toBe(false);
-    expect(outcome.detail).toContain('systemctl --user restart goodvibes.service');
+    expect(outcome.detail).toContain('goodvibes-daemon restart-service');
   });
 
-  test('never prints a systemctl command on a platform that does not have one', () => {
-    const outcome = restartHandedOverDaemon('darwin', config, stubRunCommand({}));
+  test('with no service entry the receipt says the old daemon keeps running and names the one command', () => {
+    const { control } = serviceControl(null);
+    const outcome = restartHandedOverDaemon(config, { control });
     expect(outcome.restarted).toBe(false);
-    expect(outcome.detail).not.toContain('systemctl');
+    expect(outcome.detail).toContain('goodvibes-daemon install-service');
   });
 });
 
@@ -514,6 +519,7 @@ describe('runDaemonHandover', () => {
       configManager: { get: () => undefined },
       print: (line) => printed.push(line),
       runCommand: stubRunCommand({}),
+      serviceControl: serviceControl({ platform: 'systemd' }).control,
       io: memoryIo({ [DAEMON_PATH]: 'old-daemon-bytes' }),
       ...overrides,
     };
@@ -522,8 +528,8 @@ describe('runDaemonHandover', () => {
 
   test('the whole path: pre-split daemon detected, swapped, restarted, reported', async () => {
     const io = memoryIo({ [DAEMON_PATH]: 'old-daemon-bytes' });
-    const calls: string[][] = [];
-    const { options, printed } = baseOptions({ io, runCommand: stubRunCommand({ calls }) });
+    const { control, restarts } = serviceControl({ platform: 'systemd' });
+    const { options, printed } = baseOptions({ io, serviceControl: control });
     const outcome = await runDaemonHandover(options);
 
     expect(outcome).toEqual({
@@ -535,7 +541,7 @@ describe('runDaemonHandover', () => {
     });
     expect(io.files.get(DAEMON_PATH)?.toString()).toBe('new-daemon-bytes');
     expect(io.files.get(`${DAEMON_PATH}.previous`)?.toString()).toBe('old-daemon-bytes');
-    expect(calls).toContainEqual(['systemctl', '--user', 'restart', 'goodvibes.service']);
+    expect(restarts).toEqual(['goodvibes']);
     // The receipt names both versions and the rollback, so the swap is not silent.
     const receipt = printed.join('\n');
     expect(receipt).toContain('v1.27.1');

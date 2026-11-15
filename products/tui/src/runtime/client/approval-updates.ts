@@ -54,7 +54,7 @@ export interface TerminalApprovalUpdateSubscriberOptions {
 export function createTerminalApprovalUpdateSubscriber(
   options: TerminalApprovalUpdateSubscriberOptions,
 ): ApprovalUpdateSubscriber {
-  return async (onUpdate) => {
+  return async (onUpdate, onTerminate) => {
     if (!resolveDaemonEnabled(options.configManager)) return null;
     const baseUrl = resolveControlPlaneBaseUrl(options.configManager);
     if (!baseUrl) return null;
@@ -76,6 +76,8 @@ export function createTerminalApprovalUpdateSubscriber(
       baseUrl,
       getAuthToken: () => token,
       onUpdate,
+      // The raiser reads the record instead once the stream has ended.
+      ...(onTerminate ? { onTerminate: () => onTerminate() } : {}),
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     });
   };

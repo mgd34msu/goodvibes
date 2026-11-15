@@ -21,7 +21,7 @@
  * rates), NOT a guessed base price: the base rate is always the catalog's, and
  * an unknown model stays unpriced regardless.
  */
-import { cacheRateMultipliers } from '../../providers/model-pricing.js';
+import { computeUsageCostUsd } from '../../providers/model-pricing.js';
 
 /** A single usage record. Every dimension is optional, the service attributes over whatever a record carries. */
 export interface CostUsageRecord {
@@ -203,17 +203,13 @@ export class CostAttributionService {
   } {
     const pricing = this.resolvePricing(rec.model, rec.provider);
     if (!pricing) return { costUsd: null, state: 'unpriced' };
-    const mult = cacheRateMultipliers(rec.provider);
-    // Source-carried cache rates win; the published ratio table is the
-    // fallback when the pricing feed had no cache-specific rates.
-    const cacheReadRate = pricing.cacheRead ?? pricing.input * mult.read;
-    const cacheWriteRate = pricing.cacheWrite ?? pricing.input * mult.write;
-    const costUsd =
-      (rec.inputTokens * pricing.input +
-        rec.cacheReadTokens * cacheReadRate +
-        rec.cacheWriteTokens * cacheWriteRate +
-        rec.outputTokens * pricing.output) /
-      1_000_000;
+    // The one cache-aware formula: source-carried cache rates win, the
+    // provider's published ratio is the fallback.
+    const costUsd = computeUsageCostUsd({
+      status: 'priced',
+      source: pricing.source ?? 'catalog',
+      rates: { inputPerMTok: pricing.input, outputPerMTok: pricing.output, cacheReadPerMTok: pricing.cacheRead, cacheWritePerMTok: pricing.cacheWrite },
+    }, rec, rec.provider);
     return { costUsd, state: 'priced', source: pricing.source, asOf: pricing.asOf };
   }
 

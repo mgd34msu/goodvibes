@@ -75,9 +75,9 @@ export interface TasksClient {
    * task" and "could not look" stay different answers.
    */
   lookup(taskId: string): Promise<{ readonly found: UnionTask | null; readonly daemonUnavailable: string | null }>;
-  /** Cancel a daemon-owned task over `tasks.cancel`. Rejects for a task only this surface runs. */
+  /** Cancel a daemon-owned task over `tasks.cancel`. Rejects with the daemon's refusal, named plainly for a task only this surface runs. */
   cancel(taskId: string): Promise<void>;
-  /** Re-queue a daemon-owned task over `tasks.retry`. Rejects for a task only this surface runs. */
+  /** Re-queue a daemon-owned task over `tasks.retry`. Rejects with the daemon's refusal, named plainly for a task only this surface runs. */
   retry(taskId: string): Promise<void>;
 }
 
@@ -103,17 +103,25 @@ export function createTasksClient(deps: {
   readonly local: LocalTaskSource;
   readonly verbs: DaemonVerbCaller;
 }): TasksClient {
-  const requireDaemonTask = async (taskId: string): Promise<void> => {
+  /**
+   * Send a lifecycle act to the daemon. The daemon's own answer says whether it
+   * carries the task, so nothing is read first; a "no such task" for an id this
+   * surface runs is reworded to say where the task lives.
+   */
+  const actOnDaemonTask = async (verb: 'tasks.cancel' | 'tasks.retry', taskId: string): Promise<void> => {
     const probe = deps.verbs.probe();
     if (!probe.available) {
       throw new Error(`${taskId} is not a task this surface owns, and ${probe.reason}`);
     }
-    if (!deps.local.get(taskId)) return;
-    // A task this surface runs is only the daemon's to cancel when the daemon
-    // also carries it; otherwise the verb would act on nothing.
-    let known = false;
-    try { known = readTask(await deps.verbs.invoke('tasks.get', { taskId })) !== null; } catch { /* treated as unknown */ }
-    if (!known) throw new Error(`${taskId} is a task this surface runs itself and the daemon does not carry it; cancel and retry here reach only the daemon's tasks.`);
+    try {
+      await deps.verbs.invoke(verb, { taskId });
+    } catch (error) {
+      const status = (error as { status?: unknown } | null)?.status;
+      if (status === 404 && deps.local.get(taskId)) {
+        throw new Error(`${taskId} is a task this surface runs itself and the daemon does not carry it; cancel and retry here reach only the daemon's tasks.`);
+      }
+      throw error;
+    }
   };
 
   const lookup = async (taskId: string): Promise<{ found: UnionTask | null; daemonUnavailable: string | null }> => {
@@ -159,14 +167,7 @@ export function createTasksClient(deps: {
     get: async (taskId) => (await lookup(taskId)).found,
     lookup,
 
-    cancel: async (taskId) => {
-      await requireDaemonTask(taskId);
-      await deps.verbs.invoke('tasks.cancel', { taskId });
-    },
-
-    retry: async (taskId) => {
-      await requireDaemonTask(taskId);
-      await deps.verbs.invoke('tasks.retry', { taskId });
-    },
+    cancel: (taskId) => actOnDaemonTask('tasks.cancel', taskId),
+    retry: (taskId) => actOnDaemonTask('tasks.retry', taskId),
   };
 }

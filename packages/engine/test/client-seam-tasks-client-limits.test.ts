@@ -56,10 +56,17 @@ describe('limits, lookups and local ids', () => {
     expect(await absent.lookup('d1')).toEqual({ found: null, daemonUnavailable: null });
   });
 
-  test('cancel of a task only this surface runs is refused instead of sent to the daemon', async () => {
-    const caller = verbs({ 'tasks.get': {} });
+  test('cancel of a task only this surface runs fails naming where it runs, with no read before the act', async () => {
+    const calls: string[] = [];
+    const caller: DaemonVerbCaller = {
+      probe: () => ({ available: true as const }),
+      invoke: async <T,>(methodId: string): Promise<T> => {
+        calls.push(methodId);
+        throw Object.assign(new Error('Unknown task'), { status: 404 });
+      },
+    };
     const client = createTasksClient({ local: localSource([task('l1', 'local work')]), verbs: caller });
     await expect(client.cancel('l1')).rejects.toThrow('runs itself');
-    expect(caller.calls.some(([method]) => method === 'tasks.cancel')).toBe(false);
+    expect(calls).toEqual(['tasks.cancel']);
   });
 });

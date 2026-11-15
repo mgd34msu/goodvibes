@@ -73,6 +73,8 @@ export interface DaemonServiceStartResult {
 export interface DaemonServiceControl {
   snapshot(): readonly DaemonServiceSnapshot[];
   start(serviceName: string): DaemonServiceStartResult;
+  /** Restart a running entry onto the binary now on disk (systemd, launchd, Windows tasks). Absent on a control that can only start. */
+  restart?(serviceName: string): DaemonServiceStartResult;
 }
 
 export interface DaemonServiceControlOptions {
@@ -116,6 +118,28 @@ export function createDaemonServiceControl(options: DaemonServiceControlOptions)
     }),
   }));
 
+  const act = (serviceName: string, action: 'start' | 'restart'): DaemonServiceStartResult => {
+    const entry = managers.find((candidate) => candidate.resolvedName === serviceName)
+      ?? managers.find((candidate) => {
+        try {
+          return candidate.manager.status().serviceName === serviceName;
+        } catch {
+          return false;
+        }
+      });
+    if (!entry) return { ok: false, error: `no service entry named "${serviceName}" is tracked on this host` };
+    try {
+      // The manager returns a fresh status rather than throwing; `actionError`
+      // is where it records a refusal.
+      const result = action === 'start' ? entry.manager.start() : entry.manager.restart();
+      return result.actionError === undefined
+        ? { ok: true }
+        : { ok: false, error: result.actionError };
+    } catch (error) {
+      return { ok: false, error: summarizeError(error) };
+    }
+  };
+
   return {
     snapshot: () => {
       const seen = new Set<string>();
@@ -149,27 +173,8 @@ export function createDaemonServiceControl(options: DaemonServiceControlOptions)
       }
       return snapshots;
     },
-    start: (serviceName) => {
-      const entry = managers.find((candidate) => candidate.resolvedName === serviceName)
-        ?? managers.find((candidate) => {
-          try {
-            return candidate.manager.status().serviceName === serviceName;
-          } catch {
-            return false;
-          }
-        });
-      if (!entry) return { ok: false, error: `no service entry named "${serviceName}" is tracked on this host` };
-      try {
-        // `start()` returns a fresh status rather than throwing; `actionError`
-        // is where the manager records a refusal.
-        const result = entry.manager.start();
-        return result.actionError === undefined
-          ? { ok: true }
-          : { ok: false, error: result.actionError };
-      } catch (error) {
-        return { ok: false, error: summarizeError(error) };
-      }
-    },
+    start: (serviceName) => act(serviceName, 'start'),
+    restart: (serviceName) => act(serviceName, 'restart'),
   };
 }
 

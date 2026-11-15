@@ -99,11 +99,13 @@ function assertHostOwner(broker: ConversationRewindHostBroker, hostId: string, i
 /**
  * Every broker refusal is about the caller's input, a host id that is not the
  * host, a request that is no longer waiting, so each carries the field it is
- * about and a 409: the call was well-formed, the world had moved on.
+ * about and a 409: the call was well-formed, the world had moved on. The code
+ * is the broker's, so a surface told its session was taken over can stop
+ * without reading the sentence.
  */
 function asVerbError(error: unknown): never {
   if (error instanceof ConversationRewindHostError) {
-    throw new GatewayVerbError(error.message, 'CONFLICT', 409, error.field);
+    throw new GatewayVerbError(error.message, error.code, 409, error.field);
   }
   throw error;
 }

@@ -43,5 +43,6 @@ if (args[0] === '--internal-launchd-handover') {
       return createProductionDaemonRuntime();
     },
     resolveServiceExecutable: resolveShippedServiceExecutable,
+    captureCrashes: true,
   });
 }

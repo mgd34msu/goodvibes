@@ -6,23 +6,26 @@
  *
  * - `priceUsage`, honest-unpriced dollars: unknown/subscription yields null
  *   (costState 'unpriced'), never $0. SHARED by fleet + orchestration so
- *   totals never double-count.
+ *   totals never double-count. It prices fresh input, output and cache tokens
+ *   through `computeUsageCostUsd`, the formula cost attribution uses too, so
+ *   a run shows one dollar figure whichever surface reports it; pass the
+ *   provider so cache tokens get that provider's published ratio.
  * - `priceProvenance`, provenance for the SAME resolution priceUsage prices
  *   with, stamped at pricing time so every priced value can say where its
  *   rates came from (costSource) and how fresh dated sources are (as-of).
  */
-import { computeUsageCostUsd, type ResolvedModelPricing } from '../../providers/model-pricing.js';
+import { computeUsageCostUsd, type ResolvedModelPricing, type UsageTokenCounts } from '../../providers/model-pricing.js';
 
 export interface PricingSeams {
-  readonly priceUsage: (model: string | undefined, usage: { inputTokens: number; outputTokens: number }) => number | null;
+  readonly priceUsage: (model: string | undefined, usage: UsageTokenCounts, provider?: string | undefined) => number | null;
   readonly priceProvenance: (model: string | undefined) => { source: 'user' | 'provider' | 'catalog'; asOf?: string | undefined } | null;
 }
 
 export function buildPricingSeams(
-  registry: { resolveModelPricing(model: string): ResolvedModelPricing },
+  registry: { resolveModelPricing(model: string, provider?: string): ResolvedModelPricing },
 ): PricingSeams {
   return {
-    priceUsage: (model, usage) => (model ? computeUsageCostUsd(registry.resolveModelPricing(model), usage) : null),
+    priceUsage: (model, usage, provider) => (model ? computeUsageCostUsd(registry.resolveModelPricing(model, provider), usage, provider) : null),
     priceProvenance: (model) => {
       if (!model) return null;
       const resolved = registry.resolveModelPricing(model);

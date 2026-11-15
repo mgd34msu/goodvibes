@@ -70,7 +70,11 @@ export interface WatchApprovalUpdatesOptions {
   readonly getAuthToken?: (() => string | null | Promise<string | null>) | undefined;
   /** Called for every approval transition the daemon publishes. */
   readonly onUpdate: (notice: ApprovalUpdateNotice) => void;
-  /** Called when the stream drops for good. The caller decides what to do about it. */
+  /**
+   * Called once when the stream ends after it opened: the daemon closed it, the
+   * connection failed, or it stayed silent past the heartbeat deadline. Not
+   * called for `close()`. The caller decides what to do about it.
+   */
   readonly onTerminate?: ((error: unknown) => void) | undefined;
   /** Injectable fetch (tests, or a relay-tunnelled fetch). */
   readonly fetchImpl?: typeof fetch | undefined;
@@ -143,6 +147,8 @@ export async function watchApprovalUpdates(
           }
         },
         onTerminate: ({ error }) => options.onTerminate?.(error),
+        // Reconnect is off here, so a clean end is as final as a failure.
+        onClose: () => options.onTerminate?.(new Error('The daemon closed the approval-update stream.')),
       },
       {
         ...(options.getAuthToken ? { getAuthToken: options.getAuthToken } : {}),

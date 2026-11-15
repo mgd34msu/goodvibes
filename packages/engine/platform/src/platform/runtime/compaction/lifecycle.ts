@@ -6,7 +6,7 @@
  * Provides:
  * - Valid transition map for the 9-state machine
  * - Pure transition helpers (no side-effects)
- * - Strategy selection logic based on trigger and token pressure
+ * - The lifecycle state for a chosen strategy
  */
 
 import type { CompactionLifecycleState, CompactionStrategy } from './types.js';
@@ -16,16 +16,19 @@ import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 // Transition map
 // ---------------------------------------------------------------------------
 
-/** The compaction lifecycle: for each state, the states reachable from it. */
+/**
+ * The compaction lifecycle: for each state, the states reachable from it. This
+ * is the sequence `CompactionManager.runLifecycle` runs: a check, the one
+ * strategy the session chose, the boundary commit, then done, or failed from
+ * any step, and back to idle.
+ */
 export const compactionLifecycle = defineLifecycle<CompactionLifecycleState>('compaction', {
   idle:               ['checking_threshold'],
-  checking_threshold: ['microcompact', 'collapse', 'autocompact', 'reactive_compact', 'done', 'failed'],
-  // A strategy state may also move to another strategy state; a run the
-  // session reports today goes straight to its commit or to failed.
-  microcompact:       ['collapse', 'autocompact', 'reactive_compact', 'boundary_commit', 'failed'],
-  collapse:           ['microcompact', 'autocompact', 'reactive_compact', 'boundary_commit', 'failed'],
-  autocompact:        ['microcompact', 'collapse', 'reactive_compact', 'boundary_commit', 'failed'],
-  reactive_compact:   ['microcompact', 'collapse', 'autocompact', 'boundary_commit', 'failed'],
+  checking_threshold: ['microcompact', 'collapse', 'autocompact', 'reactive_compact', 'failed'],
+  microcompact:       ['boundary_commit', 'failed'],
+  collapse:           ['boundary_commit', 'failed'],
+  autocompact:        ['boundary_commit', 'failed'],
+  reactive_compact:   ['boundary_commit', 'failed'],
   boundary_commit:    ['done', 'failed'],
   done:               ['idle'],
   failed:             ['idle'],

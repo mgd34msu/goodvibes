@@ -1,13 +1,11 @@
 /**
  * The store's compactionState mirrors the manager: it returns to idle after a
  * run ends and after a below-threshold check, while a failure stays visible
- * until the next compaction begins. The manager's table declares the
- * strategy-to-strategy moves that escalation and revert perform.
+ * until the next compaction begins.
  */
 import { describe, expect, test } from 'bun:test';
 import { createInitialSessionState } from '../platform/src/platform/runtime/store/domains/session.ts';
 import { updateSessionState } from '../platform/src/platform/runtime/store/helpers/reducers/lifecycle.ts';
-import { compactionLifecycle } from '../platform/src/platform/runtime/compaction/lifecycle.ts';
 import type { CompactionEvent } from '../platform/src/events/compaction.ts';
 
 const S = 's1';
@@ -55,14 +53,5 @@ describe('compaction store mirror', () => {
     const failed = run([{ type: 'COMPACTION_FAILED', sessionId: S, strategy: 'autocompact', error: 'x' }]);
     const done = updateSessionState(failed, { type: 'COMPACTION_DONE', sessionId: S, strategy: 'autocompact', tokensBefore: 6000, tokensAfter: 2000, durationMs: 5 });
     expect(done.compactionError).toBeUndefined();
-  });
-});
-
-describe('compaction table', () => {
-  test('declares the strategy-to-strategy moves escalation and revert perform', () => {
-    const strategies = ['microcompact', 'collapse', 'autocompact', 'reactive_compact'] as const;
-    for (const a of strategies) for (const b of strategies) {
-      expect(compactionLifecycle.can(a, b)).toBe(a !== b);
-    }
   });
 });

@@ -23,13 +23,16 @@
  * to DO something, `devices.capability.request`, `devices.artifacts.list` and
  * `devices.artifacts.read`.
  *
- * Reads against no reachable daemon degrade to an empty list (the reason is in
- * `describeAvailability`). Reads against a daemon that IS reachable but fails to
- * answer (an expired token, a 5xx, a malformed body) REJECT with the verb and
- * the cause, because an empty list there would read as "no phone is paired" or
- * "no grants". A revoke, a sweep or a capability request against no reachable
- * daemon also REJECTS, because reporting a revocation or a capture that did not
- * happen is worse than reporting the failure.
+ * Reads against no configured daemon degrade to an empty list (the reason is in
+ * `describeAvailability`). Reads against a configured daemon that fails to
+ * answer (down, an expired token, a 5xx) REJECT with the verb and the cause, and
+ * so does an answer without the field the verb promises (an older daemon, a
+ * renamed field, `null`), because an empty list there would read as "no phone
+ * is paired" or "no grants". The field names come from the generated operator
+ * types, so a rename on the daemon side fails to compile here. A revoke, a sweep
+ * or a capability request against no reachable daemon also REJECTS, because
+ * reporting a revocation or a capture that did not happen is worse than
+ * reporting the failure.
  *
  * ── What a capability request is NOT ──────────────────────────────────────
  *
@@ -41,6 +44,7 @@
  * error, because a person declining their camera is an answer.
  */
 import { logger, summarizeError } from '../../utils/index.js';
+import type { OperatorMethodOutput } from '../../types/generated/foundation-client-types.js';
 import type { DaemonVerbCaller } from './daemon-verbs.js';
 
 /**
@@ -100,9 +104,9 @@ export interface DeviceCapabilityOutcomeWire extends Record<string, unknown> {
 }
 
 export interface DevicesClient {
-  /** Paired device nodes. Empty when no daemon is reachable; rejects when a reachable daemon fails to answer. */
+  /** Paired device nodes. Empty when no daemon is configured; rejects when the configured daemon does not answer or answers without the list. */
   listNodes(): Promise<readonly DeviceNodeSummary[]>;
-  /** Live capability grants. Empty when no daemon is reachable; rejects when a reachable daemon fails to answer. */
+  /** Live capability grants. Empty when no daemon is configured; rejects when the configured daemon does not answer or answers without the list. */
   listGrants(): Promise<readonly DeviceGrantSummary[]>;
   /** Revoke a grant. Rejects when no daemon is reachable, never reports a revoke that did not happen. */
   revokeGrant(grantId: string): Promise<void>;
@@ -120,7 +124,7 @@ export interface DevicesClient {
     readonly sessionId?: string | undefined;
     readonly timeoutMs?: number | undefined;
   }): Promise<DeviceCapabilityOutcomeWire>;
-  /** Retained captures, newest first. Empty when no daemon is reachable; rejects when a reachable daemon fails to answer. */
+  /** Retained captures, newest first. Empty when no daemon is configured; rejects when the configured daemon does not answer or answers without the list. */
   listArtifacts(options?: { readonly nodeId?: string; readonly limit?: number }): Promise<{
     readonly artifacts: readonly DeviceArtifactSummary[];
     readonly retained: number;
@@ -135,14 +139,22 @@ export interface DevicesClient {
   describeAvailability(): string | null;
 }
 
-function readArray<T>(payload: unknown, key: string): readonly T[] {
-  if (Array.isArray(payload)) return payload as readonly T[];
-  if (payload && typeof payload === 'object') {
-    const value = (payload as Record<string, unknown>)[key];
-    if (Array.isArray(value)) return value as readonly T[];
-  }
-  return [];
+/** A field of a verb's answer, read where the verb promises it; a missing or mistyped field is a failure, never an empty value. */
+function readField<T>(payload: unknown, methodId: string, key: string, kind: 'array' | 'number' | 'string' | 'object'): T {
+  const value = payload && typeof payload === 'object' && !Array.isArray(payload) ? (payload as Record<string, unknown>)[key] : undefined;
+  const fits = kind === 'array' ? Array.isArray(value)
+    : kind === 'object' ? value !== null && typeof value === 'object' && !Array.isArray(value)
+      : kind === 'number' ? typeof value === 'number' && Number.isFinite(value)
+        : typeof value === 'string';
+  if (!fits) throw new Error(`${methodId} answered without ${key}; the daemon may be a different version than this surface.`);
+  return value as T;
 }
+
+/** The key each list verb returns its rows under, held to the generated operator types. */
+const NODES_KEY = 'nodes' satisfies keyof OperatorMethodOutput<'devices.nodes.list'>;
+const GRANTS_KEY = 'grants' satisfies keyof OperatorMethodOutput<'devices.grants.list'>;
+type ArtifactsListWire = OperatorMethodOutput<'devices.artifacts.list'>;
+type ArtifactReadWire = OperatorMethodOutput<'devices.artifacts.read'>;
 
 export function createDevicesClient(verbs: DaemonVerbCaller): DevicesClient {
   const requireDaemon = (action: string): void => {
@@ -151,23 +163,25 @@ export function createDevicesClient(verbs: DaemonVerbCaller): DevicesClient {
   };
 
   const readList = async <T,>(methodId: string, key: string): Promise<readonly T[]> => {
+    let payload: unknown;
     try {
-      return readArray<T>(await verbs.invoke(methodId, {}), key);
+      payload = await verbs.invoke(methodId, {});
     } catch (error) {
       logger.debug(`[devices] ${methodId} did not answer`, { error: summarizeError(error) });
       return failRead(methodId, error);
     }
+    return readField<readonly T[]>(payload, methodId, key, 'array');
   };
 
-  /** No daemon reachable is an honest empty read; a reachable daemon that failed is an error to report. */
+  /** No daemon configured is an honest empty read; a configured daemon that did not answer is an error to report. */
   const failRead = <T,>(methodId: string, error: unknown, empty: readonly T[] = []): readonly T[] => {
     if (!verbs.probe().available) return empty;
-    throw new Error(`${methodId} failed on the reachable daemon: ${summarizeError(error)}`);
+    throw new Error(`${methodId}: the configured daemon did not answer: ${summarizeError(error)}`);
   };
 
   return {
-    listNodes: () => readList<DeviceNodeSummary>('devices.nodes.list', 'nodes'),
-    listGrants: () => readList<DeviceGrantSummary>('devices.grants.list', 'grants'),
+    listNodes: () => readList<DeviceNodeSummary>('devices.nodes.list', NODES_KEY),
+    listGrants: () => readList<DeviceGrantSummary>('devices.grants.list', GRANTS_KEY),
     revokeGrant: async (grantId) => {
       requireDaemon(`revoke device grant '${grantId}'`);
       await verbs.invoke('devices.grants.revoke', { grantId });
@@ -193,25 +207,23 @@ export function createDevicesClient(verbs: DaemonVerbCaller): DevicesClient {
     },
 
     listArtifacts: async (options = {}) => {
+      const methodId = 'devices.artifacts.list';
+      let result: unknown;
       try {
-        const result = await verbs.invoke<{
-          artifacts?: readonly DeviceArtifactSummary[];
-          retained?: number;
-          retentionHours?: number;
-        }>('devices.artifacts.list', {
+        result = await verbs.invoke<ArtifactsListWire>(methodId, {
           ...(options.nodeId ? { nodeId: options.nodeId } : {}),
           ...(options.limit ? { limit: options.limit } : {}),
         });
-        return {
-          artifacts: result?.artifacts ?? [],
-          retained: result?.retained ?? 0,
-          retentionHours: result?.retentionHours ?? 0,
-        };
       } catch (error) {
         logger.debug('[devices] the retained captures could not be listed', { error: summarizeError(error) });
-        failRead('devices.artifacts.list', error);
+        failRead(methodId, error);
         return { artifacts: [], retained: 0, retentionHours: 0 };
       }
+      return {
+        artifacts: readField<readonly DeviceArtifactSummary[]>(result, methodId, 'artifacts' satisfies keyof ArtifactsListWire, 'array'),
+        retained: readField<number>(result, methodId, 'retained' satisfies keyof ArtifactsListWire, 'number'),
+        retentionHours: readField<number>(result, methodId, 'retentionHours' satisfies keyof ArtifactsListWire, 'number'),
+      };
     },
 
     readArtifact: async (artifactId) => {
@@ -219,10 +231,12 @@ export function createDevicesClient(verbs: DaemonVerbCaller): DevicesClient {
       // A swept, expired or digest-mismatched capture comes back 404 with the
       // daemon's own sentence. That IS the failure, there are no bytes, so it
       // propagates rather than becoming an empty success.
-      return await verbs.invoke<{ artifact: DeviceArtifactSummary; dataBase64: string }>(
-        'devices.artifacts.read',
-        { artifactId },
-      );
+      const methodId = 'devices.artifacts.read';
+      const read = await verbs.invoke<ArtifactReadWire>(methodId, { artifactId });
+      return {
+        artifact: readField<DeviceArtifactSummary>(read, methodId, 'artifact' satisfies keyof ArtifactReadWire, 'object'),
+        dataBase64: readField<string>(read, methodId, 'dataBase64' satisfies keyof ArtifactReadWire, 'string'),
+      };
     },
     describeAvailability: () => {
       const probe = verbs.probe();

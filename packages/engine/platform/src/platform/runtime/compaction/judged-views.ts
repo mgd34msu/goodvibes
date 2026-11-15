@@ -1,4 +1,4 @@
-import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
+import { assertJudgmentInput } from '../../gate/judgment-input.js';
 /**
  * judged-views.ts
  *
@@ -13,6 +13,13 @@ import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-inp
  * compaction wrote and names each run of carried messages by those numbers
  * instead of repeating them, so a reader sees each message once and knows
  * exactly which ones survived.
+ *
+ * Both views together fit one request of {@link VIEW_BUDGET_CHARS}, so scoring a
+ * compaction costs the same however long the conversation was: long entries
+ * share the room equally (each keeps its start and its end, so a closing
+ * qualification such as "do not deploy" survives), and when even that is not
+ * enough the oldest source messages are left out with a marker naming them.
+ * The text the compaction wrote is never left out.
  */
 
 import type { ProviderMessage } from '../../providers/interface.js';
@@ -23,7 +30,7 @@ import type { ProviderMessage } from '../../providers/interface.js';
  * question, estimated at three characters a token (about 96k characters);
  * JSON encoding of newlines and quotes and the question text need the rest.
  */
-export const VIEW_BUDGET_CHARS = Number.POSITIVE_INFINITY;
+export const VIEW_BUDGET_CHARS = 80_000;
 
 /** Characters each rendered entry costs beyond its body (position label). */
 const ENTRY_OVERHEAD_CHARS = 40;
@@ -111,9 +118,11 @@ export function fit(entries: Entry[], budget: number): number {
   return MIN_ENTRY_CHARS;
 }
 
-/** The text clipped to `cap` characters with a note of how many were cut. */
+/** The text cut to `cap` characters, keeping its start and its end, with a note of how many were left out between them. */
 export function clip(text: string, cap: number): string {
-  return text.length <= cap ? text : `${text.slice(0, cap)} [${text.length - cap} more characters]`;
+  if (text.length <= cap) return text;
+  const head = Math.ceil(cap / 2), tail = cap - head;
+  return `${text.slice(0, head)} [${text.length - cap} characters left out] ${tail > 0 ? text.slice(-tail) : ''}`;
 }
 
 /** Names a run of input positions (zero based), as the source view numbers them. */
@@ -138,8 +147,7 @@ export function compactionViews(
     ? undefined
     : { body: renderMessage(msg), droppable: false, omitted: false }));
   const entries = [...sourceEntries, ...writtenEntries.filter((entry): entry is Entry => entry !== undefined)];
-  if (Number.isNaN(budget) || budget < 1 || costAt(entries, Infinity) > budget) throw new JudgmentInputError('unsupported-input');
-  const cap = Infinity; // Judgment evidence stays complete. Handoff formatting uses fit separately.
+  const cap = fit(entries, Number.isFinite(budget) && budget >= 1 ? budget : VIEW_BUDGET_CHARS);
 
   const sourceLines: string[] = [];
   let omittedFrom = -1;

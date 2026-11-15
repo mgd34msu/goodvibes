@@ -12,6 +12,7 @@
  * native cohort; a legacy binary alone is never described as that cohort.
  */
 import { spawnSync } from 'node:child_process';
+import { homedir } from 'node:os';
 import {
   applyVerifiedUpdate,
   captureUpdateFileIo,
@@ -27,7 +28,8 @@ import {
   type UpdateFileIo,
 } from '../self-update.js';
 import { detectInstallKind } from '../install-kind.js';
-import { MANAGED_DAEMON_SERVICE_NAME } from './daemon-autostart.js';
+import { MANAGED_DAEMON_SERVICE_NAME, createDaemonServiceControl, type DaemonServiceControl } from './daemon-autostart.js';
+import type { ConfigManager } from '../../config/manager.js';
 import { DAEMON_RELEASES_LATEST_URL } from '../../config/schema-domain-update.js';
 
 /** The selected monorepo release feed for native daemon payloads. */
@@ -275,51 +277,68 @@ export function resolveHandoverServiceName(configManager: { get(key: string): un
   return configured || MANAGED_DAEMON_SERVICE_NAME;
 }
 
+export interface DaemonRestartOptions {
+  /** The daemon's service entries; defaults to the platform service manager over this host's entries. */
+  readonly control?: DaemonServiceControl;
+  readonly workingDirectory?: string;
+  readonly homeDirectory?: string;
+}
+
+/** The one command that restarts the daemon's service entry by hand. */
+const RESTART_COMMAND = 'goodvibes-daemon restart-service';
+
 /**
  * Restarts the handed-over daemon so the RUNNING process is the new binary.
  * A swap replaces the file; the process that opened the old inode keeps running
  * it until it is restarted, so without this the handover would be true on disk
  * and false in memory.
  *
- * Only systemd user units are restarted here, and only when the unit is
- * genuinely active. On every other platform and posture this reports honestly
- * that the new binary takes effect on the daemon's next start rather than
- * printing a command that would not work.
+ * The restart goes through the platform service manager, the same one the
+ * boot-time autostart uses, so a systemd unit (user or system scope as the
+ * manager resolves it), a launchd agent and a Windows task are all restarted.
+ * A service that is installed but not running picks the binary up when it next
+ * starts. With no service entry at all, the receipt says the running daemon
+ * keeps the old binary and names the one command that sets the service up.
  */
 export function restartHandedOverDaemon(
-  platform: NodeJS.Platform,
   configManager: { get(key: string): unknown },
-  runCommand: RunCommandLike = defaultRunCommand,
+  options: DaemonRestartOptions = {},
 ): DaemonRestartOutcome {
-  const unitName = resolveHandoverServiceName(configManager);
-  if (platform !== 'linux') {
+  const fallbackName = resolveHandoverServiceName(configManager);
+  const control = options.control ?? createDaemonServiceControl({
+    // The manager reads settings through `get` alone.
+    configManager: configManager as unknown as ConfigManager,
+    workingDirectory: options.workingDirectory ?? process.cwd(),
+    homeDirectory: options.homeDirectory ?? homedir(),
+  });
+  const installed = control.snapshot().filter((entry) => entry.installed);
+  const target = installed.find((entry) => entry.running)
+    ?? installed.find((entry) => entry.startSupported)
+    ?? installed[0];
+  if (!target) {
+    return {
+      restarted: false,
+      unitName: fallbackName,
+      detail: 'no service entry manages the daemon on this host, so a daemon already running keeps the old binary until it is restarted; '
+        + 'to run it as a service: goodvibes-daemon install-service',
+    };
+  }
+  const unitName = target.serviceName;
+  if (!target.running) {
+    return { restarted: false, unitName, detail: `the service "${unitName}" is not running, so the new daemon runs the next time it starts` };
+  }
+  if (!target.startSupported || !control.restart) {
+    return { restarted: false, unitName, detail: `the swap is on disk but no service manager here can restart "${unitName}"; run: ${RESTART_COMMAND}` };
+  }
+  const restarted = control.restart(unitName);
+  if (!restarted.ok) {
     return {
       restarted: false,
       unitName,
-      detail: 'the new daemon takes effect the next time the daemon starts',
+      detail: `the swap is on disk but restarting "${unitName}" failed (${restarted.error ?? 'the service manager refused'}); run: ${RESTART_COMMAND}`,
     };
   }
-  const active = runCommand('systemctl', ['--user', 'is-active', `${unitName}.service`]);
-  if (active.status !== 0 || active.stdout.trim() !== 'active') {
-    return {
-      restarted: false,
-      unitName,
-      detail: 'the new daemon takes effect the next time the daemon starts',
-    };
-  }
-  const restart = runCommand('systemctl', ['--user', 'restart', `${unitName}.service`]);
-  if (restart.status !== 0) {
-    return {
-      restarted: false,
-      unitName,
-      detail: `the swap is on disk but restarting ${unitName}.service failed, run: systemctl --user restart ${unitName}.service`,
-    };
-  }
-  return {
-    restarted: true,
-    unitName,
-    detail: `restarted ${unitName}.service onto it`,
-  };
+  return { restarted: true, unitName, detail: `restarted the service "${unitName}" onto it` };
 }
 
 export type DaemonHandoverOutcome =
@@ -352,6 +371,10 @@ export interface RunDaemonHandoverOptions {
   /** Injectable so tests observe the swap instead of replacing a real file. */
   readonly performHandover?: (options: PerformDaemonHandoverOptions) => Promise<{ readonly tag: string }>;
   readonly restartDaemon?: typeof restartHandedOverDaemon;
+  /** The daemon's service entries (tests); defaults to the platform service manager. */
+  readonly serviceControl?: DaemonServiceControl;
+  readonly workingDirectory?: string;
+  readonly homeDirectory?: string;
   readonly io?: UpdateFileIo;
   readonly timeoutMs?: number;
 }
@@ -431,16 +454,16 @@ export async function runDaemonHandover(options: RunDaemonHandoverOptions): Prom
       }
       const tag = normalizeVersion(progress.tag ?? '');
       options.print(
-        `daemon handover: the daemon binary was replaced with v${tag}; restart it to run the new one`,
+        `daemon handover: the daemon binary was replaced with v${tag}; restart it to run the new one: ${RESTART_COMMAND}`,
       );
       return { action: 'swapped-needs-restart', toTag: progress.tag ?? '' };
     }
 
-    const restart = (options.restartDaemon ?? restartHandedOverDaemon)(
-      options.platform,
-      options.configManager,
-      runCommand,
-    );
+    const restart = (options.restartDaemon ?? restartHandedOverDaemon)(options.configManager, {
+      ...(options.serviceControl ? { control: options.serviceControl } : {}),
+      ...(options.workingDirectory ? { workingDirectory: options.workingDirectory } : {}),
+      ...(options.homeDirectory ? { homeDirectory: options.homeDirectory } : {}),
+    });
     options.print(
       `daemon handover: replaced the daemon v${from} with v${normalizeVersion(result.tag)} from its own repository, ${restart.detail}.`
         + ` Replaced files are retained; rollback requires a complete verified previous cohort.`,

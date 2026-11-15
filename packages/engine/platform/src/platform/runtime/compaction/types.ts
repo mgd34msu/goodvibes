@@ -22,8 +22,8 @@ export type { CompactionQualityScore };
  *
  * Transition map:
  *   idle → checking_threshold
- *   checking_threshold → microcompact | collapse | autocompact | reactive_compact | done | failed
- *   each strategy state → boundary_commit | failed, or another strategy state
+ *   checking_threshold → microcompact | collapse | autocompact | reactive_compact | failed
+ *   each strategy state → boundary_commit | failed
  *   boundary_commit → done | failed
  *   done → idle
  *   failed → idle
@@ -100,13 +100,10 @@ export interface StrategyOutput {
 // ---------------------------------------------------------------------------
 
 /**
- * A boundary commit persists a compacted snapshot for replay-safe resumption.
- *
- * Each boundary commit stores:
- * - A unique checkpoint ID
- * - The compacted message slice (replay-safe: can be sliced from any prior state)
- * - A lineage reference to its parent (or null for the root commit)
- * - The strategy that produced this checkpoint
+ * A boundary commit records one applied compaction: its checkpoint id (sent on
+ * COMPACTION_BOUNDARY_COMMIT), the lineage of the compactions before it in this
+ * session, and what it did. The compacted messages themselves live in the
+ * conversation; the commit holds their count, not a second copy.
  */
 export interface BoundaryCommit {
   /** Unique monotonic checkpoint identifier (e.g. `cpt_<ulid>`). */
@@ -122,13 +119,10 @@ export interface BoundaryCommit {
    * `null` for the root commit (no prior compaction).
    */
   parentCheckpointId: string | null;
-  /**
-   * Ordered lineage of all prior checkpoint IDs from root to this commit.
-   * Used for replay-safe slicing, always append-only.
-   */
+  /** Ordered lineage of all prior checkpoint IDs from root to this commit, append-only. */
   lineage: readonly string[];
-  /** The compacted messages at this boundary. */
-  messages: readonly ProviderMessage[];
+  /** How many messages the compacted conversation held at this boundary. */
+  messageCount: number;
   /** Token count of the compacted messages. */
   tokenCount: number;
   /** Estimated token count before compaction (for audit). */

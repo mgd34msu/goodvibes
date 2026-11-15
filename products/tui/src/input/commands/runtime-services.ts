@@ -55,7 +55,7 @@ export const { requireEcosystemCatalogPaths } = createCommandPathAccessors('tui'
 import type { CommandContext } from '../command-registry.ts';
 import { compactSmallWindow, getLastCompactionEvent, SMALL_WINDOW_THRESHOLD } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CompactionContext, CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
-import { recordCompactionQualityScore, scoreCompactionRun } from '../../renderer/compaction-quality.ts';
+import { recordCompactionQualityScore } from '../../renderer/compaction-quality.ts';
 import type { CompactionQualityScore } from '../../renderer/compaction-quality.ts';
 
 import type { SessionSurface } from '@/runtime/index.ts';
@@ -184,7 +184,7 @@ export async function compactConversation(context: CommandContext): Promise<Comp
     extractionModelId: context.session.runtime.model,
     extractionProvider: context.session.runtime.provider,
   };
-  await conversationManager.compact(
+  const receipt = await conversationManager.compact(
     providerRegistry,
     context.session.runtime.model,
     'manual',
@@ -193,18 +193,10 @@ export async function compactConversation(context: CommandContext): Promise<Comp
   );
   const eventAfter = getLastCompactionEvent(sessionId);
   if (eventAfter !== null && eventAfter !== eventBefore) {
-    //: score this run out-of-band (see compaction-quality.ts for why
-    // this can't just subscribe to the platform's own CompactionManager pipeline)
-    // and keep the score keyed by this event's timestamp for /compact-history.
-    const qualityScore = await scoreCompactionRun({
-      sessionId: context.session.runtime.sessionId,
-      contextWindow,
-      messagesBefore,
-      messagesAfter: conversationManager.getMessagesForLLM(),
-      tokensBefore: eventAfter.tokensBeforeEstimate,
-      tokensAfter: eventAfter.tokensAfterEstimate,
-    });
-    recordCompactionQualityScore(eventAfter.timestamp, qualityScore);
+    // The compaction scored itself before it was applied; the receipt carries
+    // that score, kept by this event's timestamp for /compact-history.
+    const qualityScore = receipt?.quality ?? null;
+    if (qualityScore) recordCompactionQualityScore(eventAfter.timestamp, qualityScore);
     return { event: eventAfter, qualityScore };
   }
   return null;

@@ -140,7 +140,6 @@ describe('/codebase status', () => {
     expect(output).toContain('indexed: 0 file(s), 0 chunk(s)');
     expect(output).toContain('last build: never; run /codebase build');
     expect(output).toContain('auto-build on startup: off');
-    expect(output).toContain('limits: no file count or byte limits');
     expect(output).not.toContain('Infinity');
 
     store.close();

@@ -1,16 +1,17 @@
 /**
  * strategies/boundary-commit.ts
  *
- * Boundary commit, persists a compacted snapshot as a named checkpoint with
- * full lineage tracking for replay-safe session resumption.
+ * Boundary commit: the named record of one applied compaction and its place
+ * in the session's chain of compactions.
  *
  * A boundary commit is created after each compaction the session applies
- * (microcompact, collapse, autocompact, or reactive), and is the anchor the
- * next commit's lineage chains to.
+ * (microcompact, collapse, autocompact, or reactive), its id is published on
+ * COMPACTION_BOUNDARY_COMMIT, and it is the anchor the next commit's lineage
+ * chains to. It records counts and the summary, never a copy of the messages:
+ * the conversation holds those.
  *
  * Lineage is append-only: each commit appends its own checkpointId to the
- * parent's lineage array. This means any checkpoint can be sliced from any
- * earlier commit without re-ordering.
+ * parent's lineage array.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -69,7 +70,7 @@ export function createBoundaryCommit(
     strategy: strategyOutput.strategy,
     parentCheckpointId: parent?.checkpointId ?? null,
     lineage,
-    messages: strategyOutput.messages,
+    messageCount: strategyOutput.messages.length,
     tokenCount: strategyOutput.tokensAfter,
     tokensBefore,
     summary: strategyOutput.summary,
@@ -77,10 +78,10 @@ export function createBoundaryCommit(
 }
 
 /**
- * Validates a BoundaryCommit for replay-safety.
+ * Validates a BoundaryCommit.
  *
- * A commit is replay-safe if:
- * - It has at least one message
+ * A commit is valid if:
+ * - The compacted conversation has at least one message
  * - Its lineage is ordered and contains its own checkpointId
  * - Its tokenCount is positive
  *
@@ -89,7 +90,7 @@ export function createBoundaryCommit(
 export function validateBoundaryCommit(commit: BoundaryCommit): string[] {
   const errors: string[] = [];
 
-  if (commit.messages.length === 0) {
+  if (commit.messageCount === 0) {
     errors.push('boundary_commit: no messages in checkpoint');
   }
   if (commit.tokenCount <= 0) {

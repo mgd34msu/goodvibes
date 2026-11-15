@@ -4,7 +4,7 @@
  * lease or a daemon restart, which it answers by claiming again.
  */
 import { describe, expect, test } from 'bun:test';
-import { ConversationRewindHostBroker, ConversationRewindHostError } from '../platform/src/platform/rewind/conversation-host-broker.ts';
+import { CONVERSATION_HOST_TAKEN_OVER_CODE, ConversationRewindHostBroker, ConversationRewindHostError } from '../platform/src/platform/rewind/conversation-host-broker.ts';
 
 async function refusalOf(promise: Promise<unknown>): Promise<ConversationRewindHostError> {
   const error = await promise.then(() => undefined, (e: unknown) => e);
@@ -18,15 +18,15 @@ describe('conversation host takeover', () => {
     const first = broker.registerHost({ sessionId: 's1' });
     broker.registerHost({ sessionId: 's1' });
     const refusal = await refusalOf(broker.takeRequests({ hostId: first.hostId }));
-    expect(refusal.message).toMatch(/took over/i);
-    expect(refusal.refusal).toBe('not-the-host');
+    expect(refusal.refusal).toBe('taken-over');
+    expect(refusal.code).toBe(CONVERSATION_HOST_TAKEN_OVER_CODE);
   });
 
   test('a host id the broker never issued stays unknown, so the surface registers again', async () => {
     const broker = new ConversationRewindHostBroker();
     const refusal = await refusalOf(broker.takeRequests({ hostId: 'cvh_never-issued' }));
     expect(refusal.refusal).toBe('host-unknown');
-    expect(refusal.message).not.toMatch(/took over/i);
+    expect(refusal.code).not.toBe(CONVERSATION_HOST_TAKEN_OVER_CODE);
   });
 
   test('a lapsed lease is unknown, not a takeover', async () => {

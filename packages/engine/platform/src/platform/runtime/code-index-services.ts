@@ -52,14 +52,16 @@ import { summarizeError } from '../utils/error-display.js';
 export const CODE_INDEX_ENABLED_CONFIG_KEY = 'storage.codeIndexEnabled';
 
 /**
- * Honest, generous bounds passed EXPLICITLY to CodeIndexStore (values equal
- * to its own internal defaults) so /codebase status and the settings
- * description can state them in one place without reaching into store
- * internals or duplicating magic numbers.
+ * The bounds every product's code index builds under, passed explicitly to
+ * CodeIndexStore so /codebase status and the settings description state them
+ * from one place. Every indexed file is chunked and sent to the embedding
+ * provider, so a file over the per-file size (generated bundles, lockfiles,
+ * data dumps) is skipped and counted as too large, and a build stops adding
+ * files at the file and byte totals; the build's skip counts say how many.
  */
-export const CODE_INDEX_MAX_FILES = Infinity;
-export const CODE_INDEX_MAX_FILE_BYTES = Infinity;
-export const CODE_INDEX_MAX_TOTAL_BYTES = Infinity;
+export const CODE_INDEX_MAX_FILES = 50_000;
+export const CODE_INDEX_MAX_FILE_BYTES = 1024 * 1024;
+export const CODE_INDEX_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
 
 export interface CodeIndexServicesDeps {
   readonly workingDirectory: string;

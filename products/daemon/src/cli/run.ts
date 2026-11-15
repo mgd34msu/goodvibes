@@ -16,6 +16,8 @@ import { runProvisionWakeModelCommand } from '../daemon/provision-wake-model.js'
 import { isDaemonServiceSubcommand, runDaemonServiceCli, resolveInstalledDaemonBinary, type ManagedServiceActionRunner } from '../daemon/service-commands.js';
 import type { DaemonProcessOptions } from '../daemon/process-lifecycle.js';
 import { VERSION } from '../version.js';
+import { installProcessCrashCapture, surfaceCrashLogPath } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { createDaemonCliConfiguration, resolveDaemonCliOwnership } from './configuration.js';
 import { parseDaemonCli } from './parser.js';
 import { answersHelpFlag, renderGoodVibesDaemonHelp, renderDaemonCommandHelp, renderGoodVibesVersion, renderDaemonCliCatalog } from './help.js';
@@ -40,6 +42,12 @@ export interface DaemonCliOptions {
   /** Trusted embedding port; ordinary commands use the real platform manager. */
   readonly serviceActionRunner?: ManagedServiceActionRunner;
   readonly process?: DaemonProcessOptions;
+  /**
+   * Record an uncaught exception or unhandled rejection of a serving daemon in
+   * its crash log. The shipped entry turns it on; an embedding caller keeps its
+   * own process handlers.
+   */
+  readonly captureCrashes?: boolean;
   readonly stdout?: (line: string) => void;
   readonly stderr?: (line: string) => void;
   /** Explicit local credential-bearing output; automatic startup otherwise requires a TTY. */
@@ -168,6 +176,10 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         if (errors.length) return result({ exitCode: 2, lines: errors });
         const { repairDaemonSuiteBeforeStartup } = await import('./startup-suite-repair.js');
         const originalArgv = [...argv];
+        const releaseCrashCapture = options.captureCrashes === true ? installProcessCrashCapture({
+          surface: 'daemon', version: VERSION, writeStderr: stderr,
+          crashLogPath: surfaceCrashLogPath(configuration.homeDirectory, GOODVIBES_DAEMON_SURFACE_ROOT),
+        }) : undefined;
         const processHandle = runConfiguredDaemonCli(configuration, runtime!, env, options.process, stderr, stdout, options.pairingOutput,
           async signal => {
             if (await repairDaemonSuiteBeforeStartup({ configuration, argv: originalArgv, env, signal, print: stdout })) return null;
@@ -177,7 +189,8 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
             if (currentErrors.length) throw new Error('Daemon serving configuration changed before activation');
             signal.throwIfAborted(); return active;
           });
-        return await processHandle.finished;
+        try { return await processHandle.finished; }
+        finally { releaseCrashCapture?.(); }
       }
       default: {
         if (!isDaemonServiceSubcommand(cli.command)) return refuse('This command has no migrated dispatcher.');

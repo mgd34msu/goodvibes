@@ -51,11 +51,15 @@ describe('compaction views', () => {
     expect(views.source).toContain('tool result (read): lines.pop();');
   });
 
-  test('oversized semantic views are refused without hiding late qualifications', () => {
+  test('an oversized view fits its budget without hiding a late qualification or the written text', () => {
     const long: ProviderMessage[] = [{ role: 'user', content: 'context '.repeat(1000) + 'Do not deploy.' }];
-    expect(() => compactionViews(long, [SUMMARY], 4000)).toThrow();
+    const views = compactionViews(long, [SUMMARY], 4000);
+    expect(views.source.length + views.compacted.length).toBeLessThanOrEqual(4000);
+    expect(views.source).toContain('Do not deploy.');
+    expect(views.source).toContain('characters left out');
     const complete = compactionViews(long, [SUMMARY], 60_000);
     expect(complete.source).toContain('Do not deploy.');
+    expect(complete.source).not.toContain('left out');
   });
 });
 

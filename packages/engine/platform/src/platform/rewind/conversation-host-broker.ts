@@ -77,21 +77,32 @@ export type ConversationRewindAnswer =
 /** Why a host-facing call was refused. Each maps to one honest message. */
 export type ConversationRewindRefusal =
   | 'not-the-host'
+  | 'taken-over'
   | 'host-unknown'
   | 'request-unknown'
   | 'request-expired'
   | 'too-many-hosts';
 
+/**
+ * The wire code for a host whose session another surface claimed. A surface
+ * that receives it stops offering the session instead of claiming it back;
+ * every other refusal of a host-facing call is a plain conflict.
+ */
+export const CONVERSATION_HOST_TAKEN_OVER_CODE = 'HOST_TAKEN_OVER';
+
 export class ConversationRewindHostError extends Error {
   readonly refusal: ConversationRewindRefusal;
   /** The input field the refusal is about, for the caller's error attribution. */
   readonly field: string;
+  /** The code the refusal travels under on the wire. */
+  readonly code: string;
 
   constructor(message: string, refusal: ConversationRewindRefusal, field: string) {
     super(message);
     this.name = 'ConversationRewindHostError';
     this.refusal = refusal;
     this.field = field;
+    this.code = refusal === 'taken-over' ? CONVERSATION_HOST_TAKEN_OVER_CODE : 'CONFLICT';
   }
 }
 
@@ -501,7 +512,7 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
         throw new ConversationRewindHostError(
           `Another surface took over hosting session ${JSON.stringify(takenOverSession)}'s conversation, so hostId ${JSON.stringify(hostId)} no longer serves it. `
           + 'Stop offering this session; register it again only if this surface should take it back.',
-          'not-the-host',
+          'taken-over',
           'hostId',
         );
       }

@@ -5,7 +5,8 @@
  *
  * Responsibilities:
  * - Drive state transitions (idle → checking_threshold → strategy → boundary_commit → done/failed)
- * - Create boundary commits with lineage tracking
+ * - Create boundary commits with lineage tracking (counts and summary; the
+ *   conversation holds the messages)
  * - Emit CompactionEvents at each transition
  * - Own the lifecycle of a compaction the session itself runs (`runLifecycle`):
  *   the orchestrator's conversation compaction goes through the session's
@@ -106,7 +107,7 @@ export class CompactionManager {
   /** Current state machine state. */
   private _state: CompactionLifecycleState = 'idle';
 
-  /** Most recent boundary commit (null until first successful compaction). */
+  /** Most recent boundary commit (null until first successful compaction); the next commit's parent. */
   private _lastCommit: BoundaryCommit | null = null;
 
   /** Emitter context used for all event emissions. */

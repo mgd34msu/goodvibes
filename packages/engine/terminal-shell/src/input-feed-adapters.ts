@@ -30,6 +30,7 @@ const COMMAND_FIELDS = [
   'nextPasteId',
   'nextImageId',
   'saveUndoState',
+  'inputHistory',
 ] as const;
 type CommandField = (typeof COMMAND_FIELDS)[number];
 type CommandFeedSource = Readonly<Record<CommandField, unknown>> & { ensureInputCursorVisible(): void };
@@ -88,7 +89,7 @@ export function createWorkTreeFeedRoute<Source extends WorkTreeFeedSource>(
 const TEXT_FIELDS = ['prompt', 'cursorPos', 'commandMode', 'nextPasteId', 'nextImageId', 'pasteRegistry', 'imageRegistry',
   'inputHistory', 'commandRegistry', 'commandContext', 'autocomplete', 'filePicker', 'modalOpened', 'saveUndoState',
   'registerPaste', 'requestRender'] as const;
-const KEY_FIELDS = ['prompt', 'cursorPos', 'inputScrollTop', 'commandMode', 'contentWidth', 'inputHistory', 'indicatorFocused',
+const KEY_FIELDS = ['prompt', 'cursorPos', 'inputScrollTop', 'commandMode', 'contentWidth', 'inputHistory', 'pasteRegistry', 'indicatorFocused',
   'conversationManager', 'commandContext', 'submitConcealedInput', 'autocomplete', 'modalOpened', 'saveUndoState',
   'ensureInputCursorVisible', 'getWrappedPromptInfo', 'moveCursorVertical', 'handlePathCompletion', 'handleBlockToggle',
   'findMarkerAtPos', 'cleanupMarkerRegistry', 'expandPrompt', 'scroll', 'exitApp', 'requestRender'] as const;

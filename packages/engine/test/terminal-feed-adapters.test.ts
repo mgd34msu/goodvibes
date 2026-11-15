@@ -40,7 +40,7 @@ test('modal snapshot counters stay detached while selection callbacks remain own
 test('key snapshot uses the current block menu receiver without sharing mutable prompt fields', () => {
   const opened: string[] = [], menu = { open(_block: BlockMeta) { expect(this).toBe(menu); opened.push('original'); } };
   const source = { prompt: 'text', cursorPos: 4, inputScrollTop: 0, commandMode: false, contentWidth: 80, inputHistory: null,
-    indicatorFocused: false, conversationManager: null, commandContext: undefined, submitConcealedInput: () => false,
+    pasteRegistry: new Map<string, string>(), indicatorFocused: false, conversationManager: null, commandContext: undefined, submitConcealedInput: () => false,
     autocomplete: null, modalOpened() {}, saveUndoState() {}, ensureInputCursorVisible() {}, getWrappedPromptInfo() {},
     moveCursorVertical: () => false, handlePathCompletion: () => false, handleBlockToggle() {}, findMarkerAtPos: () => null,
     cleanupMarkerRegistry() {}, expandPrompt: (value: string) => value, scroll() {}, exitApp() {}, requestRender() {}, blockActionsMenu: menu };

@@ -1,4 +1,4 @@
-/** Own input dispatch order and snapshot write-back once, with typed product route ports. */
+/** Own input dispatch order and the one route write-back rule, with typed product route ports. */
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { InfiniteBuffer } from './conversation-history.js';
 import type { FeedContextMutableInit } from './input-feed-context.js';
@@ -14,8 +14,6 @@ export interface FeedPipelineContext extends FeedContextMutableInit {
   readonly getSessionView: () => SessionViewControls | null;
   /** True while the composer collects a concealed value; command dispatch must not see that text. */
   readonly isConcealedInput?: (() => boolean) | undefined;
-  /** The handler's own id counters; the route snapshots hold stale copies once a paste registers. */
-  readonly readPasteCounters?: (() => { readonly nextPasteId: number; readonly nextImageId: number }) | undefined;
   readonly getHistory: () => InfiniteBuffer;
   readonly getViewportHeight: () => number;
   readonly getScrollTop: () => number;
@@ -44,10 +42,38 @@ type ModalResult = Handled<
   | 'cursorPos'
   | 'nextImageId'
 >;
+type MutableKey = keyof FeedContextMutableInit;
+const PROMPT_KEYS = ['prompt', 'cursorPos', 'commandMode'] as const satisfies readonly MutableKey[];
+const MODAL_RESULT_KEYS = ['selectionCallback', 'helpOverlayActive', 'helpScrollOffset', 'shortcutsOverlayActive',
+  'shortcutsScrollOffset', 'prompt', 'cursorPos', 'nextImageId'] as const satisfies readonly MutableKey[];
+const INDICATOR_KEYS = ['indicatorFocused'] as const satisfies readonly MutableKey[];
+const COMMAND_KEYS = ['prompt', 'cursorPos', 'commandMode', 'nextPasteId', 'nextImageId'] as const satisfies readonly MutableKey[];
+const KEY_KEYS = ['prompt', 'cursorPos', 'inputScrollTop', 'commandMode', 'indicatorFocused'] as const satisfies readonly MutableKey[];
+const MOUSE_KEYS = ['mouseDownRow', 'mouseDownCol'] as const satisfies readonly MutableKey[];
+
+function snapshot<Key extends MutableKey>(context: FeedContextMutableInit, keys: readonly Key[]): Pick<FeedContextMutableInit, Key> {
+  const values = {} as Pick<FeedContextMutableInit, Key>;
+  for (const key of keys) values[key] = context[key];
+  return values;
+}
+/** Write a route's result into the owner field by field, only where the route
+ * changed the value it was handed; returns whether the route handled the token. */
+function adopt<Key extends MutableKey>(
+  context: FeedContextMutableInit,
+  before: Pick<FeedContextMutableInit, Key>,
+  result: Pick<FeedContextMutableInit, Key> & { readonly handled: boolean },
+  keys: readonly Key[],
+): boolean {
+  for (const key of keys) {
+    if (!Object.is(result[key], before[key])) context[key] = result[key];
+  }
+  return result.handled;
+}
 export interface FeedPipelinePorts<Context extends FeedPipelineContext> {
   readonly pairing?: ((context: Context, token: InputToken) => boolean) | undefined;
   readonly surfaceModalTokens: 'all' | 'text-key';
-  readonly guardModalWrites: boolean;
+  /** No longer read: every route follows the one write-back rule. Products still pass it until their feed files drop it. */
+  readonly guardModalWrites?: boolean | undefined;
   readonly modal: (context: Context, token: InputToken, env: FeedEnvironment) => ModalResult;
   readonly workTree: (context: Context, token: InputToken, env: FeedEnvironment) => boolean;
   readonly shortcut: (context: Context, token: KeyToken, env: FeedEnvironment) => PromptResult;
@@ -95,30 +121,11 @@ export function createFeedInputTokens<Context extends FeedPipelineContext>(ports
         context.requestRender();
         return;
       }
-      // Handler closures can update this same context while a route owns a
-      // snapshot. Preserve those updates rather than restoring stale values.
-      const before = {
-        helpOverlayActive: context.helpOverlayActive,
-        helpScrollOffset: context.helpScrollOffset,
-        shortcutsOverlayActive: context.shortcutsOverlayActive,
-        shortcutsScrollOffset: context.shortcutsScrollOffset,
-        prompt: context.prompt,
-        cursorPos: context.cursorPos,
-      };
-      const modal = ports.modal(context, token, env);
-      context.selectionCallback = modal.selectionCallback;
-      if (!ports.guardModalWrites || context.helpOverlayActive === before.helpOverlayActive)
-        context.helpOverlayActive = modal.helpOverlayActive;
-      if (!ports.guardModalWrites || context.helpScrollOffset === before.helpScrollOffset)
-        context.helpScrollOffset = modal.helpScrollOffset;
-      if (!ports.guardModalWrites || context.shortcutsOverlayActive === before.shortcutsOverlayActive)
-        context.shortcutsOverlayActive = modal.shortcutsOverlayActive;
-      if (!ports.guardModalWrites || context.shortcutsScrollOffset === before.shortcutsScrollOffset)
-        context.shortcutsScrollOffset = modal.shortcutsScrollOffset;
-      if (!ports.guardModalWrites || context.prompt === before.prompt) context.prompt = modal.prompt;
-      if (!ports.guardModalWrites || context.cursorPos === before.cursorPos) context.cursorPos = modal.cursorPos;
-      context.nextImageId = modal.nextImageId;
-      if (modal.handled) return;
+      // A route works on a snapshot of the composer; a closure it calls may edit
+      // the owner (the handler) directly. One rule for every route: a field is
+      // written back only when the route itself changed it.
+      const modal = adopt(context, snapshot(context, MODAL_RESULT_KEYS), ports.modal(context, token, env), MODAL_RESULT_KEYS);
+      if (modal) return;
 
       const sessionView = context.getSessionView();
       const expandPastes = ports.expandPastes;
@@ -131,75 +138,32 @@ export function createFeedInputTokens<Context extends FeedPipelineContext>(ports
         requestRender: context.requestRender,
         ...(expandPastes ? { expandPastes: (text: string) => expandPastes(context, text) } : {}),
       };
+      const viewBefore = snapshot(context, PROMPT_KEYS);
       if (handleSessionViewToken(viewState, token)) {
-        context.prompt = viewState.prompt;
-        context.cursorPos = viewState.cursorPos;
+        adopt(context, viewBefore, { ...viewState, handled: true }, ['prompt', 'cursorPos']);
         return;
       }
       if (!sessionView?.active && ports.workTree(context, token, env)) return;
       if (token.type === 'key') {
-        const prompt = context.prompt,
-          cursorPos = context.cursorPos,
-          commandMode = context.commandMode;
-        const shortcut = ports.shortcut(context, token, env);
-        if (shortcut.handled) {
-          if (context.prompt === prompt) context.prompt = shortcut.prompt;
-          if (context.cursorPos === cursorPos) context.cursorPos = shortcut.cursorPos;
-          if (context.commandMode === commandMode) context.commandMode = shortcut.commandMode;
+        if (adopt(context, snapshot(context, PROMPT_KEYS), ports.shortcut(context, token, env), PROMPT_KEYS)) {
           ports.afterShortcut?.(context);
           return;
         }
       }
       if (ports.beforeComposer?.(context, token, env)) return;
-      const indicator = ports.indicator(context, token, env);
-      context.indicatorFocused = indicator.indicatorFocused;
-      if (indicator.handled) return;
-      const text = ports.text(context, token, env);
-      if (text.handled) {
-        context.prompt = text.prompt;
-        context.cursorPos = text.cursorPos;
-        context.commandMode = text.commandMode;
-        return;
-      }
+      if (adopt(context, snapshot(context, INDICATOR_KEYS), ports.indicator(context, token, env), INDICATOR_KEYS)) return;
+      if (adopt(context, snapshot(context, PROMPT_KEYS), ports.text(context, token, env), PROMPT_KEYS)) return;
       if (token.type === 'key') {
         // A concealed value is never a slash command, even when it starts with '/'.
-        const command = context.isConcealedInput?.()
-          ? undefined
-          : ports.command(context, token, env);
-        if (command?.handled) {
-          context.commandMode = command.commandMode;
-          context.prompt = command.prompt;
-          context.cursorPos = command.cursorPos;
-          context.nextPasteId = command.nextPasteId;
-          context.nextImageId = command.nextImageId;
-          return;
+        if (!context.isConcealedInput?.()) {
+          if (adopt(context, snapshot(context, COMMAND_KEYS), ports.command(context, token, env), COMMAND_KEYS)) return;
         }
-        const key = ports.key(context, token, env);
-        if (key.handled) {
-          context.prompt = key.prompt;
-          context.cursorPos = key.cursorPos;
-          context.inputScrollTop = key.inputScrollTop;
-          context.commandMode = key.commandMode;
-          context.indicatorFocused = key.indicatorFocused;
-        }
+        adopt(context, snapshot(context, KEY_KEYS), ports.key(context, token, env), KEY_KEYS);
       } else if (token.type === 'mouse') {
-        const mouse = ports.mouse(context, token, env);
-        context.mouseDownRow = mouse.mouseDownRow;
-        context.mouseDownCol = mouse.mouseDownCol;
+        adopt(context, snapshot(context, MOUSE_KEYS), ports.mouse(context, token, env), MOUSE_KEYS);
       }
     };
-    for (const token of tokens) {
-      const counters = context.readPasteCounters;
-      const hostBefore = counters?.();
-      dispatch(token);
-      // A paste registered through the host advances the host's counters while
-      // the routes only hold snapshots; adopt the host value when it moved.
-      const hostAfter = counters?.();
-      if (hostBefore && hostAfter) {
-        if (hostAfter.nextPasteId !== hostBefore.nextPasteId) context.nextPasteId = hostAfter.nextPasteId;
-        if (hostAfter.nextImageId !== hostBefore.nextImageId) context.nextImageId = hostAfter.nextImageId;
-      }
-    }
+    for (const token of tokens) dispatch(token);
     context.requestRender();
   };
 }

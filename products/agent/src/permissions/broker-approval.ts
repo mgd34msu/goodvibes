@@ -92,6 +92,7 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
     if (!current || !isActiveStatus(current.status)) return;
     const card: PendingPermissionState = {
       ...current.request,
+      openedAt: Date.now(),
       resolve: (approved: boolean, remember = false) => {
         void broker.resolveApproval(approval.id, {
           approved,
@@ -104,7 +105,7 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
           // pending with nothing on screen; an ask that is already resolved needs nothing.
           const latest = broker.getApproval(approval.id);
           if (latest && isActiveStatus(latest.status) && !getPending()) {
-            setPending(card);
+            setPending({ ...card, openedAt: Date.now(), lastTypedAt: undefined, addressed: undefined, rememberArmed: undefined });
             render();
           }
           params.onResolveFailed?.(error);

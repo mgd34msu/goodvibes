@@ -4,8 +4,8 @@ import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/provid
 import { logger, summarizeError, resolveAndValidatePath, requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
 import { pasteImageFromClipboard, pasteFromClipboard } from './clipboard.js';
 import { MAX_IMAGE_ATTACH_BYTES } from './modal-input-routes.js';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 const URL_REFERENCE_REGEX = /^https?:\/\/[^\s]+$/i;
-const CONTEXT_REFERENCE_REGEX = /(^|\s)@([^\s]+)/g;
 const CONTEXT_REFERENCE_TRAILING_PUNCTUATION = /[),.;:!?]+$/;
 function stripTrailingReferencePunctuation(value: string): {
     readonly core: string;
@@ -26,7 +26,23 @@ function escapeContextAttribute(value: string): string {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
 }
-function readContextFileBlock(reference: string, projectRoot: string): string | null {
+/** One referenced file is cut at the size the read tool returns by default (25,000 tokens). */
+const MAX_REFERENCE_CHARS = 100_000;
+function capReferenceText(content: string, label: string): string {
+    if (content.length <= MAX_REFERENCE_CHARS)
+        return content;
+    const lineEnd = content.lastIndexOf('\n', MAX_REFERENCE_CHARS);
+    const keep = lineEnd > MAX_REFERENCE_CHARS * 0.8 ? lineEnd : MAX_REFERENCE_CHARS;
+    return `${content.slice(0, keep)}\n[${label} cut: kept the first ${keep} of ${content.length} characters. Ask for the rest with the read tool.]`;
+}
+/** A referenced path the user typed that exists but cannot be read is a refusal, not silent text. */
+function referenceFailure(reference: string, error: unknown): PromptReferenceFailure {
+    const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code: unknown }).code) : '';
+    const reason = code === 'ENOENT' ? 'no such file' : code === 'EACCES' || code === 'EPERM' ? 'permission denied'
+        : code === 'EISDIR' ? 'it is a folder' : summarizeError(error);
+    return { reference, reason };
+}
+function readContextFileBlock(reference: string, projectRoot: string, failures: PromptReferenceFailure[]): string | null {
     let resolvedPath: string;
     try {
         resolvedPath = resolveAndValidatePath(reference, projectRoot);
@@ -37,25 +53,27 @@ function readContextFileBlock(reference: string, projectRoot: string): string | 
     }
     if (!existsSync(resolvedPath))
         return null;
-    const stat = lstatSync(resolvedPath);
-    const label = escapeContextAttribute(relative(projectRoot, resolvedPath) || basename(resolvedPath));
-    if (stat.isDirectory()) {
-        const entries = readdirSync(resolvedPath, { withFileTypes: true })
-            .map((entry) => `${entry.isDirectory() ? 'dir ' : 'file'} ${entry.name}`)
-            .join('\n');
+    try {
+        const stat = lstatSync(resolvedPath);
+        const label = escapeContextAttribute(relative(projectRoot, resolvedPath) || basename(resolvedPath));
+        if (stat.isDirectory()) {
+            const entries = readdirSync(resolvedPath, { withFileTypes: true })
+                .map((entry) => `${entry.isDirectory() ? 'dir ' : 'file'} ${entry.name}`)
+                .join('\n');
+            return [`<context-folder path="${label}">`, capReferenceText(entries || '(empty directory)', 'Folder listing'), '</context-folder>'].join('\n');
+        }
+        if (!stat.isFile())
+            return null;
         return [
-            `<context-folder path="${label}">`,
-            entries || '(empty directory)',
-            stat.isDirectory() ? `</context-folder>` : '',
-        ].filter(Boolean).join('\n');
+            `<context-file path="${label}" bytes="${stat.size}">`,
+            capReferenceText(readFileSync(resolvedPath, 'utf-8'), 'File'),
+            '</context-file>',
+        ].join('\n');
     }
-    if (!stat.isFile())
+    catch (error) {
+        failures.push(referenceFailure(`@${reference}`, error));
         return null;
-    return [
-        `<context-file path="${label}" bytes="${stat.size}">`,
-        readFileSync(resolvedPath, 'utf-8'),
-        '</context-file>',
-    ].join('\n');
+    }
 }
 function buildContextUrlBlock(reference: string): string {
     const href = escapeContextAttribute(reference);
@@ -65,9 +83,32 @@ function buildContextUrlBlock(reference: string): string {
         '</context-url>',
     ].join('\n');
 }
-function expandContextReferences(text: string, projectRoot: string): string {
-    return text.replace(CONTEXT_REFERENCE_REGEX, (full: string, prefix: string, rawReference: string): string => {
-        if (rawReference.startsWith('model:'))
+export interface PromptReferenceFailure {
+    readonly reference: string;
+    readonly reason: string;
+}
+const TYPED_REFERENCE_REGEX = /(^|\s)(!@|@)(\S+)/g;
+/**
+ * Expand the references the user typed, in one pass over the typed text:
+ * `!@path` becomes the file's text and, when `contextReferences` is on,
+ * `@path` becomes a context block and `@https://...` a URL note. Replaced
+ * content is never scanned again, so a file cannot pull in other files. An
+ * `!@` file that cannot be read, or an `@` path that exists but cannot be
+ * read, is returned as a failure; an `@word` that names nothing stays text.
+ */
+function expandTypedReferences(text: string, projectRoot: string, contextReferences: boolean, failures: PromptReferenceFailure[]): string {
+    return text.replace(TYPED_REFERENCE_REGEX, (full: string, prefix: string, marker: string, rawReference: string): string => {
+        if (marker === '!@') {
+            try {
+                const resolvedPath = resolveAndValidatePath(rawReference, projectRoot);
+                return `${prefix}${capReferenceText(readFileSync(resolvedPath, 'utf-8'), 'File')}`;
+            }
+            catch (error) {
+                failures.push(referenceFailure(`!@${rawReference}`, error));
+                return full;
+            }
+        }
+        if (!contextReferences || rawReference.startsWith('model:'))
             return full;
         const { core, suffix } = stripTrailingReferencePunctuation(rawReference);
         if (!core || core.startsWith('@'))
@@ -75,7 +116,7 @@ function expandContextReferences(text: string, projectRoot: string): string {
         if (URL_REFERENCE_REGEX.test(core)) {
             return `${prefix}${buildContextUrlBlock(core)}${suffix}`;
         }
-        const fileBlock = readContextFileBlock(core, projectRoot);
+        const fileBlock = readContextFileBlock(core, projectRoot, failures);
         if (!fileBlock)
             return full;
         return `${prefix}${fileBlock}${suffix}`;
@@ -217,26 +258,20 @@ export function expandPrompt(pasteRegistry: Map<string, string>, imageRegistry: 
     data: string;
     mediaType: string;
 }>, text: string, projectRoot: string, contextReferences = false): string | ContentPart[] {
-    // Inject files named in what the user typed BEFORE pasted text is spliced in: a paste of more than
-    // eight lines is shown only as a marker, so a `!@path` inside it was never seen or chosen by the user.
-    let expanded = text;
-    const injectRegex = /(?:^|(?<=\s))!@(\S+)/g;
-    let injectMatch;
-    while ((injectMatch = injectRegex.exec(expanded)) !== null) {
-        const filePath = injectMatch[1];
-        try {
-            const resolvedPath = resolveAndValidatePath(requireDefined(filePath), projectRoot);
-            const content = readFileSync(resolvedPath, 'utf-8');
-            expanded = expanded.slice(0, injectMatch.index) + content + expanded.slice(injectMatch.index + injectMatch[0].length);
-            injectRegex.lastIndex = injectMatch.index + content.length;
-        }
-        catch (err) {
-            logger.debug('expandPrompt: failed to read injected file', { path: filePath, error: summarizeError(err) });
-        }
+    // Only what the user typed pulls files in: references are expanded before
+    // a collapsed paste is spliced in (a `!@path` inside an eight-line-plus
+    // paste was never seen or chosen), and an expanded file is not rescanned.
+    const failures: PromptReferenceFailure[] = [];
+    let expanded = expandTypedReferences(text, projectRoot, contextReferences, failures);
+    if (failures.length > 0) {
+        const named = failures.map((failure) => `${failure.reference} (${failure.reason})`).join(', ');
+        throw new RefusalError(refusal({
+            code: 'PROMPT_REFERENCE_UNREADABLE',
+            state: 'the message was not sent and is still in the composer',
+            reason: `Not sent: could not read ${named}`,
+            next: ['Your message is still in the composer; fix or remove the reference, then press Enter'],
+        }));
     }
-    // Same rule for `@path` references: only what the user typed is expanded, never text inside a collapsed paste.
-    if (contextReferences)
-        expanded = expandContextReferences(expanded, projectRoot);
     expanded = expandTextPastes(pasteRegistry, expanded);
     const imageMarkerRegex = /\[IMAGE: (img\d+), [^\]]+\]/g;
     const imageMarkers: {

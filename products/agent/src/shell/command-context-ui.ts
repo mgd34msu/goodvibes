@@ -72,6 +72,8 @@ export function createCommandContextUi(options: CommandContextUiOptions): Comman
     active = entry;
     options.setPendingPermission({
       ...request,
+      // A queued card replacing the one just answered starts its own settle time, so a held or repeated key cannot answer it.
+      openedAt: Date.now(),
       resolve: (approved: boolean, remember = false) => {
         if (active !== entry) return;
         active = null;

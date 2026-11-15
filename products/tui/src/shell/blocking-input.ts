@@ -1,4 +1,4 @@
-import { handleSimplePermissionInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
+import { handleSimplePermissionInput, routeCardInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import type { PermissionRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { applyHunkKey, hunkSelectionAnswer, type HunkSelectionState } from '../permissions/hunk-selection.ts';
 import { asksAgainEvenIfRemembered, permissionButtons } from '../permissions/prompt-card.ts';
@@ -24,12 +24,15 @@ export type PendingPermissionState = PermissionRequest & {
   /** The reply draft while replyMode is active. */
   replyBuffer?: string;
   /**
-   * Epoch ms when the prompt first appeared. Keystrokes that arrive within
-   * APPROVAL_INPUT_DEBOUNCE_MS of this are swallowed (not interpreted as an
-   * approve/deny response) so text typed ahead, before the user saw the
-   * prompt, cannot accidentally answer it.
+   * Epoch ms when the prompt first appeared. Keys typed within the settle time
+   * of this, or as part of the same burst of typing, go to the composer and
+   * never answer the card (routeCardInput).
    */
   openedAt?: number;
+  /** The last key that was passed to the composer as typing. */
+  lastTypedAt?: number;
+  /** The person has addressed the card (a key after a pause, or Tab); every key is the card's from then on. */
+  addressed?: boolean;
   /** Requester attribution ("session abc12345" / a named agent) shown on the prompt; absent when unknown. */
   requestedBy?: string;
   /** The chosen button (index into permissionButtons); arrows move it, Enter presses it. */
@@ -55,21 +58,15 @@ function withChoice(req: PendingPermissionState, delta: number): PendingPermissi
   return { ...req, choice: ((req.choice ?? 0) + delta + count) % count };
 }
 
-/**
- * Settle window after a permission prompt appears during which buffered
- * keystrokes are ignored rather than interpreted as the response. 350ms is long
- * enough to absorb type-ahead from before the prompt rendered, short enough not
- * to feel laggy to a user reacting to the prompt itself.
- */
-export const APPROVAL_INPUT_DEBOUNCE_MS = 350;
-
 export type BlockingInputHandlerOptions = {
   data: string;
   pendingPermission: PendingPermissionState | null;
   abortTurn: () => void;
   render: () => void;
-  /** Injectable clock for the approval-input debounce; defaults to Date.now(). Tests only. */
+  /** Injectable clock for the typing-burst rule; defaults to Date.now(). Tests only. */
   now?: number;
+  /** False while the composer holds a draft: keys keep going to it until Tab moves to the card. */
+  composerEmpty?: boolean;
 };
 
 export type BlockingInputHandlerResult = {
@@ -91,15 +88,20 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       return { handled: true, pendingPermission: null };
     }
 
-    // Input debounce: swallow any key that arrives within the settle window
-    // after the prompt appeared, so type-ahead text from before the user saw
-    // the prompt cannot answer it (neither approve, deny, nor navigate). The
-    // prompt stays open; re-render and consume the key.
+    // A sentence being typed when the card appeared keeps going to the composer:
+    // only a key after a pause (or Tab) addresses the card.
     const now = options.now ?? Date.now();
-    if (req.openedAt !== undefined && now - req.openedAt < APPROVAL_INPUT_DEBOUNCE_MS) {
-      render();
-      return { handled: true, pendingPermission };
+    const routed = routeCardInput(
+      data,
+      // A card with no recorded opening time has no settle time; the burst rule still applies.
+      { openedAt: req.openedAt ?? 0, lastTypedAt: req.lastTypedAt, addressed: req.addressed },
+      now,
+      options.composerEmpty ?? true,
+    );
+    if (!routed.answer) {
+      return { handled: false, pendingPermission: { ...req, lastTypedAt: routed.card.lastTypedAt } };
     }
+    if (routed.card.addressed && !req.addressed) return handleBlockingShellInput({ ...options, pendingPermission: { ...req, addressed: true } });
 
     if (req.hunkState) {
       // Buttons (Apply selected / Deny): arrows and tab choose, Enter presses.
@@ -250,29 +252,33 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       handleSimplePermissionInput(data, {
         escapeDenies: false,
         abortOnDeny: false,
-        resolve: (approved, remember) => {
-          // The card does not offer "for session" for an ask that is put to the owner again; the key allows once.
-          if (remember && !asksAgainEvenIfRemembered(req)) req.resolve(approved, true, undefined, { rememberTier: 'session' });
-          else req.resolve(approved, false);
-        },
+        resolve: (approved) => req.resolve(approved, false),
         abort: abortTurn,
         render,
       })
     )
       return { handled: true, pendingPermission: null };
 
-    // Numbered remember tiers ([1]..[N], most specific first) from the platform's
-    // rememberOptions: approve AND remember at that tier. A generalizing tier
-    // writes a durable user-origin rule; 'session' only caches in memory.
-    if (/^[1-9]$/.test(key) && !asksAgainEvenIfRemembered(req) && req.rememberOptions && req.rememberOptions.length > 0) {
-      const option = req.rememberOptions[Number(key) - 1];
-      if (option) {
-        req.resolve(true, option.tier === 'session', undefined, { rememberTier: option.tier });
-        render();
-        return { handled: true, pendingPermission: null };
-      }
+    // Remembering is never one bare key: `a` chooses the "for session" button
+    // and a digit opens that remember tier ([1]..[N], most specific first) in
+    // the submenu; Enter then confirms. A generalizing tier writes a durable
+    // user-origin rule; 'session' only caches in memory.
+    if (key === 'a') {
       render();
-      return { handled: true, pendingPermission };
+      // An ask put to the owner again offers no remembering: `a` chooses Allow once.
+      if (asksAgainEvenIfRemembered(req)) return { handled: true, pendingPermission: { ...req, choice: 0 } };
+      const sessionTier = req.rememberOptions?.findIndex((option) => option.tier === 'session') ?? -1;
+      if (sessionTier >= 0) return { handled: true, pendingPermission: { ...req, submenuOpen: true, submenuIndex: sessionTier } };
+      const session = permissionButtons(req, req).findIndex((button) => button.id === 'session' || button.id === 'remember');
+      return { handled: true, pendingPermission: session >= 0 ? { ...req, choice: session } : req };
+    }
+    if (/^[1-9]$/.test(key) && !asksAgainEvenIfRemembered(req) && req.rememberOptions && req.rememberOptions.length > 0) {
+      const index = Number(key) - 1;
+      render();
+      return {
+        handled: true,
+        pendingPermission: index < req.rememberOptions.length ? { ...req, submenuOpen: true, submenuIndex: index } : req,
+      };
     }
 
     if (key === 'd') {

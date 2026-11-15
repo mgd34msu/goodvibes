@@ -2,11 +2,9 @@ import { openHandlerMcpWorkspace } from '@goodvibes-jev/engine/terminal-shell/in
 import { createFeedRenderBuffer, syncFeedContextLiveReferences } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
 import { TerminalInputHandlerState } from '@goodvibes-jev/engine/terminal-shell/input-handler-state';
 import {
-  captureFeedContextMutable,
   projectFeedContextStable,
   projectFeedContextClosures,
 } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
-import { syncFeedContextFromHost } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
 import '@goodvibes-jev/engine/terminal-shell/composer-controller';
 import { resolveFooterTarget } from '../renderer/footer-targets.ts';
 import { SurfacePointer } from './surface-pointer.ts';
@@ -112,7 +110,7 @@ import './handler-picker-routes.ts';
 import './handler-shortcuts.ts';
 import { feedInputTokens } from './handler-feed.ts';
 import type { InputHandlerLike } from './handler-types.ts';
-import { buildInitialFeedContext, syncFeedContextMutableFields } from './feed-context-factory.ts';
+import { buildInitialFeedContext } from './feed-context-factory.ts';
 import type { UiRuntimeServices } from '../runtime/ui-services.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
 import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
@@ -281,7 +279,7 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
    */
   public initFeedContext(): void {
     this.feedContext = buildInitialFeedContext(
-      captureFeedContextMutable(this),
+      this,
       {
         ...projectFeedContextStable(this),
         configModal: this.configModal,
@@ -293,15 +291,12 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
         handleDiffApply: () => this.handleDiffApply(),
         handleUndo: () => {
           this.handleUndo();
-          this.syncFeedContextMutableFields();
         },
         handleRedo: () => {
           this.handleRedo();
-          this.syncFeedContextMutableFields();
         },
         handlePaste: () => {
           this.handlePaste();
-          this.syncFeedContextMutableFields();
         },
         saveUndoStateForText: () => this.saveUndoStateForText(),
         breakUndoCoalesce: () => {
@@ -326,10 +321,8 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
     );
   }
 
-  /** Sync mutable handler fields back into feedContext after in-feed mutations. */
-  public syncFeedContextMutableFields(): void {
-    syncFeedContextFromHost(this, this.feedContext);
-  }
+  /** The feed context reads the composer fields from this handler, so there is nothing to copy; callers that still call this can drop the call. */
+  public syncFeedContextMutableFields(): void {}
 
   /** Wire in the InputHistory instance. Optional; disables history navigation if unset. */
   public setHistory(history: InputHistory): void {
@@ -498,24 +491,11 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
     const bufferedRequestRender = renderBuffer.requestRender;
 
     this.requestRender = bufferedRequestRender;
-    // Snapshot the overlay flags before the feed: command handlers executed
-    // synchronously during token processing (e.g. /shortcuts, /help via
-    // ui-openers) mutate these directly on the handler, and an unconditional
-    // write-back of the pre-feed snapshot would silently revert them in the
-    // same keystroke (the "/shortcuts never displays" defect).
-    const helpOverlayActiveBefore = this.helpOverlayActive;
-    const helpScrollOffsetBefore = this.helpScrollOffset;
-    const shortcutsOverlayActiveBefore = this.shortcutsOverlayActive;
-    const shortcutsScrollOffsetBefore = this.shortcutsScrollOffset;
     try {
       const context = this.feedContext;
-      syncFeedContextMutableFields(this, context);
       syncFeedContextLiveReferences(this, context);
       // Swap requestRender to buffered version for this feed.
       context.requestRender = bufferedRequestRender;
-      this.syncFeedSelectionCallback = (callback) => {
-        context.selectionCallback = callback;
-      };
       context.handleHostPairingToken = (token) => this.hostPairing?.handleToken(token) ?? false;
       const tokens = this.tokenizer.feed(data);
       if (tokens.some((token) => token.type === 'mouse')) {
@@ -535,25 +515,7 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
         }
         if (pending.length) feedInputTokens(context, pending);
       } else feedInputTokens(context, tokens);
-      this.prompt = context.prompt;
-      this.cursorPos = context.cursorPos;
-      this.inputScrollTop = context.inputScrollTop;
-      this.commandMode = context.commandMode;
-      this.indicatorFocused = context.indicatorFocused;
-      // Overlay flags: only apply the pipeline's value when the pipeline
-      // itself changed it (e.g. Escape closing the overlay). Otherwise keep
-      // the live handler value, which a command handler may have just set.
-      if (context.helpOverlayActive !== helpOverlayActiveBefore) this.helpOverlayActive = context.helpOverlayActive;
-      if (context.helpScrollOffset !== helpScrollOffsetBefore) this.helpScrollOffset = context.helpScrollOffset;
-      if (context.shortcutsOverlayActive !== shortcutsOverlayActiveBefore) this.shortcutsOverlayActive = context.shortcutsOverlayActive;
-      if (context.shortcutsScrollOffset !== shortcutsScrollOffsetBefore) this.shortcutsScrollOffset = context.shortcutsScrollOffset;
-      this.selectionCallback = context.selectionCallback;
-      this.nextPasteId = context.nextPasteId;
-      this.nextImageId = context.nextImageId;
-      this.mouseDownRow = context.mouseDownRow;
-      this.mouseDownCol = context.mouseDownCol;
     } finally {
-      this.syncFeedSelectionCallback = null;
       renderBuffer.release();
       this.requestRender = immediateRequestRender;
     }

@@ -1,5 +1,5 @@
 import { existsSync, unlinkSync } from 'node:fs';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
+import { writeFileAtomic } from '@goodvibes-jev/engine/platform/platform/utils';
 import { readVersioned, setAsideNewerVersionFile } from '@goodvibes-jev/engine/platform/platform/config';
 
 import type {
@@ -85,8 +85,9 @@ export interface WriteWizardProgressOptions {
 /**
  * Atomically persist wizard progress to disk.
  *
- * Uses atomicWriteFileSync (write-to-tmp + rename) so a crash mid-write
- * never leaves a torn file. The file is user-scoped so it survives across
+ * Uses writeFileAtomic (write-to-tmp + rename) so a crash mid-write never
+ * leaves a torn file. No directory sync: after a power cut the wizard may
+ * resume one step earlier, which costs nothing. The file is user-scoped so it survives across
  * project switches and is shared with the resume-prompt check at startup.
  *
  * Masked (password) fields are excluded from the serialised textState by the
@@ -119,7 +120,7 @@ export function writeWizardProgress(
   };
   // A file from a newer release is moved aside, not overwritten, so downgrading never destroys its state.
   setAsideNewerVersionFile(path, 1);
-  atomicWriteFileSync(path, `${JSON.stringify(payload, null, 2)}\n`, { mkdirp: true });
+  writeFileAtomic(path, `${JSON.stringify(payload, null, 2)}\n`);
 }
 
 /**

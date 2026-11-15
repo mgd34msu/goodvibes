@@ -243,7 +243,8 @@ test('unsupported original source selects registered source resolution and never
   const captured = await f.host.capture({ ...f.original, unsupportedSources: [{ kind: 'image', label: 'Original referenced screenshot' }] }, f.authority);
   const result = await f.host.admit(f.target(captured), f.authority);
   expect(result).toMatchObject({ kind: 'blocked', reason: 'unsupported-source', recovery: 'required' });
-  expect(f.proposals()).toBe(0); expect(f.fake.requests.every(request => JSON.stringify(request.state).includes('Original referenced screenshot'))).toBe(true);
+  // The outcome is fixed by the source, so no routing or decision reading is spent on it.
+  expect(f.proposals()).toBe(0); expect(f.fake.requests).toHaveLength(0);
   const reads = f.fake.requests.length;
   expect(await f.host.resume(f.target(captured), f.authority)).toEqual(result); expect(f.fake.requests).toHaveLength(reads);
   expect(await (await f.store.openWorkLedgerStorage('project')).read()).toMatchObject({ revision: 0 });

@@ -77,14 +77,51 @@ export type FeedContextClosureKeys =
   | 'openModelPickerWithTarget'
   | 'openProviderModelPickerWithTarget'
   | 'onModelPickerCommit';
-/** Allocate only once. Per-feed rendering swaps and restores requestRender separately. */
+const MUTABLE_KEYS = [
+  'prompt',
+  'cursorPos',
+  'inputScrollTop',
+  'commandMode',
+  'indicatorFocused',
+  'helpOverlayActive',
+  'helpScrollOffset',
+  'shortcutsOverlayActive',
+  'shortcutsScrollOffset',
+  'nextPasteId',
+  'nextImageId',
+  'mouseDownRow',
+  'mouseDownCol',
+  'contentWidth',
+  'selectionCallback',
+] as const satisfies readonly (keyof FeedContextMutableInit)[];
+
+function bindOwnerField<Key extends keyof FeedContextMutableInit>(context: object, owner: FeedContextMutableInit, key: Key): void {
+  Object.defineProperty(context, key, {
+    enumerable: true,
+    get: (): FeedContextMutableInit[Key] => owner[key],
+    set: (value: FeedContextMutableInit[Key]) => {
+      owner[key] = value;
+    },
+  });
+}
+
+/** Allocate only once. The composer's text, cursor, mode, overlay flags and
+ * counters stay on their owner (the input handler): the context reads and
+ * writes them there, so a closure that edits the handler during a keystroke
+ * is seen by every route and nothing copies them back afterwards. Per-feed
+ * rendering swaps and restores requestRender separately. */
 export function buildInitialFeedContext<Mutable extends FeedContextMutableInit, Stable extends object, Closures extends object>(
-  mutable: Mutable,
+  owner: Mutable,
   stable: Stable,
   closures: Closures,
-) {
-  return { ...mutable, requestRender: (): void => {}, ...stable, ...closures };
+): FeedContextMutableInit & { requestRender: () => void } & Stable & Closures {
+  const context = { requestRender: (): void => {}, ...stable, ...closures };
+  for (const key of MUTABLE_KEYS) bindOwnerField(context, owner, key);
+  return context as FeedContextMutableInit & typeof context;
 }
+/** Copies the composer fields between two holders. The feed context no longer
+ * needs it (its fields are the handler's); kept only for the products'
+ * feed-context factories that still re-export it. */
 export function syncFeedContextMutableFields(fields: FeedContextMutableInit, ctx: FeedContextMutableInit): void {
   ctx.prompt = fields.prompt;
   ctx.cursorPos = fields.cursorPos;
@@ -101,31 +138,6 @@ export function syncFeedContextMutableFields(fields: FeedContextMutableInit, ctx
   ctx.mouseDownRow = fields.mouseDownRow;
   ctx.mouseDownCol = fields.mouseDownCol;
   ctx.contentWidth = fields.contentWidth;
-}
-
-/** Capture all mutable slots before writing any target slot; host setters cannot interleave a new snapshot. */
-export function syncFeedContextFromHost(host: FeedContextMutableInit, target: FeedContextMutableInit): void {
-  syncFeedContextMutableFields(captureFeedContextMutable(host), target);
-}
-
-export function captureFeedContextMutable(host: FeedContextMutableInit): FeedContextMutableInit {
-  return {
-    prompt: host.prompt,
-    cursorPos: host.cursorPos,
-    inputScrollTop: host.inputScrollTop,
-    commandMode: host.commandMode,
-    indicatorFocused: host.indicatorFocused,
-    helpOverlayActive: host.helpOverlayActive,
-    helpScrollOffset: host.helpScrollOffset,
-    shortcutsOverlayActive: host.shortcutsOverlayActive,
-    shortcutsScrollOffset: host.shortcutsScrollOffset,
-    selectionCallback: host.selectionCallback,
-    nextPasteId: host.nextPasteId,
-    nextImageId: host.nextImageId,
-    mouseDownRow: host.mouseDownRow,
-    mouseDownCol: host.mouseDownCol,
-    contentWidth: host.contentWidth,
-  };
 }
 
 const STABLE_HOST_KEYS = [
@@ -201,14 +213,11 @@ export function projectFeedContextClosures<
   Host extends { readonly [Key in (typeof FEED_FORWARD_KEYS)[number]]: (...args: never[]) => unknown } & {
     readonly sessionView: unknown;
     readonly bodyTopRow: number;
-    nextPasteId: number;
-    nextImageId: number;
     isConcealedInput?(): boolean;
     readonly concealedInput?: unknown;
     cancelConcealedInput(): boolean;
     handleEscape(): void;
     handleCtrlC(): void;
-    syncFeedContextMutableFields(): void;
   },
 >(host: Host) {
   const forwards = {} as { -readonly [Key in (typeof FEED_FORWARD_KEYS)[number]]: Host[Key] };
@@ -222,20 +231,10 @@ export function projectFeedContextClosures<
     ...forwards,
     getSessionView: () => host.sessionView as Host['sessionView'],
     isConcealedInput: (): boolean => host.isConcealedInput?.() ?? (host.concealedInput ?? null) !== null,
-    // The handler owns the paste and image id counters; the pipeline reads them
-    // back after each token so a stale feed copy never rewinds them.
-    readPasteCounters: (): { readonly nextPasteId: number; readonly nextImageId: number } => ({
-      nextPasteId: host.nextPasteId,
-      nextImageId: host.nextImageId,
-    }),
     handleEscape: () => {
       if (!host.cancelConcealedInput()) host.handleEscape();
-      host.syncFeedContextMutableFields();
     },
-    handleCtrlC: () => {
-      host.handleCtrlC();
-      host.syncFeedContextMutableFields();
-    },
+    handleCtrlC: () => host.handleCtrlC(),
     bodyTopRow: () => host.bodyTopRow,
   };
 }

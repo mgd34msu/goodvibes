@@ -82,8 +82,8 @@ describe('!@ expansion through expandPrompt', () => {
     expect(expand('prefix !@inject_target.txt suffix')).toBe('prefix file content here suffix');
   });
 
-  test('leaves the marker in place when the file cannot be read', () => {
-    expect(expand('prefix !@does_not_exist.txt suffix')).toBe('prefix !@does_not_exist.txt suffix');
+  test('refuses the send, naming the file, when it cannot be read', () => {
+    expect(() => expand('prefix !@does_not_exist.txt suffix')).toThrow(/does_not_exist\.txt/);
   });
 
   test('does not expand !@ in the middle of a word', () => {
@@ -104,8 +104,8 @@ describe('!@ expansion through expandPrompt', () => {
       const rel = `../${outside.split('/').pop()}`;
       const project = join(tmpDir, 'project');
       mkdirSync(project);
-      expect(expandPrompt(new Map(), new Map(), `see !@${rel}`, project)).toBe(`see !@${rel}`);
-      expect(expandPrompt(new Map(), new Map(), `see !@${outside}`, project)).toBe(`see !@${outside}`);
+      expect(() => expandPrompt(new Map(), new Map(), `see !@${rel}`, project)).toThrow(/Not sent/);
+      expect(() => expandPrompt(new Map(), new Map(), `see !@${outside}`, project)).toThrow(/Not sent/);
     } finally {
       rmSync(outside, { force: true });
     }

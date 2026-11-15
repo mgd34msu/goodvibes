@@ -146,25 +146,29 @@ describe('remember tiers as one-key choices', () => {
     expect(decisions).toEqual([{ approved: true, remember: false, modifiedArgs: undefined }]);
   });
 
-  test('pressing a tier number approves and remembers at that tier', () => {
+  test('a tier number chooses that tier and Enter remembers at it; the number alone answers nothing', () => {
     const decisions: Record<string, unknown>[] = [];
     const pending = makePending(request, (d) => decisions.push(d));
-    const result = press(pending, '2');
-    expect(result.pendingPermission).toBeNull();
+    const chosen = press(pending, '2');
+    expect(chosen.pendingPermission?.submenuOpen).toBe(true);
+    expect(decisions).toEqual([]);
+    press(chosen.pendingPermission, '\r');
     expect(decisions).toEqual([{ approved: true, remember: false, modifiedArgs: undefined, rememberTier: 'command-class' }]);
   });
 
   test('the session tier sets the legacy remember flag too', () => {
     const decisions: Record<string, unknown>[] = [];
     const pending = makePending(request, (d) => decisions.push(d));
-    press(pending, '4');
+    press(press(pending, '4').pendingPermission, '\r');
     expect(decisions).toEqual([{ approved: true, remember: true, modifiedArgs: undefined, rememberTier: 'session' }]);
   });
 
-  test('[a] stays the session-tier alias', () => {
+  test('[a] chooses the session tier; Enter confirms it', () => {
     const decisions: Record<string, unknown>[] = [];
     const pending = makePending(request, (d) => decisions.push(d));
-    press(pending, 'a');
+    const chosen = press(pending, 'a');
+    expect(decisions).toEqual([]);
+    press(chosen.pendingPermission, '\r');
     expect(decisions).toEqual([{ approved: true, remember: true, modifiedArgs: undefined, rememberTier: 'session' }]);
   });
 
@@ -386,7 +390,7 @@ describe('remembered allows on an ask the mode puts to the owner again', () => {
   test('the session key allows once instead of remembering', () => {
     const decisions: Record<string, unknown>[] = [];
     const pending = makePending(makeExecRequest({ rememberEffect: 'owner-asked-again' }), (decision) => decisions.push(decision));
-    press(pending, 'a');
+    press(press(pending, 'a').pendingPermission, '\r');
     expect(decisions).toHaveLength(1);
     expect(decisions[0]).toMatchObject({ approved: true });
     expect(decisions[0]!['remember']).not.toBe(true);

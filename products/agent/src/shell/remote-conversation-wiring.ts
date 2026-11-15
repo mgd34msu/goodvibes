@@ -336,8 +336,9 @@ export function installRemoteConversationRouting(
         // submission, Stop, or disposal synchronously.
         activity.begin();
         if (disposed || sequence !== routeSequence || nativePending !== pending) return detachedHandle();
-        // Source was captured before model directives, shell context or file
-        // expansion. The host alone captures a continuation's actual history.
+        // Source is the complete text the user sent (pastes spliced in, model
+        // directives removed); anything it cannot carry was refused in the
+        // composer. The host alone captures a continuation's actual history.
         const state = await intake.submit(source, { delivery: 'hosted' });
         if (disposed || sequence !== routeSequence) return detachedHandle();
         if (state?.request) pending.request = { ...state.request };

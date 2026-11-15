@@ -241,6 +241,10 @@ describe('createDaemonRepairPrompt', () => {
     });
     expect(prompt.pending()).toBe(true);
     expect(prompt.answer('y')).toBe(true);
+    // y alone installs nothing: Enter confirms.
+    expect(prompt.pending()).toBe(true);
+    expect(repaired).toBe(false);
+    expect(prompt.answer('\r')).toBe(true);
     expect(prompt.pending()).toBe(false);
     // The repair is fire-and-forget from the keypress; let it settle.
     await Promise.resolve();
@@ -323,7 +327,7 @@ describe('handleBlockingShellInput (daemon repair offer)', () => {
     });
   }
 
-  test('the pending offer consumes the keystroke and starts the repair', () => {
+  test('the pending offer consumes y and Enter and starts the repair', () => {
     let started = false;
     const prompt = promptFor(() => { started = true; });
     const { options } = shellOptions(prompt);
@@ -331,6 +335,9 @@ describe('handleBlockingShellInput (daemon repair offer)', () => {
     // handled: true is what keeps the "y" out of the composer, the user
     // answered a question, they did not type a character into their prompt.
     expect(result.handled).toBe(true);
+    expect(prompt.pending()).toBe(true);
+    expect(started).toBe(false);
+    expect(handleBlockingShellInput({ ...options, data: '\r' }).handled).toBe(true);
     expect(prompt.pending()).toBe(false);
     expect(started).toBe(true);
   });
@@ -339,6 +346,7 @@ describe('handleBlockingShellInput (daemon repair offer)', () => {
     const prompt = promptFor(() => {});
     const { options } = shellOptions(prompt);
     handleBlockingShellInput(options);
+    handleBlockingShellInput({ ...options, data: '\r' });
     const second = handleBlockingShellInput({ ...options, data: 'hello' });
     expect(second.handled).toBe(false);
   });

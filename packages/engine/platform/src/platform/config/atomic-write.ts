@@ -1,7 +1,14 @@
-/** Durable configuration publication uses the platform's single owned-stage
- * primitive. Source guards retain their old mkdirp/effect contract: a parent or
- * staging creation advances only directory facts, and publication advances the
- * target only after the original staged inode is visibly in place. */
+/** The durable writer, for files whose loss matters (settings, secrets,
+ * ledgers, offsets): the file and its own parent directory are synced before
+ * success. Three levels, one primitive (`utils/atomic-json-store.ts`):
+ *   1. replace: `writeFileAtomic(path, data)` or `writeDocument` from utils,
+ *      temp file plus rename, no directory sync. Enough for history, view
+ *      state, markers and drafts, which must never be torn but may lose the
+ *      newest write to a power cut.
+ *   2. durable: this function.
+ *   3. guarded: pass `assertCurrent`/`onEffect`; the guard and the parent's
+ *      identity are checked once, just before the rename.
+ * No level walks or syncs directories above the file's parent. */
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 
 export interface AtomicWriteOptions {

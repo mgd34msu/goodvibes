@@ -1,8 +1,6 @@
-import { copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, readDocument, summarizeError, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
 /**
  * InputHistory, Persisted command history with arrow-key navigation.
  *
@@ -98,8 +96,10 @@ export interface HistoryRedactionRule {
 }
 /**
  * Built-in redaction rules that apply regardless of caller-supplied rules.
- * Scrubs passwords and tokens typed into secret-taking commands before they
- * reach disk or the in-memory list.
+ * An executed command's secret arguments are redacted from its own
+ * declaration (`secretArgs` on the command registration) before the line
+ * gets here; these rules cover the commands that do not declare them yet and
+ * token flags typed anywhere.
  */
 const LOCAL_AUTH = String.raw`\/(?:auth\s+local|auth-local|local-auth)`;
 const BUILTIN_REDACTION_RULES: readonly HistoryRedactionRule[] = [
@@ -211,18 +211,19 @@ export class InputHistory {
         const entry: StoredInputHistoryEntry = recallText && recallText !== trimmed
             ? { text: trimmed, recallText }
             : trimmed;
-        // Dedup: skip if same as most recent entry
-        if (this.entries.length > 0 && this.sameEntry(this.entries[0]!, entry)) {
-            this.resetPosition();
+        // Lines another terminal saved go behind this one, so Up recalls what was
+        // just typed here and the repeat check compares against the real neighbour.
+        if (this.persist)
+            this.mergeFromDisk();
+        this.resetPosition();
+        if (this.entries.length > 0 && this.sameEntry(this.entries[0]!, entry))
             return;
-        }
         this.entries.unshift(entry);
         if (this.entries.length > this.maxEntries) {
             this.entries.length = this.maxEntries;
         }
-        this.resetPosition();
         if (this.persist) {
-            this.save();
+            this.write();
         }
     }
     /**
@@ -282,34 +283,38 @@ export class InputHistory {
         return this.entries.map((entry) => this.getRecallText(entry));
     }
     /**
-     * Save history to disk.
-     *
-     * Only the typed text is written. The recall text is the fully expanded
-     * prompt (injected file bodies, pasted blocks), which can carry secrets and
-     * is unbounded, so it lives in memory for this session only. Entries another
-     * terminal added since this process last read the file are merged in rather
-     * than overwritten.
+     * Save history to disk: entries another terminal added since this process
+     * last read the file are merged in behind this process's newest line, then
+     * the file is replaced whole.
      */
     save(): void {
+        this.mergeFromDisk();
+        this.write();
+    }
+    /**
+     * Only the typed text is written. The recall text is the fully expanded
+     * prompt (injected file bodies, pasted blocks), which can carry secrets and
+     * is unbounded, so it lives in memory for this session only. Losing the
+     * newest line to a power cut is acceptable for a history, so the write is
+     * a plain replace (temp file and rename) with no directory sync.
+     */
+    private write(): void {
         try {
-            this.mergeFromDisk();
-            atomicWriteFileSync(this.historyPath, JSON.stringify(this.entries.map((entry) => this.getDisplayText(entry))), { mkdirp: true });
-            this.persistedTexts = new Set(this.entries.map((entry) => this.getDisplayText(entry)));
+            const texts = this.entries.map((entry) => this.getDisplayText(entry));
+            writeDocument(this.historyPath, texts, { indent: null });
+            this.persistedTexts = new Set(texts);
         }
         catch (err) {
             logger.debug('InputHistory save failed (non-fatal)', { error: summarizeError(err) });
         }
     }
+    /** One read of the file. A file that turned unreadable since this process opened it is replaced by the next write. */
     private mergeFromDisk(): void {
-        if (!existsSync(this.historyPath))
-            return;
         let parsed: unknown;
         try {
             parsed = JSON.parse(readFileSync(this.historyPath, 'utf-8'));
         }
         catch {
-            // An unreadable file is replaced by this save; keep the old bytes for the user.
-            this.keepUnreadableCopy();
             return;
         }
         if (!Array.isArray(parsed))
@@ -331,16 +336,9 @@ export class InputHistory {
             this.entries = [...foreign, ...this.entries].slice(0, this.maxEntries);
         }
     }
-    private keepUnreadableCopy(): void {
-        try {
-            copyFileSync(this.historyPath, `${this.historyPath}.bad`);
-        }
-        catch (err) {
-            logger.debug('InputHistory could not keep a copy of the unreadable file', { error: summarizeError(err) });
-        }
-    }
     /**
-     * Load history from disk.
+     * Load history from disk. An unreadable file is moved aside (with a note
+     * saying why) by the platform's document reader and history starts empty.
      *
      * Redaction is applied to every loaded entry so that cleartext passwords
      * persisted before the redaction rules were deployed are scrubbed on first
@@ -348,22 +346,26 @@ export class InputHistory {
      */
     load(): void {
         try {
-            if (existsSync(this.historyPath)) {
-                const raw = readFileSync(this.historyPath, 'utf-8');
-                const parsed = JSON.parse(raw) as unknown;
-                if (Array.isArray(parsed)) {
-                    this.entries = (parsed as unknown[])
-                        .map((entry) => this.normalizeStoredEntry(entry))
-                        .filter((entry): entry is StoredInputHistoryEntry => entry !== null)
-                        .map((entry) => this.redactEntry(entry))
-                        .slice(0, this.maxEntries);
-                    this.persistedTexts = new Set(this.entries.map((entry) => this.getDisplayText(entry)));
-                }
+            const parsed = readDocument(this.historyPath, {
+                label: 'input-history',
+                recovery: 'Input history starts empty; lines typed from now on are kept.',
+                validate: (value: unknown): unknown[] => {
+                    if (!Array.isArray(value))
+                        throw new Error('input history is not a list');
+                    return value;
+                },
+            });
+            if (parsed) {
+                this.entries = parsed
+                    .map((entry) => this.normalizeStoredEntry(entry))
+                    .filter((entry): entry is StoredInputHistoryEntry => entry !== null)
+                    .map((entry) => this.redactEntry(entry))
+                    .slice(0, this.maxEntries);
+                this.persistedTexts = new Set(this.entries.map((entry) => this.getDisplayText(entry)));
             }
         }
         catch (err) {
             logger.debug('InputHistory load failed (non-fatal, using empty history)', { error: summarizeError(err) });
-            this.keepUnreadableCopy();
             this.entries = [];
         }
     }

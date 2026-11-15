@@ -32,21 +32,35 @@ function isExpandableContextReference(raw: string, projectRoot: string): boolean
   }
 }
 
-/** References are declared even when their expansion fails; they are never silent text authority. */
+/**
+ * What the user sent, as the native intake receives it. A collapsed paste is
+ * display only: each `[TEXT: pN, ...]` marker whose paste is in `pastes` is
+ * replaced by the pasted text, so a long paste is complete typed text. Images,
+ * `!@file` and expandable `@path`/URL references in the typed text (never
+ * inside a paste) are declared as sources the intake cannot carry.
+ */
 export function captureNativeConversationInput(
   text: string,
   content?: readonly ContentPart[],
   projectRoot: string = process.cwd(),
+  pastes?: ReadonlyMap<string, string>,
 ): NativeConversationInput {
   const sources: NativeConversationIntakeUnsupportedSource[] = [];
   const add = (kind: NativeConversationIntakeUnsupportedSource['kind'], label: string) => {
     sources.push({ kind, label: label.slice(0, 200) });
   };
-  for (const match of text.matchAll(/\[(TEXT|IMAGE): [^\]]+\]/g)) add(match[1] === 'IMAGE' ? 'image' : 'context', match[0]);
+  const pasteId = (marker: string): string | undefined => /^\[TEXT: (p\d+), \d+ lines\]$/.exec(marker)?.[1];
+  for (const match of text.matchAll(/\[(TEXT|IMAGE): [^\]]+\]/g)) {
+    if (match[1] === 'TEXT' && pastes?.has(pasteId(match[0]) ?? '')) continue;
+    add(match[1] === 'IMAGE' ? 'image' : 'context', match[0]);
+  }
   for (const match of text.matchAll(/(?:^|\s)(!@|@)(\S+)/g)) {
     if (match[1] === '!@') add('file', match[0].trim());
     else if (isExpandableContextReference(match[2] ?? '', projectRoot)) add('context', match[0].trim());
   }
   if (content?.some(part => part.type !== 'text')) add('image', 'attached-content');
-  return Object.freeze({ text, unsupportedSources: Object.freeze(sources.map(source => Object.freeze(source))) });
+  const sent = pastes && pastes.size > 0
+    ? text.replace(/\[TEXT: (p\d+), \d+ lines\]/g, (marker, id: string) => pastes.get(id) ?? marker)
+    : text;
+  return Object.freeze({ text: sent, unsupportedSources: Object.freeze(sources.map(source => Object.freeze(source))) });
 }

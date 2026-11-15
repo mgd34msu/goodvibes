@@ -13,7 +13,8 @@ import {
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConcealedInputRequest } from './concealed-input.js';
 import type { TerminalSlashCommand } from './command-registry.js';
-import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { requireYesFlag, stripYesFlag, type ConfirmableCommand } from './command-confirmation.js';
+import type { CommandSubcommandHints } from './command-args-hint.js';
 
 interface SecretsCommandContext {
   readonly print: (message: string) => void;
@@ -35,7 +36,7 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
     readonly failed: (reference: string, error: string) => string;
     readonly deleted: (key: string) => string;
   },
-): TerminalSlashCommand<Context> {
+): TerminalSlashCommand<Context> & CommandSubcommandHints & Pick<ConfirmableCommand<Context>, 'confirm'> {
   const suffix = policy.confirmMutations ? ' --yes' : '';
   const storageFlags = '[--user|--project] [--secure|--plaintext]';
   const mutationUsage = (operation: string) =>
@@ -55,6 +56,25 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
     hidden: policy.hidden,
     usage,
     argsHint: '<set|link|get|test|providers|list|delete> [KEY]',
+    secretArgs: { subcommands: { set: { from: 2 } } },
+    subcommands: {
+      set: `<KEY> <value> ${storageFlags}${suffix}`,
+      link: `<KEY> <secret-ref> ${storageFlags}${suffix}`,
+      get: '<KEY>',
+      test: '<secret-ref>',
+      providers: '',
+      list: '',
+      delete: `<KEY> ${storageFlags}${suffix}`,
+    },
+    // A product that asks with --yes (confirmMutations) has its own question; otherwise the registry asks once.
+    confirm: policy.confirmMutations
+      ? undefined
+      : (args) => {
+          const key = args[0] === 'delete' ? args.slice(1).find((value) => !value.startsWith('--')) : undefined;
+          return key
+            ? { title: `Delete secret ${key}?`, detail: `The stored value of ${key} is removed and cannot be recovered; anything that reads it stops working until it is set again.`, confirmLabel: 'Delete' }
+            : undefined;
+        },
     async handler(args, context) {
       const store = manager(context);
       const parsed = policy.confirmMutations ? stripYesFlag(args) : { rest: args, yes: true };

@@ -261,55 +261,76 @@ describe('shell/blocking-input', () => {
     });
   });
 
-  describe('approval-input debounce (Item 3a)', () => {
-    function run(data: string, openedAt: number | undefined, now: number) {
-      const resolved: Array<[boolean, boolean | undefined]> = [];
-      let aborted = 0;
+  describe('a sentence being typed never answers a card', () => {
+    function card(openedAt: number | undefined, extra: Record<string, unknown> = {}) {
+      const resolved: Array<[boolean, boolean | undefined, unknown, unknown]> = [];
       const pendingPermission = {
-        callId: 'perm-debounce',
+        callId: 'perm-typing',
         tool: 'write',
         openedAt,
-        resolve: (approved: boolean, remember?: boolean) => { resolved.push([approved, remember]); },
+        ...extra,
+        resolve: (approved: boolean, remember?: boolean, modifiedArgs?: unknown, extras?: unknown) => {
+          resolved.push([approved, remember, modifiedArgs, extras]);
+        },
       } as unknown as PendingPermissionState;
-      const result = handleBlockingShellInput({
-        data,
-        pendingPermission,
-        abortTurn: () => { aborted++; },
-        render: () => {},
-        now,
-      });
-      return { result, resolved, aborted };
+      return { pendingPermission, resolved };
+    }
+    function feed(pending: PendingPermissionState | null, data: string, now: number, composerEmpty = true) {
+      let aborted = 0;
+      const result = handleBlockingShellInput({ data, pendingPermission: pending, abortTurn: () => { aborted++; }, render: () => {}, now, composerEmpty });
+      return { result, aborted };
     }
 
     test('Ctrl+C immediately aborts a newly opened prompt', () => {
-      const { result, resolved, aborted } = run('\x03', 1000, 1000);
+      const { pendingPermission, resolved } = card(1000);
+      const { result, aborted } = feed(pendingPermission, '\x03', 1000);
       expect(result.pendingPermission).toBeNull();
-      expect(resolved).toEqual([[false, false]]);
+      expect(resolved.map(([approved, remember]) => [approved, remember])).toEqual([[false, false]]);
       expect(aborted).toBe(1);
     });
 
-    test('a keystroke within 350ms of the prompt appearing is swallowed, not treated as approval', () => {
-      const { result, resolved } = run('y', 1_000, 1_200); // 200ms later
-      expect(result.handled).toBe(true);
-      expect(result.pendingPermission).not.toBeNull(); // prompt stays open
-      expect(resolved).toHaveLength(0); // never answered
-    });
-
-    test('a deny keystroke within the window is also swallowed (no accidental abort)', () => {
-      const { result, resolved, aborted } = run('n', 1_000, 1_100);
-      expect(result.pendingPermission).not.toBeNull();
+    test('keys of a typing burst go to the composer and the card stays pending', () => {
+      const { pendingPermission, resolved } = card(1_000);
+      let pending: PendingPermissionState | null = pendingPermission;
+      // "can you also" typed 120 ms apart from the moment the card opened: every key is text.
+      let now = 1_000;
+      for (const ch of 'can you also') {
+        now += 120;
+        const { result } = feed(pending, ch, now);
+        expect(result.handled).toBe(false);
+        pending = result.pendingPermission;
+      }
+      expect(pending).not.toBeNull();
       expect(resolved).toHaveLength(0);
-      expect(aborted).toBe(0);
     });
 
-    test('a keystroke after the window resolves normally', () => {
-      const { resolved } = run('y', 1_000, 1_400); // 400ms later
-      expect(resolved).toEqual([[true, false]]);
+    test('the first key after a pause answers', () => {
+      const { pendingPermission, resolved } = card(1_000);
+      const { result } = feed(pendingPermission, 'y', 1_400);
+      expect(result.handled).toBe(true);
+      expect(result.pendingPermission).toBeNull();
+      expect(resolved.map(([approved, remember]) => [approved, remember])).toEqual([[true, false]]);
     });
 
-    test('a prompt without openedAt is never debounced (back-compat)', () => {
-      const { resolved } = run('y', undefined, 999_999);
-      expect(resolved).toEqual([[true, false]]);
+    test('with a draft in the composer keys stay text until Tab moves to the card', () => {
+      const { pendingPermission, resolved } = card(1_000);
+      const typed = feed(pendingPermission, 'y', 9_000, false);
+      expect(typed.result.handled).toBe(false);
+      const tab = feed(typed.result.pendingPermission, '\t', 9_100, false);
+      expect(tab.result.handled).toBe(true);
+      const answer = feed(tab.result.pendingPermission, 'y', 9_200, false);
+      expect(answer.result.pendingPermission).toBeNull();
+      expect(resolved.map(([approved, remember]) => [approved, remember])).toEqual([[true, false]]);
+    });
+
+    test('remembering for the session takes a and then Enter, never a alone', () => {
+      const { pendingPermission, resolved } = card(1_000);
+      const chosen = feed(pendingPermission, 'a', 2_000);
+      expect(chosen.result.pendingPermission).not.toBeNull();
+      expect(resolved).toHaveLength(0);
+      const pressed = feed(chosen.result.pendingPermission, '\r', 2_100);
+      expect(pressed.result.pendingPermission).toBeNull();
+      expect(resolved).toEqual([[true, true, undefined, { rememberTier: 'session' }]]);
     });
   });
 });

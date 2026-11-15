@@ -2,11 +2,9 @@ import { openHandlerMcpWorkspace } from '@goodvibes-jev/engine/terminal-shell/in
 import { createFeedRenderBuffer, syncFeedContextLiveReferences } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
 import { TerminalInputHandlerState } from '@goodvibes-jev/engine/terminal-shell/input-handler-state';
 import {
-  captureFeedContextMutable,
   projectFeedContextStable,
   projectFeedContextClosures,
 } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
-import { syncFeedContextFromHost } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
 import '@goodvibes-jev/engine/terminal-shell/composer-controller';
 import 'node:fs';
 import 'node:path';
@@ -85,7 +83,7 @@ import './handler-shortcuts.ts';
 import { pasteImageFromClipboard, pasteFromClipboard } from '../utils/clipboard.ts';
 import type { ClipboardPasteSource } from './handler-content-actions.ts';
 import { feedInputTokens } from './handler-feed.ts';
-import { buildInitialFeedContext, syncFeedContextMutableFields } from './feed-context-factory.ts';
+import { buildInitialFeedContext } from './feed-context-factory.ts';
 import type { UiRuntimeServices } from '../runtime/ui-services.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
 import type { PasteBurstGuardState } from './paste-flood-guard.ts';
@@ -238,7 +236,7 @@ export class InputHandler extends TerminalInputHandlerState {
    */
   public initFeedContext(): void {
     this.feedContext = buildInitialFeedContext(
-      captureFeedContextMutable(this),
+      this,
       {
         ...projectFeedContextStable(this),
         burstGuard: this.burstGuard,
@@ -250,17 +248,14 @@ export class InputHandler extends TerminalInputHandlerState {
         ...projectFeedContextClosures(this),
         handleUndo: () => {
           this.handleUndo();
-          this.syncFeedContextMutableFields();
           return this.promptEdit();
         },
         handleRedo: () => {
           this.handleRedo();
-          this.syncFeedContextMutableFields();
           return this.promptEdit();
         },
         handlePaste: () => {
           this.handlePaste();
-          this.syncFeedContextMutableFields();
           return this.promptEdit();
         },
         cycleAgentWorkspaceCategory: (direction: 'next' | 'prev') => this.cycleAgentWorkspaceCategory(direction),
@@ -277,10 +272,8 @@ export class InputHandler extends TerminalInputHandlerState {
     return { prompt: this.prompt, cursorPos: this.cursorPos };
   }
 
-  /** Sync mutable handler fields back into feedContext after in-feed mutations. */
-  public syncFeedContextMutableFields(): void {
-    syncFeedContextFromHost(this, this.feedContext);
-  }
+  /** The feed context reads the composer fields from this handler, so there is nothing to copy; callers that still call this can drop the call. */
+  public syncFeedContextMutableFields(): void {}
 
   /** Wire in the InputHistory instance. Optional; disables history navigation if unset. */
   public setHistory(history: InputHistory): void {
@@ -548,40 +541,14 @@ export class InputHandler extends TerminalInputHandlerState {
     const bufferedRequestRender = renderBuffer.requestRender;
 
     this.requestRender = bufferedRequestRender;
-    // Command handlers run synchronously during token processing (/shortcuts, /help)
-    // and set these overlay flags on the handler itself; writing the feed context's
-    // pre-feed copy back unconditionally would revert them in the same keystroke.
-    const helpOverlayActiveBefore = this.helpOverlayActive;
-    const helpScrollOffsetBefore = this.helpScrollOffset;
-    const shortcutsOverlayActiveBefore = this.shortcutsOverlayActive;
-    const shortcutsScrollOffsetBefore = this.shortcutsScrollOffset;
     try {
       const context = this.feedContext;
-      syncFeedContextMutableFields(this, context);
       syncFeedContextLiveReferences(this, context);
       // Swap requestRender to buffered version for this feed.
       context.requestRender = bufferedRequestRender;
-      this.syncFeedSelectionCallback = (callback) => {
-        context.selectionCallback = callback;
-      };
       context.handleSetupPairingToken = (token) => this.setupPairing?.handleToken(token) ?? false;
       feedInputTokens(context, this.tokenizer.feed(data));
-      this.prompt = context.prompt;
-      this.cursorPos = context.cursorPos;
-      this.inputScrollTop = context.inputScrollTop;
-      this.commandMode = context.commandMode;
-      this.indicatorFocused = context.indicatorFocused;
-      if (context.helpOverlayActive !== helpOverlayActiveBefore) this.helpOverlayActive = context.helpOverlayActive;
-      if (context.helpScrollOffset !== helpScrollOffsetBefore) this.helpScrollOffset = context.helpScrollOffset;
-      if (context.shortcutsOverlayActive !== shortcutsOverlayActiveBefore) this.shortcutsOverlayActive = context.shortcutsOverlayActive;
-      if (context.shortcutsScrollOffset !== shortcutsScrollOffsetBefore) this.shortcutsScrollOffset = context.shortcutsScrollOffset;
-      this.selectionCallback = context.selectionCallback;
-      this.nextPasteId = context.nextPasteId;
-      this.nextImageId = context.nextImageId;
-      this.mouseDownRow = context.mouseDownRow;
-      this.mouseDownCol = context.mouseDownCol;
     } finally {
-      this.syncFeedSelectionCallback = null;
       renderBuffer.release();
       this.requestRender = immediateRequestRender;
     }

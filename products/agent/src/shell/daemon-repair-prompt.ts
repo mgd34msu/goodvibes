@@ -62,6 +62,8 @@ export interface DaemonRepairPromptOptions {
 export function createDaemonRepairPrompt(options: DaemonRepairPromptOptions): DaemonRepairPrompt {
   const { offer, config, session, systemMessageRouter, render } = options;
   let awaitingAnswer = true;
+  // `y` alone does not install a system service: it asks for Enter first, so a sentence starting with y cannot.
+  let confirming = false;
 
   const repair = options.repair ?? ((pending: DaemonRepairOffer) => runDaemonRepair({
     config,
@@ -74,8 +76,16 @@ export function createDaemonRepairPrompt(options: DaemonRepairPromptOptions): Da
     pending: () => awaitingAnswer,
     answer: (key: string) => {
       if (!awaitingAnswer) return false;
+      if (!confirming && key.toLowerCase().trim() === 'y') {
+        confirming = true;
+        systemMessageRouter.high(offer.serviceInstalled
+          ? '[Daemon] Press Enter to start the daemon service, or any other key to leave it as it is.'
+          : '[Daemon] Press Enter to install and start the daemon service, or any other key to leave it as it is.');
+        render();
+        return true;
+      }
       awaitingAnswer = false;
-      if (key.toLowerCase().trim() !== 'y') {
+      if (!confirming || (key !== '\r' && key !== '\n')) {
         // A decline changes nothing at all, not the setting, not the service,
         // and is remembered for the rest of the session so it is never re-asked.
         session.decline();

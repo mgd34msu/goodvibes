@@ -6,7 +6,8 @@ import { readShellFrameFacts, createShellSubmissionPorts, createUiEventPublisher
 import { readInitialExecutionMode } from './permissions/execution-mode.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
-import { captureNativeConversationInput, type ProductInputContext } from './runtime/native-conversation-input.ts';
+import { captureNativeConversationInput, type NativeConversationInput, type ProductInputContext } from './runtime/native-conversation-input.ts';
+import { formatRefusal, refusal } from '@goodvibes-jev/engine/errors';
 import { routeNativeConversationInput, dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
 import { createNativeWorkLedgerView } from './runtime/native-work-ledger-host.ts';
 import { resolveConnectedHostConnection as resolveNativeLedgerHost } from './runtime/client/daemon-verbs.ts';
@@ -36,7 +37,7 @@ import './input/command-registry.ts';
 import './input/commands.ts';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import './input/input-history.ts';
-import { ShellContextHold, ShellPassthrough, SHELL_USAGE_HINT, withShellContext } from './input/shell-passthrough.ts';
+import { ShellContextHold, ShellPassthrough, SHELL_USAGE_HINT } from './input/shell-passthrough.ts';
 import { buildShellFooter, estimateShellFooterHeight } from './renderer/shell-surface.ts';
 import { HEADER_GAP_ROWS, withHeaderGap } from './renderer/header-line.ts';
 import { TranscriptScroll, mainBackToBottom, transcriptEscape } from './shell/transcript-scroll.ts';
@@ -89,7 +90,7 @@ import { cancelConversationGeneration, installRemoteConversationRouting } from '
 import { applyAtModelSwitches } from './input/at-model-switch.ts';
 import { createCommandContextUi } from './shell/command-context-ui.ts';
 import { createTerminalPaintWindow } from './shell/terminal-paint-window.ts';
-import { wireWorkTree } from './core/work-tree-wiring.ts';
+import { createSessionContractViews, wireWorkTree } from './core/work-tree-wiring.ts';
 import { SessionViews } from './shell/session-views.ts';
 
 // Escape bytes and enter/exit sequencing live in renderer/terminal-escapes.ts (re-exported from @goodvibes-jev/engine/terminal-shell) so this file never holds its own drifting copy.
@@ -258,6 +259,7 @@ async function main() {
   const transcript = new TranscriptScroll();
 
   const shellPassthrough = new ShellPassthrough();
+  let shellCommandsRunning = 0;
 
   // Ambient autonomy surfacing: away digest at launch + the Activity modal's Coming up,
   // both read from the connected host where schedules live and run.
@@ -306,12 +308,16 @@ async function main() {
   // Live-microphone footer row (the wake detector); assigned once voice capture is wired below, null until then so pre-wiring frames size correctly.
   let voiceCaptureStatus: () => import('./core/voice-capture-status.ts').VoiceCaptureIndicatorState | null = () => null;
 
+  // One cached contract snapshot for the session (no manifest), rebuilt on a contract event: every per-frame lookup reads it.
+  const sessionContractViews = createSessionContractViews(ctx.services.contractRunner, () => runtime.sessionId,
+    (listener) => ctx.services.runtimeBus.onDomain('contracts', listener));
   // Agents and background processes opened full screen: Enter on a lane or ▶ bead, the Activity modal, the process monitor (shell/session-views.ts).
   const sessionViews = new SessionViews({
     conversation,
     agentManager,
     processManager,
     contractRunner: ctx.services.contractRunner,
+    contracts: sessionContractViews,
     fleetNodes: () => ctx.services.processRegistry.query().nodes,
     steer: (id, text) => ctx.services.processRegistry.steer(id, text),
     killAgent: (id) => ctx.services.processRegistry.kill(id, { cascade: true }),
@@ -365,8 +371,7 @@ async function main() {
     conversation,
     events: uiServices.events,
     agentManager,
-    listContracts: () => ctx.services.contractRunner.list({ sessionId: runtime.sessionId, includeTerminal: true }),
-    onContractsChanged: (listener) => ctx.services.runtimeBus.onDomain('contracts', listener),
+    contracts: sessionContractViews,
     fleetNodes: () => ctx.services.processRegistry.query().nodes,
     pendingCallId: () => pendingPermission?.callId,
     turnActive: mainTurnBusy,
@@ -374,7 +379,7 @@ async function main() {
     sessionId: () => runtime.sessionId,
     requestRender: () => render(),
   });
-  unsubs.push(...workTreeWiring.unsubs, () => sessionViews.dispose());
+  unsubs.push(...workTreeWiring.unsubs, () => sessionViews.dispose(), sessionContractViews.dispose);
   const throbberSource = createThrobberSource(
     uiServices.events.tools,
     () => ctx.services.contextAccountingHolder.getSource()?.getCompactionState().isCompacting === true,
@@ -474,6 +479,7 @@ async function main() {
       restoreTerminal: () => terminalLifecycle.restoreTerminal(),
       warn: (message, error) => logger.warn(message, { error: summarizeError(error) }),
       warnPlain: (message) => logger.warn(message),
+      printToTerminal: writeFatalLine,
       exit: (code) => process.exit(code),
     }, handOver, exitCode);
   };
@@ -488,6 +494,12 @@ async function main() {
       configManager,
       services: ctx.services,
       exit: exitApp,
+      // The person is in the middle of something this shell can see.
+      userIsMidGesture: () => input.prompt.length > 0 || input.modalStack.length > 0 || input.waitingForOwner
+        || shellCommandsRunning > 0 || setupPairing?.ownsInput === true || pendingPermission !== null,
+      workRunningHere: () => mainTurnBusy() || uiServices.readModels.agents.getSnapshot().active.length > 0
+        || processManager.list().some((entry) => processManager.getStatus(entry.id)?.done === false),
+      sessionId: () => runtime.sessionId,
       notify: (line) => {
         systemMessageRouter.high(`[Update] ${line}`);
         render();
@@ -524,7 +536,6 @@ async function main() {
     if (input.prompt.length > 0 || text.length === 0) return;
     input.prompt = text;
     input.cursorPos = text.length;
-    input.syncFeedContextMutableFields();
     render();
   };
   // Shell output taken for a message that has not been admitted yet. If the message is refused
@@ -584,8 +595,40 @@ async function main() {
    * `@model:` at either end switches the model, `!#` pins a memory, `!` runs a
    * shell command. Everything else is sent through `sendTurn` as typed.
    */
+  // A conversation turn carries complete typed text. An image, a file or URL
+  // reference, or held shell output cannot go with it: say which part and what
+  // to do, before anything is pinned or sent, and give the draft back.
+  const refuseUnsendable = (draft: string, source: NativeConversationInput | undefined, content: readonly ContentPart[] | undefined): boolean => {
+    const parts = [...(source?.unsupportedSources ?? [])];
+    if (content?.some((part) => part.type !== 'text') && !parts.some((part) => part.kind === 'image')) parts.push({ kind: 'image', label: 'attached image' });
+    const shell = shellContextHold.take();
+    if (parts.length === 0 && shell.blocks.length === 0) {
+      shell.restore();
+      return false;
+    }
+    // Held shell output is dropped so the next Enter sends the text alone; it stays visible in the transcript.
+    shell.release();
+    const named = [...parts.map((part) => part.label), ...(shell.blocks.length > 0 ? ['the output of your last shell command'] : [])];
+    const next = [
+      ...(parts.some((part) => part.kind === 'image') ? ['remove the image and describe it in words'] : []),
+      ...(parts.some((part) => part.kind === 'file') ? ["paste the file's text in place of the !@ reference"] : []),
+      ...(parts.some((part) => part.kind === 'context') ? ['paste the text in place of the @ reference or link'] : []),
+      ...(shell.blocks.length > 0 ? ['paste the shell lines you need (the held output was not attached)'] : []),
+    ];
+    systemMessageRouter.high(formatRefusal(refusal({
+      code: 'TURN_SOURCE_UNSUPPORTED',
+      state: 'not sent; your text is back in the composer',
+      reason: `Not sent: a conversation turn carries typed text only, and this message has ${named.join(', ')}`,
+      next: [`Your text is back in the composer; to send it, ${next.join('; ')}, then press Enter`],
+    })));
+    restoreDraft(draft);
+    render();
+    return true;
+  };
+
   const submitComposerText = (text: string, content?: ContentPart[], options: ProductInputContext = {}) => {
     prepareSubmission();
+    const draft = options.source?.text ?? text;
     let processedText = applyAtModelSwitches(text, {
       providerRegistry,
       configManager,
@@ -595,18 +638,7 @@ async function main() {
       },
       notify: (message) => systemMessageRouter.high(message),
     });
-    if (processedText.startsWith('!#')) {
-      const memoryText = processedText.slice(2).trim();
-      if (!memoryText) {
-        systemMessageRouter.high('[Memory] Usage: !# <text to pin as conversation-pinned memory>');
-        render();
-        processedText = '';
-      } else {
-        const memId = ctx.services.sessionMemoryStore.add(memoryText);
-        systemMessageRouter.high(`[Memory] Pinned: "${memoryText}" (${memId})`);
-        processedText = memoryText;
-      }
-    } else if (processedText.startsWith('!')) {
+    if (processedText.startsWith('!') && !processedText.startsWith('!#')) {
       const command = processedText.slice(1).trim();
       if (!command) {
         systemMessageRouter.high(SHELL_USAGE_HINT);
@@ -615,14 +647,28 @@ async function main() {
       }
       systemMessageRouter.high(`[Shell] $ ${command}`);
       render();
+      shellCommandsRunning += 1;
       void shellPassthrough
         .run(command, workingDir)
         .then((result) => systemMessageRouter.high(result.display))
         .catch((shellErr: unknown) => systemMessageRouter.high(`[Shell] Failed to run: ${summarizeError(shellErr)}`))
-        .finally(() => render());
+        .finally(() => { shellCommandsRunning -= 1; render(); });
       return;
     }
-    sendTurn(processedText, content, options, text);
+    if (refuseUnsendable(draft, options.source, content)) return;
+    if (processedText.startsWith('!#')) {
+      const memoryText = processedText.slice(2).trim();
+      if (!memoryText) {
+        systemMessageRouter.high('[Memory] Usage: !# <text to pin as conversation-pinned memory>');
+        render();
+        return;
+      }
+      const memId = ctx.services.sessionMemoryStore.add(memoryText);
+      systemMessageRouter.high(`[Memory] Pinned: "${memoryText}" (${memId})`);
+      processedText = memoryText;
+    }
+    // Model directives and the pin prefix are the composer's own grammar; what remains is what the user sent.
+    sendTurn(processedText, options);
   };
 
   /**
@@ -632,50 +678,37 @@ async function main() {
    */
   const submitTurn = (text: string, content?: ContentPart[], options: ProductInputContext = {}): void => {
     prepareSubmission();
-    sendTurn(text, content, options);
+    if (refuseUnsendable(text, options.source, content)) return;
+    sendTurn(text, options);
   };
 
-  // `composerText` is what was typed when the composer's grammar changed it.
-  function sendTurn(processedText: string, content: ContentPart[] | undefined, options: ProductInputContext, composerText?: string): void {
-    const original = options.source ?? { text: composerText ?? processedText, unsupportedSources: [{ kind: 'context' as const, label: 'derived-input' }] };
-    if (processedText || content) {
-      void (async () => {
-        const shellContext = shellContextHold.take();
-        const outgoing = withShellContext(shellContext.blocks, processedText);
-        try {
-          const unsupportedSources = [...original.unsupportedSources];
-          if (outgoing !== processedText) unsupportedSources.push({ kind: 'context', label: 'shell-context' });
-          if (composerText !== undefined && processedText !== composerText) unsupportedSources.push({ kind: 'context', label: 'composer-derived-text' });
-          if (content?.some((part) => part.type !== 'text')) unsupportedSources.push({ kind: 'image', label: 'attached-content' });
-          const source = { text: original.text, unsupportedSources };
-          if (await remoteConversation.routeNativeOrExplain(source, commandContext.nativeConversationIntake, shellContext.restore)) return;
-          const state = await routeNativeConversationInput({
-            intake: commandContext.nativeConversationIntake,
-            source,
-            notify: (message) => {
-              systemMessageRouter.userAction(message);
-              render();
-            },
-            dispatch: (state) => dispatchNativeTurn(state, options.spokenOutput),
-          });
-          // Refused (another input still being admitted, no intake, input not acceptable): nothing was sent.
-          if (state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') {
-            shellContext.restore();
-            restoreDraft(source.text);
-          }
-        } catch (error) {
-          // Routing failed before the input was admitted: give back the draft and the shell output.
-          shellContext.restore();
-          restoreDraft(original.text);
-          systemMessageRouter.high(`Your message was not sent: ${summarizeError(error)}`);
-          render();
-        } finally {
-          shellContext.release();
-        }
-      })();
-    } else {
+  function sendTurn(text: string, options: ProductInputContext): void {
+    if (!text) {
       render();
+      return;
     }
+    const source: NativeConversationInput = { text, unsupportedSources: [] };
+    void (async () => {
+      try {
+        if (await remoteConversation.routeNativeOrExplain(source, commandContext.nativeConversationIntake)) return;
+        const state = await routeNativeConversationInput({
+          intake: commandContext.nativeConversationIntake,
+          source,
+          notify: (message) => {
+            systemMessageRouter.userAction(message);
+            render();
+          },
+          dispatch: (state) => dispatchNativeTurn(state, options.spokenOutput),
+        });
+        // Refused (another input still being admitted, no intake, input not acceptable): nothing was sent.
+        if (state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') restoreDraft(source.text);
+      } catch (error) {
+        // Routing failed before the input was admitted: give back the draft.
+        restoreDraft(source.text);
+        systemMessageRouter.high(`Your message was not sent: ${summarizeError(error)}`);
+        render();
+      }
+    })();
   }
 
   const cancelGeneration = () => {
@@ -814,7 +847,6 @@ async function main() {
         input.cursorPos = text.length;
         input.commandMode = false;
         input.autocomplete?.reset();
-        input.syncFeedContextMutableFields();
         render();
       },
       // A modal that closed itself leaves a stale stack name that would refuse pairing with nothing on screen.
@@ -917,7 +949,7 @@ async function main() {
         recoveryPending,
         daemonRepairPrompt,
         setupPairing,
-        contracts: ctx.services.contractRunner.list({ sessionId: runtime.sessionId, includeTerminal: false }),
+        contracts: sessionContractViews.active(),
       }),
     );
     setupPairing?.checkPresentation();
@@ -1193,6 +1225,7 @@ async function main() {
       recoveryPending,
       daemonRepairPrompt,
       abortTurn: () => orchestrator.abort(),
+      composerEmpty: input.prompt.length === 0,
       conversation,
       systemMessageRouter,
       render,

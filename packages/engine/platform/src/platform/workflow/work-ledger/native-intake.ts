@@ -276,6 +276,12 @@ export function createNativeConversationIntakeHost(deps: {
     }
     try {
       if (isClassicOperation()) return await classicConversation();
+      // An input with a source the intake cannot carry can never act: settle it
+      // now instead of spending a routing and a decision reading to learn that.
+      if (record.unsupportedSources.length) {
+        await update({ state: 'blocked', stage: null, reason: 'unsupported-source' });
+        return projection(record);
+      }
       const routeEvidence = await readNativeIntakeRoute({ text: record.text, sourceRevision: record.sourceRevision, ...(record.continuation ? { continuation: record.continuation } : {}), sourceIssues: record.unsupportedSources,
         port: deps.port, decisionLog: deps.decisionLog, binding: nativeConversationDecisionBinding(record, 'routing'), assertCurrent, signal });
       assertCurrent(); await update({ route: routeEvidence.route });

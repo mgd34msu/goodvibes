@@ -35,6 +35,8 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
     description: 'Review provider auth posture and export redacted auth review bundles',
     hidden: true,
     usage: '[review|show <provider>|repair <provider>|bundle export <path> --yes|bundle inspect <path>]',
+    // Login and local-auth lines are refused here, but a password typed into one must still never reach the input history.
+    secretArgs: { subcommands: { login: [4], 'local add-user': [3], 'local rotate-password': [3], 'local revoke-session': [2] } },
     async handler(args, ctx) {
       const parsed = stripYesFlag(args);
       const commandArgs = [...parsed.rest];

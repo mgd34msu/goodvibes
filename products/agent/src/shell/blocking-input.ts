@@ -1,4 +1,4 @@
-import { handleSimplePermissionInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
+import { handleSimplePermissionInput, routeCardInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import type { ConversationManager } from '../core/conversation';
 import type { PermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { SessionSnapshot } from '@/runtime/index.ts';
@@ -9,6 +9,14 @@ import type { DaemonRepairPrompt } from './daemon-repair-prompt.ts';
 
 export type PendingPermissionState = PermissionRequest & {
   resolve: (approved: boolean, remember?: boolean) => void;
+  /** When the card was put on screen; keys typed within the settle time or as one burst go to the composer. */
+  openedAt?: number;
+  /** The last key that was passed to the composer as typing. */
+  lastTypedAt?: number | undefined;
+  /** The person has addressed the card (a key after a pause, or Tab). */
+  addressed?: boolean | undefined;
+  /** `a` was pressed: Enter now allows for the session, any other key goes back. */
+  rememberArmed?: boolean | undefined;
 };
 
 export type BlockingInputHandlerOptions = {
@@ -24,6 +32,10 @@ export type BlockingInputHandlerOptions = {
    */
   daemonRepairPrompt: DaemonRepairPrompt | null;
   abortTurn: () => void;
+  /** False while the composer holds a draft: keys keep going to it until Tab moves to the card. */
+  composerEmpty?: boolean;
+  /** Injectable clock for the typing-burst rule; defaults to Date.now(). Tests only. */
+  now?: number;
   conversation: ConversationManager;
   systemMessageRouter: SystemMessageRouter;
   render: () => void;
@@ -67,13 +79,47 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
   } = options;
 
   if (pendingPermission) {
-    const req = pendingPermission;
+    // A sentence being typed when the card appeared keeps going to the composer:
+    // only a key after a pause (or Tab) addresses the card.
+    const now = options.now ?? Date.now();
+    const routed = routeCardInput(
+      data,
+      // A card with no recorded opening time has no settle time; the burst rule still applies.
+      { openedAt: pendingPermission.openedAt ?? 0, lastTypedAt: pendingPermission.lastTypedAt, addressed: pendingPermission.addressed },
+      now,
+      options.composerEmpty ?? true,
+    );
+    if (!routed.answer) {
+      return {
+        handled: false,
+        pendingPermission: { ...pendingPermission, lastTypedAt: routed.card.lastTypedAt },
+        recoveryPending,
+      };
+    }
+    const req: PendingPermissionState = routed.card.addressed ? { ...pendingPermission, addressed: true } : pendingPermission;
+    // "For session" is not offered for an ask the owner is asked again.
+    const canRemember = req.rememberEffect !== 'owner-asked-again';
+    if (req.rememberArmed) {
+      if (data === '\r' || data === '\n') {
+        req.resolve(true, true);
+        render();
+        return { handled: true, pendingPermission: null, recoveryPending };
+      }
+      systemMessageRouter.high('[Approval] Not remembered. Answer the request: y allows once, a then Enter allows for this session, n denies.');
+      render();
+      return { handled: true, pendingPermission: { ...req, rememberArmed: undefined }, recoveryPending };
+    }
+    if (canRemember && data.toLowerCase().trim() === 'a') {
+      // Remembering is never one bare key: Enter confirms it.
+      systemMessageRouter.high('[Approval] Press Enter to allow this for the rest of the session, or any other key to go back.');
+      render();
+      return { handled: true, pendingPermission: { ...req, rememberArmed: true }, recoveryPending };
+    }
     if (
       handleSimplePermissionInput(data, {
         escapeDenies: true,
         abortOnDeny: true,
-        // "For session" is not offered for an ask the owner is asked again; the key allows once.
-        resolve: (approved, remember) => req.resolve(approved, req.rememberEffect === 'owner-asked-again' ? false : remember),
+        resolve: (approved) => req.resolve(approved, false),
         abort: abortTurn,
         render,
       })
@@ -81,7 +127,7 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       return { handled: true, pendingPermission: null, recoveryPending };
 
     render();
-    return { handled: true, pendingPermission, recoveryPending };
+    return { handled: true, pendingPermission: req, recoveryPending };
   }
 
   if (recoveryPending) {
@@ -137,7 +183,7 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
     return { handled: false, pendingPermission: null, recoveryPending: null };
   }
 
-  // One-touch daemon repair: 'y' repairs, EVERY other key declines, default
+  // Daemon repair: 'y' then Enter repairs, EVERY other key declines, default
   // no, matching the workspace prompt below and every other boot-time offer.
   // Declining changes nothing whatsoever and is remembered for the rest of the
   // session, so the question is asked once and never turn after turn.

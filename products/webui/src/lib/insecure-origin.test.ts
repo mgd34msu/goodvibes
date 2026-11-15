@@ -1,20 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { isPrivateNetworkHost as transportIsPrivateNetworkHost } from '@goodvibes-jev/engine/transport-http';
-import { isInsecureTransportOrigin, isPrivateNetworkHost } from './insecure-origin';
-
-const hosts = [
-  'localhost', 'app.localhost', '127.0.0.1', '[::1]', '::1', '0.0.0.0', '::', '[::]', '0:0:0:0:0:0:0:0',
-  'nas.local', '10.1.1.1', '172.16.0.1', '172.31.255.1', '172.32.0.1', '192.168.1.5', '192.169.1.5',
-  '8.8.8.8', 'example.com', '[2001:db8::1]',
-];
-
-describe('the guard agrees with the transport about which hosts are private', () => {
-  for (const host of hosts) {
-    test(host, () => {
-      expect(isPrivateNetworkHost(host)).toBe(transportIsPrivateNetworkHost(host));
-    });
-  }
-});
+import { isInsecureTransportOrigin } from './insecure-origin';
 
 function setOrigin(url: string): void {
   (globalThis as unknown as { happyDOM: { setURL: (u: string) => void } }).happyDOM.setURL(url);
@@ -25,6 +10,13 @@ describe('isInsecureTransportOrigin', () => {
   test('a wildcard bind address typed as the origin is a working local setup, not an HTTPS wall', () => {
     setOrigin('http://0.0.0.0:3421/');
     expect(isInsecureTransportOrigin()).toBe(false);
+  });
+
+  test('plain http on a Tailscale name or address opens the app', () => {
+    for (const origin of ['http://box.tail1234.ts.net:3421/', 'http://100.101.102.103:3421/']) {
+      setOrigin(origin);
+      expect(isInsecureTransportOrigin()).toBe(false);
+    }
   });
 
   test('plain http on a public host is walled; https on the same host is not', () => {

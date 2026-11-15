@@ -1,12 +1,14 @@
-import {getLocalNetworkIp} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
 import type { CommandRegistry } from '../command-registry.ts';
-import 'node:os';
 import {
   buildCompanionConnectionInfo,
   type CompanionConnectionInfo,
   encodeConnectionPayload,
+  formatHttpOrigin,
   generateQrMatrix,
+  isWildcardBindHost,
+  refreshStableHostInputs,
   renderQrToString,
+  stableUrlHostForBindHost,
 } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../../config/surface.ts';
 import { resolveRuntimeEndpointBinding } from '../../cli/endpoints.ts';
@@ -15,17 +17,12 @@ import { requirePlatform, requireShellPaths } from './runtime-services.ts';
 
 
 
-function urlHostForBindHost(host: string): string {
-  if (host === '0.0.0.0' || host === '::') return getLocalNetworkIp();
-  return host || '127.0.0.1';
-}
-
 function formatTokenLine(token: string, showToken: boolean): string {
   if (showToken) return `Token:          ${token}`;
   return 'Token:          present (hidden in text; QR contains pairing payload)';
 }
 
-function formatAgentPairingBlock(info: CompanionConnectionInfo, qr: string, showToken: boolean): string {
+function formatAgentPairingBlock(info: CompanionConnectionInfo, qr: string, showToken: boolean, alternateUrl: string | undefined): string {
   return [
     `GoodVibes Agent companion pairing v${info.version}`,
     '━━━━━━━━━━━━━━━━━━━━━━━━',
@@ -38,6 +35,7 @@ function formatAgentPairingBlock(info: CompanionConnectionInfo, qr: string, show
     '',
     qr,
     '',
+    ...(alternateUrl ? [`If the device cannot open ${info.url}, use ${alternateUrl} instead.`, ''] : []),
     showToken
       ? 'Manual token display was explicitly confirmed for this command.'
       : 'For manual setup, rerun /pair --show-token --yes to print the token once.',
@@ -56,7 +54,7 @@ export function registerQrcodeRuntimeCommands(registry: CommandRegistry): void {
     description: 'Print companion pairing details and a QR code',
     hidden: true,
     usage: '',
-    handler(args, ctx) {
+    async handler(args, ctx) {
       // The QR payload and the --show-token text both carry the host's admin token.
       if (ctx.invokedByModel === true) {
         ctx.print('Pairing details contain the connected host operator token, so /qrcode is refused when a model runs it. The owner can type /qrcode in the live Agent terminal.');
@@ -70,7 +68,12 @@ export function registerQrcodeRuntimeCommands(registry: CommandRegistry): void {
         return;
       }
       const binding = resolveRuntimeEndpointBinding(configManager, 'controlPlane');
-      const connectedHostUrl = `http://${urlHostForBindHost(binding.host)}:${binding.port}`;
+      // The full host ladder (Tailscale name, a `.local` name that resolves here) needs
+      // the asynchronous probes; a wildcard bind waits for them once, then they are cached.
+      const hostInputs = isWildcardBindHost(binding.host) ? await refreshStableHostInputs() : undefined;
+      const resolvedHost = stableUrlHostForBindHost(binding.host, hostInputs ? () => hostInputs : undefined);
+      const connectedHostUrl = formatHttpOrigin(resolvedHost.host, binding.port);
+      const alternateUrl = resolvedHost.alternateHost ? formatHttpOrigin(resolvedHost.alternateHost, binding.port) : undefined;
       const info = buildCompanionConnectionInfo({
         daemonUrl: connectedHostUrl,
         token: tokenRecord.token,
@@ -88,7 +91,7 @@ export function registerQrcodeRuntimeCommands(registry: CommandRegistry): void {
         ].join('\n'));
         return;
       }
-      ctx.print(formatAgentPairingBlock(info, qr, showToken));
+      ctx.print(formatAgentPairingBlock(info, qr, showToken, alternateUrl));
     },
   });
 }

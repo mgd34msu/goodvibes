@@ -18,7 +18,7 @@ import {
 import { ensurePublicBaseUrl } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { formatHttpOrigin, pairingOriginUsesStableHost, refreshStableHostInputs, stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { classifyBindPosture, isNetworkFacing } from './network-posture.ts';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
@@ -129,8 +129,10 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
     // Freeze a stable web origin once (never clobbering a user-set value) so the
     // printed link and the daemon's own handoff origin agree and survive a DHCP
     // lease change where a stable name exists. The verb re-derives the same origin
-    // and returns its honest posture, so this call is a persistence side effect.
-    ensurePublicBaseUrl(runtime.configManager);
+    // and returns its honest posture. A wildcard bind waits once for the host
+    // probes (Tailscale name, a `.local` name that resolves here).
+    const hostInputs = pairingOriginUsesStableHost(runtime.configManager) ? await refreshStableHostInputs() : undefined;
+    const webOrigin = ensurePublicBaseUrl(runtime.configManager, hostInputs ? () => hostInputs : undefined);
     const name = readOptionValue(runtime.cli.commandArgs, '--name') ?? defaultPairingTokenName();
     // Mint through the canonical hand-off verb ON THE DAEMON: the deep link
     // pairs a device to the daemon-hosted web app, and the offer set (push,
@@ -168,6 +170,11 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
     // path. Absence stays quiet.
     lines.push(...(await renderPairingTailscaleLines(services)));
     lines.push('', qr);
+    // A device that cannot resolve the name in the link (no mDNS, not on the
+    // tailnet) can still use the routable address with the same one-time token.
+    if (webOrigin.alternateOrigin && link.startsWith(`${webOrigin.origin}/`)) {
+      lines.push('', 'If the link does not open on the device, use the address instead:', `  ${webOrigin.alternateOrigin}${link.slice(webOrigin.origin.length)}`);
+    }
     return lines.join('\n');
   }, { modelData: 'skip' });
 }
@@ -223,10 +230,9 @@ export function renderWeb(runtime: CliCommandRuntime): string {
   const binding = resolveRuntimeEndpointBinding(runtime.configManager, 'web');
   const publicBaseUrl = String(runtime.configManager.get('web.publicBaseUrl') ?? '');
   const hasEndpointOverride = runtime.cli.flags.hostname !== undefined || runtime.cli.flags.port !== undefined;
-  // Prefer the stable-name resolution over the raw first-non-internal IPv4 so the
-  // printed URL survives a DHCP lease change where a stable name exists.
+  // The engine's stable-host rule, the same one the daemon and pairing print.
   const url =
-    !hasEndpointOverride && publicBaseUrl ? publicBaseUrl : `http://${stableUrlHostForBindHost(binding.host).host}:${binding.port}`;
+    !hasEndpointOverride && publicBaseUrl ? publicBaseUrl : formatHttpOrigin(stableUrlHostForBindHost(binding.host).host, binding.port);
   const value = {
     enabled: runtime.configManager.get('web.enabled'),
     ...binding,

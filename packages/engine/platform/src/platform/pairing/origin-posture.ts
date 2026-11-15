@@ -4,16 +4,16 @@
  * The honest TLS/capability posture of a web origin, served over the pairing
  * contract so every surface renders the SAME truth instead of dead buttons:
  *
- *  - Plain http on a PRIVATE-NETWORK origin (LAN IP, .local, localhost) is a
- *    deliberate, supported posture. The one honest line about it is stated at
- *    pairing, never a nag.
+ *  - Plain http on a PRIVATE-NETWORK origin (LAN IP, .local, localhost, a
+ *    Tailscale name or address) is a deliberate, supported posture. The one
+ *    honest line about it is stated at pairing, never a nag.
  *  - Browsers gate some capabilities on a secure context (https, or the
  *    localhost loopback). Rather than a surface showing a dead button, the
  *    daemon labels each gated capability with WHY it is unavailable and the
  *    supported way to get it (tailscale ⇒ https without minting certificates,
  *    the daemon NEVER provisions a CA or mints certificates).
  */
-import { isPrivateNetworkHost } from '@goodvibes-jev/engine/transport-http';
+import { isPrivateNetworkHost, isTailnetHost } from '@goodvibes-jev/engine/transport-http/paths';
 import { isLoopbackHost } from '../utils/reachable-base-url.js';
 
 /** The browser-gated capabilities a surface renders availability for. */
@@ -36,7 +36,7 @@ export interface OriginPosture {
   /** The origin the posture describes (scheme://host[:port]). */
   readonly origin: string;
   readonly scheme: 'http' | 'https' | 'other';
-  /** Loopback / RFC 1918 / .local, the supported plain-http LAN posture. */
+  /** Loopback, a private LAN or link-local address, .local, or a Tailscale name or address: the supported plain-http posture. */
   readonly privateNetwork: boolean;
   /** Whether browsers treat this origin as a secure context (https, or loopback). */
   readonly secureContext: boolean;
@@ -52,6 +52,14 @@ export interface OriginPosture {
 /** The single honest plain-http-on-LAN line every surface renders verbatim. */
 export const LAN_PLAIN_HTTP_NOTICE =
   'Connection is unencrypted on your LAN. Everything works except browser-gated features; Tailscale gives encrypted access with the full app.';
+
+/**
+ * The plain-http-on-a-tailnet line: the connection is already encrypted by
+ * Tailscale, so the LAN line's advice would be wrong; only the browser-gated
+ * features are missing.
+ */
+export const TAILNET_PLAIN_HTTP_NOTICE =
+  'Connection is encrypted by Tailscale. Everything works except browser-gated features, which need https: serve this machine over Tailscale https to get them.';
 
 const NEEDS_HTTPS_REASON = 'needs https, available via tailscale';
 
@@ -95,7 +103,7 @@ export function describeOriginPosture(origin: string): OriginPosture {
     scheme,
     privateNetwork,
     secureContext,
-    ...(plainHttpLan ? { notice: LAN_PLAIN_HTTP_NOTICE } : {}),
+    ...(plainHttpLan ? { notice: isTailnetHost(parsed.hostname) ? TAILNET_PLAIN_HTTP_NOTICE : LAN_PLAIN_HTTP_NOTICE } : {}),
     capabilities,
   };
 }

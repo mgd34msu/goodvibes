@@ -29,7 +29,7 @@ function fakeConfig(initial: Record<string, unknown>) {
   };
 }
 
-const stableProbe = (): StableHostInputs => ({ hostname: 'workshop', gatewayInterfaceIp: '192.168.1.42' });
+const stableProbe = (): StableHostInputs => ({ hostname: 'workshop', gatewayInterfaceIp: '192.168.1.42', mdnsResolvesToThisHost: true });
 const unstableProbe = (): StableHostInputs => ({ hostname: 'localhost', gatewayInterfaceIp: '192.168.1.42' });
 
 describe('resolvePairingWebOrigin', () => {

@@ -98,7 +98,7 @@ function servedFixture() {
   f.configuration.config.setDaemonValues({ 'web.publicBaseUrl': '', 'controlPlane.webui.serve': true,
     'controlPlane.webui.bundleDir': bundle, 'controlPlane.hostMode': 'network', 'controlPlane.port': 4567 });
   const ensure = pairing.ensurePublicBaseUrl;
-  const spy = spyOn(pairing, 'ensurePublicBaseUrl').mockImplementation((config, _probe, bound) => ensure(config, () => ({ hostname: 'fixture' }), bound));
+  const spy = spyOn(pairing, 'ensurePublicBaseUrl').mockImplementation((config, _probe, bound) => ensure(config, () => ({ hostname: 'fixture', mdnsResolvesToThisHost: true }), bound));
   restores.push(() => spy.mockRestore());
   return { ...f, bundle, spy, bound: { host: '0.0.0.0', port: 4567, scheme: 'http' as const } };
 }

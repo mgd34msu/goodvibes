@@ -5,7 +5,7 @@ import type { ConfigModalSurface, ConfigModalView } from '../input/config-modal-
 import { createProviderRuntimeInspectionQuery } from '@/runtime/index.ts';
 import { createRuntimeProviderApi } from '@/runtime/index.ts';
 import { copyToClipboard } from '../utils/clipboard.ts';
-import { ensurePublicBaseUrl } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { ensurePublicBaseUrl, pairingOriginUsesStableHost, refreshStableHostInputs } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { PairingLimitReachedError, availablePairingOffers, mintPairingHandoff, defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { probePairingTailscale, runPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
 // ── Providers & Connectivity + Security subset ────────────────────────────────
@@ -153,6 +153,10 @@ export function registerBuiltinModals(
   manager.registerModalRedirect('docs', 'keybindings-modal');
 
   const tailscaleGatewayDeps = { configManager: deps.configManager, homeDirectory: ui.environment.shellPaths.homeDirectory };
+  // The pairing link's host ladder needs two slow probes (Tailscale, the `.local`
+  // lookup). Run them in the background now, only when the link will use the
+  // ladder, so opening the modal never waits on them and already has the answer.
+  if (pairingOriginUsesStableHost(deps.configManager)) void refreshStableHostInputs();
   manager.registerModalSurface(createPairingModalSurface({
     getConnectionInfo: () => buildPairingConnectionInfo(deps),
     controlPlaneReadModel: ui.readModels.controlPlane,
@@ -210,7 +214,8 @@ export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps): Pairi
       webOrigin: webOrigin.origin,
     });
     return {
-      url: webOrigin.origin,
+      // The routable address rides beside a name the device may not resolve.
+      url: webOrigin.alternateOrigin ? `${webOrigin.origin}  (or ${webOrigin.alternateOrigin})` : webOrigin.origin,
       token: handoff.token.token,
       tokenName: handoff.token.name,
       deepLink: handoff.deepLink ?? handoff.fragment,

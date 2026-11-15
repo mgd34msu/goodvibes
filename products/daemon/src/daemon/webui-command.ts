@@ -58,7 +58,11 @@ export interface WebuiCommandDeps {
   readonly fileExists?: ((path: string) => boolean) | undefined;
   /** Resolves a possibly-relative path against this base. Defaults to the cwd. */
   readonly baseDirectory?: string | undefined;
-  /** Stable-name probe for the LAN origin. Injected in tests so nothing shells out. */
+  /**
+   * Stable-name probe for the LAN origin. Defaults to the engine's cached,
+   * non-blocking probe; a caller that awaited `refreshStableHostInputs` first
+   * gets the Tailscale and `.local` rungs. Injected in tests.
+   */
   readonly probeStableHost?: (() => StableHostInputs) | undefined;
 }
 
@@ -155,18 +159,21 @@ function readString(config: Pick<ConfigManager, 'get'>, key: 'controlPlane.webui
 /**
  * The origin a browser opens to reach the web UI: the CONTROL-PLANE binding,
  * because that is the listener serving the bundle. A wildcard bind resolves
- * through the stable-name ladder (tailscale name, then `<host>.local`, then the
- * routed address) so the printed URL survives a DHCP lease change where it can.
+ * through the engine's stable-host rule (tailscale name, then a `<host>.local`
+ * that resolves here, then the routed address) so the printed URL survives a
+ * DHCP lease change where it can; a name comes with the routable address as
+ * `alternate`.
  */
 function servingOrigin(
   config: Pick<ConfigManager, 'get'>,
   probe: () => StableHostInputs,
-): { readonly origin: string; readonly loopback: boolean; readonly recognized: boolean } {
+): { readonly origin: string; readonly alternate?: string | undefined; readonly loopback: boolean; readonly recognized: boolean } {
   const binding = resolveRuntimeEndpointBinding(config, 'controlPlane');
   const resolved = stableUrlHostForBindHost(binding.host, probe);
   const origin = formatHttpOrigin(resolved.host, binding.port);
   const loopback = describeOriginPosture(origin).secureContext;
-  return { origin, loopback, recognized: binding.recognized };
+  const alternate = resolved.alternateHost ? formatHttpOrigin(resolved.alternateHost, binding.port) : undefined;
+  return { origin, alternate, loopback, recognized: binding.recognized };
 }
 
 /** A bundle directory is usable only when it exists and holds the app shell. */
@@ -184,7 +191,7 @@ function describeBundleProblem(
   return null;
 }
 
-function postureLines(origin: string, loopback: boolean): string[] {
+function postureLines(origin: string, loopback: boolean, alternate?: string): string[] {
   if (loopback) {
     return [
       '  reachable from this machine only (the control-plane listener is bound to loopback).',
@@ -193,6 +200,7 @@ function postureLines(origin: string, loopback: boolean): string[] {
   }
   return [
     `  reachable from your network at ${origin}; the control-plane listener uses its configured binding.`,
+    ...(alternate ? [`  a device that cannot resolve that name can use ${alternate}`] : []),
     '  To take it back to this machine only:  goodvibes-daemon webui enable --loopback',
   ];
 }
@@ -330,7 +338,7 @@ export function runWebuiCommand(argv: readonly string[], deps: WebuiCommandDeps)
   if (!serving.recognized) {
     lines.push('  note: controlPlane.hostMode is not one of local|network|custom; the daemon cannot bind until that is corrected.');
   }
-  lines.push(...postureLines(serving.origin, serving.loopback));
+  lines.push(...postureLines(serving.origin, serving.loopback, serving.alternate));
   lines.push('  Restart the daemon for this to take effect on a running process.');
   return { exitCode: 0, lines };
 }
@@ -374,7 +382,7 @@ function renderStatus(
   if (currentPublic && currentPublic !== serving.origin) {
     lines.push(`  note: web.publicBaseUrl is ${currentPublic}; links use that, the bundle is served at the URL above.`);
   }
-  lines.push(...postureLines(serving.origin, serving.loopback));
+  lines.push(...postureLines(serving.origin, serving.loopback, serving.alternate));
   return { exitCode: 0, lines };
 }
 

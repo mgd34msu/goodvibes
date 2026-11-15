@@ -63,7 +63,7 @@ function bundleDir(prefix: string): string {
   return dir;
 }
 
-const loopbackProbe = () => ({ hostname: 'desk', gatewayInterfaceIp: '192.168.1.20' });
+const loopbackProbe = () => ({ hostname: 'desk', gatewayInterfaceIp: '192.168.1.20', mdnsResolvesToThisHost: true });
 
 describe('webui custom IPv6 origins', () => {
   test.each([

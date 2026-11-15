@@ -1,19 +1,10 @@
 import { accessSync, constants } from 'node:fs';
-import { networkInterfaces } from 'node:os';
 import { spawn } from 'node:child_process';
+import { stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+/** The host another device dials for this machine: the engine's one stable-host rule for a wildcard bind. */
 export function getLocalNetworkIp(): string {
-  try {
-    const nets = networkInterfaces();
-    for (const name of Object.keys(nets)) {
-      for (const netInfo of nets[name] ?? []) {
-        if (netInfo.family === 'IPv4' && !netInfo.internal) return netInfo.address;
-      }
-    }
-  } catch {
-    return '127.0.0.1';
-  }
-  return '127.0.0.1';
+  return stableUrlHostForBindHost('0.0.0.0').host;
 }
 export function openBrowser(
   url: string,

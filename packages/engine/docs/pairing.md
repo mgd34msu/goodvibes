@@ -411,9 +411,24 @@ This is the honest picture, stated once (surfaces render the same line from the
 pairing contract, never as a recurring nag):
 
 **Plain http on your LAN works, and is a supported posture.** A phone on the
-same private network (a `10.x`/`172.16-31.x`/`192.168.x` address, a `.local`
-mDNS name, or localhost) uses the full cockpit over http. The transport does
-not refuse private-network origins. Two things are true about it:
+same private network (a `10.x`/`172.16-31.x`/`192.168.x` or link-local address,
+an IPv6 unique-local or link-local address, a `.local` mDNS name, a Tailscale
+name or `100.64-127.x` address, or localhost) uses the full cockpit over http.
+The transport does not refuse private-network origins; the one rule is
+`isPrivateNetworkHost` in `transport-http`, which the web UI's start-up guard
+imports. Over a Tailscale name or address the connection is already encrypted
+by Tailscale, and the posture notice says so instead of the LAN line.
+
+The host in a pairing link, a QR or `web.publicBaseUrl` for a wildcard bind
+comes from one rule (`stableUrlHostForBindHost`): the Tailscale MagicDNS name
+when Tailscale is up; `<host>.local` only when that name was looked up and
+resolved to one of this machine's addresses; the address of the interface that
+carries the default route; the first non-internal address. The Tailscale and
+`.local` probes run asynchronously and are cached for the process, so showing a
+link never blocks on them. When a name wins, the routable address comes back
+beside it (`alternateOrigin`) and the pairing surfaces print it as a fallback.
+
+Two things are true about plain http on the LAN:
 
 1. The connection is unencrypted on your local network. Anyone who can already
    capture traffic on your LAN can read it, including the bearer token.

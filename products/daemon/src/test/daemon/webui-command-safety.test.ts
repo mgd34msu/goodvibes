@@ -16,7 +16,7 @@ function fixture() {
     configManager: config,
     directoryExists: () => true,
     fileExists: () => true,
-    probeStableHost: () => ({ hostname: 'fixture' }),
+    probeStableHost: () => ({ hostname: 'fixture', mdnsResolvesToThisHost: true }),
   };
   return { root, configDir, daemonTierPath, config, deps,
     reload: () => new ConfigManager({ configDir, daemonTierPath }),

@@ -18,6 +18,7 @@ import { MEMORY_REVIEW_PROBABILITIES, rankFixtureMemoryReview } from './memory-r
 
 import type { Page, Route } from '@playwright/test';
 import { createECDH } from 'node:crypto';
+import { isPrivateNetworkHost, isTailnetHost } from '@goodvibes-jev/engine/transport-http/paths';
 import { recordRequests, type RecordedRequest } from './requests';
 import {
   wakeClassifierBytes,
@@ -137,31 +138,19 @@ function asProvenanceArray(value: unknown): { kind: string; ref: string; label?:
  * describeOriginPosture (packages/engine/platform/src/platform/pairing/origin-posture.ts): the ONE
  * honest plain-http-on-LAN notice line, and per-capability "needs https, available via
  * tailscale" labels, so an e2e test at a simulated private-range origin sees EXACTLY the
- * wording a real daemon would send, never a placeholder the fixture invented.
+ * wording a real daemon would send, never a placeholder the fixture invented. Which
+ * hosts are private networks is the transport's own rule, imported, not mirrored.
  */
 const LAN_PLAIN_HTTP_NOTICE_MOCK =
   'Connection is unencrypted on your LAN. Everything works except browser-gated features; Tailscale gives encrypted access with the full app.';
+const TAILNET_PLAIN_HTTP_NOTICE_MOCK =
+  'Connection is encrypted by Tailscale. Everything works except browser-gated features, which need https: serve this machine over Tailscale https to get them.';
 const NEEDS_HTTPS_REASON_MOCK = 'needs https, available via tailscale';
 const BROWSER_GATED_CAPABILITIES_MOCK = ['service-worker', 'push', 'microphone'] as const;
 
 function isLoopbackHostMock(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   return host === 'localhost' || host === '::1' || host === '127.0.0.1' || host.startsWith('127.') || host.endsWith('.localhost');
-}
-
-function isPrivateNetworkHostMock(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (isLoopbackHostMock(host)) return true;
-  if (host.endsWith('.local')) return true;
-  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!ipv4) return false;
-  const a = Number(ipv4[1]);
-  const b = Number(ipv4[2]);
-  if (a === 127) return true;
-  if (a === 10) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  return false;
 }
 
 export function describeOriginPostureForMock(origin: string): {
@@ -187,7 +176,7 @@ export function describeOriginPostureForMock(origin: string): {
     };
   }
   const scheme = parsed.protocol === 'https:' ? 'https' : parsed.protocol === 'http:' ? 'http' : 'other';
-  const privateNetwork = isPrivateNetworkHostMock(parsed.hostname);
+  const privateNetwork = isPrivateNetworkHost(parsed.hostname);
   const secureContext = scheme === 'https' || (scheme === 'http' && isLoopbackHostMock(parsed.hostname));
   const capabilities = BROWSER_GATED_CAPABILITIES_MOCK.map((capability) => (
     secureContext ? { capability, available: true } : { capability, available: false, reason: NEEDS_HTTPS_REASON_MOCK }
@@ -198,7 +187,7 @@ export function describeOriginPostureForMock(origin: string): {
     scheme,
     privateNetwork,
     secureContext,
-    ...(plainHttpLan ? { notice: LAN_PLAIN_HTTP_NOTICE_MOCK } : {}),
+    ...(plainHttpLan ? { notice: isTailnetHost(parsed.hostname) ? TAILNET_PLAIN_HTTP_NOTICE_MOCK : LAN_PLAIN_HTTP_NOTICE_MOCK } : {}),
     capabilities,
   };
 }

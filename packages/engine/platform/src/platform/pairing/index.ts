@@ -52,6 +52,7 @@ export {
   isLoopbackHost,
   BROWSER_GATED_CAPABILITIES,
   LAN_PLAIN_HTTP_NOTICE,
+  TAILNET_PLAIN_HTTP_NOTICE,
 } from './origin-posture.js';
 export type {
   OriginPosture,
@@ -61,10 +62,14 @@ export type {
 
 export {
   firstNonInternalIpv4,
+  interfaceIpv4,
+  isWildcardBindHost,
   mdnsLocalName,
-  parseIpRouteSrc,
+  parseDefaultRouteInterface,
   parseTailscaleStatus,
   probeStableHostInputs,
+  refreshStableHostInputs,
+  resolvesToThisHost,
   resolveStableHost,
   stableUrlHostForBindHost,
 } from './stable-host.js';
@@ -105,5 +110,5 @@ export {
 } from './offer-copy.js';
 export type { PairingOfferCopy } from './offer-copy.js';
 
-export { ensurePublicBaseUrl, formatHttpOrigin, isHttpOnLan, resolvePairingWebOrigin } from './web-origin.js';
+export { ensurePublicBaseUrl, formatHttpOrigin, isHttpOnLan, pairingOriginUsesStableHost, resolvePairingWebOrigin } from './web-origin.js';
 export type { PairingWebOrigin } from './web-origin.js';

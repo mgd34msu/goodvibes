@@ -3,7 +3,8 @@ import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } fr
 import { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 export { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createCliProviderViews } from '@goodvibes-jev/engine/terminal-shell/cli-provider-views';
-import { getLocalNetworkIp, openBrowser } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
+import { openBrowser } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
+import { stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
 export { openBrowser } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
 import { hasCommandFlag, isPresentConfigValue, extractAuthorizationCode } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
 export { hasCommandFlag, isPresentConfigValue, extractAuthorizationCode } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
@@ -93,14 +94,13 @@ export function getNestedValue(source: unknown, key: string): unknown {
 const connectHostForBindHost = dialHostForConfiguredHost;
 
 /**
- * Where ANOTHER machine dials, a pairing QR code, a phone-facing link. A
- * wildcard resolves to this host's LAN address here, NOT to loopback, because
- * loopback on the other device is the other device. Deliberately not the
- * function above.
+ * Where ANOTHER machine dials, a pairing QR code, a phone-facing link: the
+ * engine's stable-host rule, the same one the daemon and the TUI print. A
+ * wildcard resolves away from loopback, because loopback on the other device
+ * is the other device. Deliberately not the function above.
  */
 export function urlHostForBindHost(host: string): string {
-  if (host === '0.0.0.0' || host === '::') return getLocalNetworkIp();
-  return host || '127.0.0.1';
+  return stableUrlHostForBindHost(host).host;
 }
 
 export function probeTcp(host: string, port: number, timeoutMs = 750): Promise<boolean> {

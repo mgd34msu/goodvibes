@@ -1,5 +1,4 @@
-import { acquireCrossProcessLock, tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
-import { withFileWriteLockSync } from '../../workspace/checkpoint/sync-write-lock.js';
+import { acquireProcessLock, withProcessLock, withProcessLockSync, type HeldProcessLock } from '../../utils/process-lock.js';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { GitService } from '../../git/service.js';
@@ -211,42 +210,20 @@ function mergeSurfaceScopedStoreOnce(workingDirectory: string, surfaceRoot: stri
 
 /** How long a register write waits for another writer before refusing. */
 const WRITER_LOCK_WAIT_MS = 2_000;
-const WRITER_LOCK_RETRY_MS = 25;
-const lockWaitCell = new Int32Array(new SharedArrayBuffer(4));
+
+/** The register's lock file, beside it. Every reader-writer of the register takes this one lock. */
+function registerLockPath(storePath: string): string {
+  return `${storePath}.writer.sqlite`;
+}
 
 /**
- * Run a register write under its writer lock, waiting briefly when another
- * writer (or the polled `list()`) holds it instead of failing at once. The
- * register's writes are short, so a holder normally releases within
- * milliseconds; one that does not is refused with a message that says so.
+ * Run a register write under its lock, waiting briefly when another process
+ * holds it. The register's writes are short, so a holder normally releases
+ * within milliseconds; one that does not is refused with a message that says
+ * so. A holder that died released the lock with its process.
  */
 function withRegistryWriteLock<T>(storePath: string, write: () => T): T {
-  const deadline = Date.now() + WRITER_LOCK_WAIT_MS;
-  for (;;) {
-    try {
-      return withFileWriteLockSync(storePath, write);
-    } catch (error) {
-      if ((error as { code?: string }).code !== 'FILE_WRITER_BUSY') throw error;
-      if (Date.now() >= deadline) {
-        throw Object.assign(
-          new Error(`The worktree register (${storePath}) is being updated by another process: its writer lock is already owned and stayed held for ${WRITER_LOCK_WAIT_MS}ms. Nothing was changed; retry the command.`),
-          { code: 'FILE_WRITER_BUSY' },
-        );
-      }
-      // A lock left by a process that died mid-write is not held by anyone:
-      // the strict lock replaces it only when its owner is provably gone, and
-      // refuses a live one. Releasing it at once leaves the retry free to take it.
-      let cleared = false;
-      try {
-        const release = tryAcquireCrossProcessLock(`${storePath}.lock`);
-        if (release) { release(); cleared = true; }
-      } catch {
-        // Treated as held: wait for the holder below.
-      }
-      if (cleared) continue;
-      Atomics.wait(lockWaitCell, 0, 0, WRITER_LOCK_RETRY_MS);
-    }
-  }
+  return withProcessLockSync(registerLockPath(storePath), write, { waitMs: WRITER_LOCK_WAIT_MS });
 }
 
 function defaultStore(): WorktreeStore {
@@ -598,8 +575,7 @@ export class WorktreeRegistry {
   public async list(): Promise<WorktreeStatusRecord[]> {
     const beforeScan = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), false);
     const listed = await this.git.worktreeList();
-    const release = await acquireCrossProcessLock(`${getStorePath(this.workingDirectory, this.surfaceRoot)}.lock`, { strictOwnership: true });
-    try {
+    return withProcessLock(registerLockPath(getStorePath(this.workingDirectory, this.surfaceRoot)), () => {
       const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
       const present = new Set(listed.map((entry) => normalizePath(entry.path, this.workingDirectory)));
       const records: WorktreeStatusRecord[] = listed.map((entry) => {
@@ -679,7 +655,7 @@ export class WorktreeRegistry {
       }
       reapPreservedStores(getStorePath(this.workingDirectory, this.surfaceRoot), now);
       return records.sort((a, b) => a.path.localeCompare(b.path));
-    } finally { release(); }
+    });
   }
 
   /**
@@ -725,9 +701,9 @@ export class WorktreeRegistry {
       // acted, the owner may have moved on, or the worktree may have been marked kept. The lock is released before the
       // removal itself, which can take long on a large tree and would otherwise make every other register writer
       // wait out its limit. Git's own refusal to remove a tree with changes is the last check.
-      let release: (() => void) | undefined;
+      let lock: HeldProcessLock | undefined;
       try {
-        release = await acquireCrossProcessLock(`${storePath}.lock`, { strictOwnership: true });
+        lock = await acquireProcessLock(registerLockPath(storePath));
         const current = readStore(storePath).records[row.path];
         const guardedNow = current ? sweepProtection({ ...row, state: current.state, sessionId: current.sessionId, taskId: current.taskId }) : null;
         if (guardedNow) { keepReason(guardedNow); continue; }
@@ -739,7 +715,7 @@ export class WorktreeRegistry {
         logger.warn('worktree retention: a worktree was kept because its removal did not complete', { path: row.path, error: message });
         continue;
       } finally {
-        release?.();
+        lock?.release();
       }
       try {
         await this.git.worktreeRemove(row.path);
@@ -771,15 +747,15 @@ export class WorktreeRegistry {
 
   /** Drop the register entry of a worktree whose directory is gone. Best effort: the next list() reaps it otherwise. */
   private async forgetRemoved(storePath: string, path: string): Promise<void> {
-    let release: (() => void) | undefined;
     try {
-      release = await acquireCrossProcessLock(`${storePath}.lock`, { strictOwnership: true });
-      const store = readStore(storePath, true, true);
-      delete store.records[path];
-      writeStore(store, storePath);
+      await withProcessLock(registerLockPath(storePath), () => {
+        const store = readStore(storePath, true, true);
+        delete store.records[path];
+        writeStore(store, storePath);
+      });
     } catch (error) {
       logger.warn('worktree retention: the register entry of a removed worktree could not be dropped yet', { path, error: summarizeError(error) });
-    } finally { release?.(); }
+    }
   }
 
   /**

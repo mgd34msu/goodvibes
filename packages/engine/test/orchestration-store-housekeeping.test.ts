@@ -24,7 +24,7 @@ import {
 import { emptyWorkItemUsage, type WorkItem, type Workstream } from '../platform/src/platform/orchestration/types.js';
 import { WorktreeRegistry } from '../platform/src/platform/runtime/worktree/registry.js';
 import { GitService } from '../platform/src/platform/git/service.js';
-import { withFileWriteLockSync } from '../platform/src/platform/workspace/checkpoint/sync-write-lock.js';
+import { ProcessLockBusyError, withProcessLockSync } from '../platform/src/platform/utils/process-lock.js';
 import { logger } from '../platform/src/platform/utils/logger.js';
 
 const NOW = 1_800_000_000_000; // fixed clock for every age assertion
@@ -719,8 +719,8 @@ describe('worktree register housekeeping', () => {
     const root = makeRepo('wt-locked-');
     const registry = new WorktreeRegistry(root);
     registry.attach(root, { sessionId: 'original-session' });
-    withFileWriteLockSync(storePath(root), () => {
-      expect(() => registry.attach(root, { sessionId: 'competing-session' })).toThrow('already owned');
+    withProcessLockSync(`${storePath(root)}.writer.sqlite`, () => {
+      expect(() => registry.attach(root, { sessionId: 'competing-session' })).toThrow(ProcessLockBusyError);
       expect(readRegisterRecords(root)[root]).toMatchObject({ sessionId: 'original-session' });
     });
     registry.attach(root, { sessionId: 'current-session' });

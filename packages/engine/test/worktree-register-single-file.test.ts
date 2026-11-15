@@ -84,18 +84,6 @@ describe('worktree register', () => {
     expect(statSync(file).isDirectory()).toBe(true);
   });
 
-  test('a writer lock left by a dead process does not block a state change', () => {
-    const cwd = repo();
-    const path = join(cwd, '.goodvibes', '.worktrees', 'agent-c1');
-    git(cwd, 'worktree', 'add', '-b', 'agent-c1', path);
-    const registry = new WorktreeRegistry(cwd);
-    registry.attach(path, { sessionId: 's1' });
-    // A pid no live process can hold: well above the kernel's pid limit.
-    writeFileSync(join(cwd, '.goodvibes', 'worktrees.json.lock'), JSON.stringify({ pid: 2_147_483_646, token: '0123456789abcdef', acquiredAt: 1 }));
-    registry.setState(path, 'kept');
-    expect(getPersistedWorktreeMeta(path, { workingDirectory: cwd })?.state).toBe('kept');
-  });
-
   test('discard refuses the main checkout and leaves its uncommitted files alone', async () => {
     const cwd = repo();
     writeFileSync(join(cwd, 'wip.txt'), 'unsaved\n');

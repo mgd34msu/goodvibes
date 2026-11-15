@@ -435,7 +435,7 @@ describe('action grants', () => {
       const args = ['all'];
       const grant = createActionGrant({ id: 'compile', description: 'Compile', command: 'make', args, cwd: '/a', confirmedBy: 'owner' });
       const pin = captureRegisteredGrantAction([grant], { kind: 'action-grant', grantId: grant.id, digest: grant.digest });
-      expect(grant.digest).toMatch(/^grant-revision-v1:[a-p]{32}$/);
+      expect(grant.digest).toMatch(/^grant-revision-v1:[0-9a-f]{32}$/);
       args[0] = 'foreign';
       const restored = JSON.parse(JSON.stringify(grant)) as TriggerActionGrant;
       for (let i = 0; i < 10; i++) expect(verifyGrant([restored], grant.id, grant.digest, pin.approvedAction).ok).toBe(true);

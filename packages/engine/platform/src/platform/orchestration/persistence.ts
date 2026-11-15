@@ -9,7 +9,6 @@ import { existsSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:
 import { basename, dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { writeFileAtomic, reapOwnedAtomicTempFile, captureExistingDirectory, prepareAtomicPublicationDirectory } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { tryAcquireCrossProcessLock, assertCrossProcessLockCurrent } from '../workspace/checkpoint/cross-process-lock.js';
@@ -183,7 +182,7 @@ export function loadWorkstreamSnapshot(projectRoot: SnapshotRoot, workstreamId: 
   // corrupt, or let a later old writer replace it with an empty older state.
   if (snapshot === null && isFutureSnapshot(raw)) return null;
   if (snapshot === null) {
-    const quarantinePath = `${path}.${opaqueUuid()}${QUARANTINE_SUFFIX}`;
+    const quarantinePath = `${path}.${crypto.randomUUID()}${QUARANTINE_SUFFIX}`;
     try {
       parent.assertCurrent();
       if (fileObservationIdentity(path) !== source.physical) return null;

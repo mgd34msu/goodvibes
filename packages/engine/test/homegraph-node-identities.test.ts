@@ -6,7 +6,6 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
@@ -53,7 +52,7 @@ test('once-per-mutation opaque IDs avoid old delimiter and normalized-slug colli
   await f.sync({ knowledgeSpaceId: 'homeassistant:tenant', devices: [{ id: 'ha_device:value' }] });
   const nodes = f.store.listNodes().filter(node => node.kind === 'ha_device'); expect(nodes).toHaveLength(4);
   expect(new Set(nodes.map(node => node.id)).size).toBe(4); expect(new Set(nodes.map(node => node.slug)).size).toBe(4);
-  for (const node of nodes) expect(node.id).toMatch(/^hg-node-[a-p-]+$/);
+  for (const node of nodes) expect(node.id).toMatch(/^hg-node-[0-9a-f-]+$/);
   await f.sync({ knowledgeSpaceId: 'homeassistant:tenant:ha_device', devices: [{ id: 'value', title: 'Updated' }, { id: 'a-b' }, { id: 'a b' }] });
   expect(f.store.listNodes().filter(node => node.kind === 'ha_device')).toHaveLength(4); expect(first.counts.devices).toBe(3);
 });
@@ -112,7 +111,7 @@ test('fresh tuple duplicates and changed tuple binding are refused at the real n
 });
 
 test('opaque collision, retired original and copied planner cannot silently rebind native identity', async () => {
-  const f = await fixture(), uuid = '00000000-0000-4000-8000-000000000001' as const, id = `hg-node-${opaqueUuid(uuid)}`;
+  const f = await fixture(), uuid = '00000000-0000-4000-8000-000000000001' as const, id = `hg-node-${uuid}`;
   await f.store.upsertNode({ id, kind: 'topic', slug: 'foreign', title: 'Foreign', status: 'draft' }); const generator = spyOn(crypto, 'randomUUID').mockReturnValue(uuid);
   try { expect(() => createHomeGraphNodeIdentityPlanner(f.store).prepare(selector)).toThrow(HomeGraphIdentityHeldError); } finally { generator.mockRestore(); }
   await f.store.deleteNode(id); const repeated = spyOn(crypto, 'randomUUID').mockReturnValue(uuid);

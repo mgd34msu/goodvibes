@@ -1,4 +1,3 @@
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { SQLiteStore } from '../state/sqlite-store.js';
 import type { KnowledgeIssueRecord, KnowledgeIssueUpsertInput, KnowledgeNodeRecord, KnowledgeNodeRevisionRecord, KnowledgeNodeUpsertInput, KnowledgeSourceRecord } from './types.js';
 import { nowMs, stableText } from './store-schema.js';
@@ -42,7 +41,7 @@ export function prepareKnowledgeIssueRecord(view: IssueView, input: KnowledgeIss
       ? ensureKnowledgeSpaceMetadata(mergedIssueMetadata, issueSpaceId)
       : mergedIssueMetadata;
     const record: KnowledgeIssueRecord = {
-      id: existing?.id ?? input.id ?? `issue-${opaqueUuid()}`,
+      id: existing?.id ?? input.id ?? `issue-${crypto.randomUUID()}`,
       severity: input.severity,
       code: input.code,
       message: input.message.trim(),

@@ -19,7 +19,7 @@ test('fresh readonly inspection leaves config, store and binding registry absent
 test('simultaneous independent native preparations adopt exactly one saved identity', async () => {
   const f = fixture();
   const [first, second] = await Promise.all([prepareConfiguredProjectContext(f.config, f.workspace, undefined, { activate: true }), prepareConfiguredProjectContext(f.config, f.workspace, undefined, { activate: true })]);
-  expect(first.projectId).toBe(second.projectId); expect(first.projectId).toMatch(/^project-[a-p-]+$/);
+  expect(first.projectId).toBe(second.projectId);
   const store = createConfiguredPlanningStore(f.config); try { await store.init(); const selected = ProjectPlanningService.forConfiguredWorkspace(store, f.config, f.workspace); expect<unknown>((await selected.service.status()).projectId).toBe(first.projectId); } finally { await store.close(); }
   expect((await prepareConfiguredProjectContext(f.config, f.workspace)).projectId).toBe(first.projectId);
 });

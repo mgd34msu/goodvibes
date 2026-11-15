@@ -326,8 +326,8 @@ test('opaque quality labels are stable for actual unchanged rows and new source 
   try {
     const first = await run(); expect(first).toHaveLength(2);
     for (const issue of first) {
-      expect(issue.id).toMatch(/^hg-issue-[a-p-]+$/);
-      expect(issue.metadata.subjectRevision).toMatch(/^hq-[a-p-]+$/);
+      expect(issue.id).toMatch(/^hg-issue-[0-9a-f-]+$/);
+      expect(issue.metadata.subjectRevision).toMatch(/^hq-[0-9a-f-]+$/);
       expect(issue.metadata.subjectFingerprint).toBeUndefined();
     }
     const second = await run();
@@ -488,7 +488,7 @@ test('unreviewed older unbound labels adopt a valid native revision and remain r
   const adopted = reopened.getIssue(issue.id)!;
   expect(adopted.status).toBe('open'); expect(adopted.metadata.review).toBeUndefined();
   expect(adopted.metadata.homeGraphQualityRevisionVersion).toBe(1); expect(adopted.metadata.qualitySubjectState).toBeNull();
-  expect(adopted.metadata.subjectRevision).toMatch(/^hq-[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+  expect(adopted.metadata.subjectRevision).toMatch(/^hq-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
   expect(adopted.metadata.subjectRevision).not.toBe(issue.metadata.subjectRevision);
   await reopened.close();
   const again = new KnowledgeStore({ dbPath }); stores.push(again); await again.init();

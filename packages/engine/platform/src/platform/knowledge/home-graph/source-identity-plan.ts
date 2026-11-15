@@ -1,6 +1,5 @@
 /** Mutation-local labels chosen from actual saved source facts. Lookup has no
  * registration side effects; a capture without an explicit event time is new. */
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeStore } from '../store.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
 import { homeGraphIdentitySpace, HomeGraphIdentityHeldError as Held } from '../store-homegraph-node-selector.js';
@@ -24,7 +23,7 @@ export function createHomeGraphSourceIdentityPlanner(store: KnowledgeStore) {
       const previous = apply(get, pending, [key]) as HomeGraphSourceIdentity | undefined;
       if (previous) { previous.assertCurrent(); return previous; }
       const rows = candidates(selector); if (rows.length > 1) throw new Held('ambiguous'); const saved = rows[0];
-      const token = !saved || !saved.canonicalUri && selector.role !== 'documentation-candidate' ? opaqueUuid() : undefined, id = saved?.id ?? `hg-src-${token!}`;
+      const token = !saved || !saved.canonicalUri && selector.role !== 'documentation-candidate' ? crypto.randomUUID() : undefined, id = saved?.id ?? `hg-src-${token!}`;
       if (!saved && (store.getSource(id) || labels.has(id))) throw new Held('stale');
       const canonicalUri = saved?.canonicalUri ?? (selector.role === 'documentation-candidate' ? selector.value! : `homegraph://source/${token!}`);
       const metadata: Record<string, unknown> = { homeGraphSourceIdentityVersion: 1, homeGraphIdentitySpace: selector.spaceId,

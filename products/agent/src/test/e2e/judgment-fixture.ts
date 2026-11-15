@@ -62,7 +62,7 @@ function restoreProjectedNativeNotice(value: unknown, original: string | undefin
   if (!('evidenceProjection' in state) || !state.evidenceProjection || typeof state.evidenceProjection !== 'object'
     || !('withheld' in state.evidenceProjection) || !Array.isArray(state.evidenceProjection.withheld) || !state.evidenceProjection.withheld.length) return value;
   const references = new Map<string, string>();
-  const marker = /\[WITHHELD:card-shaped-number:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[1-9][0-9]*\]/g;
+  const marker = /\[WITHHELD:card-shaped-number:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[1-9][0-9]*\]/g;
   const restore = (content: string): string | undefined => {
     const matches = [...content.matchAll(marker)];
     if (!matches.length) return content;

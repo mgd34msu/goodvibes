@@ -1,4 +1,3 @@
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeStore } from '../store.js';
 import { semanticNodeSelector, semanticNodeScopeMatches, semanticNodeCandidateParams, type SemanticNodeSelector } from '../store-semantic-node-selector.js';
 import { SemanticIdentityHeldError as Held } from '../store-semantic-fact-selector.js';
@@ -21,7 +20,7 @@ export function createSemanticNodeIdentityPlanner(store: KnowledgeStore) {
       if (previous) { previous.assertCurrent(); return previous; }
       const selected = candidates(selector).filter(row => semanticNodeScopeMatches(row, selector)); if (selected.length > 1) throw new Held('ambiguous');
       const prefix = selector.role === 'entity' ? 'sem-entity' : selector.role === 'gap' ? 'sem-gap' : selector.role === 'wiki' ? 'sem-page' : 'sem-intrinsic-gap';
-      const id = selected[0]?.id ?? `${prefix}-${opaqueUuid()}`;
+      const id = selected[0]?.id ?? `${prefix}-${crypto.randomUUID()}`;
       if ((!selected.length && store.getRecordSnapshot('node', id).record !== null) || (apply(mapGet, labels, [id]) !== undefined && apply(mapGet, labels, [id]) !== key)) throw new Held('stale');
       const identity = freeze({ id, selector, assertCurrent() { assertSelected({ id, selector }, candidates(selector)); } });
       apply(mapSet, labels, [id, key]);

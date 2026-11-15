@@ -71,7 +71,6 @@ describe('bootDaemon one-call factory', () => {
     const first = await prepareConfiguredProjectContext(config, work);
     const second = await prepareConfiguredProjectContext(config, work);
     expect(first.registration).toBe('registered');
-    expect(first.projectId).toMatch(/^project-[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
     expect(second).toEqual(first);
   });
 

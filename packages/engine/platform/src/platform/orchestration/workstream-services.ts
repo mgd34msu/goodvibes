@@ -1,4 +1,3 @@
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 // ---------------------------------------------------------------------------
 // workstream-services.ts, one OrchestrationEngine instance, plus the
 // command-facing facade a surface drives it through.
@@ -361,7 +360,7 @@ function createWorkstreamCommandService(
     return {
       title: task,
       phases: draftPhases(commitScope, 1),
-      items: [{ id: `item-${opaqueUuid()}`, title: task, task }],
+      items: [{ id: `item-${crypto.randomUUID()}`, title: task, task }],
     };
   }
 
@@ -419,7 +418,7 @@ function createWorkstreamCommandService(
       const result = await decompose(task);
       const spec = buildSpec(task, result.proposal);
       const draft: WorkstreamDraft = {
-        id: `wsd_${opaqueUuid()}`,
+        id: `wsd_${crypto.randomUUID()}`,
         task,
         spec: isolation ? { ...spec, isolation } : spec,
         gate: result.gate,

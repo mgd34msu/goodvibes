@@ -2,7 +2,7 @@
  * observation, not a content digest. Earlier saved v1 checksum rows verify that
  * published pin once when their bytes are adopted into v2. */
 import { createHash } from 'node:crypto';
-import { opaqueUuid, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, chmodSync, openSync, unlinkSync, writeFile, type BigIntStats } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { PersistentStore } from '../state/persistent-store.js';
@@ -230,7 +230,7 @@ export class DeviceCaptureArtifactStore {
     const assertOriginal = assertion?.bind(input); assertOriginal?.();
     input = { ...input, bytes: Buffer.from(input.bytes), ...(assertOriginal ? { assertCurrent: assertOriginal } : {}) };
     if (!input.nodeId || !isDeviceCapabilityId(input.capabilityId) || !ARTIFACT_KINDS.includes(input.kind)) throw new Error('Device capture identity is invalid');
-    const bytes = input.bytes, now = this.now(), id = opaqueUuid();
+    const bytes = input.bytes, now = this.now(), id = crypto.randomUUID();
     const extension = input.mediaType.includes('png') ? 'png' : input.mediaType.includes('webp') ? 'webp' : /jpe?g/.test(input.mediaType) ? 'jpg' : input.mediaType.includes('webm') ? 'webm' : 'bin';
     const fileName = `${id}.${extension}`;
     return this.mutate(async (rows, _malformed, mutation) => {

@@ -1,5 +1,4 @@
 import { homeGraphSourceIdentityIndexes } from '../platform/src/platform/knowledge/store-homegraph-source-selector.js';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { Database } from 'bun:sqlite';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -88,7 +87,7 @@ test('actual refinement producer keeps one saved gap task and respects its termi
   const gap = await store.upsertNode({ id: 'gap', kind: 'knowledge_gap', slug: 'gap', title: 'What remains unknown?', status: 'draft', metadata: { knowledgeSpaceId: 'house', semanticKind: 'gap' } });
   const context = { gap, sources: [], linkedObjects: [] };
   const task = await upsertRefinementTaskForGap(store, 'house', context, 'manual', 'detected', 'Original gap');
-  expect(task.id).toMatch(/^kref-[a-p-]+$/);
+  expect(task.id).toMatch(/^kref-[0-9a-p-]+$/);
   await store.upsertRefinementTask({ ...task, state: 'closed' });
   await store.close(); stores.splice(stores.indexOf(store), 1); const reopened = (await open(dbPath)).store;
   const repeated = await upsertRefinementTaskForGap(reopened, 'house', { ...context, gap: reopened.getNode(gap.id)! }, 'manual', 'queued', 'Retry');
@@ -142,7 +141,7 @@ test('future saved auxiliary lifecycle states remain unchanged instead of reopen
 
 test('fresh role labels refuse an occupied original native row and a distinct pending role collision', async () => {
   const { store } = await open();
-  const uuid = '00000000-0000-4000-8000-000000000001' as const, id = `sem-entity-${opaqueUuid(uuid)}`;
+  const uuid = '00000000-0000-4000-8000-000000000001' as const, id = `sem-entity-${uuid}`;
   const original = await store.upsertNode({ id, kind: 'topic', slug: 'foreign-original', title: 'Foreign original', status: 'draft' });
   const generate = spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(uuid);
   try {

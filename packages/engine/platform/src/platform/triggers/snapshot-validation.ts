@@ -56,7 +56,7 @@ export function isTriggerGrant(value: unknown): value is TriggerActionGrant {
     || !finite(value['createdAt']) || !finite(value['confirmedAt']) || !text(value['digest']) || !optional(value, 'cwd', text)) return false;
   try { validateArgv(value['command'], value['args'], 'grant'); } catch { return false; }
   if (/^[0-9a-f]{64}$/.test(value['digest'])) return optional(value, 'approvedAction', approval);
-  return /^grant-revision-v1:[a-p]{32}$/.test(value['digest']) && approval(value['approvedAction']);
+  return /^grant-revision-v1:[0-9a-p]{32}$/.test(value['digest']) && approval(value['approvedAction']);
 }
 export function isTriggerEvent(value: unknown): value is TriggerEventLogEntry {
   return object(value) && finite(value['at']) && text(value['triggerId']) && oneOf(value['kind'], ['stream', 'condition', 'on-exit'])

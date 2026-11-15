@@ -21,7 +21,7 @@ export interface RegisteredProjectIdentity { readonly projectId: string; assertC
 function sameFile(left: BigIntStats, right: BigIntStats): boolean { return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid && left.gid === right.gid && left.birthtimeNs === right.birthtimeNs; }
 function exactFile(stat: BigIntStats): string { return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.nlink, stat.size, stat.birthtimeNs, stat.mtimeNs, stat.ctimeNs].join(':'); }
 function invokeGuard(guard: () => void): void { const result: unknown = guard(); if (result !== undefined) { drainOwned(result); throw new ProjectIdentityUnavailableError(); } }
-function opaqueId(): string { return `project-${randomUUID().replace(/[0-9a-f]/g, nibble => String.fromCharCode(97 + Number.parseInt(nibble, 16)))}`; }
+function opaqueId(): string { return `project-${randomUUID()}`; }
 function binding(value: unknown): ProjectBinding {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ProjectIdentityUnavailableError();
   const row = value as Record<string, unknown>;
@@ -78,7 +78,7 @@ export class ProjectIdentityRegistry {
     if (names.length > MAX_PROJECT_BINDINGS) throw new ProjectIdentityUnavailableError();
     let selected: RegisteredProjectIdentity | null = null;
     for (const name of names) {
-      if (!/^binding-[a-p-]+\.json$/.test(name) || basename(name) !== name) throw new ProjectIdentityUnavailableError();
+      if (!/^binding-[0-9a-p-]+\.json$/.test(name) || basename(name) !== name) throw new ProjectIdentityUnavailableError();
       this.assertCurrent(); const path = join(this.directory, name), source = readFileObservation(path), entry = lstatSync(path, { bigint: true });
       if ((entry.mode & 0o777n) !== 0o600n || (process.geteuid && entry.uid !== BigInt(process.geteuid()))) throw new ProjectIdentityUnavailableError();
       let value: unknown; try { value = JSON.parse(new TextDecoder('utf8', { fatal: true }).decode(source.bytes)); } catch { throw new ProjectIdentityUnavailableError(); }
@@ -111,7 +111,7 @@ export class ProjectIdentityRegistry {
       if (existing) { if (previousId !== null && existing.projectId !== previousId) throw new ProjectIdentityUnavailableError(); existing.assertCurrent(); invokeGuard(() => nativeWriter?.declare('project-default-bindings-v1')); current(); (nativeApply(weakGet, confirmations, [existing]) as () => void)(); current(); return existing; }
       const projectId = previousId ?? opaqueId();
       invokeGuard(() => nativeWriter?.declare('project-default-bindings-v1')); current();
-      const suffix = randomUUID().replace(/[0-9a-f]/g, nibble => String.fromCharCode(97 + Number.parseInt(nibble, 16)));
+      const suffix = randomUUID();
       const target = join(this.directory, `binding-${suffix}.json`), temporary = join(this.directory, `.binding-${suffix}.stage`);
       const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600), original = fstatSync(fd, { bigint: true });
       try {

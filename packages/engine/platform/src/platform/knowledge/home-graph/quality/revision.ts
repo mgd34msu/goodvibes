@@ -1,7 +1,6 @@
 /** Opaque quality lifecycles over actual saved history. No source body is
  * copied into issue metadata, and a deleted history is never reconstructed. */
 import { isDeepStrictEqual } from 'node:util';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeStore } from '../../store.js';
 import type { KnowledgeIssueRecord, KnowledgeNodeRecord, KnowledgeNodeRevisionRecord } from '../../types.js';
 import { sameKnowledgeRecord } from '../../store-record-representation.js';
@@ -34,7 +33,7 @@ export interface QualityRevisionPlan {
 }
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
-const opaque = (value: unknown): value is string => typeof value === 'string' && value.length === 39 && /^hq-[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/.test(value);
+const opaque = (value: unknown): value is string => typeof value === 'string' && value.length === 39 && /^hq-[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}$/.test(value);
 const order = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 function dependency(value: unknown): value is Dependency {
   return object(value) && Object.keys(value).length === 4 && text(value.nodeId) && text(value.incarnation)
@@ -140,7 +139,7 @@ export function createQualityRevisionPlans(store: KnowledgeStore) {
       let revision = (unchanged || !state) && opaque(previousRevision) ? previousRevision : undefined;
       const assertCurrent = () => { subject.assertCurrent(); for (const member of members) member.assertCurrent(); };
       return { assertCurrent, metadata() {
-        assertCurrent(); revision ??= `hq-${opaqueUuid()}`;
+        assertCurrent(); revision ??= `hq-${crypto.randomUUID()}`;
         return { subjectRevision: revision, homeGraphQualityRevisionVersion: HOME_GRAPH_QUALITY_REVISION_VERSION, qualitySubjectState: state };
       } };
     },

@@ -1,5 +1,4 @@
 /** Saved auxiliary roles reuse their actual row, not a digest of another ID. */
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeIssueRecord, KnowledgeRefinementTaskRecord } from '../types.js';
 import { observeKnowledgeValue } from '../local-value-observation.js';
@@ -9,7 +8,7 @@ const taskStates: readonly string[] = Object.freeze(['detected', 'queued', 'sear
 function prepare<T extends { readonly id: string }>(read: () => readonly T[], readId: (id: string) => T | null, prefix: string) {
   const rows = read(); if (rows.length > 1) throw new Held('ambiguous');
   const original = rows[0], observed = observeKnowledgeValue(original ?? null);
-  const id = original?.id ?? `${prefix}-${opaqueUuid()}`;
+  const id = original?.id ?? `${prefix}-${crypto.randomUUID()}`;
   if (!original && readId(id)) throw new Held('stale');
   return Object.freeze({ id, original, assertCurrent() {
     const current = read();

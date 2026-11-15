@@ -25,11 +25,11 @@ function fixture() {
   return { engine, h };
 }
 
-test('generated stream, phase, item and best-of-N identities preserve every UUID nibble', () => {
+test('generated stream, phase, item and best-of-N identities are plain UUIDs', () => {
   const { engine } = fixture();
   const stream = engine.createWorkstream({ title: 'opaque', phases: [{ ...phase, id: undefined }],
     isolation: 'worktree', items: [{ title: 'attempt', task: 'task', attempts: 2 }] });
-  const uuid = '[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}';
+  const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
   expect(stream.id).toMatch(new RegExp(`^ws-${uuid}$`));
   expect(stream.phases[0]!.id).toMatch(new RegExp(`^phase-${uuid}$`));
   for (const item of stream.items) {

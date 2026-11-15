@@ -7,7 +7,6 @@ import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { createSemanticFactIdentityPlanner, assertSemanticFactIdentityPlanner, prepareSemanticFactIdentity } from '../platform/src/platform/knowledge/semantic/identity-plan.js';
 import { semanticFactIdentityMetadata, SemanticIdentityHeldError } from '../platform/src/platform/knowledge/store-semantic-fact-selector.js';
 import { captureSemanticSourceRevision, semanticSourceIsCurrent, semanticSourceRevisionMetadata } from '../platform/src/platform/knowledge/semantic/source-revisions.js';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { NativeDataWriteOwner } from '../platform/src/platform/runtime/native-reader-compatibility.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [];
@@ -32,7 +31,7 @@ test('complete exact claims preserve Unicode, punctuation, case, qualifiers and 
     { ...claim, subjectIds: ['Device'] }, { ...claim, subjectIds: [], fallbackScope: 'device' }];
   const ids = inputs.map(input => pass.prepare(input).id);
   expect(new Set(ids).size).toBe(inputs.length);
-  expect(ids.every(id => /^sem-fact-[a-p-]+$/.test(id))).toBe(true);
+  expect(ids.every(id => /^sem-fact-[0-9a-f-]+$/.test(id))).toBe(true);
   expect(pass.prepare({ ...claim, subjectIds: ['device', 'other'], fallbackScope: 'source-a' }).id)
     .toBe(pass.prepare({ ...claim, subjectIds: ['other', 'device', 'device'], fallbackScope: 'source-b' }).id);
 });
@@ -150,7 +149,7 @@ test('future saved source-cache format is held instead of treated as a cache mis
 
 test('a fresh random label cannot overwrite an unrelated actual row or another claim in this pass', async () => {
   const { store } = await open();
-  const uuid = '00000000-0000-4000-8000-000000000001' as const, id = `sem-fact-${opaqueUuid(uuid)}`;
+  const uuid = '00000000-0000-4000-8000-000000000001' as const, id = `sem-fact-${uuid}`;
   const original = await store.upsertNode({ id, kind: 'topic', slug: 'unrelated-original', title: 'Unrelated original', status: 'draft' });
   const generate = spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(uuid);
   try {

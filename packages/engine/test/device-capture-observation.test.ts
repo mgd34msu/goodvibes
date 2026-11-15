@@ -3,7 +3,6 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { DeviceCaptureArtifactStore } from '../platform/src/platform/devices/device-capture-artifacts.js';
 import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities } from '../platform/src/platform/runtime/native-reader-compatibility.js';
 import { realUpdateFileIo } from '../platform/src/platform/runtime/self-update.js';
@@ -80,7 +79,7 @@ test('sweep preserves unproven UUID names and unrelated/index temporary files', 
 
 test('a failed exclusive capture open preserves the other owner’s same-name file', async () => {
   const f = fixture(), mocked = spyOn(crypto, 'randomUUID').mockReturnValue(UUID); cleanup.push(() => mocked.mockRestore());
-  const path = join(f.directory, `${opaqueUuid(UUID)}.png`); writeFileSync(path, 'foreign bytes', { mode: 0o600 });
+  const path = join(f.directory, `${UUID}.png`); writeFileSync(path, 'foreign bytes', { mode: 0o600 });
   const store = new DeviceCaptureArtifactStore(f.directory);
   await expect(store.retain(originalInput)).rejects.toThrow(); expect(readFileSync(path, 'utf8')).toBe('foreign bytes');
   await store.sweep(); expect(readFileSync(path, 'utf8')).toBe('foreign bytes');
@@ -114,7 +113,7 @@ test.each([0, 0o777])('capture and index remain private and readable with umask 
 
 test('a failed capture replacement stays protected even if the first quarantine publication also fails', async () => {
   const f = fixture(), mocked = spyOn(crypto, 'randomUUID').mockReturnValue(UUID); cleanup.push(() => mocked.mockRestore());
-  const path = join(f.directory, `${opaqueUuid(UUID)}.png`); let replaced = false;
+  const path = join(f.directory, `${UUID}.png`); let replaced = false;
   const store = new DeviceCaptureArtifactStore(f.directory);
   await expect(store.retain({ ...originalInput, assertCurrent() {
     if (replaced || !existsSync(path) || statSync(path).size !== 3) return;
@@ -126,7 +125,7 @@ test('a failed capture replacement stays protected even if the first quarantine 
   expect(JSON.parse(readFileSync(f.index, 'utf8')).pending).toEqual(originalPending);
   expect(readFileSync(path, 'utf8')).toBe('foreign replacement');
   await new DeviceCaptureArtifactStore(f.directory).sweep(); expect(readFileSync(path, 'utf8')).toBe('foreign replacement');
-  expect(JSON.parse(readFileSync(f.index, 'utf8')).preservedFiles).toContain(`${opaqueUuid(UUID)}.png`);
+  expect(JSON.parse(readFileSync(f.index, 'utf8')).preservedFiles).toContain(`${UUID}.png`);
 });
 
 test.each([2, 3])('a real killed writer preserves unproved empties and reclaims only its durable original crash spool (stage %i)', async stopAt => {

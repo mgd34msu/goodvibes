@@ -1,6 +1,5 @@
 /** One actual semantic write pass reuses exact complete claims, not hashes or
  * global plaintext caches. Final indexed absence checks reject another ID. */
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeStore } from '../store.js';
 import { SemanticIdentityHeldError, semanticFactSelector, semanticFactScopeMatches, type SemanticFactSelector } from '../store-semantic-fact-selector.js';
 
@@ -23,7 +22,7 @@ export function createSemanticFactIdentityPlanner(store: KnowledgeStore) {
       if (previous) { previous.assertCurrent(); return previous; }
       const existing = matching(selector);
       if (existing.length > 1) throw new SemanticIdentityHeldError('ambiguous');
-      const id = existing[0]?.id ?? `sem-fact-${opaqueUuid()}`;
+      const id = existing[0]?.id ?? `sem-fact-${crypto.randomUUID()}`;
       if (!existing.length && (store.getNode(id) || store.getRecordGeneration('node', id) !== null || apply(mapGet, allocated, [id]) !== undefined)) {
         throw new SemanticIdentityHeldError('stale');
       }

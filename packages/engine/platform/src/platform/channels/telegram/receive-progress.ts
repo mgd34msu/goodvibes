@@ -3,7 +3,6 @@
  * Empty responses prove only through their request's start, after dispatch and
  * durable cursor work. Native payment spans persist under that cursor's real
  * lease; an in-memory span alone never proves cross-restart custody. */
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { TelegramPollingCursor } from './offset-store.js';
 import { sameTelegramPaymentReceiveSelector, readTelegramPaymentReceiveSelector, TELEGRAM_UPDATE_RETENTION_MS,
   MAX_TELEGRAM_PAYMENT_RECEIVE_SPANS, type TelegramPaymentReceiveSelector, type TelegramPaymentReceiveSpan } from './payment-receive-span.js';
@@ -158,7 +157,7 @@ export class TelegramPollingReceiveProgress implements TelegramReceiveProgressOw
       if (!validTime(since) || since > now || now - since >= RETENTION_MS || !purchaseId || purchaseId.length > 256) throw new TelegramReceiveCoverageError();
       const spans = this.cursor.receiveSpans();
       if (spans.length >= MAX_TELEGRAM_PAYMENT_RECEIVE_SPANS) throw new TelegramReceiveCoverageError();
-      const span: TelegramPaymentReceiveSpan = { id: opaqueUuid(), accountId: captured.observation.accountId, purchaseId,
+      const span: TelegramPaymentReceiveSpan = { id: crypto.randomUUID(), accountId: captured.observation.accountId, purchaseId,
         sinceMs: since, registeredAtMs: now, offsetAtStart: captured.observation.offset, completedAtMs: now,
         quietThroughMs: null, invalid: false, gaps: [] };
       this.cursor.replaceReceiveSpans([...spans, span], () => { this.time(); captured.assertCurrent(); });

@@ -1,7 +1,6 @@
 /** Namespace allocation, recovery and cleanup against real Git, without model calls. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { WorktreeIdentityRegistry } from '../platform/src/platform/orchestration/worktree-identities.js';
 import { createHash } from 'node:crypto';
 import { judgmentInputBoundary } from '../platform/src/platform/gate/boundary.js';
@@ -120,7 +119,7 @@ test('exact private tuple allocations survive restart and never expose arbitrary
   for (const namespace of names) {
     const original = stream(), ws = { ...original, id: '../group', items: original.items.map(item => ({ ...item, id: '../unit' })) };
     const first = await reserve(root, ws, namespace), reopened = await reserve(root, ws, namespace);
-    expect(reopened.branch).toBe(first.branch); expect(first.branch).toMatch(/^ws-owned\/[a-p-]+$/);
+    expect(reopened.branch).toBe(first.branch); expect(first.branch).toMatch(/^ws-owned\/[0-9a-f-]+$/);
     expect(first.branch).not.toContain(namespace || 'unit'); branches.push(first.branch);
   }
   expect(new Set(branches).size).toBe(names.length);
@@ -215,7 +214,7 @@ test('generated namespace avoids card-shaped path material without relaxing user
   const oldBoundary = judgmentInputBoundary('read', { path: legacy }, root);
   expect(oldBoundary.passed).toBe(false);
   expect(oldBoundary.checks[0]?.detail).toBe('card-material');
-  const generated = join(root, '.goodvibes', '.worktrees', `ws-owned/${opaqueUuid()}`, 'src', 'csv.ts');
+  const generated = join(root, '.goodvibes', '.worktrees', `ws-owned/${crypto.randomUUID()}`, 'src', 'csv.ts');
   expect(judgmentInputBoundary('read', { path: generated }, root).passed).toBe(true);
   const syntheticCard = ['4111', '1111', '1111', '1111'].join('');
   const userPath = join(generated, '..', `${syntheticCard}.txt`);
@@ -308,7 +307,7 @@ test('read access follows explicit owner path rules without classifying file nam
   const store = new UserPermissionRuleStore(':memory:');
   const permission = new PermissionManager(async () => { throw new Error('read access must not prompt'); },
     createPermissionConfigReader(config), new PolicyRuntimeState(), null, { isEnabled: () => true }, store);
-  const path = join(root, '.goodvibes', '.worktrees', `ws-owned/${opaqueUuid()}`, 'src', 'csv.ts');
+  const path = join(root, '.goodvibes', '.worktrees', `ws-owned/${crypto.randomUUID()}`, 'src', 'csv.ts');
   expect(await permission.readAccess(path)).toBe('allow');
   const syntheticCard = ['4111', '1111', '1111', '1111'].join('');
   expect(await permission.readAccess(join(path, '..', `${syntheticCard}.txt`))).toBe('allow');

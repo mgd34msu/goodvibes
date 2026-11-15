@@ -38,7 +38,7 @@ export function computeGrantDigest(grant: Pick<TriggerActionGrant, 'command' | '
   return createHash('sha256').update(canonicalGrant(grant)).digest('hex');
 }
 
-const GRANT_REVISION = /^grant-revision-v1:[a-p]{32}$/;
+const GRANT_REVISION = /^grant-revision-v1:[0-9a-p]{32}$/;
 function validApproval(approval: TriggerApprovedAction): boolean {
   return approval !== null && typeof approval === 'object' && !Array.isArray(approval)
     && Object.keys(approval).length === 4 && approval.version === 1 && typeof approval.command === 'string'
@@ -90,8 +90,7 @@ export function createActionGrant(input: RegisterGrantInput, previous?: TriggerA
     createdAt: now,
     confirmedAt: now,
     confirmedBy: input.confirmedBy,
-    digest: retained?.digest ?? `grant-revision-v1:${randomUUID().replace(/-/g, '')
-      .replace(/[0-9a-f]/g, nibble => String.fromCharCode(97 + Number.parseInt(nibble, 16)))}`,
+    digest: retained?.digest ?? `grant-revision-v1:${randomUUID().replace(/-/g, '')}`,
     ...(approvedAction === undefined ? {} : { approvedAction }),
   };
 }

@@ -1,6 +1,5 @@
 /** Once-only labels for one actual Home Graph mutation pass. Saved native
  * tuples keep their IDs/slugs; reads alone never allocate or persist a label. */
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeStore } from '../store.js';
 import { homeGraphNodeSelector, homeGraphNodeMatches, HomeGraphIdentityHeldError as Held, type HomeGraphNodeSelector } from '../store-homegraph-node-selector.js';
 const apply = Reflect.apply, mapGet = Map.prototype.get, mapSet = Map.prototype.set, mapValues = Map.prototype.values;
@@ -26,7 +25,7 @@ export function createHomeGraphNodeIdentityPlanner(store: KnowledgeStore) {
       const previous = apply(mapGet, pending, [key]) as HomeGraphNodeIdentity | undefined;
       if (previous) { previous.assertCurrent(); return previous; }
       const rows = candidates(selector); if (rows.length > 1) throw new Held('ambiguous');
-      const saved = rows[0], id = saved?.id ?? `hg-node-${opaqueUuid()}`, slug = saved?.slug ?? id;
+      const saved = rows[0], id = saved?.id ?? `hg-node-${crypto.randomUUID()}`, slug = saved?.slug ?? id;
       if (!saved && (store.getNode(id) || apply(mapGet, labels, [id]) !== undefined)) throw new Held('stale');
       const savedHome = saved?.metadata.homeAssistant;
       const objectId = savedHome && typeof savedHome === 'object' && !Array.isArray(savedHome) && typeof (savedHome as Record<string, unknown>).objectId === 'string' ? (savedHome as { objectId: string }).objectId : selector.objectId;

@@ -2,7 +2,7 @@
  * authority, and a reservation never proves that Git actually created a tree. */
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureExistingDirectory, writeFileAtomic } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { tryAcquireCrossProcessLock, assertCrossProcessLockCurrent } from '../workspace/checkpoint/cross-process-lock.js';
@@ -11,7 +11,7 @@ import type { GitWorktreeCreationFacts } from '../git/service.js';
 import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 
 export const WORKTREE_IDENTITY_FILE = 'goodvibes-worktree-identities-v1.json';
-const BRANCH = /^ws-owned\/[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/;
+const BRANCH = /^ws-owned\/[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}$/;
 export interface WorktreeIdentityKey { readonly namespace: string | null; readonly workstreamId: string; readonly itemId: string }
 export interface StoredWorktreeIdentity extends WorktreeIdentityKey {
   readonly branch: string;
@@ -162,7 +162,7 @@ export class WorktreeIdentityRegistry {
     return this.change(registry => {
       const existing = registry.rows.find(row => sameKey(row, key));
       if (existing) return { value: existing };
-      const branch = `ws-owned/${opaqueUuid()}`;
+      const branch = `ws-owned/${crypto.randomUUID()}`;
       if (registry.rows.some(row => row.branch === branch)) throw unavailable();
       const row = Object.freeze({ ...key, branch, state: 'reserved' as const });
       return { value: row, rows: [...registry.rows, row] };

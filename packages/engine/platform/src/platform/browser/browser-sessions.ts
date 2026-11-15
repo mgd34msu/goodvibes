@@ -3,7 +3,6 @@ export { cdpEndpointCandidates } from './browser-cdp.js';
 export type { ReachableCdpEndpoint } from './browser-cdp.js';
 import { assertProvisionCurrent, ownProvisionLifetime, type BrowserProvisionLifetime } from './browser-failure-reading.js';
 import { readBrowserLaunchCause } from './launch-reading.js';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { OwnedWork } from '../utils/owned-work.js';
@@ -222,7 +221,7 @@ export class BrowserSessionManager {
   private readonly hosts = new Map<string, BrowserHostClient>();
   /** Saved tool/journal references must never select another manager's first
    * browser after a restart. Local ordinals belong to this owner only. */
-  readonly #incarnation = opaqueUuid();
+  readonly #incarnation = crypto.randomUUID();
   #sessionCounter = 0;
   private lastProvision: BrowserProvisionReport | null = null;
   /**

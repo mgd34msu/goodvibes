@@ -139,8 +139,7 @@ export function captureGateInput(cwd: string, previous?: GateSourceInputIdentity
   const retained = previous && observations.get(previous);
   const unchanged = retained && retained.root === root && retained.entries.length === entries.length
     && retained.entries.every((entry, index) => entry === entries[index]);
-  const source = unchanged && previous ? previous.source : `gate-source-${randomUUID()
-    .replace(/[0-9a-f]/g, nibble => String.fromCharCode(97 + Number.parseInt(nibble, 16)))}`;
+  const source = unchanged && previous ? previous.source : `gate-source-${randomUUID()}`;
   const captured = Object.freeze({ source, packageScripts: Object.freeze(scripts) });
   observations.set(captured, { root, entries });
   return captured;

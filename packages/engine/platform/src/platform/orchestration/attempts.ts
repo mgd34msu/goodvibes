@@ -1,4 +1,4 @@
-import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 
 /**
  * attempts.ts, best-of-N sibling attempts for the orchestration engine.
@@ -111,7 +111,7 @@ export function attemptItemId(sourceId: string, index: number): string {
 }
 
 function siblingId(spec: WorkItemSpec, index: number): string {
-  return spec.id ? attemptItemId(spec.id, index) : `item-${opaqueUuid()}`;
+  return spec.id ? attemptItemId(spec.id, index) : `item-${crypto.randomUUID()}`;
 }
 
 export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): AttemptsCoordinator {
@@ -149,7 +149,7 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
         items.push(item);
         continue;
       }
-      const groupId = `boN-${opaqueUuid()}`;
+      const groupId = `boN-${crypto.randomUUID()}`;
       if (groups.has(groupId) || pendingGroups.has(groupId)) throw new AttemptError('Attempt group identity already exists');
       const siblingIds: string[] = [];
       for (let i = 0; i < n; i++) {

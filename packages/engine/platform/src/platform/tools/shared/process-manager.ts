@@ -209,9 +209,7 @@ export class ProcessManager {
   // ─── Private helpers ────────────────────────────────────────────────────────
 
   private newId(): string {
-    // Handles are opaque. Encode generated decimal digits injectively so a
-    // timestamp cannot resemble card material at the unchanged privacy floor.
-    return `bg_${++this._counter}_${Date.now()}`.replace(/\d/g, (digit) => String.fromCharCode(97 + Number(digit)));
+    return `bg_${++this._counter}_${Date.now()}`;
   }
 
   // ─── Public API ─────────────────────────────────────────────────────────────

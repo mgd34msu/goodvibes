@@ -1,4 +1,3 @@
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 
 /**
  * OrchestrationEngine (see CHANGELOG 0.38.0), owns Workstream state and
@@ -185,7 +184,7 @@ const CAPACITY_RETRY_BASE_MS = 500;
 const CAPACITY_RETRY_MAX_MS = 5_000;
 
 function generateId(prefix: string): string {
-  return `${prefix}-${opaqueUuid()}`;
+  return `${prefix}-${crypto.randomUUID()}`;
 }
 
 function assertDistinctIds(entries: readonly { readonly id: string }[], kind: string): void {
@@ -199,7 +198,7 @@ function assertDistinctIds(entries: readonly { readonly id: string }[], kind: st
 
 export function createOrchestrationEngine(deps: OrchestrationEngineDeps): OrchestrationEngine {
   const now = deps.now ?? ((): number => Date.now());
-  const sessionId = deps.sessionId ?? opaqueUuid();
+  const sessionId = deps.sessionId ?? crypto.randomUUID();
   const stateRoot = deps.stateRoot ?? deps.projectRoot;
   const snapshotRoot: SnapshotRoot = deps.stateNamespace === undefined ? stateRoot : { root: stateRoot, namespace: deps.stateNamespace };
   const maxItemRetries = deps.maxItemRetries ?? 0;

@@ -55,7 +55,7 @@ test('fresh URI roles and punctuation-rich scope/locator facts remain distinct a
   const f = await fixture(), pass = createHomeGraphSourceIdentityPlanner(f.store);
   const a = pass.prepare(selector), b = pass.prepare({ ...selector, role: 'artifact' }), c = pass.prepare({ ...selector, spaceId: 'Project' }), d = pass.prepare({ ...selector, spaceId: 'project' });
   expect(new Set([a.id,b.id,c.id,d.id]).size).toBe(4); expect(pass.prepare(selector)).toBe(a);
-  for (const identity of [a,b,c,d]) { expect(identity.id).toMatch(/^hg-src-[a-p-]+$/); expect(identity.canonicalUri).toBe(`homegraph://source/${identity.id.slice('hg-src-'.length)}`); expect(identity.canonicalUri).not.toContain(url); }
+  for (const identity of [a,b,c,d]) { expect(identity.id).toMatch(/^hg-src-[0-9a-f-]+$/); expect(identity.canonicalUri).toBe(`homegraph://source/${identity.id.slice('hg-src-'.length)}`); expect(identity.canonicalUri).not.toContain(url); }
   expect(pass.lookup({ ...selector, value: url + '/unknown' })).toBeUndefined();
 });
 

@@ -158,7 +158,7 @@ describe('prepared answer-gap universe and write guards', () => {
     const oldNode = structuredClone(item.existing), oldIssue = structuredClone(item.issue);
     const result = await (await prepare(item).read()).persist(reason);
     expect(result).not.toBeNull(); expect(result?.id).not.toBe(oldNode.id);
-    expect(result?.id).toMatch(/^sem-answer-gap-[a-p-]+$/);
+    expect(result?.id).toMatch(/^sem-answer-gap-[0-9a-f-]+$/);
     expect(item.store.getNode(oldNode.id)).toEqual(oldNode); expect(item.store.getIssue(oldIssue.id)).toEqual(oldIssue);
     expect(item.store.listIssues().filter((issue) => issue.nodeId === result?.id)).toHaveLength(1);
     expect(item.store.listEdges().filter((edge) => edge.toId === result?.id && edge.relation === 'has_gap')).toHaveLength(2);

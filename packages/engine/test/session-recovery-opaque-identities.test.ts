@@ -29,7 +29,7 @@ test('arbitrary private IDs use opaque persisted names; safe paths and restart l
     expect(f.surface.recoveryFile('a1b2c3d4')).toBe(join(f.surface.recoveryDir, 'recovery-a1b2c3d4.jsonl'));
     writeRecoveryFile(snapshot('first tail'), id, 'title', { surface: f.surface });
     const path = f.surface.recoveryFile(id);
-    expect(basename(path)).toMatch(/^recovery-opaque-[a-p-]+\.jsonl$/);
+    expect(basename(path)).toMatch(/^recovery-opaque-[0-9a-f-]+\.jsonl$/);
     expect(path).not.toContain('private'); expect(path).not.toContain('4111111111111111');
     expect(JSON.parse(fs.readFileSync(path, 'utf8').split('\n')[0]!)).toMatchObject({ sessionId: id });
     const restarted = createSessionSurface(f.identity);

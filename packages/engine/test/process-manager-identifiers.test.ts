@@ -1,13 +1,14 @@
 import { expect, spyOn, test } from 'bun:test';
+import { findCardNumberShapes } from '../platform/src/platform/security/card-shapes.ts';
 import { ProcessManager, type BgCommandResult } from '../platform/src/platform/tools/shared/process-manager.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
 useToolReadings();
 
+// Luhn-valid on its own: a handle carrying it must still not read as card material.
 const epoch = 1_700_000_000_004;
-const encodedEpoch = 'bhaaaaaaaaaae';
 
-test('same-time ordinary allocations preserve the counter injectively across decimal digit boundaries', async () => {
+test('same-time allocations are distinct, addressable and never read as card numbers', async () => {
   const manager = new ProcessManager();
   const clock = spyOn(Date, 'now').mockReturnValue(epoch);
   try {
@@ -17,19 +18,15 @@ test('same-time ordinary allocations preserve the counter injectively across dec
       ids.push(result.process_id!);
     }
     expect(new Set(ids).size).toBe(12);
-    expect(ids[0]).toBe(`bg_b_${encodedEpoch}`);
-    expect(ids[8]).toBe(`bg_j_${encodedEpoch}`);
-    expect(ids[9]).toBe(`bg_ba_${encodedEpoch}`);
-    expect(ids[11]).toBe(`bg_bc_${encodedEpoch}`);
     for (const id of ids) {
-      expect(id).toMatch(/^bg_[a-j]+_[a-j]+$/);
+      expect(findCardNumberShapes(`started ${id}`)).toEqual([]);
       expect(manager.getStatus(id)?.id).toBe(id);
       expect(manager.handleCommand(`bg_status ${id}`)?.success).toBe(true);
     }
   } finally { clock.mockRestore(); await manager.close(); }
 });
 
-test('owned allocation retains its previous spelling and exact owner-bound identity', async () => {
+test('owned allocation keeps its exact owner-bound identity', async () => {
   const manager = new ProcessManager();
   const owner = {};
   const otherOwner = {};
@@ -44,7 +41,7 @@ test('owned allocation retains its previous spelling and exact owner-bound ident
       readOutput: async () => { reads++; return output; },
       stop: async () => { stops++; finish({ ...output, exit_code: 0 }); },
     });
-    expect(started.process_id).toBe(`bg_owned_b_${encodedEpoch}`);
+    expect(started.process_id).toBe(`bg_owned_1_${epoch}`);
     const id = started.process_id!;
     expect(manager.hasBoundaryOwner(id)).toBe(true);
     const readsBefore = reads;

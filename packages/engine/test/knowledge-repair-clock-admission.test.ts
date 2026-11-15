@@ -3,7 +3,6 @@ import { intrinsicAssessmentFixture } from './_helpers/knowledge-self-improvemen
 const answerReadings = useKnowledgeAnswerReadings();
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -121,16 +120,15 @@ test('operator review and no-op writes compare the public clock view without los
   const repaired = await markGapRepairAttempt(store, gap, 'repair-clock', { status: 'repaired' });
   const input = { id: repaired.id, kind: repaired.kind, slug: repaired.slug, title: repaired.title,
     status: repaired.status, confidence: repaired.confidence };
-  // A valid native UUID whose final separator-joined digits pass Luhn. The
-  // producer must encode its identity; the privacy check still refuses the raw spelling.
+  // A UUID whose separator-joined digits pass Luhn is an identifier, not card material.
   const uuid = 'aaaaaaaa-aaaa-4aaa-aaa4-222222222222' as const;
-  expect(() => assertJudgmentInput(uuid)).toThrow('payment card material');
+  expect(() => assertJudgmentInput(uuid)).not.toThrow();
   const generate = spyOn(crypto, 'randomUUID').mockReturnValue(uuid);
   let reviewed: KnowledgeNodeRecord;
   try {
     reviewed = await store.upsertNode(input, createKnowledgeNodeOperatorMutation(repaired, { action: 'accept', reviewer: 'clock-test' }));
   } finally { generate.mockRestore(); }
-  expect(reviewed.metadata.review).toMatchObject({ id: opaqueUuid(uuid) });
+  expect(reviewed.metadata.review).toMatchObject({ id: uuid });
   expect(reviewed.metadata.lastRepairAttemptAt).toBe(collision);
   expect(() => prepareKnowledgeRecordAdmission(store, 'node', reviewed).assertCurrent()).not.toThrow();
   const unchanged = await store.upsertNode(input);

@@ -2,7 +2,6 @@
  * to its session; arbitrary session identifiers never become reversible paths. */
 import { drainOwned } from '@goodvibes-jev/judgment';
 import type { NativeDataWriteOwner } from './native-reader-compatibility.js';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { BigIntStats } from 'node:fs';
@@ -143,7 +142,7 @@ export function createRecoveryPathResolver(
       try { lstatSync(cached); paths.delete(id); versions.delete(id); }
       catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return cached; throw error; }
     }
-    const selected = join(directory, `recovery-opaque-${opaqueUuid()}.jsonl`);
+    const selected = join(directory, `recovery-opaque-${crypto.randomUUID()}.jsonl`);
     return remember(id, selected);
   };
   if (nativeDataWriter) publicationOwners.set(resolve, { writer: nativeDataWriter, declare: nativeDataWriter.declare });
@@ -236,7 +235,7 @@ export function publishRecoveryPath(directory: string, id: string, resolve: (id:
       if (current !== source) throw new Error('Recovery destination changed');
     };
     assertCurrent();
-    if (path !== canonical && (source === null || /^recovery-opaque-[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}\.jsonl$/.test(basename(path)))) {
+    if (path !== canonical && (source === null || /^recovery-opaque-[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}\.jsonl$/.test(basename(path)))) {
       const owner = publicationOwners.get(resolve);
       if (owner) {
         if (owner.writer.declare !== owner.declare) throw new Error('Recovery installation owner changed');

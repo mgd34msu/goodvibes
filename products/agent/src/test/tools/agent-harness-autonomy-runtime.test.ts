@@ -1562,7 +1562,7 @@ afterEach(() => { setSystemTime(); resetAgentMcpCallRouteForTests(); installJudg
         readonly routes: { readonly log: string; readonly poll: string; readonly stop: string };
       };
       expect(startedJson.status).toBe('started');
-      expect(startedJson.processId).toBe('bg_b_bhaaaaaaaaaae');
+      expect(startedJson.processId).toBe('bg_1_1700000000004');
       const polled = await fixture.executeAdmittedCall('process-poll', 'process', {
         action: 'poll', processId: startedJson.processId,
       });
@@ -1630,24 +1630,6 @@ afterEach(() => { setSystemTime(); resetAgentMcpCallRouteForTests(); installJudg
     } finally {
       await fixture.cleanup();
     }
-  });
-
-
-  test('a literal legacy PAN-shaped process ID remains held at registered process ingress', async () => {
-    const fixture = makeFixture();
-    try {
-      // Previously allocated handles are opaque inputs, never decoded or exempted.
-      const processId = 'bg_1_1700000000004';
-      let held: unknown;
-      try { await fixture.toolRegistry.execute('process-pan-id', 'process', { action: 'poll', processId }); }
-      catch (error) { held = error; }
-      expect(held).toBeInstanceOf(ToolInputProjectionError);
-      if (!(held instanceof ToolInputProjectionError)) throw new Error('Expected native process input projection refusal.');
-      expect(held.problem).toBe('unavailable');
-      expect(fixture.processManager.list()).toEqual([]);
-      expect(String(held)).not.toContain(processId);
-      expect(String(held)).not.toContain('1700000000004');
-    } finally { await fixture.cleanup(); }
   });
 
 

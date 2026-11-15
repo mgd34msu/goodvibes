@@ -1,4 +1,4 @@
-import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { logger } from '../utils/logger.js';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { readMultimodalPdf } from './pdf-source.js';
@@ -531,7 +531,7 @@ export class MultimodalService {
       ...(summary ? [{ kind: 'summary' as const, text: summary, metadata: {} }] : []),
     ];
     return this.source({
-      id: `mm-${opaqueUuid()}`,
+      id: `mm-${crypto.randomUUID()}`,
       kind: 'image',
       artifact: descriptor,
       providerIds: [result.providerId],
@@ -575,7 +575,7 @@ export class MultimodalService {
       metadata: {},
     }));
     return this.source({
-      id: `mm-${opaqueUuid()}`,
+      id: `mm-${crypto.randomUUID()}`,
       kind: 'audio',
       artifact: descriptor,
       providerIds: [transcript.providerId],
@@ -611,7 +611,7 @@ export class MultimodalService {
       : extraction.sections.slice(0, 12).map((section) => ({ kind: 'section' as const, title: section, text: section, metadata: {} }));
     const text = compactText([extraction.summary ?? '', extraction.excerpt ?? ''].join('\n\n'), 4_000);
     return this.source({
-      id: `mm-${opaqueUuid()}`,
+      id: `mm-${crypto.randomUUID()}`,
       kind: 'document',
       artifact: this.artifactStore.get(record.id)!,
       providerIds: ['knowledge-extractors'],
@@ -740,7 +740,7 @@ export class MultimodalService {
     ].filter(Boolean).join(' '), 320) ?? 'Video metadata is available but no keyframes or transcripts were provided for deeper analysis.';
 
     return this.source({
-      id: `mm-${opaqueUuid()}`,
+      id: `mm-${crypto.randomUUID()}`,
       kind: 'video',
       artifact: descriptor,
       providerIds: [...providerIds].length > 0 ? [...providerIds] : ['knowledge-extractors'],

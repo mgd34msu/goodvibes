@@ -41,7 +41,7 @@ function manager(root: string, events: OrchestrationEvent[] = [], writer?: Nativ
 test('fresh exact tuples persist opaque labels with no checksum and concurrent managers converge before Git', async () => {
   const f = fixture(), first = new WorktreeIdentityRegistry(f.common), second = new WorktreeIdentityRegistry(f.common);
   const [a, b] = await Promise.all([first.reserve(key), second.reserve({ ...key })]);
-  expect(a.branch).toBe(b.branch); expect(a.state).toBe('reserved'); expect(a.branch).toMatch(/^ws-owned\/[a-p-]+$/);
+  expect(a.branch).toBe(b.branch); expect(a.state).toBe('reserved'); expect(a.branch).toMatch(/^ws-owned\/[0-9a-f-]+$/);
   const alternatives = await Promise.all([
     second.reserve({ ...key, namespace: `${key.namespace}/other` }),
     second.reserve({ ...key, workstreamId: `${key.workstreamId}/other` }),

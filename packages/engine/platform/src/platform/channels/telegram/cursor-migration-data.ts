@@ -21,7 +21,7 @@ export function readTelegramCursorPreview(value: unknown): TelegramCursorPreview
     return Object.freeze({ state: 'not-needed', message: value['message'] });
   }
   if (value['state'] !== 'unbound' || !keys(value, ['state', 'previewId', 'accountId', 'username', 'offset', 'updatedAt', 'expiresAtMs'])
-    || typeof value['previewId'] !== 'string' || !/^telegram-cursor:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/.test(value['previewId'])
+    || typeof value['previewId'] !== 'string' || !/^telegram-cursor:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}$/.test(value['previewId'])
     || !account(value['accountId']) || typeof value['username'] !== 'string' || !/^[A-Za-z0-9_]+$/.test(value['username'])
     || !offset(value['offset']) || typeof value['updatedAt'] !== 'string' || !Number.isFinite(Date.parse(value['updatedAt']))
     || !offset(value['expiresAtMs'])) return fail();

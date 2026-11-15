@@ -1,6 +1,5 @@
 /** Saved issue roles, not a digest of user/private identifiers. These labels
  * confer no review authority; the actual issue lifecycle boundary remains owner. */
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeStore } from '../../store.js';
 import { isLegacyHomeGraphQualityIssue } from '../../store-issue-replacement.js';
 import { HomeGraphQualityHeldError as Held } from './types.js';
@@ -18,7 +17,7 @@ export function createHomeGraphQualityIssueIdentities(store: KnowledgeStore, spa
   };
   function prepare(code: string, nodeId: string) {
     if (!codes.includes(code) || !nodeId) throw new Held('malformed');
-    const original = rowsFor(code, nodeId)[0], id = original?.id ?? `hg-issue-${opaqueUuid()}`;
+    const original = rowsFor(code, nodeId)[0], id = original?.id ?? `hg-issue-${crypto.randomUUID()}`;
     if (!original && (store.getIssue(id) || labels.has(id))) throw new Held('stale');
     labels.add(id);
     return Object.freeze({ id, original, assertCurrent() {

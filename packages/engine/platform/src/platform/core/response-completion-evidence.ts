@@ -4,8 +4,7 @@ import { fitCompletionEvidence } from './response-completion-budget.js';
 
 /** A local projection of observations, never an invocation or a replacement user request. */
 export class CompletionEvidenceProjection {
-  private readonly namespace = crypto.randomUUID().replace(/[0-9a-f]/g,
-    nibble => String.fromCharCode(97 + Number.parseInt(nibble, 16)));
+  private readonly namespace = crypto.randomUUID();
   // Only a small recent set keeps aliases stable across draft edits. Private
   // observation bodies never become Map keys or an unbounded duplicate cache.
   private readonly references: { readonly value: string; readonly reason: string; readonly reference: string }[] = [];

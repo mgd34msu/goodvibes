@@ -95,10 +95,7 @@ export function prepareAnswerGapUniverse(store: KnowledgeStore, requestedSpace: 
     .filter((task) => field(task, 'spaceId') === space || includes(gapIds, field(task, 'gapId'))).map((task) => snapshotNodeInput(task));
   const tasks = readTasks();
   guard.watch('gap-lifecycle-universe', readTasks, tasks);
-  // Encode only this newly minted native identifier. A numeric UUID suffix can
-  // otherwise resemble a PAN when its hyphen-separated groups are screened.
-  // Preserve all UUID entropy without changing admission of any caller data.
-  const fingerprint = randomUUID().replace(/[0-9]/g, digit => 'ghijklmnop'[Number(digit)]!);
+  const fingerprint = randomUUID();
   const nodeId = `sem-answer-gap-${fingerprint}`, issueId = `sem-answer-gap-issue-${fingerprint}`;
   guard.node(nodeId); guard.watch('absent-gap-issue', () => store.getIssue(issueId));
   guard.watch('absent-gap-slug', () => store.getNodeByKindAndSlug('knowledge_gap', `answer-gap-${fingerprint}`));

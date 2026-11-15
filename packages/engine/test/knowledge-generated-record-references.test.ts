@@ -82,7 +82,7 @@ async function fixture(batched = false, extractionClock?: number, historical = t
     expect(fact.id).toBe(protectedHistoricalFactId);
     expect(judgmentInputProblem({ id: fact.id })).toBe('card-material');
   } else {
-    expect(fact.id).toMatch(/^sem-fact-[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/);
+    expect(fact.id).toMatch(/^sem-fact-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     expect(judgmentInputProblem({ id: fact.id })).toBeUndefined();
   }
   return { store, source, extraction, subject, fact, plan, fake, spaceId, input };

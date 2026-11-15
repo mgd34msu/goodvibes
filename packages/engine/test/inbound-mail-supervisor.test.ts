@@ -30,7 +30,6 @@ import {
   InboundMailSupervisor,
   MailboxCursorStore,
   PersistedExpectationStore,
-  createInboundNoticeHealth,
   type InboundMailSourceFactory,
   type InboundMailSupervisorDeps,
 } from '../platform/src/platform/email/inbound/index.ts';

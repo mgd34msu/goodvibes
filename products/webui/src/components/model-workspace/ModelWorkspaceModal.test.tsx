@@ -138,7 +138,7 @@ describe('ModelWorkspaceModal: multi-target routing', () => {
     unmount();
   });
 
-  test('the capability filter is disabled, no wire data exists for it', async () => {
+  test('the capability filter is disabled when the daemon sends no capability flags', async () => {
     const { el, unmount } = render();
     await waitFor(() => el.textContent?.includes('claude-opus-4') ?? false);
     const capabilitySelect = el.querySelector('.model-workspace-filter button[aria-label="Capability"]');

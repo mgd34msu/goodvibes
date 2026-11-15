@@ -7,11 +7,10 @@
  * SSE event carrying the count of chunks dropped since the last notice. Every stream consumer
  * (session updates, control-plane invalidation, chat turns) routes that event here.
  *
- * This tiny module-level store accumulates the dropped count and notifies React subscribers,
- * so the UI can show a persistent, non-dismissing-until-resolved notice: "live events were
- * dropped, the view may be stale, resync". A resync (refetching every query) is the honest
- * recovery: the missed events were only ever invalidation triggers, so a full refetch restores
- * the true state. acknowledgeRelayOverflow() clears the notice once the operator resyncs.
+ * This tiny module-level store accumulates the dropped count and notifies React subscribers.
+ * RelayOverflowBanner refetches every query once per burst, by itself: the missed events were
+ * only ever invalidation triggers, so a full refetch restores the true state.
+ * acknowledgeRelayOverflow() clears the count when that refetch starts.
  */
 
 /** The SSE event name the relay transport emits on a tunnel send-buffer overflow. */
@@ -57,7 +56,7 @@ export function noteRelayOverflow(dropped: number): void {
   emit();
 }
 
-/** Clear the outstanding overflow notice (call after a successful resync). */
+/** Clear the outstanding overflow count (the resync owner calls it as its refetch starts). */
 export function acknowledgeRelayOverflow(): void {
   if (snapshot.totalDropped === 0 && snapshot.lastAt === 0) return;
   snapshot = { totalDropped: 0, lastAt: 0, epoch: snapshot.epoch + 1 };

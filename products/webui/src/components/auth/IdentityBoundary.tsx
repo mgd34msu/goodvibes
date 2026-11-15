@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { getClientLifetime, subscribeClientLifetime } from '../../lib/client-lifetime';
 import { writeStoredActiveCompanionSessionId, writeStoredCompanionSessions } from '../../lib/companion-chat';
 
-/** Each credential/transport generation owns its cache and mounted application. */
+/** Each credential generation (token or relay pairing) owns its cache and mounted application; a route flip is not one. */
 export function IdentityBoundary({ children }: { children: ReactNode }) {
   const lifetime = useSyncExternalStore(subscribeClientLifetime, getClientLifetime, getClientLifetime);
   const client = useMemo(() => new QueryClient({

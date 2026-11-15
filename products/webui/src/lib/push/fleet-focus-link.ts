@@ -5,7 +5,7 @@
  * a PushMessage whose `data` is `{ kind: 'needs-input', sessionId?, nodeId? }`
  * (platform push/types.ts PushNotificationData). The service worker opens the app at
  * `/?view=fleet#fleet-node=<nodeId>&fleet-session=<sessionId>` (see
- * notification-link.ts). This module reads that fragment and scrubs it, so
+ * `linkForNotification` in public/sw.js). This module reads that fragment and scrubs it, so
  * FleetView can focus the node the operator was summoned to, mirroring the
  * approval action hand-off's fragment discipline (approval-action-link.ts).
  *

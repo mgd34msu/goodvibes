@@ -126,23 +126,6 @@ describe('sortProvidersConfiguredFirst', () => {
     expect(sorted.map((p) => p.id)).toEqual(['groq', 'openai', 'abacusai', 'anthropic']);
   });
 
-  test('a provider configured only via a usable route sorts as configured', () => {
-    const routeOnly = {
-      id: 'openai',
-      label: 'openai',
-      value: {
-        id: 'openai',
-        runtime: {
-          auth: {
-            configured: false,
-            routes: [{ route: 'subscription-oauth', configured: true, usable: true, freshness: 'healthy' }],
-          },
-        },
-      },
-    };
-    const sorted = sortProvidersConfiguredFirst([provider('abacusai', false), routeOnly]);
-    expect(sorted[0]?.id).toBe('openai');
-  });
 });
 
 describe('reasoningOptionsForModel', () => {

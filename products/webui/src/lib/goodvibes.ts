@@ -11,7 +11,6 @@ export { tokenStore, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
 import { isRuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import { routedFetch } from './relay-connection';
 import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type TelegramCursorPreview } from '@goodvibes-jev/engine/platform/platform/channels/telegram-cursor';
-import { resolveDaemonRefusal } from './daemon-refusal';
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/platform/browser/decision-policy';
 import { browserDecisionPolicy } from './decision-policy';
 import type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentOperationView, PaymentOperationCancellation } from '@goodvibes-jev/engine/platform/platform/payments';
@@ -203,8 +202,6 @@ interface RouteDefinition {
 interface RequestOptions {
   /** Set only by a handler for an explicit owner gesture. */
   readonly explicitUserRequest?: boolean;
-  /** Structured purchase-window failures already have a fixed host diagnostic. */
-  readonly interpretRefusal?: boolean;
   method?: HttpMethod;
   body?: unknown;
   query?: JsonRecord;
@@ -298,13 +295,15 @@ function asRecord(value: unknown): JsonRecord {
  * The daemon's own words about an HTTP failure (category, hint, recoverable,
  * retryAfterMs) lifted onto the thrown error, where formatError reads them. A body
  * category never decides the two answers the app keys off: only a 401 is
- * 'authentication' and only a transport failure is 'network'.
+ * 'authentication' and only a transport failure is 'network'. A relay step-up 401
+ * (`code: 'step-up-required'`) is its own category: the change needs a passkey, the
+ * session did not expire.
  */
 export function daemonErrorFields(status: number, body: unknown): { category: string; hint?: string; recoverable?: boolean; retryAfterMs?: number } {
   const record = asRecord(body);
   const bodyCategory = typeof record.category === 'string' ? record.category.trim() : '';
   const category = status === 401
-    ? 'authentication'
+    ? record.code === 'step-up-required' ? 'step-up' : 'authentication'
     : bodyCategory && bodyCategory !== 'authentication' && bodyCategory !== 'network' ? bodyCategory : 'service';
   return {
     category,
@@ -383,11 +382,6 @@ async function requestJson<T = unknown>(path: string, options: RequestOptions = 
       body,
       ...daemonErrorFields(response.status, body),
     });
-    if (options.interpretRefusal !== false && path !== WEBUI_METHOD_ROUTES['judgment.battery.run'].path && path !== WEBUI_METHOD_ROUTES['control.status'].path) await resolveDaemonRefusal(error, runBrowserJudgment, {
-      signal: options.signal, isCurrent: () => isClientLifetimeCurrent(failureLifetime),
-    });
-    // Interpretation never replaces the original HTTP failure, even if its
-    // signal or account changed while the bounded reading was in flight.
     throw error;
   }
   return body as T;
@@ -508,34 +502,14 @@ export function webuiRouteFor(methodId: string): RouteDefinition | undefined {
 /**
  * invokeOperator, the single dispatcher for every operator method id, contract-typed.
  *
- * Overload 1 covers every id in the installed `OperatorMethodId` union (every row in
- * EXTRA_METHOD_ROUTES except models.*, see overload 2, plus every sessions.* id that
- * falls through to scopedPlatform.operator.invoke below). The `input` parameter is typed
- * `OperatorMethodInput<TMethodId>` DIRECTLY, which is the whole point: an earlier
- * signature took a free `TInput` type parameter defaulting to that same type, and a
- * default is not a constraint, TypeScript infers it from the argument whenever one is
- * passed, so the generated shape was discarded and any object compiled. Two breaking
- * contract changes reached this app through that gap without producing one type error.
- * `TOutput` keeps its default because an output override never weakens a request.
- *
- * A caller whose body genuinely cannot be checked against the generated input uses
- * `invokeOperatorUncheckedInput` instead, named, documented, and enumerable, rather than
- * every call site in this file opting out in silence.
- *
- * Overload 2 is the untyped fallback `invokeOperatorUncheckedInput` casts through for the
- * ids listed in its own header comment (calendar.*, email.*, memory.*, stepup.credentials.
- * register, approvals.approve). Historically models.list/current/select ALSO went through
- * this fallback, they were not in the OperatorMethodId union at all (operator-method-
- * ids.ts had no "models.*" entries). The 2.0.0 re-pin adds real models.list /
- * models.current.get / models.current.set entries, so models.* now calls overload 1 like
- * fleet.* and checkpoints.* do, this is no longer a standing gap. Flag it again if a
- * future contracts generation ever drops coverage for these ids.
+ * The `input` parameter is typed `OperatorMethodInput<TMethodId>` directly, so a contract
+ * change to any verb fails this app's compile instead of reaching the daemon as a stale
+ * body. `TOutput` may be overridden only to narrow the reply a view reads.
  */
 async function invokeOperator<
   TMethodId extends OperatorMethodId,
   TOutput = OperatorMethodOutput<TMethodId>,
 >(methodId: TMethodId, input?: OperatorMethodInput<TMethodId>, signal?: AbortSignal): Promise<TOutput>;
-async function invokeOperator(methodId: string, input?: unknown, signal?: AbortSignal): Promise<unknown>;
 async function invokeOperator(methodId: string, input?: unknown, signal?: AbortSignal): Promise<unknown> {
   const route = EXTRA_METHOD_ROUTES[methodId];
   if (!route) {
@@ -544,15 +518,11 @@ async function invokeOperator(methodId: string, input?: unknown, signal?: AbortS
     // (SHARED_BROWSER_ROUTES ∪ KNOWLEDGE_BROWSER_ROUTES), a runtime invariant the type
     // system cannot see through a string-keyed table lookup. isExtraRoutedMethod's test
     // coverage below is what actually enforces it, not this cast.
-    const lifetime = getClientLifetime();
-    try { return await scopedPlatform.operator.invoke(
+    return scopedPlatform.operator.invoke(
       methodId as BrowserKnowledgeMethodId,
       input as OperatorMethodInput<BrowserKnowledgeMethodId>,
       { signal },
-    ); } catch (error) {
-      await resolveDaemonRefusal(error, runBrowserJudgment, { signal, isCurrent: () => isClientLifetimeCurrent(lifetime) });
-      throw error;
-    }
+    );
   }
   const { path, rest } = interpolateRoute(route, input);
   if (route.method === 'GET') return requestJson(path, { method: route.method, query: rest, signal });
@@ -571,12 +541,12 @@ function purchaseWindowRoute(action: 'status' | 'approve' | 'deny' | 'cancel'): 
 }
 async function readPurchaseWindows(signal?: AbortSignal): Promise<PaymentPurchaseStatus> {
   const route = purchaseWindowRoute('status');
-  return readPaymentWindowStatus(await requestJson(route.path, { method: 'GET', interpretRefusal: false, signal }));
+  return readPaymentWindowStatus(await requestJson(route.path, { method: 'GET', signal }));
 }
 async function answerPurchaseWindow(action: 'approve' | 'deny' | 'cancel', input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal): Promise<PaymentWindowAnswer> {
   const route = purchaseWindowRoute(action);
   const purchaseId = input.purchaseId, windowId = input.windowId;
-  const result = readPaymentWindowAnswer(await requestJson(route.path, { method: 'POST', body: { purchaseId, windowId, confirm: true }, explicitUserRequest: true, interpretRefusal: false, signal }));
+  const result = readPaymentWindowAnswer(await requestJson(route.path, { method: 'POST', body: { purchaseId, windowId, confirm: true }, explicitUserRequest: true, signal }));
   if (result.purchaseId !== purchaseId || result.windowId !== windowId) throw new Error('The purchase answer did not match the selected window. Refresh its status.');
   return result;
 }
@@ -584,7 +554,7 @@ async function stopPurchaseOperation(input: Pick<PaymentOperationView, 'purchase
   const route = purchaseWindowRoute('cancel');
   const purchaseId = input.purchaseId, operationId = input.operationId;
   const result = readPaymentOperationCancellation(await requestJson(route.path, { method: 'POST',
-    body: { purchaseId, operationId, confirm: true }, explicitUserRequest: true, interpretRefusal: false, signal }));
+    body: { purchaseId, operationId, confirm: true }, explicitUserRequest: true, signal }));
   if (result.purchaseId !== purchaseId || result.operationId !== operationId) throw new Error('The stop acknowledgement did not match the selected purchase. Refresh its status.');
   return result;
 }
@@ -593,7 +563,7 @@ async function reconcilePurchaseOperation(input: Pick<PaymentOperationView, 'pur
   const purchaseId = input.purchaseId, operationId = input.operationId;
   const result = readPaymentOperation(await requestJson(PAYMENT_PURCHASE_RECONCILE_HTTP.path, { method: PAYMENT_PURCHASE_RECONCILE_HTTP.method,
     body: { purchaseId, operationId, outcome, inspectedMerchantHistory: true, confirm: true },
-    explicitUserRequest: true, interpretRefusal: false, signal }));
+    explicitUserRequest: true, signal }));
   if (result.purchaseId !== purchaseId || result.operationId !== operationId || result.outcome !== `owner-confirmed-${outcome}`) {
     throw new Error('The reconciliation did not match the selected purchase. Refresh its status before taking action.');
   }
@@ -604,7 +574,7 @@ async function telegramCursorAction(actionId: 'cursor-migration-preview' | 'curs
   const route = EXTRA_METHOD_ROUTES['channels.actions.invoke'];
   if (!route || route.method !== 'POST') throw new Error('The connected client does not provide channel recovery actions.');
   const { path } = interpolateRoute(route, { surface: 'telegram', actionId });
-  const result = await requestJson(path, { method: 'POST', body, signal, explicitUserRequest: true, interpretRefusal: false });
+  const result = await requestJson(path, { method: 'POST', body, signal, explicitUserRequest: true });
   if (!result || typeof result !== 'object' || Array.isArray(result) || !('actionId' in result) || result.actionId !== actionId
     || !('surface' in result) || result.surface !== 'telegram' || !('result' in result)) throw new Error('The channel recovery response did not match this request.');
   return result.result;
@@ -665,42 +635,6 @@ void PROFILE_FORGET_SENDS_ONLY_DECLARED_KEYS;
 
 const PROFILE_FORGET_BODY_IS_ACCEPTED: OperatorMethodInput<'profile.forget'> = {} as ProfileForgetInput;
 void PROFILE_FORGET_BODY_IS_ACCEPTED;
-
-/**
- * invokeOperatorUncheckedInput, the ONE deliberate way to send a body the generated
- * input type cannot check, and the visible inventory of which ids need it.
- *
- * Every other call goes through `invokeOperator`, whose `input` parameter is typed
- * `OperatorMethodInput<TMethodId>` directly. That matters: an earlier signature took a
- * free `TInput` type parameter DEFAULTING to the generated input, and a default is not a
- * constraint, TypeScript infers it from the argument whenever one is passed, so the
- * generated shape was discarded and any object compiled. Two breaking contract changes
- * reached this app through that gap (a required `authority`, and `profile.forget` moving
- * from `lineIndex` to `section`+`text`), neither of which produced a single type error.
- *
- * Two distinct reasons an id lands here, and they are worth telling apart:
- *
- *  1. THE GENERATED INPUT IS A CATCH-ALL. calendar.*, email.* and memory.* generate as
- *     `{ readonly [key: string]: unknown }`, which declares nothing and which a local
- *     interface cannot satisfy anyway (TypeScript gives interfaces no implicit index
- *     signature). The hand-authored input types at these call sites are strictly MORE
- *     precise than the contract, so nothing is lost by not checking against it, but the
- *     list below is then an honest inventory of where the contract says nothing useful.
- *  2. THE GENERATED INPUT IS WRONG. stepup.credentials.register and approvals.approve
- *     both carry real, tested divergences the generated map does not reflect (see their
- *     own section comments). These are the ones to re-check on every pin bump: when the
- *     contract catches up, the call moves back to `invokeOperator` and the divergence
- *     comment goes with it.
- *
- * The single `as` here is the price of the escape, paid once in one named place instead
- * of silently at every call site in the file.
- */
-async function invokeOperatorUncheckedInput<TOutput>(
-  methodId: OperatorMethodId,
-  input: unknown,
-): Promise<TOutput> {
-  return await invokeOperator(methodId as string, input) as TOutput;
-}
 
 /**
  * invokeGatewayMethod, typed direct call to the generic invoke-by-id endpoint
@@ -782,10 +716,9 @@ async function readContractMethod<M extends 'contracts.list' | 'contracts.get'>(
 //     client never runtime-validates the wire response (see `invokeOperator`), so
 //     a mixed-version/pre-audit record may genuinely omit it; approvals.test.ts
 //     pins a fixture that omits `audit` on purpose.
-//   - `ApprovalDecision.modifiedArgs` and `ApprovalApproveInput.selectedHunks` are
-//     real per-hunk-apply wire fields the generated 0.38 maps do not cover.
 // Because of these deliberate divergences, invokeOperator's approvals.* calls
-// below pass explicit TOutput/TInput overrides rather than the contract defaults.
+// below pass explicit TOutput overrides rather than the contract defaults. The
+// approve body is the contract's own input (approveInput below).
 
 /**
  * One edit hunk of an `edit`-tool approval's `request.args.edits` array.
@@ -1000,17 +933,21 @@ export interface ApprovalActionResult {
  * (approval-hunk-apply.ts) so every surface (TUI, webui) produces identical
  * modified-edit args, the webui only ever sends indices, never a computed diff.
  */
-export interface ApprovalApproveInput {
-  readonly selectedHunks?: readonly number[];
-  readonly note?: string;
-  readonly remember?: boolean;
-  /** Requested remember tier. The HTTP approval route now forwards it into the
-   * same broker resolution the in-process path uses, and reports what it did in
-   * the response's `recorded` block, the UI reads remembering from there. */
+export type ApprovalApproveInput = Omit<OperatorMethodInput<'approvals.approve'>, 'approvalId' | 'rememberTier'> & {
+  /** A tier from the approval's own remember options (an open string on the record); checked against the contract's tiers before sending. */
   readonly rememberTier?: string;
-  /** Exec-prompt answer path: `{ answer: string }` feeds the waiting command.
-   * The route forwards it and reports delivery via `recorded.modifiedArgsDelivered`. */
-  readonly modifiedArgs?: Record<string, unknown>;
+};
+
+type ApprovalRememberTier = NonNullable<OperatorMethodInput<'approvals.approve'>['rememberTier']>;
+const APPROVAL_REMEMBER_TIERS: readonly ApprovalRememberTier[] = ['session', 'exact', 'command-class', 'path', 'tool'];
+
+/** The approve body: the contract's input, with an unknown remember tier refused before anything is sent. */
+function approveInput(approvalId: string, input: ApprovalApproveInput = {}): OperatorMethodInput<'approvals.approve'> {
+  const { rememberTier, ...rest } = input;
+  if (rememberTier === undefined) return { ...rest, approvalId };
+  const tier = APPROVAL_REMEMBER_TIERS.find((candidate) => candidate === rememberTier);
+  if (!tier) throw new Error(`This daemon offers no remember tier "${rememberTier}"; nothing was approved. Choose another remember option.`);
+  return { ...rest, approvalId, rememberTier: tier };
 }
 
 /** Optional deny payload: `note` rides the audit trail; `reason` is the
@@ -1098,20 +1035,9 @@ export interface WatcherActionResult {
 }
 
 /**
- * Calendar (calendar.*, platform 1.1.0).
- *
- * CORRECTED AT THE 1.19.1 RE-PIN. This comment used to claim these ids have "NO
- * OperatorMethodInputMap/OutputMap entry in the installed contracts package (verified:
- * grepping the generated foundation-client-types.d.ts for 'calendar' returns nothing)"
- * and concluded the hand-authored shapes were "a permanent divergence (no generated map
- * to converge with)". Both halves are now false: the installed map carries
- * calendar.events.create/get/list and calendar.ics.export/import.
- *
- * The result shapes below are now derived from the contract. The INPUT shapes for the
- * two writes are not, and deliberately: the contract types their `confirm` field as
- * `boolean`, while this client types it as literal `true` so a caller cannot satisfy
- * the type with `confirm: false` and meet the daemon's refusal at runtime instead. That
- * is a narrowing of the contract, which is safe, rather than a divergence from it.
+ * Calendar (calendar.*). Every shape is the contract's; the two writes narrow `confirm`
+ * to literal `true` so a caller cannot pass `confirm: false` and meet the daemon's
+ * refusal at runtime instead.
  */
 export type CalendarEventsListResult = OperatorMethodOutput<'calendar.events.list'>;
 export type CalendarEventSummary = CalendarEventsListResult['events'][number];
@@ -1122,40 +1048,15 @@ export interface CalendarEventDetail extends CalendarEventSummary {
   readonly recurrence?: string;
 }
 
-/**
- * `confirm` is required AND literal-true, which is deliberately stricter than the
- * contract. OperatorMethodInput<'calendar.events.create'> types it `confirm: boolean`,
- * so aliasing this type to the contract would let a caller pass `confirm: false` and
- * meet the type while the daemon refuses the write. Same stance as EmailSendInput
- * below. Every other field here is field-for-field the contract's own; only the
- * narrowing is ours.
- */
-export interface CalendarEventCreateInput {
-  readonly title: string;
-  readonly start: string;
-  readonly end: string;
-  readonly description?: string;
-  readonly attendees?: readonly string[];
-  readonly location?: string;
-  readonly calendarId?: string;
-  readonly confirm: true;
-}
+export type CalendarEventCreateInput = OperatorMethodInput<'calendar.events.create'> & { readonly confirm: true };
 
 export type CalendarEventCreateResult = OperatorMethodOutput<'calendar.events.create'>;
 
-export interface CalendarIcsImportInput {
-  readonly icsContent: string;
-  readonly calendarId?: string;
-  readonly confirm: true;
-}
+export type CalendarIcsImportInput = OperatorMethodInput<'calendar.ics.import'> & { readonly confirm: true };
 
 export type CalendarIcsImportResult = OperatorMethodOutput<'calendar.ics.import'>;
 
-export interface CalendarIcsExportInput {
-  readonly calendarId?: string;
-  readonly from?: string;
-  readonly to?: string;
-}
+export type CalendarIcsExportInput = OperatorMethodInput<'calendar.ics.export'>;
 
 export type CalendarIcsExportResult = OperatorMethodOutput<'calendar.ics.export'>;
 
@@ -1202,33 +1103,15 @@ export type EmailAttachment = NonNullable<EmailMessageDetail['attachments']>[num
  * runtime, and the view pairs it with a real confirmation sheet, so the flag is
  * never set on the operator's behalf without them having seen the recipients.
  */
-export interface EmailSendInput {
-  readonly to: string;
-  readonly subject: string;
-  readonly body: string;
-  readonly inReplyTo?: string;
-  readonly confirm: true;
-}
+export type EmailSendInput = OperatorMethodInput<'email.send'> & { readonly confirm: true };
 
-export interface EmailSendResult {
-  readonly messageId: string;
-  readonly sentAt: string;
-}
+export type EmailSendResult = OperatorMethodOutput<'email.send'>;
 
 /** Drafts append to the IMAP Drafts folder, distinct from the local channel draft
  * store, and notably NOT gated on a `confirm` flag (nothing leaves the account). */
-export interface EmailDraftCreateInput {
-  readonly to: string;
-  readonly subject: string;
-  readonly body: string;
-  readonly inReplyTo?: string;
-  readonly references?: string;
-}
+export type EmailDraftCreateInput = OperatorMethodInput<'email.draft.create'>;
 
-export interface EmailDraftCreateResult {
-  readonly uid: number;
-  readonly draftId: string;
-}
+export type EmailDraftCreateResult = OperatorMethodOutput<'email.draft.create'>;
 
 /**
  * SessionDeleteResult, the honest hard-delete outcome shape shared by
@@ -1420,40 +1303,20 @@ export interface MemoryConsolidationReceiptsResult {
   readonly pendingProposals: readonly MemoryConsolidationProposal[];
 }
 
-export interface MemorySearchInput {
-  readonly scope?: MemoryScope;
-  readonly cls?: MemoryClass;
-  readonly tags?: readonly string[];
-  readonly query?: string;
-  readonly semantic?: boolean;
-  readonly since?: number;
-  readonly reviewState?: readonly MemoryReviewState[];
-  readonly minConfidence?: number;
-  readonly provenanceKinds?: readonly MemoryProvenanceKind[];
-  readonly staleOnly?: boolean;
-  readonly limit?: number;
-  /** Apply the recall-injection contract server-side (exclude flagged records outright,
-   * drop sub-floor records, count every exclusion). Off by default, a browse/review
-   * caller wants to SEE flagged and low-confidence records too. */
-  readonly recall?: boolean;
-}
+/** `recall: true` applies the recall-injection contract server-side; a browse/review caller leaves it off to see flagged records too. */
+export type MemorySearchInput = OperatorMethodInput<'memory.records.search'>;
 
-export interface MemoryAddReviewInput {
-  readonly state?: MemoryReviewState;
-  readonly confidence?: number;
-  readonly reviewedBy?: string;
-  readonly staleReason?: string;
-}
 
-export interface MemoryAddInput {
-  readonly cls: MemoryClass;
-  readonly summary: string;
-  readonly scope?: MemoryScope;
-  readonly detail?: string;
-  readonly tags?: readonly string[];
-  readonly provenance?: readonly MemoryProvenanceLink[];
-  readonly review?: MemoryAddReviewInput;
-}
+export type MemoryAddInput = OperatorMethodInput<'memory.records.add'>;
+
+type MemoryRecordUpdateFields = OperatorMethodInput<'memory.records.update'>;
+/** The record's own words and scope, edited in place (memory.records.update); omitted fields stay as they are. */
+export type MemoryUpdateInput = {
+  readonly summary?: MemoryRecordUpdateFields['summary'];
+  readonly detail?: MemoryRecordUpdateFields['detail'];
+  readonly tags?: MemoryRecordUpdateFields['tags'];
+  readonly scope?: MemoryRecordUpdateFields['scope'];
+};
 
 export interface MemoryUpdateReviewInput {
   readonly state?: MemoryReviewState;
@@ -1462,10 +1325,7 @@ export interface MemoryUpdateReviewInput {
   readonly staleReason?: string;
 }
 
-export interface MemoryReviewQueueInput {
-  readonly limit?: number;
-  readonly scope?: MemoryScope;
-}
+export type MemoryReviewQueueInput = OperatorMethodInput<'memory.review-queue'>;
 
 // ─── Web Push (push.*, platform 1.1.0) ────────────────────────────────────
 //
@@ -1908,16 +1768,13 @@ export const client = {
       mintChallenge: (input?: { rendezvousId?: string; sessionId?: string; method?: string; path?: string; ttlMs?: number }, signal?: AbortSignal) =>
         invokeOperator<'stepup.challenge.mint', StepUpMintChallengeResult>('stepup.challenge.mint', input ?? {}, signal),
       registerCredential: (input: StepUpRegisterCredentialInput) =>
-        invokeOperatorUncheckedInput<StepUpRegisterCredentialResult>(
-          'stepup.credentials.register',
-          input,
-        ),
+        invokeOperator<'stepup.credentials.register', StepUpRegisterCredentialResult>('stepup.credentials.register', input),
       // The daemon's registered passkeys. Both verbs are admin-only and resolve through the
       // generated REST routes (GET /api/stepup/credentials, DELETE .../{credentialId}).
       listCredentials: (signal?: AbortSignal) =>
-        invokeOperator('stepup.credentials.list', {}, signal) as Promise<{ credentials: readonly StepUpCredentialSummary[] }>,
+        invokeOperator<'stepup.credentials.list', { credentials: readonly StepUpCredentialSummary[] }>('stepup.credentials.list', {}, signal),
       removeCredential: (credentialId: string) =>
-        invokeOperator('stepup.credentials.remove', { credentialId }) as Promise<{ credentialId: string; removed: boolean }>,
+        invokeOperator<'stepup.credentials.remove', { credentialId: string; removed: boolean }>('stepup.credentials.remove', { credentialId }),
     },
     // config.*, like models.*, no OperatorMethodId coverage in the pinned
     // browser platform route maps, so both resolve through EXTRA_METHOD_ROUTES.
@@ -2070,23 +1927,17 @@ export const client = {
         },
       },
     },
-    // models.* (2.0.0 re-pin): real OperatorMethodId coverage and real REST bindings
-    // (GET /api/models, GET /api/models/current, PATCH /api/models/current), see
-    // invokeOperator's doc comment. `current` nests get/set to mirror the real verb ids
+    // models.* (GET /api/models, GET /api/models/current, PATCH /api/models/current).
+    // `current` nests get/set to mirror the real verb ids
     // (models.current.get / models.current.set) exactly, the same way `wake.model.get`
     // nests above.
     models: {
       list: () => invokeOperator('models.list'),
       current: {
         get: () => invokeOperator('models.current.get'),
-        // `effort` rides the same verb (platform adds it alongside registryKey; the
-        // generated input type here lags one pin behind, hence the unchecked
-        // call for the effort-carrying variant). null CLEARS the persisted
-        // level back to the provider default; omission leaves it untouched.
+        // null CLEARS the persisted effort back to the provider default; omission leaves it untouched.
         set: (registryKey: string, effort?: string | null) =>
-          effort === undefined
-            ? invokeOperator('models.current.set', { registryKey })
-            : invokeOperatorUncheckedInput('models.current.set', { registryKey, effort }),
+          invokeOperator('models.current.set', effort === undefined ? { registryKey } : { registryKey, effort }),
       },
     },
     tasks: {
@@ -2098,63 +1949,41 @@ export const client = {
       retry: (taskId: string) => invokeOperator('tasks.retry', { taskId }),
     },
     // Calendar (calendar.*, see the EXTRA_METHOD_ROUTES header comment above for the
-    // invokable-false/501/404 honesty caveat). Every call site here is explicitly typed
-    // against the hand-authored shapes above (no generated I/O map exists for this
-    // family), see that section's header comment.
+    // invokable-false/501/404 honesty caveat), typed by the contract.
     calendar: {
       events: {
         list: (input?: CalendarEventsListInput) =>
-          invokeOperatorUncheckedInput<CalendarEventsListResult>(
-            'calendar.events.list',
-            input ?? {},
-          ),
+          invokeOperator('calendar.events.list', input ?? {}),
         get: (eventId: string, calendarId?: string) =>
           invokeOperator<'calendar.events.get', CalendarEventDetail>(
             'calendar.events.get',
             { eventId, ...(calendarId ? { calendarId } : {}) },
           ),
         create: (input: CalendarEventCreateInput) =>
-          invokeOperatorUncheckedInput<CalendarEventCreateResult>(
-            'calendar.events.create',
-            input,
-          ),
+          invokeOperator('calendar.events.create', input),
       },
       ics: {
         export: (input?: CalendarIcsExportInput) =>
-          invokeOperatorUncheckedInput<CalendarIcsExportResult>(
-            'calendar.ics.export',
-            input ?? {},
-          ),
+          invokeOperator('calendar.ics.export', input ?? {}),
         import: (input: CalendarIcsImportInput) =>
-          invokeOperatorUncheckedInput<CalendarIcsImportResult>(
-            'calendar.ics.import',
-            input,
-          ),
+          invokeOperator('calendar.ics.import', input),
       },
     },
     // Email (email.*). Routed entirely by the generated WEBUI_METHOD_ROUTES rows that
     // EXTRA_METHOD_ROUTES derives itself, this block adds no route and no transport,
-    // only the ergonomic + typing layer over invokeOperator, exactly as calendar.* does.
-    // Explicit type params throughout because this family has no generated I/O map (see
-    // the EmailInboxMessage section header above for the transcription provenance).
+    // only the ergonomic layer over invokeOperator, typed by the contract.
     email: {
       inbox: {
         list: (input?: EmailInboxListInput) =>
-          invokeOperatorUncheckedInput<EmailInboxListResult>(
-            'email.inbox.list',
-            input ?? {},
-          ),
+          invokeOperator('email.inbox.list', input ?? {}),
         read: (uid: number) =>
           invokeOperator<'email.inbox.read', EmailMessageDetail>('email.inbox.read', { uid }),
       },
       send: (input: EmailSendInput) =>
-        invokeOperatorUncheckedInput<EmailSendResult>('email.send', input),
+        invokeOperator('email.send', input),
       draft: {
         create: (input: EmailDraftCreateInput) =>
-          invokeOperatorUncheckedInput<EmailDraftCreateResult>(
-            'email.draft.create',
-            input,
-          ),
+          invokeOperator('email.draft.create', input),
       },
     },
     // Occasions and plans (occasions.*, docs/occasions.md). Real generated I/O maps
@@ -2238,7 +2067,7 @@ export const client = {
     // On the `{ id, ...input }` spread form used here and by sessions.steer / followUp /
     // messages.create: a property arriving THROUGH a spread is not excess-property
     // checked, so a stale key in the spread source compiles clean no matter how the
-    // parameter is typed (measured, see the guard block above invokeOperatorUncheckedInput).
+    // parameter is typed (measured, see the profile.forget guard block above).
     // These four are safe for a structural reason rather than a checked one: every spread
     // source is DERIVED from the contract (OperatorMethodInput<…>, or an Omit of it), so it
     // cannot hold a key the contract does not, and a retirement removes it from both sides
@@ -2310,13 +2139,8 @@ export const client = {
       // selectedHunks: an index array into the pending approval's own
       // edit list. Omit it to approve the whole request. The daemon computes
       // modifiedArgs server-side, this call never carries a computed diff.
-      // selectedHunks is not in OperatorMethodInputMap['approvals.approve'] yet, a
-      // real, tested wire field the generated 0.38 map does not cover.
-      approve: (approvalId: string, input?: ApprovalApproveInput) =>
-        invokeOperatorUncheckedInput<ApprovalActionResult>(
-          'approvals.approve',
-          { approvalId, ...input },
-        ),
+      approve: async (approvalId: string, input?: ApprovalApproveInput) =>
+        invokeOperator<'approvals.approve', ApprovalActionResult>('approvals.approve', approveInput(approvalId, input)),
       cancel: (approvalId: string) =>
         invokeOperator<'approvals.cancel', ApprovalActionResult>('approvals.cancel', { approvalId }),
       claim: (approvalId: string) =>
@@ -2356,20 +2180,16 @@ export const client = {
       },
     },
     // memory.records.* / memory.review-queue, table-routed via EXTRA_METHOD_ROUTES
-    // (real REST bindings, see that table's comment); every I/O shape here is the
-    // hand-authored local type above, cross-checked against the daemon's own schema
-    // source rather than the (nonexistent, for these six ids) generated maps,
-    // explicit TInput/TOutput overrides throughout, same pattern as Approvals/Tasks.
+    // (real REST bindings, see that table's comment); inputs are the contract's.
     memory: {
       search: (input?: MemorySearchInput) =>
-        invokeOperatorUncheckedInput<MemorySearchResult>(
-          'memory.records.search',
-          input ?? {},
-        ),
+        invokeOperator<'memory.records.search', MemorySearchResult>('memory.records.search', input ?? {}),
       add: (input: MemoryAddInput) =>
-        invokeOperatorUncheckedInput<MemoryRecordEntityResult>('memory.records.add', input),
+        invokeOperator<'memory.records.add', MemoryRecordEntityResult>('memory.records.add', input),
       get: (id: string) =>
         invokeOperator<'memory.records.get', MemoryRecordEntityResult>('memory.records.get', { id }),
+      update: (id: string, input: MemoryUpdateInput) =>
+        invokeOperator<'memory.records.update', MemoryRecordEntityResult>('memory.records.update', { id, ...input }),
       updateReview: (id: string, input: MemoryUpdateReviewInput) =>
         invokeOperator<'memory.records.update-review', MemoryRecordEntityResult>(
           'memory.records.update-review',
@@ -2378,10 +2198,7 @@ export const client = {
       delete: (id: string) =>
         invokeOperator<'memory.records.delete', MemoryRecordDeleteResult>('memory.records.delete', { id }),
       reviewQueue: (input?: MemoryReviewQueueInput) =>
-        invokeOperatorUncheckedInput<MemoryReviewQueueResult>(
-          'memory.review-queue',
-          input ?? {},
-        ),
+        invokeOperator<'memory.review-queue', MemoryReviewQueueResult>('memory.review-queue', input ?? {}),
       // memory.consolidation.receipts (platform 1.8.0), HAS a real generated I/O map
       // (unlike the six ids above), but the explicit TOutput override keeps the
       // hand-authored, narrower `merged`/`archived`/`decayed` entry shapes above
@@ -2439,7 +2256,7 @@ export const client = {
         list: (workstreamId?: string) =>
           invokeGatewayMethod<'fleet.attempts.list', FleetAttemptsListResult>(
             'fleet.attempts.list',
-            (workstreamId ? { workstreamId } : {}) as FleetAttemptsListInput,
+            workstreamId ? { workstreamId } : {},
           ),
         pick: (groupId: string, winnerItemId: string, confirm = true) =>
           invokeGatewayMethod<'fleet.attempts.pick', FleetAttemptsPickResult>(
@@ -2524,26 +2341,9 @@ export const client = {
       create: (input: OperatorMethodInput<'sessions.create'>) => invokeOperator('sessions.create', input),
       close: (sessionId: string, signal?: AbortSignal) => invokeOperator('sessions.close', { sessionId }, signal),
       reopen: (sessionId: string, signal?: AbortSignal) => invokeOperator('sessions.reopen', { sessionId }, signal),
-      // delete (delete-means-delete): NOT in the installed 0.38 OperatorMethodId
-      // union (unlike close/reopen above), see the EXTRA_METHOD_ROUTES header comment.
-      // Untyped call site, like models.*, SessionDeleteResult is this module's own
-      // honest local shape (`{sessionId, deleted}`), cross-checked against the platform
-      // repo's method-catalog-control-core.ts 'sessions.delete' outputSchema at the time
-      // of writing. Requires the session to already be closed (409 SESSION_ACTIVE
-      // otherwise), callers close first (see App.tsx / SessionsView.tsx call sites).
-      // Callers MUST pair this with a capability check (operator.control.methodInfo) or
-      // a proof-of-gone reconcile, never assume a 200 means the record is truly gone
-      // on every daemon build.
-      //
-      // THE CAST BELOW IS NOT REDUNDANT, though tsc stays silent if you delete it.
-      // OperatorMethodOutput<'sessions.delete'> is `{sessionId}`, it has no `deleted`.
-      // The cast widens the result to this module's `{sessionId, deleted}`, and `deleted`
-      // is the entire point of the verb (actually removed, not merely closed). Removing
-      // it type-checks clean only because the one test that reads the result compares it
-      // with toEqual rather than reading the field, so nothing forces the property to
-      // exist, a later `if (result.deleted)` would then fail to compile. Retire the cast
-      // when the generated output gains `deleted`, not before.
-      delete: (sessionId: string, signal?: AbortSignal) => invokeOperator('sessions.delete', { sessionId }, signal) as Promise<SessionDeleteResult>,
+      // delete: requires the session to already be closed (409 SESSION_ACTIVE otherwise),
+      // callers close first. `deleted: true` means the record and its messages are gone.
+      delete: (sessionId: string, signal?: AbortSignal) => invokeOperator<'sessions.delete', SessionDeleteResult>('sessions.delete', { sessionId }, signal),
       // sessions.search (typed-client scaffold, first consumer of the search facade):
       // in the OperatorMethodId union but routeless (no browser/EXTRA_METHOD_ROUTES
       // entry), generic-invoke-only, typed via the contract-bridge-types.ts bridge
@@ -2647,9 +2447,9 @@ export const client = {
     // not a watcher-authoring surface).
     watchers: {
       triggers: {
-        status: async () => readTriggerOperatorStatus(await requestJson('/api/control-plane/methods/watchers.triggers.status/invoke', { method: 'POST', body: { body: {} }, interpretRefusal: false })),
+        status: async () => readTriggerOperatorStatus(await requestJson('/api/control-plane/methods/watchers.triggers.status/invoke', { method: 'POST', body: { body: {} } })),
         migrate: async (input: { readonly olderInstancesClosed: true; readonly confirm: true }) =>
-          readTriggerMigrationResult(await requestJson('/api/control-plane/methods/watchers.triggers.migrate/invoke', { method: 'POST', body: { body: input }, interpretRefusal: false })),
+          readTriggerMigrationResult(await requestJson('/api/control-plane/methods/watchers.triggers.migrate/invoke', { method: 'POST', body: { body: input } })),
       },
       stop: (watcherId: string) =>
         invokeOperator<'watchers.stop', WatcherActionResult>('watchers.stop', { watcherId }),
@@ -2737,7 +2537,7 @@ export const client = {
         get: (origin?: string) =>
           invokeGatewayMethod<'pairing.posture.get', PairingPostureGetResult>(
             'pairing.posture.get',
-            (origin ? { origin } : {}) as PairingPostureGetInput,
+            origin ? { origin } : {},
           ),
       },
     },
@@ -2803,22 +2603,22 @@ export const client = {
       // streams back over the same SSE channel. Untyped route (no generated I/O map),
       // CompanionRegenerateResult is this module's hand-authored shape.
       retry: (sessionId: string, input?: { messageId?: string }) =>
-        invokeOperator('companion.chat.messages.retry', {
+        invokeOperator<'companion.chat.messages.retry', CompanionRegenerateResult>('companion.chat.messages.retry', {
           sessionId,
           ...(input?.messageId ? { messageId: input.messageId } : {}),
-        }) as Promise<CompanionRegenerateResult>,
+        }),
       // edit-and-branch (companion.chat.messages.edit): edit a user message and branch
       // the conversation from it. The original (and everything after) is superseded
       // (retained, flagged); a new user message carrying `revisionOf` is appended and a
       // fresh turn answers it. The daemon route reads the edited text from `content`.
       edit: (sessionId: string, messageId: string, input: CompanionEditInput) =>
-        invokeOperator('companion.chat.messages.edit', {
+        invokeOperator<'companion.chat.messages.edit', CompanionEditResult>('companion.chat.messages.edit', {
           sessionId,
           messageId,
           content: input.content,
           ...(input.attachments?.length ? { attachments: input.attachments } : {}),
           ...(input.metadata ? { metadata: input.metadata } : {}),
-        }) as Promise<CompanionEditResult>,
+        }),
     },
     // Server-side turn stop (companion.chat.turns.cancel, platform 1.4+). The
     // terminal turn.cancelled event on the session stream is the authoritative
@@ -3035,18 +2835,13 @@ export async function setExplicitAuthToken(rawToken: string): Promise<unknown> {
   await client.auth.setToken(token);
   const validationLifetime = getClientLifetime();
   try {
-    try {
-      return await getCurrentAuth();
-    } catch (error) {
-      if (isAuthRejection(error) || getClientLifetime() !== validationLifetime) throw error;
-      // One more look before judging: a transient failure says nothing about the token.
-      return await getCurrentAuth();
-    }
+    return await getCurrentAuth();
   } catch (error) {
     if (getClientLifetime() === validationLifetime) {
       if (isAuthRejection(error) || previous.token === null) await client.auth.clearToken();
       // Not a verdict on the new token (network, daemon error): the browser keeps the
-      // credential it already had instead of being signed out by a failed switch.
+      // credential it already had instead of being signed out by a failed switch, and the
+      // error says why the new one was not adopted.
       else await tokenStore.setTokenEntry(previous.token, previous.expiresAt);
     }
     throw error;

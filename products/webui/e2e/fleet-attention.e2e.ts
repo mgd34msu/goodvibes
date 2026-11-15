@@ -75,7 +75,7 @@ test('a pick-blocked workstream and a conflict-blocked item each show their own 
 
 test('a needs-input deep link opens Work focused on the blocked node', async ({ page }) => {
   await installMockDaemon(page);
-  // The shape a push notification tap produces (notification-link.ts).
+  // The shape a push notification tap produces (`linkForNotification` in public/sw.js).
   await page.goto('/?view=fleet#fleet-node=agent-blocked-7&fleet-session=session-blocked');
   await expect(page.locator('.app-shell')).toBeVisible();
   // The node's detail is open (not the first approval, not the list).

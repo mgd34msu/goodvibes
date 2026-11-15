@@ -32,15 +32,9 @@ export interface ModelOption {
   registryKey: string;
 }
 
+/** Provider rows from a providers.list or models.list response: both answer `{ providers: [...] }`. */
 export function providerOptionsFromResponse(value: unknown): ProviderOption[] {
-  return firstArrayAtPath(value, [
-    ['providers'],
-    ['items'],
-    ['data'],
-    ['result', 'providers'],
-    ['result', 'items'],
-    ['result', 'data'],
-  ])
+  return firstArrayAtPath(value, [['providers']])
     .map((provider) => {
       const id = bestId(provider);
       return id ? { id, label: bestTitle(provider, id), value: provider } : null;
@@ -119,7 +113,7 @@ function appendUniqueString(target: string[], value: string) {
   target.push(value);
 }
 
-/** Declared registry aliases and explicit wire identities; other relationships need a current reading. */
+/** Declared registry aliases and explicit wire identities: the only relationships a provider's models follow. */
 export function providerModelSourceIds(provider: unknown): string[] {
   const providerId = bestId(provider);
   const ids: string[] = [];
@@ -130,25 +124,21 @@ export function providerModelSourceIds(provider: unknown): string[] {
   appendUniqueString(ids, firstString(readPath(provider, ['runtime', 'models']), ['providerId', 'catalogProviderId', 'canonicalProviderId']));
 
   for (const route of firstArrayAtPath(provider, [
-    ['auth', 'routes'],
+    ['routes'],
     ['runtime', 'auth', 'routes'],
   ])) {
     appendUniqueString(ids, firstString(route, ['providerId', 'catalogProviderId', 'subscriptionProviderId']));
   }
-
-
   return ids.filter((id) => id !== providerId);
 }
 
 export function modelOptionsFromProvider(provider: unknown): ModelOption[] {
   const models: ModelOption[] = [];
   const providerId = bestId(provider);
+  // `models`: the catalog record's or snapshot's model list; `runtime.models`: the
+  // provider's own declared ids and aliases.
   for (const path of [
     ['models'],
-    ['availableModels'],
-    ['modelCatalog'],
-    ['catalog', 'models'],
-    ['catalog', 'items'],
     ['runtime', 'models', 'models'],
     ['runtime', 'models', 'aliases'],
   ]) {
@@ -166,8 +156,8 @@ export function modelOptionsFromProvider(provider: unknown): ModelOption[] {
   return models;
 }
 
-export function modelOptionsForProvider(provider: unknown, modelCatalogProviders: unknown[] = [], inferredProviderIds: readonly string[] = []): ModelOption[] {
-  const aliasProviderIds = [...new Set([...providerModelSourceIds(provider), ...inferredProviderIds])];
+export function modelOptionsForProvider(provider: unknown, modelCatalogProviders: unknown[] = []): ModelOption[] {
+  const aliasProviderIds = providerModelSourceIds(provider);
   const aliasModels: ModelOption[] = [];
 
   for (const aliasProviderId of aliasProviderIds) {

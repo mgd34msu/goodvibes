@@ -13,7 +13,7 @@
  * serve memory" state, never a blank list that reads as "nothing is stored".
  */
 import { useEffect, useMemo, useState } from 'react';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Database, Plus } from 'lucide-react';
 import {
   client as platformClient,
@@ -22,6 +22,7 @@ import {
   type MemoryRecord,
   type MemoryScope,
   type MemorySearchInput,
+  type MemoryUpdateInput,
 } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError, isMethodUnavailableError } from '../../lib/errors';
@@ -39,6 +40,7 @@ import { MemorySearchHonestyNote } from './MemorySearchHonestyNote';
 import { MEMORY_CLASSES, MEMORY_SCOPES, isPersonaRecord, splitTags } from './memory-helpers';
 import '../../styles/components/memory.css';
 
+/** One page of records; "Show more" asks for the next page on top. */
 const LIMIT = 100;
 const PERSONA_FILTER: MemorySearchInput = { cls: 'constraint', tags: [VIBE_PERSONA_TAG], limit: LIMIT };
 
@@ -61,11 +63,21 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
   const tagsSettled = useDebouncedValue(tagsInput);
 
   const { remove, saveReview } = useMemoryRecordMutations();
+  const queryClient = useQueryClient();
+  const saveEdit = useMutation({
+    mutationFn: ({ id, input }: { id: string; input: MemoryUpdateInput }) => platformClient.operator.memory.update(id, input),
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['memory'] }); },
+  });
+
+  // The page size grows with "Show more" and starts over whenever the search changes.
+  const filterKey = JSON.stringify([query.trim(), semantic, scopeFilter, clsFilter, tagsSettled, recall]);
+  const [page, setPage] = useState({ filterKey, limit: LIMIT });
+  const limit = page.filterKey === filterKey ? page.limit : LIMIT;
 
   const appliedFilters = useMemo<MemorySearchInput>(() => {
     const tags = splitTags(tagsSettled);
     return {
-      limit: LIMIT,
+      limit,
       ...(query.trim() ? { query: query.trim() } : {}),
       ...(semantic ? { semantic: true } : {}),
       ...(scopeFilter ? { scope: scopeFilter } : {}),
@@ -73,7 +85,7 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
       ...(tags.length ? { tags } : {}),
       ...(recall ? { recall: true } : {}),
     };
-  }, [query, semantic, scopeFilter, clsFilter, tagsSettled, recall]);
+  }, [limit, query, semantic, scopeFilter, clsFilter, tagsSettled, recall]);
   const browsing = Object.keys(appliedFilters).length === 1;
 
   const list = useQuery({
@@ -131,7 +143,10 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
 
   // The mutations are shared by every row: an error belongs to the record it was for.
   const mutationError = (remove.error && remove.variables?.id === selectedId ? remove.error : null)
-    ?? (saveReview.error && saveReview.variables?.id === selectedId ? saveReview.error : null);
+    ?? (saveReview.error && saveReview.variables?.id === selectedId ? saveReview.error : null)
+    ?? (saveEdit.error && saveEdit.variables?.id === selectedId ? saveEdit.error : null);
+  // A full page means more records may exist past it: say so and offer the next page.
+  const pageFull = (list.data?.records.length ?? 0) >= limit;
 
   const listPane = (
     <>
@@ -139,7 +154,7 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
         {list.error && (
           <ErrorState error={list.error} onRetry={() => void list.refetch()} title="Search failed" />
         )}
-        {list.data && <MemorySearchHonestyNote result={list.data} limit={LIMIT} />}
+        {list.data && <MemorySearchHonestyNote result={list.data} limit={limit} />}
       </div>
       {list.isPending && <SkeletonRows count={6} label="Loading memory" />}
       {list.data?.records.length === 0 && !showPersonaGroup && (
@@ -163,6 +178,19 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
             />
           ))}
         </RowGroup>
+      )}
+      {list.data && pageFull && (
+        <div className="lib-toolbar" role="status">
+          <span>{`Showing the first ${String(limit)} records${browsing ? '' : ' that match'}.`}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={list.isFetching}
+            onClick={() => setPage({ filterKey, limit: limit + LIMIT })}
+          >
+            {list.isFetching ? 'Loading…' : 'Show more'}
+          </Button>
+        </div>
       )}
       {showPersonaGroup && personas.data && (
         <RowGroup label="Personas" count={personaRecords.length}>
@@ -229,6 +257,8 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
               deleting={remove.isPending && remove.variables.id === selected.id}
               onSaveReview={(id, input) => saveReview.mutate({ id, input })}
               saving={saveReview.isPending && saveReview.variables.id === selected.id}
+              onSaveEdit={(id, input) => saveEdit.mutate({ id, input })}
+              savingEdit={saveEdit.isPending && saveEdit.variables.id === selected.id}
             />
           )}
           detailOpen={selected !== undefined}

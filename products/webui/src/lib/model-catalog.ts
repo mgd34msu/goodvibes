@@ -37,20 +37,13 @@
  *     response, not the models.list catalog, specifically to get honest price
  *     data.
  *
- *   - Capability flags (reasoning/toolCalling/multimodal) and a "quality tier"
- *     / benchmark score exist server-side on ModelDefinition/benchmarkStore but
- *     are NOT projected onto any HTTP response this client can reach (confirmed:
- *     zero occurrences of `capabilities`/`qualityTier`/`benchmark` in the
- *     operator contract or the model/provider routes). The Capability filter
- *     and the qualityTier group-by are kept in the type vocabulary below for
- *     naming parity with the TUI's model picker, but hasAnyCapabilityData /
- *     hasAnyQualityTierData let a caller detect there is really nothing to
- *     filter/group by today and render an honest disabled state instead of a
- *     control that silently filters nothing, the same forward-compat honesty
- *     ruling provider-status.ts's FRESHNESS_RANK comment documents (a future
- *     daemon adding this data should "just work" without a code change here).
+ *   - Capability flags: providers.list carries `capabilities { toolCalling, reasoning,
+ *     multimodal }` per model from the registry definition (runtime-snapshot.ts
+ *     toModelSnapshot()), and the Capability filter narrows by them. A daemon that
+ *     predates the field sends none, and the filter renders disabled.
  */
 import { asRecord, firstArrayAtPath, firstString, readPath } from './object';
+import { isProviderConfigured } from './provider-status';
 
 // ---------------------------------------------------------------------------
 // Targets
@@ -84,6 +77,12 @@ export interface ModelPricing {
   readonly currency: string;
 }
 
+export interface ModelCapabilities {
+  readonly toolCalling: boolean;
+  readonly reasoning: boolean;
+  readonly multimodal: boolean;
+}
+
 export interface CatalogModel {
   readonly id: string;
   readonly registryKey: string;
@@ -93,6 +92,15 @@ export interface CatalogModel {
   readonly family?: ModelFamily;
   readonly tier?: string;
   readonly pricing?: ModelPricing;
+  readonly capabilities?: ModelCapabilities;
+}
+
+function readCapabilities(raw: unknown): ModelCapabilities | undefined {
+  const record = asRecord(raw);
+  const { toolCalling, reasoning, multimodal } = record;
+  return typeof toolCalling === 'boolean' && typeof reasoning === 'boolean' && typeof multimodal === 'boolean'
+    ? { toolCalling, reasoning, multimodal }
+    : undefined;
 }
 
 function readPricing(raw: unknown): ModelPricing | undefined {
@@ -122,6 +130,7 @@ function normalizeCatalogModel(providerId: string, raw: unknown): CatalogModel |
     family: readModelFamily(record.family),
     tier: firstString(record, ['tier']) || undefined,
     pricing: readPricing(record.pricing),
+    capabilities: readCapabilities(record.capabilities),
   };
 }
 
@@ -159,17 +168,13 @@ export function providerIdsFromProvidersResponse(value: unknown): string[] {
   return ids;
 }
 
-/** Provider ids whose `configured` (top-level or runtime.auth.configured) is true. */
+/** Provider ids the daemon reports as set up (provider-status.ts isProviderConfigured). */
 export function configuredProviderIdsFromProvidersResponse(value: unknown): Set<string> {
   const providers = firstArrayAtPath(value, [['providers']]);
   const ids = new Set<string>();
   for (const providerRaw of providers) {
     const id = firstString(providerRaw, ['providerId', 'id']);
-    if (!id) continue;
-    const configured =
-      asRecord(providerRaw).configured === true ||
-      readPath(providerRaw, ['runtime', 'auth', 'configured']) === true;
-    if (configured) ids.add(id);
+    if (id && isProviderConfigured(providerRaw)) ids.add(id);
   }
   return ids;
 }
@@ -208,13 +213,12 @@ export function detectFamily(model: CatalogModel): ModelFamily | undefined {
 
 // ---------------------------------------------------------------------------
 // Filters, TUI vocabulary (model-picker-types.ts). 'all'/'none' are always
-// honest no-ops; the rest are backed by real per-model tier data (see the
-// module doc comment for what is/isn't wire-served today).
+// honest no-ops; the rest are backed by real per-model tier and capability data.
 // ---------------------------------------------------------------------------
 
 export type CategoryFilter = 'all' | 'free' | 'paid' | 'subscription';
 export type CapabilityFilter = 'reasoning' | 'toolUse' | 'multimodal' | 'none';
-export type GroupByMode = 'provider' | 'family' | 'pricingTier' | 'qualityTier';
+export type GroupByMode = 'provider' | 'family' | 'pricingTier';
 
 /** Matches the TUI's tierToCategoryFilter: 'free'/'subscription' pass through, anything else configured is 'paid'. */
 export function tierToCategoryFilter(tier: string | undefined): CategoryFilter | undefined {
@@ -229,22 +233,23 @@ export function hasAnyTierData(models: readonly CatalogModel[]): boolean {
   return models.some((model) => Boolean(model.tier));
 }
 
-/** Always false today (see module doc comment), kept as a function, not a constant,
- *  so a future daemon that starts projecting capability flags is picked up without
- *  a code change at every call site once this is wired to real data. */
-export function hasAnyCapabilityData(_models: readonly CatalogModel[]): boolean {
-  return false;
+/** True once the current dataset carries capability flags on at least one model. */
+export function hasAnyCapabilityData(models: readonly CatalogModel[]): boolean {
+  return models.some((model) => model.capabilities !== undefined);
 }
 
-/** Always false today, see hasAnyCapabilityData. */
-export function hasAnyQualityTierData(_models: readonly CatalogModel[]): boolean {
-  return false;
+function hasCapability(model: CatalogModel, filter: CapabilityFilter): boolean {
+  if (filter === 'none') return true;
+  const capabilities = model.capabilities;
+  if (!capabilities) return false;
+  return filter === 'toolUse' ? capabilities.toolCalling : capabilities[filter];
 }
 
 export interface ModelFilterOptions {
   readonly query?: string;
   readonly provider?: string;
   readonly categoryFilter?: CategoryFilter;
+  readonly capabilityFilter?: CapabilityFilter;
   readonly availableOnly?: boolean;
   readonly configuredProviderIds?: ReadonlySet<string>;
 }
@@ -256,6 +261,7 @@ export function filterModels(models: readonly CatalogModel[], options: ModelFilt
     if (options.provider && model.provider !== options.provider) return false;
     if (query && !`${model.label} ${model.registryKey}`.toLowerCase().includes(query)) return false;
     if (categoryFilter !== 'all' && tierToCategoryFilter(model.tier) !== categoryFilter) return false;
+    if (!hasCapability(model, options.capabilityFilter ?? 'none')) return false;
     if (options.availableOnly && options.configuredProviderIds && !options.configuredProviderIds.has(model.provider)) {
       return false;
     }
@@ -269,17 +275,14 @@ export interface ModelGroup {
   readonly models: readonly CatalogModel[];
 }
 
-/** Groups honest for 'provider'/'family'/'pricingTier'; 'qualityTier' has no wire
- *  data (see hasAnyQualityTierData) so callers should disable that mode rather than
- *  call this with it, passed through here as a single "Ungrouped" bucket if it is. */
+/** Groups models by provider, family or pricing tier. */
 export function groupModels(models: readonly CatalogModel[], groupBy: GroupByMode): ModelGroup[] {
   const buckets = new Map<string, CatalogModel[]>();
   const order: string[] = [];
   const keyFor = (model: CatalogModel): string => {
     if (groupBy === 'provider') return model.provider;
     if (groupBy === 'family') return detectFamily(model) ?? 'Ungrouped';
-    if (groupBy === 'pricingTier') return model.tier ?? 'unreported';
-    return 'Ungrouped';
+    return model.tier ?? 'unreported';
   };
   for (const model of models) {
     const key = keyFor(model);

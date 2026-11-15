@@ -1,14 +1,14 @@
 import { Trash2 } from 'lucide-react';
 import { useId, useState, type SyntheticEvent } from 'react';
-import type { MemoryRecord, MemoryUpdateReviewInput } from '../../lib/goodvibes';
+import type { MemoryRecord, MemoryScope, MemoryUpdateInput, MemoryUpdateReviewInput } from '../../lib/goodvibes';
 import { DetailPane, DetailSection } from '../../components/data-view/DataView';
 import { Button } from '../../components/ui/Button';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
-import { Field, Input } from '../../components/ui/Field';
+import { Field, Input, Textarea } from '../../components/ui/Field';
 import { Select } from '../../components/ui/Select';
 import { sentence } from '../library/library-data';
 import { MemoryRecordDetail } from './MemoryRecordDetail';
-import { MEMORY_REVIEW_STATES, isFlaggedReviewState } from './memory-helpers';
+import { MEMORY_REVIEW_STATES, MEMORY_SCOPES, isFlaggedReviewState, splitTags } from './memory-helpers';
 
 interface MemoryRecordPaneProps {
   record: MemoryRecord;
@@ -17,15 +17,34 @@ interface MemoryRecordPaneProps {
   deleting: boolean;
   onSaveReview: (id: string, input: MemoryUpdateReviewInput) => void;
   saving: boolean;
+  /** Saves edited words, tags or scope in place (memory.records.update), keeping the record's history. */
+  onSaveEdit: (id: string, input: MemoryUpdateInput) => void;
+  savingEdit: boolean;
   /** An error from the last review save or delete, shown in the pane. */
   error?: string | null;
 }
 
-/** The right-hand pane for one memory record: detail, the review form (state,
- * confidence, reason; committed to the daemon only on Save, memory.records.update-review)
- * and a confirmed delete. Keyed by record id by the caller so drafts reset per record. */
-export function MemoryRecordPane({ record, onClose, onDelete, deleting, onSaveReview, saving, error }: MemoryRecordPaneProps) {
+/** The right-hand pane for one memory record: detail, an edit form for its summary,
+ * detail, tags and scope (memory.records.update, the record keeps its id, confidence and
+ * provenance), the review form (state, confidence, reason; memory.records.update-review)
+ * and a confirmed delete. Each form commits only on its own Save. Keyed by record id by
+ * the caller so drafts reset per record. */
+export function MemoryRecordPane({ record, onClose, onDelete, deleting, onSaveReview, saving, onSaveEdit, savingEdit, error }: MemoryRecordPaneProps) {
   const formId = useId();
+  const editFormId = useId();
+  const [summary, setSummary] = useState(record.summary);
+  const [detail, setDetail] = useState(record.detail ?? '');
+  const [tags, setTags] = useState(record.tags.join(', '));
+  const [scope, setScope] = useState<MemoryScope>(record.scope);
+  const editTags = splitTags(tags);
+  const edit: MemoryUpdateInput = {
+    ...(summary.trim() !== record.summary ? { summary: summary.trim() } : {}),
+    ...(detail.trim() !== (record.detail ?? '') ? { detail: detail.trim() } : {}),
+    ...(editTags.join('\n') !== record.tags.join('\n') ? { tags: editTags } : {}),
+    ...(scope !== record.scope ? { scope } : {}),
+  };
+  const editChanged = Object.keys(edit).length > 0;
+  const summaryValid = summary.trim() !== '';
   const [state, setState] = useState(record.reviewState);
   const [confidence, setConfidence] = useState(String(Math.round(record.confidence)));
   const [staleReason, setStaleReason] = useState(record.staleReason ?? '');
@@ -42,6 +61,12 @@ export function MemoryRecordPane({ record, onClose, onDelete, deleting, onSaveRe
       confidence: parsed,
       ...(flagged && staleReason.trim() ? { staleReason: staleReason.trim() } : {}),
     });
+  }
+
+  function submitEdit(event: SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editChanged || !summaryValid) return;
+    onSaveEdit(record.id, edit);
   }
 
   async function handleDelete(): Promise<void> {
@@ -74,6 +99,30 @@ export function MemoryRecordPane({ record, onClose, onDelete, deleting, onSaveRe
       >
         {error && <div className="dv-notice dv-notice--bad" role="alert"><span>{error}</span></div>}
         <MemoryRecordDetail record={record} />
+        <DetailSection title="Edit">
+          <form id={editFormId} className="lib-form" onSubmit={submitEdit}>
+            <Field label="Summary" error={summaryValid ? undefined : 'A memory needs a summary.'}>
+              <Input value={summary} aria-label={`Summary of ${record.summary}`} onChange={(event) => setSummary(event.target.value)} />
+            </Field>
+            <Field label="Detail">
+              <Textarea value={detail} rows={4} aria-label={`Detail of ${record.summary}`} onChange={(event) => setDetail(event.target.value)} />
+            </Field>
+            <Field label="Tags" help="Comma separated.">
+              <Input value={tags} aria-label={`Tags of ${record.summary}`} onChange={(event) => setTags(event.target.value)} />
+            </Field>
+            <Field label="Scope" help="Moving a record to team shares it beyond this project.">
+              <Select<MemoryScope>
+                value={scope}
+                aria-label={`Scope of ${record.summary}`}
+                onChange={setScope}
+                options={MEMORY_SCOPES.map((option) => ({ value: option, label: sentence(option) }))}
+              />
+            </Field>
+            <Button type="submit" variant="secondary" disabled={savingEdit || !editChanged || !summaryValid} aria-busy={savingEdit}>
+              {savingEdit ? 'Saving…' : 'Save changes'}
+            </Button>
+          </form>
+        </DetailSection>
         <DetailSection title="Review">
           <form id={formId} className="lib-form" onSubmit={submit}>
             <Field label="Review state">

@@ -24,16 +24,19 @@ test.each(['yes', 'no', 'uncertain'] as const)('accepts a genuine-shaped %s bool
   const input = request();
   expect(readMailReplySubjectResponse(input, response(input, verdict))).toEqual(verdict === 'uncertain' ? { status: 'held' } : { status: 'ready', alreadyReply: verdict === 'yes' });
 });
-test.each(['request', 'invented-text', 'boolean', 'missing-reading', 'unsettled', 'evidence'] as const)('rejects %s response integrity failure', kind => {
+test.each(['request', 'battery', 'version', 'value'] as const)('rejects a reply that does not answer this request: %s', kind => {
   const input = request(); const wire = response(input);
   let raw: unknown = wire;
   if (kind === 'request') raw = { ...wire, requestId: crypto.randomUUID() };
-  if (kind === 'invented-text') raw = { ...wire, value: { alreadyReply: false, subject: 'Different text' } };
-  if (kind === 'boolean') raw = { ...wire, value: { alreadyReply: true } };
-  if (kind === 'missing-reading') raw = { ...wire, readings: {} };
-  if (kind === 'unsettled') raw = { ...wire, readings: { already_reply: { ...wire.readings.already_reply, verdict: 'uncertain' } } };
-  if (kind === 'evidence') raw = { ...wire, evidence: [] };
+  if (kind === 'battery') raw = { ...wire, battery: 'webui.voice.speech-seams' };
+  if (kind === 'version') raw = { ...wire, batteryVersion: 2 };
+  if (kind === 'value') raw = { ...wire, value: { alreadyReply: 'yes' } };
   expect(readMailReplySubjectResponse(input, raw)).toBeUndefined();
+});
+test('ignores fields the daemon adds later', () => {
+  const input = request();
+  const raw = { ...response(input, 'yes'), trace: { added: true }, value: { alreadyReply: true, confidence: 0.99 } };
+  expect(readMailReplySubjectResponse(input, raw)).toEqual({ status: 'ready', alreadyReply: true });
 });
 test.each([['RE: Lunch?', true], ['Fwd: AW: Lunch?', true], ['Lunch?', false], ['Invoice: May', false]] as const)('the rule decides %s with no request', async (subject, alreadyReply) => {
   expect(await readMailReplySubject('synthetic-subject-reference', new AbortController().signal, subject)).toMatchObject({ status: 'ready', provenance: 'rule', alreadyReply });

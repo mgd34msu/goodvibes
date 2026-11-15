@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { client as platformClient, DEFAULT_SSE_RECONNECT, GOODVIBES_BASE_URL, WEBUI_VERSION, getCurrentAuth } from '../lib/goodvibes';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from '../lib/client-lifetime';
@@ -21,8 +21,7 @@ import {
   deriveAuthState,
   deriveWorkingState,
 } from '../lib/daemon-health';
-import { getStoredRelayPairing } from '../lib/relay-pairing';
-import { getActiveRoute, probeRelayReachability, setActiveRoute, subscribeActiveRoute } from '../lib/relay-connection';
+import { getActiveRoute, probeConnection, setActiveRoute, subscribeActiveRoute } from '../lib/relay-connection';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -30,6 +29,9 @@ import { getActiveRoute, probeRelayReachability, setActiveRoute, subscribeActive
 
 /** How often to re-probe the daemon (ms) */
 const HEALTH_PROBE_INTERVAL_MS = 15_000;
+
+/** A direct probe that has not answered by then counts as a miss (a LAN address off-network can hang). */
+const DIRECT_PROBE_TIMEOUT_MS = 5_000;
 
 /**
  * Ping endpoint, lightweight, always-available.
@@ -49,7 +51,7 @@ async function probeLatency(): Promise<{ latencyMs: number | null; ok: boolean }
   const start = performance.now();
   try {
     const url = `${GOODVIBES_BASE_URL.replace(/\/+$/, '')}${PING_PATH}`;
-    const res = await fetch(url, { credentials: 'include', method: 'GET' });
+    const res = await fetch(url, { credentials: 'include', method: 'GET', signal: AbortSignal.timeout(DIRECT_PROBE_TIMEOUT_MS) });
     const elapsed = clampLatency(Math.round(performance.now() - start));
     return { latencyMs: elapsed, ok: res.status < 500 };
   } catch {
@@ -81,7 +83,8 @@ async function probeCall(fn: () => Promise<unknown>): Promise<{ ok: boolean; sta
  * Returns live daemon health: connection state, latency, SSE stream state,
  * active turn count, queued task count, and current model name.
  *
- * - Probes the daemon every 15 s via a lightweight fetch (no throw on failure).
+ * - Probes the daemon every 15 s via a lightweight fetch (no throw on failure),
+ *   together with the relay when a relay pairing is stored.
  * - Reuses the existing queryClient pattern for tasks + model (separate queries).
  * - Opens the turn-domain event stream for SSE state tracking.
  */
@@ -164,25 +167,16 @@ export function useDaemonHealth(): DaemonHealth {
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('down');
 
-  /**
-   * Consecutive probe-failure counter (persists across refetch intervals).
-   * 1st failure → 'reconnecting'; 2nd+ consecutive failure → 'down' (or a relay
-   * fallback probe, if a relay pairing is stored, see the effect below).
-   * Any direct success resets it to 0.
-   */
-  const failureCountRef = useRef<number>(0);
-
-  /** Threshold of consecutive failures before declaring the daemon 'down'. */
-  const FAILURE_THRESHOLD = 2;
-
   // Use TanStack Query so we get deduplication and window-focus coordination.
   // refetchIntervalInBackground: true, intentional trade-off: keeps the strip
   // accurate even when the tab is backgrounded (battery/network cost is low at
   // 15 s intervals; a stale connection indicator would be misleading to users
-  // who return to the tab expecting current status).
+  // who return to the tab expecting current status). With a relay pairing stored,
+  // the relay is tried together with the direct probe (lib/relay-connection.ts
+  // probeConnection), so a device away from home connects as soon as the relay answers.
   const healthQuery = useQuery({
     queryKey: ['daemon-health', 'probe'] as const,
-    queryFn: probeLatency,
+    queryFn: () => probeConnection(probeLatency, () => setConnectionState('connected')),
     networkMode: 'always',
     refetchInterval: HEALTH_PROBE_INTERVAL_MS,
     refetchIntervalInBackground: true,
@@ -209,65 +203,28 @@ export function useDaemonHealth(): DaemonHealth {
     };
   }, [refetchHealth]);
 
-  // Derive connection + route state from the direct probe result, falling back to the
-  // relay when direct is genuinely down (FAILURE_THRESHOLD+ consecutive misses) and a
-  // relay pairing is stored (lib/relay-pairing.ts). Pure liveness: ok (status < 500) on
-  // either path → connected. Neither path answering → down, route null.
+  // Derive connection state from the probe. A route that answered: connected over it.
+  // No route: a connection that was up shows 'reconnecting' for one probe, then 'down'.
   useEffect(() => {
-    let cancelled = false;
-
-    async function evaluate() {
-      if (browserOffline) {
-        setLatencyMs(null);
-        setConnectionState('down');
-        return;
-      }
-      if (healthQuery.isSuccess) {
-        const { latencyMs: probed, ok } = healthQuery.data;
-        if (cancelled) return;
-        setLatencyMs(probed);
-        if (ok) {
-          failureCountRef.current = 0;
-          setConnectionState('connected');
-          setActiveRoute('direct');
-          return;
-        }
-      } else if (healthQuery.isError) {
-        // Defensive guard: probeLatency never rethrows today, but this branch
-        // ensures correct failure-threshold behaviour if a future refactor adds
-        // a throwing code path to the probe.
-        if (cancelled) return;
-        setLatencyMs(null);
-      } else {
-        return; // still pending, nothing to evaluate yet
-      }
-
-      failureCountRef.current += 1;
-      const directDown = failureCountRef.current >= FAILURE_THRESHOLD;
-      if (!directDown) {
-        if (!cancelled) setConnectionState('reconnecting');
-        return;
-      }
-
-      // Direct is down. Try the relay ONLY if this device has a stored pairing,
-      // with none, behavior is byte-identical to before this file existed.
-      if (getStoredRelayPairing()) {
-        const relayOk = await probeRelayReachability();
-        if (cancelled) return;
-        if (relayOk) {
-          setConnectionState('connected');
-          setActiveRoute('relay');
-          return;
-        }
-      }
-
-      if (!cancelled) setConnectionState('down');
+    if (browserOffline) {
+      setLatencyMs(null);
+      setConnectionState('down');
+      return;
     }
-
-    void evaluate();
-    return () => {
-      cancelled = true;
-    };
+    if (healthQuery.isSuccess) {
+      const { route, latencyMs: probed } = healthQuery.data;
+      setLatencyMs(probed);
+      if (route) {
+        setConnectionState('connected');
+        setActiveRoute(route);
+        return;
+      }
+    } else if (healthQuery.isError) {
+      setLatencyMs(null);
+    } else {
+      return; // still pending, nothing to evaluate yet
+    }
+    setConnectionState((previous) => (previous === 'connected' ? 'reconnecting' : 'down'));
   }, [browserOffline, healthQuery.isSuccess, healthQuery.isError, healthQuery.data, healthQuery.dataUpdatedAt]);
 
   // -- Tasks ----------------------------------------------------------------

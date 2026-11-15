@@ -10,8 +10,7 @@
  *   - ProviderRuntimeSnapshot (providers.list / providers.get): nested at
  *     `runtime.auth.routes` / `runtime.auth.configured`.
  * ProvidersView merges both into one record per provider id, so a caller may
- * carry either shape (or both). This module reads all three candidate paths
- * so the deriver works regardless of which query populated which field.
+ * carry either shape (or both). This module reads those two shapes.
  *
  * This module is the ONLY place that turns route freshness into a provider
  * pill. `bestStatus` (src/lib/object.ts) stays untouched, it is a generic
@@ -73,7 +72,6 @@ const FRESHNESS_RANK: Record<string, number> = {
 
 const ROUTE_PATHS: readonly (readonly string[])[] = [
   ['routes'],
-  ['auth', 'routes'],
   ['runtime', 'auth', 'routes'],
 ];
 
@@ -85,23 +83,18 @@ function extractRoutes(record: unknown): unknown[] {
   return [];
 }
 
+/**
+ * Whether the daemon reports the provider as set up: the models.list record's `configured`
+ * or the provider snapshot's `runtime.auth.configured`. The daemon computes both from the
+ * provider's usable auth routes, so the client reads the flag and never re-derives it.
+ */
+export function isProviderConfigured(record: unknown): boolean {
+  return asRecord(record).configured === true || readPath(record, ['runtime', 'auth', 'configured']) === true;
+}
+
 function extractConfigured(record: unknown): { configured: boolean; configuredVia: string } {
-  const top = asRecord(record);
   const configuredVia = firstString(record, ['configuredVia']);
-  const nestedConfigured =
-    readPath(record, ['runtime', 'auth', 'configured']) === true ||
-    readPath(record, ['auth', 'configured']) === true;
-  // The daemon's aggregate flag has been observed FALSE while one of its own
-  // routes reports configured+usable (subscription-oauth on a provider whose
-  // env API key is absent). A usable route IS a configured provider, so the
-  // routes are consulted, not just the rollup, and the header can never
-  // contradict a healthy pill derived from those same routes.
-  const routeConfigured = extractRoutes(record).some((route) => {
-    const r = asRecord(route);
-    return r.configured === true || r.usable === true;
-  });
-  const configured = top.configured === true || nestedConfigured || routeConfigured || configuredVia.length > 0;
-  return { configured, configuredVia };
+  return { configured: isProviderConfigured(record), configuredVia };
 }
 
 function normalizeRoute(raw: unknown): ProviderRouteStatus {

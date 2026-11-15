@@ -206,41 +206,6 @@ describe('deriveCredentialAvailability (honest degrade)', () => {
   });
 });
 
-describe('deriveProviderStatus: a usable route IS a configured provider', () => {
-  // The live daemon has been observed reporting runtime.auth.configured false
-  // ("OPENAI_API_KEY or OPENAI_KEY not set") while its own subscription-oauth
-  // route reports configured+usable+healthy. The header must side with the
-  // routes: "not configured" beside a healthy pill contradicts itself.
-  test('aggregate configured:false is overridden by a usable subscription-oauth route', () => {
-    const status = deriveProviderStatus({
-      runtime: {
-        auth: {
-          configured: false,
-          detail: 'OPENAI_API_KEY or OPENAI_KEY not set',
-          routes: [
-            { route: 'api-key', configured: false, usable: false, freshness: 'unconfigured' },
-            { route: 'subscription-oauth', configured: true, usable: true, freshness: 'healthy' },
-          ],
-        },
-      },
-    });
-    expect(status.configured).toBe(true);
-    expect(status.freshness).toBe('healthy');
-  });
-
-  test('all-unconfigured routes still read not configured', () => {
-    const status = deriveProviderStatus({
-      runtime: {
-        auth: {
-          configured: false,
-          routes: [{ route: 'api-key', configured: false, usable: false, freshness: 'unconfigured' }],
-        },
-      },
-    });
-    expect(status.configured).toBe(false);
-  });
-});
-
 describe('plain-language provider state (settings dialog rows)', () => {
   test('every freshness has a dot tone', () => {
     expect(freshnessTone('healthy')).toBe('ok');

@@ -136,7 +136,7 @@ export function DeviceGrants() {
           Every capability asks before it runs. Choosing &quot;always allow&quot; on that prompt
           writes one durable grant for that one capability on that one phone, listed here, and
           revocable here. Revoking deletes the grant, so the next request asks again.
-          {nodes.data ? ` Captures are kept for ${String(nodes.data.captureRetentionHours)} hours.` : ''}
+          {nodes.data ? ` Captures are kept by the daemon for ${String(nodes.data.captureRetentionHours)} hours; the phone's browser keeps no copy.` : ''}
         </>
       )}
       actions={(

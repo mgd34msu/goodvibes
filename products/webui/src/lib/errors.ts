@@ -1,5 +1,4 @@
 import { asRecord, compactJson } from './object';
-import { daemonRefusalValue } from './daemon-refusal';
 
 function readString(record: Record<string, unknown>, key: string): string {
   const value = record[key];
@@ -74,22 +73,19 @@ export function isAdminRequiredError(error: unknown): boolean {
 }
 
 export function isSessionNotFoundError(error: unknown): boolean {
-  return errorCode(error) === 'SESSION_NOT_FOUND' || daemonRefusalValue(error)?.session_not_found === true;
+  return errorCode(error) === 'SESSION_NOT_FOUND';
 }
 
-/** SESSION_CLOSED is structural; unresolved prose requires a genuine daemon reading. */
 export function isSessionClosedError(error: unknown): boolean {
-  return errorCode(error) === 'SESSION_CLOSED' || daemonRefusalValue(error)?.session_closed === true;
+  return errorCode(error) === 'SESSION_CLOSED';
 }
 
-/** SESSION_ACTIVE is structural; unresolved prose requires a genuine daemon reading. */
 export function isSessionActiveError(error: unknown): boolean {
-  return errorCode(error) === 'SESSION_ACTIVE' || daemonRefusalValue(error)?.session_active === true;
+  return errorCode(error) === 'SESSION_ACTIVE';
 }
 
-/** SESSION_NOT_LOCAL is structural; unresolved prose requires a genuine daemon reading. */
 export function isSessionNotLocalError(error: unknown): boolean {
-  return errorCode(error) === 'SESSION_NOT_LOCAL' || daemonRefusalValue(error)?.session_not_local === true;
+  return errorCode(error) === 'SESSION_NOT_LOCAL';
 }
 
 
@@ -140,7 +136,7 @@ export function isMethodUnavailableError(error: unknown): boolean {
   const serialized = serializeError(error);
   const transport = asRecord(serialized.transport);
   const status = readNumber(serialized, 'status') ?? readNumber(transport, 'status');
-  return status === 404 && (errorCode(error) === 'METHOD_NOT_FOUND' || daemonRefusalValue(error)?.method_unknown === true);
+  return status === 404 && errorCode(error) === 'METHOD_NOT_FOUND';
 }
 
 /**
@@ -166,10 +162,12 @@ export function isDaemonUnreachableError(error: unknown): boolean {
  * when the request/stream opened but has since expired or been revoked. Distinct from
  * `isDaemonUnreachableError` (network/status-0, daemon unreachable): this is a genuine
  * "the daemon is answering and says you are no longer authenticated" signal, the one
- * that must hand off to the sign-in front door rather than retry forever.
+ * that must hand off to the sign-in front door rather than retry forever. A relay
+ * step-up refusal is also a 401 but means "this change needs your passkey", not
+ * "signed out", so it is excluded.
  */
 export function isAuthExpiredError(error: unknown): boolean {
-  if (!error) return false;
+  if (!error || isStepUpRequiredError(error)) return false;
   const serialized = serializeError(error);
   const transport = asRecord(serialized.transport);
   const category = readString(serialized, 'category') || readString(transport, 'category');
@@ -267,32 +265,14 @@ export function isEmailAuthFailedError(error: unknown): boolean {
 }
 
 /**
- * True for the daemon's step-up refusal on a mutating call that arrived over the relay
- * (evaluateStepUp in @goodvibes-jev/engine/platform's relay step-up policy, a fail-closed hook:
- * consumers wire a real WebAuthn verifier, and until one is wired every mutating relay
- * call is refused rather than silently allowed through). Two distinct codes, both a
- * genuine policy refusal rather than a fault:
- *   - `step-up-required`, a fresh assertion is required and none/an invalid one was
- *     presented.
- *   - `step-up-verifier-unavailable`, the daemon has no verifier wired at all, so the
- *     policy fails closed unconditionally.
- * The webui has no WebAuthn ceremony implemented (a further deferral of its own), so
- * either code always means: render the honest refusal with its reason, never retry
- * silently and never paint a generic/scary failure banner.
+ * True for the daemon's step-up refusal on a call that arrived over the relay: a 401 whose
+ * body is `{ code: 'step-up-required', reason, action, error, next }` (the relay gate's
+ * refusal shape). The passkey ceremony in relay-connection.ts has already run or could not
+ * help (cancelled, another prompt open, `action: 'register-locally'`), so the call was not
+ * sent: show the daemon's reason and next step, never "your session expired".
  */
 export function isStepUpRequiredError(error: unknown): boolean {
-  const code = errorCode(error);
-  return code === 'step-up-required' || code === 'step-up-verifier-unavailable';
-}
-
-/**
- * True when the underlying refusal is specifically the "no verifier wired at all"
- * variant, as opposed to "a verifier exists but this call didn't carry a valid fresh
- * assertion". Callers that want to word the refusal differently (e.g. "not supported on
- * this connection yet" vs "step up and try again") can branch on this.
- */
-export function isStepUpVerifierUnavailableError(error: unknown): boolean {
-  return errorCode(error) === 'step-up-verifier-unavailable';
+  return errorCode(error) === 'step-up-required';
 }
 
 export function errorDebugValue(error: unknown): unknown {

@@ -257,18 +257,16 @@ self.addEventListener('push', (event) => {
   );
 });
 
-// Map a notification's data onto an in-app URL. Kept in sync with the pure
-// helper src/lib/push/notification-link.ts; src/lib/push/sw.test.ts runs this
-// copy against that helper for every notification kind. This copy is what the
-// service-worker runtime actually executes. The `.startsWith('/')` guard
-// is load-bearing, not decorative: without it an absolute `data.url` (e.g. from a
-// malicious or malformed push payload) would have the SW open an external site on
-// a notification tap. src/lib/push/sw.test.ts loads and executes THIS file (not a
-// hand-copy) to pin that the guard actually runs here, not just in the pure helper.
+// Map a notification's data onto an in-app URL. This is the one implementation;
+// src/lib/push/sw.test.ts loads and executes this file for every notification
+// kind. The `.startsWith('/')` guard is load-bearing: without it an absolute
+// `data.url` (e.g. from a malicious or malformed push payload) would have the SW
+// open an external site on a notification tap.
 function linkForNotification(data, action) {
   // An Allow/Deny action tap carries the choice + approval id back in the FRAGMENT
-  // for the authenticated app to complete (the SW cannot approve on its own, no
-  // operator token here; see docs/push-approval-actions.md).
+  // for the authenticated app (the SW holds no operator token): Allow opens that
+  // approval for the owner to read and approve, Deny is applied on open (see
+  // useApprovalActions and docs/push-approval-actions.md).
   if (
     data &&
     data.kind === 'approval' &&
@@ -281,8 +279,7 @@ function linkForNotification(data, action) {
   if (data && data.kind === 'approval') return '/?view=approvals-tasks';
   // needs-input (a fleet node blocked on the operator) and completion (a tracked
   // run that finished): deep-link to the Fleet view focused on that node (carrying
-  // its session id when known). Kept in sync with the pure helper
-  // src/lib/push/notification-link.ts; src/lib/push/sw.test.ts compares the two.
+  // its session id when known).
   if (data && (data.kind === 'needs-input' || data.kind === 'completion')) {
     if (typeof data.nodeId === 'string' && data.nodeId.length > 0) {
       var nodePart = 'fleet-node=' + encodeURIComponent(data.nodeId);

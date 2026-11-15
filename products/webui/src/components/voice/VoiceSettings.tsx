@@ -98,6 +98,11 @@ export function VoiceSettings() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['voice', 'config'] });
     },
+    // A refused write (or a refused second write after the voice was cleared) still
+    // changes what the host holds: re-read it, and the alert below says why.
+    onError: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['voice', 'config'] });
+    },
   });
 
   const localInstall = useVoiceLocalInstall();
@@ -157,6 +162,11 @@ export function VoiceSettings() {
                   options={[{ value: '', label: 'Provider default' }, ...voices.map((v) => ({ value: v.id, label: v.label }))]}
                 />
               </div>
+              {setKey.isError && (
+                <p className="voice-settings-hint" role="alert">
+                  {`The voice setting was not saved: ${formatError(setKey.error)}`}
+                </p>
+              )}
               {voicesQuery.isLoading && <p className="voice-settings-hint">Loading voices…</p>}
               <p className="voice-settings-hint">One voice for the terminal, the desktop app and the agent.</p>
             </>

@@ -41,7 +41,6 @@ import { createRelayClient, type RelayClient } from '@goodvibes-jev/engine/trans
 import { clearStoredRelayPairing, getStoredRelayPairing, type RelayPairingPayload } from './relay-pairing';
 import { STEP_UP_ASSERTION_HEADER } from './stepup';
 import { resolveStepUp } from './stepup-prompter';
-import { invalidateClientLifetime } from './client-lifetime';
 
 export type ConnectionRoute = 'direct' | 'relay';
 
@@ -49,12 +48,38 @@ export type ConnectionRoute = 'direct' | 'relay';
 // Route store, a tiny module-level pub/sub. Plain (non-React) code, like
 // routedFetch below, reads the snapshot directly; React reads it reactively via
 // useSyncExternalStore in useDaemonHealth.
+//
+// A route is transport, not identity: flipping it re-opens the live streams (their
+// hooks depend on the route) and lets in-flight requests finish or fail on their own.
+// It never bumps the client lifetime, so drafts, attachments and the query cache
+// survive a device moving between its home network and the relay. The last route that
+// answered is remembered for this tab session beside the pairing, so a reload away
+// from home starts on the relay instead of waiting for the direct probe to fail.
 // ---------------------------------------------------------------------------
 
-let activeRoute: ConnectionRoute = 'direct';
+const ROUTE_SESSION_KEY = 'goodvibes.webui.relayRoute';
+
+function readRememberedRoute(): ConnectionRoute {
+  try {
+    return globalThis.sessionStorage?.getItem(ROUTE_SESSION_KEY) === 'relay' && getStoredRelayPairing() ? 'relay' : 'direct';
+  } catch {
+    return 'direct';
+  }
+}
+
+function rememberRoute(route: ConnectionRoute): void {
+  try {
+    if (route === 'relay') globalThis.sessionStorage?.setItem(ROUTE_SESSION_KEY, route);
+    else globalThis.sessionStorage?.removeItem(ROUTE_SESSION_KEY);
+  } catch {
+    // Unusable session storage only costs the head start on the next load.
+  }
+}
+
+let activeRoute: ConnectionRoute = readRememberedRoute();
 const listeners = new Set<() => void>();
 
-/** Current active route. Defaults to 'direct'; relay is opt-in and probe-driven. */
+/** Current active route: the remembered one for this tab session, else 'direct'. */
 export function getActiveRoute(): ConnectionRoute {
   return activeRoute;
 }
@@ -63,7 +88,7 @@ export function getActiveRoute(): ConnectionRoute {
 export function setActiveRoute(route: ConnectionRoute): void {
   if (activeRoute === route) return;
   activeRoute = route;
-  invalidateClientLifetime();
+  rememberRoute(route);
   for (const listener of listeners) listener();
 }
 
@@ -102,9 +127,11 @@ export function getRelayClient(): RelayClient | null {
   return client;
 }
 
-/** Tear down the relay client (e.g. after clearing the stored pairing). */
+/**
+ * Tear down the relay client (e.g. after clearing the stored pairing). The pairing
+ * write itself retires the client lifetime (relay-pairing.ts); closing a socket does not.
+ */
 export function closeRelayClient(): void {
-  invalidateClientLifetime();
   if (client) client.close();
   client = null;
   clientForPairingKey = null;
@@ -136,6 +163,54 @@ export async function probeRelayReachability(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** What one connection probe found: the route that answered, if any, and the direct latency. */
+export interface ConnectionProbeResult {
+  readonly route: ConnectionRoute | null;
+  readonly latencyMs: number | null;
+}
+
+export type DirectProbe = () => Promise<{ ok: boolean; latencyMs: number | null }>;
+
+let lastAnsweredRoute: ConnectionRoute | null = null;
+
+/**
+ * Find a route to the daemon. With no relay pairing this is the direct probe alone.
+ * With one, the direct probe runs alone only while direct is the route that answered
+ * last; otherwise (first probe, on the relay, or after a miss) the direct probe and the
+ * relay connect start together, and the relay is adopted the moment it answers, before a
+ * slow or hanging direct probe settles (`onRelayReady` lets the caller show it at once).
+ * Direct is preferred whenever it answers, so a device back on its home network leaves
+ * the relay on the next probe.
+ */
+export async function probeConnection(probeDirect: DirectProbe, onRelayReady?: () => void): Promise<ConnectionProbeResult> {
+  if (!getStoredRelayPairing()) {
+    const direct = await probeDirect();
+    return { route: direct.ok ? 'direct' : null, latencyMs: direct.latencyMs };
+  }
+  if (activeRoute === 'direct' && lastAnsweredRoute === 'direct') {
+    const direct = await probeDirect();
+    if (direct.ok) return { route: 'direct', latencyMs: direct.latencyMs };
+    lastAnsweredRoute = (await probeRelayReachability()) ? 'relay' : null;
+    return { route: lastAnsweredRoute, latencyMs: null };
+  }
+  let directSettled = false;
+  const relay = probeRelayReachability().then((ok) => {
+    if (ok && !directSettled) {
+      setActiveRoute('relay');
+      onRelayReady?.();
+    }
+    return ok;
+  });
+  const direct = await probeDirect();
+  directSettled = true;
+  if (direct.ok) {
+    lastAnsweredRoute = 'direct';
+    return { route: 'direct', latencyMs: direct.latencyMs };
+  }
+  lastAnsweredRoute = (await relay) ? 'relay' : null;
+  return { route: lastAnsweredRoute, latencyMs: null };
 }
 
 // ---------------------------------------------------------------------------

@@ -179,7 +179,7 @@ describe('health consumes the actual platform source error and owner lifetime', 
     const retired = platformClient.realtime.viaSse({ onError: error => retiredErrors.push(error) });
     cleanups.push(retired.turn.onEnvelope('TURN_STARTED', () => {}));
     await until(() => endpoint.arrivals.length === 1, 'Retired native source was not acquired');
-    closeRelayClient(); // The actual pool retires its client/lifetime even when route stays direct.
+    flushSync(() => invalidateClientLifetime()); // A credential change retires the client while the route stays direct.
     const current = platformClient.realtime.viaSse({ onError: error => currentErrors.push(error) });
     cleanups.push(current.turn.onEnvelope('TURN_STARTED', () => {}));
     await until(() => endpoint.arrivals.length === 2, 'Replacement native source was not acquired');

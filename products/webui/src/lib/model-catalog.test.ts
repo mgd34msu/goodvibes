@@ -7,7 +7,6 @@ import {
   filterModels,
   groupModels,
   hasAnyCapabilityData,
-  hasAnyQualityTierData,
   hasAnyTierData,
   modelsFromProvidersResponse,
   providerIdsFromProvidersResponse,
@@ -127,16 +126,25 @@ describe('tierToCategoryFilter: matches the TUI\'s tierToCategoryFilter mapping'
   });
 });
 
-describe('hasAnyTierData / hasAnyCapabilityData / hasAnyQualityTierData, honest forward-compat detection', () => {
+describe('hasAnyTierData / hasAnyCapabilityData, honest detection', () => {
   const models = modelsFromProvidersResponse(PROVIDERS_RESPONSE);
 
   test('tier data is genuinely present in this fixture', () => {
     expect(hasAnyTierData(models)).toBe(true);
   });
 
-  test('capability and quality-tier data are never fabricated, always false today (no wire source exists)', () => {
+  test('capability data is never fabricated: absent flags mean no data', () => {
     expect(hasAnyCapabilityData(models)).toBe(false);
-    expect(hasAnyQualityTierData(models)).toBe(false);
+  });
+
+  test('capability flags from the daemon drive the capability filter', () => {
+    const withFlags = modelsFromProvidersResponse({ providers: [{ providerId: 'p', models: [
+      { id: 'tools', registryKey: 'p:tools', capabilities: { toolCalling: true, reasoning: false, multimodal: false } },
+      { id: 'eyes', registryKey: 'p:eyes', capabilities: { toolCalling: false, reasoning: false, multimodal: true } },
+    ] }] });
+    expect(hasAnyCapabilityData(withFlags)).toBe(true);
+    expect(filterModels(withFlags, { capabilityFilter: 'toolUse' }).map((model) => model.id)).toEqual(['tools']);
+    expect(filterModels(withFlags, { capabilityFilter: 'multimodal' }).map((model) => model.id)).toEqual(['eyes']);
   });
 
   test('tier data is absent when no model carries one', () => {

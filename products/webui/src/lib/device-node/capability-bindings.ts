@@ -256,13 +256,18 @@ export async function runWebNodeCapability(
         const url = readString(input, 'url');
         if (!/^https?:\/\//i.test(url)) return { ok: false, error: 'Only http and https links are opened.' };
         if (!bindings.canOpenWindow) return { ok: false, error: 'This browser could not open a new window.' };
-        window.open(url, '_blank', 'noopener,noreferrer');
+        // Opened without 'noopener' only so the handle can be read: with it the browser
+        // always returns null, and a blocked popup (no recent tap on this page) would be
+        // reported as opened. The opener link is cut as soon as the handle exists.
+        const opened = window.open(url, '_blank');
+        if (!opened) return { ok: false, error: 'The browser blocked opening the link; it allows a new window only right after a tap on this page.' };
+        opened.opener = null;
         return { ok: true, data: { opened: url } };
       }
       case 'device.command.vibrate': {
         if (!bindings.canVibrate) return { ok: false, error: 'This device does not offer vibration.' };
-        const duration = readNumber(input, 'durationMs') ?? 200;
-        navigator.vibrate(Math.min(Math.max(duration, 1), 5000));
+        const duration = Math.min(Math.max(readNumber(input, 'durationMs') ?? 200, 1), 5000);
+        if (!navigator.vibrate(duration)) return { ok: false, error: 'The browser refused to vibrate; it allows vibration only after a tap on this page.' };
         return { ok: true, data: { vibratedMs: duration } };
       }
       default:

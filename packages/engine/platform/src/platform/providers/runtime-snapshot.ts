@@ -1,5 +1,5 @@
 import { modelFamilyReadings, type ModelFamily } from './model-family.js';
-import type { ProviderRuntimeMetadata } from './interface.js';
+import type { ProviderAuthRouteDescriptor, ProviderRuntimeMetadata } from './interface.js';
 import type { ModelDefinition, ProviderRegistry } from './registry.js';
 import type { LLMProvider } from './interface.js';
 
@@ -13,6 +13,12 @@ export interface ProviderModelSnapshot {
   readonly displayName: string;
   readonly selectable: boolean;
   readonly contextWindow: number;
+  /** What the model can do, from its registry definition: call tools, reason, read images. */
+  readonly capabilities?: {
+    readonly toolCalling: boolean;
+    readonly reasoning: boolean;
+    readonly multimodal: boolean;
+  };
   /** Published picker family; omitted when repository metadata is unavailable. */
   readonly family?: ModelFamily | undefined;
   readonly tier?: string | undefined;
@@ -68,6 +74,13 @@ function toModelSnapshot(
     displayName: model.displayName,
     selectable: model.selectable,
     contextWindow: model.contextWindow,
+    ...(model.capabilities
+      ? { capabilities: {
+          toolCalling: model.capabilities.toolCalling,
+          reasoning: model.capabilities.reasoning,
+          multimodal: model.capabilities.multimodal,
+        } }
+      : {}),
     ...(family !== undefined ? { family } : {}),
     ...(model.tier ? { tier: model.tier } : {}),
     ...(resolved.status === 'priced'
@@ -82,6 +95,27 @@ function toModelSnapshot(
         }
       : {}),
   };
+}
+
+/** A route a request can be sent over now: set up, not refused, not expired or pending. */
+export function isProviderAuthRouteUsable(route: ProviderAuthRouteDescriptor): boolean {
+  return route.configured
+    && route.usable !== false
+    && route.freshness !== 'expired'
+    && route.freshness !== 'pending'
+    && route.freshness !== 'unconfigured';
+}
+
+/**
+ * `runtime.auth.configured` is the one "is this provider set up" field every client reads.
+ * A provider's own aggregate can say false while one of its routes is usable (a subscription
+ * sign-in with no API key in the environment), so a usable route also counts.
+ */
+function withConfiguredFromRoutes(runtime: ProviderRuntimeMetadata): ProviderRuntimeMetadata {
+  const auth = runtime.auth;
+  if (!auth || auth.configured) return runtime;
+  const usable = (auth.routes ?? []).some((route) => route.route !== 'none' && isProviderAuthRouteUsable(route));
+  return usable ? { ...runtime, auth: { ...auth, configured: true } } : runtime;
 }
 
 async function buildSnapshotForProvider(
@@ -125,7 +159,7 @@ async function buildSnapshotForProvider(
     providerId,
     active: currentModel?.provider === providerId,
     modelCount: models.length,
-    runtime: resolvedRuntime,
+    runtime: withConfiguredFromRoutes(resolvedRuntime),
     models,
   };
 }

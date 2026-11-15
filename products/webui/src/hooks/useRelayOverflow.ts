@@ -7,7 +7,7 @@ import {
 
 /**
  * Reactively read the relay live-event overflow accounting. Returns the current snapshot;
- * `totalDropped > 0` means the UI should show the honest "events were dropped, resync" notice.
+ * `totalDropped > 0` means events were dropped and a refetch pass is due.
  */
 export function useRelayOverflow(): RelayOverflowSnapshot {
   return useSyncExternalStore(subscribeRelayOverflow, getRelayOverflowSnapshot, getRelayOverflowSnapshot);

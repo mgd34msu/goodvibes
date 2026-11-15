@@ -4,8 +4,8 @@
  * (src/renderer/model-workspace.ts + src/input/model-picker.ts). Launched from
  * ProvidersView's "Browse Models" button. See src/lib/model-catalog.ts for the
  * full grounding on what's wire-honest here (price filter/group are real,
- * from providers.list()'s tier+pricing; capability filter has no wire data
- * today and renders disabled rather than a silent no-op).
+ * from providers.list()'s tier+pricing; the capability filter reads each model's
+ * capability flags and renders disabled when a daemon sends none).
  */
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -31,7 +31,6 @@ import {
   filterModels,
   groupModels,
   hasAnyCapabilityData,
-  hasAnyQualityTierData,
   hasAnyTierData,
   MODEL_TARGETS,
   modelsFromProvidersResponse,
@@ -41,6 +40,7 @@ import {
   targetHasNoModelConcept,
   type CategoryFilter,
   type CatalogModel,
+  type CapabilityFilter,
   type GroupByMode,
   type ModelTarget,
 } from '../../lib/model-catalog';
@@ -111,6 +111,7 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
   const [query, setQuery] = useState('');
   const [providerFilter, setProviderFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
+  const [capabilityFilter, setCapabilityFilter] = useState<CapabilityFilter>('none');
   const [groupBy, setGroupBy] = useState<GroupByMode>('provider');
   const [availableOnly, setAvailableOnly] = useState(false);
 
@@ -141,7 +142,6 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
   );
   const priceDataAvailable = useMemo(() => hasAnyTierData(allModels), [allModels]);
   const capabilityDataAvailable = useMemo(() => hasAnyCapabilityData(allModels), [allModels]);
-  const qualityTierDataAvailable = useMemo(() => hasAnyQualityTierData(allModels), [allModels]);
 
   const routing = useMemo(
     () => readTargetRouting(target, config.data, readPath(currentModel.data, ['model']) as { registryKey?: string; provider?: string; id?: string } | null),
@@ -154,14 +154,14 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
         query,
         provider: providerFilter || undefined,
         categoryFilter,
+        capabilityFilter: capabilityDataAvailable ? capabilityFilter : 'none',
         availableOnly,
         configuredProviderIds,
       }),
-    [allModels, query, providerFilter, categoryFilter, availableOnly, configuredProviderIds],
+    [allModels, query, providerFilter, categoryFilter, capabilityFilter, capabilityDataAvailable, availableOnly, configuredProviderIds],
   );
 
-  const effectiveGroupBy: GroupByMode = groupBy === 'qualityTier' && !qualityTierDataAvailable ? 'provider' : groupBy;
-  const groups = useMemo(() => groupModels(filtered, effectiveGroupBy), [filtered, effectiveGroupBy]);
+  const groups = useMemo(() => groupModels(filtered, groupBy), [filtered, groupBy]);
 
   const useModel = useMutation({
     mutationFn: async (model: CatalogModel) => {
@@ -312,22 +312,19 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
 
             <div className="model-workspace-filter" title={capabilityDataAvailable ? undefined : 'Not reported by this daemon'}>
               <span className="model-workspace-filter__label" aria-hidden="true">Capability</span>
-              <Select
+              <Select<CapabilityFilter>
                 aria-label="Capability"
-                value="none"
-                // No capability filter exists yet, so the control stays inert rather than look live.
-                disabled
-                onChange={() => undefined}
+                value={capabilityDataAvailable ? capabilityFilter : 'none'}
+                disabled={!capabilityDataAvailable}
+                onChange={setCapabilityFilter}
                 options={[
-                  { value: 'none', label: 'None' },
-                  { value: 'reasoning', label: 'Reasoning' },
+                  { value: 'none', label: 'Any' },
                   { value: 'toolUse', label: 'Tool use' },
-                  { value: 'multimodal', label: 'Multimodal' },
+                  { value: 'reasoning', label: 'Reasoning' },
+                  { value: 'multimodal', label: 'Images' },
                 ]}
               />
-              <small className="model-workspace-filter__note">
-                {capabilityDataAvailable ? 'Filtering by capability is not available yet' : 'Not reported by this daemon'}
-              </small>
+              {!capabilityDataAvailable && <small className="model-workspace-filter__note">Not reported by this daemon</small>}
             </div>
 
             <div className="model-workspace-filter">
@@ -340,11 +337,6 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
                   { value: 'provider', label: 'Provider' },
                   { value: 'family', label: 'Family' },
                   { value: 'pricingTier', label: 'Pricing tier' },
-                  {
-                    value: 'qualityTier',
-                    label: `Quality tier${qualityTierDataAvailable ? '' : ' (unavailable)'}`,
-                    disabled: !qualityTierDataAvailable,
-                  },
                 ]}
               />
             </div>

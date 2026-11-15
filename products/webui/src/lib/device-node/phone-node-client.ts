@@ -21,10 +21,14 @@
  *
  * Executed-work markers are persisted too (see PhoneNodeStorage.writeExecuted),
  * a bounded record of which work item ids this node has already run a
- * capability for. Without it, a tab that dies between running a capability and
- * its completion report landing would come back from reload with no memory of
- * having already fired that real, user-visible action, and the redelivered
- * item would run it a second time.
+ * capability for, as `[workId, status]` only. Without it, a tab that dies
+ * between running a capability and its completion report landing would come
+ * back from reload with no memory of having already fired that real,
+ * user-visible action, and the redelivered item would run it a second time.
+ * The result itself (a photo, clipboard text, a location) stays in memory for
+ * the life of the tab and is never written to the browser profile: captures
+ * live under the daemon's retention rule, and a few bytes per marker never hit
+ * the storage quota.
  */
 import {
   announcedCapabilities,
@@ -54,11 +58,17 @@ export interface PhoneNodeActivity {
   readonly detail: string;
 }
 
-/** A capability's outcome, remembered so a redelivered work item can be re-reported without re-running it. */
-export interface ExecutedWorkRecord {
-  readonly status: 'completed' | 'failed';
-  readonly result: unknown;
-  readonly error: string | undefined;
+/** What is persisted per executed work item: its id's outcome, never its result. */
+export type ExecutedWorkStatus = 'completed' | 'failed';
+
+/**
+ * A capability's outcome, remembered so a redelivered work item can be re-reported
+ * without re-running it. `report` is held in memory only; a marker restored after a
+ * reload has none.
+ */
+interface ExecutedWorkRecord {
+  readonly status: ExecutedWorkStatus;
+  readonly report?: { readonly result: unknown; readonly error: string | undefined };
 }
 
 export interface PhoneNodeState {
@@ -80,7 +90,7 @@ export interface PhoneNodeStorage {
   write(identity: PhoneNodeIdentity): void;
   clear(): void;
   /**
-   * Executed-work markers, [workId, outcome] pairs, oldest first. Read once at
+   * Executed-work markers, [workId, status] pairs, oldest first. Read once at
    * construction to seed the in-memory dedupe map; written after every capability
    * run so a reload between running it and the completion report landing does
    * not lose the fact that it already ran. Optional: a storage that omits these
@@ -88,15 +98,18 @@ export interface PhoneNodeStorage {
    * reload, pumpOnce()'s in-memory map still covers the lost-report-without-
    * reload case on its own.
    */
-  readExecuted?(): readonly (readonly [string, ExecutedWorkRecord])[];
-  writeExecuted?(entries: readonly (readonly [string, ExecutedWorkRecord])[]): void;
+  readExecuted?(): readonly (readonly [string, ExecutedWorkStatus])[];
+  writeExecuted?(entries: readonly (readonly [string, ExecutedWorkStatus])[]): void;
 }
 
-function isExecutedWorkRecord(value: unknown): value is ExecutedWorkRecord {
-  if (value === null || typeof value !== 'object') return false;
-  const status = (value as { status?: unknown }).status;
-  return status === 'completed' || status === 'failed';
+/** A stored marker's status; markers written by older builds held a whole record. */
+function executedStatus(value: unknown): ExecutedWorkStatus | undefined {
+  const status = value !== null && typeof value === 'object' ? (value as { status?: unknown }).status : value;
+  return status === 'completed' || status === 'failed' ? status : undefined;
 }
+
+/** What a redelivered item is answered with when its result did not survive a reload. */
+const RESULT_NOT_KEPT = 'Already executed on this device; the result was sent before, or lost when the page reloaded. It was not run again.';
 
 export function browserPhoneNodeStorage(): PhoneNodeStorage {
   return {
@@ -129,7 +142,7 @@ export function browserPhoneNodeStorage(): PhoneNodeStorage {
         // Nothing to do; the identity is dropped in memory regardless.
       }
     },
-    readExecuted(): readonly (readonly [string, ExecutedWorkRecord])[] {
+    readExecuted(): readonly (readonly [string, ExecutedWorkStatus])[] {
       try {
         const raw = window.localStorage.getItem(PHONE_NODE_EXECUTED_KEY);
         if (!raw) return [];
@@ -137,14 +150,18 @@ export function browserPhoneNodeStorage(): PhoneNodeStorage {
         // Shape-validated the same way identity is: a half-written or foreign
         // entry is dropped rather than fed back in as a false dedupe marker.
         if (!Array.isArray(parsed)) return [];
-        return parsed.filter((entry): entry is [string, ExecutedWorkRecord] => (
-          Array.isArray(entry) && entry.length === 2 && typeof entry[0] === 'string' && isExecutedWorkRecord(entry[1])
-        ));
+        const markers: [string, ExecutedWorkStatus][] = [];
+        for (const entry of parsed) {
+          if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') continue;
+          const status = executedStatus(entry[1]);
+          if (status) markers.push([entry[0], status]);
+        }
+        return markers;
       } catch {
         return [];
       }
     },
-    writeExecuted(entries: readonly (readonly [string, ExecutedWorkRecord])[]): void {
+    writeExecuted(entries: readonly (readonly [string, ExecutedWorkStatus])[]): void {
       try {
         window.localStorage.setItem(PHONE_NODE_EXECUTED_KEY, JSON.stringify(entries));
       } catch {
@@ -216,13 +233,13 @@ export class PhoneNodeClient {
   private busyLifetime: AbortController | null = null;
   private lifetime = new AbortController();
   /**
-   * Work item ids whose capability has already run, keyed to their reported
-   * outcome. Checked at the top of runWork() so a redelivery, caused by our
-   * completion report never landing (lost network, or the tab dying between
-   * running the capability and posting the report), retries only the report,
-   * never the capability itself. Seeded from storage.readExecuted() at
-   * construction so this survives a reload, not just a lost report within the
-   * same tab. See runWork(), rememberExecuted(), and completeWork().
+   * Work item ids whose capability has already run, keyed to their outcome and,
+   * for items run by this tab, the report. Checked at the top of runWork() so a
+   * redelivery, caused by our completion report never landing (lost network, or
+   * the tab dying between running the capability and posting the report),
+   * retries only the report, never the capability itself. Seeded from
+   * storage.readExecuted() at construction so the marker survives a reload; the
+   * report does not. See runWork(), rememberExecuted(), and completeWork().
    */
   private readonly executedWork: Map<string, ExecutedWorkRecord>;
   /** Item ids whose capability is running now, across stop()/start() lifetimes of this client. */
@@ -234,7 +251,7 @@ export class PhoneNodeClient {
     this.options = options;
     this.fetchImpl = options.fetchImpl ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
     this.bindings = options.bindings ?? readBrowserBindings();
-    this.executedWork = new Map(options.storage.readExecuted?.() ?? []);
+    this.executedWork = new Map((options.storage.readExecuted?.() ?? []).map(([workId, status]) => [workId, { status }] as const));
     this.identity = options.storage.read();
     this.state = {
       status: this.identity ? 'connected' : 'unpaired',
@@ -532,8 +549,10 @@ export class PhoneNodeClient {
       // report landed (dropped network, or this tab died between running the
       // capability and posting the report), so the queue offered it again. The
       // capability already fired its real, user-visible side effect once; report
-      // the outcome we already have rather than running it a second time.
-      await this.completeWork(item.id, executed.status, executed.result, executed.error);
+      // the outcome we already have rather than running it a second time. After a
+      // reload the result is gone (it is never stored), and the report says so.
+      if (executed.report) await this.completeWork(item.id, executed.status, executed.report.result, executed.report.error);
+      else await this.completeWork(item.id, 'failed', { contractVersion: WEB_NODE_CONTRACT_VERSION, alreadyExecuted: true, executedStatus: executed.status }, RESULT_NOT_KEPT);
       return;
     }
     // Another lifetime of this client (stop() then start()) may still be inside the
@@ -584,19 +603,20 @@ export class PhoneNodeClient {
 
   /**
    * Remember a capability's outcome for item.id, evicting the oldest entry past
-   * the cap, and persist the whole bounded set synchronously (writeExecuted is a
-   * plain localStorage.setItem under browserPhoneNodeStorage, it returns before
-   * this function does) so a tab dying immediately afterward still has the
-   * marker on the next reload.
+   * the cap, and persist the bounded set of `[workId, status]` markers
+   * synchronously (writeExecuted is a plain localStorage.setItem under
+   * browserPhoneNodeStorage, it returns before this function does) so a tab dying
+   * immediately afterward still has the marker on the next reload. The result is
+   * kept in memory only.
    */
-  private rememberExecuted(workId: string, status: 'completed' | 'failed', result: unknown, error: string | undefined): void {
-    this.executedWork.set(workId, { status, result, error });
+  private rememberExecuted(workId: string, status: ExecutedWorkStatus, result: unknown, error: string | undefined): void {
+    this.executedWork.set(workId, { status, report: { result, error } });
     while (this.executedWork.size > DEFAULT_MAX_EXECUTED) {
       const oldestKey = this.executedWork.keys().next().value;
       if (oldestKey === undefined) break;
       this.executedWork.delete(oldestKey);
     }
-    this.options.storage.writeExecuted?.([...this.executedWork.entries()]);
+    this.options.storage.writeExecuted?.([...this.executedWork].map(([id, record]) => [id, record.status] as const));
   }
 
   private async completeWork(workId: string, status: 'completed' | 'failed', result: unknown, error?: string, capabilityId = ''): Promise<void> {

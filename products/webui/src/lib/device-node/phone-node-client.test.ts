@@ -12,7 +12,7 @@ import {
   PHONE_NODE_TOKEN_KEY,
   PhoneNodeClient,
   browserPhoneNodeStorage,
-  type ExecutedWorkRecord,
+  type ExecutedWorkStatus,
   type PhoneNodeIdentity,
   type PhoneNodeStorage,
 } from './phone-node-client';
@@ -42,17 +42,17 @@ function bindings(overrides: Partial<BrowserBindings> = {}): BrowserBindings {
  */
 function memoryStorage(initial: PhoneNodeIdentity | null = null): PhoneNodeStorage & {
   current: PhoneNodeIdentity | null;
-  executed: [string, ExecutedWorkRecord][];
+  executed: [string, ExecutedWorkStatus][];
 } {
   const store = {
     current: initial,
-    executed: [] as [string, ExecutedWorkRecord][],
+    executed: [] as [string, ExecutedWorkStatus][],
     read: (): PhoneNodeIdentity | null => store.current,
     write: (identity: PhoneNodeIdentity): void => { store.current = identity; },
     clear: (): void => { store.current = null; store.executed = []; },
-    readExecuted: (): readonly (readonly [string, ExecutedWorkRecord])[] => store.executed,
-    writeExecuted: (entries: readonly (readonly [string, ExecutedWorkRecord])[]): void => {
-      store.executed = entries.map(([id, record]) => [id, record]);
+    readExecuted: (): readonly (readonly [string, ExecutedWorkStatus])[] => store.executed,
+    writeExecuted: (entries: readonly (readonly [string, ExecutedWorkStatus])[]): void => {
+      store.executed = entries.map(([id, status]) => [id, status]);
     },
   };
   return store;
@@ -205,26 +205,25 @@ describe('browserPhoneNodeStorage', () => {
     expect(client.getState().status).toBe('unpaired');
   });
 
-  test('executed entries of the wrong shape are dropped and well-formed ones kept', () => {
-    const good: [string, ExecutedWorkRecord] = ['w1', { status: 'completed', result: { ok: true }, error: undefined }];
+  test('executed entries of the wrong shape are dropped; markers from an older build keep only their status', () => {
     window.localStorage.setItem(PHONE_NODE_EXECUTED_KEY, JSON.stringify([
-      good, ['w2'], [3, { status: 'completed' }], ['w3', null], ['w4', { status: 'weird' }], 'junk',
+      ['w0', 'failed'], ['w1', { status: 'completed', result: { mediaBase64: 'AAAA' } }],
+      ['w2'], [3, 'completed'], ['w3', null], ['w4', { status: 'weird' }], 'junk',
     ]));
-    const read = browserPhoneNodeStorage().readExecuted?.() ?? [];
-    expect(read.map(([id]) => id)).toEqual(['w1']);
+    expect(browserPhoneNodeStorage().readExecuted?.()).toEqual([['w0', 'failed'], ['w1', 'completed']]);
   });
 
-  test('executed markers survive a storage round-trip', () => {
+  test('executed markers survive a storage round-trip as [workId, status] only', () => {
     const storage = browserPhoneNodeStorage();
-    const record: ExecutedWorkRecord = { status: 'failed', result: undefined, error: 'denied' };
-    storage.writeExecuted?.([['w1', record]]);
-    expect(browserPhoneNodeStorage().readExecuted?.().map(([id, r]) => [id, r.status, r.error])).toEqual([['w1', 'failed', 'denied']]);
+    storage.writeExecuted?.([['w1', 'failed']]);
+    expect(window.localStorage.getItem(PHONE_NODE_EXECUTED_KEY)).toBe('[["w1","failed"]]');
+    expect(browserPhoneNodeStorage().readExecuted?.()).toEqual([['w1', 'failed']]);
   });
 
   test('clear drops the identity and the executed markers', () => {
     const storage = browserPhoneNodeStorage();
     storage.write({ nodeId: 'n', token: 't', label: 'Pixel' });
-    storage.writeExecuted?.([['w1', { status: 'completed', result: 1, error: undefined }]]);
+    storage.writeExecuted?.([['w1', 'completed']]);
     storage.clear();
     expect(storage.read()).toBeNull();
     expect(storage.readExecuted?.()).toEqual([]);
@@ -236,7 +235,7 @@ describe('browserPhoneNodeStorage', () => {
     try {
       const storage = browserPhoneNodeStorage();
       expect(() => storage.write({ nodeId: 'n', token: 't', label: 'Pixel' })).not.toThrow();
-      expect(() => storage.writeExecuted?.([['w1', { status: 'completed', result: 1, error: undefined }]])).not.toThrow();
+      expect(() => storage.writeExecuted?.([['w1', 'completed']])).not.toThrow();
     } finally {
       Storage.prototype.setItem = original;
     }
@@ -417,11 +416,11 @@ describe('serving work', () => {
     expect(oldClientRuns).toBe(1);
     // The marker was persisted synchronously, before the completion POST was
     // even attempted, so it survived the "reload" even though the report did not.
-    expect(storage.executed).toHaveLength(1);
-    expect(storage.executed[0]?.[0]).toBe('w1');
+    // Only the marker is stored, never the capability's result.
+    expect(storage.executed).toEqual([['w1', 'completed']]);
 
     let newClientRuns = 0;
-    const completions: { status: unknown }[] = [];
+    const completions: { status: unknown; error?: unknown; result?: unknown }[] = [];
     const resumedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/work/pull')) {
@@ -432,7 +431,7 @@ describe('serving work', () => {
         } as unknown as Response;
       }
       if (url.includes('/complete')) {
-        completions.push(JSON.parse(String(init?.body ?? '{}')) as { status: unknown });
+        completions.push(JSON.parse(String(init?.body ?? '{}')) as { status: unknown; error?: unknown; result?: unknown });
         return { status: 200, json: async () => ({}) } as unknown as Response;
       }
       throw new Error(`unexpected request to ${url}`);
@@ -452,7 +451,10 @@ describe('serving work', () => {
 
     expect(newClientRuns).toBe(0);
     expect(completions).toHaveLength(1);
-    expect(completions[0]?.status).toBe('completed');
+    // The result did not survive the reload, so the report says the work already ran here.
+    expect(completions[0]?.status).toBe('failed');
+    expect(String(completions[0]?.error)).toContain('Already executed on this device');
+    expect(completions[0]?.result).toMatchObject({ alreadyExecuted: true, executedStatus: 'completed' });
   });
 });
 

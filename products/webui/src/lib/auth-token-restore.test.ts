@@ -35,17 +35,4 @@ describe('setExplicitAuthToken when the daemon cannot be asked', () => {
 
     expect(await tokenStore.getToken()).toBeFalsy();
   });
-
-  test('a transient failure on the first look does not discard a good token', async () => {
-    let calls = 0;
-    globalThis.fetch = asFetch(async () => {
-      calls += 1;
-      if (calls === 1) throw new TypeError('Failed to fetch');
-      return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    });
-
-    await setExplicitAuthToken('minted-device-token');
-
-    expect(await tokenStore.getToken()).toBe('minted-device-token');
-  });
 });

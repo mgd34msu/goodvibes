@@ -111,7 +111,6 @@ export function ModelsSection() {
           provider={selected.value}
           providerId={selected.id}
           modelProviders={data.modelProviders}
-          sourceRevision={`${data.providers.dataUpdatedAt}:${data.modelCatalog.dataUpdatedAt}`}
           sourceReady={data.providers.isSuccess && data.modelCatalog.isSuccess && !data.providers.isFetching && !data.modelCatalog.isFetching}
           currentRegistryKey={data.current.registryKey}
           onBack={() => setSelectedId('')}
@@ -208,7 +207,6 @@ function ProviderDetail({
   provider,
   providerId,
   modelProviders,
-  sourceRevision,
   sourceReady,
   currentRegistryKey,
   onBack,
@@ -216,7 +214,6 @@ function ProviderDetail({
   provider: unknown;
   providerId: string;
   modelProviders: unknown[];
-  sourceRevision: string;
   sourceReady: boolean;
   currentRegistryKey: string;
   onBack: () => void;
@@ -239,8 +236,7 @@ function ProviderDetail({
   // names do not overlap, so the shallow merge cannot clobber either.
   const combined = useMemo(() => ({ ...asRecord(provider), ...asRecord(detail.data) }), [provider, detail.data]);
   const status = useMemo(() => deriveProviderStatus(combined), [combined]);
-  const providerModels = useProviderModelOptions(provider, modelProviders,
-    `${providerId}:${sourceRevision}:${detail.dataUpdatedAt}`, sourceReady && !detail.isFetching);
+  const providerModels = useProviderModelOptions(provider, modelProviders, sourceReady && !detail.isFetching);
   const models: ModelOption[] = providerModels.models;
   const title = bestTitle(provider, providerId);
 

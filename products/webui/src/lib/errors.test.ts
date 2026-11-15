@@ -11,16 +11,11 @@ import {
   isSessionNotFoundError,
   isSessionNotLocalError,
   isStepUpRequiredError,
-  isStepUpVerifierUnavailableError,
 } from './errors';
 
 describe('isStepUpRequiredError (relay mutating-call refusal)', () => {
   test('true for the step-up-required code', () => {
     expect(isStepUpRequiredError({ code: 'step-up-required', message: 'needs a fresh assertion' })).toBe(true);
-  });
-
-  test('true for the step-up-verifier-unavailable code', () => {
-    expect(isStepUpRequiredError({ code: 'step-up-verifier-unavailable', message: 'no verifier wired' })).toBe(true);
   });
 
   test('true when the code is nested under transport.body', () => {
@@ -36,12 +31,9 @@ describe('isStepUpRequiredError (relay mutating-call refusal)', () => {
   });
 });
 
-describe('isStepUpVerifierUnavailableError', () => {
-  test('true only for the verifier-unavailable variant', () => {
-    expect(isStepUpVerifierUnavailableError({ code: 'step-up-verifier-unavailable' })).toBe(true);
-    expect(isStepUpVerifierUnavailableError({ code: 'step-up-required' })).toBe(false);
-    expect(isStepUpVerifierUnavailableError(undefined)).toBe(false);
-  });
+test('a relay step-up 401 is not an expired session', () => {
+  expect(isAuthExpiredError({ status: 401, category: 'step-up', body: { code: 'step-up-required', action: 'sign' } })).toBe(false);
+  expect(isAuthExpiredError({ status: 401, category: 'authentication', body: { error: 'Unauthorized' } })).toBe(true);
 });
 
 describe('isConflictError (409 stale-hunk / not-ready-group)', () => {
@@ -139,7 +131,7 @@ describe('error formatting', () => {
 
   // Since the 1.0.0 delete-means-delete change, the daemon carries
   // code: 'METHOD_NOT_FOUND' on this 404 (EngineErrorCodes.METHOD_NOT_FOUND).
-  // Machine codes remain structural; prose requires a genuine, awaited reading.
+  // The route that refuses owns the code; prose is never read.
   test('recognizes the machine code METHOD_NOT_FOUND (an upgraded daemon), no message-sniff needed', () => {
     expect(isMethodUnavailableError({
       status: 404,
@@ -151,7 +143,7 @@ describe('error formatting', () => {
     }))).toBe(true);
   });
 
-  test('unissued legacy prose remains unclassified rather than triggering a fallback', () => {
+  test('prose without the code is not classified', () => {
     expect(isMethodUnavailableError({
       status: 404,
       body: { error: 'Unknown gateway method: sessions.delete' },

@@ -3,9 +3,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { NativeWorkSubmissionRequest } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
-import { NativeWorkSubmissionControls } from '../../../runtime/native-work-submission.ts';
+import { NativeWorkSubmissionControls } from '@goodvibes-jev/engine/terminal-shell/native';
 import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity } from '../../../runtime/native-work-submission-host.ts';
-import { NativeWorkSubmissionJournal } from '../../../runtime/native-work-submission-journal.ts';
+import { NativeWorkSubmissionJournal } from '@goodvibes-jev/engine/terminal-shell/native';
 
 test('an abandoned submission after server persistence recovers the same journal identity in a restarted controller without cross-principal replay', async () => {
   const home = mkdtempSync(join(tmpdir(), 'native-submit-crash-')); const journalPath = join(home, 'product-state', 'native-work-submission.json');

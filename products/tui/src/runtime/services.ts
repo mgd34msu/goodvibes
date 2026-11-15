@@ -71,7 +71,7 @@ import { createNotificationDispatcher, startNotificationFlush, wireRuntimeNotifi
 import { createDurabilityServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { createWorkspaceCheckpointing } from './workspace-checkpointing.ts';
-import { createDomainDispatch } from './store/index.ts';
+import { createDomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import {
   DistributedRuntimeManager,
   RemoteRunnerRegistry,

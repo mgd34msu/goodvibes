@@ -28,7 +28,7 @@ import { beginModal, finishModal, clipText, scrollCountText, wrapLines, type Kit
 import { drawList, type KitRow } from './surface-kit-list.ts';
 import { button, buttonWidth, inset, type KitInset } from './surface-kit-parts.ts';
 import { drawTextBlock, splitListDetail } from './surface-kit-extra.ts';
-import type { SemanticDiff } from './semantic-diff.ts';
+import type { SemanticDiff } from '@goodvibes-jev/engine/terminal-shell/semantic-diff';
 import { getDisplayWidth } from '../utils/terminal-width.ts';
 import { type ChangeFile } from '../input/changes-model.ts';
 

@@ -37,7 +37,7 @@ import {
   resetTerminalPaletteForTests,
   setTerminalPalette,
   type TerminalPalette,
-} from '../../renderer/terminal-palette.ts';
+} from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
 import { DEFAULT_VIEW_PALETTE, extendPalette } from '../../views/polish-core.ts';
 import { buildStatusBadge } from '../../views/polish-tables.ts';
 import { MODAL_TONES } from '../../views/modals/modal-theme.ts';

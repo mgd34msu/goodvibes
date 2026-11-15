@@ -13,7 +13,7 @@ import { resolveViewName } from '../../input/views.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { ForensicsRegistry } from '@/runtime/index.ts';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
-import { createRuntimeStore } from '../../runtime/store/index.ts';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { ConversationManager } from '../../core/conversation';

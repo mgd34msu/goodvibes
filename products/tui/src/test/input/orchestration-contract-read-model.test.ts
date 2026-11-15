@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerControlRoomRuntimeCommands } from '../../input/commands/control-room-runtime.ts';
-import { createRuntimeStore, createDomainDispatch } from '../../runtime/store/index.ts';
+import { createRuntimeStore, createDomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createContractsReadModel } from '../helpers/ui-read-models.ts';
 
 // Current successor to operator-surfaces-gate's legacy graph-summary fixture.

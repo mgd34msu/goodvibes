@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { layoutLaneGraph, SPINE, type GutterCell, type GutterRow, type LaneEvent } from '../../renderer/lane-graph/layout.ts';
-import { laneGlyphs, resolveTreeGlyphSet, type TreeGlyphSetName } from '../../renderer/lane-graph/glyphs.ts';
+import { layoutLaneGraph, SPINE, type GutterCell, type GutterRow, type LaneEvent } from '@goodvibes-jev/engine/terminal-shell/lane-graph';
+import { laneGlyphs, resolveTreeGlyphSet, type TreeGlyphSetName } from '@goodvibes-jev/engine/terminal-shell/lane-graph';
 
 const TREE_GLYPH_SET_NAMES: readonly TreeGlyphSetName[] = ['rounded', 'square', 'ascii'];
 

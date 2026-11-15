@@ -9,7 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { beadBody } from '../../renderer/lane-graph/bead.ts';
-import { laneGlyphs } from '../../renderer/lane-graph/glyphs.ts';
+import { laneGlyphs } from '@goodvibes-jev/engine/terminal-shell/lane-graph';
 import { paintBody } from '../../renderer/lane-graph/paint.ts';
 import { BODY_TAB_WIDTH, getDisplayWidth, wrapPreservingIndent } from '../../utils/terminal-width.ts';
 

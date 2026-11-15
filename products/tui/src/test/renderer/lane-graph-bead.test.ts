@@ -11,7 +11,7 @@ import {
   needsAttention,
   type BeadStatusInput,
 } from '../../renderer/lane-graph/bead.ts';
-import { laneGlyphs } from '../../renderer/lane-graph/glyphs.ts';
+import { laneGlyphs } from '@goodvibes-jev/engine/terminal-shell/lane-graph';
 import { laneColor, paintBeadRow, textColumn } from '../../renderer/lane-graph/paint.ts';
 
 /** The spec's columns: the time ends at width−4, the summary 9 columns left of it. */

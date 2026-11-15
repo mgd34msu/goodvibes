@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { handlePromptKeyToken, type KeyRouteState } from '../../input/handler-feed-routes.ts';
-import type { ProductInputContext } from '../../runtime/native-conversation-input.ts';
+import type { ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 
 test('composer transports the exact source separately from expanded derived text', () => {
   const raw = '  Explain !@source.ts [TEXT: p1, 9 lines] [IMAGE: img1, clipboard, 2KB]  ';

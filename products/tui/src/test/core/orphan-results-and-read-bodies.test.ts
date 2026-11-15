@@ -15,7 +15,7 @@ import { describe, expect, test } from 'bun:test';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { activeTokens } from '../../renderer/theme.ts';
 import { beadBody, inferResultToolName } from '../../renderer/lane-graph/bead.ts';
-import { laneGlyphs } from '../../renderer/lane-graph/glyphs.ts';
+import { laneGlyphs } from '@goodvibes-jev/engine/terminal-shell/lane-graph';
 import { paintBody, textColumn } from '../../renderer/lane-graph/paint.ts';
 import { ConversationManager } from '../../core/conversation.ts';
 import { buildTurnModel, transcriptUnits, type BeadModel } from '../../core/work-tree-model.ts';

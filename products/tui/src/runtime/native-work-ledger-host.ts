@@ -1,7 +1,7 @@
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { handleNativeIntakeCommand, handleNativeSubmissionCommand } from '@goodvibes-jev/engine/terminal-shell/native/work-command';
 import { createNativeWorkLedgerReadBinding } from '@goodvibes-jev/engine/terminal-shell/native/work-ledger-binding';
-import { createNativeHostFetch } from './client/native-host-fetch.ts';
+import { createNativeHostFetch } from '@goodvibes-jev/engine/terminal-shell/native';
 import { NativeConversationIntakePreflight } from './native-conversation-intake-preflight.ts';
 import {
   NativeConversationIntakeControls,
@@ -10,16 +10,16 @@ import {
 } from './native-conversation-intake.ts';
 import { NativeConversationIntakeJournal } from './native-conversation-intake-journal.ts';
 import { createNativeConversationIntakeBinding } from './native-conversation-intake-host.ts';
-import { NativeWorkSubmissionPreflight } from './native-work-submission-preflight.ts';
+import { NativeWorkSubmissionPreflight } from '@goodvibes-jev/engine/terminal-shell/native';
 import { realpathSync } from 'node:fs';
-import { NativeWorkSubmissionJournal } from './native-work-submission-journal.ts';
+import { NativeWorkSubmissionJournal } from '@goodvibes-jev/engine/terminal-shell/native';
 import {
   NativeWorkSubmissionControls,
   type NativeWorkSubmissionActions,
   type NativeWorkSubmissionState,
-} from './native-work-submission.ts';
+} from '@goodvibes-jev/engine/terminal-shell/native';
 import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity } from './native-work-submission-host.ts';
-import { NativeWorkSourceError, readNativeWorkSourceFile } from './native-work-submission-source.ts';
+import { NativeWorkSourceError, readNativeWorkSourceFile } from '@goodvibes-jev/engine/terminal-shell/native';
 import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
 import { getOperatorWorkLedgerProject } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';

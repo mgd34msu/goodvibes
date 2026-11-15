@@ -77,7 +77,7 @@ describe.skipIf(!supported)('TUI suite launch update, actual filesystem and resp
   test('offline release discovery starts the current version with one visible diagnostic', async () => {
     const f = install(), dead = Bun.serve({ port: 0, fetch: () => new Response('') }), base = `http://127.0.0.1:${dead.port}`; dead.stop(true);
     const output = await run(f, base, ['--offline']); expect(output.code).toBe(0);
-    expect(output.stdout.split('\n').filter(line => line === "couldn't reach the update server; check skipped")).toHaveLength(1);
+    expect(output.stdout.split('\n').filter(line => line.startsWith('update check skipped: '))).toHaveLength(1);
     expect(output.stdout).toContain(`RUNNING v${OLD} argv=["--offline"] outcome=continue:check-skipped`); expect(readFileSync(f.appPath, 'utf8')).toBe(f.oldSource);
   }, END_TO_END_BUDGET_MS);
   test('a stalled member download is cancelled before publication and the original installed suite starts', async () => {

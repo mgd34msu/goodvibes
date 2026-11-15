@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captureNativeConversationInput } from '../../runtime/native-conversation-input.ts';
+import { captureNativeConversationInput } from '@goodvibes-jev/engine/terminal-shell/native';
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
 import type { NativeConversationIntakeCaptureRequest, NativeConversationIntakeResult } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 

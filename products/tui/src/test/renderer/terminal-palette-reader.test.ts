@@ -15,9 +15,9 @@
 
 import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { installBackgroundThemeProbe, OSC11_QUERY } from '../../renderer/terminal-bg-probe.ts';
-import { PALETTE_QUERIES, sweepPaletteReplies } from '../../renderer/terminal-palette-probe.ts';
-import { TerminalPaletteReader } from '../../renderer/terminal-palette-reader.ts';
-import { getTerminalPalette, resetTerminalPaletteForTests, type TerminalPalette } from '../../renderer/terminal-palette.ts';
+import { PALETTE_QUERIES, sweepPaletteReplies } from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
+import { TerminalPaletteReader } from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
+import { getTerminalPalette, resetTerminalPaletteForTests, type TerminalPalette } from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
 import { activeThemeMode, activeTokens, getActiveThemeName, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { configGetStub } from '../helpers/config-manager-stub.ts';

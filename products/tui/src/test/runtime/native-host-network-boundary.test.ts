@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { revalidateNativeConversationTurnPermit } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
-import { createNativeHostFetch } from '../../runtime/client/native-host-fetch.ts';
+import { createNativeHostFetch } from '@goodvibes-jev/engine/terminal-shell/native';
 import { createNativeWorkSubmissionBinding } from '../../runtime/native-work-submission-host.ts';
 import { createNativeConversationIntakeBinding } from '../../runtime/native-conversation-intake-host.ts';
 import { createNativeWorkLedgerHost } from '../../runtime/native-work-ledger-host.ts';

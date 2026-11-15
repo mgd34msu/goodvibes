@@ -74,7 +74,7 @@ describe.if(supported)('Agent suite launch update, actual filesystem and respawn
   test('offline release discovery starts the current version with one visible diagnostic', async () => {
     const f = install(), dead = Bun.serve({ port: 0, fetch: () => new Response('') }), base = `http://127.0.0.1:${dead.port}`; dead.stop(true);
     const output = await run(f, base, ['--offline']); expect(output.code).toBe(0);
-    expect(output.stdout.split('\n').filter(line => line === 'update check skipped: offline')).toHaveLength(1);
+    expect(output.stdout.split('\n').filter(line => line.startsWith('update check skipped: '))).toHaveLength(1);
     expect(output.stdout).toContain(`RUNNING v${OLD} argv=["--offline"] outcome=continue:check-skipped`); expect(readFileSync(f.appPath, 'utf8')).toBe(f.oldSource);
   }, 30_000);
 });

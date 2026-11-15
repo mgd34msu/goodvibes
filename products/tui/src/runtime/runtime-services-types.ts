@@ -51,7 +51,7 @@ import type { NotificationDispatcher } from './notification-dispatch.ts';
 import type { createDurabilityServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
-import type { DomainDispatch, RuntimeStore } from './store/index.ts';
+import type { DomainDispatch, RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { RuntimeEventBus, DistributedRuntimeManager, RemoteRunnerRegistry, RemoteSupervisor, IntegrationHelperService, IdempotencyStore, ComponentHealthMonitor, WorktreeRegistry, SandboxSessionRegistry, ShellPathService, FeatureFlagManager, PolicyRuntimeState, SessionSurface } from '@/runtime/index.ts';
 import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
 import type { CacheRegistry, PauseController, MemoryGovernor } from '@goodvibes-jev/engine/platform/platform/runtime/memory';

@@ -1,14 +1,11 @@
 /**
- * daemon-attach-notices, the attach-time consuming read.
+ * daemon-attach-notices, what this terminal reads from the daemon it adopts.
  *
- * On daemon attach a surface reads the daemon's undelivered receipts
- * (update/crash/migration) AND the pending feature-announcement queue
- * (web-surface URL, the sandbox first-contained-run line, …) exactly once,
- * rendering each as a one-line notice. Both sources clear on read, the
- * facade's receipt queue marks its entries delivered, and drainPending() clears
- * the announcement queue, so a second attach with nothing new shows nothing.
- * The embedded daemon is read in-process, so the lines are rendered in the
- * same tick that marks them delivered.
+ * On attach the terminal reads the daemon's undelivered receipts
+ * (update/crash/migration) over `/status` (peek, then acknowledge what was
+ * parsed, readExternalDaemonAttach) and renders each as a one-line notice; the
+ * sandbox first-contained-run line comes through the shared announcement
+ * store (createSandboxContainmentNotice).
  */
 import { FeatureAnnouncementStore, featureAnnouncementsPath, createSandboxContainmentAnnouncer } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import { readClientCompatibilityFloor } from '@goodvibes-jev/engine/platform/platform/control-plane';
@@ -19,37 +16,6 @@ export interface DaemonReceiptLike {
   readonly id: string;
   readonly text: string;
   readonly at: number;
-}
-
-/** The minimal announcement-store surface this consume drains. */
-export interface DrainableAnnouncementStore {
-  drainPending(): readonly { readonly id: string; readonly text: string; readonly at: number }[];
-}
-
-export interface DaemonAttachNoticesDeps {
-  readonly configManager: Pick<ConfigManager, 'getControlPlaneConfigDir'>;
-  /** Reads (and marks delivered) the daemon's undelivered receipts. */
-  readonly collectReceipts: () => readonly DaemonReceiptLike[];
-  /** Injectable announcement store; defaults to the shared control-plane file store. */
-  readonly announcementStore?: DrainableAnnouncementStore;
-}
-
-/**
- * Consume, exactly once, the daemon's receipts and the pending announcement
- * queue, returning the one-line notices to render. Receipts first (crash /
- * update / migration), then announcements (web-surface URL, sandbox line, …).
- */
-export function consumeDaemonAttachNotices(deps: DaemonAttachNoticesDeps): string[] {
-  const store = deps.announcementStore
-    ?? new FeatureAnnouncementStore(featureAnnouncementsPath(deps.configManager));
-  const notices: string[] = [];
-  for (const receipt of deps.collectReceipts()) {
-    if (receipt.text.trim().length > 0) notices.push(receipt.text);
-  }
-  for (const announcement of store.drainPending()) {
-    if (announcement.text.trim().length > 0) notices.push(announcement.text);
-  }
-  return notices;
 }
 
 /** Milliseconds an external-daemon `/status` read waits before giving up. */

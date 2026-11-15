@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
-import { createRuntimeStore } from '../../runtime/store/index.ts';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createRuntimeServices } from '../../runtime/services.ts';
 import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts';
 

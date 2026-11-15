@@ -20,5 +20,6 @@ export * from './lib/optional-externals.js';
 export * from './lib/post-build-smoke.js';
 export * from './lib/package-install-check.js';
 export * from './lib/sha256sums.js';
+export * from './lib/workspace-toolchain.js';
 
 export { isPinnedWorkspaceVersion } from './lib/workspace-version.js';

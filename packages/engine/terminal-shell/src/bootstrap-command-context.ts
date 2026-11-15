@@ -1,6 +1,24 @@
-/** Capture the admitted product bindings before any factory runs, then compose once in lifecycle order. */
+/** The section factories of one product's command context, run once in lifecycle order. */
+export interface TerminalCommandContextFactories<Options, Shell, Session, Provider, Workspace, Platform, Extensions, Clients, Actions extends object, Ops> {
+  readonly shell: (options: Options) => Shell;
+  readonly session: (options: Options) => Session;
+  readonly provider: (options: Options) => Provider;
+  readonly workspace: (options: Options, shell: Shell) => Workspace;
+  readonly platform: (options: Options, shell: Shell) => Platform;
+  readonly extensions: (options: Options, shell: Shell) => Extensions;
+  readonly clients: (options: Options) => Clients;
+  readonly actions: (options: Options) => Actions;
+  readonly ops: (shell: Shell, options: Options) => Ops;
+}
+
+/**
+ * Capture the product bindings before any factory runs, then compose once in
+ * lifecycle order. The capture is a copy of every option, so a dependency added
+ * to the options type reaches the factories with no second list to keep.
+ * A key list in the middle position is still accepted and is not needed.
+ */
 export function composeTerminalCommandContext<
-  Options,
+  Options extends object,
   Shell,
   Session,
   Provider,
@@ -12,21 +30,14 @@ export function composeTerminalCommandContext<
   Ops,
 >(
   options: Options,
-  keys: readonly (keyof Options)[],
-  factories: {
-    readonly shell: (options: Options) => Shell;
-    readonly session: (options: Options) => Session;
-    readonly provider: (options: Options) => Provider;
-    readonly workspace: (options: Options, shell: Shell) => Workspace;
-    readonly platform: (options: Options, shell: Shell) => Platform;
-    readonly extensions: (options: Options, shell: Shell) => Extensions;
-    readonly clients: (options: Options) => Clients;
-    readonly actions: (options: Options) => Actions;
-    readonly ops: (shell: Shell, options: Options) => Ops;
-  },
+  keysOrFactories:
+    | readonly (keyof Options)[]
+    | TerminalCommandContextFactories<Options, Shell, Session, Provider, Workspace, Platform, Extensions, Clients, Actions, Ops>,
+  legacyFactories?: TerminalCommandContextFactories<Options, Shell, Session, Provider, Workspace, Platform, Extensions, Clients, Actions, Ops>,
 ) {
-  const captured = {} as Options;
-  for (const key of keys) captured[key] = options[key];
+  const factories = Array.isArray(keysOrFactories) ? legacyFactories : keysOrFactories as Exclude<typeof keysOrFactories, readonly unknown[]>;
+  if (!factories) throw new Error('composeTerminalCommandContext needs the section factories.');
+  const captured: Options = { ...options };
   const shell = factories.shell(captured);
   const session = factories.session(captured);
   const provider = factories.provider(captured);

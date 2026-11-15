@@ -45,7 +45,7 @@ import type { ConfigManager, GoodVibesConfig } from '@goodvibes-jev/engine/platf
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createRuntimeServices } from '../runtime/services.ts';
-import { createRuntimeStore } from '../runtime/store/index.ts';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { RuntimeServices } from '../runtime/services.ts';
 import type { ProviderCatalogOptions } from '@goodvibes-jev/engine/platform/platform/providers';
 import { RuntimeEventBus, createShellPathService, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '@/runtime/index.ts';

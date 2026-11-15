@@ -1,6 +1,6 @@
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
-import { createNativeHostFetch } from '../../runtime/client/native-host-fetch.ts';
+import { createNativeHostFetch } from '@goodvibes-jev/engine/terminal-shell/native';
 import { realpathSync } from 'node:fs';
 import { openLegacyImportOperator, registerLegacyImportCommands, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';

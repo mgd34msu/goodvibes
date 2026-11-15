@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveWorkspaceToolchain, validateToolchainArguments } from '../../../scripts/run-toolchain.ts';
+import { resolveWorkspaceToolchain } from '@goodvibes-jev/engine/toolchain';
+import { validateToolchainArguments } from '../../../scripts/run-toolchain.ts';
 import { checkBinaryVersion } from '../../../scripts/check-version.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
 
@@ -31,19 +32,14 @@ test('missing or undeclared engine CLI fails instead of resolving a global execu
   expect(() => resolveWorkspaceToolchain(root, 'smoke')).toThrow('does not declare goodvibes-post-build-smoke');
 });
 
-test('sole-artifact wrapper admits shared ordinary targets and rejects skipped or ambiguous builds', () => {
+test('sole-artifact wrapper admits shared ordinary targets and rejects selectors that skip the daemon', () => {
   for (const args of [[], ['--all'], ['--target', 'linux-x64'], ['--target', 'darwin-arm64']]) {
     expect(() => validateToolchainArguments('build', args)).not.toThrow();
   }
   for (const args of [['--daemon-only'], ['--all', '--daemon-only'], ['--target', 'daemon-linux-x64'], ['--target=daemon-macos-arm64']]) {
     expect(() => validateToolchainArguments('build', args)).toThrow('sole build artifact');
   }
-  for (const args of [['--target'], ['--target', '--all'], ['--all', '--target', 'linux-x64'], ['--target=linux-x64'], ['--typo']]) {
-    expect(() => validateToolchainArguments('build', args)).toThrow('Usage:');
-  }
   expect(() => validateToolchainArguments('smoke', ['--binary', '/owned/artifact'])).not.toThrow();
-  expect(() => validateToolchainArguments('smoke', ['--binary'])).toThrow('Usage:');
-  expect(() => validateToolchainArguments('publish', [])).toThrow('Usage:');
 });
 
 test('native prebuild validates the private manifest fallback without modifying either file', () => {

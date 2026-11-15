@@ -2,11 +2,19 @@
 import './runtime/native-data-writer.ts';
 import { installedReaderCommand } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { COMPILED_VERSION } from './version.ts';
+import { metadataCliResult } from './cli/metadata.ts';
 
-// Installation reader checks never load the UI/config/provider runtime.
+// Installation reader checks, help, version and completion never load the
+// UI/config/provider runtime: they are answered from the parser alone, and the
+// interactive and management graph loads only after them.
 const readerDescription = installedReaderCommand(process.argv.slice(2), COMPILED_VERSION);
+const metadata = readerDescription === undefined ? metadataCliResult(process.argv.slice(2)) : null;
 if (readerDescription !== undefined) {
   process.stdout.write(readerDescription + '\n');
+} else if (metadata) {
+  if (metadata.stdout !== undefined) process.stdout.write(`${metadata.stdout}\n`);
+  if (metadata.stderr !== undefined) process.stderr.write(`${metadata.stderr}\n`);
+  process.exitCode = metadata.exitCode;
 } else if (process.argv[2] === 'acp') {
   // An ACP agent server owns stdout for protocol frames, so it never reaches
   // the interactive entry's config, gitignore and migration side effects.

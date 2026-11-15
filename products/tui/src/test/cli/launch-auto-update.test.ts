@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import {
   LAUNCH_UPDATED_FROM_ENV,
   restartOntoUpdatedBinary,
@@ -127,14 +129,27 @@ describe('runLaunchAutoUpdate', () => {
     const { options, printed } = baseOptions({ fetchImpl: failingFetch });
     const outcome = await runLaunchAutoUpdate(options);
     expect(outcome).toEqual({ action: 'continue', reason: 'check-skipped' });
-    expect(printed).toEqual(["couldn't reach the update server; check skipped"]);
+    expect(printed).toHaveLength(1);
+    expect(printed[0]).toStartWith('update check skipped: ');
+  });
+
+  test('a launch within hours of a successful lookup asks the release host nothing', async () => {
+    const lastCheckFile = join(makeProjectTempDir('launch-update-memory'), 'launch-update-check.json');
+    let lookups = 0;
+    const counting: UpdateFetchLike = async (url, init) => { lookups += 1; return await stubFetch('v1.0.0')(url, init); };
+    for (let launch = 0; launch < 2; launch += 1) {
+      const { options } = baseOptions({ fetchImpl: counting, lastCheckFile });
+      expect(await runLaunchAutoUpdate(options)).toEqual({ action: 'continue', reason: 'already-current' });
+    }
+    expect(lookups).toBe(1);
   });
 
   test('a check that outlives its budget is skipped the same way (launch is never held hostage)', async () => {
     const { options, printed } = baseOptions({ fetchImpl: hangingFetch, timeoutMs: 10 });
     const outcome = await runLaunchAutoUpdate(options);
     expect(outcome).toEqual({ action: 'continue', reason: 'check-skipped' });
-    expect(printed).toEqual(["couldn't reach the update server; check skipped"]);
+    expect(printed).toHaveLength(1);
+    expect(printed[0]).toStartWith('update check skipped: ');
   });
 
   test('an already-current binary continues silently', async () => {

@@ -10,7 +10,7 @@ import type { RuntimeEventBus } from '@/runtime/index.ts';
 import { createUiRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { formatTurnBudgetOutcome } from '../core/turn-budget-outcome.ts';
-import type { createDomainDispatch } from './store/index.ts';
+import type { createDomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 
 type DomainDispatch = ReturnType<typeof createDomainDispatch>;
 

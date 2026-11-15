@@ -10,7 +10,7 @@ import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/platform/platform/core';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { RuntimeEventBus } from '@/runtime/index.ts';
-import { createRuntimeStore } from '../../runtime/store/index.ts';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createRuntimeServices } from '../../runtime/services.ts';
 import { createTuiTurnPermissionManager, registerTuiTurnTools } from '../../runtime/turn-tool-composition.ts';
 import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts';

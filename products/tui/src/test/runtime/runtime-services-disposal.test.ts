@@ -23,7 +23,7 @@ import { join } from 'node:path';
 
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
-import { createRuntimeStore } from '../../runtime/store/index.ts';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

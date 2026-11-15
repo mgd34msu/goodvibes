@@ -5,7 +5,7 @@ import { ToolRegistry, ContextAccountingHolder, createContextAccountingTool } fr
 import { ConversationManager } from '../../core/conversation.ts';
 import { hydrateConversationUsage, isConversationUsageAvailable, isConversationContextAvailable } from '../../core/conversation-usage.ts';
 import { createBootstrapShell } from '../../runtime/bootstrap-shell.ts';
-import { createRuntimeStore } from '../../runtime/store/index.ts';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createUiRuntimeServices } from '../../runtime/ui-services.ts';
 import { RuntimeEventBus, ForensicsRegistry, createTaskManager } from '@/runtime/index.ts';
 import { getTestRuntimeServices, resetTestRuntimeServices, disposeTestRuntimeServicesAfterAll } from '../helpers/runtime-services.ts';

@@ -321,6 +321,8 @@ All programs in one table: [Exit codes](../../../docs/exit-codes.md).
 | `124` | `--timeout` reached; the run was cancelled. |
 | `130` | Cancelled (Ctrl-C, SIGTERM, or the saved input was cancelled). |
 
+The GitHub Action passes `--timeout 30m --max-turns 50` to a prompt run unless its `timeout` and `max-turns` inputs say otherwise, and exposes the exit code, `stopReason` and a file with the run's output as step outputs ([GitHub Action](github-action.md)).
+
 ### Final frame
 
 `json` prints this object; `stream-json` prints it last with `type` set to `TURN_RESULT` (or `NATIVE_INTAKE_RESULT` when the run went through native intake).

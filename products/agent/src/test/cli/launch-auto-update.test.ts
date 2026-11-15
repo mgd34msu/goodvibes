@@ -108,14 +108,16 @@ describe('runLaunchAutoUpdate', () => {
     const { options, printed } = baseOptions({ fetchImpl: failingFetch });
     const outcome = await runLaunchAutoUpdate(options);
     expect(outcome).toEqual({ action: 'continue', reason: 'check-skipped' });
-    expect(printed).toEqual(['update check skipped: offline']);
+    expect(printed).toHaveLength(1);
+    expect(printed[0]).toStartWith('update check skipped: ');
   });
 
   test('a check that outlives its budget is skipped the same way (launch is never held hostage)', async () => {
     const { options, printed } = baseOptions({ fetchImpl: hangingFetch, timeoutMs: 10 });
     const outcome = await runLaunchAutoUpdate(options);
     expect(outcome).toEqual({ action: 'continue', reason: 'check-skipped' });
-    expect(printed).toEqual(['update check skipped: offline']);
+    expect(printed).toHaveLength(1);
+    expect(printed[0]).toStartWith('update check skipped: ');
   });
 
   test('an already-current binary continues silently', async () => {

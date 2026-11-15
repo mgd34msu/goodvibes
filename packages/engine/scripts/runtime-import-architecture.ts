@@ -4,7 +4,13 @@ import { dirname, join, resolve } from 'node:path';
 import ts from 'typescript';
 
 export interface RuntimeLayerRule { readonly from: string; readonly forbidden: readonly string[]; }
-export interface RuntimeArchitecture { readonly files: readonly string[]; readonly layer: (file: string) => string | undefined; readonly rules: readonly RuntimeLayerRule[]; }
+export interface RuntimeArchitecture {
+  readonly files: readonly string[];
+  readonly layer: (file: string) => string | undefined;
+  readonly rules: readonly RuntimeLayerRule[];
+  /** Path aliases of the product's tsconfig (`{ '@/': '<abs>/src/' }`), so an aliased import is an edge like a relative one. */
+  readonly aliases?: Readonly<Record<string, string>>;
+}
 
 /** Parse syntax, so comments and type-only edges cannot fabricate/hide runtime imports. */
 export function runtimeImportSpecifiers(text: string): string[] {
@@ -31,9 +37,10 @@ export function runtimeImportSpecifiers(text: string): string[] {
   return imports;
 }
 
-export function resolveRuntimeImport(from: string, specifier: string): string | undefined {
-  if (!specifier.startsWith('.')) return undefined;
-  const target = resolve(dirname(from), specifier);
+export function resolveRuntimeImport(from: string, specifier: string, aliases?: Readonly<Record<string, string>>): string | undefined {
+  const alias = aliases ? Object.entries(aliases).find(([prefix]) => specifier.startsWith(prefix)) : undefined;
+  if (!alias && !specifier.startsWith('.')) return undefined;
+  const target = alias ? resolve(alias[1], specifier.slice(alias[0].length)) : resolve(dirname(from), specifier);
   const candidates = /\.[cm]?js$/.test(target) ? [target.replace(/\.js$/, '.ts').replace(/\.mjs$/, '.mts').replace(/\.cjs$/, '.cts'), target] : [target, `${target}.ts`, join(target, 'index.ts')];
   return candidates.find((candidate) => existsSync(candidate) && statSync(candidate).isFile());
 }
@@ -48,7 +55,7 @@ export function runtimeArchitectureProblems(input: RuntimeArchitecture): string[
   const graph = new Map<string, string[]>();
   for (const file of files) {
     const edges = runtimeImportSpecifiers(readFileSync(file, 'utf8')).flatMap((specifier) => {
-      const target = resolveRuntimeImport(file, specifier);
+      const target = resolveRuntimeImport(file, specifier, input.aliases);
       return target ? [target] : [];
     });
     graph.set(file, edges.filter((target) => files.has(target)));

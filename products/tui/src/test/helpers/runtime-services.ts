@@ -26,7 +26,7 @@ import { RemoteRunnerRegistry } from '@/runtime/index.ts';
 import { RemoteSupervisor } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { createShellPathService } from '@/runtime/index.ts';
-import { createRuntimeStore } from '../../runtime/store/index.ts';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
 import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import { ModeManager } from '@goodvibes-jev/engine/platform/platform/state';

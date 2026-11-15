@@ -6,7 +6,7 @@ import { basename, join, relative } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { KnowledgeSemanticService, KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { RuntimeEventBus } from '../../runtime/index.ts';
-import { createRuntimeStore } from '../../runtime/store/index.ts';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createRuntimeServices } from '../../runtime/services.ts';
 import { createBootstrapShutdown } from '../../runtime/bootstrap-shutdown.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';

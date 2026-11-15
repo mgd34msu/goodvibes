@@ -21,13 +21,13 @@ import {
   type PaletteProbeResolution,
   parseOscColorToHex,
   TerminalPaletteProbe,
-} from '../../renderer/terminal-palette-probe.ts';
+} from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
 import {
   getTerminalPalette,
   onTerminalPalette,
   resetTerminalPaletteForTests,
   type TerminalPalette,
-} from '../../renderer/terminal-palette.ts';
+} from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
 import { activeTheme, resolveTheme, setActiveThemeMode } from '../../renderer/theme.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { configGetStub } from '../helpers/config-manager-stub.ts';

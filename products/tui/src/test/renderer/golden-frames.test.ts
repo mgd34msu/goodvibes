@@ -87,7 +87,7 @@ import { UsageModal } from '../../input/usage-modal.ts';
 import { UsageTracker } from '../../runtime/usage-tracker.ts';
 import { ChangesModal } from '../../input/changes-modal.ts';
 import { parseChanges } from '../../input/changes-model.ts';
-import type { SemanticDiff } from '../../renderer/semantic-diff.ts';
+import type { SemanticDiff } from '@goodvibes-jev/engine/terminal-shell/semantic-diff';
 import { NotificationsModal } from '../../input/notifications-modal.ts';
 import { NotificationFeed } from '../../views/notifications-feed.ts';
 import { MaskedEntryModal } from '../../input/masked-entry-modal.ts';

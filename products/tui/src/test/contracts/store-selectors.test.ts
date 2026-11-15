@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { createRuntimeStore, type RuntimeState } from '../../runtime/store/index.ts';
+import { createRuntimeStore, type RuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import {
   selectRunningTasks,
   selectRunningAgents,
@@ -8,7 +8,7 @@ import {
   selectIsTurnActive,
   selectIsSessionReady,
   selectRunningTaskCountByKind,
-} from '../../runtime/store/selectors/index.ts';
+} from '@goodvibes-jev/engine/platform/platform/runtime/state';
 
 type TurnState = RuntimeState['conversation']['turnState'];
 

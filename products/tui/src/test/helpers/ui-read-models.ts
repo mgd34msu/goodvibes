@@ -11,7 +11,7 @@ import type {
   UiTasksSnapshot,
   UiWatchersSnapshot,
 } from '../../runtime/ui-read-models.ts';
-import type { RuntimeStore } from '../../runtime/store/index.ts';
+import type { RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { AutomationJob } from '@goodvibes-jev/engine/platform/platform/automation';
 import type { AutomationRun } from '@goodvibes-jev/engine/platform/platform/automation';
 import type { AutomationRouteBinding } from '@goodvibes-jev/engine/platform/platform/automation';

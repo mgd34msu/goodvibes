@@ -11,7 +11,7 @@ import { PolicyRuntimeState } from '@/runtime/index.ts';
 import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ChatRequest, ChatResponse, LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import { RuntimeEventBus } from '@/runtime/index.ts';
-import { createDomainDispatch, createRuntimeStore } from '../../runtime/store/index.ts';
+import { createDomainDispatch, createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';

@@ -10,7 +10,7 @@ import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core'
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
-import type { RuntimeStore } from './store/index.ts';
+import type { RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { RuntimeServices } from './services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { OpsControlPlane } from '@/runtime/index.ts';

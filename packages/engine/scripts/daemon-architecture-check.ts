@@ -1,7 +1,8 @@
 /**
  * Runtime import boundaries of the products, run by `bun run architecture:check`:
- * the daemon's original four boundaries (adapted to current owners) and the
- * Agent's layer rules plus "the Agent never imports TUI source".
+ * the daemon's original four boundaries (adapted to current owners), the
+ * Agent's layer rules plus "the Agent never imports TUI source", and the TUI's
+ * layer rules and import cycles (relative and `@/` imports alike).
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
@@ -17,12 +18,23 @@ function sources(root: string): string[] {
   });
 }
 
+/**
+ * The cluster readers in the shared shell. `raw-reply-route.ts` must exist, or
+ * the cluster boundary would pass vacuously after a rename; the WebSocket
+ * caller counts while it exists (a removed file cannot be imported).
+ */
+function clusterOwnerFiles(terminal: string): string[] {
+  const required = resolve(terminal, 'raw-reply-route.ts');
+  if (!existsSync(required)) throw new Error(`Missing mapped cluster owner: ${required}`);
+  const optional = resolve(terminal, 'daemon-ws-call.ts');
+  return existsSync(optional) ? [optional, required] : [required];
+}
+
 export function daemonArchitecture(root: string): RuntimeArchitecture {
   const product = resolve(root, 'products/daemon/src');
   const terminal = resolve(root, 'packages/engine/terminal-shell/src');
   // These are the mapped owners of the original src/cluster transport readers.
-  const cluster = new Set(['daemon-ws-call.ts', 'raw-reply-route.ts'].map((file) => resolve(terminal, file)));
-  for (const file of cluster) if (!existsSync(file)) throw new Error(`Missing mapped cluster owner: ${file}`);
+  const cluster = new Set(clusterOwnerFiles(terminal));
   const composition = new Set(['configuration.ts', 'entrypoint.ts', 'index.ts', 'production-runtime.ts', 'run.ts', 'serve.ts', 'startup-maintenance.ts', 'startup-pairing.ts']);
   return {
     files: [...sources(product), ...sources(terminal)],
@@ -45,7 +57,6 @@ export function daemonArchitecture(root: string): RuntimeArchitecture {
 }
 
 const TERMINAL_SHELL_SPECIFIER = '@goodvibes-jev/engine/terminal-shell';
-const CLUSTER_OWNER_FILES = ['daemon-ws-call.ts', 'raw-reply-route.ts'];
 
 /** Names a source file exports as runtime values (types are erased and cannot be a dependency). */
 function runtimeExportNames(file: string): Set<string> {
@@ -70,7 +81,7 @@ function runtimeExportNames(file: string): Set<string> {
 export function clusterPackageImportProblems(root: string): string[] {
   const architecture = daemonArchitecture(root);
   const restricted = new Set(architecture.rules.filter((rule) => rule.forbidden.includes('cluster')).map((rule) => rule.from));
-  const clusterNames = new Set(CLUSTER_OWNER_FILES.flatMap((file) => [...runtimeExportNames(resolve(root, 'packages/engine/terminal-shell/src', file))]));
+  const clusterNames = new Set(clusterOwnerFiles(resolve(root, 'packages/engine/terminal-shell/src')).flatMap((file) => [...runtimeExportNames(file)]));
   const problems: string[] = [];
   for (const file of architecture.files) {
     const layer = architecture.layer(file);
@@ -92,11 +103,12 @@ export function clusterPackageImportProblems(root: string): string[] {
   return problems;
 }
 
-/** The Agent's layers are its top-level `src/` directories; files directly in `src/` belong to none. */
+/** The Agent's layers are its top-level `src/` directories; files directly in `src/` belong to none. `@/` imports count like relative ones. */
 export function agentArchitecture(root: string): RuntimeArchitecture {
   const product = resolve(root, 'products/agent/src');
   return {
     files: sources(product),
+    aliases: { '@/': product + sep },
     layer(file) {
       const local = relative(product, file).split(sep);
       return local[0] === '..' || local.length < 2 ? undefined : local[0];
@@ -139,13 +151,61 @@ export function agentArchitectureProblems(root: string): string[] {
   return [...layerProblems, ...agentTuiSourceImportProblems(root)];
 }
 
+/**
+ * The TUI's layers are its top-level `src/` directories; files directly in
+ * `src/` (entry points) belong to none. `@/` imports resolve like relative ones,
+ * so writing an import with the alias cannot step around a rule or a cycle.
+ */
+export function tuiArchitecture(root: string): RuntimeArchitecture {
+  const product = resolve(root, 'products/tui/src');
+  return {
+    files: sources(product),
+    aliases: { '@/': product + sep },
+    layer(file) {
+      const local = relative(product, file).split(sep);
+      return local[0] === '..' || local.length < 2 ? undefined : local[0];
+    },
+    rules: [
+      // UI pieces draw and handle keys; argument parsing and entry points are not theirs.
+      { from: 'renderer', forbidden: ['cli'] },
+      { from: 'input', forbidden: ['cli'] },
+      { from: 'views', forbidden: ['cli'] },
+      // These run headless (config is read everywhere, providers and audio by
+      // headless runs), so they never reach shell UI or an entry point.
+      { from: 'config', forbidden: ['renderer', 'input', 'views', 'cli'] },
+      { from: 'providers', forbidden: ['renderer', 'input', 'views', 'cli'] },
+      { from: 'audio', forbidden: ['renderer', 'input', 'views', 'cli'] },
+    ],
+  };
+}
+
+/**
+ * Layer edges that exist today and are allowed until their target moves out of
+ * `cli/`: `/update` names the service unit through the CLI's service-name
+ * resolver. Each entry is `<from> -> <to>`, relative to `products/tui/src`.
+ */
+const TUI_ALLOWED_LAYER_EDGES: ReadonlySet<string> = new Set([
+  'input/commands/update-runtime.ts -> cli/service-posture.ts',
+]);
+
+export function tuiArchitectureProblems(root: string): string[] {
+  const product = resolve(root, 'products/tui/src');
+  const local = (file: string): string => relative(product, file).split(sep).join('/');
+  return runtimeArchitectureProblems(tuiArchitecture(root)).filter((problem) => {
+    const edge = /^layer [^:]+: (\S+) -> (\S+)$/.exec(problem);
+    return !edge || !TUI_ALLOWED_LAYER_EDGES.has(`${local(edge[1]!)} -> ${local(edge[2]!)}`);
+  });
+}
+
 if (import.meta.main) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
   const input = daemonArchitecture(root);
-  const problems = [...runtimeArchitectureProblems(input), ...clusterPackageImportProblems(root), ...agentArchitectureProblems(root)];
+  const tui = tuiArchitecture(root);
+  const problems = [...runtimeArchitectureProblems(input), ...clusterPackageImportProblems(root), ...agentArchitectureProblems(root), ...tuiArchitectureProblems(root)];
   if (problems.length) { console.error(problems.join('\n')); process.exitCode = 1; }
   else {
     console.log(`Daemon architecture: ${input.files.length} runtime files, four non-vacuous boundaries (the cluster one also checked through the package specifier), no relative runtime cycles.`);
     console.log(`Agent architecture: ${agentArchitecture(root).files.length} runtime files, four non-vacuous layer boundaries, no TUI source imports.`);
+    console.log(`TUI architecture: ${tui.files.length} runtime files, ${tui.rules.length} non-vacuous layer boundaries, no runtime cycles (relative or @/ imports).`);
   }
 }

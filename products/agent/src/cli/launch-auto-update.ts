@@ -14,9 +14,12 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  * updater), then asks the caller to restart onto the new binary.
  *
  * Honesty rules, in both directions:
- *   - the check gets a short timeout; when it cannot complete (offline, slow
- *     network) the CURRENT version starts with exactly one line saying the
- *     check was skipped, launch is never held hostage by the network.
+ *   - a lookup that succeeded in the last six hours answers the next launch
+ *     with no network request (`/update check` always asks); otherwise the
+ *     check gets a short timeout, an abandoned lookup is cancelled, and when
+ *     it cannot complete the CURRENT version starts with exactly one line
+ *     saying the check was skipped and why (no answer in time, or the release
+ *     host's own failure), launch is never held hostage by the network.
  *   - a successful update restarts into the new binary and the restarted
  *     process prints a receipt naming both versions, so the swap is never
  *     silent.
@@ -44,6 +47,13 @@ import { readUpdateSettings, type UpdateSettings } from '../config/update-settin
 import { recordSelfUpdate } from '../runtime/self-update-receipt.ts';
 import type { ConfigManager } from '../config/index.ts';
 import { VERSION } from '../version.ts';
+import { join } from 'node:path';
+
+/** The launch's remembered release lookup, beside this product's settings. */
+function launchCheckFile(configManager: Partial<Pick<ConfigManager, 'getControlPlaneConfigDir'>>): string | undefined {
+  const directory = configManager.getControlPlaneConfigDir?.();
+  return directory ? join(directory, 'launch-update-check.json') : undefined;
+}
 
 /**
  * Set on the restarted process by restartOntoUpdatedBinary, carrying the
@@ -83,6 +93,8 @@ export interface RunLaunchAutoUpdateOptions {
   readonly apply?: (options: ApplyUpdateOptions) => Promise<SuiteUpdateResult | void>;
   readonly timeoutMs?: number;
   readonly repairRequired?: ((version: string) => boolean) | undefined;
+  /** Where the last successful release lookup is remembered, so a launch within a few hours of it does not ask again. */
+  readonly lastCheckFile?: string | undefined;
   /** Injectable so tests observe the durable receipt without writing beside a real executable. */
   readonly recordReceipt?: (entry: {
     readonly execPath: string;
@@ -91,8 +103,6 @@ export interface RunLaunchAutoUpdateOptions {
     readonly trigger: 'launch';
   }) => void;
 }
-
-/** Resolves to 'timeout' when `promise` does not settle within `ms`; the timer never keeps the process alive. */
 
 /**
  * The launch-time decision: receipt-and-continue (restarted process), skip
@@ -113,7 +123,6 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
     repairRequired: version => options.repairRequired?.(version) ?? (options.apply === undefined && installedSuiteNeedsRepair({
       execPath: options.execPath, platform: options.platform, arch: options.arch, version, webuiDirectory: configuration.webuiDirectory,
     })),
-    skipped: 'update check skipped: offline',
     unswappable: (kind) =>
       kind === 'source'
         ? 'auto-update skipped: running from source (dev checkout)'
@@ -163,7 +172,7 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
 }
 
 export interface SelfUpdateAtLaunchParams {
-  readonly configManager: Pick<ConfigManager, 'getRaw'> & Partial<Pick<ConfigManager, 'get'>>;
+  readonly configManager: Pick<ConfigManager, 'getRaw'> & Partial<Pick<ConfigManager, 'get' | 'getControlPlaneConfigDir'>>;
   readonly stdout: { write(chunk: string): unknown };
 }
 
@@ -188,6 +197,7 @@ export async function selfUpdateAtLaunch(params: SelfUpdateAtLaunchParams): Prom
     settings: readUpdateSettings(params.configManager),
     configManager: params.configManager,
     env: process.env,
+    lastCheckFile: launchCheckFile(params.configManager),
     print: (line) => {
       lines.push(line);
       params.stdout.write(`${line}\n`);
@@ -208,12 +218,12 @@ export async function selfUpdateAtLaunch(params: SelfUpdateAtLaunchParams): Prom
 }
 
 /**
- * Runs the (just-swapped) binary at execPath with the original CLI arguments
- * and an inherited terminal, blocking until it exits, and returns its exit
- * code for the caller to process.exit with. The receipt marker travels in the
- * child's environment, never on the command line.
+ * Replaces this process with the (just-swapped) binary at execPath and the
+ * given CLI arguments on the same terminal; where the platform cannot replace
+ * a process, starts it and returns 0 so the caller exits and one process
+ * remains. The receipt marker travels in the environment, never on the
+ * command line.
  */
-
 export function restartOntoUpdatedBinary(options: RestartOntoUpdatedBinaryOptions): number {
   return restart(options, LAUNCH_UPDATED_FROM_ENV);
 }

@@ -8,7 +8,7 @@ import { dirname } from 'node:path';
 import { SettingsModal } from '../../input/settings-modal.ts';
 import { ModelPickerModal } from '../../input/model-picker.ts';
 import { activeTokens, activeThemeMode, getActiveThemeName, listThemeChoices, normalizeThemeName, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
-import { resetTerminalPaletteForTests } from '../../renderer/terminal-palette.ts';
+import { resetTerminalPaletteForTests } from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
 import { makeTestShellViews } from '../helpers/shell-views.ts';
 import type { ShellViews } from '../../views/builtin-views.ts';
 import type { ViewPanelAdapter } from '../../views/view-panel-adapter.ts';

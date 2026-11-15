@@ -25,6 +25,14 @@ inputs:
     description: 'Output format for run: text | json | stream-json.'
     required: false
     default: 'text'
+  timeout:
+    description: 'Cancel a prompt run that takes longer than this (goodvibes run --timeout): a bare number is seconds, or use an ms, s, m or h suffix. The run then exits 124 with stopReason timeout. Empty removes the limit.'
+    required: false
+    default: '30m'
+  max-turns:
+    description: 'Stop a prompt run after this many model answers that still ask for tools (goodvibes run --max-turns). The run then exits 1 with stopReason max_turns. Empty removes the limit.'
+    required: false
+    default: '50'
   working-directory:
     description: 'Workspace directory to run in.'
     required: false
@@ -42,6 +50,15 @@ outputs:
   version:
     description: 'The goodvibes --version string of the installed binary.'
     value: ${{ steps.install.outputs.version }}
+  result-file:
+    description: 'Path of a file under RUNNER_TEMP holding everything the prompt or command printed to stdout (for output json, the result object; for stream-json, one frame per line). Empty when nothing was run.'
+    value: ${{ steps.run.outputs.result-file }}
+  exit-code:
+    description: 'Exit code of the prompt or command (0 completed, 1 failed or max-turns reached, 2 invalid input, 3 outcome unknown, 124 timeout, 130 cancelled). Empty when nothing was run.'
+    value: ${{ steps.run.outputs.exit-code }}
+  stop-reason:
+    description: 'stopReason from the result of a prompt run with output json or stream-json (for example completed, max_turns, timeout). Empty for text output or when nothing was run.'
+    value: ${{ steps.run.outputs.stop-reason }}
 
 runs:
   using: composite
@@ -84,6 +101,7 @@ runs:
         echo "Installed: $VERSION_STRING"
 
     - name: Run GoodVibes
+      id: run
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
@@ -91,16 +109,43 @@ runs:
         GV_COMMAND: ${{ inputs.command }}
         GV_ARGS: ${{ inputs.args }}
         GV_OUTPUT: ${{ inputs.output }}
+        GV_TIMEOUT: ${{ inputs.timeout }}
+        GV_MAX_TURNS: ${{ inputs.max-turns }}
       run: |
         set -eu
         goodvibes --version
+        RESULT_FILE="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/goodvibes-result-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$$.out"
         if [ -n "$GV_PROMPT" ]; then
-          echo "Running non-interactive prompt"
-          goodvibes --non-interactive --output "$GV_OUTPUT" run "$GV_PROMPT" $GV_ARGS
+          set -- --non-interactive --output "$GV_OUTPUT" run
+          if [ -n "$GV_TIMEOUT" ]; then set -- "$@" --timeout "$GV_TIMEOUT"; fi
+          if [ -n "$GV_MAX_TURNS" ]; then set -- "$@" --max-turns "$GV_MAX_TURNS"; fi
+          set -- "$@" "$GV_PROMPT"
+          echo "Running non-interactive prompt (timeout: ${GV_TIMEOUT:-none}, max turns: ${GV_MAX_TURNS:-none})"
         elif [ -n "$GV_COMMAND" ]; then
-          echo "Running: goodvibes $GV_COMMAND $GV_ARGS"
           # shellcheck disable=SC2086
-          goodvibes --non-interactive $GV_COMMAND $GV_ARGS
+          set -- --non-interactive $GV_COMMAND
+          echo "Running: goodvibes $GV_COMMAND $GV_ARGS"
         else
           echo "No prompt or command provided; install + version only."
+          exit 0
         fi
+        # The result also goes to the step log; the exit code is the run's own.
+        set +e
+        # shellcheck disable=SC2086
+        goodvibes "$@" $GV_ARGS | tee "$RESULT_FILE"
+        EXIT_CODE="${PIPESTATUS[0]}"
+        set -e
+        STOP_REASON=""
+        if [ -n "$GV_PROMPT" ] && [ "$GV_OUTPUT" != "text" ]; then
+          if command -v jq >/dev/null 2>&1; then
+            STOP_REASON="$(jq -r 'select(type == "object" and has("stopReason") and ((.type // "TURN_RESULT") | test("^(TURN_RESULT|NATIVE_INTAKE_RESULT)$"))) | .stopReason' "$RESULT_FILE" 2>/dev/null | tail -n 1 || true)"
+          else
+            STOP_REASON="$(grep -o '"stopReason": *"[^"]*"' "$RESULT_FILE" | tail -n 1 | sed 's/.*: *"\([^"]*\)"/\1/' || true)"
+          fi
+        fi
+        {
+          echo "result-file=$RESULT_FILE"
+          echo "exit-code=$EXIT_CODE"
+          echo "stop-reason=$STOP_REASON"
+        } >> "$GITHUB_OUTPUT"
+        exit "$EXIT_CODE"

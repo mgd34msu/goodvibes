@@ -7,7 +7,7 @@ import { registerBuiltinCommands } from '../../input/commands.ts';
 import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerSelfAcpAgentCommand } from '@goodvibes-jev/engine/platform/platform/acp';
 import { createShellPathService } from '@/runtime/index.ts';
-import { createRuntimeStore } from '../../runtime/store/index.ts';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { PeerClient } from '@/runtime/index.ts';
 import { getDistributedNodeHostContract } from '@/runtime/index.ts';
 import { createStaticUiReadModel } from '../helpers/ui-read-models.ts';

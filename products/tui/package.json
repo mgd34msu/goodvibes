@@ -43,7 +43,6 @@
     "package:install-check": "bun run scripts/package-install-check.ts",
     "build:prod": "bun scripts/run-toolchain.ts build",
     "build:all": "bun scripts/run-toolchain.ts build --all",
-    "architecture:check": "bun run scripts/check-architecture.ts",
     "audit:home": "bun run scripts/audit-goodvibes-home.ts",
     "foundation:artifacts": "bun run scripts/export-foundation-artifacts.ts",
     "docs:commands": "bun run scripts/generate-command-reference.ts",

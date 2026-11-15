@@ -16,9 +16,12 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  * updater), then asks the caller to restart onto the new binary.
  *
  * Honesty rules, in both directions:
- *   - the check gets a short timeout; when it cannot complete (offline, slow
- *     network) the CURRENT version starts with exactly one line saying the
- *     check was skipped, launch is never held hostage by the network.
+ *   - a lookup that succeeded in the last six hours answers the next launch
+ *     with no network request (`/update check` always asks); otherwise the
+ *     check gets a short timeout, an abandoned lookup is cancelled, and when
+ *     it cannot complete the CURRENT version starts with exactly one line
+ *     saying the check was skipped and why (no answer in time, or the release
+ *     host's own failure), launch is never held hostage by the network.
  *   - a successful update restarts into the new binary and the restarted
  *     process prints a receipt naming both versions, so the swap is never
  *     silent.
@@ -51,6 +54,13 @@ import { runDaemonHandover, type DaemonHandoverOutcome } from '@goodvibes-jev/en
 import { resolveGoodVibesDaemonExecutable } from './service-posture.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { VERSION } from '../version.ts';
+import { join } from 'node:path';
+
+/** The launch's remembered release lookup, beside this product's settings. */
+function launchCheckFile(configManager: Partial<Pick<ConfigManager, 'getControlPlaneConfigDir'>>): string | undefined {
+  const directory = configManager.getControlPlaneConfigDir?.();
+  return directory ? join(directory, 'launch-update-check.json') : undefined;
+}
 
 /**
  * Set on the restarted process by restartOntoUpdatedBinary, carrying the
@@ -101,9 +111,9 @@ export interface RunLaunchAutoUpdateOptions {
   readonly timeoutMs?: number;
   /** Overrides the download+verify+swap budget; defaults to settings.applyTimeoutMs ?? LAUNCH_APPLY_TIMEOUT_MS. */
   readonly applyTimeoutMs?: number;
+  /** Where the last successful release lookup is remembered, so a launch within a few hours of it does not ask again. */
+  readonly lastCheckFile?: string | undefined;
 }
-
-/** Resolves to 'timeout' when `promise` does not settle within `ms`; the timer never keeps the process alive. */
 
 /**
  * The launch-time decision: receipt-and-continue (restarted process), skip
@@ -115,7 +125,6 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
     updatedFromKey: LAUNCH_UPDATED_FROM_ENV,
     defaultCheckTimeoutMs: LAUNCH_UPDATE_CHECK_TIMEOUT_MS,
     check: checkForUpdate,
-    skipped: "couldn't reach the update server; check skipped",
     unswappable: () => undefined,
     repairRequired: version => options.repairRequired?.(version) ?? (options.apply === undefined && installedSuiteNeedsRepair({ execPath: options.execPath, platform: options.platform, arch: options.arch, version,
       webuiDirectory: configuredSuiteWebuiDirectory(options.configManager) })),
@@ -196,7 +205,7 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
 }
 
 export interface SelfUpdateAtLaunchParams {
-  readonly configManager: Pick<ConfigManager, 'get' | 'getRaw'>;
+  readonly configManager: Pick<ConfigManager, 'get' | 'getRaw'> & Partial<Pick<ConfigManager, 'getControlPlaneConfigDir'>>;
   readonly stdout: { write(chunk: string): unknown };
 }
 
@@ -227,6 +236,7 @@ export async function selfUpdateAtLaunch(params: SelfUpdateAtLaunchParams): Prom
     env: process.env,
     configManager: params.configManager,
     print,
+    lastCheckFile: launchCheckFile(params.configManager),
   });
   if (outcome.action === 'halt') throw outcome.error;
   if (outcome.action === 'restart') {

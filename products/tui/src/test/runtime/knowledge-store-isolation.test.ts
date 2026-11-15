@@ -10,7 +10,7 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeServices } from '../../runtime/services.ts';
-import { createRuntimeStore } from '../../runtime/store/index.ts';
+import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { trackDisposables } from '../helpers/disposables.ts';
 import { waitFor } from '../helpers/wait-for.ts';
 

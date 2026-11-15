@@ -26,11 +26,6 @@ import {
   createMattermostDeliveryStrategy,
   createMatrixDeliveryStrategy,
 } from './delivery/strategies-enterprise.js';
-import {
-  AGENT_DELIVERY_STRATEGY_ID,
-  AgentDeliveryRegistry,
-  createAgentDeliveryStrategy,
-} from './delivery/strategies-agent.js';
 import { resolveChannelDeliverySurfaceKind, splitForSurface, SURFACE_TEXT_LIMITS } from './delivery/shared.js';
 import { channelCredentials } from './credential-holder.js';
 import { logger } from '../utils/logger.js';
@@ -79,16 +74,6 @@ function publishDiagnostic(message: string, fields: Record<string, unknown>): vo
   try { logger.error(message, fields); }
   catch { /* Preserve the delivery's original outcome and retry evidence. */ }
 }
-
-export {
-  AGENT_DELIVERY_STRATEGY_ID,
-  AgentDeliveryRegistry,
-  createAgentDeliveryStrategy,
-} from './delivery/strategies-agent.js';
-export type {
-  AgentConversationMessage,
-  AgentConversationSender,
-} from './delivery/strategies-agent.js';
 
 export { resolveChannelDeliverySurfaceKind } from './delivery/shared.js';
 
@@ -140,23 +125,10 @@ export class ChannelDeliveryRouter {
   private readonly strategyRegistrations = new WeakMap<ChannelDeliveryStrategy, { readonly guarded: boolean; readonly publication: boolean }>();
   private controlPlaneGateway: ControlPlaneGateway | null;
 
-  /**
-   * Where the agent product plugs its conversation sender in.
-   *
-   * Router-owned rather than a constructor argument, so the destination exists
-   * from the moment the router does and the agent can register whenever it
-   * starts. The strategy that reads it is appended to EVERY strategy list,
-   * including an explicitly supplied one: `agent` being deliverable is a
-   * property of the router, and an embed that hand-picks its transports has no
-   * reason to lose the one surface that is not a transport.
-   */
-  readonly agentDelivery = new AgentDeliveryRegistry();
-
   constructor(config: ChannelDeliveryRouterConfig = {}) {
     this.controlPlaneGateway = config.controlPlaneGateway ?? null;
     if (config.strategies) {
       this.strategies = [...config.strategies];
-      this.ensureAgentStrategy();
       for (const strategy of this.strategies) this.strategyRegistrations.set(strategy, this.captureRegistration(strategy));
       return;
     }
@@ -174,14 +146,7 @@ export class ChannelDeliveryRouter {
       () => this.controlPlaneGateway,
       config.secretsManager,
     );
-    this.ensureAgentStrategy();
     for (const strategy of this.strategies) this.strategyRegistrations.set(strategy, this.captureRegistration(strategy));
-  }
-
-  /** Append the agent strategy unless the caller already supplied one. */
-  private ensureAgentStrategy(): void {
-    if (this.strategies.some((entry) => entry.id === AGENT_DELIVERY_STRATEGY_ID)) return;
-    this.strategies.push(createAgentDeliveryStrategy(this.agentDelivery));
   }
 
   setControlPlaneGateway(gateway: ControlPlaneGateway | null): void {

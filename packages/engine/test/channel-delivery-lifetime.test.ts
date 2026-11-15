@@ -294,7 +294,7 @@ describe('DNS and pinned webhook transport lifetime', () => {
   });
 });
 
-describe('custom strategy and agent capability contracts', () => {
+describe('custom strategy capability contracts', () => {
   for (const mutation of ['remove', 'replace', 'remove-readd', 'replace-same'] as const) {
     test(`${mutation} selected strategy during credential preparation revokes guarded send`, async () => {
       const entered = deferred<void>();
@@ -381,19 +381,6 @@ describe('custom strategy and agent capability contracts', () => {
     expect(deliveries).toBe(1);
   });
 
-  test('an old guarded Agent sender cannot silently drop native publication', async () => {
-    let deliveries = 0;
-    const router = new ChannelDeliveryRouter({ strategies: [] });
-    const sender = { id: 'owned-legacy-agent', supportsGuardedDelivery: true, async send() { deliveries++; return 'owned-agent-receipt'; } };
-    router.agentDelivery.register(sender);
-    const { request } = fixture(providers[0]!);
-    const agent = { ...request, target: { kind: 'surface' as const, surfaceKind: 'agent' as const } };
-    await expect(router.deliver({ ...agent, withPublication: async operation => operation(() => {}) })).rejects.toThrow('does not support publication');
-    Object.defineProperty(sender, 'supportsPublication', { value: true });
-    await expect(router.deliver({ ...agent, withPublication: async operation => operation(() => {}) })).rejects.toThrow('does not support publication');
-    expect(deliveries).toBe(0);
-    await expect(router.deliver({ ...agent, assertCurrent() {} })).resolves.toBe('owned-agent-receipt'); expect(deliveries).toBe(1);
-  });
 
   test('capability-advertising custom strategy receives the lifetime', async () => {
     const owner = lifetime();
@@ -407,56 +394,8 @@ describe('custom strategy and agent capability contracts', () => {
     await expect(router.deliver({ ...request, signal: owner.signal, assertCurrent: owner.assertCurrent })).resolves.toBe('owned-custom-message');
   });
 
-  test('agent refuses unsupported sender without calling it; ordinary sends still work', async () => {
-    const router = new ChannelDeliveryRouter({ strategies: [] });
-    let delivered = 0;
-    router.agentDelivery.register({ id: 'owned-legacy-sender', async send() { delivered++; return 'owned-agent-message'; } });
-    const { request } = fixture({ name: 'Agent', surface: 'agent' });
-    await expect(router.deliver({ ...request, assertCurrent() {} })).rejects.toThrow('sender does not support guarded delivery');
-    expect(delivered).toBe(0);
-    await expect(router.deliver(request)).resolves.toBe('owned-agent-message');
-    expect(delivered).toBe(1);
-  });
 
-  test('current capable agent sender lands a guarded message', async () => {
-    const owner = lifetime();
-    const router = new ChannelDeliveryRouter({ strategies: [] });
-    let delivered = 0;
-    router.agentDelivery.register({ id: 'owned-capable-sender', supportsGuardedDelivery: true, async send(message, lifetime) {
-      assertDeliveryCurrent(lifetime!);
-      expect(message.body).toBe('Owned delivery body');
-      expect(lifetime?.signal).toBe(owner.signal);
-      delivered++;
-      return 'owned-agent-message';
-    } });
-    const { request } = fixture({ name: 'Agent', surface: 'agent' });
-    await expect(router.deliver({ ...request, signal: owner.signal, assertCurrent: owner.assertCurrent })).resolves.toBe('owned-agent-message');
-    expect(delivered).toBe(1);
-  });
 
-  test('capable agent sender can enforce the guard after its own asynchronous preparation', async () => {
-    const owner = lifetime();
-    const entered = deferred<void>();
-    const ready = deferred<void>();
-    const router = new ChannelDeliveryRouter({ strategies: [] });
-    let delivered = 0;
-    router.agentDelivery.register({ id: 'owned-capable-sender', supportsGuardedDelivery: true, async send(message, lifetime) {
-      expect(message).not.toHaveProperty('signal');
-      expect(lifetime?.signal).toBe(owner.signal);
-      entered.resolve();
-      await ready.promise;
-      assertDeliveryCurrent(lifetime!);
-      delivered++;
-      return 'owned-agent-message';
-    } });
-    const { request } = fixture({ name: 'Agent', surface: 'agent' });
-    const pending = router.deliver({ ...request, signal: owner.signal, assertCurrent: owner.assertCurrent });
-    await entered.promise;
-    owner.revoke();
-    ready.resolve();
-    await expect(pending).rejects.toBe(revoked);
-    expect(delivered).toBe(0);
-  });
 });
 
 for (const kind of ['inherited', 'accessor'] as const) {
@@ -469,32 +408,6 @@ for (const kind of ['inherited', 'accessor'] as const) {
     const { request } = fixture(providers[0]!);
     await expect(router.deliver({ ...request, assertCurrent() {} })).rejects.toThrow('does not support guarded delivery');
     expect(delivered).toBe(0); expect(getterCalls).toBe(0);
-  });
-  test(`agent sender ${kind} capability cannot opt in or run getters`, async () => {
-    let delivered = 0, getterCalls = 0;
-    const sender = { id: 'untrusted-sender', async send() { delivered++; return undefined; } };
-    if (kind === 'inherited') Object.setPrototypeOf(sender, { supportsGuardedDelivery: true });
-    else Object.defineProperty(sender, 'supportsGuardedDelivery', { get() { getterCalls++; return true; } });
-    const router = new ChannelDeliveryRouter({ strategies: [] }); router.agentDelivery.register(sender);
-    const { request } = fixture({ name: 'Agent', surface: 'agent' });
-    await expect(router.deliver({ ...request, assertCurrent() {} })).rejects.toThrow('does not support guarded delivery');
-    expect(delivered).toBe(0); expect(getterCalls).toBe(0);
-  });
-}
-for (const change of ['remove', 'replace', 'remove-readd'] as const) {
-  test(`agent sender ${change} during preparation fences its old registration`, async () => {
-    const entered = deferred<void>(), ready = deferred<void>(); let delivered = 0;
-    const router = new ChannelDeliveryRouter({ strategies: [] });
-    const sender = { id: 'captured-sender', supportsGuardedDelivery: true,
-      async send(_message: unknown, lifetime?: import('../platform/src/platform/utils/delivery-lifetime.js').DeliveryLifetime) {
-        entered.resolve(); await ready.promise; assertDeliveryCurrent(lifetime!); delivered++; return 'sent';
-      } };
-    const unregister = router.agentDelivery.register(sender);
-    const { request } = fixture({ name: 'Agent', surface: 'agent' });
-    const pending = router.deliver({ ...request, assertCurrent() {} }); await entered.promise;
-    if (change === 'replace') router.agentDelivery.register({ ...sender, id: 'replacement' }, { replace: true });
-    else { unregister(); if (change === 'remove-readd') router.agentDelivery.register(sender); }
-    ready.resolve(); await expect(pending).rejects.toThrow('registration is no longer current'); expect(delivered).toBe(0);
   });
 }
 test('direct capability mutation cannot upgrade registration without explicit replacement', async () => {

@@ -70,8 +70,10 @@ import {
   clampAttachmentLease,
 } from './attachments.js';
 export type { HostedSessionSpine } from './spine-intake.js';
-import { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionUnavailableError } from './errors.js';
-export { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionUnavailableError } from './errors.js';
+import { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionNotReadyError, HostedSessionUnavailableError } from './errors.js';
+export { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionNotReadyError, HostedSessionUnavailableError } from './errors.js';
+import type { HostedContractWorkAdapter } from './contract-work-adapter.js';
+import { isTerminalContractStatus } from '../contract/types.js';
 import type {
   CreateHostedSessionInput,
   HostedDetachPolicy,
@@ -180,13 +182,6 @@ interface LiveSession {
   released?: true;
 }
 
-/** A composition failure that may pass (registry not ready, floor busy): the session stays restored and the caller can retry. */
-class RecoverableComposeError extends Error {
-  constructor(readonly original: unknown) {
-    super(summarizeError(original));
-  }
-}
-
 const RESTART_NOTICE = 'This session was interrupted by a daemon restart. The turn that was running did not finish.';
 
 export class HostedSessionManager {
@@ -205,6 +200,7 @@ export class HostedSessionManager {
   private readonly spine: HostedSessionSpineIntake;
   /** Sweeps attachments whose lease ran out, see ./attachments.ts. */
   private attachmentTimer: ReturnType<typeof setInterval> | null = null;
+  private contractWorkAdapter: HostedContractWorkAdapter | null = null;
 
   constructor(private readonly options: HostedSessionManagerOptions) {
     this.floors = new HostedWorkspaceFloors(options.floorFactory);
@@ -220,7 +216,7 @@ export class HostedSessionManager {
           ? hostedLifecycleCallbacks.run(live, callback)
           : callback());
       },
-      deliver: (sessionId, text, correlationId) => this.deliver(sessionId, text, correlationId),
+      deliver: (sessionId, text, correlationId, delivery) => this.deliver(sessionId, text, correlationId, delivery),
       now: () => this.now(),
       alertOwner: (text) => this.alerter?.(text),
     });
@@ -266,6 +262,11 @@ export class HostedSessionManager {
       if (restoredLive && restored.record.status === 'terminated') this.releaseTranscript(restoredLive);
       this.publish(restored.terminated ? 'hosted-session-terminated' : 'hosted-session-restored', restored.record, {
         detail: restored.detail,
+      });
+    }
+    for (const record of report.evictedLive ?? []) {
+      this.publish('hosted-session-terminated', record, {
+        detail: 'more sessions were stored than hostedSessions.maxSessions allows, and this was the least recently used',
       });
     }
     this.observeTurnEvents();
@@ -395,6 +396,21 @@ export class HostedSessionManager {
         };
       },
     };
+  }
+
+  /**
+   * The external work adapter over this engine (contract-work-adapter.ts): a
+   * dispatch runs its contract in a hosted session, created for it unless the
+   * request names one. Null until the daemon composition attaches it.
+   */
+  contractWork(): HostedContractWorkAdapter | null {
+    return this.contractWorkAdapter;
+  }
+
+  /** Wired once by the daemon composition; released when this engine stops. */
+  attachContractWork(adapter: HostedContractWorkAdapter): void {
+    this.contractWorkAdapter?.close();
+    this.contractWorkAdapter = adapter;
   }
 
   /** The live-turn controls for a hosted session, when its loop is composed. */
@@ -534,7 +550,8 @@ export class HostedSessionManager {
       // the event stream. A failure before the loop reports its own turn error
       // (the loop could not be composed, the engine was disposed) is logged and
       // published here, so the first prompt is never lost without a trace.
-      void this.deliver(sessionId, input.initialPrompt).catch((error: unknown) => {
+      // The create call itself was authenticated at the gateway: an operator's input.
+      void this.deliver(sessionId, input.initialPrompt, undefined, { operatorInput: true }).catch((error: unknown) => {
         const detail = `the first prompt was not delivered: ${summarizeError(error)}`;
         logger.warn('[hosted-sessions] the initial prompt of a new session was not delivered', { sessionId, error: summarizeError(error) });
         this.publish('hosted-session-turn-ended', live.record, { detail });
@@ -647,7 +664,30 @@ export class HostedSessionManager {
         });
         await this.afterDetach(live, clientId).catch(() => undefined);
       }
+      await this.endIfUnattended(live);
     }
+  }
+
+  /**
+   * End a kill-policy session that no client is attached to once it has sat
+   * idle for one attachment lease. "The last client detached" never happens to
+   * a session created without a client, so without this it held a workspace
+   * floor and a slot until the daemon stopped while its record said it dies on
+   * detach. Work still owed to the session keeps it: a running or queued turn,
+   * an input not yet delivered, a contract it started that has not settled.
+   */
+  private async endIfUnattended(live: LiveSession): Promise<void> {
+    if (live.record.status !== 'idle' || live.attached.size > 0) return;
+    if (live.termination || live.initialization || live.composition || live.parking) return;
+    if (this.effectivePolicy(live.record.detachPolicy) !== 'kill') return;
+    if (this.now() - live.record.updatedAt < this.attachmentLeaseMs()) return;
+    if (live.runtime?.isRunning() || this.spine.hasOutstanding(live.record.id)) return;
+    const runner = live.lease?.floor.contractRunner;
+    if (runner && live.record.contractIds.some((id) => {
+      const contract = runner.get(id);
+      return contract !== null && !isTerminalContractStatus(contract.status);
+    })) return;
+    await this.terminate(live, 'detached', 'no client attached within the attachment lease and the effective policy is kill').catch(() => undefined);
   }
 
   /**
@@ -685,15 +725,17 @@ export class HostedSessionManager {
   /**
    * Drive a turn on a hosted session: the path `sessions.steer` /
    * `sessions.followUp` reach, and the one `create`'s initial prompt uses.
+   * `operatorInput` marks input an authenticated operator sent; it starts the
+   * session's next untrusted-content turn (session-runtime.ts).
    */
-  async deliver(sessionId: string, text: string, correlationId?: string): Promise<void> {
+  async deliver(sessionId: string, text: string, correlationId?: string, delivery?: { readonly operatorInput?: boolean | undefined }): Promise<void> {
     const live = this.requireLive(sessionId);
     await this.ensureComposed(live);
     this.assertSessionUsable(live);
     const runtime = live.runtime;
     if (!runtime) throw new HostedSessionUnavailableError(sessionId, 'its loop could not be composed');
     try {
-      await runtime.submit(text, correlationId);
+      await runtime.submit(text, correlationId, delivery);
     } finally {
       live.record = {
         ...live.record,
@@ -880,8 +922,9 @@ export class HostedSessionManager {
     try {
       await composition;
     } catch (error) {
-      // Composition has settled before failure cleanup joins termination.
-      if (error instanceof RecoverableComposeError) throw error.original;
+      // Composition has settled before failure cleanup joins termination. A
+      // failure that may pass leaves the session restored for the next attempt.
+      if (error instanceof HostedSessionNotReadyError) throw error;
       if (!this.disposed && live.record.status !== 'terminated') {
         await this.terminate(live, 'restart-unresumable', `its loop could not be rebuilt: ${summarizeError(error)}`);
       }
@@ -899,7 +942,7 @@ export class HostedSessionManager {
     try {
       lease = await this.floors.acquire(workspaceRoot);
     } catch (error) {
-      throw new RecoverableComposeError(error);
+      throw new HostedSessionNotReadyError(live.record.id, error, `its workspace floor could not be acquired (${summarizeError(error)})`);
     }
     try {
       this.assertSessionUsable(live);
@@ -916,7 +959,7 @@ export class HostedSessionManager {
           : undefined;
       } catch (error) {
         // The provider registry may simply not be ready yet.
-        throw new RecoverableComposeError(error);
+        throw new HostedSessionNotReadyError(live.record.id, error, `its model could not be resolved yet (${summarizeError(error)})`);
       }
       const runtime = createHostedSessionRuntime({
         sessionId: live.record.id, workspaceRoot, floor: lease.floor,
@@ -1234,6 +1277,8 @@ export class HostedSessionManager {
       clearInterval(this.attachmentTimer);
       this.attachmentTimer = null;
     }
+    this.contractWorkAdapter?.close();
+    this.contractWorkAdapter = null;
     for (const unsubscribe of this.busUnsubscribers.splice(0)) {
       try {
         unsubscribe();

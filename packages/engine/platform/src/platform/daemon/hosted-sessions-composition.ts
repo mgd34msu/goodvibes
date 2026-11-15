@@ -40,6 +40,7 @@ import {
 } from '../control-plane/routes/hosted-sessions.js';
 import type { GatewayMethodCatalog } from '../control-plane/method-catalog.js';
 import {
+  createHostedContractWorkAdapter,
   createHostedSessionLivenessProbe,
   HostedSessionManager,
   HostedSessionStore,
@@ -199,7 +200,27 @@ export function composeHostedSessionsForFacade(
   attachHostedSessionCloseSync(manager, runtimeServices.sessionBroker);
   // The contracts.* methods read and act across the hosted floors' runners too.
   runtimeServices.contractOperator.attachHosted(manager.contractRunners());
+  // Dispatched contract work (the external work seam) runs in a hosted session:
+  // a new one in the daemon's working directory unless the request names a
+  // workspace inside it. Every floor's runner publishes on the daemon bus, so
+  // settlement ends the session made for the work without anyone polling.
+  manager.attachContractWork(createHostedContractWorkAdapter({
+    runner: runtimeServices.contractOperator,
+    hostedSessions: manager,
+    workspaceRoot: runtimeServices.workingDirectory,
+    settled: (listener) => subscribeContractSettlement(runtimeBus, listener),
+  }));
   return manager;
+}
+
+/** Calls `listener` with the id of each contract that passes, fails or is cancelled. Returns the unsubscribe. */
+function subscribeContractSettlement(bus: RuntimeEventBus, listener: (contractId: string) => void): () => void {
+  const read = (envelope: { readonly payload: unknown }): void => {
+    const contractId = (envelope.payload as { readonly contractId?: unknown } | null)?.contractId;
+    if (typeof contractId === 'string') listener(contractId);
+  };
+  const unsubscribers = [bus.on('CONTRACT_PASSED', read), bus.on('CONTRACT_FAILED', read), bus.on('CONTRACT_CANCELLED', read)];
+  return () => { for (const unsubscribe of unsubscribers) unsubscribe(); };
 }
 
 /**

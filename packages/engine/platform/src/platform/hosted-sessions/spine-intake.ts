@@ -31,6 +31,7 @@ import { hostedLifecycleCallbacks } from './lifecycle-callbacks.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { HostedSessionRecord } from './types.js';
+import { HostedSessionNotFoundError, HostedSessionNotReadyError, HostedSessionUnavailableError } from './errors.js';
 
 /**
  * The narrow view of the shared session broker hosted sessions use.
@@ -61,7 +62,15 @@ export interface HostedSessionSpine {
   getInputsSince(
     sessionId: string,
     options: { readonly state?: 'queued' | undefined },
-  ): readonly { readonly id: string; readonly body: string; readonly state?: string | undefined; readonly metadata?: Record<string, unknown> | undefined; readonly correlationId?: string | undefined }[];
+  ): readonly {
+    readonly id: string;
+    readonly body: string;
+    readonly state?: string | undefined;
+    readonly metadata?: Record<string, unknown> | undefined;
+    readonly correlationId?: string | undefined;
+    /** The surface the input was submitted from, recorded by the code that accepted it. */
+    readonly surfaceKind?: string | undefined;
+  }[];
   /** Report one collected (`consumed:false`) or finished (`consumed:true`). */
   markInputDelivered(
     sessionId: string,
@@ -88,7 +97,7 @@ export interface HostedSessionSpineIntakeOptions {
   /** Attribute awaited registration/close callbacks to their session owner. */
   readonly withLifecycle?: <T>(sessionId: string, callback: () => Promise<T>) => Promise<T>;
   /** Hand one collected input to its session's loop. */
-  readonly deliver: (sessionId: string, text: string, correlationId?: string | undefined) => Promise<void>;
+  readonly deliver: (sessionId: string, text: string, correlationId?: string | undefined, delivery?: { readonly operatorInput?: boolean | undefined }) => Promise<void>;
   readonly now: () => number;
   /** Tick interval. Default 750ms, the order every inbound-dispatch client here uses. */
   readonly intervalMs?: number | undefined;
@@ -113,13 +122,36 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 const HOSTED_PARTICIPANT_SURFACE_ID = 'daemon:hosted-sessions';
 
 /**
+ * Surfaces whose input an authenticated operator sent: the daemon accepts them
+ * only over its authenticated listener or gateway. A channel, webhook, schedule
+ * or companion records its own kind, so its input never resets the session's
+ * untrusted-content window.
+ */
+const OPERATOR_SURFACE_KINDS: ReadonlySet<string> = new Set(['tui', 'web', 'webui', 'agent']);
+
+/**
+ * What the engine's own refusal already says about a failed delivery, with no
+ * reading: not ready yet is retried (nothing ran), a session that is gone or
+ * cannot serve is failed at once. Undefined for any other error.
+ */
+function knownDeliveryFailure(error: unknown): 'retry' | 'terminal' | undefined {
+  try {
+    if (error instanceof HostedSessionNotReadyError) return 'retry';
+    if (error instanceof HostedSessionUnavailableError || error instanceof HostedSessionNotFoundError) return 'terminal';
+  } catch { /* an exotic thrown value is read as unknown */ }
+  return undefined;
+}
+
+/**
  * How many ticks one collected input is given before it is failed.
  *
  * Small on purpose. The failures worth retrying here are the transient ones,
  * a restored session's loop still being composed, a floor lease still being
  * acquired, and those clear within a tick or two. Anything that survives
  * the bounded attempt ceiling is failed observably rather than kept in limbo.
- * The shared failure reader, not this count, determines retry eligibility.
+ * The engine's own refusal decides retry eligibility when it is one (not ready
+ * is retried, unavailable is not); the shared failure reader decides for any
+ * other error. This count is only the ceiling after that.
  */
 const DEFAULT_MAX_DELIVERY_ATTEMPTS = 3;
 
@@ -130,6 +162,8 @@ interface PendingDelivery {
   readonly body: string;
   /** The broker's input identity, retained through queued delivery and retry. */
   readonly correlationId?: string | undefined;
+  /** An authenticated operator sent it; see OPERATOR_SURFACE_KINDS. */
+  readonly operatorInput?: boolean | undefined;
   readonly attempts: number;
   /** Failed attempts to classify the current failure; bounded like delivery attempts. */
   readonly readingFailures?: number | undefined;
@@ -374,6 +408,7 @@ export class HostedSessionSpineIntake {
             inputId: input.id,
             body: input.body,
             correlationId: input.correlationId,
+            ...(input.surfaceKind !== undefined && OPERATOR_SURFACE_KINDS.has(input.surfaceKind) ? { operatorInput: true } : {}),
             attempts: 0,
           };
           // Without the collected mark the input is still queued on the spine, so
@@ -529,7 +564,8 @@ export class HostedSessionSpineIntake {
       return;
     }
     try {
-      await this.options.deliver(pending.sessionId, pending.body, pending.correlationId);
+      await this.options.deliver(pending.sessionId, pending.body, pending.correlationId,
+        pending.operatorInput === true ? { operatorInput: true } : undefined);
       this.pending.delete(key);
       // A successfully completed turn stays delivered during shutdown drain.
       try { await spine.markInputDelivered(pending.sessionId, pending.inputId, { consumed: true }); }
@@ -544,6 +580,8 @@ export class HostedSessionSpineIntake {
     } catch (error) {
       // Its session or this intake closed while it waited: no retry can reach it.
       if (this.stopped || this.fenced.has(pending.sessionId)) { await this.abandon(spine, pending); return; }
+      const known = knownDeliveryFailure(error);
+      if (known !== undefined) { await this.settleKnownFailure(spine, pending, known, summarizeError(error)); return; }
       // Keep the input collected even if the evidence is unsafe to read. It must
       // never be retried merely because privacy admission failed.
       const blocked: PendingDelivery = { ...pending, attempts: pending.attempts + 1,
@@ -554,6 +592,41 @@ export class HostedSessionSpineIntake {
         failure: { error: captured, detail: summarizeError(captured), ...(this.failureReading ? { reading: this.failureReading } : {}) } };
       this.pending.set(key, failed);
       await this.classifyFailure(spine, failed, assertCurrent);
+    }
+  }
+
+  /**
+   * A failure the engine classified itself. Not ready is retried on the next
+   * tick until the attempts are spent; anything else fails the input now, with
+   * the session's own reason.
+   */
+  private async settleKnownFailure(spine: HostedSessionSpine, pending: PendingDelivery, known: 'retry' | 'terminal', detail: string): Promise<void> {
+    const key = pendingKey(pending.sessionId, pending.inputId);
+    const attempts = pending.attempts + 1;
+    if (known === 'retry' && attempts < (this.options.maxDeliveryAttempts ?? DEFAULT_MAX_DELIVERY_ATTEMPTS)) {
+      this.pending.set(key, { ...pending, attempts, failure: undefined });
+      logger.warn('[hosted-sessions] a collected input could not be delivered yet; it is retried next tick', {
+        sessionId: pending.sessionId, inputId: pending.inputId, attempts, error: detail,
+      });
+      return;
+    }
+    this.pending.delete(key);
+    logger.error('[hosted-sessions] a collected input could not be delivered and is now marked failed', {
+      sessionId: pending.sessionId, inputId: pending.inputId, attempts, error: detail,
+    });
+    await spine.failInput?.(pending.sessionId, pending.inputId, detail).catch(() => undefined);
+    this.alertOwner(pending, attempts, detail);
+  }
+
+  /** Whether this session still has an input queued, collected or being delivered. */
+  hasOutstanding(sessionId: string): boolean {
+    for (const pending of this.pending.values()) if (pending.sessionId === sessionId) return true;
+    for (const key of this.inFlight) if (key.startsWith(`${sessionId}\u0000`)) return true;
+    try {
+      return (this.options.spine?.getInputsSince(sessionId, { state: 'queued' }).length ?? 0) > 0;
+    } catch {
+      // Unknown is not idle: keep the session.
+      return true;
     }
   }
 

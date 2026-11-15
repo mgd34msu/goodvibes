@@ -21,6 +21,7 @@ import {
   HostedSessionClientOwnerError,
   HostedSessionLimitError,
   HostedSessionNotFoundError,
+  HostedSessionNotReadyError,
   HostedSessionUnavailableError,
 } from '../../hosted-sessions/manager.js';
 import type { HostedSessionAttachment } from '../../hosted-sessions/manager.js';
@@ -97,6 +98,10 @@ export function toGatewayVerbError(error: unknown): never {
     // clients already branch on it. A second word for "no session with this id"
     // only means the branch that handles it misses half the cases.
     throw new GatewayVerbError(error.message, 'SESSION_NOT_FOUND', 404);
+  }
+  if (error instanceof HostedSessionNotReadyError) {
+    // 503: the session is real and nothing ran; the same call can be sent again shortly.
+    throw new GatewayVerbError(error.message, 'HOSTED_SESSION_NOT_READY', 503);
   }
   if (error instanceof HostedSessionUnavailableError) {
     // 409, not 404: the session exists and the caller can read why it cannot

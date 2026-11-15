@@ -65,6 +65,12 @@ describe('grouping', () => {
     expect(groups.running.map((i) => i.key)).toEqual(['fleet:n1']);
   });
 
+  test('a hosted session on the union list is one row, carrying its hosted status', () => {
+    const hosted = { id: 's1', title: 'Hosted one', status: 'running', workspaceRoot: '/w', turnCount: 2, messageCount: 3, updatedAt: 1, effectiveDetachPolicy: 'kill', attachedClients: [] } as unknown as HostedSessionRecord;
+    const items = buildWorkItems({ ...EMPTY, sessions: [session({ id: 's1', kind: 'hosted' })], hosted: [hosted] });
+    expect(items.map((i) => [i.key, i.status, i.tone])).toEqual([['session:s1', 'Running', 'live']]);
+  });
+
   test('kinds: sessions, agents and processes filter separately', () => {
     const task: RuntimeTaskSummary = { id: 't1', kind: 'exec', title: 'Build', status: 'running', owner: 'me', queuedAt: 1 };
     const hosted = { id: 'h1', title: 'Hosted one', status: 'idle', workspaceRoot: '/w', turnCount: 1, messageCount: 1, updatedAt: 1, effectiveDetachPolicy: 'kill', attachedClients: [] } as unknown as HostedSessionRecord;
@@ -77,7 +83,7 @@ describe('grouping', () => {
       tasks: [task],
       ciWatches: [watch],
     });
-    expect(groupWorkItems(items, 'sessions').running.map((i) => i.key)).toEqual(['hosted:h1', 'session:s1']);
+    expect(groupWorkItems(items, 'sessions').running.map((i) => i.key)).toEqual(['session:s1', 'session:h1']);
     expect(groupWorkItems(items, 'agents').running.map((i) => i.key)).toEqual(['fleet:agent']);
     expect(groupWorkItems(items, 'processes').running.map((i) => i.key)).toEqual(['fleet:watcher', 'task:t1', 'ci-watch:w1']);
     const ci = items.find((i) => i.key === 'ci-watch:w1');

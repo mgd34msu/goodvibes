@@ -18,7 +18,9 @@ import type { GatePresetName } from '../gate/presets.js';
  * What happens to a hosted session when the last attached client detaches.
  *
  * - `kill`, the session is terminated with the reason `detached`. This is the
- *   DEFAULT, and it is the behavior every surface has always had.
+ *   DEFAULT, and it is the behavior every surface has always had. A session
+ *   that no client ever attached to (created without a `clientId`) meets the
+ *   same end once it has sat idle, unattached, for one attachment lease.
  * - `survive`, the session stays alive, idle, and reattachable; a later
  *   `sessions.hosted.attach` resumes it with its history.
  *
@@ -45,7 +47,11 @@ export type HostedSessionStatus =
  * rather than quietly dropping the record.
  */
 export type HostedSessionTerminationReason =
-  /** The last client detached and the effective policy was `kill`. */
+  /**
+   * The effective policy was `kill` and no client is attached: the last client
+   * detached, or none attached within one attachment lease while the session
+   * sat idle (a session created without a `clientId`).
+   */
   | 'detached'
   /** An explicit `sessions.hosted.kill`. */
   | 'killed'
@@ -53,9 +59,7 @@ export type HostedSessionTerminationReason =
   | 'daemon-shutdown'
   /** Restored from disk after a restart, but its composition could not be rebuilt. */
   | 'restart-unresumable'
-  /** Swept: terminated long enough ago that its record was retired. */
-  | 'retired'
-  /** The engine refused to keep it: a bound was exceeded or its workspace went away. */
+  /** Dropped at restart because more sessions were on disk than `hostedSessions.maxSessions`. */
   | 'evicted';
 
 /**
@@ -160,7 +164,11 @@ export interface CreateHostedSessionInput {
   readonly initialPrompt?: string | undefined;
   /** Per-session override of the detach policy. Omitted ⇒ follow the setting. */
   readonly detachPolicy?: HostedDetachPolicy | undefined;
-  /** The client creating it, attached immediately when given. */
+  /**
+   * The client creating it, attached immediately when given. Without one, a
+   * session under the `kill` policy ends once it has been idle and unattached
+   * for one attachment lease; pass `detachPolicy: 'survive'` to keep it.
+   */
   readonly clientId?: string | undefined;
   /** The authenticated principal creating it; only that principal can later detach `clientId`. */
   readonly principalId?: string | undefined;

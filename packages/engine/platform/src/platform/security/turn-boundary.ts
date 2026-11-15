@@ -27,6 +27,12 @@
  * point: if automated work reset the window, content that had just been read
  * could arrange for the record of itself to be erased before the send it was
  * trying to cause.
+ *
+ * A daemon-hosted session is not the owner at a terminal, so its input never
+ * passes `inputOriginIsOwnerDirect`. Each one runs in its own scope instead
+ * (`session:<id>`, hosted-sessions/session-runtime.ts), which opens empty when
+ * its loop is built and starts a new turn on input an authenticated operator
+ * sent; channel and automation input leaves it open.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';

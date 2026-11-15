@@ -561,3 +561,24 @@ describe('inputs that can no longer be delivered are never left collected and si
     } finally { intake.stop(); }
   });
 });
+
+describe('the engine classifies its own delivery refusals: no model request', () => {
+  test('a session not ready yet is delivered on the next tick; one that cannot serve is failed at once', async () => {
+    const { HostedSessionNotReadyError, HostedSessionUnavailableError } = await import('../platform/src/platform/hosted-sessions/errors.ts');
+    const port = failureReadingsPort([]);
+    const spine = buildSpine(new Map([['hosted-1', [{ id: 'late', body: 'body' }]], ['hosted-2', [{ id: 'gone', body: 'body' }]]]));
+    let lateAttempts = 0;
+    const intake = new HostedSessionSpineIntake({ spine, liveSessions: () => [record('hosted-1'), record('hosted-2')], now: () => 1,
+      failureReading: { port: port.port },
+      deliver: async (sessionId) => {
+        if (sessionId === 'hosted-2') throw new HostedSessionUnavailableError(sessionId, 'it is terminated (killed)');
+        if (++lateAttempts === 1) throw new HostedSessionNotReadyError(sessionId, new Error('registry'), 'its model could not be resolved yet');
+      } });
+    try {
+      for (let tick = 0; tick < 2; tick++) { await intake.tick(); await intake.drainDeliveries(); }
+      expect(spine.log.consumed).toEqual(['late']);
+      expect(spine.log.failed).toEqual([{ inputId: 'gone', error: expect.stringContaining('is unavailable') }]);
+      expect(port.requests).toHaveLength(0);
+    } finally { intake.stop(); }
+  });
+});

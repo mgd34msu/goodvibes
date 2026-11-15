@@ -326,6 +326,15 @@ export class UntrustedContentLedger {
    */
   private previousTurnStartSequence = 0;
   private readonly scopeWatermarks = new Map<string, { start: number; previous: number }>();
+  /**
+   * The newest evicted ingest of each scope ('' for unscoped), so a scoped
+   * window is incomplete only when an ingest IT could see was dropped: one
+   * session reading a thousand pages does not make another session's turn
+   * uncheckable. A scope forgotten past the bound folds into the shared floor,
+   * which only widens what counts as evicted.
+   */
+  private readonly evictedUpTo = new Map<string, number>();
+  private evictedFloor = 0;
 
   record(ingest: UntrustedIngest): void {
     this.#publicationRevision++;
@@ -340,8 +349,30 @@ export class UntrustedContentLedger {
     this.ingests.push(retained);
     if (this.ingests.length > MAX_RETAINED_INGESTS) {
       const discarded = this.ingests.length - MAX_RETAINED_INGESTS;
-      this.ingests.splice(0, discarded);
+      const firstSequence = this.ingestSequence - this.ingests.length + 1;
+      for (const [index, dropped] of this.ingests.splice(0, discarded).entries()) this.noteEvicted(dropped.scope ?? '', firstSequence + index);
     }
+  }
+
+  private noteEvicted(scope: string, sequence: number): void {
+    this.evictedUpTo.delete(scope);
+    this.evictedUpTo.set(scope, sequence);
+    if (this.evictedUpTo.size > MAX_SCOPE_WATERMARKS) {
+      const oldest = this.evictedUpTo.entries().next();
+      if (!oldest.done) {
+        this.evictedUpTo.delete(oldest.value[0]);
+        this.evictedFloor = Math.max(this.evictedFloor, oldest.value[1]);
+      }
+    }
+  }
+
+  /** Whether an ingest this scope could see, newer than `start`, was dropped by the retention cap. */
+  private evictedSince(start: number, scope: string | undefined): boolean {
+    if (scope === undefined) return start < this.ingestSequence - this.ingests.length;
+    const principalScope = scope.includes(':connection:') ? scope.slice(0, scope.indexOf(':connection:')) : undefined;
+    const newest = Math.max(this.evictedFloor, this.evictedUpTo.get('') ?? 0, this.evictedUpTo.get(scope) ?? 0,
+      principalScope === undefined ? 0 : this.evictedUpTo.get(principalScope) ?? 0);
+    return newest > start;
   }
 
   /** Called when a new owner turn begins: the previous turn's exposure ends. */
@@ -451,7 +482,7 @@ export class UntrustedContentLedger {
     // The retained window is by definition everything still kept, so the retention cap
     // evicting older ingests is not missing evidence for it; a turn window that reaches
     // back past the cap is.
-    const evicted = window !== 'retained' && start < this.ingestSequence - this.ingests.length;
+    const evicted = window !== 'retained' && this.evictedSince(start, scope);
     return Object.freeze({ sources: toTaintSources(ingests), complete: !missing && !truncated && !evicted,
       missing, truncated, evicted, revision,
       assertCurrent: () => {

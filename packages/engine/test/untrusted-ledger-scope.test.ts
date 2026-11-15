@@ -43,3 +43,14 @@ test('work outside any scope still sees every read, and an unscoped turn start c
   expect(origins(ledger, 'a')).toEqual([]);
   expect(ledger.captureTaintEvidence('retained').sources).toHaveLength(1);
 });
+
+test("another scope's reads passing the retention cap leave this scope's turn evidence complete", () => {
+  const ledger = new UntrustedContentLedger();
+  withUntrustedContentScope('session:b', () => { page(ledger, 'b-earlier-turn'); ledger.startTurn(); });
+  withUntrustedContentScope('session:a', () => { for (let i = 0; i < 1_001; i++) page(ledger, `a-${i}`); });
+  const own = withUntrustedContentScope('session:b', () => ledger.captureTaintEvidence('turn'));
+  expect(own.evicted).toBe(false);
+  expect(own.sources.length).toBe(0);
+  const reader = withUntrustedContentScope('session:a', () => ledger.captureTaintEvidence('turn'));
+  expect(reader.evicted).toBe(true);
+});

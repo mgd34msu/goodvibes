@@ -2,7 +2,7 @@ import { attemptGroupProgress } from './attempt-group-progress';
 /**
  * The Work view's one list, as data (design doc "Data views", Work row).
  *
- * Sessions, hosted sessions, the fleet (agents, workstreams, watchers,
+ * Sessions (daemon-hosted ones among them, one row each), the fleet (agents, workstreams, watchers,
  * background processes, observed external agents), runtime tasks, CI watches
  * and approvals used to be seven pages. They answer one question, "what is
  * running for me, and what needs me", so they become one list in three
@@ -61,7 +61,7 @@ export type CiWatch = OperatorMethodOutput<'ci.watches.list'>['watches'][number]
 /** The segmented filter's kinds. `all` shows every kind. */
 export type WorkKind = 'sessions' | 'agents' | 'processes';
 
-export type WorkItemType = 'approval' | 'attempt-group' | 'fleet' | 'session' | 'hosted' | 'task' | 'ci-watch' | 'contract';
+export type WorkItemType = 'approval' | 'attempt-group' | 'fleet' | 'session' | 'task' | 'ci-watch' | 'contract';
 
 export type WorkGroup = 'needs' | 'running' | 'finished';
 
@@ -291,43 +291,44 @@ function fleetItem(node: FleetProcessNode, depth: number, pendingApprovalSession
   };
 }
 
-function sessionItem(record: UnionSessionRecord): WorkItem {
-  const closed = isClosedStatus(record.status);
-  const reaped = isReapedStatus(record);
-  const parts = [sessionKindLabel(record.kind), projectLabel(record.project)];
-  if (record.pendingInputCount > 0) parts.push(`${record.pendingInputCount} waiting`);
-  parts.push(whenLabel(record.updatedAt));
-  const status = reaped ? 'Reaped' : closed ? 'Closed' : sentenceCase(record.status) || 'Active';
-  return {
-    key: `session:${record.id}`,
-    type: 'session',
-    id: record.id,
-    kind: 'sessions',
-    group: closed ? 'finished' : 'running',
-    title: record.title || record.id,
-    meta: parts.filter(Boolean).join(' · '),
-    tone: record.lastError ? 'bad' : closed ? 'idle' : 'ok',
-    status,
-    value: record.messageCount > 0 ? `${record.messageCount} msg${record.messageCount === 1 ? '' : 's'}` : undefined,
-    depth: 0,
-    sortAt: record.updatedAt,
-  };
+function messageCountValue(count: number): string | undefined {
+  return count > 0 ? `${count} msg${count === 1 ? '' : 's'}` : undefined;
 }
 
-function hostedItem(session: HostedSessionRecord): WorkItem {
-  const terminated = session.status === 'terminated';
+/**
+ * One row per session id. A daemon-hosted session is on the union list too
+ * (kind `hosted`); its hosted record, matched by id, supplies what only the
+ * engine knows: whether a turn is running, its workspace, its turns, and
+ * whether it has ended. A hosted record the union list does not carry yet
+ * (registration still pending) is a row of its own under the same key.
+ */
+function sessionItem(record: UnionSessionRecord | undefined, hosted: HostedSessionRecord | undefined): WorkItem {
+  const id = record?.id ?? hosted?.id ?? '';
+  const ended = hosted ? hosted.status === 'terminated' : isClosedStatus(record?.status ?? '');
+  const reaped = !hosted && record !== undefined && isReapedStatus(record);
+  const parts = hosted
+    ? ['Hosted', hosted.workspaceRoot, `${hosted.turnCount} turn${hosted.turnCount === 1 ? '' : 's'}`]
+    : [sessionKindLabel(record?.kind ?? ''), projectLabel(record?.project ?? '')];
+  if (record && record.pendingInputCount > 0) parts.push(`${record.pendingInputCount} waiting`);
+  const updatedAt = Math.max(record?.updatedAt ?? 0, hosted?.updatedAt ?? 0);
+  parts.push(whenLabel(updatedAt));
+  const status = hosted
+    ? sentenceCase(hostedStatusLabel(hosted.status))
+    : reaped ? 'Reaped' : ended ? 'Closed' : sentenceCase(record?.status ?? '') || 'Active';
+  const tone: StatusTone = record?.lastError ? 'bad' : ended ? 'idle' : hosted?.status === 'running' ? 'live' : 'ok';
   return {
-    key: `hosted:${session.id}`,
-    type: 'hosted',
-    id: session.id,
+    key: `session:${id}`,
+    type: 'session',
+    id,
     kind: 'sessions',
-    group: terminated ? 'finished' : 'running',
-    title: session.title || session.id,
-    meta: ['Hosted', session.workspaceRoot, `${session.turnCount} turn${session.turnCount === 1 ? '' : 's'}`].filter(Boolean).join(' · '),
-    tone: terminated ? 'idle' : session.status === 'running' ? 'live' : 'ok',
-    status: sentenceCase(hostedStatusLabel(session.status)),
+    group: ended ? 'finished' : 'running',
+    title: record?.title || hosted?.title || id,
+    meta: parts.filter(Boolean).join(' · '),
+    tone,
+    status,
+    value: messageCountValue(Math.max(record?.messageCount ?? 0, hosted?.messageCount ?? 0)),
     depth: 0,
-    sortAt: session.updatedAt,
+    sortAt: updatedAt,
   };
 }
 
@@ -438,15 +439,19 @@ export function buildWorkItems(sources: WorkSources): WorkItem[] {
 
   const approvals = [...sources.approvals].map(approvalItem).sort((a, b) => b.sortAt - a.sortAt);
   const attempts = sources.attemptGroups.map(attemptGroupItem);
-  const hosted = sources.hosted.map(hostedItem).sort((a, b) => b.sortAt - a.sortAt);
-  const sessions = sources.sessions.map(sessionItem).sort((a, b) => b.sortAt - a.sortAt);
+  const hostedById = new Map(sources.hosted.map((session) => [session.id, session]));
+  const unionIds = new Set(sources.sessions.map((record) => record.id));
+  const sessions = [
+    ...sources.sessions.map((record) => sessionItem(record, hostedById.get(record.id))),
+    ...sources.hosted.filter((session) => !unionIds.has(session.id)).map((session) => sessionItem(undefined, session)),
+  ].sort((a, b) => b.sortAt - a.sortAt);
   const tasks = sources.tasks.map(taskItem).sort((a, b) => b.sortAt - a.sortAt);
   const ci = sources.ciWatches.map(ciItem).sort((a, b) => b.sortAt - a.sortAt);
 
   // Fleet rows keep their tree order (parents before children); the other
   // sources follow, newest first.
   const contracts = [...contractRows.entries()].filter(([id]) => !representedContracts.has(id)).map(([, item]) => item).sort((a, b) => b.sortAt - a.sortAt);
-  return [...contracts, ...approvals, ...attempts, ...fleetRows, ...hosted, ...sessions, ...tasks, ...ci];
+  return [...contracts, ...approvals, ...attempts, ...fleetRows, ...sessions, ...tasks, ...ci];
 }
 
 export interface WorkGroups {

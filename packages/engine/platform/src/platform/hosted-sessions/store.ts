@@ -69,6 +69,11 @@ export interface HostedSessionLoadReport {
   readonly swept: readonly string[];
   /** Sessions dropped because the directory was over `maxSessions`, by id. */
   readonly evicted: readonly string[];
+  /**
+   * The evicted sessions that were still live on disk, each stamped terminated
+   * with the reason `evicted`, so the engine can announce how they ended.
+   */
+  readonly evictedLive?: readonly HostedSessionRecord[] | undefined;
 }
 
 const SESSION_FILE_SUFFIX = '.json';
@@ -211,8 +216,12 @@ export class HostedSessionStore {
     if (cap >= 1 && restored.length > cap) {
       const ordered = [...restored].sort((a, b) => rankForEviction(a.record) - rankForEviction(b.record));
       const overflow = ordered.slice(0, ordered.length - Math.floor(cap));
+      const evictedLive: HostedSessionRecord[] = [];
       for (const session of overflow) {
         evicted.push(session.record.id);
+        if (session.record.status !== 'terminated') {
+          evictedLive.push({ ...session.record, status: 'terminated', attachedClients: [], terminatedAt: now, terminatedReason: 'evicted', updatedAt: now });
+        }
         await this.delete(session.record.id);
       }
       const dropped = new Set(overflow.map((session) => session.record.id));
@@ -221,6 +230,7 @@ export class HostedSessionStore {
         rejected,
         swept,
         evicted,
+        ...(evictedLive.length > 0 ? { evictedLive } : {}),
       };
     }
     return { restored, rejected, swept, evicted };

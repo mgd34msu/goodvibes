@@ -29,6 +29,7 @@ import type { HostedWorkspaceFloor } from './workspace-floor.js';
 import { createContractIntake } from '../contract/intake-route.js';
 import { observeSessionContracts } from './session-contracts.js';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
+import { getProcessUntrustedContentLedger, withUntrustedContentScope } from '../security/untrusted-content.js';
 import {
   containmentFor,
   resolveHostedExecPosture,
@@ -148,9 +149,11 @@ export interface HostedSessionRuntime {
    * Submit a user message. Resolves when this message's own turn has ended,
    * including a message queued behind a running turn. Rejects when the session
    * is shut down before the message is delivered, so the caller never records
-   * an unanswered message as consumed.
+   * an unanswered message as consumed. `operatorInput` says an authenticated
+   * operator sent it (not a channel, schedule or other automation), which is
+   * what starts a new untrusted-content turn for this session.
    */
-  submit(text: string, correlationId?: string): Promise<void>;
+  submit(text: string, correlationId?: string, options?: { readonly operatorInput?: boolean | undefined }): Promise<void>;
   /** Dedicated native delivery; refuses queue acceptance and requires actual completion. */
   submitNative(permit: NativeConversationTurnPermit, inputId: string, correlationId: string): Promise<void>;
   /** Interrupt the in-flight turn. Returns whether one was running. */
@@ -175,6 +178,13 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
   const originSurface = options.originSurface?.trim() || services.surfaceRoot;
   const clientOwnedStore = resolveClientOwnedStore(services, originSurface);
   const sessionId = options.sessionId;
+  // This session's own untrusted-content window. Every turn runs inside it, so
+  // what its tools read is recorded under it and its outward actions are judged
+  // against it alone: another session's pages never count against this one's
+  // sends. The window opens empty when the loop is composed.
+  const contentScope = hostedSessionContentScope(sessionId);
+  const ledger = getProcessUntrustedContentLedger();
+  withUntrustedContentScope(contentScope, () => ledger.startTurn());
   const conversation = new ConversationManager();
   const toolRegistry = new ToolRegistry();
   const contextAccountingHolder = new ContextAccountingHolder();
@@ -351,30 +361,36 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       deleteQueuedMessage: (id: string) => orchestrator.deleteQueuedMessage(id),
     },
     isRunning: () => orchestrator.isTurnInFlight,
-    submit: async (text: string, correlationId?: string): Promise<void> => {
+    submit: async (text: string, correlationId?: string, submitOptions?: { readonly operatorInput?: boolean | undefined }): Promise<void> => {
       if (disposed) throw new HostedSessionUnavailableError(sessionId, 'its loop was shut down before this message was delivered');
-      // `ownerDirect` is deliberately unset. It attests that the transport
-      // authenticated the OWNER himself, and a verb call carrying an operator
-      // token cannot honestly claim that, leaving it unset keeps the
-      // untrusted-content window open, which is the safe direction.
-      await withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(text, undefined, {
-        awaitQueuedTurn: true,
-        origin: {
-          source: 'hosted-session',
-          surface: 'service',
-          // Carry only the broker's correlation identity. It associates this
-          // actual turn with its submitting input; it conveys no authority.
-          ...(correlationId === undefined ? {} : { metadata: { correlationId } }),
-        },
-      }));
+      // `ownerDirect` is deliberately unset: it also decides the gate's surface
+      // authority, and a verb call carrying an operator token is not the owner
+      // at his own terminal. The window is this session's own instead, and an
+      // operator's input starts its next turn here. Only when no turn is in
+      // flight: a message queued behind a running turn must not erase the
+      // evidence that turn's pending send is judged against. Channel and
+      // automation input never starts one, so their exposure accumulates.
+      await withUntrustedContentScope(contentScope, async () => {
+        if (submitOptions?.operatorInput === true && !orchestrator.isTurnInFlight && !orchestrator.isThinking) ledger.startTurn();
+        await withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(text, undefined, {
+          awaitQueuedTurn: true,
+          origin: {
+            source: 'hosted-session',
+            surface: 'service',
+            // Carry only the broker's correlation identity. It associates this
+            // actual turn with its submitting input; it conveys no authority.
+            ...(correlationId === undefined ? {} : { metadata: { correlationId } }),
+          },
+        }));
+      });
     },
     submitNative: async (permit, inputId, correlationId): Promise<void> => {
       const source = readNativeConversationTurnPermit(permit);
       if (orchestrator.isTurnInFlight || orchestrator.isThinking
         || readNativeConversationTurnStatus(permit) !== 'unclaimed') throw new Error('Native turn cannot be queued or replayed');
       orchestrator.bindNativeConversationProject(source.projectId);
-      await withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(source.text, undefined, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
-        origin: { source: 'native-hosted-conversation', surface: 'service', metadata: { inputId, correlationId } } }));
+      await withUntrustedContentScope(contentScope, () => withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(source.text, undefined, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
+        origin: { source: 'native-hosted-conversation', surface: 'service', metadata: { inputId, correlationId } } })));
       if (readNativeConversationTurnStatus(permit) !== 'settled') throw new Error('Native hosted turn did not complete');
     },
     cancelNative: permit => orchestrator.cancelNativeConversationTurn(permit),
@@ -403,6 +419,11 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     },
   };
   return runtime;
+}
+
+/** The untrusted-content scope a hosted session's turns run in. */
+export function hostedSessionContentScope(sessionId: string): string {
+  return `session:${sessionId}`;
 }
 
 /** A stable id for a new hosted session. */

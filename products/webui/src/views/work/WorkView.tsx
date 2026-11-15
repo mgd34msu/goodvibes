@@ -51,7 +51,8 @@ import { ApprovalDetail } from './ApprovalDetail';
 import { AttemptGroupDetail } from './AttemptGroupDetail';
 import { CheckpointsPanel } from './CheckpointsPanel';
 import { CiWatchDetail } from './CiWatchDetail';
-import { HostedSessionDetail, useHostedAttachment } from './HostedSessionDetail';
+import { useHostedAttachment } from './HostedSessionDetail';
+import { HostedSessionWorkDetail } from './HostedSessionWorkDetail';
 import { NewWorkMenu } from './NewWorkMenu';
 import { useContractScope } from '../../hooks/useContracts';
 import type { ClientLifetime } from '../../lib/client-lifetime';
@@ -81,6 +82,11 @@ export interface WorkViewProps {
   streamPaused?: boolean;
   /** Open a session in the Chat view. */
   onOpenSession?: (sessionId: string) => void;
+}
+
+/** A hosted session is a session: its one row and pane live under `session:<id>`, so an older `hosted:<id>` key opens the same. */
+function workKey(key: string): string {
+  return key.startsWith('hosted:') ? `session:${key.slice('hosted:'.length)}` : key;
 }
 
 function kindFromTab(tab: string | undefined): WorkKind | 'all' {
@@ -140,7 +146,6 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
   const dismissedRef = useRef(Boolean(initialFocus));
   const [sessionTab, setSessionTab] = useState<SessionTab>(tab === 'checkpoints' ? 'checkpoints' : 'transcript');
 
-  const selectedHostedId = selectedKey.startsWith('hosted:') ? selectedKey.slice('hosted:'.length) : null;
   const data = useWorkData({
     contractScope,
     subscriptionActive,
@@ -152,6 +157,13 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
     dismissedRef.current = true;
     setSelectedKey('');
   }, []);
+  // A session is hosted when the engine lists it, or the union list says its kind is hosted.
+  const hostedIds = useMemo(() => new Set([
+    ...data.hostedRecords.map((session) => session.id),
+    ...data.sessionRecords.filter((record) => record.kind === 'hosted').map((record) => record.id),
+  ]), [data.hostedRecords, data.sessionRecords]);
+  const selectedSessionId = selectedKey.startsWith('session:') ? selectedKey.slice('session:'.length) : null;
+  const selectedHostedId = selectedSessionId !== null && hostedIds.has(selectedSessionId) ? selectedSessionId : null;
   const hostedAttachment = useHostedAttachment(selectedHostedId, data.hostedRecords, closeDetail);
   // A push notification's "Allow" opens the approval for review; it never approves by itself.
   const approvalActions = useApprovalActions({
@@ -175,7 +187,8 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
   const groups = useMemo(() => groupWorkItems(items, kind, query), [items, kind, query]);
   const selectedItem = useMemo(() => items.find((item) => item.key === selectedKey) ?? null, [items, selectedKey]);
 
-  const openItem = useCallback((key: string) => {
+  const openItem = useCallback((raw: string) => {
+    const key = workKey(raw);
     setSelectedKey(key);
     if (key.startsWith('session:')) setSessionTab((current) => (tab === 'checkpoints' ? 'checkpoints' : current));
   }, [tab]);
@@ -269,6 +282,21 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
       }
       case 'session': {
         const record = data.sessionRecords.find((s) => s.id === id);
+        if (hostedIds.has(id)) {
+          return (
+            <HostedSessionWorkDetail
+              key={id}
+              sessionId={id}
+              attachment={hostedAttachment}
+              record={record}
+              fallbackTitle={nonEmpty(record?.title) ?? nonEmpty(data.hostedRecords.find((h) => h.id === id)?.title) ?? id}
+              tab={sessionTab}
+              onTabChange={setSessionTab}
+              streamPaused={streamPaused}
+              onClose={closeDetail}
+            />
+          );
+        }
         return record ? (
           <SessionDetail
             key={record.id}
@@ -282,10 +310,6 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
             onClose={closeDetail}
           />
         ) : null;
-      }
-      case 'hosted': {
-        const row = data.hostedRecords.find((h) => h.id === id);
-        return <HostedSessionDetail attachment={hostedAttachment} fallbackTitle={nonEmpty(row?.title) ?? id} onClose={closeDetail} />;
       }
       case 'task': {
         const task = data.taskRecords.find((t) => t.id === id);
@@ -401,7 +425,7 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
     <DataPage
       title={WORK.label}
       description={data.firstLoad ? WORK.description : workSummary(scope === 'archived' ? items : items.filter((i) => i.group !== 'finished'), scope === 'archived')}
-      action={<NewWorkMenu lifetime={contractScope} onCreated={(key) => { dismissedRef.current = true; setSelectedKey(key); }} />}
+      action={<NewWorkMenu lifetime={contractScope} onCreated={(key) => { dismissedRef.current = true; setSelectedKey(workKey(key)); }} />}
       filters={(
         <>
           <Segmented<WorkTab>

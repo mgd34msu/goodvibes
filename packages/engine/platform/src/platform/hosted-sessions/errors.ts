@@ -7,17 +7,32 @@
 
 /** A hosted session id nobody here knows. */
 export class HostedSessionNotFoundError extends Error {
+  readonly retryable = false;
   constructor(public readonly sessionId: string) {
     super(`This daemon hosts no session ${sessionId}.`);
     this.name = 'HostedSessionNotFoundError';
   }
 }
 
-/** A known hosted session that cannot serve this request, with the reason. */
+/** A known hosted session that cannot serve this request, with the reason. A retry cannot change it. */
 export class HostedSessionUnavailableError extends Error {
+  readonly retryable = false;
   constructor(public readonly sessionId: string, reason: string) {
     super(`Hosted session ${sessionId} is unavailable: ${reason}.`);
     this.name = 'HostedSessionUnavailableError';
+  }
+}
+
+/**
+ * A live hosted session whose loop cannot be built yet: its workspace floor is
+ * still being acquired or its provider registry is not ready. Nothing ran, so
+ * the same request can be sent again shortly.
+ */
+export class HostedSessionNotReadyError extends Error {
+  readonly retryable = true;
+  constructor(public readonly sessionId: string, cause: unknown, detail: string) {
+    super(`Hosted session ${sessionId} is not ready yet: ${detail}. Nothing was run; send the request again in a moment.`, { cause });
+    this.name = 'HostedSessionNotReadyError';
   }
 }
 

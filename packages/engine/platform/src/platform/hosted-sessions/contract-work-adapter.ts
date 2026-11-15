@@ -12,6 +12,11 @@
  * `result` returns its answer as output and its status line as summary.
  *
  * The external task id is the contract id.
+ *
+ * A session the adapter created for a dispatch ends when its contract settles,
+ * on the runner's own settle event, and an idempotency key is forgotten then
+ * too: a requester that never polls again leaves nothing behind. Without a
+ * settle source the next status, result or cancel after settlement does it.
  */
 import {
   contractWorkHandle,
@@ -44,6 +49,17 @@ export interface HostedContractWorkAdapterDeps {
    * identity of its own, so it cannot tell whose session it is.
    */
   readonly ownsSession?: ((sessionId: string, request: Parameters<ContractExternalWorkAdapter['dispatch']>[0]) => boolean) | undefined;
+  /**
+   * Subscribes to contract settlement (passed, failed, cancelled) by contract
+   * id; returns the unsubscribe. The daemon passes its runtime bus, where every
+   * floor's runner publishes. Omitted ⇒ settlement is noticed on the next poll.
+   */
+  readonly settled?: ((listener: (contractId: string) => void) => () => void) | undefined;
+}
+
+/** The adapter, plus the release of its settle subscription. */
+export interface HostedContractWorkAdapter extends ContractExternalWorkAdapter {
+  close(): void;
 }
 
 /** The reason a cancel through the adapter records when the caller gives none. */
@@ -78,11 +94,13 @@ function insideRoot(root: string, candidate: string): boolean {
   return fromRoot === '' || (!fromRoot.startsWith('..') && !isAbsolute(fromRoot));
 }
 
-export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterDeps): ContractExternalWorkAdapter {
+export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterDeps): HostedContractWorkAdapter {
   /** Sessions this adapter created for a dispatch, by contract id: it ends them with the work. */
   const createdFor = new Map<string, string>();
   /** The handle a dispatch with an idempotency key returned, so a retry does not start a second contract. */
   const dispatched = new Map<string, Promise<Awaited<ReturnType<ContractExternalWorkAdapter['dispatch']>>>>();
+  /** The idempotency key each keyed dispatch's contract was started under, so settlement forgets it. */
+  const keyOf = new Map<string, string>();
 
   const endSession = async (sessionId: string): Promise<void> => {
     try {
@@ -98,13 +116,29 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
     return contract;
   };
 
-  /** Ends the session made for a contract once the contract has settled. */
-  const releaseWhenSettled = async (externalTaskId: string, status: string): Promise<void> => {
-    const sessionId = createdFor.get(externalTaskId);
-    if (sessionId === undefined || !SETTLED_STATUSES.has(status)) return;
-    createdFor.delete(externalTaskId);
+  /** The contract settled: forget its idempotency key and end the session made for it. */
+  const release = async (contractId: string): Promise<void> => {
+    const key = keyOf.get(contractId);
+    if (key !== undefined) {
+      keyOf.delete(contractId);
+      dispatched.delete(key);
+    }
+    const sessionId = createdFor.get(contractId);
+    if (sessionId === undefined) return;
+    createdFor.delete(contractId);
     await endSession(sessionId);
   };
+
+  /** The poll-time release, used only when no settle source was given. */
+  const releaseWhenSettled = async (externalTaskId: string, status: string): Promise<void> => {
+    if (deps.settled !== undefined || !SETTLED_STATUSES.has(status)) return;
+    await release(externalTaskId);
+  };
+
+  const unsubscribe = deps.settled?.((contractId) => {
+    if (!createdFor.has(contractId) && !keyOf.has(contractId)) return;
+    void release(contractId);
+  });
 
   const dispatchOnce: ContractExternalWorkAdapter['dispatch'] = async (request) => {
     let sessionId = metadataString(request.metadata, 'sessionId');
@@ -136,7 +170,12 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
       if (created) await endSession(sessionId);
       throw error;
     }
-    if (created) createdFor.set(started.contract.id, sessionId);
+    if (created) {
+      createdFor.set(started.contract.id, sessionId);
+      // A contract that settled while it was being started has already sent its event.
+      const now = deps.runner.get(started.contract.id);
+      if (deps.settled !== undefined && now !== null && SETTLED_STATUSES.has(now.status)) void release(started.contract.id);
+    }
     return contractWorkHandle(started.contract, {
       ...(request.contractId === undefined ? {} : { requestingContractId: request.contractId }),
       ...(request.status === undefined ? {} : { requestingStatus: request.status }),
@@ -152,8 +191,17 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
       const attempt = dispatchOnce(request);
       dispatched.set(key, attempt);
       // A failed attempt is not remembered: the retry is the point of the key.
-      attempt.catch(() => { if (dispatched.get(key) === attempt) dispatched.delete(key); });
+      attempt.then((handle) => {
+        if (dispatched.get(key) !== attempt) return;
+        keyOf.set(handle.externalTaskId, key);
+        // Settled before the handle came back: the key has nothing left to guard.
+        const contract = deps.runner.get(handle.externalTaskId);
+        if (deps.settled !== undefined && contract !== null && SETTLED_STATUSES.has(contract.status)) void release(handle.externalTaskId);
+      }, () => { if (dispatched.get(key) === attempt) dispatched.delete(key); });
       return attempt;
+    },
+    close() {
+      unsubscribe?.();
     },
     async status(externalTaskId) {
       const contract = contractOf(externalTaskId);

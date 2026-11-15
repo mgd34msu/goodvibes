@@ -9,8 +9,10 @@ export const nativeHostedTurnStartRequestSchema = nativeHostedTurnRequestSchema.
 });
 export const nativeHostedTurnSnapshotSchema = strictObject({
   projectId: id, requestId: id, inputId: id, sourceRevision: id,
-  state: enumSchema(['preparing', 'queued', 'running', 'cancelling', 'completed', 'cancelled', 'recovery-required']),
+  state: enumSchema(['preparing', 'queued', 'running', 'cancelling', 'completed', 'failed', 'cancelled', 'recovery-required']),
   sessionId: id.nullable(), brokerInputId: id.nullable(), correlationId: id.nullable(),
+  /** On `failed`: what failed, and whether starting the same input again is allowed. */
+  failure: strictObject({ summary: string().max(1000), retryable: boolean() }).optional(),
 }).refine(value => [value.sessionId, value.brokerInputId, value.correlationId].every(item => item === null)
   ? !['queued', 'running', 'cancelling', 'completed'].includes(value.state)
   : [value.sessionId, value.brokerInputId, value.correlationId].every(item => item !== null), 'Incomplete broker identity');

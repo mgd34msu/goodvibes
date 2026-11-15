@@ -92,6 +92,7 @@ function harness() {
         admin,
         principalKind,
         principalId,
+        credential: principalKind === "token" && principalId !== "shared-token" ? "device-token" : principalKind === "token" ? "shared-token" : "user-session",
         scopes,
         roles: [],
         authMode: "shared-token",

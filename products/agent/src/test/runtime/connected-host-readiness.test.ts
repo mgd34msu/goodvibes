@@ -14,7 +14,7 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 const paired: OperatorMethodOutput<'control.auth.current'> = {
   authenticated: true, authMode: 'shared-token', tokenPresent: true,
   authorizationHeaderPresent: true, sessionCookiePresent: false,
-  principalId: 'synthetic-paired-owner', principalKind: 'token', admin: true,
+  principalId: 'synthetic-paired-owner', principalKind: 'token', credential: 'device-token', admin: true,
   scopes: ['read:work-ledger', 'write:work-ledger'], roles: [],
 };
 const envNames = ['GOODVIBES_CONNECTED_HOST_TOKEN', 'GOODVIBES_DAEMON_TOKEN'] as const;

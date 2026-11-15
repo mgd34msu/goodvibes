@@ -18,7 +18,7 @@ async function withFixture(run: (f: { homeDirectory: string; configManager: Conf
   const minted = 'gvp_' + 'c'.repeat(32); const id = 'pair-12345678-1234-1234-1234-123456789abc'; let migrations = 0; let requests = 0;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
     requests++;
-    if (new URL(request.url).pathname === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false, principalId: request.headers.get('authorization') === `Bearer ${minted}` ? `pairing:${id}` : 'shared-token', principalKind: 'token', admin: true, scopes: ['*'], roles: [] });
+    if (new URL(request.url).pathname === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false, principalId: request.headers.get('authorization') === `Bearer ${minted}` ? `pairing:${id}` : 'shared-token', principalKind: 'token', credential: (request.headers.get('authorization') === `Bearer ${minted}` ? `pairing:${id}` : 'shared-token') === 'shared-token' ? 'shared-token' as const : 'device-token' as const, admin: true, scopes: ['*'], roles: [] });
     if (new URL(request.url).pathname === '/api/control-plane/methods/pairing.tokens.migrate/invoke') {
       migrations++; const { body } = await request.json() as { body: { name: string } };
       return Response.json({ token: { token: minted, id, name: body.name, createdAt: Date.now() } });

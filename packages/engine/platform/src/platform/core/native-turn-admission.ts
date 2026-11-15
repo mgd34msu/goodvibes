@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { ContentPart } from '../providers/interface.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { logger } from '../utils/logger.js';
@@ -31,11 +32,41 @@ export interface NativeConversationTurnAdmission {
   readonly source: NativeConversationTurnSource;
   status: Exclude<NativeConversationTurnStatus, 'unclaimed'>;
 }
-// Intentionally retained for the process lifetime, including settled attempts.
-// Durable restart ambiguity is owned by the product dispatch claim, not this map.
-const inputs = new Map<string, NativeConversationTurnAdmission>();
+/** A turn that reached a final state keeps only what refusing a replay needs. */
+interface FinishedNativeConversationTurn {
+  readonly status: 'settled' | 'recovery_required';
+  /** sha256 of the turn's identity; the request text, context and permit are released. */
+  readonly identity: string;
+}
+// The map refuses an in-process replay; durable restart ambiguity is owned by
+// the product dispatch claim. Live turns keep their admission; a finished turn
+// keeps its status and an identity hash, and only the newest finished turns
+// are kept.
+const MAX_FINISHED_TURNS = 4096;
+const inputs = new Map<string, NativeConversationTurnAdmission | FinishedNativeConversationTurn>();
+let finishedCount = 0;
 const keyOf = (source: NativeConversationTurnSource) => JSON.stringify([source.projectId, source.sourceRef.inputId]);
 const identityOf = (source: NativeConversationTurnSource) => JSON.stringify([source.projectId, source.requestId, source.sourceRef, source.route, source.text]);
+const identityHash = (source: NativeConversationTurnSource) => createHash('sha256').update(identityOf(source)).digest('hex');
+const isLive = (entry: NativeConversationTurnAdmission | FinishedNativeConversationTurn): entry is NativeConversationTurnAdmission => 'permit' in entry;
+function sameIdentity(entry: NativeConversationTurnAdmission | FinishedNativeConversationTurn, source: NativeConversationTurnSource): boolean {
+  return isLive(entry) ? identityOf(entry.source) === identityOf(source) : entry.identity === identityHash(source);
+}
+
+/** Replace a turn that reached a final state with its status and identity hash. */
+function finish(admission: NativeConversationTurnAdmission, status: FinishedNativeConversationTurn['status']): void {
+  const key = keyOf(admission.source);
+  admission.status = status;
+  inputs.delete(key);
+  inputs.set(key, Object.freeze({ status, identity: identityHash(admission.source) }));
+  finishedCount++;
+  if (finishedCount <= MAX_FINISHED_TURNS) return;
+  for (const [oldest, entry] of inputs) {
+    if (isLive(entry)) continue;
+    inputs.delete(oldest);
+    if (--finishedCount <= MAX_FINISHED_TURNS) break;
+  }
+}
 
 export function validateNativeConversationTurn(permit: NativeConversationTurnPermit, text: string, content?: readonly ContentPart[], projectId?: string): NativeConversationTurnSource {
   const source = readNativeConversationTurnPermit(permit);
@@ -51,11 +82,11 @@ export function admitNativeConversationTurn(permit: NativeConversationTurnPermit
   const source = validateNativeConversationTurn(permit, text, content, projectId);
   const key = keyOf(source), prior = inputs.get(key);
   if (prior) {
-    if (identityOf(prior.source) !== identityOf(source)) throw new NativeConversationTurnAdmissionError('identity_mismatch');
+    if (!sameIdentity(prior, source)) throw new NativeConversationTurnAdmissionError('identity_mismatch');
     if (prior.status === 'recovery_required') throw new NativeConversationTurnAdmissionError('recovery_required');
-    if (prior.status !== 'retryable') return null;
-    // Failover must preserve the original opaque binding, not reconstruct it.
-    if (prior.permit !== permit) throw new NativeConversationTurnAdmissionError('recovery_required');
+    if (prior.status !== 'retryable' || !isLive(prior)) return null;
+    // A turn that failed before any effect may run again for the same source;
+    // the identity compared above is what binds it, whichever permit carries it.
   }
   const admission: NativeConversationTurnAdmission = { permit, source, status: 'queued' };
   inputs.set(key, admission);
@@ -65,7 +96,7 @@ export function admitNativeConversationTurn(permit: NativeConversationTurnPermit
 export function readNativeConversationTurnStatus(permit: NativeConversationTurnPermit): NativeConversationTurnStatus {
   const source = readNativeConversationTurnPermit(permit);
   const prior = inputs.get(keyOf(source));
-  if (prior && identityOf(prior.source) !== identityOf(source)) throw new NativeConversationTurnAdmissionError('identity_mismatch');
+  if (prior && !sameIdentity(prior, source)) throw new NativeConversationTurnAdmissionError('identity_mismatch');
   return prior?.status ?? 'unclaimed';
 }
 
@@ -81,8 +112,9 @@ export function failNativeConversationTurn(admission: NativeConversationTurnAdmi
   // A refused move leaves the turn as it is: failing a settled turn would make
   // it admissible again, and a turn that needs recovery never becomes retryable.
   if (!move.ok) { logger.warn('Native conversation turn: failure report refused', { reason: move.reason, allowed: move.allowed }); return; }
-  admission.status = to;
+  if (to === 'recovery_required') finish(admission, to);
+  else admission.status = to;
 }
 export function settleNativeConversationTurn(admission: NativeConversationTurnAdmission): void {
-  if (inputs.get(keyOf(admission.source)) === admission && nativeConversationTurnLifecycle.can(admission.status, 'settled')) admission.status = 'settled';
+  if (inputs.get(keyOf(admission.source)) === admission && nativeConversationTurnLifecycle.can(admission.status, 'settled')) finish(admission, 'settled');
 }

@@ -28,7 +28,7 @@ function fixture(options: { mutate?: () => void; migrationResponse?: () => Respo
     const path = new URL(request.url).pathname; requests.push(path);
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
     if (path === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false,
-      principalId: token === minted || authStatus === 'paired' ? `pairing:${tokenId}` : 'shared-token', principalKind: 'token', admin: authStatus !== 'non-admin' && !(options.rejectMintedAuth && token === minted), scopes: ['*'], roles: [] });
+      principalId: token === minted || authStatus === 'paired' ? `pairing:${tokenId}` : 'shared-token', principalKind: 'token', credential: (token === minted || authStatus === 'paired' ? `pairing:${tokenId}` : 'shared-token') === 'shared-token' ? 'shared-token' as const : 'device-token' as const, admin: authStatus !== 'non-admin' && !(options.rejectMintedAuth && token === minted), scopes: ['*'], roles: [] });
     if (path === '/api/control-plane/methods/pairing.tokens.migrate/invoke' && request.method === 'POST') {
       migrations++; expect(token).toBe(shared);
       const body = await request.json() as { body: { name: string } };

@@ -21,7 +21,7 @@ const SELECTION_CHANGED = 'Native host selection changed.';
 const REDIRECT_REFUSED = 'Fetch redirect refused by request policy';
 
 const auth = { authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false,
-  principalId: 'redirected-principal', principalKind: 'token', admin: true, scopes: ['read:work-ledger', 'write:work-ledger', 'read:knowledge'], roles: [] };
+  principalId: 'redirected-principal', principalKind: 'token', credential: 'device-token', admin: true, scopes: ['read:work-ledger', 'write:work-ledger', 'read:knowledge'], roles: [] };
 const target = { workId: 'work', attemptId: 'attempt', expectedRevision: { work: 1, criteria: 1, attempt: 1 } };
 const source = { requestId: 'request', inputId: 'input', text: 'Original private source', unsupportedSources: [] };
 const turn = { kind: 'turn' as const, projectId: 'project', requestId: 'request', sourceRef: { version: 1 as const, inputId: 'input', sourceId: 'source', sourceRevision: 'r1', sessionId: 'session' }, route: 'answer' as const, text: source.text };

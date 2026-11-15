@@ -26,10 +26,12 @@ function description(state: NativeHostedTurnSnapshot["state"]): string {
       return "The host is cancelling the original turn and waiting for its owned work to stop.";
     case "completed":
       return "The host recorded completion of the original conversation delivery.";
+    case "failed":
+      return "The conversation turn ran and ended in an error. The session stays open for the next message.";
     case "cancelled":
       return "The original conversation delivery is cancelled. Effects already performed are not undone. Any recorded session identity is retained below.";
     case "recovery-required":
-      return "The original conversation delivery requires reconciliation. Its dispatch will not be replayed from this screen.";
+      return "The process that owned this turn stopped before it finished, so its outcome is unknown. Cancel it to release the session; it will not be replayed.";
   }
 }
 
@@ -46,8 +48,9 @@ export function NativeTurnStatus({
 }: NativeTurnStatusProps) {
   const snapshot = observation?.kind === "recorded" ? observation.snapshot : undefined;
   const sessionId = snapshot?.sessionId;
-  const canRequest = !observation || observation.kind === "not-found";
-  const terminal = snapshot?.state === "completed" || snapshot?.state === "cancelled";
+  const retryable = snapshot?.state === "failed" && snapshot.failure?.retryable === true;
+  const canRequest = !observation || observation.kind === "not-found" || retryable;
+  const terminal = snapshot?.state === "completed" || snapshot?.state === "cancelled" || snapshot?.state === "failed";
   return (
     <DetailSection title="Hosted conversation">
       {error && <p role="alert">{error}</p>}
@@ -67,6 +70,15 @@ export function NativeTurnStatus({
         <Facts
           items={[
             { label: "Conversation state", value: snapshot.state },
+            ...(snapshot.failure
+              ? [
+                  { label: "Failure", value: snapshot.failure.summary },
+                  {
+                    label: "Can be sent again",
+                    value: snapshot.failure.retryable ? "Yes, nothing was changed" : "No, start a new message",
+                  },
+                ]
+              : []),
             { label: "Conversation source revision", value: snapshot.sourceRevision },
             { label: "Hosted session", value: snapshot.sessionId ?? "Not recorded" },
             { label: "Broker input", value: snapshot.brokerInputId ?? "Not recorded" },
@@ -80,7 +92,7 @@ export function NativeTurnStatus({
         </Button>
         {canRequest && (
           <Button disabled={Boolean(busy) || requestDisabled} onClick={onRequest}>
-            Continue conversation request
+            {retryable ? "Send this message again" : "Continue conversation request"}
           </Button>
         )}
         {!terminal && observation?.kind !== "not-requested" && (

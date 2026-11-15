@@ -386,12 +386,17 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     },
     submitNative: async (permit, inputId, correlationId): Promise<void> => {
       const source = readNativeConversationTurnPermit(permit);
+      const before = readNativeConversationTurnStatus(permit);
+      // `retryable` is a turn that failed before any effect; it may run again.
       if (orchestrator.isTurnInFlight || orchestrator.isThinking
-        || readNativeConversationTurnStatus(permit) !== 'unclaimed') throw new Error('Native turn cannot be queued or replayed');
+        || (before !== 'unclaimed' && before !== 'retryable')) throw new Error(`Native turn cannot be queued or replayed: it is ${before}`);
       orchestrator.bindNativeConversationProject(source.projectId);
       await withUntrustedContentScope(contentScope, () => withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(source.text, undefined, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
         origin: { source: 'native-hosted-conversation', surface: 'service', metadata: { inputId, correlationId } } })));
-      if (readNativeConversationTurnStatus(permit) !== 'settled') throw new Error('Native hosted turn did not complete');
+      const after = readNativeConversationTurnStatus(permit);
+      if (after !== 'settled') throw new Error(after === 'retryable'
+        ? 'The model provider failed before the turn changed anything; the same message can be sent again.'
+        : `Native hosted turn did not complete: it is ${after.replace('_', ' ')}`);
     },
     cancelNative: permit => orchestrator.cancelNativeConversationTurn(permit),
     cancel: (): boolean => {

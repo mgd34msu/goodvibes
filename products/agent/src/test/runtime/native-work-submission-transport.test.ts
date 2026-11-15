@@ -23,7 +23,7 @@ function fixture() {
   const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: guarded(violations, async request => {
     expect(request.headers.get('authorization')).toBe('Bearer synthetic-submission-token');
     const path = new URL(request.url).pathname; requests.push(path);
-    if (path === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false, principalId: 'paired-principal-fixture', principalKind: 'token', admin: true, scopes: ['read:work-ledger', 'write:work-ledger'], roles: [] });
+    if (path === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false, principalId: 'paired-principal-fixture', principalKind: 'token', credential: 'device-token', admin: true, scopes: ['read:work-ledger', 'write:work-ledger'], roles: [] });
     if (path === '/api/work-ledger/project') return Response.json({ projectId: 'p' });
     if (path === '/api/work-ledger/snapshot') return Response.json({ projectId: 'p', cursor: 0, revision: 0, works: [] });
     if (path === '/api/work-ledger/history') return Response.json({ projectId: 'p', afterSequence: 0, throughSequence: 0, cursor: 0, hasMore: false, events: [] });

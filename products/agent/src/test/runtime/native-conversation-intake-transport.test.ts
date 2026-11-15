@@ -39,7 +39,7 @@ function fixture() {
     expect(request.headers.get('authorization')).toBe('Bearer synthetic-intake-token');
     const path = new URL(request.url).pathname; requests.push(path);
     if (revoked) return Response.json({ error: 'Revoked authority' }, { status: 403 });
-    if (path === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false, principalId, principalKind: 'token', admin: true, scopes, roles: [] });
+    if (path === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false, principalId, principalKind: 'token', credential: (principalId) === 'shared-token' ? 'shared-token' as const : 'device-token' as const, admin: true, scopes, roles: [] });
     if (path === '/api/work-ledger/project') return Response.json({ projectId });
     if (path === '/api/work-ledger/snapshot') { if (heldSnapshot) { snapshotArrived(); await heldSnapshot; } return Response.json({ projectId: 'p', cursor: 0, revision: 0, works: [] }); }
     if (path === '/api/work-ledger/history') return Response.json({ projectId: 'p', afterSequence: 0, throughSequence: 0, cursor: 0, hasMore: false, events: [] });

@@ -1,7 +1,7 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { WorkLedgerReadClient } from '../../workflow/work-ledger/index.js';
-import { WorkLedgerAccessError, projectWorkLedgerReadEvent, projectWorkLedgerReadWork } from '../../workflow/work-ledger/types.js';
+import { WorkLedgerAccessError, projectWorkLedgerReadEvent, type WorkLedgerReadEvent } from '../../workflow/work-ledger/types.js';
 import {
   WORK_LEDGER_READ_SCOPE, WORK_LEDGER_HISTORY_PAGE_SIZE, WORK_LEDGER_READ_MAX_BYTES,
   workLedgerReadSnapshotSchema, type WorkLedgerHistoryPage,
@@ -80,7 +80,8 @@ export function registerWorkLedgerGatewayMethods(catalog: GatewayMethodCatalog, 
       const snapshot = workLedgerReadSnapshotSchema.parse(await reader.readSnapshot());
       if (snapshot.projectId !== reader.projectId) throw new Error('Host reader project mismatch');
       if (invocation.isAuthorized?.() === false) throw new GatewayVerbError('Owner authorization changed', 'FORBIDDEN', 403);
-      return bounded({ ...snapshot, works: snapshot.works.map(view => ({ ...view, work: projectWorkLedgerReadWork(view.work) })), provenance: provenance(invocation) });
+      // The reader already projected each work for reading.
+      return bounded({ ...snapshot, provenance: provenance(invocation) });
     });
   });
   attach('workLedger.history', async invocation => {
@@ -88,33 +89,49 @@ export function registerWorkLedgerGatewayMethods(catalog: GatewayMethodCatalog, 
     const afterSequence = cursor(input.afterSequence, 'afterSequence');
     const through = input.throughSequence === undefined ? undefined : cursor(input.throughSequence, 'throughSequence');
     if (through !== undefined && through < afterSequence) invalid('throughSequence');
+    // Authorisation is checked once before the read and once before the reply;
+    // nothing between them can change it for this call.
+    if (invocation.isAuthorized?.() === false) throw new GatewayVerbError('Owner authorization changed', 'FORBIDDEN', 403);
+    const withProvenance = provenance(invocation) === 'available';
     return read(async () => {
-      // Snapshot supplies an honest durable high-water mark even for an empty page.
-      const snapshot = await reader.readSnapshot();
-      if (snapshot.projectId !== reader.projectId) throw new Error('Host reader project mismatch');
-      if (afterSequence > snapshot.cursor) invalid('afterSequence');
-      if (through !== undefined && through > snapshot.cursor) invalid('throughSequence');
-      const throughSequence = through ?? snapshot.cursor;
-      const all = await reader.history(afterSequence);
+      // One read gives both the high-water mark and the page.
+      const { cursor: highWater, events } = await readHistoryPage(reader, afterSequence);
+      if (afterSequence > highWater) invalid('afterSequence');
+      if (through !== undefined && through > highWater) invalid('throughSequence');
+      const throughSequence = through ?? highWater;
       const page: WorkLedgerHistoryPage = {
         projectId: reader.projectId, afterSequence, cursor: afterSequence, throughSequence,
-        hasMore: afterSequence < throughSequence, provenance: provenance(invocation), events: [],
+        hasMore: afterSequence < throughSequence, provenance: withProvenance ? 'available' : 'requires_read_knowledge', events: [],
       };
-      for (const rawEvent of all) {
-        const event = projectWorkLedgerReadEvent(rawEvent, page.provenance === 'available');
-        if (event.sequence > throughSequence) break;
-        if (invocation.isAuthorized?.() === false) throw new GatewayVerbError('Owner authorization changed', 'FORBIDDEN', 403);
-        if (event.sequence !== page.cursor + 1) throw new Error('History cursor is not contiguous');
-        const next = { ...page, cursor: event.sequence, hasMore: event.sequence < throughSequence, events: [...page.events, event] };
-        if (new TextEncoder().encode(JSON.stringify(next)).byteLength > WORK_LEDGER_READ_MAX_BYTES) {
-          if (page.events.length === 0) bounded(next);
+      // The page is sized by a running total: the envelope at its widest
+      // (largest cursor, `hasMore: false`) plus each event and its comma.
+      const encoder = new TextEncoder();
+      let bytes = encoder.encode(JSON.stringify({ ...page, cursor: throughSequence, hasMore: false })).byteLength;
+      for (const readEvent of events) {
+        if (readEvent.sequence > throughSequence) break;
+        if (readEvent.sequence !== page.cursor + 1) throw new Error('History cursor is not contiguous');
+        // The reader projected the event; only a caller without read:knowledge narrows it further.
+        const event = !withProvenance && readEvent.type === 'import_legacy' ? projectWorkLedgerReadEvent(readEvent, false) : readEvent;
+        const size = encoder.encode(JSON.stringify(event)).byteLength + (page.events.length > 0 ? 1 : 0);
+        if (bytes + size > WORK_LEDGER_READ_MAX_BYTES) {
+          if (page.events.length === 0) bounded({ ...page, events: [event] });
           break;
         }
+        bytes += size;
         page.events.push(event); page.cursor = event.sequence; page.hasMore = event.sequence < throughSequence;
-        if (page.events.length === WORK_LEDGER_HISTORY_PAGE_SIZE) break;
       }
       if (page.hasMore && page.events.length === 0) throw new Error('History cursor did not advance');
-      return bounded(page);
+      if (invocation.isAuthorized?.() === false) throw new GatewayVerbError('Owner authorization changed', 'FORBIDDEN', 403);
+      return page;
     });
   });
+}
+
+/** One page and the high-water mark; a reader without a page read pays the two reads. */
+async function readHistoryPage(reader: WorkLedgerReadClient, afterSequence: number): Promise<{ readonly cursor: number; readonly events: readonly WorkLedgerReadEvent[] }> {
+  if (reader.historyPage) return reader.historyPage(afterSequence, WORK_LEDGER_HISTORY_PAGE_SIZE);
+  const snapshot = await reader.readSnapshot();
+  if (snapshot.projectId !== reader.projectId) throw new Error('Host reader project mismatch');
+  if (afterSequence > snapshot.cursor) return { cursor: snapshot.cursor, events: [] };
+  return { cursor: snapshot.cursor, events: (await reader.history(afterSequence)).slice(0, WORK_LEDGER_HISTORY_PAGE_SIZE) };
 }

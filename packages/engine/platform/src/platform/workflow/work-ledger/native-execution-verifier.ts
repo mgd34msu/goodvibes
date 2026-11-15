@@ -1,9 +1,10 @@
 /** Host-only original-source checks. A terminal runner is never its own attestation. */
-import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync, type BigIntStats } from 'node:fs';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { canonicalJson, hashState, recordedJudgmentInputHash, readYesNo, type YesNoBand, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import { assertDurableCheckpoint, parseDurableAdmission } from '../../contract/durable-admission.js';
 import { assertNativeContractSource, nativeContractSourceForAdmission } from '../../contract/native-source.js';
@@ -32,10 +33,7 @@ function freeze<T>(value: T): T {
   return value;
 }
 function assertSynchronousGuard(check: () => unknown): void {
-  let result: unknown;
-  try { result = check(); }
-  catch (error) { drainOwned(error); throw error; }
-  if (result !== undefined) { drainOwned(result); throw new NativeWorkExecutionError('invalid'); }
+  assertSynchronousJudgmentGuard(check, () => new NativeWorkExecutionError('invalid'));
 }
 function contained(root: string, path: string): string {
   if (isAbsolute(path)) throw new Error('Native artifact path must be relative');
@@ -67,9 +65,11 @@ function evidenceRoot(contract: ContractView): string {
   }
   return realpathSync(contract.projectRoot);
 }
+/** What a file was when it was captured: its identity and times, and a digest of its bytes. */
+interface ArtifactIdentity { readonly dev: bigint; readonly ino: bigint; readonly size: bigint; readonly mtimeNs: bigint; readonly ctimeNs: bigint; readonly digest: string }
 type ArtifactSnapshot =
   | { readonly kind: 'absent'; readonly text: string; readonly byteLength: 0 }
-  | { readonly kind: 'file'; readonly bytes: Buffer; readonly text: string; readonly byteLength: number };
+  | { readonly kind: 'file'; readonly identity: ArtifactIdentity; readonly text: string; readonly byteLength: number };
 const ARTIFACT_MAX_BYTES = 20 * 1024 * 1024;
 function readArtifact(root: string, path: string): ArtifactSnapshot {
   const absolute = contained(root, path);
@@ -96,11 +96,28 @@ function readArtifact(root: string, path: string): ArtifactSnapshot {
       || !current.isFile() || current.isSymbolicLink() || current.dev !== after.dev || current.ino !== after.ino
       || current.size !== after.size || current.mtimeNs !== after.mtimeNs || current.ctimeNs !== after.ctimeNs) throw new Error('Native artifact changed during capture');
     const bytes = buffer.subarray(0, offset);
-    return { kind: 'file', bytes, byteLength: bytes.length, text: bytes.includes(0) ? `(binary file, ${bytes.length} bytes)` : bytes.toString('utf8') };
+    const identity = { dev: after.dev, ino: after.ino, size: after.size, mtimeNs: after.mtimeNs, ctimeNs: after.ctimeNs,
+      digest: createHash('sha256').update(bytes).digest('hex') };
+    return { kind: 'file', identity, byteLength: bytes.length, text: bytes.includes(0) ? `(binary file, ${bytes.length} bytes)` : bytes.toString('utf8') };
   } finally { closeSync(fd); }
 }
-function sameArtifact(left: ArtifactSnapshot, right: ArtifactSnapshot): boolean {
-  return left.kind === 'file' ? right.kind === 'file' && left.bytes.equals(right.bytes) : right.kind === 'absent';
+/**
+ * The file is still what was judged: one `lstat` compares identity and times,
+ * then one read compares the digest. Used once, immediately before publication.
+ */
+function artifactUnchanged(root: string, path: string, captured: ArtifactSnapshot): boolean {
+  const absolute = contained(root, path);
+  let named: BigIntStats;
+  try { named = lstatSync(absolute, { bigint: true }); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return captured.kind === 'absent';
+    throw error;
+  }
+  if (captured.kind !== 'file') return false;
+  const was = captured.identity;
+  if (!named.isFile() || named.dev !== was.dev || named.ino !== was.ino || named.size !== was.size
+    || named.mtimeNs !== was.mtimeNs || named.ctimeNs !== was.ctimeNs) return false;
+  const now = readArtifact(root, path);
+  return now.kind === 'file' && now.identity.digest === was.digest;
 }
 
 /** Reference slots a ledger evidence record has (types.ts) beyond the five the verifier always writes, less one spare. */
@@ -342,20 +359,21 @@ export async function verifyNativeWorkExecution(options: {
   const paths = [...new Set(contract.units.flatMap(unit => unit.touchedPaths))];
   const captured: (ArtifactSnapshot & { readonly path: string })[] = [];
   let bytes = 0;
+  // While verifying, "still wanted" is the abort signal. What was judged is
+  // compared once, by `assertCurrent` below, inside the publishing transaction.
   for (const path of paths) {
-    current(); const absolute = contained(root, path);
+    options.signal.throwIfAborted(); const absolute = contained(root, path);
     if (!await options.readAccessFilter(absolute)) throw new Error('Native artifact read is access-restricted');
-    current(); const content = readArtifact(root, path); bytes += content.byteLength;
+    options.signal.throwIfAborted(); const content = readArtifact(root, path); bytes += content.byteLength;
     if (bytes > 20 * 1024 * 1024) throw new Error('Native artifact capture exceeds total budget');
     captured.push({ path, ...content });
   }
   const assertCurrent = () => {
     current(); const latest = options.runner.get(admission.contractId);
     if (!latest || !isDeepStrictEqual(latest, contract) || evidenceRoot(latest) !== root) throw new Error('Native contract changed during verification');
-    for (const artifact of captured) if (!sameArtifact(readArtifact(root, artifact.path), artifact)) throw new Error('Native artifact changed during verification');
+    for (const artifact of captured) if (!artifactUnchanged(root, artifact.path, artifact)) throw new Error('Native artifact changed during verification');
     current();
   };
-  assertCurrent();
   const unit: ContractUnit = { id: 'native', groupId: 'native', title: 'Frozen native acceptance', goal: source.goal, brief: source.goal,
     role: 'research', dependsOn: [], files: [], attempts: 1,
     criteria: source.criteria.map((text, index) => ({ id: `native.c${index}`, text, quote: text, origin: 'stated', serves: [], disposition: 'judged', status: 'unread', readings: [] })),
@@ -369,7 +387,7 @@ export async function verifyNativeWorkExecution(options: {
   const pending = new Set<Promise<unknown>>();
   const checkPort: JudgmentPort = { ...options.port, ask(request) {
     const operation = Promise.resolve().then(async () => {
-      const active = () => { checkSignal.throwIfAborted(); assertCurrent(); request.signal?.throwIfAborted(); assertSynchronousGuard(() => request.beforeAttempt?.()); assertCurrent(); checkSignal.throwIfAborted(); };
+      const active = () => { checkSignal.throwIfAborted(); request.signal?.throwIfAborted(); assertSynchronousGuard(() => request.beforeAttempt?.()); checkSignal.throwIfAborted(); };
       const state = freeze(structuredClone({ ...(request.state as Record<string, EntryType>), originalSource })) as unknown as EntryType;
       const questions = freeze(structuredClone(request.questions));
       const context = freeze(structuredClone(request.context));
@@ -414,8 +432,9 @@ export async function verifyNativeWorkExecution(options: {
   } catch (error) {
     checkAbort.abort(); await Promise.allSettled([...pending]); throw error;
   }
-  assertCurrent(); if (result.discarded) throw new Error('Native verification cancelled');
-  for (const path of paths) { if (!await options.readAccessFilter(contained(root, path))) throw new Error('Native artifact read was revoked'); assertCurrent(); }
+  options.signal.throwIfAborted(); if (result.discarded) throw new Error('Native verification cancelled');
+  for (const path of paths) { if (!await options.readAccessFilter(contained(root, path))) throw new Error('Native artifact read was revoked'); }
+  options.signal.throwIfAborted();
   const decisionReferences = result.check.decisionIds.map((id, index): WorkEvidenceReference => {
     const entry = options.decisionLog.get(id); const site = index === 0 ? CHECK_SITES.judge : CHECK_SITES.quality;
     const expected = { ...(index === 0 ? judgeState(unit, evidence) : qualityState(unit, evidence)), originalSource } as unknown as EntryType;
@@ -438,7 +457,7 @@ export async function verifyNativeWorkExecution(options: {
     references: decisionReferences.map(item => item.ref) }));
   const passed = result.check.result === 'pass' && criteriaResults.every(item => item.status === 'satisfied');
   result.recordAction(`native settlement ${admission.contractId}: ${passed ? 'verified' : 'failed'} against ${admission.payloadRevision}`);
-  assertCurrent();
+  options.signal.throwIfAborted();
   return { attestation: freeze({ outcome: passed ? 'verified' : 'failed', reason: passed ? 'Every original native criterion and quality check passed against host-collected evidence.' : 'Original native criteria or quality did not pass verification.', source: 'host_check', criteriaResults, references }),
     report: (contract.answer?.trim() || 'Native execution finished; see revision-bound verification evidence.').slice(0, 20_000), assertCurrent };
 }

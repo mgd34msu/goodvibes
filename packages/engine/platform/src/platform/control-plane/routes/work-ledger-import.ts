@@ -6,6 +6,7 @@ import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { WORK_LEDGER_IMPORT_SCOPE, WORK_LEDGER_READ_SCOPE } from '../method-catalog-work-ledger.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
+import { requireNativeOwner } from './native-owner.js';
 import { LEGACY_IMPORT_MAX_BYTES, prepareLegacyWorkLedgerMigration, workLedgerCommandSchema } from '../../workflow/work-ledger/index.js';
 
 /** Trusted selected-host composition only. No path, authority or actor from request data. */
@@ -25,12 +26,7 @@ export function registerWorkLedgerImportGatewayMethods(catalog: GatewayMethodCat
     const input = readInvocationParams(invocation);
     if (new TextEncoder().encode(JSON.stringify(input)).byteLength > LEGACY_IMPORT_MAX_BYTES) throw new GatewayVerbError('Legacy import exceeds request limit', 'WORK_LEDGER_IMPORT_LIMIT', 413);
     if (!prepare) {
-      const authority = invocation.nativeExecutionAuthority, current = authority?.current();
-      if (!authority || !current || context.principalKind !== 'token' || current.kind !== 'pairing-token' || current.principalId !== context.principalId
-        || current.authorityId !== current.principalId || current.authorityRevision !== current.tokenId
-        || !NATIVE_IMPORT_SCOPES.every(scope => current.scopes.includes('*') || current.scopes.includes(scope))) {
-        throw new GatewayVerbError('Native legacy import requires a persisted paired-token owner', 'NATIVE_IMPORT_UNSUPPORTED_AUTHORITY', 403);
-      }
+      const authority = requireNativeOwner(invocation, NATIVE_IMPORT_SCOPES, 'Legacy import');
       const parsed = workLedgerCommandSchema.safeParse(input);
       if (!parsed.success || parsed.data.type !== 'import_legacy') throw new GatewayVerbError('Invalid exact import command', 'INVALID_ARGUMENT', 400);
       const result = await native.run(parsed.data, authority, { signal: invocation.signal, isAuthorized: () => invocation.isAuthorized?.(NATIVE_IMPORT_SCOPES) === true });

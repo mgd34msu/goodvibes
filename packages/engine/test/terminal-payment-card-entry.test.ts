@@ -30,7 +30,7 @@ function fixture(options: { readonly scopes?: readonly string[]; readonly create
     requests.push({ method: init?.method ?? 'GET', path: url.pathname, body });
     if (url.pathname === '/api/control-plane/auth') {
       return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true,
-        sessionCookiePresent: false, principalId: 'pairing:owner', principalKind: 'token', admin: true,
+        sessionCookiePresent: false, principalId: 'pairing:owner', principalKind: 'token', credential: 'device-token', admin: true,
         scopes: options.scopes ?? ['read:payments', 'write:payments'], roles: [] });
     }
     if (url.pathname === '/api/payments/cards' && init?.method === 'POST') {

@@ -47,7 +47,7 @@ export function interactiveHostPairingFixture(options: { holdAuth?: number; empt
         return new Response('', { headers: { 'content-type': 'application/json' } });
       return Response.json({ authenticated: authorization === `Bearer ${bootstrap}` || isPaired,
         authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false,
-        principalId: isPaired ? `pairing:${id}` : 'shared-token', principalKind: 'token', admin: !(options.rejectMinted && isPaired), scopes: ['*'], roles: [] });
+        principalId: isPaired ? `pairing:${id}` : 'shared-token', principalKind: 'token', credential: (isPaired ? `pairing:${id}` : 'shared-token') === 'shared-token' ? 'shared-token' as const : 'device-token' as const, admin: !(options.rejectMinted && isPaired), scopes: ['*'], roles: [] });
     }
     if (path === '/api/control-plane/methods/pairing.tokens.migrate/invoke' && request.method === 'POST') {
       if (authorization !== `Bearer ${bootstrap}`) { unexpected.push('invalid migration authority'); return new Response('unauthorized', { status: 401 }); }

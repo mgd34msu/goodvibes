@@ -58,6 +58,7 @@ function harness(admitted: Admitted, turnState: "running" | "completed") {
         admin: true,
         principalKind: "token",
         principalId: "paired-owner",
+        credential: "device-token",
         scopes: ["read:work-ledger", "write:work-ledger", "write:sessions"],
         roles: [],
         authMode: "shared-token",

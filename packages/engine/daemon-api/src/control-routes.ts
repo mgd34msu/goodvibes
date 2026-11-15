@@ -4,7 +4,7 @@ import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import { jsonErrorResponse } from './error-response.js';
 import { readSynthesizedDispatchDepth } from './gateway-rest-routes.js';
 import { GATEWAY_METHOD_INVOKE_PATH } from './operator.js';
-import type { AuthenticatedPrincipal } from './http-policy.js';
+import type { AuthenticatedPrincipal, CredentialKind } from './http-policy.js';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
@@ -163,6 +163,16 @@ const controlBodySchemas = createRouteBodySchemaRegistry({
  */
 export const EXPLICIT_USER_REQUEST_HEADER = 'x-goodvibes-explicit-user-request';
 
+/**
+ * The credential a resolved principal was authenticated with. The daemon's
+ * resolver hands back the request principal, which carries it; a resolver
+ * that does not (an embedding host's own) reports none rather than a guess.
+ */
+function credentialOf(principal: AuthenticatedPrincipal): CredentialKind | null {
+  const kind = (principal as { readonly credentialKind?: unknown }).credentialKind;
+  return kind === 'local' || kind === 'shared-token' || kind === 'device-token' || kind === 'user-session' ? kind : null;
+}
+
 function readExplicitUserRequest(req: Request): boolean | undefined {
   const raw = req.headers.get(EXPLICIT_USER_REQUEST_HEADER);
   if (raw === null) return undefined;
@@ -271,8 +281,10 @@ export function createDaemonControlRouteHandlers(
       const sessionCookiePresent = (req.headers.get('cookie') ?? '')
         .split(';')
         .some((segment) => segment.trim().startsWith(`${context.sessionCookieName}=`));
+      // The authenticator states which credential this is; nothing is inferred from a principal's name.
+      const credential = principal ? credentialOf(principal) : null;
       const authMode = principal
-        ? (principal.principalKind === 'token' && principal.principalId === 'shared-token' ? 'shared-token' : 'session')
+        ? (credential === 'shared-token' ? 'shared-token' : 'session')
         : token.length > 0
           ? 'invalid'
           : 'anonymous';
@@ -284,9 +296,11 @@ export function createDaemonControlRouteHandlers(
         sessionCookiePresent,
         principalId: principal?.principalId ?? null,
         principalKind: principal?.principalKind ?? null,
+        credential,
         admin: principal?.admin ?? false,
         scopes: principal?.scopes ?? [],
-        roles: session?.roles ?? [],
+        // A token credential has no login roles; its role is what its grant makes it.
+        roles: session?.roles ?? (principal ? (principal.admin ? ['admin'] : []) : []),
       };
 
       return Response.json(snapshot);

@@ -1,9 +1,6 @@
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, type Stats } from 'node:fs';
-import { dirname, resolve } from 'node:path';
 import {
-  acquireCrossProcessLock,
-  confirmFileDurable,
-  writeJsonFileAtomic,
+  BoundedJsonFile,
+  type BoundedJsonFileIO,
 } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import {
   nativeWorkSubmissionRequestSchema,
@@ -26,11 +23,7 @@ export interface NativeSubmissionJournalRecord {
   readonly command: NativeWorkSubmissionRequest;
 }
 
-export interface NativeSubmissionJournalIO {
-  readonly writeJsonFileAtomic: typeof writeJsonFileAtomic;
-  readonly confirmFileDurable: typeof confirmFileDurable;
-  readonly acquireCrossProcessLock: typeof acquireCrossProcessLock;
-}
+export type NativeSubmissionJournalIO = BoundedJsonFileIO;
 
 export class NativeSubmissionJournalError extends Error {
   constructor(readonly code: 'invalid_binding' | 'invalid_command' | 'invalid_journal' | 'journal_limit' | 'conflict') {
@@ -45,7 +38,6 @@ const ownKeys = (value: unknown, keys: readonly string[]): value is Record<strin
   !!value && typeof value === 'object' && !Array.isArray(value)
   && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))
 );
-const missing = (error: unknown): boolean => !!error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
 
 function copyBinding(value: unknown): NativeSubmissionJournalBinding {
   if (!ownKeys(value, bindingKeys) || !bindingKeys.every(key => typeof value[key] === 'string'
@@ -68,10 +60,12 @@ function copyCommand(value: unknown): NativeWorkSubmissionRequest {
   return parsed.data;
 }
 
-const sameBinding = (left: NativeSubmissionJournalBinding, right: NativeSubmissionJournalBinding): boolean => (
+/** The same host, project, workspace and principal. */
+export const sameNativeSubmissionBinding = (left: NativeSubmissionJournalBinding, right: NativeSubmissionJournalBinding): boolean => (
   bindingKeys.every(key => left[key] === right[key])
 );
-const sameCommand = (left: NativeWorkSubmissionRequest, right: NativeWorkSubmissionRequest): boolean => (
+/** The same request identity, revision and source. */
+export const sameNativeSubmissionCommand = (left: NativeWorkSubmissionRequest, right: NativeWorkSubmissionRequest): boolean => (
   left.requestId === right.requestId && left.inputId === right.inputId && left.expectedRevision === right.expectedRevision
   && left.goal === right.goal && left.criteria.length === right.criteria.length
   && left.criteria.every((criterion, index) => criterion === right.criteria[index])
@@ -88,47 +82,10 @@ function validateFile(value: unknown): JournalFile {
     let parsed: NativeSubmissionJournalRecord;
     try { parsed = { binding: copyBinding(record.binding), command: copyCommand(record.command) }; }
     catch { throw new NativeSubmissionJournalError('invalid_journal'); }
-    if (records.some(existing => sameBinding(existing.binding, parsed.binding))) throw new NativeSubmissionJournalError('invalid_journal');
+    if (records.some(existing => sameNativeSubmissionBinding(existing.binding, parsed.binding))) throw new NativeSubmissionJournalError('invalid_journal');
     records.push(parsed);
   }
   return { version: 1, records };
-}
-
-/** Check existing ancestors as well as the final file; never adopt symlink-backed state. */
-function assertDirectoryChain(path: string): void {
-  for (let current = dirname(path); ; current = dirname(current)) {
-    try {
-      const stat = lstatSync(current);
-      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new NativeSubmissionJournalError('invalid_journal');
-    } catch (error) { if (!missing(error)) throw error; }
-    if (dirname(current) === current) break;
-  }
-}
-
-function readFile(path: string): JournalFile {
-  let stat: Stats;
-  try { stat = lstatSync(path); }
-  catch (error) { if (missing(error)) return { version: 1, records: [] }; throw error; }
-  if (!stat.isFile() || stat.isSymbolicLink()) throw new NativeSubmissionJournalError('invalid_journal');
-  if (stat.size > NATIVE_SUBMISSION_JOURNAL_MAX_BYTES) throw new NativeSubmissionJournalError('journal_limit');
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
-  try {
-    const opened = fstatSync(fd);
-    if (!opened.isFile() || opened.ino !== stat.ino || opened.dev !== stat.dev) throw new NativeSubmissionJournalError('invalid_journal');
-    if (opened.size > NATIVE_SUBMISSION_JOURNAL_MAX_BYTES) throw new NativeSubmissionJournalError('journal_limit');
-    const bytes = new Uint8Array(NATIVE_SUBMISSION_JOURNAL_MAX_BYTES + 1);
-    let length = 0;
-    while (length < bytes.length) {
-      const count = readSync(fd, bytes, length, bytes.length - length, length);
-      if (!count) break;
-      length += count;
-    }
-    if (length > NATIVE_SUBMISSION_JOURNAL_MAX_BYTES) throw new NativeSubmissionJournalError('journal_limit');
-    let value: unknown;
-    try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length))); }
-    catch { throw new NativeSubmissionJournalError('invalid_journal'); }
-    return validateFile(value);
-  } finally { closeSync(fd); }
 }
 
 /**
@@ -141,48 +98,37 @@ function readFile(path: string): JournalFile {
  */
 export class NativeWorkSubmissionJournal {
   readonly path: string;
-  private readonly io: NativeSubmissionJournalIO;
+  private readonly file: BoundedJsonFile<JournalFile>;
 
   constructor(path: string, io: Partial<NativeSubmissionJournalIO> = {}) {
-    this.path = resolve(path);
-    this.io = { writeJsonFileAtomic, confirmFileDurable, acquireCrossProcessLock, ...io };
-  }
-
-  private async locked<T>(operation: () => T): Promise<T> {
-    assertDirectoryChain(this.path);
-    mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-    const release = await this.io.acquireCrossProcessLock(`${this.path}.lock`, { strictOwnership: true });
-    try {
-      assertDirectoryChain(this.path);
-      return operation();
-    } finally { release(); }
+    this.file = new BoundedJsonFile<JournalFile>(path, {
+      maxBytes: NATIVE_SUBMISSION_JOURNAL_MAX_BYTES, parse: validateFile, empty: () => ({ version: 1, records: [] }),
+      invalid: () => new NativeSubmissionJournalError('invalid_journal'), limit: () => new NativeSubmissionJournalError('journal_limit'), io,
+    });
+    this.path = this.file.path;
   }
 
   async read(binding: NativeSubmissionJournalBinding): Promise<NativeSubmissionJournalRecord | undefined> {
     const selected = copyBinding(binding);
-    return this.locked(() => readFile(this.path).records.find(record => sameBinding(record.binding, selected)));
+    return (await this.file.read()).records.find(record => sameNativeSubmissionBinding(record.binding, selected));
   }
 
-  /** null means absent, never an unconditional overwrite. */
+  /** null means absent, never an unconditional overwrite. The write is durable when this returns. */
   async save(binding: NativeSubmissionJournalBinding, command: NativeWorkSubmissionRequest, expectedRequestId: string | null): Promise<void> {
     const record = { binding: copyBinding(binding), command: copyCommand(command) };
     if (expectedRequestId !== null && (typeof expectedRequestId !== 'string' || !expectedRequestId.length)) {
       throw new NativeSubmissionJournalError('conflict');
     }
-    await this.locked(() => {
-      const file = readFile(this.path);
-      const index = file.records.findIndex(existing => sameBinding(existing.binding, record.binding));
+    await this.file.update(file => {
+      const index = file.records.findIndex(existing => sameNativeSubmissionBinding(existing.binding, record.binding));
       const current = file.records[index];
       if ((current?.command.requestId ?? null) !== expectedRequestId) throw new NativeSubmissionJournalError('conflict');
-      if (current && current.command.requestId === record.command.requestId && !sameCommand(current.command, record.command)) {
+      if (current && current.command.requestId === record.command.requestId && !sameNativeSubmissionCommand(current.command, record.command)) {
         throw new NativeSubmissionJournalError('conflict');
       }
       if (index < 0) file.records.push(record); else file.records[index] = record;
-      if (file.records.length > NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS
-        || Buffer.byteLength(JSON.stringify(file), 'utf8') > NATIVE_SUBMISSION_JOURNAL_MAX_BYTES) {
-        throw new NativeSubmissionJournalError('journal_limit');
-      }
-      this.io.writeJsonFileAtomic(this.path, file, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
+      if (file.records.length > NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS) throw new NativeSubmissionJournalError('journal_limit');
+      return { next: file, value: undefined };
     });
   }
 
@@ -190,24 +136,25 @@ export class NativeWorkSubmissionJournal {
   async remove(binding: NativeSubmissionJournalBinding, requestId: string): Promise<void> {
     const selected = copyBinding(binding);
     if (typeof requestId !== 'string' || !requestId.length) throw new NativeSubmissionJournalError('conflict');
-    await this.locked(() => {
-      const file = readFile(this.path);
-      const index = file.records.findIndex(existing => sameBinding(existing.binding, selected));
-      if (index < 0) return;
+    await this.file.update(file => {
+      const index = file.records.findIndex(existing => sameNativeSubmissionBinding(existing.binding, selected));
+      if (index < 0) return { value: undefined };
       if (file.records[index]!.command.requestId !== requestId) throw new NativeSubmissionJournalError('conflict');
       file.records.splice(index, 1);
-      this.io.writeJsonFileAtomic(this.path, file, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
+      return { next: file, value: undefined };
     });
   }
 
-  /** Confirm exact visible intent and durable file/ancestry before any replay POST. */
+  /**
+   * Confirm exact visible intent and durable bytes before replaying a record
+   * this process did not just save (one recovered after a restart).
+   */
   async confirm(binding: NativeSubmissionJournalBinding, command: NativeWorkSubmissionRequest): Promise<void> {
     const selected = copyBinding(binding);
     const expected = copyCommand(command);
-    await this.locked(() => {
-      const current = readFile(this.path).records.find(record => sameBinding(record.binding, selected));
-      if (!current || !sameCommand(current.command, expected)) throw new NativeSubmissionJournalError('conflict');
-      this.io.confirmFileDurable(this.path);
+    await this.file.confirm(file => {
+      const current = file.records.find(record => sameNativeSubmissionBinding(record.binding, selected));
+      if (!current || !sameNativeSubmissionCommand(current.command, expected)) throw new NativeSubmissionJournalError('conflict');
     });
   }
 }

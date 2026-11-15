@@ -22,7 +22,7 @@ function fixture(options: { migrationResponse?: () => Response | Promise<Respons
       if (options.redirectAuth) return new Response(null, { status: 307, headers: { location: '/must-not-follow-auth' } });
       if (authCalls === options.holdAuth) return new Promise<Response>(() => {});
       return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false,
-        principalId: token === minted ? `pairing:${id}` : 'shared-token', principalKind: 'token', admin: authorized && !(options.rejectMinted && token === minted), scopes: ['*'], roles: [] });
+        principalId: token === minted ? `pairing:${id}` : 'shared-token', principalKind: 'token', credential: (token === minted ? `pairing:${id}` : 'shared-token') === 'shared-token' ? 'shared-token' as const : 'device-token' as const, admin: authorized && !(options.rejectMinted && token === minted), scopes: ['*'], roles: [] });
     }
     if (path === '/api/control-plane/methods/pairing.tokens.migrate/invoke' && request.method === 'POST') {
       migrations++; expect(token).toBe(shared);

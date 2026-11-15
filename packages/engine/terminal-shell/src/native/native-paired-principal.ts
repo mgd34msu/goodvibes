@@ -1,9 +1,21 @@
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 
+type CurrentAuth = OperatorMethodOutput<'control.auth.current'>;
+
+/**
+ * The credential the host says the caller presented (`shared-token`,
+ * `device-token`, `user-session` or `local`). Read from the host's answer,
+ * never inferred from a principal's name.
+ */
+export function currentAuthCredential(auth: CurrentAuth): string | null {
+    const credential = (auth as { readonly credential?: unknown }).credential;
+    return typeof credential === 'string' ? credential : null;
+}
+
 /** Shared-token migration authority, verified by the selected host before minting a device token. */
-export function isHostPairingBootstrapPrincipal(auth: OperatorMethodOutput<'control.auth.current'>): boolean {
-    return auth.authenticated === true && auth.admin === true && auth.principalKind === 'token'
-        && auth.principalId === 'shared-token' && Array.isArray(auth.scopes)
+export function isHostPairingBootstrapPrincipal(auth: CurrentAuth): boolean {
+    return auth.authenticated === true && auth.admin === true && currentAuthCredential(auth) === 'shared-token'
+        && Array.isArray(auth.scopes)
         && auth.scopes.some(scope => scope === '*' || scope === 'write:control-plane');
 }
 
@@ -51,20 +63,18 @@ export function parseMintedPairingToken(payload: unknown, name: string): MintedH
     return { id, token, name, createdAt };
 }
 
-/** Live paired operator authority, with operation-specific scopes. authMode
- * alone also describes shared bootstrap credentials and cannot prove pairing. */
-export function isPairedOperatorPrincipal(auth: OperatorMethodOutput<'control.auth.current'>, scopes: readonly string[], expectedPrincipalId?: string | undefined): auth is OperatorMethodOutput<'control.auth.current'> & {
+/** Live paired operator authority (a device token), with operation-specific scopes. */
+export function isPairedOperatorPrincipal(auth: CurrentAuth, scopes: readonly string[], expectedPrincipalId?: string | undefined): auth is CurrentAuth & {
     readonly principalId: string;
 } {
-    return auth.authenticated === true && auth.admin === true && auth.principalKind === 'token'
+    return auth.authenticated === true && auth.admin === true && currentAuthCredential(auth) === 'device-token'
         && typeof auth.principalId === 'string' && auth.principalId.length > 0 && auth.principalId.length <= 200
-        && auth.principalId !== 'shared-token'
         && (expectedPrincipalId === undefined || auth.principalId === expectedPrincipalId)
         && Array.isArray(auth.scopes)
         && scopes.every(scope => auth.scopes.includes('*') || auth.scopes.includes(scope));
 }
 
 /** The live authority required by native intake. */
-export function isNativePairedPrincipal(auth: OperatorMethodOutput<'control.auth.current'>, expectedPrincipalId?: string | undefined): auth is OperatorMethodOutput<'control.auth.current'> & { readonly principalId: string } {
+export function isNativePairedPrincipal(auth: CurrentAuth, expectedPrincipalId?: string | undefined): auth is CurrentAuth & { readonly principalId: string } {
     return isPairedOperatorPrincipal(auth, ['read:work-ledger', 'write:work-ledger'], expectedPrincipalId);
 }

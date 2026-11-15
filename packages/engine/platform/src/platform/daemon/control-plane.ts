@@ -41,6 +41,7 @@ import { missingScopes } from './http/route-helpers.js';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import {
   type AuthenticatedPrincipal,
+  type CredentialKind,
   type RequestContext,
   type RequestPrincipal,
 } from './http-policy.js';
@@ -55,6 +56,8 @@ export interface ControlPlaneWebSocketData {
   authToken: string;
   principalId: string | null;
   principalKind: 'user' | 'bot' | 'service' | 'token' | null;
+  /** Which credential the socket authenticated with; null before in-band auth. */
+  credentialKind?: CredentialKind | null | undefined;
   admin: boolean;
   scopes: readonly string[];
   readonly domains: readonly RuntimeEventDomain[];
@@ -210,7 +213,7 @@ interface GatewayMethodCallInput {
    * call (a socket compares its authentication revision first). Absent: the
    * call authenticates the token once itself.
    */
-  readonly principal?: AuthenticatedPrincipal | undefined;
+  readonly principal?: (AuthenticatedPrincipal & { readonly credentialKind?: CredentialKind | null | undefined }) | undefined;
 }
 
 export class DaemonControlPlaneHelper {
@@ -686,6 +689,7 @@ export class DaemonControlPlaneHelper {
         authToken: token,
         principalId: principal.principalId,
         principalKind: principal.principalKind,
+        credentialKind: principal.credentialKind,
         scopes: principal.scopes,
         admin: principal.admin,
         domains,
@@ -839,6 +843,7 @@ export class DaemonControlPlaneHelper {
       ws.data.authToken = token;
       ws.data.principalId = principal.principalId;
       ws.data.principalKind = principal.principalKind;
+      ws.data.credentialKind = principal.credentialKind;
       ws.data.scopes = principal.scopes;
       ws.data.admin = principal.admin;
       ws.data.authRevision = principal.authRevision;
@@ -910,7 +915,7 @@ export class DaemonControlPlaneHelper {
       const response = methodId
         ? await this.invokeGatewayMethodCall({
             authToken: ws.data.authToken,
-            principal: { principalId: ws.data.principalId, principalKind: ws.data.principalKind, admin: ws.data.admin, scopes: ws.data.scopes },
+            principal: { principalId: ws.data.principalId, principalKind: ws.data.principalKind, credentialKind: ws.data.credentialKind, admin: ws.data.admin, scopes: ws.data.scopes },
             signal: this.socketSignal(ws),
             methodId,
             query: typeof frame.query === 'object' && frame.query !== null ? frame.query as Record<string, unknown> : undefined,
@@ -1108,7 +1113,7 @@ export class DaemonControlPlaneHelper {
     const descriptor = this.context.gatewayMethods.get(input.methodId);
     const authenticates = !!descriptor && descriptor.access !== 'public' && descriptor.access !== 'remote-peer';
     // One authentication per call, handed to the dispatch below.
-    const principal = authenticates ? input.principal ?? this.describeAuthenticatedPrincipal(input.authToken) : null;
+    const principal = authenticates ? input.principal ?? this.describeRequestPrincipal(input.authToken) : null;
     const principalId = principal?.principalId;
     // Clients of one principal (every shared-token client, every login of one user) each get their own
     // window: a fresh request on one connection must not end what another connection just read.
@@ -1119,7 +1124,7 @@ export class DaemonControlPlaneHelper {
       () => this.dispatchGatewayMethodCall(input, principal));
   }
 
-  private async dispatchGatewayMethodCall(input: GatewayMethodCallInput, authenticated: AuthenticatedPrincipal | null): Promise<{ status: number; ok: boolean; body: unknown }> {
+  private async dispatchGatewayMethodCall(input: GatewayMethodCallInput, authenticated: GatewayMethodCallInput['principal'] | null): Promise<{ status: number; ok: boolean; body: unknown }> {
     const descriptor = this.context.gatewayMethods.get(input.methodId);
     if (!descriptor) {
       return {
@@ -1155,7 +1160,8 @@ export class DaemonControlPlaneHelper {
     // the transport itself established as a person's (a login session or a paired
     // device; the shared operator token is not one, automation drives it) can make that claim; a bot, service or peer cannot, so its claim is
     // dropped before any handler reads it. A literal false stays: it only restricts.
-    if (context?.explicitUserRequest === true && context.principalKind !== 'user' && !(context.principalKind === 'token' && context.principalId !== 'shared-token')) {
+    const credential = authenticated?.credentialKind;
+    if (context?.explicitUserRequest === true && credential !== 'user-session' && credential !== 'device-token') {
       context = { ...context, explicitUserRequest: undefined };
     }
     // Input validation gate: reject a wrong-typed / missing-required body against

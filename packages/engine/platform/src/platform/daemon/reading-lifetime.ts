@@ -1,15 +1,11 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { prepareJudgmentResult } from '../gate/judgment-result.js';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
 
 /** Do not hide a thenable from the foundation's synchronous authority contract. */
 export function assertSynchronousCurrent(check?: () => void): void {
-  const result: unknown = check?.();
-  if (result !== undefined) {
-    drainOwned(result);
-    throw new Error('Daemon reading authority checks must be synchronous');
-  }
+  assertSynchronousJudgmentGuard(check, () => new Error('Daemon reading authority checks must be synchronous'));
 }
 
 /** Bind transmission, retention and late results to the daemon caller's live source. */

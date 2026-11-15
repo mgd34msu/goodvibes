@@ -11,18 +11,11 @@ import {
 } from '../../workflow/work-ledger/native-submission-wire.js';
 import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
+import { requireNativeOwner } from './native-owner.js';
 
 const SCOPES = [WORK_LEDGER_READ_SCOPE, WORK_LEDGER_WRITE_SCOPE] as const;
 function authorize(invocation: GatewayMethodInvocation) {
-  const context = invocation.context;
-  if (!context.admin || !context.principalId || !SCOPES.every(scope => context.scopes?.includes('*') || context.scopes?.includes(scope))
-    || invocation.isAuthorized?.(SCOPES) !== true) throw new GatewayVerbError('Native submission requires current owner access, read:work-ledger and write:work-ledger', 'FORBIDDEN', 403);
-  const authority = invocation.nativeExecutionAuthority; const current = authority?.current();
-  if (!authority || !current || context.principalKind !== 'token' || current.kind !== 'pairing-token' || current.principalId !== context.principalId
-    || !SCOPES.every(scope => current.scopes.includes('*') || current.scopes.includes(scope))) {
-    throw new GatewayVerbError('Native submission requires a persisted paired-token owner; shared tokens and user sessions are unsupported', 'NATIVE_SUBMISSION_UNSUPPORTED_AUTHORITY', 403);
-  }
-  return authority;
+  return requireNativeOwner(invocation, SCOPES, 'Native submission');
 }
 
 /** Trusted daemon ledger owner. Neither handler acquires an execution graph. */

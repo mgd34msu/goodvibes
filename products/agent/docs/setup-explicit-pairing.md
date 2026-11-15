@@ -115,10 +115,11 @@ Setup status is a read-only observation, never an authority grant. Agent uses th
 same selected-host resolver and effective token precedence as native intake:
 `GOODVIBES_CONNECTED_HOST_TOKEN`, `GOODVIBES_DAEMON_TOKEN`, the Agent-owned
 pairing for the exact selected origin, then the existing daemon operator token
-file (only when no host pairing exists). A fresh `control.auth.current` response must identify an
-authenticated admin token principal other than `shared-token`, with
-`read:work-ledger` and `write:work-ledger` (or `*`). The coarse `authMode` is not
-pairing evidence. Intake and setup share this predicate.
+file (only when no host pairing exists). A fresh `control.auth.current` response must report an
+authenticated admin whose `credential` is `device-token` (a paired device), with
+`read:work-ledger` and `write:work-ledger` (or `*`). The daemon states the
+credential kind; nothing is inferred from the principal's name. Intake and setup
+share this predicate.
 
 The request is bounded to 1.5 seconds. Disabled connected-host dialing performs
 neither the auth request nor setup's TCP service probes. After the response, the

@@ -14,7 +14,7 @@ for (const paired of [true, false]) test(`native headless command ${paired ? 'us
     expect(request.headers.get('authorization')).toBe('Bearer headless-private-token');
     if (path === '/api/work-ledger/project') return Response.json({ projectId: 'project' });
     if (path === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false,
-      principalId: 'paired-native-principal', principalKind: 'token', admin: true, scopes: ['read:work-ledger', 'write:work-ledger'], roles: [] });
+      principalId: 'paired-native-principal', principalKind: 'token', credential: 'device-token', admin: true, scopes: ['read:work-ledger', 'write:work-ledger'], roles: [] });
     throw new Error(`Unexpected native headless request ${path}`);
   } });
   const baseUrl = `http://127.0.0.1:${server.port}`;

@@ -647,10 +647,14 @@ export function createNativeWorkExecutionHost(deps: {
         }
         const existing = latest.record; inspectAuthority(existing, authority);
         if (existing.state === 'cancelled') throw new NativeWorkExecutionError('stale');
-        if (existing.state === 'launch-claimed' && !active.get(key.attemptId)?.claimed) throw new NativeWorkExecutionError('recovery-required');
         signal.throwIfAborted();
         if (existing.state === 'prepared') await decide(existing.target, authority, signal, true);
-        claimOwner(existing, authority);
+        const owner = claimOwner(existing, authority);
+        // After a restart nothing in memory says who launched this attempt; the
+        // stored owner facts do, and `inspectAuthority` just matched them to
+        // the caller. That caller adopts the launch. The runner returns a run
+        // it already holds unchanged, so adopting never starts a second one.
+        if (existing.state === 'launch-claimed' && !owner.claimed) { owner.claimed = true; if (existing.receipt) owner.contractId = existing.receipt.contractId; }
         const retained = await retainReceipt(await requireRunner().resumeDurable(key)); settleAfterCompletion(retained, authority); return retained;
       });
     },

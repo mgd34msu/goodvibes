@@ -97,12 +97,13 @@ export async function openNativeIntake(
     const auth = await platformClient.operator.invoke("control.auth.current", {}, current);
     check();
     current.throwIfAborted();
+    // The daemon states which credential this browser holds; a paired device is `device-token`.
+    const credential = (auth as { readonly credential?: unknown }).credential;
     if (
       !auth.authenticated ||
       !auth.admin ||
-      auth.principalKind !== "token" ||
+      credential !== "device-token" ||
       !auth.principalId ||
-      auth.principalId === "shared-token" ||
       auth.principalId.length > 200 ||
       !(
         authority === "turn"
@@ -110,16 +111,22 @@ export async function openNativeIntake(
           : ["read:work-ledger", authority === "execution" ? "write:fleet" : "write:work-ledger"]
       ).every((scope) => auth.scopes.includes("*") || auth.scopes.includes(scope))
     ) {
-      const error = new Error(
+      const scopes =
         authority === "turn"
-          ? "Native conversation delivery requires an existing paired admin with read:work-ledger, write:work-ledger and write:sessions. Shared tokens and user sessions are unsupported."
+          ? "read:work-ledger, write:work-ledger and write:sessions"
           : authority === "execution"
-            ? "Native execution requires an existing paired admin with read:work-ledger and write:fleet. Shared tokens and user sessions are unsupported."
-            : "Native requests require an existing paired admin with read:work-ledger and write:work-ledger. Shared tokens and user sessions are unsupported."
+            ? "read:work-ledger and write:fleet"
+            : "read:work-ledger and write:work-ledger";
+      const feature =
+        authority === "turn" ? "Native conversation delivery" : authority === "execution" ? "Native execution" : "Native requests";
+      throw Object.assign(
+        new Error(
+          credential === "device-token"
+            ? `${feature} needs owner access with ${scopes}; this pairing does not hold it. Pair this browser again with those scopes (Settings, Devices and pairing), then retry.`
+            : `${feature} runs only for a paired device. Pair this browser (Settings, Devices and pairing), then retry.`
+        ),
+        { code: "PAIRED_OWNER_REQUIRED" }
       );
-      throw authority === "execution"
-        ? Object.assign(error, { code: "NATIVE_EXECUTION_UNSUPPORTED_AUTHORITY" })
-        : error;
     }
     const diffScope = selectedDiff?.kind === "session" ? "read:sessions" : selectedDiff ? "read:checkpoints" : undefined;
     if (diffScope && !auth.scopes.includes("*") && !auth.scopes.includes(diffScope))

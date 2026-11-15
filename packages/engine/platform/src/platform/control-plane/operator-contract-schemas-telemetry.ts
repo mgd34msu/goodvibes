@@ -48,6 +48,8 @@ const ERROR_SOURCE_SCHEMA = enumSchema([
 const AUTHENTICATED_PRINCIPAL_KIND_SCHEMA = enumSchema(['user', 'bot', 'service', 'token']);
 
 export const CONTROL_AUTH_CURRENT_MODE_SCHEMA = enumSchema(['anonymous', 'invalid', 'session', 'shared-token']);
+/** Which credential the caller presented, as the daemon's authenticator read it; null when none authenticated. */
+export const CONTROL_AUTH_CURRENT_CREDENTIAL_SCHEMA = enumSchema(['local', 'shared-token', 'device-token', 'user-session']);
 export const TELEMETRY_VIEW_SCHEMA = enumSchema(['safe', 'raw']);
 export const TELEMETRY_SEVERITY_SCHEMA = enumSchema(['debug', 'info', 'warn', 'error']);
 
@@ -59,6 +61,7 @@ export const CONTROL_AUTH_CURRENT_RESPONSE_SCHEMA = objectSchema({
   sessionCookiePresent: BOOLEAN_SCHEMA,
   principalId: nullableSchema(STRING_SCHEMA),
   principalKind: nullableSchema(AUTHENTICATED_PRINCIPAL_KIND_SCHEMA),
+  credential: nullableSchema(CONTROL_AUTH_CURRENT_CREDENTIAL_SCHEMA),
   admin: BOOLEAN_SCHEMA,
   scopes: STRING_LIST_SCHEMA,
   roles: STRING_LIST_SCHEMA,
@@ -70,6 +73,7 @@ export const CONTROL_AUTH_CURRENT_RESPONSE_SCHEMA = objectSchema({
   'sessionCookiePresent',
   'principalId',
   'principalKind',
+  'credential',
   'admin',
   'scopes',
   'roles',

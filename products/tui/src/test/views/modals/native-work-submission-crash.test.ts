@@ -16,7 +16,7 @@ test('an abandoned submission after server persistence recovers the same journal
   const arrived = new Promise<void>(resolve => { received = resolve; }); const mutations: string[] = []; const lookups: string[] = [];
   const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(request) {
     const path = new URL(request.url).pathname; const replacement = request.headers.get('authorization') === 'Bearer synthetic-replacement-token';
-    if (path === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false, principalId: replacement ? 'principal-replacement' : 'principal-original', principalKind: 'token', admin: true, scopes: ['read:work-ledger', 'write:work-ledger'], roles: [] });
+    if (path === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false, principalId: replacement ? 'principal-replacement' : 'principal-original', principalKind: 'token', credential: 'device-token' as const, admin: true, scopes: ['read:work-ledger', 'write:work-ledger'], roles: [] });
     if (path === '/api/work-ledger/snapshot') return Response.json({ projectId: 'p', revision: 0, cursor: 0, works: [] });
     if (path === '/api/work-ledger/submissions') {
       mutations.push(path); command = await request.json() as NativeWorkSubmissionRequest;

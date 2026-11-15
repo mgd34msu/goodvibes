@@ -62,7 +62,22 @@ const MAX_BYTES = LEGACY_IMPORT_MAX_BYTES;
 const MAX_SOURCES = 500;
 const MAX_ENTITIES = 5_000;
 const MAX_LINKS = 20_000;
-function fail(code: BlockCode, reason: string): never { throw new PreparationError(code, reason); }
+/**
+ * Where preparation is reading, so a refusal names the source, the JSON
+ * pointer inside it and the value it refused. Preparation is synchronous, so
+ * one module value is enough; `prepare` resets it on entry and exit.
+ */
+let at: { sourceId?: string; pointer?: string } = {};
+function located(reason: string, value?: unknown): string {
+  const where = at.sourceId === undefined ? '' : ` (source ${at.sourceId}${at.pointer ? `, at ${at.pointer}` : ''})`;
+  let shown = '';
+  if (value !== undefined) {
+    const text = JSON.stringify(value) ?? String(value);
+    shown = `; the value is ${text.length > 120 ? `${text.slice(0, 117)}...` : text}`;
+  }
+  return `${reason.replace(/\.$/u, '')}${where}${shown}.`;
+}
+function fail(code: BlockCode, reason: string, value?: unknown): never { throw new PreparationError(code, located(reason, value)); }
 function object(value: Json | undefined, label: string): RecordValue {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('invalid-source', `${label} must be an object.`);
   return value;
@@ -110,11 +125,11 @@ function capture(value: unknown): Json {
       }
       active.delete(input);
       bytes += 2 + Object.keys(input).length;
-      if (bytes > MAX_BYTES) fail('limit', 'Source bundle exceeds the preparation byte limit.');
+      if (bytes > MAX_BYTES) fail('limit', `The captured sources exceed the ${MAX_BYTES / 1024} KiB one preparation reads; prepare fewer sources at a time`);
       return result;
     } else return fail('invalid-source', 'Source contains a value that JSON cannot preserve.');
     bytes += Buffer.byteLength(JSON.stringify(result));
-    if (bytes > MAX_BYTES) fail('limit', 'Source bundle exceeds the preparation byte limit.');
+    if (bytes > MAX_BYTES) fail('limit', `The captured sources exceed the ${MAX_BYTES / 1024} KiB one preparation reads; prepare fewer sources at a time`);
     return result;
   }
   return visit(value, 0);
@@ -144,13 +159,15 @@ function reported(status: Json | undefined, planning: boolean): WorkReportedStat
     case 'done': if (!planning) return 'complete'; break;
     case 'cancelled': if (!planning) return 'cancelled'; break;
   }
-  return fail('invalid-source', 'Unknown legacy task status; explicit reconciliation is required.');
+  const allowed = planning ? 'pending, deferred, in-progress, blocked or completed' : 'pending, in_progress, blocked, failed, done or cancelled';
+  return fail('invalid-source', `This task's status is not one a ${planning ? 'planning-state' : 'work-plan'} source uses (${allowed}); correct it in the source, then prepare again`, status);
 }
 
 export function prepareLegacyWorkLedgerMigration(input: LegacyMigrationInput, signal?: AbortSignal): LegacyMigrationPreparation {
   return prepare(input, signal, 3);
 }
 function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, version: 1 | 2 | 3, originalRevision?: string): LegacyMigrationPreparation {
+  at = {};
   try {
     if (signal?.aborted) fail('cancelled', 'Preparation cancelled; no source or ledger was changed.');
     if (input.pendingLocalChanges !== false) fail('pending-local-changes', 'Save or discard local edits explicitly before capturing persisted sources.');
@@ -209,6 +226,7 @@ function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, v
       if (links.length > MAX_LINKS) fail('limit', 'Too many legacy links.');
     }
     for (const [sourceId, entry] of [...sources].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+      at = { sourceId, pointer: '/metadata' };
       const meta = object(entry.source.metadata, 'source.metadata');
       if (entry.source.connectorId !== 'goodvibes-project-planning' || meta.projectPlanning !== true || meta.projectId !== projectId) fail('invalid-source', `Source ${sourceId} is not planning data for the selected project.`);
       const space = id(meta.knowledgeSpaceId, 'knowledgeSpaceId');
@@ -233,10 +251,12 @@ function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, v
       }
       if (kind === 'state' || kind === 'work-plan') {
         array(value.tasks, 'tasks').forEach((item, index) => {
-          const task = object(item, 'task'); const taskId = id(kind === 'state' ? task.id : task.taskId, 'task ID');
-          if (typeof task.title !== 'string' || !task.title.trim()) fail('invalid-source', 'A task title is missing.');
-          if (kind === 'work-plan' && (task.projectId !== projectId || task.knowledgeSpaceId !== space)) fail('invalid-source', 'Task project or knowledge space disagrees with source.');
           const pointer = `/metadata/value/tasks/${index}`;
+          at = { sourceId, pointer };
+          const task = object(item, 'task'); const taskId = id(kind === 'state' ? task.id : task.taskId, 'task ID');
+          if (typeof task.title !== 'string' || !task.title.trim()) { at = { sourceId, pointer: `${pointer}/title` }; fail('invalid-source', `Task ${taskId} has no title; add one in the source, then prepare again`, task.title ?? null); }
+          if (kind === 'work-plan' && (task.projectId !== projectId || task.knowledgeSpaceId !== space)) fail('invalid-source', 'Task project or knowledge space disagrees with source.');
+          at = { sourceId, pointer: `${pointer}/status` };
           if (task.metadata !== undefined) {
             const metadata = object(task.metadata, 'task.metadata');
             // Actual ProjectPlanningService projection preserves both its generated work
@@ -246,6 +266,7 @@ function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, v
             if (metadata.dependencies !== undefined) array(metadata.dependencies, 'metadata.dependencies').forEach((to, i) => link(sourceId, `${pointer}/metadata/dependencies/${i}`, taskId, 'dependencies', to));
           }
           add('work', taskId, task, sourceId, pointer, reported(task.status, kind === 'state'));
+          at = { sourceId, pointer };
           for (const field of ['parentTaskId', 'contractId', 'phaseId', 'agentId', 'turnId', 'decisionId', 'sourceMessageId'] as const) {
             if (task[field] !== undefined) link(sourceId, `${pointer}/${field}`, taskId, field, task[field]);
           }
@@ -255,6 +276,7 @@ function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, v
         });
       }
     }
+    at = {};
     if (signal?.aborted) fail('cancelled', 'Preparation cancelled; no source or ledger was changed.');
     const body = { version, hostId, projectId, expectedLedgerRevision: input.expectedLedgerRevision,
       sources: [...sources.values()].sort((a, b) => String(a.source.id) < String(b.source.id) ? -1 : String(a.source.id) > String(b.source.id) ? 1 : 0),
@@ -263,15 +285,16 @@ function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, v
     const manifest: LegacyMigrationManifest = freeze(version === 3
       ? { ...body, version: 3 as const, revision: originalRevision ?? opaqueUuid() }
       : { ...body, version: version as 1 | 2, digest: historicalManifestCommitment(body) });
-    if (Buffer.byteLength(JSON.stringify(manifest)) > LEGACY_IMPORT_MAX_BYTES - 1024) fail('limit', 'Complete manifest exceeds 256 KiB; nothing was truncated.');
+    const manifestBytes = Buffer.byteLength(JSON.stringify(manifest));
+    if (manifestBytes > LEGACY_IMPORT_MAX_BYTES - 1024) fail('limit', `The prepared import of ${sources.size} sources is ${Math.ceil(manifestBytes / 1024)} KiB, over the ${(LEGACY_IMPORT_MAX_BYTES - 1024) / 1024} KiB a single import carries; nothing was truncated. Prepare fewer sources at a time and import each set`);
     capture(manifest); // Check complete-envelope nesting, including retained fragments.
     // A prepared manifest must already be representable by the native work schema.
     projectLegacyImportWorks(manifest, 0);
     applyOwned(addOwned, ownedManifests, [manifest]);
     return { kind: 'prepared', manifest };
   } catch (error) {
-    return { kind: 'blocked', code: error instanceof PreparationError ? error.code : 'invalid-source', reason: error instanceof PreparationError ? error.message : 'Malformed source capture; nothing was changed.' };
-  }
+    return { kind: 'blocked', code: error instanceof PreparationError ? error.code : 'invalid-source', reason: error instanceof PreparationError ? error.message : located('A source could not be read as planning data; nothing was changed') };
+  } finally { at = {}; }
 }
 
 /** Recompute from fresh captures. This proves repeatable preparation, never durable import. */

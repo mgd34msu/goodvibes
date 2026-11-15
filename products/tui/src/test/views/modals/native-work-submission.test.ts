@@ -139,7 +139,7 @@ test('source and input identity in a looked-up receipt must match before it can 
 
 test('unsupported authority stays visible and does not request new scopes or expose server error text', async () => {
   const f = fixture(); f.client.submit = async () => { throw { code: 'NATIVE_SUBMISSION_UNSUPPORTED_AUTHORITY', message: 'private token' }; };
-  const result = await f.controls.submitSource(source); expect(result?.status).toBe('unavailable'); expect(result?.message).toContain('existing live paired operator'); expect(result?.message).not.toContain('private token'); f.controls.close();
+  const result = await f.controls.submitSource(source); expect(result?.status).toBe('unavailable'); expect(result?.message).toContain('paired device'); expect(result?.message).not.toContain('private token'); f.controls.close();
 });
 
 
@@ -151,11 +151,9 @@ test('restart loads durable identity and looks up before any replay, without rer
   expect(f.calls).toEqual(['snapshot', 'submit', 'get']); expect(f.ids()).toBe(2); restarted.close();
 });
 
-test('journal write and confirmation failures prevent every submission POST', async () => {
+test('a journal write failure prevents every submission POST', async () => {
   const f = fixture(); f.journal.save = async () => { throw new Error('file sync failed'); };
   const failed = await f.controls.submitSource(source); expect(failed?.status).toBe('unavailable'); expect(f.calls).toEqual(['snapshot']); expect(failed?.message).toContain('No submission was sent'); f.controls.close();
-  const g = fixture(); g.journal.confirm = async () => { throw new Error('directory sync failed'); };
-  const unconfirmed = await g.controls.submitSource(source); expect(unconfirmed?.status).toBe('unavailable'); expect(g.calls).toEqual(['snapshot']); g.controls.close();
 });
 
 test('restored journal plus not-found lookup replays the exact command and original revision', async () => {

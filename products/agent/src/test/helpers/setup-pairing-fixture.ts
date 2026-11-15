@@ -46,7 +46,7 @@ export function setupPairingFixture(options: { holdAuth?: number; holdMigration?
       returned++;
       return Response.json({ authenticated: authorization === `Bearer ${bootstrap}` || isPaired,
         authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false,
-        principalId: isPaired ? `pairing:${id}` : 'shared-token', principalKind: 'token', admin: true, scopes: ['*'], roles: [] });
+        principalId: isPaired ? `pairing:${id}` : 'shared-token', principalKind: 'token', credential: (isPaired ? `pairing:${id}` : 'shared-token') === 'shared-token' ? 'shared-token' as const : 'device-token' as const, admin: true, scopes: ['*'], roles: [] });
     }
     if (path === '/api/control-plane/methods/pairing.tokens.migrate/invoke' && request.method === 'POST') {
       if (authorization !== `Bearer ${bootstrap}`) { unexpected.push('invalid migration authority'); return new Response('unauthorized', { status: 401 }); }

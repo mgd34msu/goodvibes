@@ -38,7 +38,7 @@ async function fixture() {
     if (url.pathname === '/api/control-plane/auth') {
       await authWait;
       return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true,
-        sessionCookiePresent: false, principalId, principalKind: 'token', admin: true, scopes, roles: [] });
+        sessionCookiePresent: false, principalId, principalKind: 'token', credential: (principalId) === 'shared-token' ? 'shared-token' as const : 'device-token' as const, admin: true, scopes, roles: [] });
     }
     const matched = /^\/api\/control-plane\/methods\/(watchers\.triggers\.(?:status|migrate))\/invoke$/.exec(url.pathname);
     if (!matched) return Response.json({ error: 'Unknown fixture route' }, { status: 404 });

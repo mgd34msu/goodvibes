@@ -382,13 +382,18 @@ function reduceWorkLedger(state: WorkLedgerState, command: WorkLedgerCommand, ac
  * Additive ledger only: no runner, approval cache, tool execution or persistence
  * backend. Trusted composition retains authority, products receive service.
  */
+/** One page of history and the high-water mark, from one read of the ledger. */
+export interface WorkLedgerHistoryPager {
+  historyPage(afterSequence: number, limit: number, actor: WorkLedgerActor): Promise<{ readonly cursor: number; readonly events: readonly WorkLedgerEvent[] }>;
+}
+
 export function createWorkLedger(options: {
   readonly projectId: string;
   /** Host-issued binding for new imports. Exact durable retries survive host restarts. */
   readonly importHostId?: string;
   readonly storage: WorkLedgerStorage;
   readonly clock: WorkLedgerClock;
-}): { readonly service: WorkLedgerService; readonly authority: WorkLedgerAuthority } {
+}): { readonly service: WorkLedgerService & WorkLedgerHistoryPager; readonly authority: WorkLedgerAuthority } {
   const { projectId, storage, clock } = options;
   createEmptyWorkLedgerState(projectId);
   // The last persisted image that passed full validation. Replaying every
@@ -455,7 +460,7 @@ export function createWorkLedger(options: {
     try { return readValidatedState(raw); } catch { throw new WorkLedgerAccessError('invalid_state', 'Authoritative ledger state is invalid; it was not reset.'); }
   }
 
-  const service: WorkLedgerService = {
+  const service: WorkLedgerService & WorkLedgerHistoryPager = {
     readSnapshot(actor) {
       return admit(async () => {
       if (closed) throw new WorkLedgerAccessError('closed', 'Work ledger is closed');
@@ -474,6 +479,24 @@ export function createWorkLedger(options: {
       if (closed) throw new WorkLedgerAccessError('closed', 'Work ledger is closed');
       requireIdentity(actor);
       return state.history.filter(event => event.sequence > afterSequence);
+      });
+    },
+    historyPage(afterSequence, limit, actor) {
+      return admit(async () => {
+      if (closed) throw new WorkLedgerAccessError('closed', 'Work ledger is closed');
+      requireIdentity(actor);
+      if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) throw new WorkLedgerAccessError('invalid_cursor', 'Invalid history cursor');
+      if (!Number.isSafeInteger(limit) || limit < 1) throw new WorkLedgerAccessError('invalid_cursor', 'Invalid history page size');
+      const state = await readAuthoritativeState();
+      if (closed) throw new WorkLedgerAccessError('closed', 'Work ledger is closed');
+      requireIdentity(actor);
+      const events: WorkLedgerEvent[] = [];
+      for (const event of state.history) {
+        if (event.sequence <= afterSequence) continue;
+        events.push(event);
+        if (events.length === limit) break;
+      }
+      return { cursor: state.revision, events };
       });
     },
     lookupSubmission(requestId, actor) {

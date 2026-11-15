@@ -6,21 +6,13 @@ import { nativeWorkExecutionRequestSchema, nativeWorkExecutionSnapshotSchema, NA
   type NativeWorkExecutionRequest, type NativeWorkExecutionRevision, type NativeWorkExecutionSnapshot } from '../../workflow/work-ledger/native-execution-wire.js';
 import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
+import { requireNativeOwner } from './native-owner.js';
 
 const SCOPES = ['read:work-ledger', 'write:fleet'] as const;
 type NativeGatewayExecution = Pick<NativeWorkExecutionHost, 'start' | 'statusByAttempt' | 'cancel' | 'cancelTarget' | 'resume' | 'settle'>;
 
 function authorize(invocation: GatewayMethodInvocation) {
-  const context = invocation.context;
-  if (!context.admin || !context.principalId || !SCOPES.every(scope => context.scopes?.includes('*') || context.scopes?.includes(scope))
-    || invocation.isAuthorized?.(SCOPES) !== true) throw new GatewayVerbError('Native execution requires current owner access, read:work-ledger and write:fleet', 'FORBIDDEN', 403);
-  const authority = invocation.nativeExecutionAuthority;
-  const current = authority?.current();
-  if (!authority || !current || context.principalKind !== 'token' || current.kind !== 'pairing-token' || current.principalId !== context.principalId
-    || !SCOPES.every(scope => current.scopes.includes('*') || current.scopes.includes(scope))) {
-    throw new GatewayVerbError('Native execution requires a persisted paired-token owner; shared tokens and user sessions are unsupported', 'NATIVE_EXECUTION_UNSUPPORTED_AUTHORITY', 403);
-  }
-  return authority;
+  return requireNativeOwner(invocation, SCOPES, 'Native execution');
 }
 function revision(target: NativeWorkExecutionTarget): NativeWorkExecutionRevision {
   return { work: target.workRevision, criteria: target.criteriaRevision, attempt: target.attemptRevision };

@@ -44,7 +44,7 @@ function fixture(options: { readonly window?: PaymentWindowView; readonly princi
     if (url.pathname === '/api/control-plane/auth') {
       await holdAuth;
       return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true,
-        sessionCookiePresent: false, principalId: principal, principalKind: 'token', admin: true, scopes: ['read:payments', 'write:payments'], roles: [] });
+        sessionCookiePresent: false, principalId: principal, principalKind: 'token', credential: (principal) === 'shared-token' ? 'shared-token' as const : 'device-token' as const, admin: true, scopes: ['read:payments', 'write:payments'], roles: [] });
     }
     if (url.pathname.endsWith('/status')) return Response.json({ windows: options.operation ? [] : [view], operations: options.operation ? [options.operation] : [] });
     if (options.answerStatus) return Response.json({ error: 'private transport diagnostic' }, { status: options.answerStatus });

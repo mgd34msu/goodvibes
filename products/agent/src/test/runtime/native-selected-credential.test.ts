@@ -45,7 +45,7 @@ function fixture(baseUrl = 'http://127.0.0.1:3421') {
   return { ...options, options, config, baseUrl, pairingPath, globalPath, pair, resolve };
 }
 const auth = (principalId: string) => ({ authenticated: true, authMode: 'shared-token', tokenPresent: true,
-  authorizationHeaderPresent: true, sessionCookiePresent: false, principalId, principalKind: 'token', admin: true,
+  authorizationHeaderPresent: true, sessionCookiePresent: false, principalId, principalKind: 'token', credential: (principalId) === 'shared-token' ? 'shared-token' as const : 'device-token' as const, admin: true,
   scopes: ['read:work-ledger', 'write:work-ledger', 'write:sessions'], roles: [] });
 const guarded = (violations: string[], handle: (request: Request) => Promise<Response>) => async (request: Request): Promise<Response> => {
   // A failed assertion in a handler becomes an HTTP 500 the client may treat as an expected failure; keep it for the test body.

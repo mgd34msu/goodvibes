@@ -46,7 +46,7 @@ const NEXT_STEP: Record<NativeWorkExecutionErrorCode, string> = {
   'unsupported-authority': 'Execution needs a native pairing token with the work-ledger read and write scopes; pair with those scopes, then retry.',
   stale: 'The work, attempt, authority or workspace scope changed since it was read; read the work again and start from its current revisions.',
   conflict: 'A concurrent change won; read the execution status, then retry only if it is still unstarted, or cancel it.',
-  'recovery-required': 'An earlier attempt has no live owner; read its status, then resume it, or cancel it and start again.',
+  'recovery-required': 'This attempt ended without a result that can be resumed; cancel it, then claim the work again to start a new attempt.',
   closed: 'The execution host is closing; retry once it is running again.',
   invalid: 'The request is malformed; correct it and send it again.',
   refused: 'Admission refused this work; read its status for the reason, then start again with changed work, or cancel it.',
@@ -267,6 +267,12 @@ export interface NativeWorkExecutionMutation<T> {
 }
 export interface NativeWorkExecutionStorage {
   readonly continuations?: NativeCiContinuationStorage;
+  /**
+   * The store's content revision: moves on every write it publishes or adopts.
+   * A caller that read a transaction compares this integer to know whether a
+   * second read could see anything new. Absent: always read again.
+   */
+  revision?(): number;
   /** Authoritative synchronous reads, required before every semantic/tool operation. */
   current(key: DurableContractRequest['key'], original?: NativeExecutionOriginal): NativeWorkExecutionTransaction;
   /** Unique persisted association; ledger edits cannot strand inspection or cancellation. */

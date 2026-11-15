@@ -44,7 +44,7 @@ test('TUI history → native ledger → process restart recovers the exact owner
     const path = new URL(request.url).pathname; requests.push(path);
     expect(request.headers.get('authorization')).toBe('Bearer synthetic-history-recovery-token');
     if (path === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false,
-      principalId: 'paired-history-recovery', principalKind: 'token', admin: true, scopes: ['read:work-ledger', 'read:knowledge', 'write:work-ledger'], roles: [] });
+      principalId: 'paired-history-recovery', principalKind: 'token', credential: 'device-token', admin: true, scopes: ['read:work-ledger', 'read:knowledge', 'write:work-ledger'], roles: [] });
     if (path === '/api/work-ledger/snapshot') return Response.json(snapshot);
     if (path === '/api/work-ledger/history') return Response.json({ projectId: historical.projectId, afterSequence: Number(new URL(request.url).searchParams.get('afterSequence') ?? 0), throughSequence: 1, cursor: 1, provenance: 'available', hasMore: false, events: Number(new URL(request.url).searchParams.get('afterSequence') ?? 0) ? [] : [event] });
     if (path === '/api/work-ledger/intake/capture') {

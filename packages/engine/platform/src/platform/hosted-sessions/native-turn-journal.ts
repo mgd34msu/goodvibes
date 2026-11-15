@@ -24,11 +24,22 @@ export interface NativeHostedTurnDispatch {
   readonly identity: NativeHostedTurnIdentity;
   /** Selected by the host entry point, never the source body. Absent means historical WebUI. */
   readonly originSurface?: NativeHostedTurnOriginSurface;
-  readonly state: 'preparing' | 'queued' | 'dispatching' | 'completed' | 'cancelled' | 'recovery-required';
+  readonly state: 'preparing' | 'queued' | 'dispatching' | 'completed' | 'failed' | 'cancelled' | 'recovery-required';
   readonly sessionId: string | null;
   readonly brokerInputId: string | null;
   readonly correlationId: string | null;
+  /** Present only on `failed`: what failed, and whether the same input may be started again. */
+  readonly failure?: NativeHostedTurnFailure;
 }
+
+/** A turn whose runtime ran and ended in an error (a provider failure, a refused tool, an abort). */
+export interface NativeHostedTurnFailure {
+  /** Short, already-redacted text for the person and the log. */
+  readonly summary: string;
+  /** The failure happened before any effect, so the same input may be started again. */
+  readonly retryable: boolean;
+}
+const MAX_FAILURE_SUMMARY = 1000;
 
 /**
  * The process that created a claim. Kept beside the journal, not in it, so
@@ -64,17 +75,23 @@ export class NativeHostedTurnJournalError extends Error {
 }
 
 type DispatchState = NativeHostedTurnDispatch['state'];
-type DispatchChange = Omit<NativeHostedTurnDispatch, 'identity' | 'originSurface'>;
+type DispatchChange = Omit<NativeHostedTurnDispatch, 'identity' | 'originSurface' | 'failure'>;
 interface JournalFile { readonly version: 1; readonly records: NativeHostedTurnDispatch[]; }
 const identityKeys = ['projectId', 'principalId', 'requestId', 'inputId', 'sourceId', 'sourceRevision', 'sourceSessionId'] as const;
 const bindingKeys = ['sessionId', 'brokerInputId', 'correlationId'] as const;
 const changeKeys = ['state', ...bindingKeys] as const;
-const states: readonly DispatchState[] = ['preparing', 'queued', 'dispatching', 'completed', 'cancelled', 'recovery-required'];
+const states: readonly DispatchState[] = ['preparing', 'queued', 'dispatching', 'completed', 'failed', 'cancelled', 'recovery-required'];
+/**
+ * `failed` is terminal like `completed`: the turn's owner ran it to an error.
+ * `recovery-required` is kept for a claim whose owner is gone, so nothing
+ * knows how it ended; only a cancel ends it.
+ */
 const transitions: Record<DispatchState, readonly DispatchState[]> = {
-  preparing: ['queued', 'dispatching', 'cancelled', 'recovery-required'],
-  queued: ['dispatching', 'cancelled', 'recovery-required'],
-  dispatching: ['completed', 'cancelled', 'recovery-required'],
+  preparing: ['queued', 'dispatching', 'failed', 'cancelled', 'recovery-required'],
+  queued: ['dispatching', 'failed', 'cancelled', 'recovery-required'],
+  dispatching: ['completed', 'failed', 'cancelled', 'recovery-required'],
   completed: [],
+  failed: [],
   cancelled: [],
   'recovery-required': ['cancelled'],
 };
@@ -109,14 +126,23 @@ function copyChange(value: unknown): DispatchChange {
     brokerInputId: value.brokerInputId as string | null, correlationId: value.correlationId as string | null };
 }
 
+function copyFailure(value: unknown): NativeHostedTurnFailure {
+  if (!exact(value, ['summary', 'retryable']) || typeof value.summary !== 'string' || value.summary.length > MAX_FAILURE_SUMMARY
+    || typeof value.retryable !== 'boolean') throw new NativeHostedTurnJournalError('invalid-dispatch');
+  return { summary: value.summary, retryable: value.retryable };
+}
+
 function copyDispatch(value: unknown): NativeHostedTurnDispatch {
-  const hasSurface = value && typeof value === 'object' && !nodeTypes.isProxy(value) && Object.hasOwn(value, 'originSurface');
-  if (!exact(value, ['identity', ...changeKeys, ...(hasSurface ? ['originSurface'] : [])])
+  const own = (key: string) => !!value && typeof value === 'object' && !nodeTypes.isProxy(value) && Object.hasOwn(value, key);
+  const hasSurface = own('originSurface'), hasFailure = own('failure');
+  if (!exact(value, ['identity', ...changeKeys, ...(hasSurface ? ['originSurface'] : []), ...(hasFailure ? ['failure'] : [])])
     || (hasSurface && value.originSurface !== 'webui' && value.originSurface !== 'agent')) throw new NativeHostedTurnJournalError('invalid-dispatch');
   const identity = copyIdentity(value.identity);
   const change = copyChange({ state: value.state, sessionId: value.sessionId, brokerInputId: value.brokerInputId, correlationId: value.correlationId });
   if (identity.continuationSessionId && change.sessionId !== null && identity.continuationSessionId !== change.sessionId) throw new NativeHostedTurnJournalError('invalid-dispatch');
-  return { identity, ...change, ...(hasSurface ? { originSurface: value.originSurface as NativeHostedTurnOriginSurface } : {}) };
+  if (hasFailure !== (change.state === 'failed')) throw new NativeHostedTurnJournalError('invalid-dispatch');
+  return { identity, ...change, ...(hasSurface ? { originSurface: value.originSurface as NativeHostedTurnOriginSurface } : {}),
+    ...(hasFailure ? { failure: copyFailure(value.failure) } : {}) };
 }
 
 const keyOf = (identity: NativeHostedTurnIdentity): string => JSON.stringify([identity.projectId, identity.principalId, identity.inputId]);
@@ -156,8 +182,7 @@ function regularFile(path: string): Stats | null {
   return stat;
 }
 
-function readFile(path: string): JournalFile {
-  const stat = regularFile(path);
+function readFile(path: string, stat: Stats | null): JournalFile {
   if (!stat) return { version: 1, records: [] };
   if (stat.size > NATIVE_HOSTED_TURN_JOURNAL_MAX_BYTES) throw new NativeHostedTurnJournalError('journal-limit');
   const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
@@ -180,7 +205,10 @@ function readFile(path: string): JournalFile {
   } finally { closeSync(fd); }
 }
 
-const terminalState = (state: DispatchState): boolean => state === 'completed' || state === 'cancelled';
+const terminalState = (state: DispatchState): boolean => state === 'completed' || state === 'failed' || state === 'cancelled';
+/** Whether a record is a final outcome (completed, failed or cancelled). */
+export function isTerminalNativeHostedTurnState(state: NativeHostedTurnDispatch['state']): boolean { return terminalState(state); }
+const stampOf = (stat: Stats | null): string => stat ? `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}` : 'absent';
 
 /** Owners of claims that are not yet terminal. Unreadable means "no evidence", never an error. */
 function readOwners(path: string): Map<string, NativeHostedTurnClaimOwner> {
@@ -210,18 +238,48 @@ function readOwners(path: string): Map<string, NativeHostedTurnClaimOwner> {
 export class NativeHostedTurnJournal {
   readonly path: string;
   private readonly io: NativeHostedTurnJournalIO;
+  /**
+   * The parsed journal as this process last read or wrote it, keyed by the
+   * file's identity and times. Another writer replaces the file (a new inode)
+   * or changes its size and times, so one `lstat` says whether to read again.
+   */
+  private cached: { readonly stamp: string; readonly records: readonly NativeHostedTurnDispatch[] } | undefined;
+  /** The file image last confirmed durable; a confirm repeats only for different bytes. */
+  private confirmedStamp: string | undefined;
+  private directoryReady = false;
   constructor(path: string, io: Partial<NativeHostedTurnJournalIO> = {}) {
     this.path = resolve(path);
     this.io = { acquireCrossProcessLock, writeJsonFileAtomic, confirmFileDurable, ...io };
   }
 
   private async locked<T>(operation: () => T): Promise<T> {
-    assertDirectoryChain(this.path);
-    mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-    assertDirectoryChain(this.path);
-    regularFile(`${this.path}.lock`);
+    // The directory chain is checked and created once per process.
+    if (!this.directoryReady) {
+      assertDirectoryChain(this.path);
+      mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
+      assertDirectoryChain(this.path);
+      regularFile(`${this.path}.lock`);
+      this.directoryReady = true;
+    }
     const release = await this.io.acquireCrossProcessLock(`${this.path}.lock`, { strictOwnership: true });
-    try { assertDirectoryChain(this.path); return operation(); } finally { release(); }
+    try { return operation(); } finally { release(); }
+  }
+
+  /** The journal under the lock: the cached parse while the file is unchanged, else one read. */
+  private load(): JournalFile {
+    const stat = regularFile(this.path), stamp = stampOf(stat);
+    if (this.cached?.stamp === stamp) return { version: 1, records: [...this.cached.records] };
+    const file = readFile(this.path, stat);
+    this.cached = { stamp, records: [...file.records] };
+    return file;
+  }
+
+  /** Confirm the current bytes durable unless this process already wrote or confirmed them. */
+  private confirmDurable(): void {
+    const stamp = stampOf(regularFile(this.path));
+    if (stamp === this.confirmedStamp) return;
+    this.io.confirmFileDurable(this.path);
+    this.confirmedStamp = stamp;
   }
 
   private find(file: JournalFile, identity: NativeHostedTurnIdentity): NativeHostedTurnDispatch | null {
@@ -233,16 +291,21 @@ export class NativeHostedTurnJournal {
   private write(file: JournalFile): void {
     if (file.records.length > NATIVE_HOSTED_TURN_JOURNAL_MAX_RECORDS
       || Buffer.byteLength(JSON.stringify(file), 'utf8') > NATIVE_HOSTED_TURN_JOURNAL_MAX_BYTES) throw new NativeHostedTurnJournalError('journal-limit');
+    this.cached = undefined;
     this.io.writeJsonFileAtomic(this.path, file, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
+    // A durable write that returned is the confirmation; the parse is the file just written.
+    const stamp = stampOf(regularFile(this.path));
+    this.cached = { stamp, records: [...file.records] };
+    this.confirmedStamp = stamp;
   }
 
   async read(identity: NativeHostedTurnIdentity): Promise<NativeHostedTurnDispatch | null> {
     const expected = copyIdentity(identity);
     return this.locked(() => {
-      const record = this.find(readFile(this.path), expected);
+      const record = this.find(this.load(), expected);
       // Visible terminal bytes after a published-indeterminate write are not
-      // enough to claim durable completion/cancellation. Confirm under the lock.
-      if (record && ['completed', 'cancelled'].includes(record.state)) this.io.confirmFileDurable(this.path);
+      // enough to claim a durable outcome. Confirm under the lock.
+      if (record && terminalState(record.state)) this.confirmDurable();
       return record;
     });
   }
@@ -251,8 +314,8 @@ export class NativeHostedTurnJournal {
   async sessionRecords(sessionId: string): Promise<readonly NativeHostedTurnDispatch[]> {
     if (!validId(sessionId)) throw new NativeHostedTurnJournalError('invalid-identity');
     return this.locked(() => {
-      const records = readFile(this.path).records.filter(record => record.sessionId === sessionId || record.identity.continuationSessionId === sessionId);
-      if (records.length) this.io.confirmFileDurable(this.path);
+      const records = this.load().records.filter(record => record.sessionId === sessionId || record.identity.continuationSessionId === sessionId);
+      if (records.length) this.confirmDurable();
       return records;
     });
   }
@@ -265,12 +328,14 @@ export class NativeHostedTurnJournal {
       || (owner.host !== undefined && (owner.host.length === 0 || owner.host.length > 512)))) throw new NativeHostedTurnJournalError('invalid-dispatch');
     const surface = originSurface ?? 'webui';
     return this.locked(() => {
-      const file = readFile(this.path);
+      const file = this.load();
       const existing = this.find(file, expected);
       if (existing) {
         if (existing.state === 'cancelled' && existing.sessionId === null && existing.originSurface === undefined) return false;
         if ((existing.originSurface ?? 'webui') !== surface) throw new NativeHostedTurnJournalError('surface-conflict');
-        return false;
+        // A turn that failed before any effect may be started again with the same input.
+        if (existing.state !== 'failed' || existing.failure?.retryable !== true) return false;
+        file.records.splice(file.records.indexOf(existing), 1);
       }
       // Bind continuation ownership under the same lock as the input claim.
       // An unclaimed cancellation tombstone has no session settings ownership.
@@ -280,7 +345,7 @@ export class NativeHostedTurnJournal {
         && (record.originSurface ?? 'webui') !== surface)) throw new NativeHostedTurnJournalError('surface-conflict');
       if (expected.continuationSessionId && file.records.some(record =>
         (record.sessionId === expected.continuationSessionId || record.identity.continuationSessionId === expected.continuationSessionId)
-        && !['completed', 'cancelled'].includes(record.state) && !locallyOwnedInputs.includes(record.identity.inputId))) {
+        && !terminalState(record.state) && !locallyOwnedInputs.includes(record.identity.inputId))) {
         throw new NativeHostedTurnJournalError('conflict');
       }
       file.records.push({ identity: expected, ...(originSurface ? { originSurface } : {}), state: 'preparing', sessionId: null, brokerInputId: null, correlationId: null });
@@ -307,7 +372,7 @@ export class NativeHostedTurnJournal {
   async owner(identity: NativeHostedTurnIdentity): Promise<NativeHostedTurnClaimOwner | null> {
     const expected = copyIdentity(identity);
     return this.locked(() => {
-      this.find(readFile(this.path), expected);
+      this.find(this.load(), expected);
       return readOwners(`${this.path}.owners`).get(keyOf(expected)) ?? null;
     });
   }
@@ -315,7 +380,7 @@ export class NativeHostedTurnJournal {
   /** Terminal records, and whether the journal is close enough to a cap that they are worth compacting. */
   async census(): Promise<{ readonly nearCap: boolean; readonly terminal: readonly NativeHostedTurnDispatch[] }> {
     return this.locked(() => {
-      const file = readFile(this.path);
+      const file = this.load();
       const nearCap = file.records.length >= NATIVE_HOSTED_TURN_JOURNAL_MAX_RECORDS * COMPACT_AT
         || Buffer.byteLength(JSON.stringify(file), 'utf8') >= NATIVE_HOSTED_TURN_JOURNAL_MAX_BYTES * COMPACT_AT;
       return { nearCap, terminal: nearCap ? file.records.filter(record => terminalState(record.state)) : [] };
@@ -332,7 +397,7 @@ export class NativeHostedTurnJournal {
     const wanted = new Map(proven.map(identity => { const copy = copyIdentity(identity); return [keyOf(copy), copy] as const; }));
     if (!wanted.size) return 0;
     return this.locked(() => {
-      const file = readFile(this.path);
+      const file = this.load();
       const owners = readOwners(`${this.path}.owners`);
       const droppedKeys: string[] = [];
       const kept = file.records.filter(record => {
@@ -344,7 +409,7 @@ export class NativeHostedTurnJournal {
       const dropped = droppedKeys.length;
       if (!dropped) return 0;
       // The terminal bytes being relied on must be durable before anything that proves them is removed.
-      this.io.confirmFileDurable(this.path);
+      this.confirmDurable();
       this.write({ version: 1, records: kept });
       this.pruneOwners(droppedKeys);
       return dropped;
@@ -365,7 +430,7 @@ export class NativeHostedTurnJournal {
   async prevent(identity: NativeHostedTurnIdentity): Promise<NativeHostedTurnDispatch> {
     const expected = copyIdentity(identity);
     return this.locked(() => {
-      const file = readFile(this.path);
+      const file = this.load();
       const existing = this.find(file, expected);
       if (existing) return existing;
       const record: NativeHostedTurnDispatch = { identity: expected, state: 'cancelled', sessionId: null, brokerInputId: null, correlationId: null };
@@ -375,22 +440,24 @@ export class NativeHostedTurnJournal {
     });
   }
 
-  async transition(identity: NativeHostedTurnIdentity, expectedState: DispatchState, next: DispatchChange): Promise<NativeHostedTurnDispatch> {
+  async transition(identity: NativeHostedTurnIdentity, expectedState: DispatchState, next: DispatchChange, failure?: NativeHostedTurnFailure): Promise<NativeHostedTurnDispatch> {
     const expected = copyIdentity(identity);
     const change = copyChange(next);
+    if ((failure !== undefined) !== (change.state === 'failed')) throw new NativeHostedTurnJournalError('invalid-dispatch');
+    const failed = failure === undefined ? undefined : copyFailure({ summary: failure.summary.slice(0, MAX_FAILURE_SUMMARY), retryable: failure.retryable });
     if (expected.continuationSessionId && change.sessionId !== null && expected.continuationSessionId !== change.sessionId) throw new NativeHostedTurnJournalError('invalid-dispatch');
     if (!states.includes(expectedState)) throw new NativeHostedTurnJournalError('invalid-dispatch');
     return this.locked(() => {
-      const file = readFile(this.path);
+      const file = this.load();
       const current = this.find(file, expected);
       if (!current || current.state !== expectedState) throw new NativeHostedTurnJournalError('conflict');
       if (current.state === change.state && sameBinding(current, change)) {
-        this.io.confirmFileDurable(this.path);
+        this.confirmDurable();
         return current;
       }
       if (!transitions[current.state].includes(change.state)
         || (current.state !== 'preparing' && !sameBinding(current, change))) throw new NativeHostedTurnJournalError('conflict');
-      const updated: NativeHostedTurnDispatch = { ...current, identity: expected, ...change };
+      const updated: NativeHostedTurnDispatch = { ...current, identity: expected, ...change, ...(failed ? { failure: failed } : {}) };
       file.records[file.records.indexOf(current)] = updated;
       this.write(file);
       return updated;

@@ -12,20 +12,12 @@ import {
 } from '../../workflow/work-ledger/native-intake-wire.js';
 import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
+import { requireNativeOwner } from './native-owner.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 const SCOPES = [WORK_LEDGER_READ_SCOPE, WORK_LEDGER_WRITE_SCOPE] as const;
 function authorize(invocation: GatewayMethodInvocation) {
-  const context = invocation.context;
-  if (!context.admin || !context.principalId || !SCOPES.every(scope => context.scopes?.includes('*') || context.scopes?.includes(scope))
-    || invocation.isAuthorized?.(SCOPES) !== true) throw new GatewayVerbError('Native intake requires current owner access, read:work-ledger and write:work-ledger', 'FORBIDDEN', 403);
-  const authority = invocation.nativeExecutionAuthority; const current = authority?.current();
-  if (!authority || !current || context.principalKind !== 'token' || current.kind !== 'pairing-token' || current.principalId !== context.principalId
-    || current.authorityId !== current.principalId || current.authorityRevision !== current.tokenId
-    || !SCOPES.every(scope => current.scopes.includes('*') || current.scopes.includes(scope))) {
-    throw new GatewayVerbError('Native intake requires a persisted paired-token owner; shared tokens and user sessions are unsupported', 'NATIVE_INTAKE_UNSUPPORTED_AUTHORITY', 403);
-  }
-  return authority;
+  return requireNativeOwner(invocation, SCOPES, 'Native intake');
 }
 export function registerNativeConversationIntakeGatewayMethods(catalog: GatewayMethodCatalog, host: Pick<NativeConversationIntakeHost, 'capture' | 'get' | 'admit' | 'resume' | 'cancel'>): void {
   for (const operation of ['capture', 'get', 'admit', 'resume', 'cancel'] as const) {

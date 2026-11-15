@@ -37,7 +37,7 @@ function fixture(failWrite = false) {
       const url = new URL(input instanceof Request ? input.url : String(input));
       requests.push({ path: url.pathname, body: init?.body ? JSON.parse(String(init.body)) as unknown : undefined, headers: new Headers(init?.headers) });
       if (url.pathname === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true,
-        authorizationHeaderPresent: true, sessionCookiePresent: false, principalId: 'pairing:owner', principalKind: 'token', admin: true,
+        authorizationHeaderPresent: true, sessionCookiePresent: false, principalId: 'pairing:owner', principalKind: 'token', credential: 'device-token', admin: true,
         scopes: ['read:channels', 'write:channels'], roles: [] });
       const actionId = url.pathname.split('/').at(-1);
       if (actionId === 'cursor-migration-preview') return Response.json({ surface: 'telegram', actionId, result: preview });

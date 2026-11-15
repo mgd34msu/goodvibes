@@ -46,7 +46,7 @@ export function createLegacyImportHostFixture() {
     duringRequest?.(path);
     if (redirect?.path === path) return new Response(null, { status: 307, headers: { location: redirect.destination } });
     if (path === IMPORT_ROUTES.auth && request.method === 'GET') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false,
-      principalId: IMPORT_FIXTURE_PRINCIPAL, principalKind: 'token', admin, scopes, roles: ['admin'] });
+      principalId: IMPORT_FIXTURE_PRINCIPAL, principalKind: 'token', credential: 'device-token' as const, admin, scopes, roles: ['admin'] });
     if (path === IMPORT_ROUTES.sources && request.method === 'GET') {
       assert.equal(url.searchParams.get('limit'), '100'); assert.equal(url.searchParams.get('includeAllSpaces'), 'true');
       const sources = original.sources.map(entry => entry.source);

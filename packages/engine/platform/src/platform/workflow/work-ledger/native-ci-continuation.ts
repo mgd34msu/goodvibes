@@ -15,8 +15,10 @@ import type { NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativeP
 import type { NativeExecutionOriginal, NativeWorkExecutionRecord, NativeWorkExecutionStorage, NativeWorkExecutionTarget } from './native-execution-types.js';
 import { captureNativeCiIssue, nativeCiIssueCommitment, captureNativeCiWatchIdentity, nativeCiWatchCommitment, captureNativeCiFailure, nativeCiFailureCommitment, nativeCiConsumption, nativeCiSuccessorId, nativeCiLedgerSourceMetadata, nativeCiLedgerSourceMatches, nativeCiSourceBinding, nativeCiHistoricalSourceBinding, parseNativeCiContinuation, type NativeCiContinuationRecord, type NativeCiContinuationTransaction, type NativeCiContinuationOriginal } from './native-ci-continuation-types.js';
 
-export type NativeCiGrantOwner = Pick<PairingTokenManager, 'readNativeContinuation' | 'withNativeContinuation' | 'consumeNativeContinuation' | 'revokeNativeContinuation' | 'bindNativeContinuationWatch' | 'issueNativeContinuationFromGrant' | 'revokeNativeContinuationsForSource'>;
-export interface NativeCiContinuationPolicy { capture(version?: 1 | 2): string; current(version?: 1 | 2): string; scopes(): readonly string[]; onDidInvalidate(listener: () => void): () => void; }
+export type NativeCiGrantOwner = Pick<PairingTokenManager, 'readNativeContinuation' | 'withNativeContinuation' | 'consumeNativeContinuation' | 'revokeNativeContinuation' | 'bindNativeContinuationWatch' | 'issueNativeContinuationFromGrant' | 'revokeNativeContinuationsForSource'>
+  & Partial<Pick<PairingTokenManager, 'revisionSource'>>;
+/** Each continuation compares its own policy revision when it is used; a settings change is not a process-wide abort. */
+export interface NativeCiContinuationPolicy { capture(version?: 1 | 2): string; current(version?: 1 | 2): string; scopes(): readonly string[]; }
 interface SourceOwner { readonly record: NativeWorkExecutionRecord; readonly authority: NativePairedExecutionAuthority; readonly assertCurrent: () => void; }
 
 export function createNativeCiContinuationHost(deps: {
@@ -29,9 +31,11 @@ export function createNativeCiContinuationHost(deps: {
 }) {
   const pending = new Map<string, Set<Promise<unknown>>>();
   const repairs = new Map<string, Promise<{ readonly sessionId: string }>>();
+  // One controller per continuation that has a live operation; removed when
+  // the continuation is revoked or the host closes. A policy change is not a
+  // process-wide abort: each record compares its own policy revision at use.
   const controllers = new Map<string, AbortController>();
   let closed = false;
-  const unsubscribe = deps.policy?.onDidInvalidate(() => { for (const controller of controllers.values()) controller.abort(); });
   const available = () => {
     if (closed || deps.signal.aborted || !deps.storage.continuations || !deps.grants || !deps.policy) throw new Error('Native CI continuation ownership is unavailable');
     return { storage: deps.storage.continuations, grants: deps.grants, policy: deps.policy };
@@ -43,11 +47,13 @@ export function createNativeCiContinuationHost(deps: {
     successorRead?: (attemptId: string) => ReturnType<NativeWorkExecutionStorage['currentByAttempt']>) {
     const { grants, policy } = available(); const record = current.record;
     if (!record || record.state === 'cancelled' || (expected && (expected.version !== record.version || expected.id !== record.id || !isDeepStrictEqual(expected.issue, record.issue) || !isDeepStrictEqual(expected.grant, record.grant)))) throw new Error('Native CI continuation was cancelled or changed');
-    controller(record.id).signal.throwIfAborted();
+    controllers.get(record.id)?.signal.throwIfAborted();
     const paired = grants.readNativeContinuation(record.grant, undefined, record.watch ? nativeCiWatchCommitment(record.watch) : undefined); const scope = deps.scopes.currentScope(deps.projectRoot);
+    const reissue = 'Create the CI watch again from the work to repair it.';
     if (!paired || paired.principalId !== record.issue.principalId || paired.authorityRevision !== record.issue.authorityRevision
-      || !isDeepStrictEqual(paired.scopes, record.issue.authorityScopes) || !paired.scopes.every(scope => policy.scopes().includes(scope)) || policy.current(record.version) !== record.issue.policyRevision
-      || scope.root !== deps.projectRoot || scope.scopeId !== record.issue.scopeId || scope.scopeRevision !== record.issue.scopeRevision) throw new Error('Native CI continuation owner, policy, or scope changed');
+      || !isDeepStrictEqual(paired.scopes, record.issue.authorityScopes)) throw new Error(`Native CI continuation: the paired device that issued it was revoked or changed. ${reissue}`);
+    if (!paired.scopes.every(scope => policy.scopes().includes(scope)) || policy.current(record.version) !== record.issue.policyRevision) throw new Error(`Native CI continuation: the settings it was issued under changed. ${reissue}`);
+    if (scope.root !== deps.projectRoot || scope.scopeId !== record.issue.scopeId || scope.scopeRevision !== record.issue.scopeRevision) throw new Error(`Native CI continuation: the workspace scope it was issued for changed. ${reissue}`);
     const original = current.original.record;
     const work = current.original.ledger.works.find(item => item.id === record.issue.originalKey.workId);
     if (!original?.receipt || original.state === 'cancelled' || current.original.intent?.state === 'cancelled'
@@ -81,15 +87,31 @@ export function createNativeCiContinuationHost(deps: {
   function sourceReader(record: NativeCiContinuationRecord, execution?: NativeExecutionOriginal, successor?: NativeExecutionOriginal) {
     let observed = record, original = execution, child = successor;
     execution = undefined; successor = undefined;
+    const held = controller(record.id);
+    // The four facts a continuation's currency rests on, each from its owner:
+    // the store's content revision (ledger, record, successor), the grant
+    // owner's revision, the workspace scope and the policy. While none moved,
+    // the last full read still stands and is returned without reading again.
+    let last: { readonly facts: string; readonly owned: ReturnType<typeof inspect> } | undefined;
+    const facts = (): string | undefined => {
+      const stored = deps.storage.revision?.(), granted = deps.grants?.revisionSource?.revision();
+      if (stored === undefined || granted === undefined || !deps.policy) return undefined;
+      const scope = deps.scopes.currentScope(deps.projectRoot);
+      return JSON.stringify([stored, granted, scope.root, scope.scopeId, scope.scopeRevision, deps.policy.current(observed.version)]);
+    };
     const snapshot = (): NativeCiContinuationOriginal => ({ record: observed, execution: original });
     const inspectOwned = (current: NativeCiContinuationTransaction) => inspect(current, record, attemptId => {
       const next = deps.storage.currentByAttempt(attemptId, child); child = next.record ?? next.intent ?? child; return next;
     });
     return { snapshot, inspect: inspectOwned, release() { original = undefined; child = undefined; }, observe(next: NativeCiContinuationRecord) { observed = parseNativeCiContinuation(next, observed); },
       read() {
-        controller(record.id).signal.throwIfAborted();
+        held.signal.throwIfAborted();
+        const before = facts();
+        if (before !== undefined && last?.facts === before) return last.owned;
         const current = available().storage.current(record.id, record.issue.originalKey, snapshot()), owned = inspectOwned(current);
-        observed = owned.record; original = current.original.record ?? current.original.intent ?? original; return owned;
+        observed = owned.record; original = current.original.record ?? current.original.intent ?? original;
+        last = before === undefined ? undefined : { facts: before, owned };
+        return owned;
       } };
   }
   function operation(record: NativeCiContinuationRecord, ready: Promise<unknown> = Promise.resolve(), original?: NativeExecutionOriginal, successor?: NativeExecutionOriginal): ExternalOperationSource {
@@ -107,7 +129,7 @@ export function createNativeCiContinuationHost(deps: {
     // During the first storage await, only the actual issuer's exact reservation
     // may own this operation. It cannot start a repair before ready has succeeded.
     let persisted = false;
-    void ready.then(() => { persisted = true; }, () => { controller(record.id).abort(); });
+    void ready.then(() => { persisted = true; }, () => { controller(record.id).abort(); controllers.delete(record.id); });
     const assertCurrent = () => {
       signal.throwIfAborted();
       if (persisted) { reader.read(); return; }
@@ -141,7 +163,7 @@ export function createNativeCiContinuationHost(deps: {
         return work;
       },
       async revoke() {
-        controller(record.id).abort();
+        controller(record.id).abort(); controllers.delete(record.id);
         const { grants, storage } = available(); grants.revokeNativeContinuation(record.grant);
         await ready.catch(() => {});
         await storage.transaction(record.id, record.issue.originalKey, current => ({
@@ -157,7 +179,8 @@ export function createNativeCiContinuationHost(deps: {
     await deps.joinOriginal(current.original); signal.throwIfAborted(); current = reader.read();
     const claimed = await owners.grants.withNativeContinuation(record.grant, current.paired, async assertPairing =>
       deps.scopes.withCurrentScope(current.scope, async assertScope => {
-        signal.throwIfAborted(); assertPairing(); assertScope(); reader.read();
+        signal.throwIfAborted(); assertPairing(); assertScope();
+        // The claim transaction below inspects the record it acts on; that is the read that counts.
         // Only an admitted, still-current claim needs the saved replay binding.
         // brief remains the original immutable capture from before every await;
         // rejected original drainage/ownership never computes its log digest.
@@ -199,12 +222,12 @@ export function createNativeCiContinuationHost(deps: {
     try { existing = execution.statusByAttempt(successor.workId, successor.attemptId, authority); }
     catch (error) { if (!(error instanceof Error) || !('code' in error) || error.code !== 'not-found') throw error; }
     if (existing) {
-      if (existing.kind === 'execution' && existing.execution.state === 'launch-claimed' && existing.execution.receipt) {
-        // Stable live/terminal receipt lookup after response loss. A restart with
-        // unknown launched effects cannot claim success or manufacture a fresh lifetime.
-        if (existing.recovery === 'required') throw new Error('Native CI successor has a launch receipt but its outcome requires native reconciliation; no effects were replayed');
+      if (existing.kind === 'execution' && existing.execution.state === 'launch-claimed' && existing.execution.receipt && existing.recovery !== 'required') {
+        // Stable live/terminal receipt lookup after response loss.
         return { sessionId: existing.execution.receipt.ownerAgentId };
       }
+      // A successor launched before a restart is resumed by its owner; the
+      // runner continues the same contract and starts no second one.
       const key = existing.kind === 'execution' ? existing.execution.request.key : existing.intent.request.key;
       result = await execution.resume(key, authority, { signal });
     } else result = await execution.start(successor, authority, { signal, taskEvidence: ciRepairPrompt(brief) });
@@ -260,7 +283,7 @@ export function createNativeCiContinuationHost(deps: {
       if (!record?.watch || !isDeepStrictEqual(record.watch, bound)) throw new Error('Native CI revocation watch changed');
       // Revocation does not need expired execution permission. The private watch
       // commitment still proves exactly which issued capability is being retired.
-      grants.revokeNativeContinuation(record.grant, nativeCiWatchCommitment(record.watch)); controller(record.id).abort();
+      grants.revokeNativeContinuation(record.grant, nativeCiWatchCommitment(record.watch)); controllers.get(record.id)?.abort(); controllers.delete(record.id);
       await storage.transaction(record.id, record.issue.originalKey, latest => ({
         next: latest.record && latest.record.state !== 'cancelled' ? { ...latest.record, state: 'cancelled' } : null, value: undefined,
       }), () => { deps.signal.throwIfAborted(); });
@@ -269,7 +292,7 @@ export function createNativeCiContinuationHost(deps: {
       for (;;) { const promises = pending.get(durableKeyIdentity(key)); if (!promises?.size) return; await Promise.allSettled([...promises]); }
     },
     close(): Promise<void> {
-      closed = true; unsubscribe?.(); for (const item of controllers.values()) item.abort();
+      closed = true; for (const item of controllers.values()) item.abort();
       // A repair may still own its immutable brief while the original executor
       // drains, before it has called execution.start and entered that host's
       // pending set. Retirement must join this actual owner too.

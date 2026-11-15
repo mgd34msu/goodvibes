@@ -2,7 +2,7 @@ import type { WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/plat
 import type { OperatorNativeWorkSubmissionClient, NativeWorkSubmissionRequest, NativeWorkSubmissionReceipt } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
 import { NATIVE_SUBMISSION_MAX_BYTES, NativeWorkSourceError, readNativeWorkSourceFile, validateNativeWorkSource, type NativeWorkSource } from './native-work-submission-source.js';
 import type { NativeSubmissionJournalBinding, NativeSubmissionJournalRecord, NativeWorkSubmissionJournal } from './native-work-submission-journal.js';
-import { NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS } from './native-work-submission-journal.js';
+import { NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS, sameNativeSubmissionBinding as sameBinding, sameNativeSubmissionCommand as sameCommand } from './native-work-submission-journal.js';
 
 export interface NativeWorkSubmissionBinding {
   readonly client: OperatorNativeWorkSubmissionClient;
@@ -31,11 +31,6 @@ export interface NativeWorkSubmissionActions {
 const requestIdentity = (command: NativeWorkSubmissionRequest): Pick<NativeWorkSubmissionRequest, 'requestId' | 'inputId' | 'expectedRevision'> => ({
   requestId: command.requestId, inputId: command.inputId, expectedRevision: command.expectedRevision,
 });
-const sameBinding = (a: NativeSubmissionJournalBinding, b: NativeSubmissionJournalBinding): boolean =>
-  a.endpoint === b.endpoint && a.projectId === b.projectId && a.workspace === b.workspace && a.principalId === b.principalId;
-const sameCommand = (a: NativeWorkSubmissionRequest, b: NativeWorkSubmissionRequest): boolean =>
-  a.requestId === b.requestId && a.inputId === b.inputId && a.expectedRevision === b.expectedRevision && a.goal === b.goal
-    && a.criteria.length === b.criteria.length && a.criteria.every((value, index) => value === b.criteria[index]);
 const freezeCommand = (command: NativeWorkSubmissionRequest): NativeWorkSubmissionRequest => {
   const captured = { ...command, criteria: [...command.criteria] }; Object.freeze(captured.criteria); return Object.freeze(captured);
 };
@@ -88,7 +83,7 @@ export class NativeWorkSubmissionControls {
     const epoch = ++this.epoch; const controller = new AbortController();
     let binding: NativeWorkSubmissionBinding | undefined; let disposed = false;
     let operationDraft: Draft | undefined; let scope: NativeSubmissionJournalBinding | undefined;
-    let phase: Phase = 'source'; let result: NativeWorkSubmissionState | undefined;
+    let phase: Phase = 'source'; let result: NativeWorkSubmissionState | undefined; let savedHere = false;
     const dispose = (): void => { if (disposed || !binding) return; disposed = true; try { binding.dispose(); } catch {} };
     const current = (): boolean => {
       if (epoch !== this.epoch || controller.signal.aborted) return false;
@@ -108,8 +103,8 @@ export class NativeWorkSubmissionControls {
       if (!current()) return;
       binding = selected.bind(); if (!current()) return;
       phase = 'principal';
+      // readPrincipal accepts only a device-token credential the host itself reported.
       const principalId = await binding.readPrincipal(controller.signal); if (!current()) return;
-      if (!principalId || principalId === 'shared-token' || principalId.length > 200) throw Object.assign(new Error('Unsupported native principal'), { code: 'NATIVE_SUBMISSION_UNSUPPORTED_AUTHORITY' });
       scope = { endpoint: selected.endpoint, projectId: selected.projectId, workspace: selected.workspace, principalId };
       phase = 'journal-read';
       let stored = await selected.journal.read(scope); if (!current()) return;
@@ -135,7 +130,7 @@ export class NativeWorkSubmissionControls {
         operationDraft = { identity: selected.identity, binding: scope, command, outcome: 'unknown' }; this.draft = operationDraft;
         phase = 'journal-save';
         await selected.journal.save(scope, command, stored?.command.requestId ?? null); if (!current()) return;
-        stored = { binding: scope, command };
+        stored = { binding: scope, command }; savedHere = true;
       }
       if (!result && mode !== 'submit') {
         const draft = operationDraft!; phase = 'lookup';
@@ -155,8 +150,10 @@ export class NativeWorkSubmissionControls {
         if (!current()) return;
         if (!stored) {
           phase = 'journal-save'; await selected.journal.save(scope, draft.command, null); if (!current()) return;
+          savedHere = true;
         }
-        phase = 'journal-confirm'; await selected.journal.confirm(scope, draft.command); if (!current()) return;
+        // A save this run completed is already durable; only a record recovered from disk is confirmed first.
+        if (!savedHere) { phase = 'journal-confirm'; await selected.journal.confirm(scope, draft.command); if (!current()) return; }
         phase = 'submit';
         publish({ status: 'pending', message: mode === 'retry' ? 'Replaying the exact durable request after lookup; IDs, source and revision are unchanged…' : 'Source and identity are durably recorded; submitting to the native ledger…', request: requestIdentity(draft.command) });
         const submitted = await binding.client.submit(draft.command, { signal: controller.signal }); if (!current()) return;
@@ -181,8 +178,8 @@ export class NativeWorkSubmissionControls {
       else if (code === 'NATIVE_SUBMISSION_CONFLICT' || code === 'CONFLICT') {
         if (operationDraft) operationDraft.outcome = 'conflict';
         result = publish({ status: 'conflict', message: 'Native ledger revision changed. The original request was not rewritten. Inspect its status; an explicitly new submit-file command may capture a fresh revision.', request });
-      } else if (code === 'NATIVE_SUBMISSION_UNSUPPORTED_AUTHORITY' || code === 'NATIVE_SUBMISSION_FORBIDDEN' || code === 'FORBIDDEN') {
-        result = publish({ status: 'unavailable', message: 'Submission requires an existing live paired operator with native ledger read/write authority. No credentials or scopes were changed.', request });
+      } else if (code === 'PAIRED_OWNER_REQUIRED' || code === 'NATIVE_SUBMISSION_UNSUPPORTED_AUTHORITY' || code === 'NATIVE_SUBMISSION_FORBIDDEN' || code === 'FORBIDDEN') {
+        result = publish({ status: 'unavailable', message: 'Submission runs only for a paired device with work-ledger read and write access. Pair this terminal with the daemon (/devices migrate-shared), then retry. No submission was sent.', request });
       } else if (code === 'NATIVE_SUBMISSION_REQUEST_CONFLICT') {
         result = publish({ status: 'unknown', message: 'Submission identity conflicts with recorded input. Inspect the original request; no source or identity was replaced.', request });
       } else result = publish({ status: request ? 'unknown' : 'unavailable', message: request

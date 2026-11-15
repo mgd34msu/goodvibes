@@ -1,3 +1,4 @@
+import type { WorkLedgerHistoryPager } from './service.js';
 import {
   WorkLedgerAccessError,
   type WorkLedgerAuthority,
@@ -21,6 +22,12 @@ export interface WorkLedgerReadClient {
   readSnapshot(): Promise<WorkLedgerReadSnapshot>;
   history(afterSequence: number): Promise<readonly WorkLedgerReadEvent[]>;
   /**
+   * At most `limit` events after the cursor and the ledger's high-water mark,
+   * from one read; only the returned events are projected. Absent on readers
+   * that have no cheaper path than `readSnapshot` plus `history`.
+   */
+  historyPage?(afterSequence: number, limit: number): Promise<{ readonly cursor: number; readonly events: readonly WorkLedgerReadEvent[] }>;
+  /**
    * Subscribe before reading; notifications may coalesce. Catch up through history.
    * onUnavailable is called with the reason when the ledger cannot be read, so the listener will receive no changes until it can.
    */
@@ -42,7 +49,7 @@ export type LocalWorkLedgerReadBindingOptions =
     readonly actorId: string;
     /** Explicit trusted-host grant to disclose complete imported KnowledgeSourceRecords. */
     readonly allowLegacyProvenance?: boolean;
-    readonly service: Pick<WorkLedgerService, 'readSnapshot' | 'history' | 'subscribe'>;
+    readonly service: Pick<WorkLedgerService, 'readSnapshot' | 'history' | 'subscribe'> & Partial<WorkLedgerHistoryPager>;
     readonly authority: WorkLedgerAuthority;
   };
 
@@ -82,6 +89,12 @@ export function createLocalWorkLedgerReadBinding(options: LocalWorkLedgerReadBin
       requireOpen();
       return events.map(event => projectWorkLedgerReadEvent(event, allowLegacyProvenance === true));
     },
+    ...(service.historyPage ? { async historyPage(afterSequence: number, limit: number) {
+      requireOpen();
+      const page = await service.historyPage!(afterSequence, limit, actor);
+      requireOpen();
+      return { cursor: page.cursor, events: page.events.map(event => projectWorkLedgerReadEvent(event, allowLegacyProvenance === true)) };
+    } } : {}),
     subscribe(listener: (snapshot: WorkLedgerReadSnapshot) => void, onUnavailable?: (reason: string) => void) {
       requireOpen();
       return service.subscribe(actor, snapshot => {

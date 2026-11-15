@@ -126,11 +126,29 @@ function sameFacts(a: NativeWorkExecutionIntent | NativeWorkExecutionRecord, b: 
   return a.version === b.version && isDeepStrictEqual(a.owner, b.owner) && a.projectId === b.projectId && sameDurableRequest(a.request, b.request)
     && Object.keys(a.target).every(key => a.target[key as keyof typeof a.target] === b.target[key as keyof typeof b.target]) && sameScopes(a.authorityScopes, b.authorityScopes);
 }
+/**
+ * The last ledger image each project's reads validated, kept deeply frozen.
+ * The ledger is validated where it is written; a read of the same bytes reuses
+ * that result instead of parsing and replaying every event again. Different
+ * bytes (another writer, a restored file) are validated in full.
+ */
+const validatedLedgers = new Map<string, { readonly image: string; readonly ledger: WorkLedgerState }>();
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); for (const child of Object.values(value)) deepFreeze(child); }
+  return value;
+}
+function validatedLedger(projectId: string, image: string): WorkLedgerState {
+  const known = validatedLedgers.get(projectId);
+  if (known && known.image === image) return known.ledger;
+  const ledger = deepFreeze(readWorkLedgerState(JSON.parse(image), projectId));
+  validatedLedgers.set(projectId, { image, ledger });
+  return ledger;
+}
 function read(db: SqlReader, projectId: string, key: Lookup, original?: NativeExecutionOriginal, candidate?: SettlementSource, ledgers?: Map<string, WorkLedgerState>): NativeWorkExecutionTransaction {
   let ledger = ledgers?.get(projectId);
   if (!ledger) {
     const ledgerRow = db.exec('SELECT format_version, revision, state_json FROM work_ledgers WHERE project_id = ?', [projectId])[0]?.values[0];
-    ledger = ledgerRow ? readWorkLedgerState(JSON.parse(String(ledgerRow[2])), projectId) : createEmptyWorkLedgerState(projectId);
+    ledger = ledgerRow ? validatedLedger(projectId, String(ledgerRow[2])) : createEmptyWorkLedgerState(projectId);
     if (ledgerRow && (ledgerRow[0] !== ledger.version || ledgerRow[1] !== ledger.revision)) throw new NativeWorkExecutionError('invalid');
     ledgers?.set(projectId, ledger);
   }
@@ -283,6 +301,7 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
   }
   return {
     continuations: createNativeCiContinuationStorage(sqlite, projectId, refresh, (db, key, original) => read(db, projectId, key, original), beforeCiV2Write),
+    revision: () => sqlite.contentRevision(),
     current(key, original) { if (closed) throw new NativeWorkExecutionError('closed'); return withValidationOriginal(original, () => sqlite.readPersisted(db => read(db, projectId, key, original))); },
     currentByAttempt(attemptId, original) { if (closed) throw new NativeWorkExecutionError('closed'); if (!attemptId || typeof attemptId !== 'string') throw new NativeWorkExecutionError('invalid'); return withValidationOriginal(original, () => sqlite.readPersisted(db => read(db, projectId, { attemptId }, original))); },
     transaction,

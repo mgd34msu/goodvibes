@@ -5,17 +5,9 @@ import { NATIVE_HOSTED_TURN_SCOPES, NativeHostedTurnError, type NativeHostedTurn
 import { nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema, nativeHostedTurnLookupSchema, nativeHostedSessionRequestSchema, nativeHostedSessionLookupSchema } from '../../hosted-sessions/native-turn-wire.js';
 import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
+import { isNativeOwner, requireNativeOwner } from './native-owner.js';
 function authorize(invocation: GatewayMethodInvocation) {
-  const context = invocation.context, authority = invocation.nativeExecutionAuthority, current = authority?.current();
-  if (!context.admin || context.principalKind !== 'token' || !context.principalId || !authority || !current
-    || current.kind !== 'pairing-token' || current.principalId !== context.principalId
-    || current.authorityId !== current.principalId || current.authorityRevision !== current.tokenId
-    || !NATIVE_HOSTED_TURN_SCOPES.every(scope => (context.scopes?.includes('*') || context.scopes?.includes(scope))
-      && (current.scopes.includes('*') || current.scopes.includes(scope)))
-    || invocation.isAuthorized?.(NATIVE_HOSTED_TURN_SCOPES) !== true) {
-    throw new GatewayVerbError('Native hosted delivery requires a current paired admin with read:work-ledger, write:work-ledger and write:sessions', 'NATIVE_TURN_FORBIDDEN', 403);
-  }
-  return authority;
+  return requireNativeOwner(invocation, NATIVE_HOSTED_TURN_SCOPES, 'Native hosted delivery');
 }
 export function registerNativeHostedTurnGatewayMethods(catalog: GatewayMethodCatalog, host: NativeHostedTurnHost): void {
   const discovery = catalog.get('workLedger.turn.session');
@@ -25,9 +17,7 @@ export function registerNativeHostedTurnGatewayMethods(catalog: GatewayMethodCat
     const parsed = nativeHostedSessionRequestSchema.safeParse(readInvocationParams(invocation));
     if (!parsed.success) throw new GatewayVerbError('Invalid session identity', 'INVALID_ARGUMENT', 400);
     try {
-      const result = await host.session(parsed.data.sessionId, invocation.nativeExecutionAuthority, { isAuthorized: () => {
-        try { authorize(invocation); return true; } catch { return false; }
-      } });
+      const result = await host.session(parsed.data.sessionId, invocation.nativeExecutionAuthority, { isAuthorized: () => isNativeOwner(invocation, NATIVE_HOSTED_TURN_SCOPES) });
       if (invocation.isAuthorized?.(['read:sessions']) !== true) throw new GatewayVerbError('Session discovery authority changed', 'FORBIDDEN', 403);
       return nativeHostedSessionLookupSchema.parse(result);
     } catch (error) {
@@ -46,9 +36,7 @@ export function registerNativeHostedTurnGatewayMethods(catalog: GatewayMethodCat
         const parsed = (operation === 'start' || operation === 'startAgent' ? nativeHostedTurnStartRequestSchema : nativeHostedTurnRequestSchema).safeParse(input);
         if (!parsed.success) throw new GatewayVerbError('Invalid native hosted turn identity', 'INVALID_ARGUMENT', 400);
         invocation.signal?.throwIfAborted();
-        const result = await host[operation](parsed.data, authority, { ...(invocation.signal ? { signal: invocation.signal } : {}), isAuthorized: () => {
-          try { authorize(invocation); return true; } catch { return false; }
-        } });
+        const result = await host[operation](parsed.data, authority, { ...(invocation.signal ? { signal: invocation.signal } : {}), isAuthorized: () => isNativeOwner(invocation, NATIVE_HOSTED_TURN_SCOPES) });
         if (operation === 'status') authorize(invocation);
         else {
           try { authorize(invocation); } catch (revoked) { withholdCommittedResult(revoked, `The ${operation} request was applied.`); }

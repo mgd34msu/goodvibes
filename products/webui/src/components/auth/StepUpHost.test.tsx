@@ -48,6 +48,8 @@ mock.module('../../lib/goodvibes', () => ({ client: { operator: { stepup: {
     if (!reply) return Promise.reject(new Error('Unexpected synthetic challenge request'));
     return reply;
   },
+  // No list in this fixture: the ceremony then offers any passkey the device holds.
+  listCredentials: () => Promise.reject(new Error('No synthetic credential list')),
 } } } }));
 
 const { StepUpHost } = await import('./StepUpHost');
@@ -185,7 +187,7 @@ test('caller abort before Verify retires the actual prompt with its native reaso
 });
 
 test('a cancelled pending challenge blocks replacement until drained and cannot start a late assertion or retry', async () => {
-  relayReplies.push(required(), required(), required());
+  relayReplies.push(required(), required());
   const oldMint = deferred(challenge);
   mintReplies.push(oldMint.promise);
   renderHost();
@@ -198,21 +200,21 @@ test('a cancelled pending challenge blocks replacement until drained and cannot 
   expectCallerAbort(await old, caller.signal);
   expect(mintSignals[0]?.aborted).toBe(true);
   expect(dialog()).toBeNull();
-  expect(response(await outcome(routedFetch(replacementUrl, { method: 'POST' }))).status).toBe(401);
+  // A requirement arriving while the cancelled ceremony drains waits its turn instead of failing.
+  const replacement = outcome(routedFetch(replacementUrl, { method: 'POST' }));
+  await nextFrame();
   expect(dialog()).toBeNull();
   oldMint.resolve(challenge);
-  await nextFrame();
-  const replacement = outcome(routedFetch(replacementUrl, { method: 'POST' }));
   await waitFor(() => Boolean(dialog()?.textContent?.includes('POST /api/owned-stepup-replacement')));
   expect(credentialRequests).toHaveLength(0);
   click('Cancel');
   expect(response(await replacement).status).toBe(401);
-  expect(attempts).toHaveLength(3);
+  expect(attempts).toHaveLength(2);
   expect(attempts.every(value => !value.headers.has(STEP_UP_ASSERTION_HEADER))).toBe(true);
 });
 
 test('caller abort cancels native assertion work and its late result cannot retry or settle the replacement', async () => {
-  relayReplies.push(required(), required(), required(), new Response('owned replacement result'));
+  relayReplies.push(required(), required(), new Response('owned replacement result'));
   mintReplies.push(Promise.resolve(challenge), Promise.resolve(challenge));
   const oldCredential = deferred<Credential | null>(null), newCredential = deferred<Credential | null>(null);
   credentialReplies.push(oldCredential.promise, newCredential.promise);
@@ -226,11 +228,12 @@ test('caller abort cancels native assertion work and its late result cannot retr
   expectCallerAbort(await old, caller.signal);
   expect(credentialRequests[0]?.signal?.aborted).toBe(true);
   expect(dialog()).toBeNull();
-  expect(response(await outcome(routedFetch(replacementUrl, { method: 'POST' }))).status).toBe(401);
+  const replacement = outcome(routedFetch(replacementUrl, { method: 'POST' }));
+  await nextFrame();
+  expect(dialog()).toBeNull();
   oldCredential.resolve(credential('old-credential'));
   await nextFrame();
   expect(attempts).toHaveLength(2);
-  const replacement = outcome(routedFetch(replacementUrl, { method: 'POST' }));
   await waitFor(() => Boolean(dialog()?.textContent?.includes('/api/owned-stepup-replacement')));
   click('Verify with passkey');
   await waitFor(() => credentialRequests.length === 2);
@@ -239,14 +242,14 @@ test('caller abort cancels native assertion work and its late result cannot retr
   expect(await response(await replacement).text()).toBe('owned replacement result');
   await waitFor(() => dialog() === null);
   expect(dialog()).toBeNull();
-  expect(attempts).toHaveLength(4);
-  const retry = attempts[3];
+  expect(attempts).toHaveLength(3);
+  const retry = attempts[2];
   if (!retry) throw new Error('Missing replacement retry');
   const assertion = retry.headers.get(STEP_UP_ASSERTION_HEADER);
   if (!assertion) throw new Error('Missing replacement assertion');
   expect(JSON.parse(new TextDecoder().decode(base64UrlToBytes(assertion))))
     .toMatchObject({ credentialId: bytesToBase64Url(new TextEncoder().encode('replacement-credential')) });
-  expect(attempts.slice(0, 3).every(value => !value.headers.has(STEP_UP_ASSERTION_HEADER))).toBe(true);
+  expect(attempts.slice(0, 2).every(value => !value.headers.has(STEP_UP_ASSERTION_HEADER))).toBe(true);
 });
 
 test('explicit UI Cancel retains the exact original 401 while cancelling only its pending native ceremony', async () => {

@@ -5,7 +5,7 @@
  * Exports:
  *   - escapeHtml       , minimal HTML escaper
  *   - normalizeLanguage, alias resolution
- *   - highlightCode    , highlight a declared or read language, falling back to escapeHtml
+ *   - highlightCode    , highlight a declared language, or pick one locally for an untagged block
  */
 
 import hljs from 'highlight.js/lib/core';
@@ -64,10 +64,6 @@ hljs.registerLanguage('xml', xml);
 hljs.registerLanguage('yaml', yaml);
 
 // ---------------------------------------------------------------------------
-// Language alias map
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
 
@@ -86,11 +82,15 @@ export function normalizeLanguage(language: string): string {
   return grammar ? hljs.listLanguages().find(name => hljs.getLanguage(name) === grammar) ?? normalized : '';
 }
 
+const REGISTERED_LANGUAGES = hljs.listLanguages();
+/** Above this size an untagged block is shown plain: detection tries every grammar, so its cost grows with the text. */
+const AUTO_DETECT_MAX_CHARS = 20_000;
+
 /**
  * Highlight `code` for the given `language`.
  *
  * - If `language` resolves to a registered hljs language, use it.
- * - Unknown/absent tags stay plaintext until a source-owned typed reading arrives.
+ * - An untagged or unknown tag is detected here against the registered grammars; nothing is sent anywhere.
  * - Otherwise escape and return as-is.
  */
 export function highlightCode(
@@ -104,6 +104,10 @@ export function highlightCode(
       ignoreIllegals: true,
     });
     return { language: normalizedLanguage, html: result.value };
+  }
+  if (code.trim() && code.length <= AUTO_DETECT_MAX_CHARS) {
+    const detected = hljs.highlightAuto(code, REGISTERED_LANGUAGES);
+    if (detected.language && detected.language !== 'plaintext' && detected.relevance > 0) return { language: detected.language, html: detected.value };
   }
   return { language: normalizedLanguage, html: escapeHtml(code) };
 }

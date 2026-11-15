@@ -7,6 +7,7 @@ import { ToastProvider } from '../../lib/toast';
 const removed: string[] = [];
 mock.module('../../lib/stepup', () => ({
   stepUpAvailability: () => ({ supported: true }),
+  StepUpError: class StepUpError extends Error {},
   getRegisteredCredential: () => null,
   setRegisteredCredential: () => {},
   clearRegisteredCredential: () => {},

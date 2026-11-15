@@ -22,8 +22,14 @@
  * daemon (there is nothing valid to send). An offer the operator genuinely
  * left unchecked IS sent as declined (or just omitted, which the daemon treats
  * identically), the two cases read differently in the result list on purpose.
+ *
+ * A failed offer can be tried again from the result list. A ceremony that already
+ * produced its push subscription or passkey is resent as it was, so a retry after a
+ * failed daemon request never leaves a second, unrecorded passkey on the device.
+ * A passkey the daemon recorded is remembered on this device as an id hint only;
+ * the daemon's list stays the record of what is registered.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { BellRing, KeyRound, Radio } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Checkbox } from '../ui/Checkbox';
@@ -37,7 +43,7 @@ import type {
 } from '../../lib/goodvibes';
 import type { PairingOfferKind } from '../../lib/pairing';
 import { describePushSubscribeError, ensureBrowserPushSubscription, ensureDeviceId } from '../../lib/push/push-client';
-import { describeStepUpError, registerPasskey, stepUpAvailability } from '../../lib/stepup';
+import { describeStepUpError, registerPasskey, setRegisteredCredential, stepUpAvailability } from '../../lib/stepup';
 import { formatError } from '../../lib/errors';
 import '../../styles/components/pairing-handoff.css';
 
@@ -84,51 +90,59 @@ const STATUS_TONE: Record<PairingHandoffOutcome['status'], StatusTone> = {
   failed: 'bad',
 };
 
+type GatheredAccept = {
+  notifications?: PairingHandoffCompleteNotificationsAccept;
+  relay?: boolean;
+  passkey?: PairingHandoffCompletePasskeyAccept;
+};
+
 export function PairingHandoffOffers({ offers, onDone, postureNotice }: PairingHandoffOffersProps) {
+  const passkeyAvailable = stepUpAvailability().supported;
+  // An offer this browser cannot complete starts unchecked, so it reads as declined, not failed.
   const [accepted, setAccepted] = useState<Partial<Record<PairingOfferKind, boolean>>>(() =>
-    Object.fromEntries(offers.map((kind) => [kind, true])),
+    Object.fromEntries(offers.map((kind) => [kind, kind !== 'passkey' || passkeyAvailable])),
   );
   const [phase, setPhase] = useState<'deciding' | 'submitting' | 'done'>('deciding');
   const [results, setResults] = useState<readonly PairingHandoffOutcome[] | null>(null);
+  // What each local ceremony produced. A retry after the daemon request failed resends it
+  // instead of creating a second passkey or push subscription on this device.
+  const gathered = useRef<GatheredAccept>({});
 
-  const passkeyAvailable = stepUpAvailability().supported;
-
-  async function handleContinue(): Promise<void> {
+  async function submit(kinds: readonly PairingOfferKind[], previous: readonly PairingHandoffOutcome[] | null): Promise<void> {
     setPhase('submitting');
     // A plain mutable draft (the public PairingHandoffCompleteInput['accept']
     // shape is readonly, by design, for every OTHER caller), built up here,
     // then handed to complete() as one literal below.
-    const accept: {
-      notifications?: PairingHandoffCompleteNotificationsAccept;
-      relay?: boolean;
-      passkey?: PairingHandoffCompletePasskeyAccept;
-    } = {};
+    const accept: GatheredAccept = {};
     const localFailures: Partial<Record<PairingOfferKind, string>> = {};
 
-    if (accepted.notifications) {
+    if (kinds.includes('notifications') && accepted.notifications) {
       try {
-        const payload = await ensureBrowserPushSubscription();
-        accept.notifications = { ...payload, deviceId: ensureDeviceId() };
+        gathered.current.notifications ??= { ...await ensureBrowserPushSubscription(), deviceId: ensureDeviceId() };
+        accept.notifications = gathered.current.notifications;
       } catch (error) {
         localFailures.notifications = describePushSubscribeError(error);
       }
     }
-    if (accepted.relay) {
+    if (kinds.includes('relay') && accepted.relay) {
       accept.relay = true;
     }
-    if (accepted.passkey) {
+    if (kinds.includes('passkey') && accepted.passkey) {
       try {
-        const ceremony = await registerPasskey({
-          userName: typeof window === 'undefined' ? 'operator' : window.location.host,
-          userDisplayName: 'GoodVibes operator',
-          label: 'Paired device',
-        });
-        accept.passkey = {
-          rpId: ceremony.rpId,
-          origin: ceremony.origin,
-          credentialId: ceremony.credentialId,
-          publicKeyCose: ceremony.publicKeyCose,
-        };
+        if (!gathered.current.passkey) {
+          const ceremony = await registerPasskey({
+            userName: typeof window === 'undefined' ? 'operator' : window.location.host,
+            userDisplayName: 'GoodVibes operator',
+            label: 'Paired device',
+          });
+          gathered.current.passkey = {
+            rpId: ceremony.rpId,
+            origin: ceremony.origin,
+            credentialId: ceremony.credentialId,
+            publicKeyCose: ceremony.publicKeyCose,
+          };
+        }
+        accept.passkey = gathered.current.passkey;
       } catch (error) {
         localFailures.passkey = describeStepUpError(error);
       }
@@ -143,7 +157,13 @@ export function PairingHandoffOffers({ offers, onDone, postureNotice }: PairingH
       requestErrorMessage = formatError(error);
     }
 
+    // The daemon's list is the owner of "this device has a passkey"; the browser keeps only the id as a hint.
+    if (accept.passkey && serverResults?.some((r) => r.kind === 'passkey' && r.status === 'completed')) {
+      setRegisteredCredential({ credentialId: accept.passkey.credentialId, label: 'Paired device', registeredAt: Date.now() });
+    }
+
     const finalResults: PairingHandoffOutcome[] = offers.map((kind) => {
+      if (!kinds.includes(kind)) return previous?.find((r) => r.kind === kind) ?? { kind, status: 'declined' };
       const localFailure = localFailures[kind];
       if (localFailure) return { kind, status: 'failed', detail: localFailure };
       const fromServer = serverResults?.find((r) => r.kind === kind);
@@ -158,6 +178,8 @@ export function PairingHandoffOffers({ offers, onDone, postureNotice }: PairingH
     setPhase('done');
   }
 
+  const retryKinds = (results ?? []).filter((r) => r.status === 'failed' && accepted[r.kind as PairingOfferKind]).map((r) => r.kind as PairingOfferKind);
+
   return (
     <Dialog
       open
@@ -166,11 +188,18 @@ export function PairingHandoffOffers({ offers, onDone, postureNotice }: PairingH
       // registration still runs, hiding its outcome and any way to retry.
       onClose={phase === 'submitting' ? () => undefined : onDone}
       footer={phase === 'done' ? (
-        <Button variant="primary" onClick={onDone}>
-          Continue to the app
-        </Button>
+        <>
+          {retryKinds.length > 0 && (
+            <Button onClick={() => void submit(retryKinds, results)}>
+              Try again
+            </Button>
+          )}
+          <Button variant="primary" onClick={onDone}>
+            Continue to the app
+          </Button>
+        </>
       ) : (
-        <Button variant="primary" disabled={phase === 'submitting'} onClick={() => void handleContinue()}>
+        <Button variant="primary" disabled={phase === 'submitting'} onClick={() => void submit(offers, null)}>
           {phase === 'submitting' ? 'Completing…' : 'Continue'}
         </Button>
       )}

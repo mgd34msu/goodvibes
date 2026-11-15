@@ -3,11 +3,9 @@ import { SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentReq
 import { choiceAnswer, fakePort, noulAnswer, type Answerer } from '@goodvibes-jev/judgment/testing';
 import { BrowserJudgmentError, type AuthenticatedPrincipal, type BrowserJudgmentInputMap, type BrowserJudgmentRequest } from '../daemon-api/src/index.ts';
 import { BrowserJudgmentReferences, BrowserJudgmentRegistry, BrowserJudgmentService } from '../platform/src/platform/judgment-browser/index.ts';
-import { createWebuiCommandRankAdapter, webuiDaemonRefusalAdapter, type WebuiPaletteSources } from '../platform/src/platform/judgment-browser/batteries/webui-adapters.ts';
-import { WEBUI_BUILTIN_COMMANDS, WEBUI_COMMAND_CATALOG_VERSION } from '../platform/src/platform/judgment-browser/batteries/webui-command-catalog.ts';
+import { webuiDaemonRefusalAdapter } from '../platform/src/platform/judgment-browser/batteries/webui-adapters.ts';
 import { readStructuredDaemonRefusal } from '../platform/src/platform/judgment-browser/batteries/webui-readers.ts';
 import { readWebuiStatusCatalog } from '../platform/src/platform/judgment-browser/batteries/webui-status-catalog.ts';
-import type { ResolvedCommandRank } from '../platform/src/platform/judgment-browser/batteries/webui-types.ts';
 import { withWebuiAnswerBoundary } from '../platform/src/platform/judgment-browser/batteries/webui-answers.ts';
 
 const ERRORS = 'webui.errors.daemon-refusal';
@@ -15,15 +13,13 @@ const PALETTE = 'webui.palette.command-rank';
 const owner: AuthenticatedPrincipal = { principalId: 'fixture-owner', principalKind: 'user', admin: false, scopes: ['write:judgment', 'read:sessions'] };
 const body = <K extends keyof BrowserJudgmentInputMap>(battery: K, input: BrowserJudgmentInputMap[K]): BrowserJudgmentRequest<K> => ({ protocolVersion: 1, requestId: crypto.randomUUID(), battery, batteryVersion: 1, input }) as BrowserJudgmentRequest<K>;
 const source = (message = 'This daemon does not host a live runtime for the existing session.', status = 404) => ({ methodId: 'sessions.contextUsage.get', status, message });
-const sourceBinding = 'fixture-palette-query-and-candidate-source';
 
-function harness(options: { answer?: Answerer; sources?: WebuiPaletteSources; authorize?: () => boolean; beforeAnswer?: (request: JudgmentRequest<Questions>) => Promise<void> } = {}) {
+function harness(options: { answer?: Answerer; authorize?: () => boolean; beforeAnswer?: (request: JudgmentRequest<Questions>) => Promise<void> } = {}) {
   const fake = fakePort(options.answer ?? ((name) => noulAnswer(name === 'session_not_local' ? 0.99 : 0.01)));
   const log = new SqliteDecisionLog(':memory:');
   const references = new BrowserJudgmentReferences();
   const registry = new BrowserJudgmentRegistry();
   registry.register(webuiDaemonRefusalAdapter);
-  if (options.sources) registry.register(createWebuiCommandRankAdapter(options.sources));
   let current = owner;
   let active = 0;
   let peak = 0;
@@ -47,24 +43,6 @@ function harness(options: { answer?: Answerer; sources?: WebuiPaletteSources; au
     async close() { await service.close(); log[Symbol.dispose](); },
   };
 }
-
-/** Trusted source fixture only. Production session/access authority is supplied by daemon composition. */
-function paletteSources(state: ResolvedCommandRank, assertCurrent: () => void = () => {}): WebuiPaletteSources {
-  return { async resolve(_input, context) {
-    const samePrincipal = () => {
-      const principal = context.currentPrincipal();
-      if (principal.principalId !== context.principal.principalId
-        || (principal.admin !== true && !principal.scopes.includes('read:sessions'))) throw new BrowserJudgmentError('JUDGMENT_REFERENCE_HELD');
-      assertCurrent();
-    };
-    samePrincipal();
-    return { state, sourceBinding, assertCurrent: samePrincipal };
-  } };
-}
-const rankState = (count = 3): ResolvedCommandRank => ({ query: 'start over', registryVersion: WEBUI_COMMAND_CATALOG_VERSION,
-  candidates: Array.from({ length: count }, (_, index) => ({ title: index === 0 ? 'New Chat' : `Unrelated ${index}`, group: 'chat' })) });
-const rankBody = (count = 3) => body(PALETTE, { query: { kind: 'inline', text: 'start over' }, registryVersion: WEBUI_COMMAND_CATALOG_VERSION,
-  candidates: Array.from({ length: count }, (_, index) => ({ kind: 'chat' as const, sessionId: `private-session-${index}` })) });
 
 describe('actual WebUI descriptors through the published service', () => {
   test('known refusal codes resolve structurally and cannot create endpoint readings', async () => {
@@ -139,78 +117,6 @@ describe('actual WebUI descriptors through the published service', () => {
     expect(readWebuiStatusCatalog('knowledge-job.future-status', 'badge')).toBeUndefined();
   });
 
-  test('palette reads every opaque index, preserves actual probabilities and keeps private identities out of the log', async () => {
-    const f = harness({ sources: paletteSources(rankState()), answer: (_name, _question, state) => noulAnswer((state as { candidate: { title: string } }).candidate.title === 'New Chat' ? 0.93 : 0.03) });
-    try {
-      const result = await f.execute(rankBody()) as Record<string, unknown>;
-      expect(result).toMatchObject({ status: 'settled', value: { accepted: [{ candidateIndex: 0, probability: 0.93 }], rejected: [1, 2] }, readings: { candidate_0: { verdict: 'yes', outcome: 'act' }, candidate_1: { verdict: 'no', outcome: 'act' } } });
-      expect(f.requests).toHaveLength(3); expect(Object.keys(result.readings as object)).toEqual(['candidate_0', 'candidate_1', 'candidate_2']);
-      const recorded = JSON.stringify(f.log.query());
-      for (const text of ['private-session-', 'New Chat', 'start over', sourceBinding]) expect(recorded).not.toContain(text);
-    } finally { await f.close(); }
-  });
-
-  test('palette preserves source lifetime cancellation across its resolver wrapper and drains fan-out', async () => {
-    const lifetime = new AbortController(); const sources = paletteSources(rankState(8));
-    let entered!: () => void; const started = new Promise<void>((resolve) => { entered = resolve; });
-    let active = 0;
-    const f = harness({ sources: { async resolve(input, context) {
-      return { ...await sources.resolve(input, context), signal: lifetime.signal };
-    } }, beforeAnswer: ({ signal }) => new Promise((_, reject) => {
-      signal!.addEventListener('abort', () => reject(signal!.reason), { once: true });
-      if (++active === 4) entered();
-    }) });
-    try {
-      const pending = f.execute(rankBody(8)).catch((error: unknown) => error);
-      await started; lifetime.abort();
-      expect(await pending).toMatchObject({ code: 'JUDGMENT_REFERENCE_HELD' });
-      await f.service.close();
-      expect(active).toBe(4); expect(f.requests).toHaveLength(0);
-      // Retiring the source also retires retention authority. Drained calls
-      // cannot acquire a source-bearing failure hash after that boundary.
-      expect(f.log.query()).toEqual([]);
-    } finally { await f.close(); }
-  });
-
-  test('all 64 candidates are read with at most four active provider calls', async () => {
-    const f = harness({ sources: paletteSources(rankState(64)), answer: () => noulAnswer(0.01), beforeAnswer: () => new Promise((resolve) => setTimeout(resolve, 1)) });
-    try {
-      const result = await f.execute(rankBody(64));
-      expect(result).toMatchObject({ status: 'settled', value: { accepted: [], rejected: Array.from({ length: 64 }, (_, i) => i) } });
-      expect(f.requests).toHaveLength(64); expect(f.peak()).toBe(4);
-    } finally { await f.close(); }
-  });
-
-  test('the complete 27 builtins and eight chats use request indices with genuine sorted scores', async () => {
-    const candidates = [...WEBUI_BUILTIN_COMMANDS.map(({ title, group, keywords }) => ({ title, group, keywords })), ...rankState(8).candidates];
-    const request = body(PALETTE, { query: { kind: 'inline', text: 'start over' }, registryVersion: WEBUI_COMMAND_CATALOG_VERSION,
-      candidates: [...WEBUI_BUILTIN_COMMANDS.map(({ id }) => ({ kind: 'builtin' as const, commandId: id })), ...rankBody(8).input.candidates] });
-    const f = harness({ sources: paletteSources({ ...rankState(), candidates }), answer: (_name, _question, state) => {
-      const title = (state as { candidate: { title: string } }).candidate.title;
-      return noulAnswer(title === 'New Chat' ? 0.93 : title === 'Go to Chat' ? 0.8 : 0.03);
-    } });
-    try {
-      const result = await f.execute(request) as Record<string, unknown>;
-      expect(result).toMatchObject({ status: 'settled', value: { accepted: [
-        { candidateIndex: 7, probability: 0.93 }, { candidateIndex: 27, probability: 0.93 }, { candidateIndex: 0, probability: 0.8 },
-      ] } });
-      expect(Object.keys(result.readings as object)).toHaveLength(35);
-      expect(f.requests).toHaveLength(35); expect(f.peak()).toBeLessThanOrEqual(4);
-      const recorded = JSON.stringify(f.log.query());
-      for (const text of ['private-session-', 'chat.new', 'New Chat', 'start over', sourceBinding]) expect(recorded).not.toContain(text);
-    } finally { await f.close(); }
-  });
-
-  test('one unsettled candidate holds the entire ranking with original confirm or escalate outcomes', async () => {
-    for (const [probability, outcome] of [[0.57, 'confirm'], [0.5, 'escalate']] as const) {
-      const f = harness({ sources: paletteSources(rankState()), answer: (_name, _question, state) => noulAnswer((state as { candidate: { title: string } }).candidate.title === 'New Chat' ? probability : 0.99) });
-      try {
-        const result = await f.execute(rankBody());
-        expect(result).toMatchObject({ status: 'held', outcome, readings: { candidate_0: { probability, outcome }, candidate_1: { outcome: 'act' } } });
-        expect(result).not.toHaveProperty('value'); expect(f.requests).toHaveLength(3);
-      } finally { await f.close(); }
-    }
-  });
 });
 
 describe('adapter source ownership and full-input admission', () => {
@@ -239,25 +145,6 @@ describe('adapter source ownership and full-input admission', () => {
     }
   });
 
-  test('full resolved palette is inspected before candidate bounds or first port/log use', async () => {
-    const state = { ...rankState(65), candidates: [...rankState(64).candidates, { title: 'password=synthetic-secret' }] };
-    const f = harness({ sources: paletteSources(state) });
-    try {
-      await expect(f.execute(rankBody(3))).rejects.toMatchObject({ code: 'JUDGMENT_INPUT_HELD' });
-      expect(f.requests).toHaveLength(0); expect(f.log.query()).toHaveLength(0);
-    } finally { await f.close(); }
-  });
-
-  test('palette source cannot substitute inline query, count or registry revision', async () => {
-    for (const state of [{ ...rankState(), query: 'different private query' }, { ...rankState(), registryVersion: 'stale' }, rankState(2)]) {
-      const f = harness({ sources: paletteSources(state) });
-      try {
-        await expect(f.execute(rankBody())).rejects.toMatchObject({ code: 'JUDGMENT_REFERENCE_HELD' });
-        expect(f.requests).toHaveLength(0); expect(f.log.query()).toHaveLength(0);
-      } finally { await f.close(); }
-    }
-  });
-
   test('source revision and principal are rechecked after asynchronous provider work', async () => {
     for (const change of ['source', 'principal'] as const) {
       let valid = true;
@@ -277,42 +164,4 @@ describe('adapter source ownership and full-input admission', () => {
     }
   });
 
-  test('palette cancellation stops new calls and discards all late candidate results', async () => {
-    let entered = 0;
-    let enter!: () => void;
-    let release!: () => void;
-    const started = new Promise<void>((resolve) => { enter = resolve; });
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const f = harness({ sources: paletteSources(rankState(12)), beforeAnswer: async () => { if (++entered === 4) enter(); await gate; } });
-    const abort = new AbortController();
-    try {
-      const pending = f.execute(rankBody(12), abort.signal);
-      await started; abort.abort(); release();
-      await expect(pending).rejects.toMatchObject({ code: 'JUDGMENT_ABORTED' });
-      expect(entered).toBe(4);
-    } finally { release?.(); await f.close(); }
-  });
-
-  test('palette source rechecks current read:sessions after asynchronous scoring', async () => {
-    let entered = 0;
-    let enter!: () => void;
-    let release!: () => void;
-    const started = new Promise<void>((resolve) => { enter = resolve; });
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const f = harness({ sources: paletteSources(rankState()), beforeAnswer: async () => { if (++entered === 3) enter(); await gate; } });
-    try {
-      const pending = f.execute(rankBody());
-      await started;
-      f.principal({ ...owner, scopes: ['write:judgment'] });
-      release();
-      await expect(pending).rejects.toMatchObject({ code: 'JUDGMENT_REFERENCE_HELD' });
-    } finally { release?.(); await f.close(); }
-  });
-
-  test('public command catalog includes the complete 27 builtin registrations and no callbacks', () => {
-    expect(WEBUI_BUILTIN_COMMANDS).toHaveLength(27);
-    expect(new Set(WEBUI_BUILTIN_COMMANDS.map((command) => command.id)).size).toBe(27);
-    expect(WEBUI_BUILTIN_COMMANDS.find((command) => command.id === 'chat.new')).toMatchObject({ title: 'New Chat', group: 'chat', keywords: ['new', 'create', 'session'] });
-    expect(WEBUI_BUILTIN_COMMANDS.every((command) => Object.keys(command).sort().join() === 'group,id,keywords,title')).toBe(true);
-  });
 });

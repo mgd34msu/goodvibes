@@ -3,23 +3,19 @@ import { expect, spyOn, test } from 'bun:test';
 import { exportAndCompareFixture } from '../helpers/webui-fixture-parity.ts';
 import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
-import { WEBUI_BUILTIN_COMMANDS, WEBUI_COMMAND_CATALOG_VERSION } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
 import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import { startDaemonFixture } from '../../testing/daemon-fixture.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
-test('capture production-composed browser palette and daemon-refusal HTTP wires', async () => {
-  const calls: { state: { candidate?: { title: string } }; questions: Record<string, unknown> }[] = [];
-  let selection = 'Go to Library';
+test('capture production-composed browser daemon-refusal HTTP wires', async () => {
+  const calls: { state: unknown; questions: Record<string, unknown> }[] = [];
   let uncertain = false;
   const endpoint = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
     if (new URL(request.url).pathname !== '/v1/systemone') return new Response(null, { status: 404 });
     const input = await request.json() as typeof calls[number];
     calls.push(input);
     return Response.json({ model: 'jev-1.13.0', answers: Object.fromEntries(Object.keys(input.questions).map(name =>
-      [name, { type: 'noul', noul: uncertain ? 0.5 : name === 'match'
-        ? input.state.candidate?.title === selection ? 0.99 : 0.01
-        : name === 'method_unknown' ? 0.99 : 0.01 }])), usage: { input_tokens: 1, output_tokens: 1 } });
+      [name, { type: 'noul', noul: uncertain ? 0.5 : name === 'method_unknown' ? 0.99 : 0.01 }])), usage: { input_tokens: 1, output_tokens: 1 } });
   } });
   const discovery = spyOn(ProviderRegistry.prototype, 'refreshLiveModelDiscovery').mockResolvedValue([]);
   const benchmarks = spyOn(BenchmarkStore.prototype, 'refreshBenchmarks').mockResolvedValue(undefined);
@@ -47,32 +43,6 @@ test('capture production-composed browser palette and daemon-refusal HTTP wires'
     const sessionId = (JSON.parse(created.body) as { sessionId: string }).sessionId;
     const listBefore = await wire('/api/companion/chat/sessions?includeClosed=true&limit=100');
     const session = await wire(`/api/companion/chat/sessions/${sessionId}`);
-    // Same group/title ordering as getCommands(); replay asserts exact identities and order.
-    const candidates = [...WEBUI_BUILTIN_COMMANDS.map(command => ({ group: command.group, title: command.title,
-      candidate: { kind: 'builtin' as const, commandId: command.id } })),
-      { group: 'chats', title, candidate: { kind: 'chat' as const, sessionId } }]
-      .sort((a, b) => a.group.localeCompare(b.group) || a.title.localeCompare(b.title)).map(item => item.candidate);
-    const palette = (text: string): BrowserJudgmentRequest<'webui.palette.command-rank'> => ({
-      protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.palette.command-rank', batteryVersion: 1,
-      input: { query: { kind: 'inline', text }, registryVersion: WEBUI_COMMAND_CATALOG_VERSION, candidates },
-    });
-    const library = await run(palette('show saved material'));
-    selection = title;
-    const chat = await run(palette('Find synthetic café plans'));
-    uncertain = true;
-    const held = await run(palette('uncertain synthetic command'));
-    uncertain = false;
-    for (const capture of [library, chat]) {
-      expect(capture.status).toBe(200);
-      expect(JSON.parse(capture.body)).toMatchObject({ status: 'settled', outcome: 'act', evidence: expect.any(Array) });
-      expect(JSON.parse(capture.body).evidence).toHaveLength(candidates.length);
-    }
-    // Every built-in command plus the one chat created above.
-    expect(candidates).toHaveLength(WEBUI_BUILTIN_COMMANDS.length + 1);
-    expect(JSON.parse(held.body)).toMatchObject({ status: 'held', reason: 'uncertain' });
-    expect(JSON.stringify(calls)).not.toContain(sessionId);
-    expect(calls.some(call => call.state.candidate?.title === title)).toBe(true);
-
     // A synthetic handler behind the real canonical method and authenticated
     // invocation route. The browser replays this same-method response at its
     // direct close URL; neither the issuer nor judgment service is replaced.
@@ -105,20 +75,17 @@ test('capture production-composed browser palette and daemon-refusal HTTP wires'
     expect(JSON.parse(listAfter.body)).toMatchObject({ sessions: [] });
     const decisions = daemon.services.judgment.decisionLog.query({ battery: 'webui.errors.daemon-refusal' });
     expect(decisions).toHaveLength(2);
-    const paletteDecisions = daemon.services.judgment.decisionLog.query({ battery: 'webui.palette.command-rank' });
-    // One reading per candidate for each of the three palette requests.
-    expect(paletteDecisions).toHaveLength(candidates.length * 3);
-    for (const capture of [library, chat, held, errorSettled, errorHeld]) {
+    for (const capture of [errorSettled, errorHeld]) {
       const evidence = (JSON.parse(capture.body) as { evidence: { decisionId: string; model: string; requestedModel: string; latencyMs: number; usage: unknown }[] }).evidence;
       for (const item of evidence) {
-        const record = [...decisions, ...paletteDecisions].find(entry => entry.id === item.decisionId);
+        const record = decisions.find(entry => entry.id === item.decisionId);
         expect(record).toMatchObject({ status: 'answered', model: item.model, requestedModel: item.requestedModel, latencyMs: item.latencyMs, usage: item.usage });
       }
     }
     const directory = process.env.GOODVIBES_TEST_BROWSER_JUDGMENT_FIXTURE_DIR;
     exportAndCompareFixture(directory, 'runtime.json', `${JSON.stringify({
         source: 'Owned loopback synthetic System One; actual default runtime composition and authenticated DaemonServer HTTP. No live model or credential.',
-        title, sessionId, listBefore, session, library, chat, held, close, errorSettled, errorHeld, deleted, listAfter,
+        title, sessionId, listBefore, session, close, errorSettled, errorHeld, deleted, listAfter,
       }, null, 2)}\n`, new URL('../../../../webui/e2e/support/fixtures/browser-judgment-runtime/', import.meta.url));
   } finally { try { await daemon.stop(); } finally { secrets.mockRestore(); restore(); } }
 }, 30_000);

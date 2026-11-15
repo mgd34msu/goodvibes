@@ -8,7 +8,7 @@ import {
 } from "./client-lifetime";
 import { randomUuid } from "./uuid";
 
-type ProviderBattery = "webui.credentials.provider-key" | "webui.models.catalog-provider-match";
+type ProviderBattery = "webui.models.catalog-provider-match";
 type Request = BrowserJudgmentRequest<ProviderBattery>;
 export type CredentialProviderResult =
   | {
@@ -138,7 +138,7 @@ export async function readCredentialProvider(
   providerId: string,
   names: readonly string[],
   signal: AbortSignal,
-  battery: ProviderBattery = "webui.credentials.provider-key"
+  battery: ProviderBattery = "webui.models.catalog-provider-match"
 ): Promise<CredentialProviderResult> {
   if (!providerId || !names.length || names.length > 64 || signal.aborted)
     return { status: "held" };

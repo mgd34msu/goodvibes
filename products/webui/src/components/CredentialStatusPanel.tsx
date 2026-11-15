@@ -1,6 +1,4 @@
-import { useEffect, useState } from 'react';
-import { readCredentialProvider, type CredentialProviderResult } from '../lib/credential-provider-judgment';
-import { subscribeClientLifetime } from '../lib/client-lifetime';
+import { useMemo } from 'react';
 import { readDeclaredProviderCredential } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
 /**
  * CredentialStatusPanel, the display-site adoption of the cross-surface
@@ -31,6 +29,7 @@ import type { StatusTone } from './ui/StatusDot';
 import { client as platformClient } from '../lib/goodvibes';
 import { deriveCredentialAvailability, type CredentialStatusEntry } from '../lib/provider-status';
 import { errorCode, formatError, isAdminRequiredError, serializeError } from '../lib/errors';
+import { asRecord } from '../lib/object';
 import { EmptyState } from './feedback/EmptyState';
 import { SkeletonBlock } from './feedback/SkeletonBlock';
 import { Chip } from './ui/Chip';
@@ -54,11 +53,30 @@ function credentialLabel(entry: CredentialStatusEntry): string {
   return entry.usable ? 'usable' : 'configured, not usable';
 }
 
+/**
+ * The stored-credential names a provider's own sign-in routes name (`secretKeys`, `envVars`),
+ * from the provider record the daemon returns. This is how a custom provider says which key is its own.
+ */
+function routeCredentialNames(record: unknown): ReadonlySet<string> {
+  const root = asRecord(record);
+  const names = new Set<string>();
+  for (const routes of [root.routes, asRecord(root.auth).routes, asRecord(asRecord(root.runtime).auth).routes]) {
+    if (!Array.isArray(routes)) continue;
+    for (const route of routes) {
+      const fields = asRecord(route);
+      for (const list of [fields.secretKeys, fields.envVars]) {
+        if (Array.isArray(list)) for (const name of list) if (typeof name === 'string' && name) names.add(name);
+      }
+    }
+  }
+  return names;
+}
+
 export interface CredentialStatusPanelProps {
   /**
-   * The currently selected provider id, if any, used only for a soft,
-   * declared-catalog enrichment. Exact provider-owned key names are highlighted.
-   * Undeclared/custom names use source-owned readings and remain unclassified when held.
+   * The currently selected provider id, if any. A stored name is highlighted as this provider's
+   * when the built-in catalog declares it or the provider's own sign-in routes name it; any other
+   * name is listed without the caption.
    */
   selectedProviderId?: string;
 }
@@ -86,22 +104,14 @@ export function CredentialStatusPanel({ selectedProviderId }: CredentialStatusPa
   // optional-chain lint rule has nothing to flag.
   const degradedReason = otherRefusal ?? (availability?.available === false ? availability.reason : null);
   const credentials = availability?.available === true ? availability.credentials : null;
-  const unknownNames = (credentials?.map(entry => entry.key) ?? []).filter(key => selectedProviderId && readDeclaredProviderCredential(selectedProviderId, key) === undefined);
-  const nameSnapshot = JSON.stringify(unknownNames);
-  const [alignment, setAlignment] = useState<{ providerId: string; names: string; result: CredentialProviderResult }>();
-  const [identityRevision, setIdentityRevision] = useState(0);
-  useEffect(() => subscribeClientLifetime(() => { setAlignment(undefined); setIdentityRevision(value => value + 1); }), []);
-  useEffect(() => {
-    const names = JSON.parse(nameSnapshot) as string[];
-    if (!selectedProviderId || !names.length) return;
-    const abort = new AbortController();
-    void readCredentialProvider(selectedProviderId, names, abort.signal).then(result => {
-      if (!abort.signal.aborted) setAlignment({ providerId: selectedProviderId, names: nameSnapshot, result });
-    });
-    return () => abort.abort();
-  }, [selectedProviderId, nameSnapshot, identityRevision]);
-  const semanticMatches = alignment && alignment.providerId === selectedProviderId && alignment.names === nameSnapshot
-    && alignment.result.status === 'ready' && alignment.result.isCurrent() ? alignment.result.matches : undefined;
+  // Same query key and call as the provider detail view, so an open provider page answers from its cache.
+  const providerDetail = useQuery({
+    queryKey: ['providers', selectedProviderId],
+    enabled: Boolean(selectedProviderId),
+    queryFn: () => platformClient.operator.providers.get(selectedProviderId!),
+    retry: false,
+  });
+  const providerNames = useMemo(() => routeCredentialNames(providerDetail.data), [providerDetail.data]);
 
   return (
     <SettingsBlock className="credential-status" title="Credential status">
@@ -132,7 +142,7 @@ export function CredentialStatusPanel({ selectedProviderId }: CredentialStatusPa
           {credentials.map((entry) => {
             const matched = Boolean(
               selectedProviderId && (readDeclaredProviderCredential(selectedProviderId, entry.key) === true
-                || semanticMatches?.[unknownNames.indexOf(entry.key)] === true),
+                || providerNames.has(entry.key)),
             );
             return (
               <Row

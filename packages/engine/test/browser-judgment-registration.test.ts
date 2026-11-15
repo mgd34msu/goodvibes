@@ -19,7 +19,10 @@ const inputs: Record<BrowserJudgmentBatteryId, unknown> = {
   'webui.models.catalog-provider-match': { providerId: 'p', keys: ['k'] },
 };
 
-test('every published battery id is served by the runtime and has a contract schema', async () => {
+/** Ids still in the wire contract whose readings the web UI now decides in code; the runtime no longer serves them. */
+const RETIRED = new Set<BrowserJudgmentBatteryId>(['webui.palette.command-rank', 'webui.credentials.provider-key', 'webui.code.language', 'webui.config.credential-key', 'webui.settings.card-material-key']);
+
+test('every published battery id is served by the runtime, except the retired ones, and has a contract schema', async () => {
   const log = new SqliteDecisionLog(':memory:');
   const port: JudgmentPort = { model: 'jev-1.13.0', async ask() { throw new Error('no model call is expected'); } };
   const service = createWebuiBrowserJudgment({ methods: new GatewayMethodCatalog(),
@@ -31,6 +34,7 @@ test('every published battery id is served by the runtime and has a contract sch
     for (const battery of BROWSER_JUDGMENT_BATTERY_IDS) {
       const request = { protocolVersion: 1, requestId: crypto.randomUUID(), battery, batteryVersion: BROWSER_JUDGMENT_BATTERY_VERSIONS[battery], input: inputs[battery] };
       const refusal = await service.execute(request, owner, new AbortController().signal, () => owner).catch((error: unknown) => error);
+      if (RETIRED.has(battery)) { expect(refusal).toMatchObject({ code: 'JUDGMENT_BATTERY_UNKNOWN' }); continue; }
       expect(refusal).not.toMatchObject({ code: 'JUDGMENT_BATTERY_UNKNOWN' });
       expect(refusal).not.toMatchObject({ code: 'JUDGMENT_BATTERY_VERSION_UNSUPPORTED' });
     }

@@ -51,6 +51,7 @@ mock.module('../../lib/stepup', () => ({
   registerPasskey: () => registerPasskeyImpl(),
   describeStepUpError: (error: unknown) => (error instanceof Error ? error.message : String(error)),
   stepUpAvailability: () => ({ supported: true }),
+  setRegisteredCredential: () => {},
 }));
 
 const { PairingHandoffOffers } = await import('./PairingHandoffOffers');

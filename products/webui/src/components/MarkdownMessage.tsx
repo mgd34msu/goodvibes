@@ -1,7 +1,5 @@
-import { readCodeLanguage, type CodeLanguageResult } from '../lib/code-language-judgment';
-import { subscribeClientLifetime } from '../lib/client-lifetime';
-import { isValidElement, ReactNode, useEffect, useMemo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import { createContext, isValidElement, memo, ReactNode, useContext, useMemo, useState } from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { Check, Copy } from 'lucide-react';
@@ -10,8 +8,6 @@ import { useWebUiPreferences } from '../lib/ui-preferences';
 import { useOptionalToast } from '../lib/toast';
 import { IconButton } from './ui/IconButton';
 import '../styles/components/markdown.css';
-
-
 
 function codeElementFromChildren(children: ReactNode) {
   const child = Array.isArray(children) ? children[0] : children;
@@ -38,39 +34,19 @@ function codeTextFromChildren(children: ReactNode): string {
   return textFromReactNode(child?.props.children ?? children);
 }
 
-interface MessageSource { readonly sessionId: string; readonly messageId: string; readonly contentRevision: string }
-interface CodeBlockProps {
-  source?: MessageSource;
-  content: string;
-  start?: number;
-  end?: number;
-  children: ReactNode;
-  lineNumbers: boolean;
-}
+// Code blocks read the line-number preference from here, so the renderer map below can be
+// one module-level object: a new map on every render would be a new component type, and
+// React would unmount and rebuild every code block on each keystroke or streamed token.
+const LineNumbersContext = createContext(false);
 
-function CodeBlock({ children, lineNumbers, source, content, start, end }: CodeBlockProps) {
+function CodeBlock({ children }: { children: ReactNode }) {
+  const lineNumbers = useContext(LineNumbersContext);
   const [copied, setCopied] = useState(false);
   const toastCtx = useOptionalToast();
   const language = languageFromCodeChild(children);
   const code = codeTextFromChildren(children);
   const visibleCode = code.endsWith('\n') ? code.slice(0, -1) : code;
-  const [reading, setReading] = useState<{ source: object; result: CodeLanguageResult }>();
-  const [identityRevision, setIdentityRevision] = useState(0);
-  const declaredLanguage = normalizeLanguage(language);
-  const sessionId = source?.sessionId; const messageId = source?.messageId; const contentRevision = source?.contentRevision;
-  const currentSource = useMemo(() => ({ sessionId, messageId, contentRevision, content, start, end, identityRevision }),
-    [sessionId, messageId, contentRevision, content, start, end, identityRevision]);
-  useEffect(() => subscribeClientLifetime(() => { setReading(undefined); setIdentityRevision(value => value + 1); }), []);
-  useEffect(() => {
-    if (declaredLanguage || !sessionId || !messageId || !contentRevision || start === undefined || end === undefined) return;
-    const abort = new AbortController();
-    void readCodeLanguage({ sessionId, messageId, contentRevision, content, start, end }, abort.signal).then(result => {
-      if (!abort.signal.aborted) setReading({ source: currentSource, result });
-    });
-    return () => abort.abort();
-  }, [declaredLanguage, sessionId, messageId, contentRevision, content, start, end, currentSource]);
-  const inferredLanguage = reading?.source === currentSource && reading.result.status === 'ready' && reading.result.isCurrent() ? reading.result.language : '';
-  const highlighted = highlightCode(visibleCode, declaredLanguage || inferredLanguage);
+  const highlighted = useMemo(() => highlightCode(visibleCode, language), [visibleCode, language]);
   const highlightedLines = highlighted.html.split('\n');
   const displayLanguage = language || highlighted.language;
 
@@ -126,37 +102,33 @@ function CodeBlock({ children, lineNumbers, source, content, start, end }: CodeB
   );
 }
 
+const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+const COMPONENTS: Components = {
+  a: ({ children, node: _node, ...props }) => (
+    <a {...props} target="_blank" rel="noreferrer">
+      {children}
+    </a>
+  ),
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+};
+
 interface MarkdownMessageProps {
   content: string;
   lineNumbers?: boolean;
-  source?: MessageSource;
 }
 
-export function MarkdownMessage({ content, lineNumbers, source }: MarkdownMessageProps) {
+/** Re-renders only when its text or line-number setting changes; a parent's keystroke or token does not re-parse it. */
+export const MarkdownMessage = memo(function MarkdownMessage({ content, lineNumbers }: MarkdownMessageProps) {
   const [preferences] = useWebUiPreferences();
   const showLineNumbers = lineNumbers ?? preferences.codeBlockLineNumbers;
 
   return (
     <div className="markdown-message">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
-        components={{
-          a: ({ children, ...props }) => (
-            <a {...props} target="_blank" rel="noreferrer">
-              {children}
-            </a>
-          ),
-          pre: ({ children, node }) => {
-            return (
-              <CodeBlock lineNumbers={showLineNumbers} source={source} content={content} start={node?.position?.start.offset} end={node?.position?.end.offset}>
-                {children}
-              </CodeBlock>
-            );
-          },
-        }}
-      >
-        {content}
-      </ReactMarkdown>
+      <LineNumbersContext.Provider value={showLineNumbers}>
+        <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
+          {content}
+        </ReactMarkdown>
+      </LineNumbersContext.Provider>
     </div>
   );
-}
+});

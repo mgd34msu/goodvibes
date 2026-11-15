@@ -44,6 +44,23 @@ describe('MarkdownMessage', () => {
     expect(el.querySelector('pre')?.textContent).toContain('bun run build');
   });
 
+  test('a parent re-render with the same text keeps the code block node and sends nothing', () => {
+    let requests = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(async (): Promise<Response> => { requests++; return new Response(null, { status: 503 }); }, { preconnect: originalFetch.preconnect });
+    try {
+      const content = '```\ndef square(value):\n    return value ** 2\n```';
+      const el = render(<div><MarkdownMessage content={content} /></div>);
+      const block = el.querySelector('.markdown-code-block');
+      expect(el.querySelector('.markdown-code-label')?.textContent).toBe('python');
+      for (let i = 0; i < 20; i++) flushSync(() => root.render(<div data-tick={i}><MarkdownMessage content={content} /></div>));
+      expect(el.querySelector('.markdown-code-block')).toBe(block);
+      expect(requests).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('without line numbers no hidden numbering spans exist', () => {
     const el = render(<MarkdownMessage content={'```bash\nbun test\n```'} lineNumbers={false} />);
     expect(el.querySelectorAll('pre [aria-hidden="true"]')).toHaveLength(0);

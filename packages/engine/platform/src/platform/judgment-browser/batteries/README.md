@@ -1,14 +1,14 @@
 # First WebUI battery readers
 
-These are server-only definitions and readers for the browser judgment registrations. The surrounding `webui-runtime.ts` source owner and daemon `browser-judgment-composition.ts` now install the command/error/mail readers under authenticated host ownership; this reader layer itself grants no access or transmission permission.
+These are server-only definitions and readers for the browser judgment registrations. The surrounding `webui-runtime.ts` source owner and daemon `browser-judgment-composition.ts` install the error, mail-subject, speech-seam and provider-catalog readers under authenticated host ownership; this reader layer itself grants no access or transmission permission.
 
-`webui-adapters.ts` implements the published `BrowserJudgmentBattery` descriptor contract from PR31. `webuiDaemonRefusalAdapter` and `webuiMailReplySubjectAdapter` resolve existing server references with the fresh `currentPrincipal` callback. `createWebuiCommandRankAdapter(sources)` accepts the `WebuiPaletteSources` authority supplied by daemon composition. It must resolve the query and all requested candidates in request order, retain the identity map locally, and bind query provenance together with candidate access/revisions in `sourceBinding`. Its `assertCurrent()` must recheck current identity, `read:sessions`, lifetime and source revisions after async work. The adapter checks the full returned projection before bounds/port/logging and verifies its query, version and candidate count against the request. No browser text-staging endpoint or private-source permission is created here.
+`webui-adapters.ts` implements the published `BrowserJudgmentBattery` descriptor contract. `webuiDaemonRefusalAdapter` and `webuiMailReplySubjectAdapter` resolve existing server references with the fresh `currentPrincipal` callback. No browser text-staging endpoint or private-source permission is created here.
 
-`webui-command-catalog.ts` contains the 27 public builtin descriptors from the pinned WebUI source, without callbacks. `webui-status-catalog.ts` contains exhaustive structural tone mappings for the current companion-session, knowledge-job, knowledge-refinement and provider-account auth enum types. `readWebuiStatusCatalog()` is caller-side; unknown labels stay unsupported. Status tone is always read from this table; no model is asked for it. The public `judgment-browser/catalogs` entrypoint re-exports only these pure catalogs, the declared-fact rules below and erased types. Its browser graph includes no provider, source resolver, log or SQLite implementation.
+The web UI command palette, code-block language, settings key classification and credential-to-provider highlight are decided in the browser by code (the palette's lexical matcher, the bundled highlighter's own detection, the engine's declared config key facts, the provider catalog and the provider's own sign-in routes); none of them asks a model. `webui-status-catalog.ts` contains exhaustive structural tone mappings for the current companion-session, knowledge-job, knowledge-refinement and provider-account auth enum types. `readWebuiStatusCatalog()` is caller-side; unknown labels stay unsupported. Status tone is always read from this table; no model is asked for it. The public `judgment-browser/catalogs` entrypoint re-exports only these pure catalogs, the declared-fact rules below and erased types. Its browser graph includes no provider, source resolver, log or SQLite implementation.
 
 The adapters return the actual framework readings on both settled and held projections. An item outcome is never weakened to make a compound usable, and held projections contain no business `value`. Published PR41 `2142bab8` supplies the optional `structuralBasis: { method_unknown: 'http-status-not-404' }` for four genuine refusal readings, and held-only `compoundOutcome: 'escalate'` for conflicting facts. A missing valid HTTP status holds before the port. The service consumes `compoundOutcome` as a minimum for the wire `outcome`; it does not emit a second outcome field. The adapters do not synthesize a fifth reading or alter individual outcomes. Both cases are covered through the actual service and decision log in the focused adapter tests.
 
-The source-level adapter API also exports `WebuiDaemonRefusalRun`, `WebuiCommandRankRun` and `WebuiPaletteSources`. The run types contain server-only framework evidence; they are not HTTP result types.
+The source-level adapter API also exports `WebuiDaemonRefusalRun`. The run type contains server-only framework evidence; it is not an HTTP result type.
 
 `webui-specs.ts` exports the WebUI batteries and `WEBUI_BATTERY_QUESTIONS`. Questions, item names, criteria and decision sites are fixed. Fixtures are synthetic calibration inputs; offline replay verifies the harness, not real-model calibration or accuracy.
 
@@ -19,9 +19,8 @@ The source-level adapter API also exports `WebuiDaemonRefusalRun`, `WebuiCommand
 Code answers these at once, in the browser and in the adapters, from the same declarations exported by `catalogs.ts`. An adapter refuses (`JUDGMENT_INPUT_HELD`) a request about a declared fact before any model call, so a reading is spent only on what no declaration covers:
 
 - Reply marker: `readReplySubjectMarker(subject)` (`reply-subject-marker.ts`) reads the leading `Prefix:` chain against the known localized reply and forward markers. Only a short unknown prefix (`unrecognised-prefix`) is sent to `webui.mail.reply-subject`, as advice.
-- Code grammar: `readFenceTagLanguage(tag)` (`code-fence-language.ts`) maps a fence tag or its highlighter alias to a grammar. Only an untagged or unknown-tag block is sent to `webui.code.language`.
-- Provider credential names: a built-in provider (`isDeclaredCredentialProvider`) declares every name it reads (`readDeclaredProviderCredential`). Only an undeclared custom provider is sent to `webui.credentials.provider-key`.
-- Settings keys: a schema key, a declared credential key and a declared card field are answered by the config key facts. Only an undeclared key reaches `webui.config.credential-key` or `webui.settings.card-material-key`.
+- Code grammar: `readFenceTagLanguage(tag)` (`code-fence-language.ts`) maps a fence tag or its highlighter alias to a grammar.
+- Provider credential names: a built-in provider (`isDeclaredCredentialProvider`) declares every name it reads (`readDeclaredProviderCredential`).
 - Status tone: `readWebuiStatusCatalog()`; there is no status battery.
 
 ## Resolved server projections
@@ -29,9 +28,6 @@ Code answers these at once, in the browser and in the adapters, from the same de
 The exact types are in `webui-types.ts`. They are **not browser request schemas**.
 
 - Refusal: `{ methodId, message, status?, code?, category?: 'network' | 'authentication' }`. The selected original failure message must retain complete context. Omit stack, body payloads, headers, URLs and unrelated data
-- Palette: `{ query, registryVersion, candidates: [{ title, group?, keywords? }] }`. The resolver authenticates and snapshots every identity/revision first, retaining its identity-to-index map outside the log. The reader cannot validate identity uniqueness because it deliberately never receives session IDs. Identical descriptor text may legitimately represent different commands
-
-The browser-facing resolver must reject unregistered, duplicate, stale, cross-principal or unavailable candidate references before constructing a projection. Resolve all candidates before the first model call. Empty query is handled by the browser's ordinary grouped command list; it must not be represented as a semantic ranking with invented probabilities.
 
 ## Before provider and logging
 
@@ -43,11 +39,11 @@ The foundation recording wrapper stores an unsalted state hash. This helper does
 
 ## Budgets and cancellation
 
-Errors use at most one logical call and select all unresolved eligible items together; `method_unknown` requires HTTP 404 even with `METHOD_NOT_FOUND`. Palette reads all candidates (maximum 64) with at most four active calls. Its result represents each candidate once and uses the actual acted-yes probability, sorted descending with input order for ties. One unsettled candidate holds the whole result.
+Errors use at most one logical call and select all unresolved eligible items together; `method_unknown` requires HTTP 404 even with `METHOD_NOT_FOUND`.
 
-Abort prevents new palette calls and late results cannot produce a ready result. Active cancellation depends on the injected port honoring the signal. The service owns admission/fan-out bounds, provider cancellation, source `assertCurrent()` checks and request/registry/revision echo validation. The shared port owns transient-availability retry/backoff with no total outage cutoff. Source expiry/revocation and caller/runtime cancellation remain authoritative lifetimes, and every transmission and retention boundary rechecks current authority.
+Abort prevents new calls and late results cannot produce a ready result. Active cancellation depends on the injected port honoring the signal. The service owns admission/fan-out bounds, provider cancellation and request echo validation. It checks the source (`assertCurrent()`), the route and the host policy once at admission and once at commit; between them source revocation, route revocation and request cancellation abort the run through their signals, and each transmission and retention step checks only that signal and the caller's identity. The shared port owns transient-availability retry/backoff with no total outage cutoff.
 
-The WebUI palette calls the generated authenticated route through `routedFetch` with an abort signal. Its reader binds the response request ID, versions and registry version, requires every candidate's genuine reading and evidence, and maps acted indices to registered local callbacks. Query changes, registry mutations, session snapshot revisions and close/unmount invalidate pending results; execution rechecks registration. An uncertain/held/unavailable response contains no ranked action rows. Clearing the query explicitly restores the unranked command browser. Known status consumers use catalog IDs; unsupported text is visibly unclassified and makes no provider request. Error interpretation now awaits real server-issued references at the asynchronous HTTP caller boundary. The default daemon owner binds the closed source purposes to its configured Jev route and existing decision-log metadata policy. Actual daemon tests use synthetic loopback inference; they do not establish live-provider calibration.
+Known status consumers use catalog IDs; unsupported text is visibly unclassified and makes no provider request. Error interpretation now awaits real server-issued references at the asynchronous HTTP caller boundary. The default daemon owner binds the closed source purposes to its configured Jev route and existing decision-log metadata policy. Actual daemon tests use synthetic loopback inference; they do not establish live-provider calibration.
 
 ## Mail reply subjects
 

@@ -19,8 +19,13 @@ describe('normalizeLanguage', () => {
 });
 
 describe('highlightCode', () => {
-  test('an unknown language falls back to escaped plain text', () => {
-    expect(highlightCode('<b>x</b>', 'klingon')).toEqual({ language: '', html: '&lt;b&gt;x&lt;/b&gt;' });
+  test('an untagged or unknown-tag block is detected locally against the registered grammars', () => {
+    expect(highlightCode('def square(value):\n    return value ** 2\nprint(square(4))', '').language).toBe('python');
+    expect(highlightCode('SELECT customer_id, COUNT(*) FROM orders GROUP BY customer_id ORDER BY 2 DESC;', 'klingon').language).toBe('sql');
+  });
+  test('ordinary text with no grammar stays escaped plain text', () => {
+    expect(highlightCode('', 'klingon')).toEqual({ language: '', html: '' });
+    expect(highlightCode('<'.repeat(20_001), '')).toEqual({ language: '', html: '&lt;'.repeat(20_001) });
   });
   test('a known language returns highlighted markup under its canonical name', () => {
     const result = highlightCode('const a = 1;', 'ts');

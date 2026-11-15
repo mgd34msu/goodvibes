@@ -1,7 +1,6 @@
 import { endpointKind, HOSTED_BASE_URL, validEndpointURL } from '@goodvibes-jev/judgment';
 import { BrowserJudgmentError } from '@goodvibes-jev/engine/daemon-api';
-import { captureJudgmentFallbackSettings, CONFIG_SCHEMA, type ConfigManager, type SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { SECRET_BEARING_CONFIG_PATHS } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
+import { captureJudgmentFallbackSettings, type ConfigManager, type SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { createWebuiBrowserJudgment, type BrowserJudgmentRoute } from '@goodvibes-jev/engine/platform/platform/judgment-browser';
@@ -11,9 +10,9 @@ const text = (value: unknown): string => typeof value === 'string' ? value.trim(
 
 /**
  * The daemon's configured Jev service owns these fixed WebUI purposes:
- * ranking an operator's palette query against registered commands/host chat
- * titles, interpreting an authenticated canonical daemon failure, and deciding
- * a reply prefix for an authenticated canonical mail-read subject. This is
+ * interpreting an authenticated canonical daemon failure, deciding a reply
+ * prefix the reply-marker rule does not know, finding speech seams in a host
+ * chat message and matching an undeclared provider to a model catalog. This is
  * the same settings-owned route and metadata-only decision log used by the
  * engine. Read scopes and browser text never grant an arbitrary destination,
  * prompt, source category, or retention store.
@@ -84,55 +83,16 @@ export function composeBrowserJudgment(input: {
         };
       },
     } } : {}),
-    configNames: {
-      async list() {
-        const names = new Set<string>(CONFIG_SCHEMA.map(entry => entry.key));
-        const leafKeys = new Set<string>([...CONFIG_SCHEMA.filter(entry => entry.type === 'object').map(entry => entry.key), ...SECRET_BEARING_CONFIG_PATHS]);
-        const walk = (value: unknown, prefix = '') => {
-          if (!value || typeof value !== 'object' || Array.isArray(value)) return;
-          for (const [key, entry] of Object.entries(value)) {
-            const path = prefix ? `${prefix}.${key}` : key;
-            if (entry && typeof entry === 'object' && !Array.isArray(entry) && !leafKeys.has(path)) walk(entry, path);
-            else names.add(path);
-          }
-        };
-        walk(input.config.getAll());
-        return [...names].map(key => ({ key, description: CONFIG_SCHEMA.find(entry => entry.key === key)?.description ?? '' }));
-      },
-      lifetime() {
-        const captured = configLifetime;
-        return { signal: captured.signal, assertCurrent() {
-          if (closed || captured !== configLifetime || captured.signal.aborted) throw new BrowserJudgmentError('JUDGMENT_REFERENCE_HELD');
-        } };
-      },
-    },
-    ...(input.secrets.list ? { credentialNames: {
-      list: () => input.secrets.list!(),
-      lifetime: () => {
-        const captured = credentialLifetime;
-        return { signal: captured.signal, assertCurrent() {
-          if (closed || captured !== credentialLifetime || captured.signal.aborted) throw new BrowserJudgmentError('JUDGMENT_REFERENCE_HELD');
-        } };
-      },
-    } } : {}),
     authorize({ battery, sources, route }) {
       if (closed || route.revision !== revision || !sources.length) return false;
       // Explicit source/purpose allowlist. Reference ownership is independently
       // proved by the source owner before this product policy is consulted.
-      return battery === 'webui.palette.command-rank'
-        ? sources.every((source) => source === 'palette-query' || source === 'chat-title') && sources.includes('palette-query')
-        : battery === 'webui.errors.daemon-refusal'
-          ? sources.length === 1 && sources[0] === 'daemon-error'
-          : battery === 'webui.models.catalog-provider-match'
-            ? sources.length === 1 && sources[0] === 'provider-catalog-ids'
-          : (battery === 'webui.config.credential-key' || battery === 'webui.settings.card-material-key')
-            ? sources.length === 1 && sources[0] === 'config-key-names'
-            : battery === 'webui.voice.speech-seams'
+      return battery === 'webui.errors.daemon-refusal'
+        ? sources.length === 1 && sources[0] === 'daemon-error'
+        : battery === 'webui.models.catalog-provider-match'
+          ? sources.length === 1 && sources[0] === 'provider-catalog-ids'
+          : battery === 'webui.voice.speech-seams'
             ? sources.length === 1 && sources[0] === 'chat-speech'
-            : battery === 'webui.code.language'
-            ? sources.length === 1 && sources[0] === 'chat-code'
-            : battery === 'webui.credentials.provider-key'
-            ? sources.length === 1 && sources[0] === 'credential-names'
             : battery === 'webui.mail.reply-subject' && sources.length === 1 && sources[0] === 'mail-subject';
     },
   });

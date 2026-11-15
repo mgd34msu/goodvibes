@@ -4,7 +4,7 @@
  * The daemon gates mutating relay calls behind a WebAuthn step-up assertion (see the platform's
  * platform/relay/step-up-policy + daemon-wiring): a mutating call that arrives over the
  * relay without a fresh, valid assertion is answered 401 with `www-authenticate: WebAuthn`
- * and body `{ error: 'step-up-required' }`. This module is the operator's half of that
+ * and body `{ code: 'step-up-required', reason, action, error, next }`. This module is the operator's half of that
  * ceremony:
  *
  *   - registerPasskey()  → navigator.credentials.create (server accepts 'none' attestation),
@@ -31,7 +31,11 @@
 /** The request header a step-up assertion rides on. Mirrors the platform's STEP_UP_ASSERTION_HEADER. */
 export const STEP_UP_ASSERTION_HEADER = 'x-goodvibes-stepup-assertion';
 
-/** localStorage key recording the credential id registered on THIS device/browser. */
+/**
+ * localStorage key holding the id of the passkey this browser registered, a hint only: the
+ * daemon's `stepup.credentials.list` is the record of what is registered. Both registration
+ * paths (Settings and the pairing hand-off) write it once the daemon has recorded the passkey.
+ */
 const REGISTERED_CREDENTIAL_KEY = 'goodvibes.webui.stepup.credential';
 
 // ---------------------------------------------------------------------------
@@ -101,7 +105,7 @@ export function describeStepUpError(error: unknown): string {
       case 'user-cancelled':
         return 'Verification was cancelled. The action was not completed.';
       case 'no-credential':
-        return 'No passkey is registered on this device yet. Register one in Settings → Security before verifying.';
+        return 'None of the passkeys the daemon lists is on this device. Register one in Settings under Sign-in while connected directly to the daemon (same network), then try again.';
       case 'ceremony-failed':
       default:
         return error.message || 'The passkey ceremony did not complete.';
@@ -304,10 +308,11 @@ export async function registerPasskey(options: { userName: string; userDisplayNa
 /**
  * Run navigator.credentials.get against a server-minted challenge and return the assertion
  * envelope + the ready-to-attach header value. `challenge` is the base64url the mint verb
- * returned. When a credentialId is known (registered on this device) it is passed as an
- * allowCredentials hint so the OS shows the right passkey.
+ * returned. `credentialIds` are the passkeys the daemon lists: passed as allowCredentials so
+ * the device offers only a passkey the daemon will accept. With none given, the device offers
+ * any passkey it holds for this site.
  */
-export async function runAssertion(options: { challenge: string; credentialId?: string; signal?: AbortSignal }): Promise<{ envelope: StepUpAssertionEnvelope; headerValue: string }> {
+export async function runAssertion(options: { challenge: string; credentialIds?: readonly string[]; signal?: AbortSignal }): Promise<{ envelope: StepUpAssertionEnvelope; headerValue: string }> {
   const availability = stepUpAvailability();
   if (!availability.supported) throw new StepUpError('unsupported', availability.reason ?? 'Passkeys are not supported here.');
 
@@ -316,8 +321,8 @@ export async function runAssertion(options: { challenge: string; credentialId?: 
     rpId: relyingPartyId(),
     userVerification: 'required',
     timeout: 60_000,
-    ...(options.credentialId
-      ? { allowCredentials: [{ type: 'public-key' as const, id: base64UrlToBytes(options.credentialId) }] }
+    ...(options.credentialIds?.length
+      ? { allowCredentials: options.credentialIds.map((id) => ({ type: 'public-key' as const, id: base64UrlToBytes(id) })) }
       : {}),
   };
 
@@ -325,7 +330,12 @@ export async function runAssertion(options: { challenge: string; credentialId?: 
   try {
     assertion = (await navigator.credentials.get({ publicKey, ...(options.signal ? { signal: options.signal } : {}) })) as PublicKeyCredential | null;
   } catch (error) {
-    throw normalizeCeremonyError(error, false);
+    // With allowCredentials set, NotAllowed also covers "none of these passkeys is on this device".
+    const normalized = normalizeCeremonyError(error, false);
+    if (normalized.code === 'user-cancelled' && options.credentialIds?.length) {
+      throw new StepUpError('no-credential', 'Verification was cancelled, or none of the passkeys the daemon lists is on this device.');
+    }
+    throw normalized;
   }
   if (!assertion) throw new StepUpError('user-cancelled', 'No assertion was produced.');
 

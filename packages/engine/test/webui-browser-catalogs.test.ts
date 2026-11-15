@@ -15,7 +15,7 @@ interface Graph {
 
 // Resolved through the `bun` source condition: the published `import` condition points at build
 // output, which a unit run must not depend on.
-test('public catalogs and the real palette caller exclude server provider, logging and SQLite graphs', async () => {
+test('public catalogs and a real settings caller exclude server provider, logging and SQLite graphs', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'gv-webui-browser-catalogs-'));
   try {
     const scope = join(dir, 'node_modules', '@goodvibes-jev');
@@ -25,7 +25,7 @@ test('public catalogs and the real palette caller exclude server provider, loggi
       const entry = join(dir, `${name}.ts`);
       // A real package lookup, without aliases, externals or host shims.
       writeFileSync(entry, caller
-        ? `import * as caller from ${JSON.stringify(join(ROOT, 'products/webui/src/lib/command-judgment.ts'))}; globalThis.testCaller = caller;`
+        ? `import * as caller from ${JSON.stringify(join(ROOT, 'products/webui/src/lib/config-redaction.ts'))}; globalThis.testCaller = caller;`
         : `import * as catalogs from ${JSON.stringify(PUBLIC_ENTRY)}; globalThis.testCatalogs = catalogs;`);
       const outfile = join(dir, `${name}.js`);
       const metafile = join(dir, `${name}-meta.json`);
@@ -44,10 +44,10 @@ test('public catalogs and the real palette caller exclude server provider, loggi
       // The emitted IIFE must be self-contained, with no remaining import edges.
       expect(Object.values(graph.outputs).flatMap((output) => output.imports)).toEqual([]);
       expect(paths.some((path) => path.endsWith(`/judgment-browser/batteries/catalogs.ts`))).toBe(true);
-      if (caller) expect(paths.some((path) => path.endsWith('/webui/src/lib/command-judgment.ts'))).toBe(true);
+      if (caller) expect(paths.some((path) => path.endsWith('/webui/src/lib/config-redaction.ts'))).toBe(true);
       else {
         const catalogs = runInNewContext(`${readFileSync(outfile, 'utf8')}\ntestCatalogs`, Object.create(null), { timeout: 5_000 }) as typeof import('../platform/src/platform/judgment-browser/batteries/catalogs.ts');
-        expect(catalogs.WEBUI_BUILTIN_COMMANDS).toHaveLength(27);
+        expect(catalogs.isSecretBearingConfigKey('surfaces.slack.botToken')).toBe(true);
         expect(catalogs.readWebuiStatusCatalog('knowledge-job.running', 'library-dot')).toEqual({ vocabulary: 'library-dot', tone: 'info' });
         expect(catalogs.readWebuiStatusCatalog('account-auth.expiring', 'badge')).toEqual({ vocabulary: 'badge', tone: 'warning' });
         expect(catalogs.readWebuiStatusCatalog('knowledge-refinement.needs_review', 'library-dot')).toEqual({ vocabulary: 'library-dot', tone: 'warn' });

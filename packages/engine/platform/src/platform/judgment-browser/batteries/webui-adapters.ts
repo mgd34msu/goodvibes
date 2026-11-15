@@ -1,19 +1,13 @@
 import { declaredProviderCatalogId } from '@goodvibes-jev/engine/contracts';
-import { credentialKey } from '../../config/batteries/credential-key.js';
-import { configKeyFacts } from '../../config/config-key-facts.js';
-import { isDeclaredCredentialProvider } from './catalogs.js';
-import { readFenceTagLanguage } from './code-fence-language.js';
 import { readReplySubjectMarker } from './reply-subject-marker.js';
 import type { BatteryRun, Outcome, Reading, YesNoReading } from '@goodvibes-jev/judgment/decisions';
 import { BrowserJudgmentError, type BrowserJudgmentInputMap } from '@goodvibes-jev/engine/daemon-api';
-import { requireSynchronousAssertion } from '../guards.js';
-import type { BrowserJudgmentBattery, BrowserJudgmentProjection, BrowserJudgmentResolveContext, BrowserJudgmentResolvedInput } from '../types.js';
-import { catalogProviderMatchBattery, cardMaterialKeyBattery, daemonRefusalBattery, commandRankBattery, mailReplySubjectBattery, credentialProviderBattery, codeLanguageBattery, WEBUI_BATTERY_QUESTIONS } from './webui-specs.js';
-import { readStructuredDaemonRefusal, snapshotWebuiCommandRank, snapshotWebuiDaemonRefusal, snapshotWebuiMailSubject, snapshotWebuiCredentialNames, snapshotWebuiCode, snapshotWebuiConfigKeys } from './webui-readers.js';
-import { REFUSAL_ITEMS, WEBUI_READER_LIMITS, type CommandRankValue, type DaemonRefusalValue, type ResolvedCommandRank, type ResolvedDaemonRefusal } from './webui-types.js';
+import type { BrowserJudgmentBattery, BrowserJudgmentProjection } from '../types.js';
+import { catalogProviderMatchBattery, daemonRefusalBattery, mailReplySubjectBattery, WEBUI_BATTERY_QUESTIONS } from './webui-specs.js';
+import { readStructuredDaemonRefusal, snapshotWebuiDaemonRefusal, snapshotWebuiMailSubject, snapshotWebuiCredentialNames } from './webui-readers.js';
+import { REFUSAL_ITEMS, type DaemonRefusalValue, type ResolvedDaemonRefusal } from './webui-types.js';
 
 const ERRORS = 'webui.errors.daemon-refusal';
-const PALETTE = 'webui.palette.command-rank';
 const MAIL = 'webui.mail.reply-subject';
 const inputHeld = (): never => { throw new BrowserJudgmentError('JUDGMENT_INPUT_HELD'); };
 const referenceHeld = (): never => { throw new BrowserJudgmentError('JUDGMENT_REFERENCE_HELD'); };
@@ -34,111 +28,7 @@ function recordProjection(runs: readonly { recordAction(action: string): void }[
   for (const run of runs) run.recordAction(action);
 }
 const unsettled = (readings: Readonly<Record<string, Reading>>): boolean => Object.values(readings).some((reading) => reading.outcome !== 'act');
-// A fact the program declares is never sent for a reading; the caller answers it from the same declaration.
-const declaredConfigKey = (key: string): boolean => { const facts = configKeyFacts(key); return facts.inSchema || facts.secret || facts.cardMaterial; };
 const hasHttpStatus = (source: ResolvedDaemonRefusal): source is ResolvedDaemonRefusal & { readonly status: number } => source.status !== undefined && Number.isInteger(source.status) && source.status >= 100 && source.status <= 599;
-
-export function createWebuiCodeLanguageAdapter(resolve: BrowserJudgmentBattery<'webui.code.language', { readonly code: string; readonly tag: string }, BatteryRun<typeof codeLanguageBattery.items>>['resolve']): BrowserJudgmentBattery<'webui.code.language', { readonly code: string; readonly tag: string }, BatteryRun<typeof codeLanguageBattery.items>> {
-  return {
-    id: 'webui.code.language', version: 2, maxCalls: 1, questions: WEBUI_BATTERY_QUESTIONS['webui.code.language']!, resolve,
-    async run(port, input, { signal }) {
-      checkAbort(signal); const state = preflight(() => snapshotWebuiCode(input));
-      if (readFenceTagLanguage(state.tag) !== undefined) return inputHeld();
-      const run = await codeLanguageBattery.run(port, state, { signal, site: 'webui.code.language' });
-      checkAbort(signal); return run;
-    },
-    project(run) {
-      const readings = { language: run.readings.language };
-      if (unsettled(readings)) return held(readings);
-      return { status: 'settled', value: { language: readings.language.choice }, readings };
-    },
-    record(run, projection) { recordProjection([run], projection); },
-  };
-}
-
-type ConfigKeyRun = readonly BatteryRun<typeof credentialKey.items>[];
-export function createWebuiConfigKeyAdapter(resolve: BrowserJudgmentBattery<'webui.config.credential-key', { readonly keys: readonly { readonly key: string; readonly description: string }[] }, ConfigKeyRun>['resolve']): BrowserJudgmentBattery<'webui.config.credential-key', { readonly keys: readonly { readonly key: string; readonly description: string }[] }, ConfigKeyRun> {
-  return {
-    id: 'webui.config.credential-key', version: 1, maxCalls: 64, questions: Object.fromEntries(Object.entries(credentialKey.items).map(([name, item]) => [name, item.question])), resolve,
-    async run(port, input, { signal }) {
-      checkAbort(signal); const source = preflight(() => snapshotWebuiConfigKeys(input));
-      if (source.keys.some(({ key }) => declaredConfigKey(key))) return inputHeld();
-      const runs: BatteryRun<typeof credentialKey.items>[] = [];
-      // One browser request, bounded server fan-out. The service owns shared budgets and retries.
-      let next = 0; let failure: unknown;
-      await Promise.all(Array.from({ length: Math.min(4, source.keys.length) }, async () => {
-        while (next < source.keys.length && !signal.aborted && failure === undefined) {
-          const index = next++;
-          try { runs[index] = await credentialKey.run(port, { ...source.keys[index]! }, { signal, site: 'webui.config.credential-key' }); }
-          catch (error) { failure = error; }
-        }
-      }));
-      checkAbort(signal); if (failure !== undefined) throw failure; return runs;
-    },
-    project(runs) {
-      const readings = Object.fromEntries(runs.map((run, index) => [`key_${index}`, run.readings.credential]));
-      if (unsettled(readings)) return held(readings);
-      return { status: 'settled', value: { matches: runs.map(run => run.readings.credential.verdict === 'yes') }, readings };
-    },
-    record(runs, projection) { recordProjection(runs, projection); },
-  };
-}
-
-type CardMaterialKeyRun = readonly BatteryRun<typeof cardMaterialKeyBattery.items>[];
-export function createWebuiCardMaterialKeyAdapter(resolve: BrowserJudgmentBattery<'webui.settings.card-material-key', { readonly keys: readonly { readonly key: string; readonly description: string }[] }, CardMaterialKeyRun>['resolve']): BrowserJudgmentBattery<'webui.settings.card-material-key', { readonly keys: readonly { readonly key: string; readonly description: string }[] }, CardMaterialKeyRun> {
-  return {
-    id: 'webui.settings.card-material-key', version: 1, maxCalls: 64, questions: Object.fromEntries(Object.entries(cardMaterialKeyBattery.items).map(([name, item]) => [name, item.question])), resolve,
-    async run(port, input, { signal }) {
-      checkAbort(signal); const source = preflight(() => snapshotWebuiConfigKeys(input));
-      if (source.keys.some(({ key }) => declaredConfigKey(key))) return inputHeld();
-      const runs: BatteryRun<typeof cardMaterialKeyBattery.items>[] = [];
-      // One browser request, bounded server fan-out. The service owns shared budgets and retries.
-      let next = 0; let failure: unknown;
-      await Promise.all(Array.from({ length: Math.min(4, source.keys.length) }, async () => {
-        while (next < source.keys.length && !signal.aborted && failure === undefined) {
-          const index = next++;
-          try { runs[index] = await cardMaterialKeyBattery.run(port, { ...source.keys[index]! }, { signal, site: 'webui.settings.card-material-key' }); }
-          catch (error) { failure = error; }
-        }
-      }));
-      checkAbort(signal); if (failure !== undefined) throw failure; return runs;
-    },
-    project(runs) {
-      const readings = Object.fromEntries(runs.map((run, index) => [`key_${index}`, run.readings.material]));
-      if (unsettled(readings)) return held(readings);
-      return { status: 'settled', value: { matches: runs.map(run => run.readings.material.verdict === 'yes') }, readings };
-    },
-    record(runs, projection) { recordProjection(runs, projection); },
-  };
-}
-
-type CredentialRun = readonly BatteryRun<typeof credentialProviderBattery.items>[];
-export function createWebuiCredentialProviderAdapter(resolve: BrowserJudgmentBattery<'webui.credentials.provider-key', BrowserJudgmentInputMap['webui.credentials.provider-key'], CredentialRun>['resolve']): BrowserJudgmentBattery<'webui.credentials.provider-key', BrowserJudgmentInputMap['webui.credentials.provider-key'], CredentialRun> {
-  return {
-    id: 'webui.credentials.provider-key', version: 1, maxCalls: 64, questions: WEBUI_BATTERY_QUESTIONS['webui.credentials.provider-key']!, resolve,
-    async run(port, input, { signal }) {
-      checkAbort(signal); const source = preflight(() => snapshotWebuiCredentialNames(input));
-      if (isDeclaredCredentialProvider(source.providerId)) return inputHeld();
-      const runs: BatteryRun<typeof credentialProviderBattery.items>[] = [];
-      // One browser request, bounded server fan-out. The service owns shared budgets and retries.
-      let next = 0; let failure: unknown;
-      await Promise.all(Array.from({ length: Math.min(4, source.keys.length) }, async () => {
-        while (next < source.keys.length && !signal.aborted && failure === undefined) {
-          const index = next++;
-          try { runs[index] = await credentialProviderBattery.run(port, { providerId: source.providerId, key: source.keys[index]! }, { signal, site: 'webui.credentials.provider-key' }); }
-          catch (error) { failure = error; }
-        }
-      }));
-      checkAbort(signal); if (failure !== undefined) throw failure; return runs;
-    },
-    project(runs) {
-      const readings = Object.fromEntries(runs.map((run, index) => [`key_${index}`, run.readings.matches]));
-      if (unsettled(readings)) return held(readings);
-      return { status: 'settled', value: { matches: runs.map(run => run.readings.matches.verdict === 'yes') }, readings };
-    },
-    record(runs, projection) { recordProjection(runs, projection); },
-  };
-}
 
 type CatalogProviderRun = readonly BatteryRun<typeof catalogProviderMatchBattery.items>[];
 export function createWebuiCatalogProviderAdapter(resolve: BrowserJudgmentBattery<'webui.models.catalog-provider-match', BrowserJudgmentInputMap['webui.models.catalog-provider-match'], CatalogProviderRun>['resolve']): BrowserJudgmentBattery<'webui.models.catalog-provider-match', BrowserJudgmentInputMap['webui.models.catalog-provider-match'], CatalogProviderRun> {
@@ -238,88 +128,3 @@ export const webuiDaemonRefusalAdapter: BrowserJudgmentBattery<'webui.errors.dae
   },
   record({ run }, projection) { recordProjection([run], projection); },
 };
-
-/**
- * Server source authority supplied by daemon composition, not HTTP input.
- * Resolve the query and every requested command/chat in index order. Retain
- * identities locally. Bind query provenance AND the candidate snapshot to the
- * sourceBinding; read access is not route/retention permission. assertCurrent
- * must recheck currentPrincipal, access, lifetime and revisions after async work.
- */
-export interface WebuiPaletteSources {
-  resolve(input: BrowserJudgmentInputMap['webui.palette.command-rank'], context: BrowserJudgmentResolveContext): Promise<BrowserJudgmentResolvedInput<ResolvedCommandRank>>;
-}
-/** Server-only evidence for every candidate in original request order. */
-export interface WebuiCommandRankRun {
-  readonly registryVersion: string;
-  readonly pairs: readonly BatteryRun<typeof commandRankBattery.items>[];
-}
-
-export function createWebuiCommandRankAdapter(sources: WebuiPaletteSources): BrowserJudgmentBattery<'webui.palette.command-rank', ResolvedCommandRank, WebuiCommandRankRun> {
-  return {
-    id: PALETTE, version: 1, maxCalls: WEBUI_READER_LIMITS.candidateCount, questions: WEBUI_BATTERY_QUESTIONS[PALETTE]!,
-    async resolve(input, context) {
-      checkAbort(context.signal);
-      const resolved = await sources.resolve(input, context);
-      try {
-        checkAbort(context.signal);
-        requireSynchronousAssertion(() => resolved.assertCurrent(), 'JUDGMENT_REFERENCE_HELD');
-        const state = preflight(() => snapshotWebuiCommandRank(resolved.state));
-        if (state.registryVersion !== input.registryVersion || state.candidates.length !== input.candidates.length
-          || (input.query.kind === 'inline' && state.query !== input.query.text)) return referenceHeld();
-        return { state, sourceBinding: resolved.sourceBinding, assertCurrent: () => resolved.assertCurrent(),
-          ...(resolved.dispose === undefined ? {} : { dispose: () => resolved.dispose!() }),
-          ...(resolved.signal === undefined ? {} : { signal: resolved.signal }) };
-      } catch (error) {
-        // Until this return transfers ownership, the adapter owns cleanup.
-        // Cancellation in the await gap must not retain a private query or
-        // consume one of the host's bounded reference slots for five minutes.
-        resolved.dispose?.();
-        throw error;
-      }
-    },
-    async run(port, raw, { signal }) {
-      checkAbort(signal);
-      const state = preflight(() => snapshotWebuiCommandRank(raw));
-      if (!state.candidates.length) return inputHeld();
-      const pairs: BatteryRun<typeof commandRankBattery.items>[] = [];
-      let next = 0;
-      let failed = false;
-      let firstError: unknown;
-      const worker = async (): Promise<void> => {
-        while (!failed && !signal.aborted && next < state.candidates.length) {
-          const index = next++;
-          const candidate = state.candidates[index]!;
-          try {
-            const run = await commandRankBattery.run(port, { query: state.query, candidate: { title: candidate.title,
-              ...(candidate.group === undefined ? {} : { group: candidate.group }),
-              ...(candidate.keywords === undefined ? {} : { keywords: [...candidate.keywords] }) } }, { signal, site: PALETTE, pattern: 'rerank' });
-            pairs[index] = run;
-            if (run.result.decisionId !== undefined) port.recorder?.recordReadings(run.result.decisionId, { candidateIndex: index, match: { ...run.readings.match } });
-          } catch (error) { if (!failed) { failed = true; firstError = error; } }
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(WEBUI_READER_LIMITS.concurrency, state.candidates.length) }, worker));
-      checkAbort(signal);
-      if (failed) throw firstError;
-      return { registryVersion: state.registryVersion, pairs };
-    },
-    project({ registryVersion, pairs }) {
-      const readings = Object.fromEntries(pairs.map((pair, index) => [`candidate_${index}`, pair.readings.match]));
-      if (!pairs.length || pairs.length > WEBUI_READER_LIMITS.candidateCount || Object.values(readings).some((reading) => !reading)) return invalid();
-      if (unsettled(readings)) return held(readings);
-      const accepted: { candidateIndex: number; probability: number }[] = [];
-      const rejected: number[] = [];
-      pairs.forEach((pair, candidateIndex) => {
-        const reading = pair.readings.match;
-        if (reading.verdict === 'yes') accepted.push({ candidateIndex, probability: reading.probability });
-        else if (reading.verdict === 'no') rejected.push(candidateIndex);
-        else return invalid();
-      });
-      accepted.sort((a, b) => b.probability - a.probability || a.candidateIndex - b.candidateIndex);
-      const value: CommandRankValue = { registryVersion, accepted, rejected };
-      return { status: 'settled', value, readings };
-    },
-    record({ pairs }, projection) { recordProjection(pairs, projection); },
-  };
-}

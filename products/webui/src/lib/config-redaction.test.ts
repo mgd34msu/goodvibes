@@ -156,7 +156,6 @@ describe("displayConfigValue", () => {
       [{ ...reference, model: "" }],
     ]) {
       expect(displayConfigValue("judgment.fallbacks", value)).toBe("••••");
-      expect(displayConfigValue("judgment.fallbacks", value, true)).toBe("••••");
     }
   });
 
@@ -197,7 +196,6 @@ describe("displayConfigValue", () => {
   test("numbers and objects render without throwing", () => {
     expect(displayConfigValue("tts.speed", 1.5)).toBe("1.5");
     expect(displayConfigValue("cache.gates", [{ name: "lint" }])).toBe("••••");
-    expect(displayConfigValue("cache.gates", [{ name: "lint" }], true)).toContain("lint");
   });
 });
 
@@ -210,13 +208,13 @@ describe("unknown key display authorization", () => {
     ["synthetic-private-value"],
     null,
     undefined,
-  ])("unknown value %j is fully masked until explicitly cleared", (value) => {
+  ])("unknown value %j is fully masked", (value) => {
     expect(displayConfigValue("extension.unknown", value)).toBe("••••");
   });
 
-  test("clearance only affects unresolved names, never canonical declared secrets", () => {
+  test("canonical declared secrets never show their value", () => {
     for (const key of SECRET_BEARING_CONFIG_PATHS) {
-      expect(displayConfigValue(key, "synthetic-private-value", true)).not.toContain(
+      expect(displayConfigValue(key, "synthetic-private-value")).not.toContain(
         "synthetic-private-value"
       );
       for (const value of [
@@ -225,7 +223,7 @@ describe("unknown key display authorization", () => {
         { nested: "synthetic-private-value" },
         ["synthetic-private-value"],
       ]) {
-        expect(displayConfigValue(key, value, true)).toBe("••••");
+        expect(displayConfigValue(key, value)).toBe("••••");
       }
     }
   });
@@ -262,7 +260,7 @@ describe("flattenConfig", () => {
     const value = { ordinaryName: "synthetic-private-value" };
     const entries = flattenConfig({ cluster: { groupMaterial: value } });
     expect(entries).toEqual([{ key: "cluster.groupMaterial", value, category: "Cluster" }]);
-    expect(displayConfigValue(entries[0]!.key, entries[0]!.value, true)).toBe("••••");
+    expect(displayConfigValue(entries[0]!.key, entries[0]!.value)).toBe("••••");
   });
 
   test("flattens nested objects into dotted keys, categorized", () => {

@@ -28,7 +28,7 @@ function field(type: 'string' | 'number', value: unknown, money = false): Config
   return {
     key: money ? 'payments.budget.dailyItem' : type === 'string' ? 'provider.systemPromptFile' : 'display.collapseThreshold',
     type, default: value, liveValue: value, present: true, description: '',
-    isSecret: false, daemonOwned: false, secretStoreOnly: false,
+    isSecret: false, daemonOwned: false,
     ...(money ? { unit: 'money' as const } : {}),
   };
 }

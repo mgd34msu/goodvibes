@@ -4,11 +4,14 @@
  * Two ceremonies, wired honestly:
  *   - Register a passkey: navigator.credentials.create (the daemon accepts 'none' attestation),
  *     then persist the resulting COSE public key via the stepup.credentials.register verb so the
- *     daemon can verify later assertions. The credential id is remembered on this device so the
- *     assert ceremony can hint the right passkey.
- *   - Verify now: mint a server challenge and run navigator.credentials.get against it, proving
- *     the passkey produces a valid assertion on this device. (Full server-side verification runs
- *     on every real mutating relay call, this button confirms the local ceremony works.)
+ *     daemon can verify later assertions.
+ *   - Verify now: mint a server challenge and sign it on this device with one of the passkeys the
+ *     daemon lists, proving this device holds one the daemon knows. (The daemon checks the
+ *     signature itself on every real mutating relay call.)
+ *
+ * The daemon's credential list is the record of what is registered. This browser keeps only the
+ * id of the passkey it registered (written by this panel and by the pairing hand-off), and every
+ * status sentence comes from matching that id against the daemon's list.
  *
  * Every failure, unsupported browser, no authenticator, user cancel, register/verify error, is
  * rendered plainly with a specific message; nothing is faked or silently swallowed.
@@ -25,6 +28,7 @@ import {
   runAssertion,
   setRegisteredCredential,
   stepUpAvailability,
+  StepUpError,
   type RegisteredCredentialRecord,
 } from '../../lib/stepup';
 import { Button } from '../ui/Button';
@@ -54,6 +58,18 @@ export function StepUpSettings() {
   }, []);
 
   useEffect(() => { void refreshCredentials(); }, [refreshCredentials]);
+
+  // The daemon's list decides; the local id only says which listed passkey this browser made.
+  const onDaemon = registered && daemonCredentials ? daemonCredentials.find((credential) => credential.credentialId === registered.credentialId) : undefined;
+  const status: { tone: 'ok' | 'idle' | 'warn'; text: string } = daemonCredentials === null
+    ? { tone: 'idle', text: 'Reading the daemon’s registered passkeys…' }
+    : onDaemon
+      ? { tone: 'ok', text: `The passkey this browser registered${onDaemon.label ? ` (${onDaemon.label})` : ''} is registered with the daemon.` }
+      : registered
+        ? { tone: 'warn', text: 'The passkey this browser registered is no longer on the daemon’s list, so it cannot confirm relay actions. Register a new one.' }
+        : daemonCredentials.length > 0
+          ? { tone: 'ok', text: `The daemon has ${daemonCredentials.length === 1 ? 'one registered passkey' : `${daemonCredentials.length} registered passkeys`}. If one is on this device, Verify now confirms it.` }
+          : { tone: 'idle', text: 'The daemon has no registered passkey yet.' };
 
   const handleRemove = async (credentialId: string) => {
     setBusy('remove');
@@ -119,11 +135,16 @@ export function StepUpSettings() {
     setBusy('verify');
     setError(null);
     try {
-      const challenge = await platformClient.operator.stepup.mintChallenge({});
-      await runAssertion({ challenge: challenge.challenge, credentialId: registered?.credentialId });
+      const [challenge, listed] = await Promise.all([
+        platformClient.operator.stepup.mintChallenge({}),
+        platformClient.operator.stepup.listCredentials(),
+      ]);
+      setDaemonCredentials(listed.credentials);
+      if (listed.credentials.length === 0) throw new StepUpError('no-credential', 'The daemon has no registered passkey.');
+      await runAssertion({ challenge: challenge.challenge, credentialIds: listed.credentials.map((credential) => credential.credentialId) });
       toast({
         title: 'Passkey verified',
-        description: 'Your passkey produced a valid assertion on this device. This does not check the daemon\'s record; the daemon verifies it on every real relay action.',
+        description: 'This device signed with a passkey the daemon lists. The daemon checks the signature on every real relay action.',
         tone: 'success',
       });
     } catch (verifyError) {
@@ -152,12 +173,8 @@ export function StepUpSettings() {
       ) : (
         <>
           <div className="stepup-status" role="status">
-            <StatusDot tone={registered ? 'ok' : 'idle'} />
-            <span>
-              {registered
-                ? `A passkey is registered on this device${registered.label ? ` (${registered.label})` : ''}.`
-                : 'No passkey is registered on this device yet.'}
-            </span>
+            <StatusDot tone={status.tone} />
+            <span>{status.text}</span>
           </div>
 
           <Field label="Passkey label (optional)">
@@ -171,7 +188,7 @@ export function StepUpSettings() {
 
           <div className="stepup-actions">
             <Button variant="primary" onClick={() => void handleRegister()} disabled={busy !== null}>
-              {busy === 'register' ? 'Waiting for passkey…' : registered ? 'Register a new passkey' : 'Register a passkey'}
+              {busy === 'register' ? 'Waiting for passkey…' : onDaemon ? 'Register a new passkey' : 'Register a passkey'}
             </Button>
             <Button onClick={() => void handleVerify()} disabled={busy !== null}>
               {busy === 'verify' ? 'Waiting for passkey…' : 'Verify now'}

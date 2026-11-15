@@ -3,7 +3,7 @@ import type { BrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-api";
 import { invalidateClientLifetime } from "./client-lifetime";
 import { alternatingMatches, judgmentResponse, responseCorruptions } from "../test-support/judgment-response";
 
-type Request = BrowserJudgmentRequest<"webui.credentials.provider-key">;
+type Request = BrowserJudgmentRequest<"webui.models.catalog-provider-match">;
 let calls: { request: Request; signal: AbortSignal }[] = [];
 let transport: (request: Request) => Promise<unknown> = async (request) => response(request);
 mock.module("./goodvibes", () => ({
@@ -17,7 +17,7 @@ const { readCredentialProvider, readCredentialProviderResponse } =
 const request = (keys = ["CUSTOM_A", "CUSTOM_B"]): Request => ({
   protocolVersion: 1,
   batteryVersion: 1,
-  battery: "webui.credentials.provider-key",
+  battery: "webui.models.catalog-provider-match",
   requestId: crypto.randomUUID(),
   input: { providerId: "openai", keys },
 });

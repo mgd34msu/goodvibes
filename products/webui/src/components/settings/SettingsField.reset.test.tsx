@@ -24,7 +24,7 @@ function render(field: ConfigFieldModel, onReset?: (key: string) => Promise<void
 
 const field = (overrides: Partial<ConfigFieldModel> = {}): ConfigFieldModel => ({
   key: 'display.collapseThreshold', type: 'number', default: 30, liveValue: 50, present: true, description: '',
-  isSecret: false, daemonOwned: true, secretStoreOnly: false, ...overrides,
+  isSecret: false, daemonOwned: true, ...overrides,
 });
 
 test('a value that differs from its default offers a reset that asks the daemon to remove it', async () => {

@@ -39,9 +39,8 @@ import {
   type ConfigSchemaEntry,
   type FeatureSettingMeta,
 } from './generated/config-schema';
-import { categoryLabelForKey, CATEGORY_LABELS, isSecretConfigKey, isUnresolvedConfigKey, SECRET_CONFIG_KEYS } from './config-redaction';
+import { categoryLabelForKey, CATEGORY_LABELS, isSecretConfigKey, SECRET_CONFIG_KEYS } from './config-redaction';
 import { isDaemonOwnedConfigKey } from './config-ownership';
-import { isSecretStoreOnlyConfigKey } from './secret-store-only-config-keys';
 import { isDeclaredCardMaterialKey as isCardMaterialKey } from './card-material';
 import { asRecord } from './object';
 
@@ -65,12 +64,6 @@ export interface ConfigFieldModel {
    *  (config-ownership.ts). A write to a daemon-owned key applies to every connected client,
    *  not just this browser tab. */
   readonly daemonOwned: boolean;
-  /** True when this key's real value is resolved ONLY from the daemon's secret
-   *  store (secret-store-only-config-keys.ts), a config.set write here is inert
-   *  (never read by the connector that uses it) and leaves a plaintext, unused
-   *  copy of the value in the daemon's config file. SettingsField refuses to
-   *  write these and names the real command instead. */
-  readonly secretStoreOnly: boolean;
 }
 
 /** A live-config key with no schema entry, shown read-only so nothing is hidden. */
@@ -78,8 +71,6 @@ export interface RawRowModel {
   readonly key: string;
   readonly value: unknown;
   readonly isSecret: boolean;
-  /** Set only for an unresolved key with a current, acted negative reading. */
-  readonly displayCleared?: boolean;
   readonly daemonOwned: boolean;
 }
 
@@ -197,7 +188,6 @@ function buildField(entry: ConfigSchemaEntry, config: unknown): ConfigFieldModel
     present,
     isSecret: isSecretConfigKey(entry.key),
     daemonOwned: isDaemonOwnedConfigKey(entry.key),
-    secretStoreOnly: isSecretStoreOnlyConfigKey(entry.key),
   };
 }
 
@@ -278,7 +268,7 @@ function buildFeatureUnit(feature: FeatureSettingMeta, liveConfig: unknown): Fea
  * feature domains the schema does not cover, then live-only namespaces the
  * schema does not know.
  */
-export function buildSettingsModel(liveConfig: unknown, clearedKeys: ReadonlySet<string> = new Set(), nonCardKeys: ReadonlySet<string> = new Set()): SettingsGroupModel[] {
+export function buildSettingsModel(liveConfig: unknown): SettingsGroupModel[] {
   // 1. Ordered namespace list from the schema (first appearance wins).
   const orderedNamespaces: string[] = [];
   const seen = new Set<string>();
@@ -329,17 +319,17 @@ export function buildSettingsModel(liveConfig: unknown, clearedKeys: ReadonlySet
       (e) => namespaceOf(e.key) === ns && !OWNED_CONFIG_KEYS.has(e.key) && !isCardMaterialKey(e.key),
     ).map((e) => buildField(e, liveConfig));
 
-    // Explicit card exclusions win even over declared-secret facts. Other platform
-    // secrets need no semantic clearance to render a deterministic masked row.
+    // Declared card material is never listed, even when it is also a declared
+    // credential. Every other live key outside the schema is listed read-only;
+    // its value is masked unless the credential list or the schema declares it.
     const rawRows: RawRowModel[] = liveKeys
       .filter(
-        (k) => namespaceOf(k) === ns && !schemaKeySet.has(k) && !OWNED_CONFIG_KEYS.has(k) && !isCardMaterialKey(k) && (SECRET_CONFIG_KEYS.has(k) || nonCardKeys.has(k)),
+        (k) => namespaceOf(k) === ns && !schemaKeySet.has(k) && !OWNED_CONFIG_KEYS.has(k) && !isCardMaterialKey(k),
       )
       .map((k) => ({
         key: k,
         value: readConfigPath(liveConfig, k).value,
-        isSecret: isSecretConfigKey(k) && !(isUnresolvedConfigKey(k) && clearedKeys.has(k)),
-        displayCleared: isUnresolvedConfigKey(k) && clearedKeys.has(k),
+        isSecret: isSecretConfigKey(k),
         daemonOwned: isDaemonOwnedConfigKey(k),
       }));
 

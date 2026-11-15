@@ -1,5 +1,5 @@
 import { Check, Clock, Copy, Layers, Paperclip, Pencil, RotateCcw, X } from 'lucide-react';
-import { useCallback, useRef, useState } from 'react';
+import { memo, useCallback, useRef, useState } from 'react';
 import type { ChatMessage } from './types';
 import type { SupersededReason } from './lineage';
 import { MessageLineage, messageIsEdited } from './MessageLineage';
@@ -51,7 +51,8 @@ interface MessageItemProps {
   onEditMessage?: (message: ChatMessage, newText: string) => void;
 }
 
-export function MessageItem({
+/** Memoised: a keystroke in the composer or a streamed token re-renders a message only when its own props change. */
+export const MessageItem = memo(function MessageItem({
   message,
   index,
   isSendPending,
@@ -164,10 +165,10 @@ export function MessageItem({
         // the transcript after every automatic compaction.
         <details className="message-compaction-handoff">
           <summary>Compaction handoff: context re-injected after auto-compaction ({text.split('\n').length} lines)</summary>
-          <MarkdownMessage content={text} source={message.sessionId && message.id && message.contentRevision ? { sessionId: message.sessionId, messageId: message.id, contentRevision: message.contentRevision } : undefined} />
+          <MarkdownMessage content={text} />
         </details>
       ) : (
-        text && <MarkdownMessage content={text} source={message.sessionId && message.id && message.contentRevision ? { sessionId: message.sessionId, messageId: message.id, contentRevision: message.contentRevision } : undefined} />
+        text && <MarkdownMessage content={text} />
       )}
       {attachments.length > 0 && (
         <div className="message-attachments">
@@ -295,4 +296,4 @@ export function MessageItem({
       </div>
     </article>
   );
-}
+});

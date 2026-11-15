@@ -17,13 +17,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 // ---------------------------------------------------------------------------
 
 let _credentialsGet: () => Promise<unknown> = () => Promise.resolve({ available: true, credentials: [] });
+let _providerGet: (id: string) => Promise<unknown> = () => Promise.resolve({});
 
 mock.module('../lib/goodvibes', () => ({
-  runBrowserJudgment: () => Promise.reject(new Error('No semantic credential reading in this display fixture.')),
   client: {
     operator: {
       credentials: {
         get: () => _credentialsGet(),
+      },
+      providers: {
+        get: (id: string) => _providerGet(id),
       },
     },
   },
@@ -75,6 +78,7 @@ function rejection(status: number, body: unknown): Promise<never> {
 
 afterEach(() => {
   _credentialsGet = () => Promise.resolve({ available: true, credentials: [] });
+  _providerGet = () => Promise.resolve({});
 });
 
 // ---------------------------------------------------------------------------
@@ -110,6 +114,24 @@ describe('CredentialStatusPanel: available (credentials.get resolves)', () => {
     const openaiRow = rows.find((r) => r.textContent?.includes('OPENAI_API_KEY'));
     expect(anthropicRow?.querySelector('[aria-current]')).not.toBeNull();
     expect(openaiRow?.querySelector('[aria-current]')).toBeNull();
+    unmount();
+  });
+
+  test("a custom provider's own sign-in route names its stored key; other names get no caption", async () => {
+    _credentialsGet = () =>
+      Promise.resolve({
+        available: true,
+        credentials: [
+          { key: 'ACME_TOKEN', configured: true, usable: true, source: 'secrets' },
+          { key: 'OTHER_TOKEN', configured: true, usable: true, source: 'secrets' },
+        ],
+      });
+    _providerGet = () => Promise.resolve({ runtime: { auth: { routes: [{ route: 'api-key', envVars: ['ACME_TOKEN'], secretKeys: ['ACME_TOKEN'] }] } } });
+    const { el, unmount } = render('acme-custom');
+    await waitFor(() => (el.textContent ?? '').includes('for the selected provider'));
+    const rows = [...el.querySelectorAll('li')];
+    expect(rows.find((r) => r.textContent?.includes('ACME_TOKEN'))?.querySelector('[aria-current]')).not.toBeNull();
+    expect(rows.find((r) => r.textContent?.includes('OTHER_TOKEN'))?.textContent).not.toContain('for the selected provider');
     unmount();
   });
 });

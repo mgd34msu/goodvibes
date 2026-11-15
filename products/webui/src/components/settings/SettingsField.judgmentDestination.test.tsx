@@ -19,7 +19,7 @@ function render(field: ConfigFieldModel, onCommit: (key: string, value: unknown)
 
 const endpoint: ConfigFieldModel = {
   key: 'judgment.endpoint', type: 'string', default: 'https://old.example/decide', liveValue: 'https://old.example/decide',
-  present: true, description: '', isSecret: false, daemonOwned: false, secretStoreOnly: false,
+  present: true, description: '', isSecret: false, daemonOwned: false,
 };
 
 async function settle(): Promise<void> {

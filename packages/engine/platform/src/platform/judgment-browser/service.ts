@@ -125,7 +125,6 @@ export class BrowserJudgmentService {
     referenceSignal?.addEventListener('abort', revoked, { once: true });
     if (referenceSignal?.aborted) revoked();
     try {
-      authenticate(); requireSynchronousAssertion(() => resolved.assertCurrent(), 'JUDGMENT_REFERENCE_HELD');
       let state: unknown;
       try { state = captureBrowserJudgmentJson(snapshotJudgmentInput(resolved.state)); }
       catch { throw new BrowserJudgmentError('JUDGMENT_INPUT_HELD'); }
@@ -135,6 +134,11 @@ export class BrowserJudgmentService {
       routeSignal?.addEventListener('abort', routeRevoked, { once: true });
       if (routeSignal?.aborted) routeRevoked();
       const endpointKinds = new Set([route.kind, ...route.endpointKinds ?? []]);
+      // One check of caller, source, route and host policy: at admission, before each
+      // transmission and log write, and at commit. Each is in-memory compares (the
+      // caller's identity is an integer compare per request). It is not repeated after
+      // an answer (the log write just checked it), after the run (the commit does) or
+      // after projection (nothing awaits between commit and the response).
       const authorized = () => {
         const actor = authenticate();
         requireSynchronousAssertion(() => resolved.assertCurrent(), 'JUDGMENT_REFERENCE_HELD');
@@ -196,7 +200,7 @@ export class BrowserJudgmentService {
                 }
                 catch (error) { abort.abort(normalizedError(error, signal)); throw error; }
               } });
-            authorized();
+            checkAbort();
             if (!result.decisionId) throw new BrowserJudgmentError('JUDGMENT_UNRECORDED');
             evidence.push({ decisionId: result.decisionId, model: result.model, requestedModel: result.requestedModel, usage: result.usage, latencyMs: result.latencyMs });
             return result;
@@ -223,7 +227,6 @@ export class BrowserJudgmentService {
         const projection = battery.project(result);
         try { projected = captureBrowserJudgmentJson(projection) as typeof projected; }
         catch { throw new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE'); }
-        authorized();
         validateBrowserJudgmentProjection(request, projected, state);
         const outcomes = Object.values(projected.readings).map((reading) => reading.outcome);
         if (projected.status === 'held' && projected.compoundOutcome !== undefined) outcomes.push(projected.compoundOutcome);

@@ -18,7 +18,6 @@ import { trackIntervals } from '../helpers/intervals.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 import { composeBrowserJudgment } from '../../runtime/browser-judgment-composition.js';
 import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { WEBUI_COMMAND_CATALOG_VERSION } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
 
 const BATTERY = 'webui.errors.daemon-refusal' as const;
 const MARKER = 'synthetic-browser-composition-marker';
@@ -26,6 +25,15 @@ const principal: AuthenticatedPrincipal = {
   principalId: 'synthetic-browser-owner', principalKind: 'user', admin: true, scopes: ['write:judgment'],
 };
 const questions = { session_not_found: noul('Does this fixture name a missing session?') };
+
+/** A catalog with one method whose canonical failure the daemon can issue a reference for. */
+function failingMethods(): GatewayMethodCatalog {
+  const methods = new GatewayMethodCatalog();
+  methods.register({ id: 'synthetic.browser.failure', title: 'Synthetic failure', description: 'Owned failure source',
+    category: 'sessions', access: 'authenticated', source: 'builtin', transport: ['http'], scopes: [],
+  }, async () => { throw new Error('unused'); });
+  return methods;
+}
 
 test.each(['TYPESAFE_BASE_URL', 'TYPESAFE_API_KEY', 'TYPESAFE_DEFAULT_MODEL'] as const)('fresh browser calls recover after observed %s environment changes', async (key) => {
   const entered = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
@@ -35,16 +43,18 @@ test.each(['TYPESAFE_BASE_URL', 'TYPESAFE_API_KEY', 'TYPESAFE_DEFAULT_MODEL'] as
   const inner: JudgmentPort = { model: 'jev-1.13.0', async ask(input) {
     calls++; entered.resolve(); await release.promise;
     return { requestedModel: 'jev-1.13.0', model: 'jev-1.13.0', requestId: undefined, usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1,
-      answers: Object.fromEntries(Object.keys(input.questions).map((name) => [name, { type: 'noul', noul: 0.99 }])) as never };
+      answers: Object.fromEntries(Object.keys(input.questions).map((name) => [name, { type: 'noul', noul: name === 'session_closed' ? 0.99 : 0.01 }])) as never };
   } };
   const cleanup: (() => void | Promise<void>)[] = [];
   const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log, volumeMonitor: { lastAlert: () => undefined } }, env,
-    methods: new GatewayMethodCatalog(), config: configuration().configManager, secrets: { onDidChange: () => () => {} },
+    methods: failingMethods(), config: configuration().configManager, secrets: { onDidChange: () => () => {} },
     disposal: { add(_label, dispose) { cleanup.push(dispose); } },
   });
-  const input = () => ({ protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.palette.command-rank', batteryVersion: 1,
-    input: { query: { kind: 'inline', text: 'Synthetic query' }, registryVersion: WEBUI_COMMAND_CATALOG_VERSION,
-      candidates: [{ kind: 'builtin', commandId: 'nav.chat' }] } });
+  const input = () => {
+    const errorRef = service.issueErrorReference({ principal, methodId: 'synthetic.browser.failure', status: 500, body: { error: 'The synthetic session has finished and cannot accept this operation.' } });
+    if (!errorRef) throw new Error('No error reference was issued.');
+    return { protocolVersion: 1, requestId: crypto.randomUUID(), battery: BATTERY, batteryVersion: 1, input: { errorRef } };
+  };
   try {
     const pending = service.execute(input(), principal, new AbortController().signal, () => principal);
     await entered.promise;
@@ -317,36 +327,6 @@ test('default configured browser policy admits only the issued mail-subject purp
     await expect(service.execute({ ...request, requestId: crypto.randomUUID() }, principal, new AbortController().signal, () => principal)).rejects.toMatchObject({ code: 'JUDGMENT_REFERENCE_HELD' });
     expect(calls).toHaveLength(1);
   } finally { for (const dispose of cleanup.reverse()) await dispose(); }
-});
-
-test.each(['webui.config.credential-key', 'webui.settings.card-material-key'] as const)('%s uses the product config incarnation and never its values', async battery => {
-  using log = new SqliteDecisionLog(':memory:');
-  const entered = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
-  const calls: unknown[] = []; const cleanup: (() => void | Promise<void>)[] = [];
-  // A key no declaration covers (an extension's setting); declared keys are answered without a reading.
-  const config = configuration({ syntheticExtension: { label: 'synthetic' } }).configManager;
-  const inner: JudgmentPort = { model: 'jev-1.13.0', async ask(input) {
-    calls.push(input.state); entered.resolve(); await release.promise;
-    return { requestedModel: 'jev-1.13.0', model: 'jev-1.13.0', requestId: undefined, usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1,
-      answers: { [battery === 'webui.config.credential-key' ? 'credential' : 'material']: { type: 'noul', noul: 0.001 } } as never };
-  } };
-  const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log, volumeMonitor: { lastAlert: () => undefined } }, env: {},
-    methods: new GatewayMethodCatalog(), config, secrets: { onDidChange: () => () => {} },
-    disposal: { add(_label, dispose) { cleanup.push(dispose); } },
-  });
-  const request = (key = 'syntheticExtension.label') => ({ protocolVersion: 1, batteryVersion: 1, requestId: crypto.randomUUID(), battery, input: { keys: [key] } });
-  try {
-    await expect(service.execute(request('display.stream'), principal, new AbortController().signal, () => principal)).rejects.toMatchObject({ code: 'JUDGMENT_INPUT_HELD' });
-    expect(calls).toEqual([]);
-    const pending = service.execute(request(), principal, new AbortController().signal, () => principal);
-    const observed = pending.then(() => 'unexpected-settled', () => 'held');
-    await entered.promise;
-    config.set('display.stream', !config.get('display.stream'));
-    release.resolve(); expect(await observed).toBe('held'); expect(log.query()).toEqual([]);
-    expect(await service.execute(request(), principal, new AbortController().signal, () => principal)).toMatchObject({ status: 'settled', value: { matches: [false] } });
-    expect(calls).toEqual([{ key: 'syntheticExtension.label', description: '' }, { key: 'syntheticExtension.label', description: '' }]);
-    expect(log.query()).toHaveLength(1);
-  } finally { release.resolve(); for (const dispose of cleanup.reverse()) await dispose(); }
 });
 
 test('daemon composition explicitly authorizes canonical chat speech seams on the configured judgment route', async () => {

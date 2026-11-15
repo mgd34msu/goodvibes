@@ -131,10 +131,9 @@ export function createBrowserJudgmentHttpHandler(context: BrowserJudgmentHttpCon
       if (req.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json'
         || !['', 'identity'].includes(req.headers.get('content-encoding') ?? '')) throw new BrowserJudgmentError('JUDGMENT_CONTENT_TYPE_UNSUPPORTED');
       const input = parseBrowserJudgmentRequest(await readBody(req));
-      const admittedPrincipal = currentPrincipal();
       if (!context.service) throw new BrowserJudgmentError('JUDGMENT_UNAVAILABLE');
-      const result = await context.service.execute(input, admittedPrincipal, req.signal, currentPrincipal);
-      currentPrincipal();
+      // The service checks `currentPrincipal` at admission, before each transmission and at commit.
+      const result = await context.service.execute(input, principal, req.signal, currentPrincipal);
       if (req.signal.aborted) throw new BrowserJudgmentError('JUDGMENT_ABORTED');
       return response(result);
     } catch (error) { return refusal(error); }

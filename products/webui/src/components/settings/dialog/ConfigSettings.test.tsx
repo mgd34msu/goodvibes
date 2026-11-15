@@ -31,10 +31,8 @@ const CONFIG_FIXTURE = {
   provider: { systemPromptFile: "prompts/system.md" },
   surfaces: {
     slack: { botToken: "xoxb-super-secret-value-1234" },
-    // secret-store-only-config-keys.ts: the daemon's mail connector never reads
-    // this value from config (surface-config.ts resolves the password only
-    // from the secret store), used below to prove the field refuses to write
-    // it through config.set.
+    // A declared credential: the field writes it through credentials.set,
+    // never config.set (which refuses a literal credential).
     email: { password: "nine-nine-nine-plaintext" },
   },
   behavior: { hitlMode: "balanced" },
@@ -433,7 +431,7 @@ describe("settings config groups: feature units", () => {
   });
 });
 
-describe("settings config groups: secret-store-only credentials go through credentials.set", () => {
+describe("settings config groups: declared credentials go through credentials.set", () => {
   async function openEmailPassword(el: HTMLElement): Promise<HTMLElement> {
     await waitFor(() =>
       Boolean([...el.querySelectorAll(".settings-category")].some((b) => b.textContent === "Surfaces"))
@@ -462,20 +460,6 @@ describe("settings config groups: secret-store-only credentials go through crede
     expect(configSetCalls.filter(([key]) => key === "surfaces.email.password")).toEqual([]);
     await waitFor(() => (field.textContent ?? "").includes("secret store"));
     expect(field.textContent).not.toContain("new-mail-password");
-    unmount();
-  });
-
-  test("a daemon without credentials.set saves nothing and names the terminal command", async () => {
-    credentialSetCalls.length = 0;
-    credentialSetMode = "unavailable";
-    const { el, unmount } = render();
-    const field = await openEmailPassword(el);
-    enterAndSave(field, "new-mail-password");
-    await waitFor(() => Boolean(field.querySelector(".settings-field-error")));
-    expect(field.querySelector(".settings-field-error")?.textContent).toContain(
-      "/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD"
-    );
-    expect(configSetCalls.filter(([key]) => key === "surfaces.email.password")).toEqual([]);
     unmount();
   });
 });

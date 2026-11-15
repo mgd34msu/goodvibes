@@ -22,21 +22,21 @@
  *   - an admin-scope refusal (403) on config.get reads distinctly from a generic
  *     fetch failure;
  *   - a secret-shaped key never renders its stored value;
- *   - undeclared keys remain excluded until current canonical metadata readings
- *     establish they are not card material; unresolved secrets remain masked.
+ *   - declared card-material keys are never listed; a key the schema does not
+ *     declare is listed read-only with its value masked. Both facts come from
+ *     the engine's declarations, never from a model.
  *
  * Writes go through config.set one key at a time (the daemon's real /config
- * contract). The daemon refuses any key outside its config schema, so keys it
- * holds beyond the schema are listed read-only and have no editor.
+ * contract), except a declared credential, which goes through credentials.set
+ * so the value lands in the secret store and the config holds a reference. The
+ * daemon refuses any key outside its config schema, so keys it holds beyond the
+ * schema are listed read-only and have no editor.
  */
-import { createContext, useCallback, useContext, useMemo, useState, useEffect, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { isDeclaredCardMaterialKey } from '../../../lib/card-material';
-import { readConfigKey, type ConfigKeyResult } from '../../../lib/config-key-judgment';
-import { subscribeClientLifetime } from '../../../lib/client-lifetime';
+import { isStructuredCredentialReferenceConfigKey } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
 import { client as platformClient, type ConfigSetOutcome } from '../../../lib/goodvibes';
-import { isSecretStoreOnlyConfigKey, secretStoreSetCommandFor } from '../../../lib/secret-store-only-config-keys';
-import { formatError, isAdminRequiredError, isMethodUnavailableError } from '../../../lib/errors';
+import { formatError, isAdminRequiredError } from '../../../lib/errors';
 import { useToast } from '../../../lib/toast';
 import { ErrorState } from '../../feedback/ErrorState';
 import { SkeletonBlock } from '../../feedback/SkeletonBlock';
@@ -46,67 +46,34 @@ import { FeatureUnitCard } from '../FeatureUnitCard';
 import { PaymentCardEntry } from '../PaymentCardEntry';
 import { PaymentWindows } from '../PaymentWindows';
 import { TelegramCursorRecovery } from '../TelegramCursorRecovery';
-import { displayConfigValue, isUnresolvedConfigKey, SECRET_CONFIG_KEYS } from '../../../lib/config-redaction';
+import { displayConfigValue, isUndeclaredConfigKey, SECRET_CONFIG_KEYS } from '../../../lib/config-redaction';
 import {
   buildSettingsModel,
-  liveLeafKeys,
-  OBJECT_TYPED_CONFIG_KEYS,
   filterSettingsModel,
   readConfigPath,
   type SettingsGroupModel,
 } from '../../../lib/settings-model';
 
-/** readConfigKey refuses more than this many names in one reading. */
-const CONFIG_KEY_READ_LIMIT = 64;
-
-/** Reads any number of names by splitting them into readings the judgment boundary accepts; one unsettled batch leaves the whole answer unsettled. */
-async function readConfigKeyInBatches(
-  names: readonly string[],
-  signal: AbortSignal,
-  battery?: Parameters<typeof readConfigKey>[2]
-): Promise<ConfigKeyResult> {
-  const batches: string[][] = [];
-  for (let at = 0; at < names.length; at += CONFIG_KEY_READ_LIMIT)
-    batches.push(names.slice(at, at + CONFIG_KEY_READ_LIMIT));
-  const results = await Promise.all(batches.map((batch) => readConfigKey(batch, signal, battery)));
-  const ready: Extract<ConfigKeyResult, { status: 'ready' }>[] = [];
-  for (const result of results) {
-    if (result.status !== 'ready') return result;
-    ready.push(result);
-  }
-  const classic = ready.every((result) => result.provenance === 'classic');
+/**
+ * A declared credential goes through credentials.set: the daemon stores the
+ * value in its secret store, reads it back, and only then points the config key
+ * at it. config.set refuses a literal credential, so this is the one write
+ * path that works for every key in the daemon's credential list.
+ */
+async function setCredential(key: string, value: unknown): Promise<ConfigSetOutcome> {
+  if (typeof value !== 'string') throw new Error(`${key} takes a text value.`);
+  const stored = await platformClient.operator.credentials.set({ key, value });
   return {
-    status: 'ready',
-    matches: ready.flatMap((result) => result.matches),
-    ...(classic ? { provenance: 'classic' as const } : {}),
-    isCurrent: () => ready.every((result) => result.isCurrent()),
+    success: stored.success,
+    key,
+    persistedTo: `the daemon's secret store (${stored.scope} scope, ${stored.reference})`,
+    daemonOwned: true,
   };
 }
 
-/** The daemon's real 403 admin-scope refusal on config.get carries no machine `code`, status only. */
-/**
- * The mail and calendar passwords are read only from the daemon's secret store,
- * so a config.set would save a copy nothing reads. They go through
- * credentials.set, which stores the value there and leaves a reference in
- * config. Only a daemon that does not have the method falls back to naming the
- * terminal command, and nothing is written.
- */
-async function setSecretStoreOnlyCredential(key: string, value: unknown): Promise<ConfigSetOutcome> {
-  if (typeof value !== 'string') throw new Error(`${key} takes a text value.`);
-  try {
-    const stored = await platformClient.operator.credentials.set({ key, value });
-    return {
-      success: stored.success,
-      key,
-      persistedTo: `the daemon's secret store (${stored.scope} scope, ${stored.reference})`,
-      daemonOwned: true,
-    };
-  } catch (error) {
-    if (!isMethodUnavailableError(error)) throw error;
-    throw new Error(
-      `This daemon cannot store credentials from the browser, so nothing was saved. Run ${secretStoreSetCommandFor(key)} from a terminal with daemon access.`,
-    );
-  }
+/** A key in the daemon's credential list whose value is one secret (not a validated list of references). */
+function isCredentialKey(key: string): boolean {
+  return SECRET_CONFIG_KEYS.has(key) && !isStructuredCredentialReferenceConfigKey(key);
 }
 
 interface ConfigSettingsValue {
@@ -143,63 +110,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
     retry: false,
   });
 
-  const baseGroups = useMemo(() => buildSettingsModel(config.data), [config.data]);
-  // Canonically declared secrets stay deterministic, including non-schema keys.
-  // Only genuinely unresolved names need credential and card-material readings.
-  const unresolvedNames = liveLeafKeys(config.data, "", new Set([...OBJECT_TYPED_CONFIG_KEYS, ...SECRET_CONFIG_KEYS]))
-    .filter((key) => isUnresolvedConfigKey(key) && !isDeclaredCardMaterialKey(key));
-  const nameSignature = JSON.stringify(unresolvedNames);
-  const [classification, setClassification] = useState<{
-    data: unknown;
-    updatedAt: number;
-    nameSignature: string;
-    result: ConfigKeyResult;
-    cardResult: ConfigKeyResult;
-  }>();
-  const [identityRevision, setIdentityRevision] = useState(0);
-  useEffect(
-    () =>
-      subscribeClientLifetime(() => {
-        setClassification(undefined);
-        setIdentityRevision((value) => value + 1);
-      }),
-    []
-  );
-  useEffect(() => {
-    const names = JSON.parse(nameSignature) as string[];
-    if (!enabled || !config.isSuccess || config.isFetching || !names.length)
-      return;
-    const abort = new AbortController();
-    void Promise.all([readConfigKeyInBatches(names, abort.signal), readConfigKeyInBatches(names, abort.signal, "webui.settings.card-material-key")]).then(([result, cardResult]) => {
-      if (!abort.signal.aborted)
-        setClassification({
-          data: config.data,
-          updatedAt: config.dataUpdatedAt,
-          nameSignature,
-          result,
-          cardResult,
-        });
-    });
-    return () => abort.abort();
-  }, [
-    enabled,
-    config.isSuccess,
-    config.isFetching,
-    config.data,
-    config.dataUpdatedAt,
-    nameSignature,
-    identityRevision,
-  ]);
-  const current = enabled && config.isSuccess && !config.isFetching
-    && classification?.data === config.data && classification.updatedAt === config.dataUpdatedAt
-    && classification.nameSignature === nameSignature ? classification : undefined;
-  const nonCardKeys = current?.cardResult.status === 'ready' && current.cardResult.isCurrent()
-    ? new Set(unresolvedNames.filter((_, index) => current.cardResult.status === 'ready' && current.cardResult.matches.at(index) === false))
-    : new Set<string>();
-  const clearedKeys = current?.result.status === 'ready' && current.result.isCurrent()
-    ? new Set(unresolvedNames.filter((_, index) => current.result.status === 'ready' && current.result.matches.at(index) === false))
-    : new Set<string>();
-  const groups = nonCardKeys.size ? buildSettingsModel(config.data, clearedKeys, nonCardKeys) : baseGroups;
+  const groups = useMemo(() => buildSettingsModel(config.data), [config.data]);
   // payments.currency's live value, for MoneyField's currency label, read from
   // the live config since it may sit in a different group than the money field.
   const currency = useMemo(() => {
@@ -220,8 +131,8 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
   const commit = useCallback(
     async (key: string, value: unknown): Promise<void> => {
       try {
-        const outcome = isSecretStoreOnlyConfigKey(key)
-          ? await setSecretStoreOnlyCredential(key, value)
+        const outcome = isCredentialKey(key)
+          ? await setCredential(key, value)
           : await platformClient.operator.config.set(key, value);
         setPersistedByKey((prev) => ({ ...prev, [key]: outcome }));
         await queryClient.invalidateQueries({ queryKey: ['config'] });
@@ -387,7 +298,7 @@ export function ConfigGroupList({
                   <div key={row.key} className="settings-readable__row">
                     <dt className="settings-readable__key">
                       {row.key}
-                      {row.isSecret && <span className="settings-secret-flag"> {isUnresolvedConfigKey(row.key) ? '(masked)' : '(secret)'}</span>}
+                      {row.isSecret && <span className="settings-secret-flag"> {isUndeclaredConfigKey(row.key) && !SECRET_CONFIG_KEYS.has(row.key) ? '(masked)' : '(secret)'}</span>}
                       {row.daemonOwned && (
                         <span
                           className="settings-daemon-flag"
@@ -399,7 +310,7 @@ export function ConfigGroupList({
                       )}
                     </dt>
                     <dd className={row.isSecret ? 'settings-value settings-value--secret' : 'settings-value'}>
-                      {displayConfigValue(row.key, row.value, row.displayCleared)}
+                      {displayConfigValue(row.key, row.value)}
                     </dd>
                   </div>
                 ))}

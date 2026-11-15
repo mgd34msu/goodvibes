@@ -89,22 +89,15 @@ export class BrowserJudgmentReferences {
       const entry = current();
       try {
         const principal = currentPrincipal();
-        current();
         if (!principal || 'then' in principal || entry.principalId !== principal.principalId) { consumeRejectedHook(principal); return held(); }
-        const allowed = granted(entry.mayRead(principal));
-        current();
-        if (!allowed) return held();
+        if (!granted(entry.mayRead(principal))) return held();
         requireSynchronousAssertion(() => entry.assertCurrent(), 'JUDGMENT_REFERENCE_HELD');
-        current();
       }
       catch { return held(); }
     };
     assertCurrent();
     let state: S;
     try { state = parse(current().snapshot); } catch { return held(); }
-    // Parsing is also supplied code. A revoked or replaced row cannot escape
-    // as a successful lease, even when the parser returned the original data.
-    assertCurrent();
     // The binding stays server-side; it is not an approval token and is never emitted.
     return { state, sourceBinding: id, assertCurrent, signal: current().lifetime.signal };
   }

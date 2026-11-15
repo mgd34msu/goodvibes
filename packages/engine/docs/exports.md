@@ -65,7 +65,7 @@ Client-safe surfaces:
 - `@goodvibes-jev/engine/platform/browser/agent`
 - `@goodvibes-jev/engine/platform/client-auth`
 - `@goodvibes-jev/engine/platform/platform/payments/browser` (the four payment UI policy helpers only)
-- `@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs` (fixed command descriptors and structural status tones only)
+- `@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs` (structural status tones and declared-fact rules only)
 - `@goodvibes-jev/engine/platform/events`
 - `@goodvibes-jev/engine/platform/events/<domain>` for the explicit public event domains documented in [Public Surface](./public-surface.md)
 - `@goodvibes-jev/engine/platform/observer`

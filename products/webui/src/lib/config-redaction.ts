@@ -1,4 +1,4 @@
-/** Config display uses canonical declarations. Unknown keys are masked until a current key-name reading settles. No value is sent for interpretation. */
+/** Config display uses the engine's declarations: a declared credential is masked, and so is any key the schema does not declare. Nothing is sent anywhere to decide it. */
 import { asRecord } from "./object";
 import {
   SECRET_BEARING_CONFIG_PATHS,
@@ -17,6 +17,7 @@ export function isSecretConfigKey(key: string): boolean {
 export function isUndeclaredConfigKey(key: string): boolean {
   return !SCHEMA_KEYS.has(key);
 }
+/** A key neither the schema nor the credential list declares; its value stays masked. */
 export function isUnresolvedConfigKey(key: string): boolean {
   return !isSecretBearingConfigKey(key) && !SCHEMA_KEYS.has(key);
 }
@@ -27,8 +28,8 @@ export function maskSecretValue(value: string): string {
   return `${"•".repeat(Math.min(12, Math.max(4, value.length - 4)))}${value.slice(-4)}`;
 }
 
-/** Render a config value for display, masking declared secrets and unresolved names. */
-export function displayConfigValue(key: string, value: unknown, cleared = false): string {
+/** Render a config value for display, masking declared secrets and undeclared names. */
+export function displayConfigValue(key: string, value: unknown): string {
   if (isStructuredCredentialReferenceConfigKey(key)) {
     try {
       return JSON.stringify(captureStructuredCredentialReferenceConfigValue(key, value));
@@ -36,7 +37,7 @@ export function displayConfigValue(key: string, value: unknown, cleared = false)
       return "••••";
     }
   }
-  if (isUnresolvedConfigKey(key) && !cleared) return "••••";
+  if (isUnresolvedConfigKey(key)) return "••••";
   if (
     isSecretBearingConfigKey(key) &&
     typeof value !== "string" &&

@@ -43,15 +43,14 @@ test('unavailable, empty, loading, closed and history gap remain distinct', asyn
   expect(nativeWorkLedgerLines(model.state).join()).toContain('No native work');
   f.emit(snapshot(2), [event(2)]); await flush(); expect(model.state.status).toBe('unavailable'); expect(f.calls).toContain('dispose');
 });
-test('explicit host/project selection, replacement, stale onUnavailable and reopen', async () => {
+test('explicit host/project selection, replacement and reopen', async () => {
   let host: NativeLedgerHost = { baseUrl: 'https://one.invalid', token: 'secret-one', workspace: 'workspace' };
-  const errors: Array<(e: Error) => void> = []; const readers: ReturnType<typeof fixture>[] = [];
-  const view = createNativeWorkLedgerView(() => host, () => {}, (_host, project, error) => { expect(project).toBe('p'); errors.push(error); const f = fixture(); readers.push(f); return { available: true, client: f.client }; }, async () => { throw new Error('No discovery scope'); });
+  const readers: ReturnType<typeof fixture>[] = [];
+  const view = createNativeWorkLedgerView(() => host, () => {}, (_host, project) => { expect(project).toBe('p'); const f = fixture(); readers.push(f); return { available: true, client: f.client }; }, async () => { throw new Error('No discovery scope'); });
   view.open(); expect(view.state.status).toBe('loading'); view.selectProject('p'); view.open(); await flush();
-  view.close(); view.open(); await flush(); errors[0]!(new Error('old token revoked')); expect(view.state.status).toBe('ready');
+  view.close(); view.open(); await flush(); expect(view.state.status).toBe('ready');
   host = { baseUrl: 'https://two.invalid', token: 'secret-two', workspace: 'workspace' }; view.sync(); expect(view.state.status).toBe('unavailable');
   expect(nativeWorkLedgerLines(view.state).join()).not.toContain('secret');
-  view.selectProject('p'); view.open(); await flush(); errors.at(-1)!(new Error('HTTP 403')); expect(view.state.status).toBe('unavailable');
   expect(readers.at(-1)!.calls).toContain('dispose'); view.close();
 });
 test('reported complete never implies verified; stable IDs and criterion revisions render', () => {
@@ -111,16 +110,6 @@ for (const replacement of ['baseUrl', 'token', 'workspace'] as const) {
     expect(view.state.status).toBe('unavailable'); expect(nativeWorkLedgerLines(view.state).join(' ')).not.toContain('launch-claimed'); view.close();
   });
 }
-
-test('synchronous host binding revocation cannot resurrect read or execution clients', async () => {
-  let executionsDisposed = 0; const f = fixture();
-  const view = createNativeWorkLedgerView(() => ({ baseUrl: 'https://one.invalid', token: 'synthetic', workspace: '/one' }), () => {}, (_host, _project, unavailable) => {
-    unavailable(new Error('Revoked during binding'));
-    return { available: true, client: f.client, execution: { start: async () => { throw new Error(); }, status: async () => { throw new Error(); }, cancel: async () => { throw new Error(); }, resume: async () => { throw new Error(); }, dispose() { executionsDisposed++; } } };
-  });
-  view.selectProject('p'); view.open(); await flush();
-  expect(view.state.status).toBe('unavailable'); expect(f.calls).toEqual(['dispose']); expect(executionsDisposed).toBe(1); view.close();
-});
 
 test('reentrant reader cleanup keeps the newer Agent lifecycle and drops the outer binding', async () => {
   const old = fixture(); const fresh = fixture(); const discarded = fixture(); const model = new NativeWorkLedgerModel();

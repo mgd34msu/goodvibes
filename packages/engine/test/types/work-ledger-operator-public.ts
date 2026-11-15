@@ -4,7 +4,7 @@ import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client
 import type { WorkLedgerReadClient, WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 
 declare const operator: Pick<OperatorRemoteClient, 'invoke'>;
-const options: OperatorWorkLedgerReadOptions = { pollIntervalMs: 1_000, requestTimeoutMs: 2_000, onUnavailable: () => {} };
+const options: OperatorWorkLedgerReadOptions = { pollIntervalMs: 1_000, requestTimeoutMs: 2_000 };
 const reader: WorkLedgerReadClient = createOperatorWorkLedgerReadClient(operator, 'consumer-project', options);
 const snapshot: Promise<WorkLedgerReadSnapshot> = reader.readSnapshot();
 const detach: () => void = reader.subscribe(() => {});

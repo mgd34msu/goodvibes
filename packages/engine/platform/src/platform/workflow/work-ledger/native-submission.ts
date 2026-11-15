@@ -6,7 +6,6 @@ import { realpathSync } from 'node:fs';
 import type { NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativePairedExecutionSnapshot } from './native-execution.js';
 import type { WorkLedgerAuthority, WorkLedgerEvent, WorkLedgerService } from './types.js';
 import {
-  NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES, NATIVE_WORK_SUBMISSION_MAX_RESPONSE_BYTES,
   nativeWorkSubmissionRequestSchema, nativeWorkSubmissionLookupRequestSchema,
   nativeWorkSubmissionReceiptSchema,
   type NativeWorkSubmissionRequest, type NativeWorkSubmissionLookupRequest,
@@ -41,11 +40,6 @@ function paired(authority: NativePairedExecutionAuthority): NativePairedExecutio
     || !REQUIRED_SCOPES.every(scope => current.scopes.includes('*') || current.scopes.includes(scope))) throw new NativeWorkSubmissionError('unsupported-authority');
   return Object.freeze({ ...current, scopes: Object.freeze([...current.scopes].sort()) });
 }
-function bounded(value: unknown, limit: number): void {
-  let json: string | undefined;
-  try { json = JSON.stringify(value); } catch { throw new NativeWorkSubmissionError('invalid'); }
-  if (json === undefined || new TextEncoder().encode(json).byteLength > limit) throw new NativeWorkSubmissionError('invalid');
-}
 function receipt(event: WorkLedgerEvent, projectId: string, sessionId: string, principalId: string,
   issued?: { readonly request: NativeWorkSubmissionRequest; readonly sourceId: string; readonly sourceRevision: string }): NativeWorkSubmissionReceipt {
   if (event.type !== 'submit_native' || (event.work.source?.version !== 1 && event.work.source?.version !== 3 && event.work.source?.version !== 4) || !event.attemptId || event.actorId !== principalId) throw new NativeWorkSubmissionError('unavailable');
@@ -61,7 +55,7 @@ function receipt(event: WorkLedgerEvent, projectId: string, sessionId: string, p
     ledgerRevision: event.sequence, workId: event.workId, attemptId: attempt.id,
     expectedRevision: { work: event.work.revision, criteria: event.work.criteriaRevision, attempt: attempt.revision },
     source, goal: event.work.goal, criteria: event.work.criteria });
-  bounded(value, NATIVE_WORK_SUBMISSION_MAX_RESPONSE_BYTES); return value;
+  return value;
 }
 
 /** The existing ledger owner and real pairing/scope owners remain the only authorities. */
@@ -111,10 +105,9 @@ export function createNativeWorkSubmissionHost(deps: {
   return {
     projectId: deps.projectId,
     async submit(input, authority, options = {}) {
-      bounded(input, NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES);
       const parsed = nativeWorkSubmissionRequestSchema.safeParse(input);
       if (!parsed.success) throw new NativeWorkSubmissionError('invalid');
-      const captured = parsed.data; bounded(captured, NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES);
+      const captured = parsed.data;
       return track(() => withOwner(authority, options, async (actor, isAuthorized, signal) => {
         const identity = paired(authority);
         const replay = (event: WorkLedgerEvent): NativeWorkSubmissionResult => {
@@ -145,7 +138,6 @@ export function createNativeWorkSubmissionHost(deps: {
       }));
     },
     async get(input, authority, options = {}) {
-      bounded(input, NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES);
       const parsed = nativeWorkSubmissionLookupRequestSchema.safeParse(input);
       if (!parsed.success) throw new NativeWorkSubmissionError('invalid');
       const requestId = parsed.data.requestId;

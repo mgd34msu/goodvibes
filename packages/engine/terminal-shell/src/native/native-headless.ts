@@ -217,6 +217,8 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
         if (state?.turnReady && state.turnPermit && state.result?.kind === 'turn') {
             inTurn = true;
             const turn = await options.runTurn(state, options.signal);
+            // The turn ended (whatever its exit): its intake record has nothing left to fence.
+            await state.finishTurn?.();
             // runTurn also awaits shutdown: a signal during cleanup still belongs to this invocation.
             return { ...turn, exitCode: options.signal.aborted ? 130 : turn.exitCode, native: state };
         }

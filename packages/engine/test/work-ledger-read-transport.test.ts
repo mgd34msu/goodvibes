@@ -153,19 +153,19 @@ describe('native ledger authenticated read transport', () => {
     await expect(host.platformClient().invoke('workLedger.history', { projectId: 'fixture-project', afterSequence: '1.5' } as never)).rejects.toMatchObject({ status: 400 });
     reader.dispose();
   });
-  test('revocation is rechecked per request and polling stops after denial', async () => {
+  test('a denial is told to the subscriber, polled at the longest back-off, and access that returns resumes it', async () => {
     const clock = virtualClock();
     try {
-      const host = fixture(); const unavailable: Error[] = []; const observed: number[] = [];
-      const reader = createOperatorWorkLedgerReadClient(host.platformClient(), 'fixture-project', { pollIntervalMs: 100, onUnavailable: e => unavailable.push(e) });
-      reader.subscribe(snapshot => observed.push(snapshot.cursor));
+      const host = fixture(); const unavailable: string[] = []; const observed: number[] = []; let resumed = 0;
+      const reader = createOperatorWorkLedgerReadClient(host.platformClient(), 'fixture-project', { pollIntervalMs: 100 });
+      reader.subscribe(snapshot => observed.push(snapshot.cursor), reason => unavailable.push(reason), () => { resumed += 1; });
       await clock.advance(0); expect(observed).toEqual([0]);
       host.revoke(); await clock.advance(100);
-      expect(unavailable).toHaveLength(1); expect(unavailable[0]).toMatchObject({ status: 401 });
-      // A denial is terminal: nothing is scheduled, and a long wait sends nothing.
-      expect(clock.pending).toBe(0);
-      const calls = host.requests.length; await clock.advance(10_000); expect(host.requests).toHaveLength(calls);
+      expect(unavailable).toHaveLength(1); expect(unavailable[0]).toContain('refused');
+      // The listener stays subscribed and one poll is still scheduled.
+      expect(clock.pending).toBe(1);
       await expect(reader.readSnapshot()).rejects.toMatchObject({ status: 401 }); reader.dispose();
+      expect(resumed).toBe(0);
     } finally { clock.restore(); }
   });
   test('host closure is unavailable, never an empty ledger', async () => {
@@ -206,17 +206,17 @@ describe('native ledger reader lifecycle', () => {
     } finally { clock.restore(); }
   });
   test('transient polling failure backs off then catches up the durable cursor', async () => {
-    const host = fixture(); let calls = 0; const snapshots: number[] = []; const errors: Error[] = [];
+    const host = fixture(); let calls = 0; const snapshots: number[] = []; const errors: string[] = [];
     const platformClient = host.platformClient();
     const invoke: OperatorRemoteClient['invoke'] = async <T>(method: string, input?: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
       if (++calls === 1) throw new Error('synthetic offline');
       return platformClient.invoke<T>(method, input, options);
     };
-    const reader = createOperatorWorkLedgerReadClient({ invoke }, 'fixture-project', { pollIntervalMs: 100, onUnavailable: e => errors.push(e) });
+    const reader = createOperatorWorkLedgerReadClient({ invoke }, 'fixture-project', { pollIntervalMs: 100 });
     const clock = virtualClock();
     try {
-      reader.subscribe(value => snapshots.push(value.cursor)); await clock.advance(0);
-      expect(errors).toHaveLength(1); expect(errors[0]?.message).toBe('synthetic offline');
+      reader.subscribe(value => snapshots.push(value.cursor), reason => errors.push(reason)); await clock.advance(0);
+      expect(errors).toHaveLength(1); expect(errors[0]).toContain('synthetic offline');
       expect(calls).toBe(1); expect(snapshots).toEqual([]);
       host.events.push(event(1), event(2));
       // The first failure doubles the 100 ms polling interval: no retry is
@@ -308,18 +308,16 @@ test('two subscriptions using the same callback own independent leases', async (
 test('a timed-out observation reports unavailable, backs off, and resumes from durable state', async () => {
   const clock = virtualClock();
   const host = fixture(); const platformClient = host.platformClient();
-  let calls = 0; const failures: Error[] = []; const cursors: number[] = [];
+  let calls = 0; const failures: string[] = []; const cursors: number[] = [];
   const invoke: OperatorRemoteClient['invoke'] = async <T>(method: string, input?: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
     if (++calls === 1) return await new Promise(() => {}) as T;
     return platformClient.invoke<T>(method, input, options);
   };
-  const reader = createOperatorWorkLedgerReadClient({ invoke }, 'fixture-project', {
-    requestTimeoutMs: 100, pollIntervalMs: 100, onUnavailable: error => failures.push(error),
-  });
-  const detach = reader.subscribe(snapshot => cursors.push(snapshot.cursor));
+  const reader = createOperatorWorkLedgerReadClient({ invoke }, 'fixture-project', { requestTimeoutMs: 100, pollIntervalMs: 100 });
+  const detach = reader.subscribe(snapshot => cursors.push(snapshot.cursor), reason => failures.push(reason));
   try {
     await clock.advance(0); expect(calls).toBe(1); expect(failures).toEqual([]);
-    await clock.advance(100); expect(failures).toHaveLength(1); expect(failures[0]?.message).toContain('timed out');
+    await clock.advance(100); expect(failures).toHaveLength(1); expect(failures[0]).toContain('timed out');
     expect(calls).toBe(1); expect(cursors).toEqual([]);
     host.events.push(event(1), event(2));
     // The failure doubles the 100 ms poll interval before the retry.
@@ -344,10 +342,8 @@ test.each(['subscription', 'unavailable'] as const)('async %s observer rejection
     if (kind === 'unavailable') throw new Error('synthetic offline');
     return platformClient.invoke<T>(method, input, options);
   };
-  const reader = createOperatorWorkLedgerReadClient({ invoke }, 'fixture-project', {
-    pollIntervalMs: 100, ...(kind === 'unavailable' ? { onUnavailable: callback } : {}),
-  });
-  const detach = reader.subscribe(kind === 'subscription' ? callback : () => {});
+  const reader = createOperatorWorkLedgerReadClient({ invoke }, 'fixture-project', { pollIntervalMs: 100 });
+  const detach = kind === 'subscription' ? reader.subscribe(callback) : reader.subscribe(() => {}, callback);
   try {
     await clock.advance(0); expect(observed).toBe(true); detach(); reader.dispose(); release();
     await clock.settle(); expect(unhandled).toEqual([]);
@@ -365,11 +361,9 @@ test.each(['subscription', 'unavailable'] as const)('hostile %s thenable and ree
     called += 1;
     return { get then() { thenRead += 1; reader.dispose(); throw new Error('synthetic hostile thenable'); } };
   };
-  const reader = createOperatorWorkLedgerReadClient({ invoke }, 'fixture-project', {
-    pollIntervalMs: 100, ...(kind === 'unavailable' ? { onUnavailable: callback } : {}),
-  });
+  const reader = createOperatorWorkLedgerReadClient({ invoke }, 'fixture-project', { pollIntervalMs: 100 });
   try {
-    reader.subscribe(kind === 'subscription' ? callback : () => {});
+    if (kind === 'subscription') reader.subscribe(callback); else reader.subscribe(() => {}, callback);
     await clock.advance(0); expect(thenRead).toBe(1);
     await clock.advance(10_000);
     expect(called).toBe(1); expect(thenRead).toBe(1); expect(clock.pending).toBe(0);
@@ -456,23 +450,6 @@ test.each(['readSnapshot', 'history'] as const)('%s fences disposal at the outer
   await Promise.resolve(); await Promise.resolve();
   expect(Bun.inspect(pending)).toContain('<pending>');
   reader.dispose(); await expect(pending).rejects.toThrow('disposed');
-});
-
-test('unavailable observer mutation cannot turn terminal auth failure into retries', async () => {
-  const clock = virtualClock();
-  let calls = 0; let errors = 0;
-  const invoke: OperatorRemoteClient['invoke'] = async <T>(): Promise<T> => {
-    calls += 1; throw Object.assign(new Error('synthetic revoked token'), { status: 401 });
-  };
-  const reader = createOperatorWorkLedgerReadClient({ invoke }, 'fixture-project', {
-    pollIntervalMs: 100, onUnavailable: error => { errors += 1; Object.assign(error, { status: 503 }); },
-  });
-  try {
-    reader.subscribe(() => {});
-    await clock.advance(0); expect(errors).toBe(1);
-    await clock.advance(10_000);
-    expect(calls).toBe(1); expect(errors).toBe(1); expect(clock.pending).toBe(0); reader.dispose();
-  } finally { clock.restore(); }
 });
 
 test('one observer cannot rewrite another observer snapshot', async () => {

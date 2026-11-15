@@ -390,6 +390,10 @@ export class WorkspaceRegistrationStore {
     // visible are confirmed on disk by the next scope read before it trusts them.
     await this.store.persist(state, { durable: state.version === 2 });
     if (this.path === ':memory:') this.memoryState = structuredClone(state);
+    // The write itself made these bytes durable; the next scope read need not sync them again.
+    else if (state.version === 2) {
+      try { this.durableIdentity = fileIdentity(statSync(this.path, { bigint: true })); } catch { this.durableIdentity = null; }
+    }
   }
 
   /**

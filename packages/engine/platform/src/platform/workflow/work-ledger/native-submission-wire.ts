@@ -1,25 +1,28 @@
 /** Transport data only. Source text does not confer execution or verification authority. */
 import { array, boolean, literal, number, strictObject, string, union, type z } from 'zod/v4';
 
-export const NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES = Infinity;
-export const NATIVE_WORK_SUBMISSION_MAX_RESPONSE_BYTES = Infinity;
+/**
+ * The one size rule for submitted work: the goal and criteria together, in
+ * UTF-8. Every ledger read returns a work whole, with its attempt report and
+ * evidence, inside a 1 MiB page; a quarter of that keeps the largest accepted
+ * work readable, so work that is accepted can always be shown.
+ */
+export const NATIVE_WORK_SUBMISSION_MAX_TEXT_BYTES = 262_144;
 
 const id = string().min(1).max(200);
 const revision = number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 // Validate non-whitespace without trimming, normalization, deduplication, or reordering.
 const text = string().min(1).max(20_000).regex(/\S/, 'Must contain non-whitespace text');
 const criteria = array(text).min(1).max(100);
-const bounded = (value: unknown, limit: number): boolean => {
-  try {
-    const json = JSON.stringify(value);
-    return typeof json === 'string' && new TextEncoder().encode(json).byteLength <= limit;
-  } catch { return false; }
-};
+const encoder = new TextEncoder();
+const textBytes = (value: { readonly goal: string; readonly criteria: readonly string[] }): number =>
+  value.criteria.reduce((total, criterion) => total + encoder.encode(criterion).byteLength, encoder.encode(value.goal).byteLength);
 
 /** The authenticated host owns project, actor, source, session, work, and attempt selection. */
 export const nativeWorkSubmissionRequestSchema = strictObject({
   requestId: id, inputId: id, expectedRevision: revision, goal: text, criteria,
-}).refine(value => bounded(value, NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES), 'Submission exceeds byte limit');
+}).refine(value => textBytes(value) <= NATIVE_WORK_SUBMISSION_MAX_TEXT_BYTES,
+  `The goal and criteria together must be at most ${NATIVE_WORK_SUBMISSION_MAX_TEXT_BYTES / 1024} KiB; shorten them or split the work`);
 
 export const nativeWorkSubmissionLookupRequestSchema = strictObject({ requestId: id });
 
@@ -33,16 +36,16 @@ export const nativeWorkSubmissionReceiptSchema = strictObject({
     strictObject({ version: literal(4), sourceId: string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/), sourceRevision: string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/), sessionId: id }),
   ]),
   goal: text, criteria,
-}).refine(value => bounded(value, NATIVE_WORK_SUBMISSION_MAX_RESPONSE_BYTES), 'Receipt exceeds byte limit');
+});
 
 export const nativeWorkSubmissionResultSchema = strictObject({
   kind: literal('submitted'), replayed: boolean(), receipt: nativeWorkSubmissionReceiptSchema,
-}).refine(value => bounded(value, NATIVE_WORK_SUBMISSION_MAX_RESPONSE_BYTES), 'Submission result exceeds byte limit');
+});
 
 export const nativeWorkSubmissionLookupResultSchema = union([
   strictObject({ kind: literal('found'), receipt: nativeWorkSubmissionReceiptSchema }),
   strictObject({ kind: literal('not-found') }),
-]).refine(value => bounded(value, NATIVE_WORK_SUBMISSION_MAX_RESPONSE_BYTES), 'Lookup result exceeds byte limit');
+]);
 
 export type NativeWorkSubmissionRequest = z.infer<typeof nativeWorkSubmissionRequestSchema>;
 export type NativeWorkSubmissionLookupRequest = z.infer<typeof nativeWorkSubmissionLookupRequestSchema>;

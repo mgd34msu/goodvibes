@@ -8,7 +8,7 @@ import { NativeConversationStorageError } from '../../workflow/work-ledger/nativ
 import { NativeConversationIntakeError, type NativeConversationIntakeHost } from '../../workflow/work-ledger/native-intake.js';
 import {
   nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeLookupRequestSchema, nativeConversationIntakeTransitionRequestSchema,
-  nativeConversationIntakeResultSchema, nativeConversationIntakeLookupResultSchema, NATIVE_CONVERSATION_INTAKE_MAX_REQUEST_BYTES,
+  nativeConversationIntakeResultSchema, nativeConversationIntakeLookupResultSchema,
 } from '../../workflow/work-ledger/native-intake-wire.js';
 import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
@@ -27,7 +27,6 @@ export function registerNativeConversationIntakeGatewayMethods(catalog: GatewayM
     catalog.register(descriptor, async invocation => {
       try {
         const authority = authorize(invocation); const input = readInvocationParams(invocation);
-        if (new TextEncoder().encode(JSON.stringify(input)).byteLength > NATIVE_CONVERSATION_INTAKE_MAX_REQUEST_BYTES) throw new GatewayVerbError('Native intake exceeds the transport limit', 'NATIVE_INTAKE_LIMIT', 413);
         invocation.signal?.throwIfAborted();
         const options = { ...(invocation.signal ? { signal: invocation.signal } : {}), isAuthorized: () => invocation.isAuthorized?.(SCOPES) === true };
         if (operation === 'capture') {

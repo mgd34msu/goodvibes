@@ -104,7 +104,7 @@ export function createNativeWorkLedgerHost(deps: {
       available: true,
       identity,
       projectId: selectedProject,
-      bind: (onUnavailable) => {
+      bind: () => {
         const current = () => captureSelection().identity === identity;
         if (!current()) return { available: false, reason: 'Native host selection changed.' };
         let disposed = false;
@@ -130,7 +130,6 @@ export function createNativeWorkLedgerHost(deps: {
           }
         }) as OperatorRemoteClient['invoke'];
         return createNativeWorkLedgerReadBinding({ invoke, dispose: () => operator.dispose() }, selectedProject, {
-          onUnavailable,
           execution: { invoke },
           beforeDispose: () => {
             disposed = true;

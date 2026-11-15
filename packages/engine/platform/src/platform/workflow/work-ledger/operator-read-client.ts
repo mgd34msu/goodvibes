@@ -23,14 +23,11 @@ export interface OperatorWorkLedgerReadOptions {
   readonly pollIntervalMs?: number;
   /** Bound a stalled read without changing or replacing the operator transport. */
   readonly requestTimeoutMs?: number;
-  /** Observation failures; a later successful explicit read may recover. */
-  readonly onUnavailable?: (error: Error) => void;
-  /**
-   * Observation ended for good: the host denied the binding (401, 403, 404 or
-   * 410). Subscribed listeners are dropped; subscribe again once access is
-   * restored to resume.
-   */
-  readonly onObservationStopped?: (error: Error) => void;
+}
+interface Subscriber {
+  readonly listener: (snapshot: WorkLedgerReadSnapshot) => void;
+  readonly onUnavailable: ((reason: string) => void) | undefined;
+  readonly onResumed: (() => void) | undefined;
 }
 function error(message: string): Error { return new Error(`Native work ledger: ${message}`); }
 function validCursor(value: number): boolean { return Number.isSafeInteger(value) && value >= 0; }
@@ -79,7 +76,7 @@ export function createOperatorWorkLedgerReadClient(
     projection = next;
     if (changed && lastSnapshot) {
       lastSnapshot = { ...lastSnapshot, provenance: projection };
-      for (const listener of [...listeners.values()]) {
+      for (const { listener } of [...listeners.values()]) {
         if (disposed) break;
         notifyObserver(() => listener(structuredClone(lastSnapshot!)));
       }
@@ -91,7 +88,9 @@ export function createOperatorWorkLedgerReadClient(
         works: event.works, manifest: null, provenance: 'requires_read_knowledge' } : event);
   }
   const requests = new Set<AbortController>();
-  const listeners = new Map<symbol, (snapshot: WorkLedgerReadSnapshot) => void>();
+  const listeners = new Map<symbol, Subscriber>();
+  // Whether the subscribers were last told that observation is unavailable.
+  let unavailableReason: string | undefined;
   function active(): void { if (disposed) throw error('reader is disposed'); }
   async function validate(method: string, value: unknown, signal: AbortSignal): Promise<void> {
     const schema = getOperatorContract().operator.methods.find(item => item.id === method)?.outputSchema;
@@ -149,13 +148,20 @@ export function createOperatorWorkLedgerReadClient(
       const value = await snapshot(controller);
       if (disposed || epoch !== generation) return;
       failures = 0;
+      if (unavailableReason !== undefined) {
+        unavailableReason = undefined;
+        for (const { onResumed } of [...listeners.values()]) {
+          if (disposed || epoch !== generation) break;
+          if (onResumed) notifyObserver(onResumed);
+        }
+      }
       // A lower cursor means the host ledger was restored or replaced. The new
       // state is the truth: adopt it and tell the listeners, instead of failing
       // every later poll against a cursor that will never be reached again.
       if (value.cursor < observedCursor) lastSnapshot = value;
       if (value.cursor !== observedCursor) {
         observedCursor = value.cursor;
-        for (const listener of [...listeners.values()]) {
+        for (const { listener } of [...listeners.values()]) {
           if (disposed || epoch !== generation) break;
           notifyObserver(() => listener(structuredClone(value)));
         }
@@ -164,16 +170,23 @@ export function createOperatorWorkLedgerReadClient(
       // Unsubscribe/dispose advance the observation epoch before aborting.
       // A request timeout aborts only this request and must report/retry.
       if (disposed || epoch !== generation) return;
-      // Capture admission state before handing an error to an observer.
+      // A refusal (401, 403, 404, 410) is reported like any other failure and
+      // polled at the longest back-off: access that returns resumes by itself,
+      // and the subscriber that owns each listener is told both ways.
       const status = statusOf(cause);
-      notifyObserver(() => options.onUnavailable?.(cause instanceof Error ? cause : error('read unavailable')));
-      // Permanent admission failures need a new host/session binding; never keep an old grant alive.
-      if (status === 401 || status === 403 || status === 404 || status === 410) {
-        stopObservation(); listeners.clear();
-        notifyObserver(() => options.onObservationStopped?.(cause instanceof Error ? cause : error('observation stopped')));
-        return;
+      const refused = status === 401 || status === 403 || status === 404 || status === 410;
+      const detail = cause instanceof Error ? cause.message : 'read unavailable';
+      const reason = refused
+        ? `The host refused the work ledger read (${status}): ${detail}. It is retried every minute; restore access to resume.`
+        : `The work ledger cannot be read right now: ${detail}. It is retried automatically.`;
+      if (reason !== unavailableReason) {
+        unavailableReason = reason;
+        for (const { onUnavailable } of [...listeners.values()]) {
+          if (disposed || epoch !== generation) break;
+          if (onUnavailable) notifyObserver(() => onUnavailable(reason));
+        }
       }
-      failures = Math.min(failures + 1, 6);
+      failures = refused ? 6 : Math.min(failures + 1, 6);
       nextDelay = Math.min(60_000, interval * 2 ** failures);
     } finally { if (pollController === controller) pollController = undefined; }
     schedule(nextDelay, epoch);
@@ -215,11 +228,11 @@ export function createOperatorWorkLedgerReadClient(
         if (!page.hasMore) return protect(events);
       } while (true);
     },
-    subscribe(listener) {
+    subscribe(listener, onUnavailable, onResumed) {
       active();
       const subscription = Symbol();
-      listeners.set(subscription, listener);
-      if (listeners.size === 1) { observedCursor = -1; failures = 0; schedule(0, generation); }
+      listeners.set(subscription, { listener, onUnavailable, onResumed });
+      if (listeners.size === 1) { observedCursor = -1; failures = 0; unavailableReason = undefined; schedule(0, generation); }
       let attached = true;
       return () => {
         if (!attached) return; attached = false;

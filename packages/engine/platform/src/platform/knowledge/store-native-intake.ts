@@ -202,8 +202,11 @@ export function createNativeConversationStorage(sqlite: SQLiteStore, projectId: 
           // The full ordinary reducer replay is already validated by the ledger adapter.
           const nextValue = finish(current, structuredClone(event) as WorkLedgerSubmission); synchronous(nextValue);
           const next = parseNativeConversationCapture(nextValue, current);
+          // The publishing decision itself may be appended here, written with the association it allowed.
+          const decisionsKept = isDeepStrictEqual(next.decisions, current.decisions)
+            || (next.decisions.length === current.decisions.length + 1 && isDeepStrictEqual(next.decisions.slice(0, -1), current.decisions));
           if (next.state !== 'associated' || next.generation !== current.generation
-            || next.proposalsSpent !== current.proposalsSpent || !isDeepStrictEqual(next.proposal, current.proposal) || !isDeepStrictEqual(next.decisions, current.decisions)
+            || next.proposalsSpent !== current.proposalsSpent || !isDeepStrictEqual(next.proposal, current.proposal) || !decisionsKept
             || !isDeepStrictEqual(next.association, { workId: event.workId, attemptId: event.attemptId, ledgerRevision: event.sequence })) throw new NativeConversationStorageError('invalid');
           assertPublication(next, event as WorkLedgerSubmission);
           synchronous(assertCurrent(current));

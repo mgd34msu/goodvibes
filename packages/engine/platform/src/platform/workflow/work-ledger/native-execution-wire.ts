@@ -7,6 +7,18 @@ export const NATIVE_WORK_EXECUTION_MAX_REQUEST_BYTES = 4_096;
 export const NATIVE_WORK_EXECUTION_MAX_RESPONSE_BYTES = 16_384;
 
 const id = string().min(1).max(200);
+/**
+ * Why an automatic settlement failed, one code per cause the owner can act on:
+ * a touched path outside the tree or not a regular file or link, one over the
+ * size limit, a read the access policy refuses or withdrew, the capture budget,
+ * a deliverable not applied, a review that is not genuine, files changing while
+ * they were verified, a cancel, the host's own state; anything else is
+ * `verification-failed` (the work did not pass).
+ */
+export const NATIVE_SETTLEMENT_FAILURE_CODES = ['artifact-outside-tree', 'artifact-not-regular', 'artifact-too-large',
+  'artifact-access-restricted', 'artifact-access-revoked', 'artifact-budget-exceeded', 'not-applied', 'review-not-genuine',
+  'changed-during-verification', 'cancelled', 'host-state', 'verification-failed'] as const;
+export type NativeSettlementFailureCode = typeof NATIVE_SETTLEMENT_FAILURE_CODES[number];
 const count = number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 
 /** Selected host identity only; this grants no execution eligibility or authority. */
@@ -40,7 +52,7 @@ export const nativeWorkExecutionExecutionSnapshotSchema = strictObject({
   integration: contractIntegrationInspectionSchema.optional(),
   settlement: strictObject({ state: enumSchema(['pending', 'required', 'failed', 'published']), evidenceId: id.optional(), reportSequence: count.optional(), evidenceSequence: count.optional(),
     /** Why a failed settlement failed: a fixed code, never raw error text. Absent from older hosts. */
-    reason: enumSchema(['evidence-over-capacity', 'artifact-access-restricted', 'artifact-budget-exceeded', 'review-not-genuine', 'changed-during-verification', 'cancelled', 'host-state', 'verification-failed']).optional() }).optional(),
+    reason: enumSchema(NATIVE_SETTLEMENT_FAILURE_CODES).optional() }).optional(),
   progress: strictObject({
     status: enumSchema(CONTRACT_STATUSES),
     sessionMode: boolean(),

@@ -5,7 +5,7 @@ import { nativeWorkExecutionLines, type NativeWorkExecutionState } from './nativ
 import { nativeConversationExecutionIntent, sameNativeExecutionIntent, inspectNativeConversationExecution, dispatchNativeConversationExecution } from './native-conversation-execution.js';
 import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeResultSchema, sameNativeConversationSource, type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeResult, type NativeConversationIntakeSourceRef, type OperatorNativeConversationIntakeClient, type NativeConversationTurnPermit, } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import type { NativeConversationInput } from './native-conversation-input.js';
-import { NATIVE_INTAKE_JOURNAL_MAX_RECORDS, NativeIntakeJournalError, type NativeIntakeJournalBinding, type NativeConversationIntakeJournal } from './native-conversation-intake-journal.js';
+import { NativeIntakeJournalError, type NativeIntakeJournalBinding, type NativeConversationIntakeJournal } from './native-conversation-intake-journal.js';
 /** Construction-owned product capabilities, never selected by a decision or tool argument. */
 export interface NativeConversationIntakePolicy {
     readonly allowHosted: boolean;
@@ -28,14 +28,14 @@ export type NativeConversationIntakeSelection = {
     readonly endpoint: string;
     readonly projectId: string;
     readonly workspace: string;
-    readonly journal: Pick<NativeConversationIntakeJournal, 'read' | 'save' | 'confirm' | 'claimTurn' | 'saveExecutionIntent'> & Partial<Pick<NativeConversationIntakeJournal, 'saveHostedSource' | 'path' | 'releaseTurnClaim' | 'discardUncaptured'>>;
+    readonly journal: Pick<NativeConversationIntakeJournal, 'read' | 'save' | 'confirm' | 'claimTurn' | 'saveExecutionIntent'> & Partial<Pick<NativeConversationIntakeJournal, 'saveHostedSource' | 'path' | 'releaseTurnClaim' | 'discardUncaptured' | 'remove' | 'finishTurn'>>;
     readonly bind: () => NativeConversationIntakeBinding;
 };
 /** Non-secret reason a native operation failed, for scripts to branch on. */
-export type NativeIntakeFailureCause = 'journal_limit' | 'journal_conflict' | 'journal' | 'principal' | 'network' | 'schema' | 'host_changed' | 'unknown';
+export type NativeIntakeFailureCause = 'journal_conflict' | 'journal' | 'principal' | 'network' | 'schema' | 'host_changed' | 'unknown';
 export function nativeIntakeFailureCause(error: unknown): NativeIntakeFailureCause {
     if (error instanceof NativeIntakeJournalError)
-        return error.code === 'journal_limit' ? 'journal_limit' : error.code === 'conflict' ? 'journal_conflict' : 'journal';
+        return error.code === 'conflict' ? 'journal_conflict' : 'journal';
     if (!(error instanceof Error))
         return 'unknown';
     const code = (error as { readonly code?: unknown }).code;
@@ -65,6 +65,11 @@ export interface NativeConversationIntakeState {
      * intake-retry can dispatch it; resolves false when the claim stays (it then reads as possibly run).
      */
     readonly releaseTurnClaim?: (() => Promise<boolean>) | undefined;
+    /**
+     * Present with a permit. Call once the local turn has ended: its journal record has nothing left to fence and
+     * is removed. Never throws; a record that cannot be removed now is removed by the next input's save.
+     */
+    readonly finishTurn?: (() => Promise<void>) | undefined;
     readonly execution?: NativeWorkExecutionState | undefined;
     readonly hostedTurn?: NativeHostedTurnLookup | undefined;
     /** Selection fence survives operation completion, never grants authority. */
@@ -91,7 +96,7 @@ type IntakePhase =
     | 'principal' | 'get' | 'capture' | 'admit' | 'resume' | 'cancel'
     | 'execution-status' | 'execution-dispatch'
     | `hosted-${'status' | 'start' | 'cancel'}`
-    | 'journal-read' | 'journal-save' | 'journal-confirm' | 'journal-claim' | 'journal-execution' | 'journal-hosted-source';
+    | 'journal-read' | 'journal-save' | 'journal-confirm' | 'journal-claim' | 'journal-execution' | 'journal-hosted-source' | 'journal-remove';
 const isJournalPhase = (phase: IntakePhase): boolean => phase.startsWith('journal-');
 const terminal = (result: NativeConversationIntakeResult) => ['turn', 'work', 'blocked', 'refused', 'cancelled'].includes(result.kind);
 const sameCommand = (left: NativeConversationIntakeCaptureRequest, right: NativeConversationIntakeCaptureRequest) => JSON.stringify(left) === JSON.stringify(right);
@@ -191,10 +196,8 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
             catch { }
         } };
         const detach = () => { controller.abort(); dispose(); };
+        // Selection is checked at every await below; nothing polls it in between.
         this.active = { identity: selected.identity, detach };
-        const timer = setInterval(() => { if (!current())
-            detach(); }, 100);
-        timer.unref?.();
         const request = () => command ? { requestId: command.requestId, inputId: command.inputId } : undefined;
         const validate = (result: NativeConversationIntakeResult): NativeConversationIntakeResult => {
             const parsed = nativeConversationIntakeResultSchema.parse(result);
@@ -238,7 +241,22 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 this.active!.request = request();
             if (expected && (!command || expected.inputId !== command.inputId || expected.requestId !== command.requestId))
                 return { status: 'invalid', message: 'The retained input changed. The newer input was not cancelled.', request: request() };
-            const confirm = async () => { phase = 'journal-confirm'; await selected.journal.confirm(scope, command!); };
+            // A record this call wrote, or already confirmed, is not read back before the next POST.
+            let confirmed = false;
+            const confirm = async () => {
+                if (confirmed)
+                    return;
+                phase = 'journal-confirm';
+                await selected.journal.confirm(scope, command!);
+                confirmed = true;
+            };
+            /** The input is settled for this client: its record has nothing left to protect. */
+            const settled = async () => {
+                if (!selected.journal.remove || !command)
+                    return;
+                phase = 'journal-remove';
+                await selected.journal.remove(scope, command);
+            };
             const preserveHostedSource = async () => {
                 if (delivery !== 'hosted' || !observedSource)
                     return;
@@ -332,6 +350,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 await selected.journal.save(scope, command, stored?.command.requestId ?? null, delivery ? { delivery } : undefined);
                 if (!current())
                     return;
+                confirmed = true;
                 this.retained.persisted = true;
                 this.active!.request = request();
                 result = undefined;
@@ -349,16 +368,15 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                     await selected.journal.save(scope, command, retained.expectedRequestId, retained.delivery ? { delivery: retained.delivery } : undefined);
                     if (!current())
                         return;
+                    confirmed = true;
                 }
-                phase = 'journal-confirm';
-                await selected.journal.confirm(scope, command);
+                await confirm();
                 if (!current())
                     return;
                 retained.persisted = true;
             }
             if (!result && (mode === 'submit' || mode === 'retry')) {
-                phase = 'journal-confirm';
-                await selected.journal.confirm(scope, command);
+                await confirm();
                 if (!current())
                     return;
                 phase = 'capture';
@@ -463,6 +481,18 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 hostedTurn = await hosted(mode === 'status' ? 'status' : mode === 'cancel' ? 'cancel' : 'request', result);
                 if (!current())
                     return;
+                // A hosted turn that finished or was cancelled is the host's to show; nothing here can run it again.
+                if (!('kind' in hostedTurn) && ['completed', 'cancelled'].includes(hostedTurn.state)) {
+                    await settled();
+                    if (!current())
+                        return;
+                }
+            }
+            else if (result.kind === 'blocked' || result.kind === 'refused' || result.kind === 'cancelled') {
+                // The host holds a terminal answer: nothing is left to resume, retry or dispatch from here.
+                await settled();
+                if (!current())
+                    return;
             }
             let execution: NativeWorkExecutionState | undefined;
             if (result.kind === 'work') {
@@ -479,6 +509,10 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                     execution = await dispatchNativeConversationExecution(binding.execution, selected.projectId, intent, controller.signal);
                     if (!current())
                         return;
+                    // The work receipt exists and its execution was requested: the host owns it from here (/work).
+                    await settled();
+                    if (!current())
+                        return;
                 }
                 else {
                     phase = 'execution-status';
@@ -488,20 +522,24 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 }
             }
             const turnPermit = turnReady ? binding.client.bindTurn(result) : undefined;
-            return { status: 'recorded', message: hostedTurn ? (result.sourceRef.classic ? 'Owner-authorized Classic conversation recorded for host-owned delivery; no decision-model receipt.' : 'Native conversational decision recorded for host-owned delivery.') : describeResult(result, turnReady, Boolean(stored?.dispatch)), request: request(), result, ...(hostedTurn ? { hostedTurn, hostedCurrent } : {}), ...(execution ? { execution } : {}), ...(turnReady ? { turnReady: true, turnPermit, releaseTurnClaim: releaseClaim } : {}) };
+            const finishTurn = async (): Promise<void> => {
+                try {
+                    await selected.journal.finishTurn?.(scope, claimedCommand, claimedRevision);
+                }
+                catch { /* the next save under this binding replaces the record */ }
+            };
+            return { status: 'recorded', message: hostedTurn ? (result.sourceRef.classic ? 'Owner-authorized Classic conversation recorded for host-owned delivery; no decision-model receipt.' : 'Native conversational decision recorded for host-owned delivery.') : describeResult(result, turnReady, Boolean(stored?.dispatch)), request: request(), result, ...(hostedTurn ? { hostedTurn, hostedCurrent } : {}), ...(execution ? { execution } : {}), ...(turnReady ? { turnReady: true, turnPermit, releaseTurnClaim: releaseClaim, finishTurn } : {}) };
         }
         catch (error) {
             if (!current())
                 return;
-            const full = isJournalPhase(phase) && error instanceof NativeIntakeJournalError && error.code === 'journal_limit';
-            return { status: command ? 'unknown' : 'unavailable', cause: nativeIntakeFailureCause(error), request: request(), message: full
-                    ? `The intake journal${selected.journal.path ? ` ${selected.journal.path}` : ''} is full: it keeps at most ${NATIVE_INTAKE_JOURNAL_MAX_RECORDS} host, project, workspace and principal bindings within 2 MB, and every other binding holds an input the host may not have captured, or a local turn already started, so none was evicted. No request or turn was sent. Use /work intake-cancel to discard this input, or move the journal file aside and use /work intake-retry; inputs in the moved file that the host never captured are then no longer recoverable here, and a local turn that already started could run again if it is retried.`
+            return { status: command ? 'unknown' : 'unavailable', cause: nativeIntakeFailureCause(error), request: request(), message: phase === 'journal-remove'
+                    ? 'The input is settled on the host, but its journal record could not be removed now. Nothing else was sent; the next input replaces it.'
                     : isJournalPhase(phase)
                     ? 'The durable intake journal could not be confirmed. No further request or ordinary turn was sent. The visible original input and dispatch claim are preserved.'
                     : 'Native intake outcome is unknown or unavailable. Inspect /work intake-status before retrying the same input; an interrupted request may already have taken effect.' };
         }
         finally {
-            clearInterval(timer);
             dispose();
             if (epoch === this.epoch)
                 this.active = undefined;

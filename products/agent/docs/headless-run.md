@@ -49,7 +49,7 @@ Every frame carries `schemaVersion` (currently `1`). Consumers should ignore fra
 | `usage` | yes | `{ modelCalls, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsdCents? }` for the run, or `null` when no model turn ran. |
 | `error`, `model`, `provider`, `events` | no | Present when known. |
 | `kind` | no | On failures: `outcome-unknown` (the host may have acted) or `unavailable` (nothing was sent). |
-| `cause` | no | With `kind`: `journal_limit`, `journal_conflict`, `journal`, `principal`, `network`, `schema`, `host_changed` or `unknown`. |
+| `cause` | no | With `kind`: `journal_conflict`, `journal`, `principal`, `network`, `schema`, `host_changed` or `unknown`. |
 | `native` | no | The intake state: `status`, `message`, `request`, `result`, `execution`. |
 
 ### Stream frames
@@ -61,6 +61,8 @@ Every frame carries `schemaVersion` (currently `1`). Consumers should ignore fra
 | `PERMISSION_REQUESTED` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `ownerPrompt` |
 | `PERMISSION_DECIDED` | `callId`, `tool`, `category`, `approved`, `source`, `reasonCode`, `ownerPrompt` |
 | `PERMISSION_PROMPT` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `answer` (only with `--answer-permissions`; the run waits for the answer) |
+| `PERMISSION_ANSWERED` | `callId`, `approved` (an answer line was accepted) |
+| `PERMISSION_ANSWER_REJECTED` | `callId` (when it was a string), `reason`, `waiting` (an answer line was not used, and which call ids still wait) |
 | `AGENT_SPAWNING`, `AGENT_RUNNING` | `agentId`, `taskId`, `parentAgentId`, `contractId`, `contractRole` |
 | `AGENT_COMPLETED`, `AGENT_FAILED`, `AGENT_CANCELLED` | `agentId`, `taskId`; plus `durationMs` and `toolCallsMade`, `error` or `reason` |
 | `CONTRACT_CREATED`, `CONTRACT_STATUS_CHANGED` | `contractId`; `sessionId`, `origin`, `ownerAgentId` or `from`, `to` |
@@ -78,7 +80,7 @@ Pass `--answer-permissions` with `--output stream-json`. For each call the gate 
 {"type":"PERMISSION_ANSWER","callId":"<callId from the frame>","approved":true}
 ```
 
-`remember` (boolean) and `note` (text the model sees when you refuse) are optional. Lines that are not a well-formed answer for a waiting call are ignored. A call that is never answered is refused, never approved: when stdin ends, when the run is cancelled (Ctrl-C, `--timeout`) or when the run finishes. The refusal names the call and says nothing ran. `PERMISSION_DECIDED` then reports the outcome with `ownerPrompt: true`.
+`remember` (boolean) and `note` (text the model sees when you refuse) are optional. Each `PERMISSION_ANSWER` line gets a `PERMISSION_ANSWERED` frame when it is used, or a `PERMISSION_ANSWER_REJECTED` frame with the reason (approved not a boolean, no prompt waiting for that call id) and the call ids still waiting. Lines that are not a `PERMISSION_ANSWER` are ignored, so other input can share the pipe. A call that is never answered is refused, never approved: when stdin ends, when the run is cancelled (Ctrl-C, `--timeout`) or when the run finishes. The refusal names the call and says nothing ran. `PERMISSION_DECIDED` then reports the outcome with `ownerPrompt: true`.
 
 `PERMISSION_REQUESTED` is sent for every tool call that reaches the permission gate, not only the ones that ask someone. It is sent when the gate reports its decision, so no call is ever left waiting behind it. `ownerPrompt` is `true` when the owner was asked to answer that call, and `false` when a rule, preset or remembered approval decided it. Both frames carry the same value; it is absent only on a request the gate never decided.
 

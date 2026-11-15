@@ -277,9 +277,21 @@ export function createHeadlessPermissionInput(options: HeadlessPermissionInputOp
     try { value = JSON.parse(line); } catch { return; }
     if (typeof value !== 'object' || value === null) return;
     const answer = value as Record<string, unknown>;
-    if (answer['type'] !== 'PERMISSION_ANSWER' || typeof answer['callId'] !== 'string' || typeof answer['approved'] !== 'boolean') return;
+    // Other lines may share the pipe; only an answer is acknowledged or rejected.
+    if (answer['type'] !== 'PERMISSION_ANSWER') return;
+    const callId = answer['callId'];
+    const reject = (reason: string): void => options.emit({
+      type: 'PERMISSION_ANSWER_REJECTED',
+      ...(typeof callId === 'string' ? { callId } : {}),
+      reason,
+      waiting: [...pending.keys()],
+    });
+    if (typeof callId !== 'string') return reject('callId must be the string from the PERMISSION_PROMPT frame');
+    if (typeof answer['approved'] !== 'boolean') return reject('approved must be true or false');
+    if (!pending.has(callId)) return reject('no prompt is waiting for this call id; it was answered already, or never asked');
     const note = typeof answer['note'] === 'string' ? answer['note'].slice(0, MAX_NOTE_CHARS) : undefined;
-    settle(answer['callId'], {
+    options.emit({ type: 'PERMISSION_ANSWERED', callId, approved: answer['approved'] });
+    settle(callId, {
       approved: answer['approved'],
       remember: answer['remember'] === true,
       ...(note ? { reason: note } : {}),

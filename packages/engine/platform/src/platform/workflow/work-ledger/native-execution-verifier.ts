@@ -1,6 +1,6 @@
 /** Host-only original-source checks. A terminal runner is never its own attestation. */
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync, type BigIntStats } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readlinkSync, readSync, realpathSync, type BigIntStats } from 'node:fs';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { canonicalJson, hashState, recordedJudgmentInputHash, readYesNo, type YesNoBand, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -26,7 +26,17 @@ import type { WorkEvidenceReference } from './types.js';
 import { assertNativeRecordedDecision } from './native-recorded-decision.js';
 import { nativeJudgeBatches, nativeQuestionBatches } from './native-judge-proof.js';
 import type { NativeWorkAttestation } from './native-settlement-types.js';
+import type { NativeSettlementFailureCode } from './native-execution-wire.js';
 export type { NativeWorkAttestation } from './native-settlement-types.js';
+
+/** A settlement failure whose cause is known, carried as a code rather than read back from the wording. */
+export class NativeSettlementFailure extends Error {
+  constructor(readonly code: NativeSettlementFailureCode, message: string) {
+    super(message);
+    this.name = 'NativeSettlementFailure';
+  }
+}
+function fail(code: NativeSettlementFailureCode, message: string): never { throw new NativeSettlementFailure(code, message); }
 
 function freeze<T>(value: T): T {
   if (value !== null && typeof value === 'object') { for (const child of Object.values(value)) freeze(child); Object.freeze(value); }
@@ -36,18 +46,18 @@ function assertSynchronousGuard(check: () => unknown): void {
   assertSynchronousJudgmentGuard(check, () => new NativeWorkExecutionError('invalid'));
 }
 function contained(root: string, path: string): string {
-  if (isAbsolute(path)) throw new Error('Native artifact path must be relative');
+  if (isAbsolute(path)) fail('artifact-outside-tree', `Touched path ${path} is not relative to the project`);
   const absolute = resolve(root, path); const rel = relative(root, absolute);
-  if (!rel || rel === '..' || rel.startsWith('../') || isAbsolute(rel)) throw new Error('Native artifact escapes its execution tree');
+  if (!rel || rel === '..' || rel.startsWith('../') || isAbsolute(rel)) fail('artifact-outside-tree', `Touched path ${path} is outside the project`);
   // A genuine deletion may remove its containing directory too. Check the
   // nearest surviving parent without following a dangling or linked ancestor.
   let parent = dirname(absolute);
   for (;;) {
     try {
       const stat = lstatSync(parent);
-      if (!stat.isDirectory() || stat.isSymbolicLink() || realpathSync(parent) !== parent) throw new Error('Native artifact has a linked parent');
+      if (!stat.isDirectory() || stat.isSymbolicLink() || realpathSync(parent) !== parent) fail('artifact-outside-tree', `Touched path ${path} sits under a linked directory`);
       const relParent = relative(root, parent);
-      if (relParent === '..' || relParent.startsWith('../') || isAbsolute(relParent)) throw new Error('Native artifact parent escapes its execution tree');
+      if (relParent === '..' || relParent.startsWith('../') || isAbsolute(relParent)) fail('artifact-outside-tree', `Touched path ${path} is outside the project`);
       return absolute;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || parent === root) throw error;
@@ -57,25 +67,40 @@ function contained(root: string, path: string): string {
 }
 /** Terminal worktree completion can evict its tree only after applying the result. */
 function evidenceRoot(contract: ContractView): string {
-  if (contract.commit?.status === 'failed') throw new Error('Native deliverable was not applied or committed');
+  if (contract.commit?.status === 'failed') fail('not-applied', 'The deliverable was not applied or committed');
   if (contract.isolation === 'worktree' && contract.sessionMode !== true) {
-    if (!contract.commit || !['applied', 'committed', 'skipped'].includes(contract.commit.status)) throw new Error('Native worktree application is unavailable');
+    if (!contract.commit || !['applied', 'committed', 'skipped'].includes(contract.commit.status)) fail('not-applied', 'The worktree result has not been applied to the project');
     // A skipped application is safe only for output-only work. No branch-only file proves owner-tree completion.
-    if (contract.commit.status === 'skipped' && contract.units.some(unit => unit.touchedPaths.length > 0)) throw new Error('Native changed artifacts were not applied');
+    if (contract.commit?.status === 'skipped' && contract.units.some(unit => unit.touchedPaths.length > 0)) fail('not-applied', 'The changed files were not applied to the project');
   }
   return realpathSync(contract.projectRoot);
 }
-/** What a file was when it was captured: its identity and times, and a digest of its bytes. */
+/** What a file was when it was captured: its identity and times, and a digest of its bytes (a link's: of its text). */
 interface ArtifactIdentity { readonly dev: bigint; readonly ino: bigint; readonly size: bigint; readonly mtimeNs: bigint; readonly ctimeNs: bigint; readonly digest: string }
 type ArtifactSnapshot =
   | { readonly kind: 'absent'; readonly text: string; readonly byteLength: 0 }
-  | { readonly kind: 'file'; readonly identity: ArtifactIdentity; readonly text: string; readonly byteLength: number };
+  | { readonly kind: 'file' | 'link'; readonly identity: ArtifactIdentity; readonly text: string; readonly byteLength: number };
 const ARTIFACT_MAX_BYTES = 20 * 1024 * 1024;
+/** A symbolic link is evidence as its link text; it is never followed. */
+function readLink(absolute: string): ArtifactSnapshot {
+  const before = lstatSync(absolute, { bigint: true });
+  const target = readlinkSync(absolute);
+  const after = lstatSync(absolute, { bigint: true });
+  if (!after.isSymbolicLink() || after.dev !== before.dev || after.ino !== before.ino || after.ctimeNs !== before.ctimeNs) {
+    fail('changed-during-verification', `Touched link ${absolute} changed while it was read`);
+  }
+  const identity = { dev: after.dev, ino: after.ino, size: after.size, mtimeNs: after.mtimeNs, ctimeNs: after.ctimeNs,
+    digest: createHash('sha256').update(target).digest('hex') };
+  const text = `(symbolic link to ${target})`;
+  return { kind: 'link', identity, text, byteLength: Buffer.byteLength(target) };
+}
 function readArtifact(root: string, path: string): ArtifactSnapshot {
   const absolute = contained(root, path);
   try {
     const stat = lstatSync(absolute);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > ARTIFACT_MAX_BYTES) throw new Error('Native artifact must be a bounded regular file');
+    if (stat.isSymbolicLink()) return readLink(absolute);
+    if (!stat.isFile()) fail('artifact-not-regular', `Touched path ${path} is not a regular file or link`);
+    if (stat.size > ARTIFACT_MAX_BYTES) fail('artifact-too-large', `Touched file ${path} is over ${ARTIFACT_MAX_BYTES / 1024 / 1024} MiB`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'absent', text: '(deleted file)', byteLength: 0 };
     throw error;
@@ -83,7 +108,7 @@ function readArtifact(root: string, path: string): ArtifactSnapshot {
   const fd = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = fstatSync(fd, { bigint: true }); const named = lstatSync(contained(root, path), { bigint: true });
-    if (!before.isFile() || !named.isFile() || named.isSymbolicLink() || named.dev !== before.dev || named.ino !== before.ino || before.size > BigInt(ARTIFACT_MAX_BYTES)) throw new Error('Native artifact changed before capture');
+    if (!before.isFile() || !named.isFile() || named.isSymbolicLink() || named.dev !== before.dev || named.ino !== before.ino || before.size > BigInt(ARTIFACT_MAX_BYTES)) fail('changed-during-verification', `Touched file ${path} changed before it was read`);
     // A file growing during a read must not allocate beyond the admitted size.
     const buffer = Buffer.alloc(Number(before.size) + 1); let offset = 0;
     while (offset < buffer.length) {
@@ -94,7 +119,7 @@ function readArtifact(root: string, path: string): ArtifactSnapshot {
     const after = fstatSync(fd, { bigint: true }), current = lstatSync(contained(root, path), { bigint: true });
     if (offset !== Number(before.size) || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs
       || !current.isFile() || current.isSymbolicLink() || current.dev !== after.dev || current.ino !== after.ino
-      || current.size !== after.size || current.mtimeNs !== after.mtimeNs || current.ctimeNs !== after.ctimeNs) throw new Error('Native artifact changed during capture');
+      || current.size !== after.size || current.mtimeNs !== after.mtimeNs || current.ctimeNs !== after.ctimeNs) fail('changed-during-verification', `Touched file ${path} changed while it was read`);
     const bytes = buffer.subarray(0, offset);
     const identity = { dev: after.dev, ino: after.ino, size: after.size, mtimeNs: after.mtimeNs, ctimeNs: after.ctimeNs,
       digest: createHash('sha256').update(bytes).digest('hex') };
@@ -112,12 +137,12 @@ function artifactUnchanged(root: string, path: string, captured: ArtifactSnapsho
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return captured.kind === 'absent';
     throw error;
   }
-  if (captured.kind !== 'file') return false;
+  if (captured.kind === 'absent') return false;
   const was = captured.identity;
-  if (!named.isFile() || named.dev !== was.dev || named.ino !== was.ino || named.size !== was.size
+  if ((captured.kind === 'link' ? !named.isSymbolicLink() : !named.isFile()) || named.dev !== was.dev || named.ino !== was.ino || named.size !== was.size
     || named.mtimeNs !== was.mtimeNs || named.ctimeNs !== was.ctimeNs) return false;
   const now = readArtifact(root, path);
-  return now.kind === 'file' && now.identity.digest === was.digest;
+  return now.kind !== 'absent' && now.kind === captured.kind && now.identity.digest === was.digest;
 }
 
 /** Reference slots a ledger evidence record has (types.ts) beyond the five the verifier always writes, less one spare. */
@@ -238,7 +263,7 @@ export async function verifyNativeWorkExecution(options: {
     return !!answers && Object.keys(answers).length === QUALITY_ITEMS.length && QUALITY_ITEMS.every(item => rawNo(answers[item], UNIT_QUALITY_BAND) !== null
       && check.quality[item]?.verdict === 'no' && check.quality[item]?.outcome === 'act');
   }
-  if (units.length === 0 || units.some(unit => unit.status !== 'passed' || !genuine(unit))) throw new Error('Native execution lacks genuine unit and quality checks');
+  if (units.length === 0 || units.some(unit => unit.status !== 'passed' || !genuine(unit))) fail('review-not-genuine', 'Native execution lacks genuine unit and quality checks');
   const deliverable = contract.checks.at(-1);
   const deliverableSite = 'contract.check.deliverable-judge';
   const judgeGroups = new Map<string, string[]>();
@@ -251,7 +276,7 @@ export async function verifyNativeWorkExecution(options: {
   }
   const deliverableJudgeIds = deliverable ? [...judgeGroups.values()].find(ids => priorJudge(deliverable, contract.criteria, deliverableSite, ids)) : undefined;
   if (!deliverable || deliverable.result !== 'pass' || deliverable.goal.verdict !== 'met' || deliverable.goal.outcome !== 'act'
-    || !deliverableJudgeIds) throw new Error('Native execution lacks a genuine deliverable check');
+    || !deliverableJudgeIds) fail('review-not-genuine', 'Native execution lacks a genuine deliverable check');
   // The independent content review is part of completion, not an extra ID that
   // makes an otherwise genuine requirements check invalid. Verify its actual
   // recorded answers and input binding; a checkpoint's passed label is no proof.
@@ -331,7 +356,7 @@ export async function verifyNativeWorkExecution(options: {
     || !isDeepStrictEqual(originalDecision?.decisionIds, originalIds)
     || !deliverable.decisionIds.includes(originalId)
     || original['sourceDigest'] !== hashState(originalObligationSource(contract)) || original['outputDigest'] !== answerCommitment()) {
-    throw new Error('Native execution lacks genuine original-obligation coverage');
+    fail('review-not-genuine', 'Native execution lacks genuine original-obligation coverage');
   }
   let claimsValid: boolean | undefined;
   const genuineClaimsOnce = (): boolean => claimsValid ??= genuineClaims();
@@ -353,7 +378,7 @@ export async function verifyNativeWorkExecution(options: {
     || !nativeJudgeBatches(fulfillmentIds, contract.criteria, deliverableSite, options.decisionLog)
     || !contentDecision || !isDeepStrictEqual(contentDecision.decisionIds, contentIds)
     || deliverable.decisionIds.length !== expectedIds.length || !expectedIds.every(id => typeof id === 'string' && deliverable.decisionIds.includes(id))) {
-    throw new Error('Native execution lacks a genuine final-answer content review');
+    fail('review-not-genuine', 'Native execution lacks a genuine final-answer content review');
   }
   const root = evidenceRoot(contract);
   const paths = [...new Set(contract.units.flatMap(unit => unit.touchedPaths))];
@@ -363,15 +388,15 @@ export async function verifyNativeWorkExecution(options: {
   // compared once, by `assertCurrent` below, inside the publishing transaction.
   for (const path of paths) {
     options.signal.throwIfAborted(); const absolute = contained(root, path);
-    if (!await options.readAccessFilter(absolute)) throw new Error('Native artifact read is access-restricted');
+    if (!await options.readAccessFilter(absolute)) fail('artifact-access-restricted', `Reading touched path ${path} is not allowed by the read policy`);
     options.signal.throwIfAborted(); const content = readArtifact(root, path); bytes += content.byteLength;
-    if (bytes > 20 * 1024 * 1024) throw new Error('Native artifact capture exceeds total budget');
+    if (bytes > ARTIFACT_MAX_BYTES) fail('artifact-budget-exceeded', `The touched files together are over ${ARTIFACT_MAX_BYTES / 1024 / 1024} MiB`);
     captured.push({ path, ...content });
   }
   const assertCurrent = () => {
     current(); const latest = options.runner.get(admission.contractId);
-    if (!latest || !isDeepStrictEqual(latest, contract) || evidenceRoot(latest) !== root) throw new Error('Native contract changed during verification');
-    for (const artifact of captured) if (!artifactUnchanged(root, artifact.path, artifact)) throw new Error('Native artifact changed during verification');
+    if (!latest || !isDeepStrictEqual(latest, contract) || evidenceRoot(latest) !== root) fail('changed-during-verification', 'The contract changed while it was verified');
+    for (const artifact of captured) if (!artifactUnchanged(root, artifact.path, artifact)) fail('changed-during-verification', `Touched path ${artifact.path} changed while it was verified`);
     current();
   };
   const unit: ContractUnit = { id: 'native', groupId: 'native', title: 'Frozen native acceptance', goal: source.goal, brief: source.goal,
@@ -432,8 +457,8 @@ export async function verifyNativeWorkExecution(options: {
   } catch (error) {
     checkAbort.abort(); await Promise.allSettled([...pending]); throw error;
   }
-  options.signal.throwIfAborted(); if (result.discarded) throw new Error('Native verification cancelled');
-  for (const path of paths) { if (!await options.readAccessFilter(contained(root, path))) throw new Error('Native artifact read was revoked'); }
+  options.signal.throwIfAborted(); if (result.discarded) fail('cancelled', 'Verification was cancelled');
+  for (const path of paths) { if (!await options.readAccessFilter(contained(root, path))) fail('artifact-access-revoked', `Reading touched path ${path} was withdrawn by the read policy during verification`); }
   options.signal.throwIfAborted();
   const decisionReferences = result.check.decisionIds.map((id, index): WorkEvidenceReference => {
     const entry = options.decisionLog.get(id); const site = index === 0 ? CHECK_SITES.judge : CHECK_SITES.quality;

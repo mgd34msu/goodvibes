@@ -125,23 +125,6 @@ describe('operator read client observation', () => {
       client.dispose();
     } finally { timers.restore(); }
   });
-
-  test('a permanent denial tells the listeners, and a later subscribe starts observing again', async () => {
-    const invoke = (async () => { throw Object.assign(new Error('forbidden'), { status: 403 }); }) as unknown as OperatorRemoteClient['invoke'];
-    const timers = manualTimers();
-    try {
-      const stopped: string[] = [];
-      const client = createOperatorWorkLedgerReadClient({ invoke }, 'p', { pollIntervalMs: 100, requestTimeoutMs: REQUEST_TIMEOUT_MS, onObservationStopped: (error) => stopped.push(error.message) });
-      client.subscribe(() => {});
-      const stoppedFirst = new Promise<void>((resolve) => { const original = stopped.push.bind(stopped); stopped.push = (...items: string[]) => { const length = original(...items); resolve(); return length; }; });
-      await timers.fire(stoppedFirst);
-      expect(stopped).toEqual(['forbidden']);
-      expect(timers.pending).toHaveLength(0);
-      client.subscribe(() => {});
-      expect(timers.pending).toHaveLength(1);
-      client.dispose();
-    } finally { timers.restore(); }
-  });
 });
 
 describe('intake client memory', () => {

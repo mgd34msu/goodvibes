@@ -28,39 +28,19 @@ export type NativeLedgerHost = (NativeSubmissionHost & { readonly readExecutionM
 export type NativeLedgerBindingFactory = (
   host: Exclude<NativeLedgerHost, { reason: string }>,
   project: string,
-  unavailable: (error: Error) => void,
   current?: () => boolean,
 ) => NativeWorkLedgerBinding;
-export const createNativeLedgerBinding: NativeLedgerBindingFactory = (host, project, onUnavailable, current = () => true) => {
+export const createNativeLedgerBinding: NativeLedgerBindingFactory = (host, project, current = () => true) => {
   const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current }) });
+  // The host authorises each execution call itself (owner, scopes, paired
+  // credential) and refuses a revoked token; asking who we are first repeats that.
   const invoke = (async (...args: Parameters<OperatorRemoteClient['invoke']>) => {
-    if (!current()) throw new Error('Native execution host selection changed');
-    if (host.expectedPrincipalId !== undefined) {
-      const auth = await operator.invoke('control.auth.current', {}, args[2]);
-      if (!current()) throw new Error('Native execution host selection changed');
-      // Execution has its own authority: do not require intake's write scope.
-      if (
-        auth.authenticated !== true ||
-        auth.admin !== true ||
-        auth.principalKind !== 'token' ||
-        auth.principalId !== host.expectedPrincipalId ||
-        !auth.principalId ||
-        auth.principalId.length > 200 ||
-        auth.principalId === 'shared-token' ||
-        !Array.isArray(auth.scopes) ||
-        !['read:work-ledger', 'write:fleet'].every((scope) => auth.scopes.includes('*') || auth.scopes.includes(scope))
-      ) {
-        throw Object.assign(new Error('Native execution requires the selected paired principal'), {
-          code: 'NATIVE_EXECUTION_UNSUPPORTED_AUTHORITY',
-        });
-      }
-    }
     if (!current()) throw new Error('Native execution host selection changed');
     const value = await operator.invoke(...args);
     if (!current()) throw new Error('Native execution host selection changed');
     return value;
   }) as OperatorRemoteClient['invoke'];
-  return createNativeWorkLedgerReadBinding(operator, project, { onUnavailable, execution: { invoke } });
+  return createNativeWorkLedgerReadBinding(operator, project, { execution: { invoke } });
 };
 
 export async function discoverNativeLedgerProject(
@@ -104,7 +84,6 @@ export function createBoundNativeWorkLedgerView(
   let intakeSelectionEpoch = 0;
   let active = false;
   let epoch = 0;
-  let timer: ReturnType<typeof setInterval> | undefined;
   const same = (a: Exclude<NativeLedgerHost, { reason: string }>, b: Exclude<NativeLedgerHost, { reason: string }>) =>
     a.baseUrl === b.baseUrl &&
     a.token === b.token &&
@@ -207,8 +186,6 @@ export function createBoundNativeWorkLedgerView(
     discovery?.abort();
     discovery = undefined;
     discoveryHost = undefined;
-    if (timer) clearInterval(timer);
-    timer = undefined;
   };
   const sync = () => {
     if (!active) return;
@@ -252,8 +229,6 @@ export function createBoundNativeWorkLedgerView(
       // Loading can synchronously render and sync, revoking the host or closing
       // the view. Keep local ownership and recheck before admitting any request.
       if (generation !== epoch || !active || controller.signal.aborted) return;
-      timer = setInterval(sync, 1000);
-      timer.unref?.();
       opening = discover(host, AbortSignal.any([controller.signal, AbortSignal.timeout(5000)])).then(
         (project) => {
           if (generation !== epoch || !active) return;
@@ -283,28 +258,20 @@ export function createBoundNativeWorkLedgerView(
     const generation = epoch;
     const project = selected.project;
     try {
-      const binding = bind(
-        host,
-        project,
-        (error) => {
-          if (generation === epoch && active) {
-            active = false;
-            stop();
-            model.unavailable(error.message.split(host.token).join('[redacted]'));
-          }
-        },
-        () => {
-          const now = resolve();
-          return (
-            generation === epoch &&
-            active &&
-            selected?.project === project &&
-            same(host, selected.host) &&
-            !('reason' in now) &&
-            same(host, now)
-          );
-        },
-      );
+      // Each request of the binding asks whether the selection still holds; a
+      // change closes the view at once with the reason (sync), so nothing polls.
+      const binding = bind(host, project, () => {
+        const now = resolve();
+        const holds =
+          generation === epoch &&
+          active &&
+          selected?.project === project &&
+          same(host, selected.host) &&
+          !('reason' in now) &&
+          same(host, now);
+        if (!holds && generation === epoch && active) queueMicrotask(sync);
+        return holds;
+      });
       const current = resolve();
       if (generation !== epoch || !active || 'reason' in current || !same(current, host)) {
         try {
@@ -319,10 +286,6 @@ export function createBoundNativeWorkLedgerView(
         return;
       }
       model.open(binding);
-      if (generation === epoch) {
-        timer = setInterval(sync, 1000);
-        timer.unref?.();
-      }
     } catch (error) {
       model.unavailable(error instanceof Error ? error.message : String(error));
     }

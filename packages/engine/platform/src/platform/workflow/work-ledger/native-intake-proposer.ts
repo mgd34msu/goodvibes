@@ -14,7 +14,41 @@ export interface NativeRequirementProposalRequest {
   readonly assertCurrent: () => void;
 }
 export interface NativeRequirementProposer {
+  /** Resolves with the reply's JSON object; throws NativeRequirementProposalUnreadable when the reply holds none. */
   propose(input: NativeRequirementProposalRequest): Promise<unknown>;
+}
+
+/** The model answered, but its reply holds no readable JSON object: the attempt counts and goes back for repair. */
+export class NativeRequirementProposalUnreadable extends Error {
+  constructor() {
+    super('The requirement proposal reply held no readable JSON object');
+    this.name = 'NativeRequirementProposalUnreadable';
+  }
+}
+
+/**
+ * The first balanced JSON object in a reply. A model may wrap its object in a
+ * code fence or a sentence; the object itself is what was asked for.
+ */
+export function firstJsonObject(reply: string): unknown {
+  for (let start = reply.indexOf('{'); start !== -1; start = reply.indexOf('{', start + 1)) {
+    let depth = 0, inString = false, escaped = false;
+    for (let index = start; index < reply.length; index++) {
+      const char = reply[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') inString = true;
+      else if (char === '{') depth++;
+      else if (char === '}' && --depth === 0) {
+        try { return JSON.parse(reply.slice(start, index + 1)) as unknown; } catch { break; }
+      }
+    }
+  }
+  throw new NativeRequirementProposalUnreadable();
 }
 
 /** Uses the configured provider, with no tools, filesystem context or fallback generation. */
@@ -51,7 +85,7 @@ export function createNativeRequirementProposer(providers: Pick<ProviderRegistry
       input.signal.throwIfAborted(); input.assertCurrent();
       if (response.stopReason !== 'completed' || response.toolCalls.length !== 0
         || new TextEncoder().encode(response.content).byteLength > 32_768) throw new Error('Native requirement proposal unavailable');
-      return JSON.parse(response.content) as unknown;
+      return firstJsonObject(response.content);
     },
   };
 }

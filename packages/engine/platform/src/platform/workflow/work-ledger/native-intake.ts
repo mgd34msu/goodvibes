@@ -8,17 +8,17 @@ import { realpathSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { canonicalJson, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import type { AutonomousDecision } from '../../gate/autonomous-decision.js';
-import type { NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativePairedExecutionSnapshot } from './native-execution.js';
-import { createWorkLedger, readWorkLedgerState } from './service.js';
-import type { WorkLedgerSubmission } from './types.js';
+import type { NativeExecutionScope, NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativePairedExecutionSnapshot } from './native-execution.js';
+import { createWorkLedger } from './service.js';
+import type { WorkLedgerState, WorkLedgerSubmission } from './types.js';
 import { readNativeIntakeRoute, decideNativeIntake, validateNativeRequirementProposal } from './native-intake-decisions.js';
-import type { NativeRequirementProposer } from './native-intake-proposer.js';
+import { NativeRequirementProposalUnreadable, type NativeRequirementProposer } from './native-intake-proposer.js';
 import { nativeIntakeContinuationCatalog, nativeIntakeDecisionSite, recoverNativeIntakeDecision } from './native-intake-recovery.js';
-export { createNativeRequirementProposer } from './native-intake-proposer.js';
+export { createNativeRequirementProposer, NativeRequirementProposalUnreadable } from './native-intake-proposer.js';
 export type { NativeRequirementProposer, NativeRequirementProposalRequest } from './native-intake-proposer.js';
 import { NATIVE_CONVERSATION_MAX_PROPOSALS, NATIVE_CONVERSATION_MAX_DECISIONS, createNativeConversationCapture,
   nativeConversationProposalRevision, parseNativeConversationCapture, type NativeConversationCapture, type NativeConversationKey,
-  nativeConversationDecisionBinding, NATIVE_CONVERSATION_MAX_RECORD_BYTES, type NativeConversationStorage } from './native-intake-types.js';
+  nativeConversationDecisionBinding, type NativeConversationOwner, type NativeConversationStorage } from './native-intake-types.js';
 import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeLookupRequestSchema,
   nativeConversationIntakeTransitionRequestSchema, nativeConversationIntakeResultSchema, nativeConversationIntakeWorkReceiptSchema,
   type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeLookupRequest, type NativeConversationIntakeTransitionRequest,
@@ -38,8 +38,6 @@ const NEXT_STEP: Record<NativeConversationIntakeErrorCode, string> = {
   unavailable: 'A required owner is not available right now; retry shortly.',
   closed: 'The intake host is closing; retry once it is running again.',
 };
-/** How often a running input re-checks its owners. Each check re-reads the input and the workspace registry (including a durability confirmation), so it is paced in seconds. */
-const OWNER_WATCH_INTERVAL_MS = 1_000;
 const SETTLED_TURN = 'This input\'s turn was already dispatched and has finished, so it can never run again; capture a new input (new inputId) to ask again.';
 export class NativeConversationIntakeError extends Error {
   constructor(readonly code: NativeConversationIntakeErrorCode, detail?: string) {
@@ -77,6 +75,12 @@ function paired(authority: NativePairedExecutionAuthority): NativePairedExecutio
   return Object.freeze({ ...value, scopes: Object.freeze([...value.scopes].sort()) });
 }
 const contextReadScope = (selectedDiff: NativeSelectedDiffSelector | undefined) => selectedDiff ? selectedDiff.kind === 'session' ? 'read:sessions' : 'read:checkpoints' : undefined;
+/**
+ * The owners one call established, once, when it started: the pairing it was
+ * authorised under and the workspace scope. Every later write runs inside
+ * `withOwners`, whose pairing and registry owners compare against these.
+ */
+interface Owners { readonly identity: NativePairedExecutionSnapshot; readonly scope: NativeExecutionScope; readonly facts: NativeConversationOwner }
 const terminal = (record: NativeConversationCapture) => ['associated', 'turn', 'cancelled'].includes(record.state);
 
 export function createNativeConversationIntakeHost(deps: {
@@ -91,28 +95,22 @@ export function createNativeConversationIntakeHost(deps: {
   const deliveries = new Map<string, { controller: AbortController; promise: Promise<NativeConversationIntakeResult>; generation?: number }>();
   let closed = false; let closing: Promise<void> | undefined;
   const assertOpen = () => { if (closed) throw new NativeConversationIntakeError('closed'); };
-  /** Name the real limit when a record outgrows the stored-record cap, instead of a generic "malformed request". */
-  const assertRecordFits = (candidate: unknown): void => {
-    const bytes = new TextEncoder().encode(JSON.stringify(candidate)).byteLength;
-    if (bytes > NATIVE_CONVERSATION_MAX_RECORD_BYTES) throw new NativeConversationIntakeError('invalid',
-      `This conversation is too long to keep: the stored input needs ${bytes} bytes and the limit is ${NATIVE_CONVERSATION_MAX_RECORD_BYTES}. Start a new session, or capture a shorter continuation or text.`);
-  };
-  const keyOf = (inputId: string, authority: NativePairedExecutionAuthority): NativeConversationKey => ({ principalId: paired(authority).principalId, inputId });
+  const keyOf = (inputId: string, owners: Owners): NativeConversationKey => ({ principalId: owners.identity.principalId, inputId });
   const keyId = (key: NativeConversationKey) => JSON.stringify({ principalId: key.principalId, inputId: key.inputId });
   function track<T>(operation: () => Promise<T>): Promise<T> {
     assertOpen(); const promise = Promise.resolve().then(() => withConfiguredDecisionModelPolicy(operation)); pending.add(promise);
     void promise.then(() => pending.delete(promise), () => pending.delete(promise)); return promise;
   }
-  function owner(authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions) {
+  function owner(authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions): Owners {
     assertOpen();
     if (options.isAuthorized && options.isAuthorized() !== true) throw new NativeConversationIntakeError('forbidden');
     const identity = paired(authority); const scope = deps.scopes.currentScope(root);
-    if (scope.root !== root || realpathSync(deps.projectRoot) !== root) throw new NativeConversationIntakeError('stale');
+    if (scope.root !== root) throw new NativeConversationIntakeError('stale');
     return { identity, scope, facts: { authorityId: identity.authorityId, authorityRevision: identity.authorityRevision,
       authorityScopes: [...identity.scopes], scopeId: scope.scopeId, scopeRevision: scope.scopeRevision, projectRoot: root } };
   }
-  function inspect(record: NativeConversationCapture, authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions): void {
-    const current = owner(authority, options);
+  /** The record belongs to these owners. Compares values the call already holds; reads nothing. */
+  function inspect(record: NativeConversationCapture, current: Owners): void {
     if (record.projectId !== deps.projectId || record.principalId !== current.identity.principalId || record.sessionId !== deps.sessionId
       || !isDeepStrictEqual(record.owner, current.facts)) throw new NativeConversationIntakeError('stale');
     if (record.continuation) {
@@ -125,19 +123,28 @@ export function createNativeConversationIntakeHost(deps: {
     if (!deps.continuation) throw new NativeConversationIntakeError('unavailable');
     deps.continuation.assertCurrent(record.continuation, record.principalId, record);
   }
-  function load(key: NativeConversationKey, authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions, revision?: string, original?: NativeConversationCapture): NativeConversationCapture {
+  function load(key: NativeConversationKey, owners: Owners, revision?: string, original?: NativeConversationCapture): NativeConversationCapture {
     const value = deps.storage.current(original ?? key);
     const record = value === null ? null : parseNativeConversationCapture(value, original);
     if (!record) throw new NativeConversationIntakeError('not-found');
-    inspect(record, authority, options);
+    inspect(record, owners);
     if (revision !== undefined && revision !== record.sourceRevision) throw new NativeConversationIntakeError('stale');
     return record;
   }
-  async function withOwners<T>(record: NativeConversationCapture, authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions,
+  /**
+   * Runs one write holding the pairing and the workspace registration the call
+   * started under: each owner compares its current state with `owners` once,
+   * and the storage transaction compares the record's generation. That is the
+   * only currency check a write needs.
+   */
+  async function withOwners<T>(owners: Owners, authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions,
     operation: (assertCurrent: () => void) => Promise<T>): Promise<T> {
-    inspect(record, authority, options); const current = owner(authority, options);
-    return authority.withCurrent(current.identity, assertAuthority => deps.scopes.withCurrentScope(current.scope, assertScope => {
-      const assertCurrent = () => { assertAuthority(); assertScope(); inspect(record, authority, options); };
+    return authority.withCurrent(owners.identity, assertAuthority => deps.scopes.withCurrentScope(owners.scope, assertScope => {
+      const assertCurrent = () => {
+        assertOpen();
+        if (options.isAuthorized && options.isAuthorized() !== true) throw new NativeConversationIntakeError('forbidden');
+        assertAuthority(); assertScope();
+      };
       assertCurrent(); return operation(assertCurrent);
     }));
   }
@@ -145,9 +152,10 @@ export function createNativeConversationIntakeHost(deps: {
     if (!record.association) throw new NativeConversationIntakeError('unavailable');
     const storage = deps.storage.publicationStorage(record, () => { throw new NativeConversationIntakeError('invalid'); }, () => { throw new NativeConversationIntakeError('invalid'); });
     try {
-      const ledger = await storage.read();
-      const state = readWorkLedgerState(ledger, deps.projectId);
-      const event = state.receipts.find(item => item.actorId === record.principalId && item.requestId === record.requestId)?.event;
+      // The store validated this ledger where it read it; the association names the one event.
+      const state = await storage.read() as WorkLedgerState;
+      const event = state.history[record.association.ledgerRevision - 1];
+      if (event?.actorId !== record.principalId || event.requestId !== record.requestId) throw new NativeConversationIntakeError('unavailable');
       if (!event || event.type !== 'submit_native' || event.work.source?.version !== 2 || !event.attemptId
         || event.workId !== record.association.workId || event.attemptId !== record.association.attemptId || event.sequence !== record.association.ledgerRevision) throw new NativeConversationIntakeError('unavailable');
       return projectReceipt(event as WorkLedgerSubmission);
@@ -192,14 +200,14 @@ export function createNativeConversationIntakeHost(deps: {
     }
   }
   async function run(key: NativeConversationKey, revision: string, authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions,
-    controller: AbortController, resuming: boolean, original: NativeConversationCapture): Promise<NativeConversationIntakeResult> {
-    let record = load(key, authority, options, revision, original);
+    controller: AbortController, resuming: boolean, original: NativeConversationCapture, owners: Owners): Promise<NativeConversationIntakeResult> {
+    let record = original;
     if (record.settled) throw new NativeConversationIntakeError('conflict', SETTLED_TURN);
     if (terminal(record) || record.state === 'blocked' || record.state === 'refused' || (!resuming && record.state !== 'captured')) return projection(record);
     assertContinuation(record);
     const signal = AbortSignal.any([lifetime.signal, controller.signal, ...(options.signal ? [options.signal] : [])]);
     signal.throwIfAborted();
-    record = await withOwners(record, authority, options, assertOwners => deps.storage.transaction(record, original => {
+    record = await withOwners(owners, authority, options, assertOwners => deps.storage.transaction(record, original => {
       assertOwners(); signal.throwIfAborted(); assertContinuation(record);
       if (!original || original.generation !== record.generation || terminal(original)) throw new NativeConversationIntakeError('conflict');
       let current = original;
@@ -230,36 +238,20 @@ export function createNativeConversationIntakeHost(deps: {
     }));
     if (record.state !== 'processing') return projection(record);
     const generation = record.generation; const delivery = deliveries.get(keyId(key)); if (delivery) delivery.generation = generation;
-    const assertCurrent = () => {
-      decisionModelPolicyState();
-      signal.throwIfAborted(); const current = load(key, authority, options, revision, record); assertContinuation(current);
-      if (current.generation !== generation || current.state !== 'processing') throw new NativeConversationIntakeError('stale');
-    };
-    const watch = setInterval(() => { try { assertCurrent(); } catch (error) { controller.abort(error); } }, OWNER_WATCH_INTERVAL_MS); watch.unref?.();
+    // Between writes the owners are not re-read: "still wanted" is the abort
+    // signal (cancel, close, the request ending or its credential revoked), and
+    // each write below re-checks owners and generation in its own transaction.
+    const assertCurrent = () => { decisionModelPolicyState(); signal.throwIfAborted(); };
     let terminalUpdate: NativeConversationCapture | undefined;
-    const prepareTerminalUpdate = (next: NativeConversationCapture): void => {
-      // Preparation is complete. Native publication retains its owner checks;
-      // the processing monitor must not cancel our exact terminal result while
-      // its acknowledgement is still pending.
-      terminalUpdate = next;
-      clearInterval(watch);
-    };
-    const currentTerminal = (): NativeConversationCapture => {
-      signal.throwIfAborted();
-      const current = load(key, authority, options, revision, record); assertContinuation(current);
-      if (!terminalUpdate || !isDeepStrictEqual(current, terminalUpdate)) throw new NativeConversationIntakeError('stale');
-      return current;
-    };
+    /** One write of this generation. A terminal one also passes the continuation's publication fence. */
     async function update(change: Partial<NativeConversationCapture>) {
-      assertRecordFits({ ...record, ...change });
-      record = await withOwners(record, authority, options, assertOwners => deps.storage.transaction(record, current => {
+      record = await withOwners(owners, authority, options, assertOwners => deps.storage.transaction(record, current => {
         assertOwners(); assertCurrent();
-        if (!current || current.generation !== generation) throw new NativeConversationIntakeError('stale');
+        if (!current || current.generation !== generation || current.state !== 'processing') throw new NativeConversationIntakeError('stale');
         const next = parseNativeConversationCapture({ ...current, ...change }, record);
-        if (next.state !== 'processing') prepareTerminalUpdate(next);
+        if (next.state !== 'processing') { assertContinuation(next); terminalUpdate = next; }
         return { next, value: next };
       }));
-      if (terminalUpdate) record = currentTerminal();
     }
     async function classicConversation(): Promise<NativeConversationIntakeResult> {
       assertCurrent();
@@ -284,37 +276,41 @@ export function createNativeConversationIntakeHost(deps: {
       }
       const routeEvidence = await readNativeIntakeRoute({ text: record.text, sourceRevision: record.sourceRevision, ...(record.continuation ? { continuation: record.continuation } : {}), sourceIssues: record.unsupportedSources,
         port: deps.port, decisionLog: deps.decisionLog, binding: nativeConversationDecisionBinding(record, 'routing'), assertCurrent, signal });
-      assertCurrent(); await update({ route: routeEvidence.route });
+      assertCurrent();
+      // The route is written with the next stage: resume re-reads the route, so
+      // it needs no write of its own.
+      let pending: Partial<NativeConversationCapture> = { route: routeEvidence.route };
       let previous: unknown = null;
       for (;;) {
         assertCurrent();
-        if (record.decisions.length >= NATIVE_CONVERSATION_MAX_DECISIONS) { await update({ state: 'refused', stage: null, reason: 'exhausted' }); return projection(record); }
+        if (record.decisions.length >= NATIVE_CONVERSATION_MAX_DECISIONS) { await update({ ...pending, state: 'refused', stage: null, reason: 'exhausted' }); return projection(record); }
         let requirements: ReturnType<typeof validateNativeRequirementProposal> | undefined;
         if (routeEvidence.settled && routeEvidence.route === 'contract' && record.unsupportedSources.length === 0) {
           if (record.proposal) requirements = validateNativeRequirementProposal(record.text, record.sourceRevision, record.proposal);
           else if (record.proposalsSpent < NATIVE_CONVERSATION_MAX_PROPOSALS) {
-            await update({ stage: 'extracting' });
+            await update({ ...pending, stage: 'extracting' }); pending = {};
             // The attempt is charged only once the provider has answered: an outage
-            // must not use up the budget and end the input as "exhausted". Output
-            // that cannot be read at all (a JSON syntax error) is still an attempt.
+            // must not use up the budget and end the input as "exhausted". A reply
+            // that holds no readable JSON is an answered attempt and goes back for repair.
             const attemptNumber = record.proposalsSpent + 1;
             let proposed: unknown;
             try { proposed = await deps.proposer.propose({ text: record.text, sourceRevision: record.sourceRevision,
               attempt: attemptNumber, previous, ...(record.continuation ? { continuation: record.continuation } : {}), signal, assertCurrent }); }
             catch (error) {
+              if (!(error instanceof NativeRequirementProposalUnreadable)) throw error;
               assertCurrent();
-              if (error instanceof SyntaxError) await update({ proposalsSpent: attemptNumber });
-              throw error;
+              await update({ proposalsSpent: attemptNumber });
+              previous = { spans: null, problems: ['unreadable'] };
+              continue;
             }
             assertCurrent();
-            await update({ proposalsSpent: attemptNumber });
             try { requirements = validateNativeRequirementProposal(record.text, record.sourceRevision, proposed); }
             catch { /* Invalid proposals remain evidence of a failed attempt, never new roots. */ }
-            if (requirements?.proposal.spans.length) await update({ proposal: requirements.proposal });
+            await update({ proposalsSpent: attemptNumber, ...(requirements?.proposal.spans.length ? { proposal: requirements.proposal } : {}) });
           }
         }
         // This durable stage precedes the final reading and owns its recovery lookup.
-        await update({ stage: 'deciding' });
+        await update({ ...pending, stage: 'deciding' }); pending = {};
         const { repair, resolve, continuations } = nativeIntakeContinuationCatalog(record);
         const result = await decideNativeIntake({ text: record.text, sourceRevision: record.sourceRevision, ...(record.continuation ? { continuation: record.continuation } : {}), routeEvidence,
           ...(requirements ? { requirements } : {}), port: deps.port, decisionLog: deps.decisionLog,
@@ -341,24 +337,24 @@ export function createNativeConversationIntakeHost(deps: {
         }
         if (record.unsupportedSources.length) throw new NativeConversationIntakeError('unavailable');
         if (routeEvidence.route !== 'contract') {
-          await withOwners(record, authority, options, assertOwners => deps.storage.transaction(record, current => {
+          record = await withOwners(owners, authority, options, assertOwners => deps.storage.transaction(record, current => {
             assertOwners(); assertCurrent(); result.autonomous.recordClaim(); assertRecorded(result.autonomous);
             if (!current || current.generation !== generation) throw new NativeConversationIntakeError('stale');
             const next = parseNativeConversationCapture({ ...current, state: 'turn', stage: null, decisions }, record);
-            prepareTerminalUpdate(next); record = next; return { next, value: undefined };
+            assertContinuation(next); terminalUpdate = next; return { next, value: next };
           }));
-          record = currentTerminal();
           return projection(record);
         }
         if (!requirements?.criteria.length || !record.proposal) throw new NativeConversationIntakeError('unavailable');
-        await update({ stage: 'deciding', decisions });
-        await publish(record, result.autonomous, requirements.criteria, authority, options, signal, assertCurrent, prepareTerminalUpdate);
-        return projection(currentTerminal());
+        // The act decision is written with the association, in the publishing transaction.
+        record = await publish(record, decisions, result.autonomous, requirements.criteria, authority, options, owners, signal, assertCurrent,
+          next => { terminalUpdate = next; });
+        return projection(record);
       }
     } catch (error) {
       signal.throwIfAborted();
       if (terminalUpdate) {
-        const current = load(key, authority, options, revision, record); assertContinuation(current);
+        const current = load(key, owners, revision, record); assertContinuation(current);
         // A lost acknowledgement cannot turn our exact durable terminal record
         // into a stale processing attempt or a new Classic conversation.
         if (isDeepStrictEqual(current, terminalUpdate)) throw error;
@@ -367,34 +363,38 @@ export function createNativeConversationIntakeHost(deps: {
       if (!terminalUpdate && !record.association && !record.decisions.some(entry => entry.decision.outcome === 'reject') && activateClassicFallback(error))
         return await classicConversation();
       throw error;
-    } finally { clearInterval(watch); }
+    }
   }
-  async function publish(record: NativeConversationCapture, decision: AutonomousDecision, criteria: readonly string[], authority: NativePairedExecutionAuthority,
-    options: NativeConversationIntakeOptions, signal: AbortSignal, assertCurrent: () => void,
-    prepareTerminalUpdate: (next: NativeConversationCapture) => void): Promise<void> {
+  async function publish(record: NativeConversationCapture, decisions: NativeConversationCapture['decisions'], decision: AutonomousDecision, criteria: readonly string[],
+    authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions, owners: Owners, signal: AbortSignal, assertCurrent: () => void,
+    prepareTerminalUpdate: (next: NativeConversationCapture) => void): Promise<NativeConversationCapture> {
     if (!record.proposal || decision.decision.outcome !== 'act') throw new NativeConversationIntakeError('invalid');
     const source = { version: 2 as const, sourceId: record.sourceId, sourceRevision: record.sourceRevision, inputId: record.inputId, sessionId: record.sessionId,
       ...(record.continuation ? { continuation: nativeConversationContinuationSchema.parse(record.continuation) } : {}),
       extraction: { version: 1 as const, offsetEncoding: 'utf16' as const, spans: [...record.proposal.spans], proposalRevision: nativeConversationProposalRevision(record.proposal),
         admissionDecisionId: decision.decision.decisionId, judgmentDecisionIds: [...decision.decision.judgmentDecisionIds] } };
+    let published: NativeConversationCapture | undefined;
     const storage = deps.storage.publicationStorage(record, current => {
       assertCurrent(); decision.assertCurrent(); assertRecorded(decision);
-      if (current.generation !== record.generation || !isDeepStrictEqual(current.proposal, record.proposal)) throw new NativeConversationIntakeError('stale');
+      if (current.generation !== record.generation || current.state !== 'processing' || !isDeepStrictEqual(current.proposal, record.proposal)) throw new NativeConversationIntakeError('stale');
     }, (current, event) => {
       decision.recordClaim(); assertCurrent(); assertRecorded(decision);
-      const next = parseNativeConversationCapture({ ...current, state: 'associated', stage: null,
+      const next = parseNativeConversationCapture({ ...current, state: 'associated', stage: null, decisions,
         association: { workId: event.workId, attemptId: event.attemptId, ledgerRevision: event.sequence } }, record);
-      prepareTerminalUpdate(next); return next;
+      assertContinuation(next); prepareTerminalUpdate(next); published = next; return next;
     });
     const ledger = createWorkLedger({ projectId: deps.projectId, storage, clock: { now: Date.now, newId: kind => `${kind}-${opaqueUuid()}` } });
     const actor = ledger.authority.issueActor({ actorId: record.principalId, projectId: deps.projectId, role: 'coordinator' });
     try {
       for (let attempt = 0; attempt < 3; attempt++) {
         assertCurrent(); const snapshot = await ledger.service.readSnapshot(actor); assertCurrent();
-        const result = await withOwners(record, authority, options, assertOwners => ledger.service.execute({ type: 'submit_native', requestId: record.requestId,
+        const result = await withOwners(owners, authority, options, assertOwners => ledger.service.execute({ type: 'submit_native', requestId: record.requestId,
           expectedRevision: snapshot.revision, title: record.text.trim(), goal: record.text, criteria: [...criteria], source }, actor,
         { signal, isAuthorized: () => { assertOwners(); assertCurrent(); return true; } }));
-        if (result.kind === 'accepted') return;
+        if (result.kind === 'accepted') {
+          if (!published) throw new NativeConversationIntakeError('indeterminate');
+          return published;
+        }
         if (result.kind === 'indeterminate') throw new NativeConversationIntakeError('indeterminate');
         if (result.code !== 'conflict') throw new NativeConversationIntakeError(result.code === 'request_conflict' ? 'request-conflict' : 'unavailable');
       }
@@ -404,13 +404,13 @@ export function createNativeConversationIntakeHost(deps: {
   async function deliver(input: NativeConversationIntakeTransitionRequest, authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions, resuming: boolean): Promise<NativeConversationIntakeResult> {
     const parsed = nativeConversationIntakeTransitionRequestSchema.safeParse(input);
     if (!parsed.success) return Promise.reject(new NativeConversationIntakeError('invalid'));
-    const key = keyOf(parsed.data.inputId, authority); const existing = deliveries.get(keyId(key));
-    const original = load(key, authority, options, parsed.data.sourceRevision);
-    if (existing) return existing.promise.then(value => { load(key, authority, options, parsed.data.sourceRevision, original); return value; });
+    const owners = owner(authority, options);
+    const key = keyOf(parsed.data.inputId, owners); const existing = deliveries.get(keyId(key));
+    const original = load(key, owners, parsed.data.sourceRevision);
+    if (existing) return existing.promise;
     const controller = new AbortController();
-    const promise = track(() => run(key, parsed.data.sourceRevision, authority, options, controller, resuming, original)).then(async result => {
-      load(key, authority, options, parsed.data.sourceRevision, original); return nativeConversationIntakeResultSchema.parse(result);
-    });
+    const promise = track(() => run(key, parsed.data.sourceRevision, authority, options, controller, resuming, original, owners))
+      .then(result => nativeConversationIntakeResultSchema.parse(result));
     const delivery = { controller, promise }; deliveries.set(keyId(key), delivery);
     void promise.then(() => { if (deliveries.get(keyId(key)) === delivery) deliveries.delete(keyId(key)); }, () => { if (deliveries.get(keyId(key)) === delivery) deliveries.delete(keyId(key)); });
     return promise;
@@ -430,13 +430,13 @@ export function createNativeConversationIntakeHost(deps: {
           && isDeepStrictEqual(existing.continuation?.selectedDiff ? nativeSelectedDiffSelector(existing.continuation.selectedDiff) : undefined, selection?.selectedDiff);
         // Replayed capture retains its original checkpoint even when later turns appended.
         const priorValue = deps.storage.current(key), prior = priorValue === null ? null : parseNativeConversationCapture(priorValue);
-        if (prior) { inspect(prior, authority, options); if (!matches(prior)) throw new NativeConversationIntakeError('request-conflict'); return projection(prior); }
+        if (prior) { inspect(prior, current); if (!matches(prior)) throw new NativeConversationIntakeError('request-conflict'); return projection(prior); }
         const captureKey = keyId(key);
         const pending = captures.get(captureKey);
         if (pending) {
           const existing = await pending;
           options.signal?.throwIfAborted();
-          inspect(existing, authority, options);
+          inspect(existing, current);
           if (!matches(existing)) throw new NativeConversationIntakeError('request-conflict');
           return projection(existing);
         }
@@ -444,26 +444,23 @@ export function createNativeConversationIntakeHost(deps: {
           if (selection && !deps.continuation) throw new NativeConversationIntakeError('unavailable');
           const continuation = selection ? captureNativeConversationContinuation(await deps.continuation!.capture(selection.sessionId, current.identity.principalId, selection.selectedDiff)) : undefined;
           if (continuation && (continuation.sessionId !== selection?.sessionId || !isDeepStrictEqual(continuation.selectedDiff ? nativeSelectedDiffSelector(continuation.selectedDiff) : undefined, selection?.selectedDiff))) throw new NativeConversationIntakeError('stale');
-          const source = { ...original, ...(continuation ? { continuation } : {}) };
-          assertRecordFits(source);
           const record = createNativeConversationCapture({ projectId: deps.projectId, principalId: current.identity.principalId,
-            ...source,
+            ...original, ...(continuation ? { continuation } : {}),
             sessionId: deps.sessionId, owner: current.facts, generation: 1, state: 'captured', stage: null, route: null, reason: null,
             proposalsSpent: 0, proposal: null, decisions: [], association: null });
           // Before initial publication another host may have captured this same
           // input. Adopt its already-persisted identity only after exact replay
           // matching; the unpublished candidate is not its original-source fence.
-          const stored = await withOwners(record, authority, options, assertCurrent => deps.storage.transaction(key, existing => {
+          return withOwners(current, authority, options, assertCurrent => deps.storage.transaction(key, existing => {
             assertCurrent();
             if (existing) {
               const capturedExisting = parseNativeConversationCapture(existing);
-              inspect(capturedExisting, authority, options);
+              inspect(capturedExisting, current);
               if (!matches(capturedExisting)) throw new NativeConversationIntakeError('request-conflict');
               return { next: null, value: capturedExisting };
             }
             assertContinuation(record); return { next: record, value: record };
           }));
-          return stored;
         })();
         captures.set(captureKey, capture);
         let stored: NativeConversationCapture;
@@ -471,16 +468,17 @@ export function createNativeConversationIntakeHost(deps: {
         // The shared capture is not tied to any one caller's signal (a second
         // caller must not inherit the first one's abort); each caller honours its own here.
         options.signal?.throwIfAborted();
-        inspect(stored, authority, options); return projection(stored);
+        inspect(stored, current); return projection(stored);
       });
     },
     get(input, authority, options = {}) {
       const parsed = nativeConversationIntakeLookupRequestSchema.safeParse(input);
       if (!parsed.success) return Promise.reject(new NativeConversationIntakeError('invalid'));
-      return track(async () => { options.signal?.throwIfAborted(); owner(authority, options);
-        const value = deps.storage.current(keyOf(parsed.data.inputId, authority)); if (value === null) return { kind: 'not-found' };
+      return track(async () => {
+        options.signal?.throwIfAborted(); const owners = owner(authority, options);
+        const value = deps.storage.current(keyOf(parsed.data.inputId, owners)); if (value === null) return { kind: 'not-found' };
         const record = parseNativeConversationCapture(value);
-        inspect(record, authority, options); const result = await projection(record); inspect(record, authority, options); return result;
+        inspect(record, owners); return projection(record);
       });
     },
     admit(input, authority, options = {}) { return deliver(input, authority, options, false); },
@@ -489,10 +487,11 @@ export function createNativeConversationIntakeHost(deps: {
       const parsed = nativeConversationIntakeTransitionRequestSchema.safeParse(input);
       if (!parsed.success) return Promise.reject(new NativeConversationIntakeError('invalid'));
       return track(async () => {
-        const key = keyOf(parsed.data.inputId, authority); const record = load(key, authority, options, parsed.data.sourceRevision);
+        const owners = owner(authority, options);
+        const key = keyOf(parsed.data.inputId, owners); const record = load(key, owners, parsed.data.sourceRevision);
         if (record.state !== 'turn') throw new NativeConversationIntakeError('conflict', `Only a dispatched turn can be settled; this input is ${record.state}.`);
-        await withOwners(record, authority, options, assertCurrent => deps.storage.transaction(record, current => {
-          assertCurrent(); if (!current) throw new NativeConversationIntakeError('not-found'); inspect(current, authority, options);
+        await withOwners(owners, authority, options, assertCurrent => deps.storage.transaction(record, current => {
+          assertCurrent(); if (!current) throw new NativeConversationIntakeError('not-found'); inspect(current, owners);
           if (current.state !== 'turn' || current.generation !== record.generation) throw new NativeConversationIntakeError('stale');
           if (current.settled) return { next: null, value: undefined };
           return { next: parseNativeConversationCapture({ ...current, settled: true }, record), value: undefined };
@@ -503,17 +502,18 @@ export function createNativeConversationIntakeHost(deps: {
       const parsed = nativeConversationIntakeTransitionRequestSchema.safeParse(input);
       if (!parsed.success) return Promise.reject(new NativeConversationIntakeError('invalid'));
       return track(async () => {
-        const key = keyOf(parsed.data.inputId, authority); const record = load(key, authority, options, parsed.data.sourceRevision);
+        const owners = owner(authority, options);
+        const key = keyOf(parsed.data.inputId, owners); const record = load(key, owners, parsed.data.sourceRevision);
         const delivery = deliveries.get(keyId(key)); let validated = false;
         try {
-          const result = await withOwners(record, authority, options, assertCurrent => deps.storage.transaction(record, current => {
-            assertCurrent(); if (!current) throw new NativeConversationIntakeError('not-found'); inspect(current, authority, options); validated = true;
+          const result = await withOwners(owners, authority, options, assertCurrent => deps.storage.transaction(record, current => {
+            assertCurrent(); if (!current) throw new NativeConversationIntakeError('not-found'); inspect(current, owners); validated = true;
             if (terminal(current)) return { next: null, value: current };
             const next = parseNativeConversationCapture({ ...current, generation: current.generation + 1, state: 'cancelled', stage: null }, record);
             return { next, value: next };
           }));
           if (result.state === 'cancelled') { delivery?.controller.abort(); if (delivery) await Promise.allSettled([delivery.promise]); }
-          inspect(result, authority, options); return projection(result);
+          return projection(result);
         } catch (error) {
           // After ambiguous durable publication, prevent local old-generation continuation too.
           if (validated) { delivery?.controller.abort(); if (delivery) await Promise.allSettled([delivery.promise]); }

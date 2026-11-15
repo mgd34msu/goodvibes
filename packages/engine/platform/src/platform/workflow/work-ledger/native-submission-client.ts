@@ -1,7 +1,5 @@
 import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
 import {
-  NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES,
-  NATIVE_WORK_SUBMISSION_MAX_RESPONSE_BYTES,
   nativeWorkSubmissionRequestSchema,
   nativeWorkSubmissionLookupRequestSchema,
   nativeWorkSubmissionReceiptSchema,
@@ -15,8 +13,7 @@ import {
 } from './native-submission-wire.js';
 
 export {
-  NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES,
-  NATIVE_WORK_SUBMISSION_MAX_RESPONSE_BYTES,
+  NATIVE_WORK_SUBMISSION_MAX_TEXT_BYTES,
   nativeWorkSubmissionRequestSchema,
   nativeWorkSubmissionLookupRequestSchema,
   nativeWorkSubmissionReceiptSchema,
@@ -51,12 +48,6 @@ export class NativeWorkSubmissionClientError extends Error {
   }
 }
 
-function bounded(value: unknown, limit: number): boolean {
-  try {
-    const json = JSON.stringify(value);
-    return typeof json === 'string' && new TextEncoder().encode(json).byteLength <= limit;
-  } catch { return false; }
-}
 
 /**
  * Reuses the selected authenticated operator transport without acquiring authority,
@@ -105,7 +96,6 @@ export function createOperatorNativeWorkSubmissionClient(
         cancelled,
       ]);
       active(controller.signal);
-      if (!bounded(value, NATIVE_WORK_SUBMISSION_MAX_RESPONSE_BYTES)) throw new NativeWorkSubmissionClientError('invalid_response');
       return value;
     } finally {
       controller.signal.removeEventListener('abort', cancel);
@@ -122,12 +112,10 @@ export function createOperatorNativeWorkSubmissionClient(
     async submit(input: NativeWorkSubmissionRequest, options: OperatorNativeWorkSubmissionOptions = {}) {
       active(options.signal);
       let request: NativeWorkSubmissionRequest;
-      try {
-        if (!bounded(input, NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES)) throw new Error();
-        request = nativeWorkSubmissionRequestSchema.parse(input);
-      } catch { throw new NativeWorkSubmissionClientError('invalid_request'); }
-      // Keep a distinct snapshot: neither caller nor a reentrant transport may alter response validation.
-      const identity = nativeWorkSubmissionRequestSchema.parse(request);
+      try { request = nativeWorkSubmissionRequestSchema.parse(input); }
+      catch { throw new NativeWorkSubmissionClientError('invalid_request'); }
+      // The parsed request is this call's own copy: the receipt is compared with it.
+      const identity = request;
       const value = await invoke('workLedger.submit', request, options);
       active(options.signal);
       let result: NativeWorkSubmissionResult;

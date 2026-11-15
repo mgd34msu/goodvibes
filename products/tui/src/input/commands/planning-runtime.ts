@@ -1,6 +1,6 @@
 import { directOwnerPlanningInput, type CommandRegistry } from '../command-registry.ts';
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
-import { captureNativeConversationInput } from '../../runtime/native-conversation-input.ts';
+import { captureNativeConversationInput } from '@goodvibes-jev/engine/terminal-shell/native';
 import { openModalCommand, requirePlanManager } from './runtime-services.ts';
 import { isPlanMode, togglePlanMode, permissionModeLabel, type PermissionModeValue } from '../../core/permission-mode.ts';
 import { parsePlanningActionTarget } from './planning-action-target.ts';

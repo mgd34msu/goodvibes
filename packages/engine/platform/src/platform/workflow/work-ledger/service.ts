@@ -396,15 +396,19 @@ export function createWorkLedger(options: {
 }): { readonly service: WorkLedgerService & WorkLedgerHistoryPager; readonly authority: WorkLedgerAuthority } {
   const { projectId, storage, clock } = options;
   createEmptyWorkLedgerState(projectId);
-  // The last persisted image that passed full validation. Replaying every
-  // command costs O(events) per call and clients poll, so an image identical
-  // to it skips the replay. Identity is by deep equality, never by revision
-  // alone, so a restored or edited ledger is always validated afresh.
-  let validated: { readonly image: unknown; readonly state: WorkLedgerState } | undefined;
+  // The last image this service either validated by full replay or produced
+  // itself with the reducer from a validated predecessor. The reducer is the one
+  // owner of "this state follows from that one by this command", so a state it
+  // committed is trusted as is; only an image it did not produce (another
+  // process, a restored file) is replayed. Identity is by revision and then deep
+  // equality, never by revision alone, so a restored or edited ledger is always
+  // validated afresh.
+  let validated: { readonly revision: number; readonly state: WorkLedgerState } | undefined;
   function readValidatedState(raw: unknown): WorkLedgerState {
-    if (validated !== undefined && isDeepStrictEqual(validated.image, raw)) return structuredClone(validated.state);
+    const revision = raw !== null && typeof raw === 'object' ? (raw as { revision?: unknown }).revision : undefined;
+    if (validated !== undefined && revision === validated.revision && isDeepStrictEqual(validated.state, raw)) return structuredClone(validated.state);
     const state = readWorkLedgerState(raw, projectId);
-    validated = { image: structuredClone(raw), state: structuredClone(state) };
+    validated = { revision: state.revision, state: structuredClone(state) };
     return state;
   }
   const identities = new WeakMap<WorkLedgerActor, WorkLedgerHostIdentity>();
@@ -561,7 +565,7 @@ export function createWorkLedger(options: {
           queueMicrotask(() => {
             if (!active || closed || !identity(actor)) return;
             try {
-              const state = readWorkLedgerState(notification, projectId);
+              const state = readValidatedState(notification);
               if (state.revision <= cursor) return;
               cursor = state.revision;
               const returned: unknown = listener(snapshot(state, requireIdentity(actor)));
@@ -602,6 +606,7 @@ export function createWorkLedger(options: {
       const authorizedNow = (): boolean => {
         try { return !executeOptions?.isAuthorized || executeOptions.isAuthorized() === true; } catch { return false; }
       };
+      let committed: WorkLedgerState | null = null;
       const operation = Promise.resolve().then(() => storage.transaction((current, context) => {
         let state: WorkLedgerState;
         try { state = readValidatedState(current); } catch {
@@ -619,7 +624,8 @@ export function createWorkLedger(options: {
         let next: WorkLedgerState | null;
         try {
           result = reduceWorkLedger(state, command, requireIdentity(actor), clock, options.importHostId, context);
-          next = result.kind === 'accepted' && !result.replayed ? readWorkLedgerState(state, projectId) : null;
+          // The reducer's own output from a validated state: no second replay.
+          next = result.kind === 'accepted' && !result.replayed ? state : null;
         } catch {
           return { next: null, value: rejected('host_error', 'Host clock, identity generation or transition validation failed before commit.', initialRevision) };
         }
@@ -640,8 +646,13 @@ export function createWorkLedger(options: {
         const nativelyAborted = readNativeAbortState(signal);
         if (!authorized || !identity(actor)) return { next: null, value: rejected('forbidden', 'Host actor was revoked before commit.', initialRevision) };
         if (aborted || nativelyAborted) return { next: null, value: rejected('cancelled', 'Command was cancelled before commit.', initialRevision) };
+        committed = next;
         return { next, value: result };
-      })).catch((): WorkLedgerResult => ({ kind: 'indeterminate', requestId: command.requestId, actorId,
+      })).then((value): WorkLedgerResult => {
+        // Durable now: the next read of this image is the state just produced.
+        if (committed) validated = { revision: committed.revision, state: structuredClone(committed) };
+        return value;
+      }, (): WorkLedgerResult => ({ kind: 'indeterminate', requestId: command.requestId, actorId,
         reason: 'Storage outcome is unknown. Reconcile by exact retry against the authoritative store.' }));
       return operation;
       });
@@ -668,7 +679,8 @@ export function reduceWorkLedgerSettlement(state: WorkLedgerState, input: {
   readonly attestation: Pick<LedgerEvidence, 'outcome' | 'reason' | 'references' | 'source' | 'criteriaResults'>;
   readonly actorId: string; readonly reportRequestId: string; readonly evidenceRequestId: string;
 }, clock: WorkLedgerClock): { readonly state: WorkLedgerState; readonly report: Exclude<WorkLedgerEvent, { type: 'import_legacy' }>; readonly evidence: Exclude<WorkLedgerEvent, { type: 'import_legacy' }> } {
-  const next = readWorkLedgerState(state, state.projectId);
+  // The caller's ledger was validated where it was read; this is a working copy.
+  const next = workLedgerStateSchema.parse(state);
   const work = next.works.find(value => value.id === input.target.workId);
   const attempt = next.attempts.find(value => value.id === input.target.attemptId);
   if (!work || !attempt || !targetMatches(input.target, work, attempt) || attempt.ownerId !== input.actorId
@@ -682,14 +694,15 @@ export function reduceWorkLedgerSettlement(state: WorkLedgerState, input: {
     target, ...input.attestation });
   const evidence = reduceWorkLedger(next, evidenceCommand, { projectId: next.projectId, actorId: input.actorId, role: 'verifier' }, clock);
   if (evidence.kind !== 'accepted' || evidence.replayed || evidence.event.type === 'import_legacy' || !evidence.event.evidence) throw new Error('Native settlement evidence refused');
-  return { state: readWorkLedgerState(next, next.projectId), report: report.event, evidence: evidence.event };
+  return { state: next, report: report.event, evidence: evidence.event };
 }
 
 /** Native owner-only successor reduction; ledger events remain evidence, never launch authority. */
 export function reduceWorkLedgerContinuation(state: WorkLedgerState, input: {
   readonly target: WorkEvidenceTarget; readonly actorId: string; readonly continuationId: string; readonly successorId: string;
 }, clock: WorkLedgerClock): { readonly state: WorkLedgerState; readonly target: WorkEvidenceTarget } {
-  const next = readWorkLedgerState(state, state.projectId);
+  // The caller's ledger was validated where it was read; this is a working copy.
+  const next = workLedgerStateSchema.parse(state);
   const work = next.works.find(value => value.id === input.target.workId);
   const attempt = next.attempts.find(value => value.id === input.target.attemptId);
   if (!work?.source || !attempt || !targetMatches(input.target, work, attempt) || attempt.ownerId !== input.actorId
@@ -707,6 +720,6 @@ export function reduceWorkLedgerContinuation(state: WorkLedgerState, input: {
   if (claim.kind !== 'accepted' || claim.replayed || claim.event.type === 'import_legacy') throw new Error('Native continuation claim refused');
   const successor = claim.event.attempts.find(item => item.id === input.successorId);
   if (!successor || successor.predecessorId !== attempt.id) throw new Error('Invalid continuation successor');
-  return { state: readWorkLedgerState(next, next.projectId), target: { workId: work.id, workRevision: work.revision,
+  return { state: next, target: { workId: work.id, workRevision: work.revision,
     criteriaRevision: work.criteriaRevision, attemptId: successor.id, attemptRevision: successor.revision } };
 }

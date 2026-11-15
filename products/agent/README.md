@@ -120,14 +120,13 @@ revision once. Before sending, the app durably publishes the exact source, IDs a
 revision in its private `native-work-submission.json` journal under its product
 state directory. The journal binds each request to the exact daemon endpoint,
 canonical workspace, project and live server-verified paired principal. It stores
-no bearer token. The journal has at most 16 bindings and 2 MiB; at the cap a new
-binding replaces the least recently saved one whose turn or work was already
-handed off, then one whose hosted input the host acknowledged, but never one
-whose input the host may not have captured, and never a hosted binding another
-live Agent process on the same journal still owns (recorded in a `.owners` file
-next to the journal; a dead or missing owner never blocks it). Corrupt,
-oversized, symlink-backed or unconfirmable state fails closed without a
-submission. In the work-submission journal, a binding is released once its
+no bearer token. The conversation intake journal beside it holds only inputs in
+flight: a record exists from submit until the host gives a terminal answer
+(blocked, refused or cancelled, including `/work intake-cancel`), the work receipt
+exists and its execution was requested, the hosted turn finishes, or the local
+turn that was dispatched has ended; then it is removed. It has no record cap and
+never refuses a new input for being full. Corrupt, oversized, symlink-backed or
+unconfirmable state fails closed without a submission. In the work-submission journal, a binding is released once its
 submission has a validated receipt; one whose outcome is not yet known is never
 evicted, so a new binding at the cap is refused with a message naming the cap
 until `submission-status` settles one.

@@ -7,7 +7,6 @@ import { NativeWorkSubmissionError, type NativeWorkSubmissionHost } from '../../
 import {
   nativeWorkSubmissionRequestSchema, nativeWorkSubmissionLookupRequestSchema,
   nativeWorkSubmissionResultSchema, nativeWorkSubmissionLookupResultSchema,
-  NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES,
 } from '../../workflow/work-ledger/native-submission-wire.js';
 import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
@@ -28,12 +27,11 @@ export function registerNativeWorkSubmissionGatewayMethods(catalog: GatewayMetho
       try {
         const authority = authorize(invocation);
         const input = readInvocationParams(invocation);
-        if (new TextEncoder().encode(JSON.stringify(input)).byteLength > NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES) throw new GatewayVerbError('Native submission exceeds the transport limit', 'NATIVE_SUBMISSION_LIMIT', 413);
         invocation.signal?.throwIfAborted();
         const options = { ...(invocation.signal ? { signal: invocation.signal } : {}), isAuthorized: () => invocation.isAuthorized?.(SCOPES) === true };
         if (operation === 'submit') {
           const parsed = nativeWorkSubmissionRequestSchema.safeParse(input);
-          if (!parsed.success) throw new GatewayVerbError('Invalid explicit native source', 'INVALID_ARGUMENT', 400);
+          if (!parsed.success) throw new GatewayVerbError(`Invalid explicit native source: ${parsed.error.issues[0]?.message ?? 'the request does not match the submission shape'}`, 'INVALID_ARGUMENT', 400);
           const result = await host.submit(parsed.data, authority, options);
           try { authorize(invocation); } catch (revoked) { withholdCommittedResult(revoked, 'The submission was recorded.'); }
           return nativeWorkSubmissionResultSchema.parse(result);

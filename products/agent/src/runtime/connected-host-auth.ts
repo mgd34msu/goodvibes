@@ -1,6 +1,6 @@
-import { canonicalizePairingHost, readAgentHostPairing, type AgentHostPairing } from './connected-host-pairing-store.ts';
+import { agentHostPairingStorePath, canonicalizePairingHost, readAgentHostPairing, type AgentHostPairing } from './connected-host-pairing-store.ts';
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/workspace';
@@ -30,6 +30,32 @@ export function connectedHostOperatorTokenPath(homeDirectory: string): string {
 
 /** A live caller supplies its actual observer; passive snapshots issue no ID. */
 export interface SelectedConnectedHostOperatorToken extends ConnectedHostOperatorToken { readonly selectionIdentity: string; }
+
+/** Identity of a file as its writers publish it (each write renames in a new file). */
+function fileStamp(path: string): string {
+  try {
+    const stat = statSync(path, { bigint: true });
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+  } catch { return 'absent'; }
+}
+/**
+ * The pairing and the operator token file change only when a writer replaces
+ * the file, so a read is kept until its file's identity changes: asking which
+ * host is selected costs one stat, not a verified re-read of the pairing store.
+ */
+const pairingReads = new Map<string, { readonly stamp: string; readonly value: AgentHostPairing }>();
+function readPairing(homeDirectory: string, hostUrl: string): AgentHostPairing {
+  const key = JSON.stringify([resolve(homeDirectory), hostUrl]);
+  const stamp = fileStamp(agentHostPairingStorePath(homeDirectory));
+  const prior = pairingReads.get(key);
+  if (prior?.stamp === stamp) return prior.value;
+  const value = readAgentHostPairing(homeDirectory, hostUrl);
+  if (value.status === 'unavailable') pairingReads.delete(key);
+  else pairingReads.set(key, { stamp, value });
+  return value;
+}
+const tokenFileReads = new Map<string, { readonly stamp: string; readonly token: string | null; readonly error?: string }>();
+
 export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl: string | undefined,
   observation: OwnedSelectionObservation, sourceOwner?: object): SelectedConnectedHostOperatorToken;
 export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: string): ConnectedHostOperatorToken;
@@ -60,21 +86,26 @@ export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: 
     });
   }
   if (hostUrl !== undefined) {
-    const pairing = readAgentHostPairing(homeDirectory, hostUrl);
+    const pairing = readPairing(homeDirectory, hostUrl);
     if (pairing.status === 'paired') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: pairing.token, expectedPrincipalId: `pairing:${pairing.tokenId}` }, pairing);
     if (pairing.status === 'unknown') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: 'A prior pairing outcome is unknown; no credential fallback or remint is allowed.' }, pairing);
     if (pairing.status === 'unavailable') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: 'The Agent host-bound pairing store could not be read safely.' }, pairing);
   }
   const path = connectedHostOperatorTokenPath(homeDirectory);
-  if (!existsSync(path)) return selected({ path, source: 'operator-file', present: false, token: null });
+  const stamp = fileStamp(path);
+  if (stamp === 'absent' && !existsSync(path)) return selected({ path, source: 'operator-file', present: false, token: null });
+  const prior = tokenFileReads.get(path);
+  if (prior?.stamp === stamp) return selected({ path, source: 'operator-file', present: true, token: prior.token, ...(prior.error ? { error: prior.error } : {}) });
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
     const token = isRecord(parsed) && typeof parsed.token === 'string' && parsed.token.trim().length > 0
       ? parsed.token
       : null;
+    tokenFileReads.set(path, { stamp, token });
     return selected({ path, source: 'operator-file', present: true, token });
   } catch {
     // Parser diagnostics can quote the secret-bearing source text.
+    tokenFileReads.delete(path);
     return selected({ path, source: 'operator-file', present: true, token: null, error: 'Connected-host token record could not be read.' });
   }
 }

@@ -10,7 +10,6 @@ import { nativeClassicConversationAdmissionSchema, type NativeClassicConversatio
 
 export const NATIVE_CONVERSATION_MAX_PROPOSALS = 3;
 export const NATIVE_CONVERSATION_MAX_DECISIONS = 32;
-export const NATIVE_CONVERSATION_MAX_RECORD_BYTES = 1_048_576;
 export interface NativeConversationKey { readonly principalId: string; readonly inputId: string; }
 export interface NativeConversationUnsupportedSource { readonly kind: 'image' | 'file' | 'context'; readonly label: string; }
 export interface NativeConversationSpan { readonly partId: 'input'; readonly start: number; readonly end: number; }
@@ -163,8 +162,7 @@ export function validateNativeConversationProposal(value: unknown, text: string,
 const captureFields = {
   classic: nativeClassicConversationAdmissionSchema.optional(),
   projectId: id, principalId: id, inputId: id, requestId: id,
-  text: string().min(1).max(20_000)
-    .refine(value => value.length <= 20_000, 'Must contain at most 20000 UTF-16 code units')
+  text: string().min(1).max(20_000, 'Must contain at most 20000 UTF-16 code units')
     .refine(value => value.trim().length > 0),
   continuation: nativeConversationContinuationSchema.optional(),
   unsupportedSources: array(strictObject({ kind: enumSchema(['image', 'file', 'context']), label: string().min(1).max(200) })).max(100),
@@ -239,7 +237,7 @@ export function parseNativeConversationCapture(value: unknown, original?: Native
       } else if (final?.outcome !== 'act' || !isDeepStrictEqual(final.binding, nativeConversationDecisionBinding(result, 'ordinary-turn'))) throw new Error();
     }
     if (parsed.classic && parsed.state !== 'turn' && parsed.state !== 'cancelled') throw new Error();
-    if (!isDeepStrictEqual(result, value) || new TextEncoder().encode(JSON.stringify(result)).byteLength > NATIVE_CONVERSATION_MAX_RECORD_BYTES) throw new Error();
+    if (!isDeepStrictEqual(result, value)) throw new Error();
     return freezeCapture(result);
   } catch { throw new NativeConversationStorageError('invalid'); }
 }

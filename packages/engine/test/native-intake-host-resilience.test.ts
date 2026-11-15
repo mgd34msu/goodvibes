@@ -92,15 +92,15 @@ test('one caller aborting a shared capture does not fail the other caller', asyn
   expect(await second).toMatchObject({ kind: 'captured' });
 });
 
-test('a transcript beyond the stored-record limit is refused with the actual limit', async () => {
+test('a long session transcript is captured: the record has no size ceiling', async () => {
   const messages = [{ role: 'user' as const, content: 'x'.repeat(1_200_000) }];
   const f = await fixture({ continuation: { async capture() {
     return { sessionId: 'hosted-owned', revision: createHash('sha256').update(canonicalNativeConversationContinuation('hosted-owned', messages)).digest('hex'), messages };
   }, assertCurrent() {} } });
-  await expect(f.host.capture({ ...f.original, continuation: { sessionId: 'hosted-owned' } }, f.authority)).rejects.toThrow('too long to keep');
+  expect(await f.host.capture({ ...f.original, continuation: { sessionId: 'hosted-owned' } }, f.authority)).toMatchObject({ kind: 'captured' });
 });
 
-test('a running input re-checks its owners about once a second, not twenty times', async () => {
+test('a running input does not re-read its owners while it waits on a model', async () => {
   const entered = deferred(), release = deferred();
   const f = await fixture({ proposer: { async propose(input) {
     entered.resolve(); await release.promise;
@@ -118,9 +118,9 @@ test('a running input re-checks its owners about once a second, not twenty times
     const running = f.host.admit(f.target(captured), f.authority);
     await entered.promise;
     const checks = spyOn(f.scopes, 'currentScope');
-    // One second of owner-watch ticks, however often the host schedules them.
+    // One second of any timer the host scheduled: none reads the workspace registry.
     for (const watcher of watchers) for (let elapsed = 0; elapsed < 1_000; elapsed += Math.max(1, watcher.everyMs)) watcher.tick();
-    expect(checks.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(checks.mock.calls.length).toBe(0);
     release.resolve();
     expect((await running).kind).toBe('work');
   } finally { interval.mockRestore(); }

@@ -109,7 +109,18 @@ export class BoundWorkLedgerModel {
     this.publish({ status: 'loading', reason: 'Reading native work ledger and durable history…' });
     if (epoch !== this.epoch) return;
     try {
-      const unsubscribe = client.subscribe((snapshot) => this.accept(snapshot, epoch));
+      // A failed read keeps this binding: the reader keeps polling, says why, and
+      // says when it resumes, when the current snapshot is read again.
+      const unsubscribe = client.subscribe(
+        (snapshot) => this.accept(snapshot, epoch),
+        (reason) => {
+          if (epoch === this.epoch && this.client === client) this.publish({ status: 'unavailable', reason });
+        },
+        () => {
+          if (epoch !== this.epoch || this.client !== client) return;
+          void client.readSnapshot().then((snapshot) => this.accept(snapshot, epoch), (error) => this.fail(error, epoch));
+        },
+      );
       if (epoch !== this.epoch) {
         try {
           unsubscribe();

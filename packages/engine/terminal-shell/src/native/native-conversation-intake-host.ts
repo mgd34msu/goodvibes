@@ -22,15 +22,10 @@ export function createNativeConversationIntakeBinding(host: NativeSubmissionHost
             throw new Error('Native intake host selection changed');
         const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: available }) });
         try {
-            // A prior principal read cannot authorize a later private-pairing call.
-            // This also fences retained permits that outlive the initial binding.
-            if (host.expectedPrincipalId !== undefined && args[0] !== 'control.auth.current') {
-                const auth = await operator.invoke('control.auth.current', {}, args[2]);
-                if (!available())
-                    throw new Error('Native intake host selection changed');
-                if (!isNativePairedPrincipal(auth, host.expectedPrincipalId))
-                    throw new Error('Native intake paired authority changed');
-            }
+            // The host authenticates this token on every request, refuses a revoked
+            // one, and checks the owner, scopes and project of each intake, hosted
+            // turn and execution call itself; the principal was read once per
+            // operation (readPrincipal), so nothing is re-read here.
             const value = await operator.invoke(...args);
             if (!available())
                 throw new Error('Native intake host selection changed');
@@ -42,16 +37,10 @@ export function createNativeConversationIntakeBinding(host: NativeSubmissionHost
     }) as OperatorRemoteClient['invoke'];
     let principalId: string | undefined;
     const hostedInvoke = (async (...args: Parameters<OperatorRemoteClient['invoke']>) => {
-        // Refresh paired authority and project immediately before every hosted call.
-        // A status read grants no permission to make a later mutation.
-        const options = args[2];
-        const auth = await invoke('control.auth.current', {}, options);
-        if (!isNativePairedPrincipal(auth, host.expectedPrincipalId) || !principalId || auth.principalId !== principalId
-            || !(auth.scopes.includes('*') || auth.scopes.includes('write:sessions')))
-            throw new Error('Native hosted turn authority changed');
-        const project = await invoke('workLedger.project', {}, options);
-        if (project.projectId !== projectId)
-            throw new Error('Native hosted turn project changed');
+        // Every hosted request names this project and the host refuses another
+        // one, and its owner check covers the principal and write:sessions.
+        if (!principalId)
+            throw new Error('Native hosted turn requires the principal read for this operation');
         return invoke(...args);
     }) as OperatorRemoteClient['invoke'];
     const client = createOperatorNativeConversationIntakeClient({ invoke }, projectId);

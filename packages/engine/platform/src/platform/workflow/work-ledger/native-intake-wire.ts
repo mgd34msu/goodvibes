@@ -4,22 +4,15 @@ import { nativeClassicConversationAdmissionSchema } from './native-intake-policy
 import { nativeSelectedDiffSelector, nativeSelectedDiffSelectorSchema, nativeSelectedDiffContextSchema } from './native-diff-context.js';
 import { array, enum as enumSchema, literal, number, strictObject, string, union, type z } from 'zod/v4';
 
-export const NATIVE_CONVERSATION_INTAKE_MAX_REQUEST_BYTES = Infinity;
-export const NATIVE_CONVERSATION_INTAKE_MAX_RESPONSE_BYTES = Infinity;
 const id = string().min(1).max(200);
 const revision = number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 // Count UTF-16 units and preserve the exact submitted string.
-const text = string().min(1).max(20_000)
-  .refine(value => value.length <= 20_000, 'Must contain at most 20000 UTF-16 code units')
+const text = string().min(1).max(20_000, 'Must contain at most 20000 UTF-16 code units')
   .regex(/\S/, 'Must contain non-whitespace text');
-const bounded = (value: unknown, limit: number): boolean => {
-  try { const json = JSON.stringify(value); return typeof json === 'string' && new TextEncoder().encode(json).byteLength <= limit; }
-  catch { return false; }
-};
 export const nativeConversationIntakeUnsupportedSourceSchema = strictObject({ kind: enumSchema(['image', 'file', 'context']), label: id });
 export const nativeConversationIntakeCaptureRequestSchema = strictObject({
   requestId: id, inputId: id, text, continuation: strictObject({ sessionId: id, selectedDiff: nativeSelectedDiffSelectorSchema.optional() }).optional(), unsupportedSources: array(nativeConversationIntakeUnsupportedSourceSchema).max(100),
-}).refine(value => bounded(value, NATIVE_CONVERSATION_INTAKE_MAX_REQUEST_BYTES), 'Capture exceeds byte limit');
+});
 export const nativeConversationIntakeLookupRequestSchema = strictObject({ inputId: id });
 export const nativeConversationIntakeTransitionRequestSchema = strictObject({ inputId: id, sourceRevision: id });
 export const nativeConversationIntakeSourceRefSchema = strictObject({ version: literal(1), inputId: id, sourceId: id, sourceRevision: id, sessionId: id,
@@ -39,8 +32,7 @@ export const nativeConversationIntakeWorkReceiptSchema = strictObject({
     && /[\uD800-\uDBFF]/.test(value.goal[offset - 1]!) && /[\uDC00-\uDFFF]/.test(value.goal[offset]!));
   return value.source.spans.length === value.criteria.length && value.source.spans.every((span, index) =>
     span.start >= (value.source.spans[index - 1]?.end ?? 0) && span.start < span.end && boundary(span.start) && boundary(span.end) && value.goal.slice(span.start, span.end) === value.criteria[index]);
-}, 'Criteria must preserve exact source spans and UTF-16 boundaries')
-  .refine(value => bounded(value, NATIVE_CONVERSATION_INTAKE_MAX_RESPONSE_BYTES), 'Receipt exceeds byte limit');
+}, 'Criteria must preserve exact source spans and UTF-16 boundaries');
 const common = { projectId: id, requestId: id, sourceRef: nativeConversationIntakeSourceRefSchema };
 export const nativeConversationIntakeResultSchema = union([
   strictObject({ kind: literal('captured'), ...common }),
@@ -60,11 +52,10 @@ export const nativeConversationIntakeResultSchema = union([
   .refine(value => {
     const continuation = value.kind === 'turn' ? value.continuation : value.kind === 'work' ? value.receipt.source.continuation : value.sourceRef.continuation;
     return JSON.stringify(continuation ? { ...(continuation.version === 2 ? { version: 2 as const } : {}), sessionId: continuation.sessionId, revision: continuation.revision, ...(continuation.selectedDiff ? { selectedDiff: 'unifiedDiff' in continuation.selectedDiff ? nativeSelectedDiffSelector(nativeSelectedDiffContextSchema.parse(continuation.selectedDiff)) : continuation.selectedDiff } : {}) } : null) === JSON.stringify(value.sourceRef.continuation ?? null);
-  }, 'Continuation source binding mismatch')
-  .refine(value => bounded(value, NATIVE_CONVERSATION_INTAKE_MAX_RESPONSE_BYTES), 'Intake result exceeds byte limit');
+  }, 'Continuation source binding mismatch');
 export const nativeConversationIntakeLookupResultSchema = union([
   nativeConversationIntakeResultSchema, strictObject({ kind: literal('not-found') }),
-]).refine(value => bounded(value, NATIVE_CONVERSATION_INTAKE_MAX_RESPONSE_BYTES), 'Intake lookup exceeds byte limit');
+]);
 
 export type NativeConversationIntakeUnsupportedSource = z.infer<typeof nativeConversationIntakeUnsupportedSourceSchema>;
 export type NativeConversationIntakeCaptureRequest = z.infer<typeof nativeConversationIntakeCaptureRequestSchema>;

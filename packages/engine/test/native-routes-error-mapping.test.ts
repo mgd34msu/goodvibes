@@ -149,7 +149,7 @@ describe('native execution status: a failed settlement', () => {
   }
 
   test('carries the fixed reason code to the caller', async () => {
-    expect((await statusOf('evidence-over-capacity')).settlement).toEqual({ state: 'failed', reason: 'evidence-over-capacity' });
+    expect((await statusOf('artifact-too-large')).settlement).toEqual({ state: 'failed', reason: 'artifact-too-large' });
   });
 
   test('has no reason when the host recorded none', async () => {

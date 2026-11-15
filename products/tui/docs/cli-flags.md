@@ -258,7 +258,7 @@ Stop once the model has answered `n` times in this run's own turn loop and still
 
 ### `--answer-permissions` (`run` only)
 
-With `--output stream-json`, a script answers the owner prompts the run raises. Each one is written as a `PERMISSION_PROMPT` frame; answer with a line on stdin, `{"type":"PERMISSION_ANSWER","callId":"<callId>","approved":true}` (optional `remember`, and `note` for a refusal). A call that is never answered is refused when stdin ends, the run is cancelled or the run finishes. Without the flag, a call that needs the owner is refused. Using it with another output format is a usage error (exit `2`).
+With `--output stream-json`, a script answers the owner prompts the run raises. Each one is written as a `PERMISSION_PROMPT` frame; answer with a line on stdin, `{"type":"PERMISSION_ANSWER","callId":"<callId>","approved":true}` (optional `remember`, and `note` for a refusal). Every answer line is acknowledged with a `PERMISSION_ANSWERED` frame, or a `PERMISSION_ANSWER_REJECTED` frame naming the reason and the call ids still waiting. A call that is never answered is refused when stdin ends, the run is cancelled or the run finishes. Without the flag, a call that needs the owner is refused. Using it with another output format is a usage error (exit `2`).
 
 ### `--omit-accumulated` (`run` only)
 
@@ -339,7 +339,7 @@ The GitHub Action passes `--timeout 30m --max-turns 50` to a prompt run unless i
 | `error` | no | What went wrong. |
 | `model`, `provider`, `events` | no | Present when a model turn ran. |
 | `kind` | no | On failures: `outcome-unknown` (the host may have acted) or `unavailable` (nothing was sent). |
-| `cause` | no | With `kind`, a non-secret reason code: `journal_limit`, `journal_conflict`, `journal`, `principal`, `network`, `schema`, `host_changed`, `unknown`. |
+| `cause` | no | With `kind`, a non-secret reason code: `journal_conflict`, `journal`, `principal`, `network`, `schema`, `host_changed`, `unknown`. |
 | `native` | no | The native intake state: `status`, `message`, `request`, `result`, `execution`. |
 
 ### Stream frames
@@ -356,6 +356,8 @@ Every `stream-json` line carries `schemaVersion` and `type`. Consumers should ig
 | `PERMISSION_REQUESTED` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `ownerPrompt` | A tool call reached the permission gate. Sent when the gate reports its decision, so nothing waits behind it; `ownerPrompt` says whether the owner was asked. |
 | `PERMISSION_DECIDED` | `callId`, `tool`, `category`, `approved`, `source`, `reasonCode`, `ownerPrompt` | The gate decided it. `ownerPrompt` is `true` when the owner was asked, `false` when a rule, preset or remembered approval decided. |
 | `PERMISSION_PROMPT` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `answer` | With `--answer-permissions`: the owner is being asked; the run waits for a `PERMISSION_ANSWER` line on stdin. |
+| `PERMISSION_ANSWERED` | `callId`, `approved` | A `PERMISSION_ANSWER` line was accepted for that call. |
+| `PERMISSION_ANSWER_REJECTED` | `callId` (when it was a string), `reason`, `waiting` | A `PERMISSION_ANSWER` line was not used: `reason` says why, `waiting` lists the call ids still waiting. |
 | `AGENT_SPAWNING`, `AGENT_RUNNING` | `agentId`, `taskId`, `parentAgentId`, `contractId`, `contractRole` | A delegated agent starts. |
 | `AGENT_COMPLETED`, `AGENT_FAILED`, `AGENT_CANCELLED` | `agentId`, `taskId`; `durationMs` and `toolCallsMade`, `error` or `reason` | It ended. |
 | `CONTRACT_CREATED`, `CONTRACT_STATUS_CHANGED` | `contractId`; `sessionId`, `origin`, `ownerAgentId` or `from`, `to` | Delegated work was set up or moved. |

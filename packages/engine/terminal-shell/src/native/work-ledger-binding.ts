@@ -6,12 +6,11 @@ export function createNativeWorkLedgerReadBinding(
   operator: Pick<OperatorRemoteClient, 'invoke'> & { dispose(): void },
   projectId: string,
   ports: {
-    readonly onUnavailable: (error: Error) => void;
     readonly execution: Pick<OperatorRemoteClient, 'invoke'>;
     readonly beforeDispose?: (() => void) | undefined;
   },
 ): NativeWorkLedgerBinding {
-  const reader = createOperatorWorkLedgerReadClient(operator, projectId, { onUnavailable: ports.onUnavailable });
+  const reader = createOperatorWorkLedgerReadClient(operator, projectId);
   return {
     available: true,
     execution: createOperatorNativeWorkExecutionClient(ports.execution, projectId),
@@ -19,7 +18,7 @@ export function createNativeWorkLedgerReadBinding(
       projectId: reader.projectId,
       readSnapshot: () => reader.readSnapshot(),
       history: (cursor) => reader.history(cursor),
-      subscribe: (listener) => reader.subscribe(listener),
+      subscribe: (listener, onUnavailable, onResumed) => reader.subscribe(listener, onUnavailable, onResumed),
       dispose() {
         ports.beforeDispose?.();
         try {

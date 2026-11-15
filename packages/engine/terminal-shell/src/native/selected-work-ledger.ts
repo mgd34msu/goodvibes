@@ -14,7 +14,7 @@ export type NativeWorkLedgerSelection =
       readonly available: true;
       readonly identity: string;
       readonly projectId: string;
-      readonly bind: (onUnavailable: (error: Error) => void) => NativeWorkLedgerBinding;
+      readonly bind: () => NativeWorkLedgerBinding;
     };
 export type NativeWorkLedgerSelectionReader = () => NativeWorkLedgerSelection;
 export function operatorWorkLedgerSelection(
@@ -26,9 +26,9 @@ export function operatorWorkLedgerSelection(
     available: true,
     identity,
     projectId,
-    bind: (onUnavailable) => ({
+    bind: () => ({
       available: true,
-      client: createOperatorWorkLedgerReadClient(operator, projectId, { onUnavailable }),
+      client: createOperatorWorkLedgerReadClient(operator, projectId),
       execution: createOperatorNativeWorkExecutionClient(operator, projectId),
     }),
   };
@@ -123,7 +123,7 @@ export class SelectedWorkLedgerModel {
       if (this.epoch === cleared) this.changed();
     };
     try {
-      const binding = selection.bind(fail);
+      const binding = selection.bind();
       if (!binding.available) {
         fail(new Error(binding.reason));
         return;
@@ -237,8 +237,18 @@ export class SelectedWorkLedgerModel {
         }
       };
       // Subscribe before initial snapshot, including synchronous subscription callbacks.
+      // A read that fails keeps the rows on screen with the reason; the reader
+      // keeps polling and says when it resumes.
       unsubscribe = client.subscribe((snapshot) => {
         observe(snapshot);
+        void catchUp();
+      }, (reason) => {
+        if (!current()) return;
+        this.reason = reason;
+        this.changed();
+      }, () => {
+        if (!current()) return;
+        if (this.snapshot) this.reason = '';
         void catchUp();
       });
       if (!current()) {

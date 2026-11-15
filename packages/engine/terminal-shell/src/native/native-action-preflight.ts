@@ -23,10 +23,10 @@ export class NativeActionPreflight<Result> {
       try { if (this.identity() === identity) return true; } catch { /* Unresolvable workspace revokes the operation. */ }
       controller.abort(); this.invalidate(); return false;
     };
-    const timer = setInterval(current, 100); timer.unref?.();
+    // The action checks `current` at each await; nothing polls the selection in between.
     try {
       const result = await action(controller.signal, current);
       return current() ? result : undefined;
-    } finally { clearInterval(timer); if (this.active === controller) this.active = undefined; }
+    } finally { if (this.active === controller) this.active = undefined; }
   }
 }

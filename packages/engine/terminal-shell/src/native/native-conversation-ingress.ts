@@ -65,6 +65,8 @@ export async function routeNativeConversationInput(deps: {
   if (isNativeConversationTurnReady(state)) {
     try {
       await deps.dispatch(state);
+      // The turn ran to its end: its intake record has nothing left to fence.
+      await state.finishTurn?.();
     } catch (error) {
       logger.warn('native intake: turn dispatch failed', { error: summarizeError(error) });
       const cause = nativeIntakeFailureCause(error);

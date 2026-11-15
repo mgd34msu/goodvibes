@@ -7,7 +7,8 @@ import type { ExternalOperationSource } from '../../permissions/external-request
 import { createNativeCiContinuationHost, type NativeCiGrantOwner, type NativeCiContinuationPolicy } from './native-ci-continuation.js';
 import { assertNativeRecordedDecision } from './native-recorded-decision.js';
 import { nativeSelectedDiffEvidence } from './native-diff-evidence.js';
-import { verifyNativeWorkExecution } from './native-execution-verifier.js';
+import { NativeSettlementFailure, verifyNativeWorkExecution } from './native-execution-verifier.js';
+import type { NativeSettlementFailureCode } from './native-execution-wire.js';
 import type { NativeWorkSettlementReceipt } from './native-settlement-types.js';
 import type { CheckSettings } from '../../contract/check.js';
 import type { ReadAccessFilter } from '../../tools/shared/read-access.js';
@@ -61,18 +62,11 @@ export interface NativeWorkExecutionStatus {
    */
   readonly settlementFailure?: NativeSettlementFailureCode;
 }
-export type NativeSettlementFailureCode =
-  | 'evidence-over-capacity' | 'artifact-access-restricted' | 'artifact-budget-exceeded'
-  | 'review-not-genuine' | 'changed-during-verification' | 'cancelled' | 'host-state' | 'verification-failed';
-/** Maps a settlement error to its fixed code, so the reason survives without carrying raw text. */
+export type { NativeSettlementFailureCode } from './native-execution-wire.js';
+/** The fixed code of a settlement error: carried by the error that names its cause, never read from its wording. */
 function settlementFailureCode(error: unknown): NativeSettlementFailureCode {
+  if (error instanceof NativeSettlementFailure) return error.code;
   if (error instanceof NativeWorkExecutionError) return error.code === 'stale' || error.code === 'conflict' ? 'changed-during-verification' : 'host-state';
-  const message = error instanceof Error ? error.message : '';
-  if (message.startsWith('Native evidence exceeds ledger reference capacity')) return 'evidence-over-capacity';
-  if (message.startsWith('Native artifact read is access-restricted')) return 'artifact-access-restricted';
-  if (message.startsWith('Native artifact capture exceeds total budget')) return 'artifact-budget-exceeded';
-  if (message.startsWith('Native execution lacks')) return 'review-not-genuine';
-  if (message.includes('changed during verification')) return 'changed-during-verification';
   if (error instanceof Error && error.name === 'AbortError') return 'cancelled';
   return 'verification-failed';
 }

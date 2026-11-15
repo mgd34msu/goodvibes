@@ -29,9 +29,11 @@ export interface WorkLedgerReadClient {
   historyPage?(afterSequence: number, limit: number): Promise<{ readonly cursor: number; readonly events: readonly WorkLedgerReadEvent[] }>;
   /**
    * Subscribe before reading; notifications may coalesce. Catch up through history.
-   * onUnavailable is called with the reason when the ledger cannot be read, so the listener will receive no changes until it can.
+   * The subscriber that owns the listener is told when observation becomes
+   * unavailable (with the reason, once per distinct reason) and when it resumes;
+   * the subscription stays in place throughout, so nothing has to subscribe again.
    */
-  subscribe(listener: (snapshot: WorkLedgerReadSnapshot) => void, onUnavailable?: (reason: string) => void): () => void;
+  subscribe(listener: (snapshot: WorkLedgerReadSnapshot) => void, onUnavailable?: (reason: string) => void, onResumed?: () => void): () => void;
   /** Revoke only this consumer. The host still owns service/store shutdown. */
   dispose(): void;
 }
@@ -95,11 +97,15 @@ export function createLocalWorkLedgerReadBinding(options: LocalWorkLedgerReadBin
       requireOpen();
       return { cursor: page.cursor, events: page.events.map(event => projectWorkLedgerReadEvent(event, allowLegacyProvenance === true)) };
     } } : {}),
-    subscribe(listener: (snapshot: WorkLedgerReadSnapshot) => void, onUnavailable?: (reason: string) => void) {
+    subscribe(listener: (snapshot: WorkLedgerReadSnapshot) => void, onUnavailable?: (reason: string) => void, onResumed?: () => void) {
       requireOpen();
+      // The store reports failures; the next change it delivers is the resumption.
+      let down = false;
       return service.subscribe(actor, snapshot => {
-        if (!disposed) return listener(readOnly(snapshot));
-      }, onUnavailable ? reason => { if (!disposed) onUnavailable(reason); } : undefined);
+        if (disposed) return;
+        if (down) { down = false; onResumed?.(); }
+        return listener(readOnly(snapshot));
+      }, reason => { if (disposed) return; down = true; onUnavailable?.(reason); });
     },
     dispose() {
       if (disposed) return;

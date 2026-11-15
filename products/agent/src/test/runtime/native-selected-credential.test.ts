@@ -12,7 +12,7 @@ import { resolveConnectedHostConnection } from '../../runtime/client/daemon-verb
 import { readConnectedHostReadiness } from '../../runtime/connected-host-readiness.ts';
 import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity } from '../../runtime/native-work-submission-host.ts';
 import { createNativeConversationIntakeBinding } from '../../runtime/native-conversation-intake-host.ts';
-import { createNativeLedgerBinding, createNativeWorkLedgerView } from '../../runtime/native-work-ledger-host.ts';
+import { createNativeWorkLedgerView } from '../../runtime/native-work-ledger-host.ts';
 import { executeNativeHeadless } from '../../cli/native-headless.ts';
 
 const envNames = ['GOODVIBES_CONNECTED_HOST_TOKEN', 'GOODVIBES_DAEMON_TOKEN'] as const;
@@ -278,63 +278,6 @@ describe('native headless selected identity propagation', () => {
           expect(existsSync(f.resolve().journalPath)).toBe(false);
         }
       } finally { f.close(); }
-    });
-  }
-});
-
-describe('explicit native ledger execution selected identity', () => {
-  const target: NativeWorkExecutionIdentity = { workId: 'work', attemptId: 'attempt', expectedRevision: { work: 1, criteria: 1, attempt: 1 } };
-  for (const authority of ['matching', 'wildcard', 'wrong-principal', 'missing-read', 'missing-fleet'] as const) {
-    test(`${authority} checks exact private execution authority for start/status/cancel/resume`, async () => {
-      const f = hostFixture();
-      f.setScopes(authority === 'wildcard' ? ['*'] : ['read:work-ledger', 'write:fleet'].filter(scope =>
-        !(authority === 'missing-read' && scope === 'read:work-ledger') && !(authority === 'missing-fleet' && scope === 'write:fleet')));
-      if (authority === 'wrong-principal') f.setPrincipal('pairing:other-owner');
-      const binding = createNativeLedgerBinding(f.resolve(), 'p', () => {});
-      if (!binding.available || !binding.execution) throw new Error('Synthetic binding unavailable');
-      try {
-        for (const action of ['start', 'status', 'cancel', 'resume'] as const) {
-          if (authority === 'matching' || authority === 'wildcard') {
-            expect((await binding.execution[action](target)).kind).toBe('pending-intent');
-            expect(f.requests.slice(-2)).toEqual(['/api/control-plane/auth', `/api/work-ledger/execution/${action}`]);
-          } else await expect(binding.execution[action](target)).rejects.toMatchObject({ code: 'NATIVE_EXECUTION_UNSUPPORTED_AUTHORITY' });
-        }
-        if (authority !== 'matching' && authority !== 'wildcard') expect(f.requests).toEqual(Array(4).fill('/api/control-plane/auth'));
-      } finally { binding.execution.dispose(); binding.client.dispose(); f.close(); }
-    });
-  }
-
-  for (const change of ['metadata', 'removal', 'environment-source', 'close-reopen'] as const) {
-    test(`held execution auth cannot dispatch after ${change}, even before a periodic selection sync`, async () => {
-      const f = hostFixture(); f.setScopes(['read:work-ledger', 'write:fleet']);
-      let entered!: () => void; const arrived = new Promise<void>(resolve => { entered = resolve; });
-      let release!: () => void; const held = new Promise<void>(resolve => { release = resolve; });
-      f.onAuth(async () => { entered(); await held; });
-      const view = createNativeWorkLedgerView(f.resolve, () => {}, (host, project, unavailable, current) => {
-        const binding = createNativeLedgerBinding(host, project, unavailable, current);
-        if (!binding.available) return binding;
-        // Keep real execution transport and the open() selection/epoch callback;
-        // inject only the read-only projection to avoid unrelated event streams.
-        return { ...binding, client: { projectId: project,
-          readSnapshot: async () => ({ projectId: project, cursor: 0, revision: 0, works: [{
-            work: { source: null, id: 'work', title: 'Synthetic work', goal: 'Synthetic goal', criteria: ['Synthetic criterion'], revision: 1,
-              criteriaRevision: 1, reportedState: 'in_progress' as const, currentAttemptId: 'attempt', createdAt: 1, updatedAt: 1 },
-            attempt: { id: 'attempt', workId: 'work', predecessorId: null, ownerId: 'pairing:selected-owner', revision: 1,
-              state: 'active' as const, report: null, blocker: null, createdAt: 1, updatedAt: 1 },
-            verification: { state: 'unverified' as const, reason: 'Synthetic fixture', evidence: null }, attention: [],
-          }] }), history: async () => [], subscribe: () => () => {}, dispose: () => binding.client.dispose(),
-        } };
-      });
-      try {
-        view.selectProject('p'); view.open(); await flush(); expect(view.state.status).toBe('ready');
-        const pending = view.execute!('start', 'work'); await arrived;
-        if (change === 'metadata') f.pair({ ...secret, name: 'Replaced during execution auth' });
-        if (change === 'removal') rmSync(f.pairingPath);
-        if (change === 'environment-source') process.env.GOODVIBES_CONNECTED_HOST_TOKEN = secret.token;
-        if (change === 'close-reopen') { view.close(); view.selectProject('p'); view.open(); }
-        release(); expect(await pending).toBeUndefined();
-        expect(f.requests).toEqual(['/api/control-plane/auth']);
-      } finally { release(); view.close(); f.close(); }
     });
   }
 });

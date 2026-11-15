@@ -1,7 +1,6 @@
 import { nativeConversationContinuationSchema } from './native-continuation-context.js';
 import { array, discriminatedUnion, enum as enumSchema, literal, NEVER, number, strictObject, string, union, unknown as unknownSchema, type z } from 'zod/v4';
 import { nativeConversationSpanSchema, nativeConversationProposalRevision, validateNativeConversationProposal } from './native-intake-types.js';
-import { NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES } from './native-submission-wire.js';
 import { LEGACY_IMPORT_MAX_BYTES, validateLegacyWorkLedgerManifest, type LegacyMigrationManifest } from './legacy-import.js';
 
 const id = string().min(1).max(200);
@@ -156,12 +155,6 @@ export const workLedgerCommandSchema = discriminatedUnion('type', [
           || new Set(extraction.judgmentDecisionIds).size !== extraction.judgmentDecisionIds.length
           || JSON.stringify(proposal.spans.map(span => command.goal.slice(span.start, span.end))) !== JSON.stringify(command.criteria)) throw new Error();
       } catch { context.addIssue({ code: 'custom', message: 'Extracted native source does not match its exact input ranges' }); }
-    }
-    // Match the explicit input boundary; individually bounded host metadata and
-    // display text must not consume the caller's accepted source-text budget.
-    const input = { requestId: command.requestId, inputId: command.source.inputId, expectedRevision: command.expectedRevision, goal: command.goal, criteria: command.criteria };
-    if (new TextEncoder().encode(JSON.stringify(input)).byteLength > NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES) {
-      context.addIssue({ code: 'custom', message: 'Native submission input exceeds the request byte limit' });
     }
   }
 });

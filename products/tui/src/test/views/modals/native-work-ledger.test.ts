@@ -16,10 +16,10 @@ const snapshot = (projectId = 'host-project', cursor = 0): WorkLedgerReadSnapsho
 }] });
 function fixture() {
   const calls: string[] = []; let value = snapshot(); let listener: (() => void) | undefined;
-  let unavailable: ((error: Error) => void) | undefined; let disposed = 0;
-  const client: WorkLedgerReadClient = { projectId: 'host-project', readSnapshot: async () => { calls.push('snapshot'); return value; }, history: async cursor => { calls.push(`history:${cursor}`); return []; }, subscribe: cb => { calls.push('subscribe'); listener = () => cb(value); return () => { calls.push('unsubscribe'); }; }, dispose: () => { disposed++; } };
-  const selection: NativeWorkLedgerSelection = { available: true, identity: 'host-A', projectId: client.projectId, bind: cb => { unavailable = cb; return { available: true, client }; } };
-  return { calls, client, selection, update: (v: WorkLedgerReadSnapshot) => { value = v; listener?.(); }, fail: (reason: string) => unavailable?.(new Error(reason)), disposed: () => disposed };
+  let unavailable: ((reason: string) => void) | undefined; let disposed = 0;
+  const client: WorkLedgerReadClient = { projectId: 'host-project', readSnapshot: async () => { calls.push('snapshot'); return value; }, history: async cursor => { calls.push(`history:${cursor}`); return []; }, subscribe: (cb, onUnavailable) => { calls.push('subscribe'); listener = () => cb(value); unavailable = onUnavailable; return () => { calls.push('unsubscribe'); }; }, dispose: () => { disposed++; } };
+  const selection: NativeWorkLedgerSelection = { available: true, identity: 'host-A', projectId: client.projectId, bind: () => ({ available: true, client }) };
+  return { calls, client, selection, update: (v: WorkLedgerReadSnapshot) => { value = v; listener?.(); }, fail: (reason: string) => unavailable?.(reason), disposed: () => disposed };
 }
 function render(modal: ConfigModal): string { return frameFromLayer(renderConfigModal(modal, 180, 45), 180, 45).map(line => line.map(cell => cell.char).join('')).join('\n'); }
 describe('native work ledger read-only surface', () => {
@@ -237,7 +237,7 @@ test('real native modal actions target the selected ledger row, display typed pr
     calls.push(action); expect(identity).toEqual({ workId: 'work-1', attemptId: 'attempt-1', expectedRevision: { work: 3, criteria: 2, attempt: 2 } });
     return { kind: 'execution', projectId: 'host-project', ...identity, currentRevision: identity.expectedRevision, currentAttempt: true, stale: false, state: 'launch-claimed', recovery: 'required', receipt: { contractId: 'contract-modal', ownerAgentId: 'worker-modal' }, progress: { status: 'running', sessionMode: true, semanticState: 'deferred', stage: 'verify', retrying: true, units: { total: 2, passed: 1, failed: 0 }, criteria: { total: 1, met: 0, unmet: 0, unshown: 1 } } };
   };
-  const selection: NativeWorkLedgerSelection = { ...f.selection, bind: fail => ({ ...f.selection.bind(fail), execution: { start: invoke('start'), status: invoke('status'), cancel: invoke('cancel'), resume: invoke('resume'), dispose() { calls.push('dispose'); } } }) };
+  const selection: NativeWorkLedgerSelection = { ...f.selection, bind: () => ({ ...f.selection.bind(), execution: { start: invoke('start'), status: invoke('status'), cancel: invoke('cancel'), resume: invoke('resume'), dispose() { calls.push('dispose'); } } }) };
   const surface = createNativeWorkLedgerModalSurface(() => selection); const modal = new ConfigModal(); modal.open(surface); await tick();
   const route = { configModal: modal, requestRender() {}, handleEscape: () => modal.close() };
   expect(calls).toEqual([]); modal.moveDown();
@@ -258,7 +258,7 @@ test('a captured old-host control row cannot dispatch after replacement, even fo
   const f = fixture(); let calls = 0;
   const execute = async () => { calls++; throw new Error('must not dispatch'); };
   const execution = { start: execute, status: execute, cancel: execute, resume: execute, dispose() {} };
-  let selection: NativeWorkLedgerSelection = { ...f.selection, bind: fail => ({ ...f.selection.bind(fail), execution }) };
+  let selection: NativeWorkLedgerSelection = { ...f.selection, bind: () => ({ ...f.selection.bind(), execution }) };
   const surface = createNativeWorkLedgerModalSurface(() => selection); const modal = new ConfigModal(); modal.open(surface); await tick();
   const row = surface.buildView().tabs[0]!.rows.find(row => row.selectable)!;
   selection = { ...selection, identity: 'replacement-host' }; surface.buildView(); await tick();
@@ -273,7 +273,7 @@ test('first status/cancel stays on the displayed attempt if a fresh read observe
       captured.push(identity.attemptId);
       return { kind: 'execution', projectId: 'host-project', ...identity, currentRevision: null, currentAttempt: false, stale: true, state: 'launch-claimed', recovery: 'required', receipt: null, progress: null };
     };
-    const selection: NativeWorkLedgerSelection = { ...f.selection, bind: fail => ({ ...f.selection.bind(fail), execution: { start: invoke, status: invoke, cancel: invoke, resume: invoke, dispose() {} } }) };
+    const selection: NativeWorkLedgerSelection = { ...f.selection, bind: () => ({ ...f.selection.bind(), execution: { start: invoke, status: invoke, cancel: invoke, resume: invoke, dispose() {} } }) };
     const surface = createNativeWorkLedgerModalSurface(() => selection); const modal = new ConfigModal(); modal.open(surface); await tick(); modal.moveDown();
     expect(modal.getSelectedRow()?.label).toContain('status/cancel attempt attempt-1');
     const next = snapshot(); f.client.readSnapshot = async () => ({ ...next, works: next.works.map(view => ({ ...view, work: { ...view.work, currentAttemptId: 'attempt-new' }, attempt: { ...view.attempt!, id: 'attempt-new' } })) });
@@ -293,7 +293,7 @@ test('native modal renders intent variants honestly with stable rows and no impl
         : { ...common, kind: 'pending-intent', state, recovery: state === 'admitting' ? 'pending' : 'required' };
     }, dispose() {},
   };
-  const surface = createNativeWorkLedgerModalSurface(() => ({ ...f.selection, bind: fail => ({ ...f.selection.bind(fail), execution }) }));
+  const surface = createNativeWorkLedgerModalSurface(() => ({ ...f.selection, bind: () => ({ ...f.selection.bind(), execution }) }));
   const modal = new ConfigModal(); modal.open(surface); await tick(); modal.moveDown(); const ids = surface.buildView().tabs[0]!.rows.map(row => row.id);
   try {
     for (const [next, label] of [['admitting', 'Admission pending'], ['refused', 'Admission refused'], ['cancelled', 'Cancelled before admission']] as const) {

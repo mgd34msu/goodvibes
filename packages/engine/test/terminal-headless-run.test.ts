@@ -231,7 +231,6 @@ describe('headless final frame', () => {
 
 describe('headless failure cause', () => {
   test('known failures map to non-secret cause codes', () => {
-    expect(nativeHeadlessFailureCause(new NativeIntakeJournalError('journal_limit'))).toBe('journal_limit');
     expect(nativeHeadlessFailureCause(new NativeIntakeJournalError('conflict'))).toBe('journal_conflict');
     expect(nativeHeadlessFailureCause(new NativeIntakeJournalError('invalid_journal'))).toBe('journal');
     expect(nativeHeadlessFailureCause(new Error('Native intake requires an existing paired principal'))).toBe('principal');

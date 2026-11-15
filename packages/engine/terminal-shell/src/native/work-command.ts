@@ -33,7 +33,11 @@ export async function handleNativeIntakeCommand(
         ? intake.resume()
         : intake.cancel());
   context.print(nativeConversationIntakeLines(result).join('\n'));
-  if (result?.turnReady || (allowHostedDispatch && result?.hostedTurn)) await context.dispatchNativeIntakeTurn?.(result);
+  if (result?.turnReady || (allowHostedDispatch && result?.hostedTurn)) {
+    await context.dispatchNativeIntakeTurn?.(result);
+    // A local turn dispatched here has ended: its intake record has nothing left to fence.
+    if (result.turnReady && context.dispatchNativeIntakeTurn) await result.finishTurn?.();
+  }
   return true;
 }
 export async function handleNativeSubmissionCommand(

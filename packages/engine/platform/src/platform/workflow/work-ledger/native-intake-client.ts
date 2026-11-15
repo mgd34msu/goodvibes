@@ -1,7 +1,6 @@
 import { captureNativeConversationContinuation, type NativeConversationContinuation } from './native-continuation-context.js';
 import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
 import {
-  NATIVE_CONVERSATION_INTAKE_MAX_REQUEST_BYTES, NATIVE_CONVERSATION_INTAKE_MAX_RESPONSE_BYTES,
   nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeLookupRequestSchema,
   nativeConversationIntakeTransitionRequestSchema, nativeConversationIntakeResultSchema,
   nativeConversationIntakeLookupResultSchema, nativeConversationIntakeWorkReceiptSchema,
@@ -55,10 +54,6 @@ export class NativeConversationIntakeClientError extends Error {
     this.name = 'NativeConversationIntakeClientError';
   }
 }
-function bounded(value: unknown, limit: number): boolean {
-  try { const json = JSON.stringify(value); return typeof json === 'string' && new TextEncoder().encode(json).byteLength <= limit; }
-  catch { return false; }
-}
 const MAX_REMEMBERED_SOURCES = 256;
 type Operation = 'capture' | 'get' | 'admit' | 'resume' | 'cancel';
 type Request = NativeConversationIntakeCaptureRequest | NativeConversationIntakeLookupRequest | NativeConversationIntakeTransitionRequest;
@@ -106,7 +101,6 @@ export function createOperatorNativeConversationIntakeClient(client: Pick<Operat
         cancelled,
       ]);
       active(controller.signal);
-      if (!bounded(value, NATIVE_CONVERSATION_INTAKE_MAX_RESPONSE_BYTES)) throw new NativeConversationIntakeClientError('invalid_response');
       return value;
     } finally {
       controller.signal.removeEventListener('abort', cancel);
@@ -138,7 +132,7 @@ export function createOperatorNativeConversationIntakeClient(client: Pick<Operat
   async function transition(operation: 'admit' | 'resume' | 'cancel', input: NativeConversationIntakeTransitionRequest, options: OperatorNativeConversationIntakeOptions): Promise<NativeConversationIntakeResult> {
     active(options.signal);
     const parsed = nativeConversationIntakeTransitionRequestSchema.safeParse(input);
-    if (!parsed.success || !bounded(input, NATIVE_CONVERSATION_INTAKE_MAX_REQUEST_BYTES)) throw new NativeConversationIntakeClientError('invalid_request');
+    if (!parsed.success) throw new NativeConversationIntakeClientError('invalid_request');
     const identity = { ...parsed.data };
     const result = parseResult(await invoke(operation, parsed.data, options));
     active(options.signal); validate(result, identity);
@@ -149,7 +143,7 @@ export function createOperatorNativeConversationIntakeClient(client: Pick<Operat
     async capture(input: NativeConversationIntakeCaptureRequest, options: OperatorNativeConversationIntakeOptions = {}) {
       active(options.signal);
       const parsed = nativeConversationIntakeCaptureRequestSchema.safeParse(input);
-      if (!parsed.success || !bounded(input, NATIVE_CONVERSATION_INTAKE_MAX_REQUEST_BYTES)) throw new NativeConversationIntakeClientError('invalid_request');
+      if (!parsed.success) throw new NativeConversationIntakeClientError('invalid_request');
       const identity = nativeConversationIntakeCaptureRequestSchema.parse(parsed.data);
       const result = parseResult(await invoke('capture', parsed.data, options));
       active(options.signal); validate(result, identity); eligible(result); return result;
@@ -157,7 +151,7 @@ export function createOperatorNativeConversationIntakeClient(client: Pick<Operat
     async get(input: NativeConversationIntakeLookupRequest, options: OperatorNativeConversationIntakeOptions = {}) {
       active(options.signal);
       const parsed = nativeConversationIntakeLookupRequestSchema.safeParse(input);
-      if (!parsed.success || !bounded(input, NATIVE_CONVERSATION_INTAKE_MAX_REQUEST_BYTES)) throw new NativeConversationIntakeClientError('invalid_request');
+      if (!parsed.success) throw new NativeConversationIntakeClientError('invalid_request');
       const identity = { ...parsed.data };
       const result = nativeConversationIntakeLookupResultSchema.safeParse(await invoke('get', parsed.data, options));
       active(options.signal);
@@ -185,7 +179,6 @@ export function createOperatorNativeConversationIntakeClient(client: Pick<Operat
             timer = setTimeout(() => { controller.abort(); reject(new NativeConversationIntakeClientError('invalid_turn_permit')); }, 10_000);
           });
           const current = await Promise.race([invokeOperator<unknown>('workLedger.intake.get', { inputId: source.sourceRef.inputId }, { signal: controller.signal }), timeout]);
-          if (!bounded(current, NATIVE_CONVERSATION_INTAKE_MAX_RESPONSE_BYTES)) throw new NativeConversationIntakeClientError('invalid_turn_permit');
           const parsed = nativeConversationIntakeResultSchema.safeParse(current);
           if (!parsed.success || parsed.data.kind !== 'turn' || JSON.stringify(parsed.data) !== JSON.stringify(source)) {
             throw new NativeConversationIntakeClientError('invalid_turn_permit');

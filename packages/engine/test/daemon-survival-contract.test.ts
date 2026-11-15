@@ -257,7 +257,11 @@ function statusHandlersOverStore(store: DaemonReceiptStore) {
     parseOptionalJsonBody: async () => null,
     requireAdmin: () => null,
     requireAuthenticatedSession: () => ({ username: 'tester', roles: ['admin'] }),
-    collectReceipts: () => store.consumeUndelivered().map(({ id, text, at }) => ({ id, text, at })),
+    collectReceipts: () => {
+      const offered = store.peekUndelivered().map(({ id, text, at }) => ({ id, text, at }));
+      store.markDelivered(new Set(offered.map((receipt) => receipt.id)));
+      return offered;
+    },
     peekReceipts: () => store.peekUndelivered().map(({ id, text, at }) => ({ id, text, at })),
     acknowledgeReceipts: (ids) => store.markDelivered(new Set(ids)),
   });
@@ -361,14 +365,15 @@ describe('daemon receipts surfaced on next surface connect', () => {
 
       // A fresh store instance (daemon restart) still has the receipt pending.
       const reloaded = new DaemonReceiptStore(path, clock);
-      const delivered = reloaded.consumeUndelivered();
+      const delivered = reloaded.peekUndelivered();
       expect(delivered).toHaveLength(1);
       expect(delivered[0]!.text).toBe(`restarted after a crash at ${formatReceiptTime(at)}`);
+      reloaded.markDelivered(new Set(delivered.map((receipt) => receipt.id)));
 
       // Second surface connect: nothing left to surface.
-      expect(reloaded.consumeUndelivered()).toEqual([]);
+      expect(reloaded.peekUndelivered()).toEqual([]);
       const again = new DaemonReceiptStore(path, clock);
-      expect(again.consumeUndelivered()).toEqual([]);
+      expect(again.peekUndelivered()).toEqual([]);
       expect(again.list()).toHaveLength(1);
     } finally {
       rmSync(scratch, { recursive: true, force: true });

@@ -611,6 +611,7 @@ export function createDaemonFacadeCollaborators(
     authToken: options.authToken,
     surfaceDeliveryEnabled: options.surfaceDeliveryEnabled,
     recordDeliveryAttempt: (entry) => recordSurfaceDeliveryAttempt(runtime, entry, surfaceDeliveryStartedAt),
+    channelPolicy: runtime.channelPolicy,
   });
   // Every reply the pipeline could not put on a channel becomes a visible
   // failed delivery rather than an absence.

@@ -160,16 +160,6 @@ describe('daemon receipts', () => {
     return { state, io };
   }
 
-  test('a receipt is still handed over when it could not be saved as delivered', () => {
-    const { state, io } = memoryIo();
-    const store = new DaemonReceiptStore('/receipts.json', { io, now: () => 1_000 });
-    store.record('updated to 3.3.0');
-    state.failWrites = 1;
-    const consumed = store.consumeUndelivered();
-    expect(consumed.map((receipt) => receipt.text)).toEqual(['updated to 3.3.0']);
-    expect(JSON.parse(state.contents!)[0].deliveredAt).toBeUndefined();
-  });
-
   test('a receipt that cannot be saved is kept in memory rather than thrown away', () => {
     const { state, io } = memoryIo();
     const store = new DaemonReceiptStore('/receipts.json', { io, now: () => 1_000 });
@@ -195,13 +185,15 @@ describe('owner alert', () => {
   test('a route whose delivery throws does not stop the next route from being tried', async () => {
     const tried: string[] = [];
     const result = await deliverOwnerAlert(
-      { listBindings: () => [binding('first', 'slack'), binding('second', 'ntfy')] } as unknown as RouteBindingManager,
+      { listBindings: () => [binding('first', 'ntfy'), binding('second', 'ntfy')] } as unknown as RouteBindingManager,
       {
         deliverSurfaceNotice: async (route) => {
           tried.push(route!.id);
           if (route!.id === 'first') throw new Error("Cannot read properties of undefined (reading 'responseUrl')");
           return { delivered: true };
         },
+        channelOwner: () => 'owner',
+        recordOwnerReceipt: () => {},
       },
       null,
       'the update failed',

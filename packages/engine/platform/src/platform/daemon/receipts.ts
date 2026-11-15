@@ -1,16 +1,18 @@
 /**
  * Daemon receipts: one-line, human-readable records of daemon-side events
  * that happened while no surface was watching ("updated from X to Y at
- * HH:MM", "restarted after a crash at HH:MM").
+ * 2026-11-15 03:12", "restarted after a crash at ...").
  *
  * Each receipt is written to the daemon log the moment it is recorded, and
- * persisted so the NEXT surface that explicitly consumes sees it exactly
- * once: a /status read that passes `?receipts=consume` receives undelivered
- * receipts and marks them delivered. A plain /status read (identity probe,
- * keepalive, version poll) neither receives nor consumes receipts, so a
- * non-rendering reader can never eat one before a rendering surface.
+ * persisted until a surface shows it: a /status read with `?receipts=peek`
+ * receives the undelivered receipts without marking them, and the reader
+ * names the ones it put on screen with `?receipts=ack`. A response lost in
+ * transit leaves them with the daemon for the next reader. A plain /status
+ * read (identity probe, keepalive, version poll) neither receives nor marks
+ * receipts.
  */
 import { existsSync, readFileSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { isRecord } from '../utils/record-coerce.js';
@@ -78,12 +80,36 @@ function parseReceipts(raw: string | null): ParsedReceiptFile {
   return { receipts, unreadable: false, droppedEntries: parsed.length - receipts.length };
 }
 
-/** Formats a timestamp as the local HH:MM wall-clock time for receipt text. */
+/**
+ * Formats a timestamp as the local date and wall-clock time for receipt text
+ * ("2026-11-15 03:12"). A receipt can wait up to two weeks for a surface, so
+ * the time of day alone would not say which day it was.
+ */
 export function formatReceiptTime(timestamp: number): string {
   const date = new Date(timestamp);
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${hours}:${minutes}`;
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** Where a daemon keeps its receipts. */
+export function daemonReceiptsPath(configManager: { getControlPlaneConfigDir(): string }): string {
+  return join(configManager.getControlPlaneConfigDir(), 'control-plane', 'daemon-receipts.json');
+}
+
+const storesByPath = new Map<string, DaemonReceiptStore>();
+
+/**
+ * The one receipt store for a receipts file in this process. The lifecycle
+ * runtime and the owner-alert fallback both record into it, so neither holds
+ * a stale copy that would overwrite the other's lines.
+ */
+export function daemonReceiptStoreAt(path: string): DaemonReceiptStore {
+  let store = storesByPath.get(path);
+  if (!store) {
+    store = new DaemonReceiptStore(path);
+    storesByPath.set(path, store);
+  }
+  return store;
 }
 
 export class DaemonReceiptStore {
@@ -174,25 +200,6 @@ export class DaemonReceiptStore {
   /** All receipts, newest last (delivered and undelivered). */
   list(): readonly DaemonReceipt[] {
     return this.receipts;
-  }
-
-  /**
-   * Undelivered receipts for a consuming /status read (`?receipts=consume`);
-   * marks them delivered so a receipt is surfaced to the first CONSUMING
-   * reader exactly once. Callers serving a non-consuming read must not call
-   * this, that is what keeps identity probes receipt-neutral.
-   */
-  consumeUndelivered(): readonly DaemonReceipt[] {
-    const undelivered = this.receipts.filter((receipt) => receipt.deliveredAt === undefined);
-    if (undelivered.length === 0) return [];
-    const deliveredAt = this.now();
-    const deliveredIds = new Set(undelivered.map((receipt) => receipt.id));
-    this.receipts = this.receipts.map((receipt) =>
-      deliveredIds.has(receipt.id) ? { ...receipt, deliveredAt } : receipt);
-    // A failed write must not hide the receipts from this reader: the disk keeps
-    // them undelivered, so the worst outcome is one repeat after a restart.
-    this.persistOrLog();
-    return undelivered;
   }
 
   /** Undelivered receipts, left undelivered until {@link markDelivered} names them. */

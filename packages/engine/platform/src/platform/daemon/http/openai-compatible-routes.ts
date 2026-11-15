@@ -4,6 +4,7 @@ import type { ToolCall, ToolDefinition } from '../../types/tools.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { isRecord } from '../../utils/record-coerce.js';
 import { resolveModelReference } from '../../providers/model-id-resolution.js';
+import { serviceFailureStatus } from './error-response.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -29,6 +30,61 @@ interface ChatCompletionRequest {
   readonly max_tokens?: unknown | undefined;
   readonly max_completion_tokens?: unknown | undefined;
   readonly tools?: unknown | undefined;
+  readonly tool_choice?: unknown | undefined;
+  readonly response_format?: unknown | undefined;
+  readonly n?: unknown | undefined;
+  readonly stop?: unknown | undefined;
+  readonly logprobs?: unknown | undefined;
+  readonly reasoning_effort?: unknown | undefined;
+}
+
+/**
+ * Sampling options the providers behind this route do not take. Leaving one
+ * out changes how an answer is sampled, not what kind of answer comes back,
+ * so the request is served and the response names them in
+ * `x-goodvibes-ignored-params`.
+ */
+const IGNORED_SAMPLING_PARAMS = ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty', 'seed', 'logit_bias', 'top_logprobs'] as const;
+const IGNORED_PARAMS_HEADER = 'x-goodvibes-ignored-params';
+
+/**
+ * The first option that would change what the answer is and that this route
+ * cannot apply, as an OpenAI-shaped 400 naming it; null when every option is
+ * applied or safely ignored.
+ */
+function refuseUnappliedOption(input: ChatCompletionRequest): Response | null {
+  const unsupported = (param: string, detail: string) => openAIError(`${detail} Remove "${param}" and resend.`, 400, 'invalid_request_error', 'unsupported_parameter', param);
+  if (input.response_format !== undefined && input.response_format !== null
+    && !(isRecord(input.response_format) && input.response_format.type === 'text')) {
+    return unsupported('response_format', 'A structured response format is not applied by this endpoint.');
+  }
+  if (input.tool_choice !== undefined && input.tool_choice !== null && input.tool_choice !== 'auto' && input.tool_choice !== 'none') {
+    return unsupported('tool_choice', 'Only tool_choice "auto" or "none" is applied by this endpoint.');
+  }
+  if (input.n !== undefined && input.n !== null && input.n !== 1) {
+    return unsupported('n', 'This endpoint returns one choice per request.');
+  }
+  if (input.stop !== undefined && input.stop !== null && !(Array.isArray(input.stop) && input.stop.length === 0)) {
+    return unsupported('stop', 'Stop sequences are not applied by this endpoint.');
+  }
+  if (input.logprobs === true) {
+    return unsupported('logprobs', 'Log probabilities are not returned by this endpoint.');
+  }
+  return null;
+}
+
+function ignoredParams(input: JsonRecord): string[] {
+  return IGNORED_SAMPLING_PARAMS.filter((param) => input[param] !== undefined && input[param] !== null);
+}
+
+/** The OpenAI error type for a provider failure's HTTP status. */
+function openAIErrorType(status: number): string {
+  if (status === 401) return 'authentication_error';
+  if (status === 403) return 'permission_error';
+  if (status === 404) return 'not_found_error';
+  if (status === 429) return 'rate_limit_error';
+  if (status >= 400 && status < 500) return 'invalid_request_error';
+  return 'server_error';
 }
 
 const OPENAI_COMPAT_PATH_PREFIX = '/v1';
@@ -97,7 +153,10 @@ async function handleChatCompletions(
     return openAIError(summarizeError(error), 400, 'invalid_request_error', 'model_not_found');
   }
 
-  let prepared: { readonly messages: ProviderMessage[]; readonly systemPrompt?: string | undefined; readonly tools?: ToolDefinition[] | undefined };
+  const refused = refuseUnappliedOption(parsed);
+  if (refused) return refused;
+
+  let prepared: PreparedChatRequest;
   try {
     prepared = prepareChatRequest(parsed);
   } catch (error) {
@@ -105,28 +164,47 @@ async function handleChatCompletions(
   }
 
   const maxTokens = readMaxTokens(parsed);
+  const ignored = ignoredParams(body);
+  const headers: Record<string, string> = ignored.length > 0 ? { [IGNORED_PARAMS_HEADER]: ignored.join(',') } : {};
   if (parsed.stream === true) {
     return streamChatCompletion({
       request,
       resolved,
       prepared,
       maxTokens,
+      headers,
     });
   }
 
   try {
     const response = await resolved.provider.chat({
-      model: resolved.modelId,
-      messages: prepared.messages,
-      ...(prepared.tools && prepared.tools.length > 0 ? { tools: prepared.tools } : {}),
-      ...(prepared.systemPrompt ? { systemPrompt: prepared.systemPrompt } : {}),
-      ...(maxTokens !== undefined ? { maxTokens } : {}),
+      ...chatOptions(resolved, prepared, maxTokens),
       signal: request.signal,
     });
-    return Response.json(buildChatCompletionResponse(resolved.responseModel, response));
+    return Response.json(buildChatCompletionResponse(resolved.responseModel, response), { headers });
   } catch (error) {
-    return openAIError(summarizeError(error), 500, 'server_error', 'provider_error');
+    // The provider's own status is kept, so a client does not retry a 400 or 401 it cannot fix by retrying.
+    const status = serviceFailureStatus(error, 502);
+    return openAIError(summarizeError(error), status, openAIErrorType(status), 'provider_error');
   }
+}
+
+interface PreparedChatRequest {
+  readonly messages: ProviderMessage[];
+  readonly systemPrompt?: string | undefined;
+  readonly tools?: ToolDefinition[] | undefined;
+  readonly reasoningEffort?: string | undefined;
+}
+
+function chatOptions(resolved: ResolvedModel, prepared: PreparedChatRequest, maxTokens: number | undefined) {
+  return {
+    model: resolved.modelId,
+    messages: prepared.messages,
+    ...(prepared.tools && prepared.tools.length > 0 ? { tools: prepared.tools } : {}),
+    ...(prepared.systemPrompt ? { systemPrompt: prepared.systemPrompt } : {}),
+    ...(prepared.reasoningEffort ? { reasoningEffort: prepared.reasoningEffort } : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+  };
 }
 
 function resolveModel(
@@ -165,11 +243,7 @@ function resolveModel(
   throw new Error(`Model '${raw}' not found.`);
 }
 
-function prepareChatRequest(input: ChatCompletionRequest): {
-  readonly messages: ProviderMessage[];
-  readonly systemPrompt?: string | undefined;
-  readonly tools?: ToolDefinition[] | undefined;
-} {
+function prepareChatRequest(input: ChatCompletionRequest): PreparedChatRequest {
   const systemParts: string[] = [];
   const messages: ProviderMessage[] = [];
 
@@ -213,10 +287,13 @@ function prepareChatRequest(input: ChatCompletionRequest): {
     throw new Error(`Unsupported message role: ${role}`);
   }
 
+  const reasoningEffort = readString(input.reasoning_effort);
   return {
     messages,
     ...(systemParts.length > 0 ? { systemPrompt: systemParts.join('\n\n') } : {}),
-    ...(Array.isArray(input.tools) ? { tools: normalizeTools(input.tools) } : {}),
+    // tool_choice "none" is applied by offering the model no tools.
+    ...(Array.isArray(input.tools) && input.tool_choice !== 'none' ? { tools: normalizeTools(input.tools) } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
   };
 }
 
@@ -332,8 +409,9 @@ function buildChatCompletionResponse(model: string, response: ChatResponse): Jso
 function streamChatCompletion(input: {
   readonly request: Request;
   readonly resolved: ResolvedModel;
-  readonly prepared: { readonly messages: ProviderMessage[]; readonly systemPrompt?: string | undefined; readonly tools?: ToolDefinition[] | undefined };
+  readonly prepared: PreparedChatRequest;
   readonly maxTokens?: number | undefined;
+  readonly headers: Record<string, string>;
 }): Response {
   const encoder = new TextEncoder();
   const id = `chatcmpl-goodvibes-${crypto.randomUUID()}`;
@@ -385,11 +463,7 @@ function streamChatCompletion(input: {
       };
 
       input.resolved.provider.chat({
-        model: input.resolved.modelId,
-        messages: input.prepared.messages,
-        ...(input.prepared.tools && input.prepared.tools.length > 0 ? { tools: input.prepared.tools } : {}),
-        ...(input.prepared.systemPrompt ? { systemPrompt: input.prepared.systemPrompt } : {}),
-        ...(input.maxTokens !== undefined ? { maxTokens: input.maxTokens } : {}),
+        ...chatOptions(input.resolved, input.prepared, input.maxTokens),
         signal: input.request.signal,
         onDelta,
       }).then((response) => {
@@ -410,7 +484,8 @@ function streamChatCompletion(input: {
             model: input.resolved.responseModel,
             choices: [{
               index: 0,
-              delta: { tool_calls: response.toolCalls.map(toOpenAIToolCall) },
+              // Stream consumers assemble tool calls by index.
+              delta: { tool_calls: response.toolCalls.map((call, index) => ({ index, ...toOpenAIToolCall(call) })) },
               logprobs: null,
               finish_reason: null,
             }],
@@ -427,7 +502,8 @@ function streamChatCompletion(input: {
         send('[DONE]');
         finish();
       }).catch((error) => {
-        send({ error: openAIErrorBody(summarizeError(error), 'server_error', 'provider_error') });
+        // The status line is already sent; the error chunk carries the provider's type.
+        send({ error: openAIErrorBody(summarizeError(error), openAIErrorType(serviceFailureStatus(error, 502)), 'provider_error') });
         send('[DONE]');
         finish();
       }).catch(() => {});
@@ -439,6 +515,7 @@ function streamChatCompletion(input: {
 
   return new Response(stream, {
     headers: {
+      ...input.headers,
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache',
       connection: 'keep-alive',
@@ -474,12 +551,12 @@ function mapFinishReason(reason: ChatResponse['stopReason']): string {
   return 'stop';
 }
 
-function openAIError(message: string, status: number, type: string, code: string): Response {
-  return Response.json({ error: openAIErrorBody(message, type, code) }, { status });
+function openAIError(message: string, status: number, type: string, code: string, param: string | null = null): Response {
+  return Response.json({ error: openAIErrorBody(message, type, code, param) }, { status });
 }
 
-function openAIErrorBody(message: string, type: string, code: string): JsonRecord {
-  return { message, type, param: null, code };
+function openAIErrorBody(message: string, type: string, code: string, param: string | null = null): JsonRecord {
+  return { message, type, param, code };
 }
 
 function openAIErrorFromResponse(response: Response): Response {

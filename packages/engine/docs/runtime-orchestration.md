@@ -504,7 +504,21 @@ Set the client base URL to the daemon prefix, for example
 `http://127.0.0.1:3421/v1` (default control-plane port; configurable via `controlPlane.port`), and use the daemon bearer token as the API key.
 The route accepts `goodvibes/current` and provider-qualified registry keys such
 as `openai:gpt-5.4`. Streaming responses use
-OpenAI-style `text/event-stream` chunks ending with `data: [DONE]`.
+OpenAI-style `text/event-stream` chunks ending with `data: [DONE]`; a streamed
+tool call carries its `index`.
+
+What the route applies: `model`, `messages`, `stream`, `max_tokens` /
+`max_completion_tokens`, `tools`, `tool_choice` `"auto"` or `"none"` (none
+offers the model no tools), and `reasoning_effort`. An option that would change
+what kind of answer comes back and that the route cannot apply is refused with
+`400`, `code: "unsupported_parameter"` and `param` naming it: `response_format`
+other than `{"type":"text"}`, any other `tool_choice`, `n` other than 1, `stop`,
+and `logprobs: true`. Sampling options the providers do not take
+(`temperature`, `top_p`, `presence_penalty`, `frequency_penalty`, `seed`,
+`logit_bias`, `top_logprobs`) are served without them and listed in the
+`x-goodvibes-ignored-params` response header. A provider failure keeps the
+provider's own status (a context-too-long 400, a 401, a 429) with the matching
+OpenAI error type; one with no status is a `502`.
 
 This layer is intentionally narrow. It maps OpenAI-style requests to the active
 GoodVibes provider registry for direct provider calls; it is not a replacement

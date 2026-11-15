@@ -42,6 +42,22 @@ function stringRecord(value: unknown): Record<string, string> | undefined {
   return Object.fromEntries(entries);
 }
 
+/**
+ * A present field must have its documented shape; a wrong one is refused by
+ * name rather than saved as "none", which would replace what is stored.
+ */
+function readShaped<T>(
+  value: unknown,
+  field: string,
+  expectation: string,
+  read: (value: unknown) => T | undefined,
+): T | undefined | Response {
+  if (value === undefined || value === null) return undefined;
+  const parsed = read(value);
+  if (parsed !== undefined) return parsed;
+  return jsonErrorResponse({ error: `MCP server ${field} must be ${expectation}.`, code: 'INVALID_ARGUMENT', field }, { status: 400 });
+}
+
 function parseScope(value: unknown): McpConfigScope {
   return value === 'global' ? 'global' : 'project';
 }
@@ -61,12 +77,22 @@ function parseServerConfig(value: unknown): McpServerConfig | Response {
   if (command && url) {
     return jsonErrorResponse({ error: 'MCP server may set command (stdio) or url (HTTP), not both.' }, { status: 400 });
   }
+  const args = readShaped(value.args, 'args', 'an array of strings', stringArray);
+  if (args instanceof Response) return args;
+  const env = readShaped(value.env, 'env', 'an object of string values', stringRecord);
+  if (env instanceof Response) return env;
+  const headers = readShaped(value.headers, 'headers', 'an object of string values', stringRecord);
+  if (headers instanceof Response) return headers;
+  if (headers !== undefined && !url) {
+    return jsonErrorResponse({ error: 'MCP server headers are sent only to a url (HTTP) server; this server has a command.', code: 'INVALID_ARGUMENT', field: 'headers' }, { status: 400 });
+  }
   return {
     name: value.name.trim(),
     command,
     url,
-    args: stringArray(value.args) ?? [],
-    env: stringRecord(value.env),
+    args,
+    env,
+    headers,
     role: typeof value.role === 'string' ? value.role as McpServerConfig['role'] : undefined,
     trustMode: typeof value.trustMode === 'string' ? value.trustMode as McpServerConfig['trustMode'] : undefined,
     allowedPaths: stringArray(value.allowedPaths),
@@ -121,6 +147,7 @@ function redactServer(server: McpServerConfig): Record<string, unknown> {
     url: server.url ? redactMcpUrl(server.url) : null,
     args: redactMcpArgs(server.args ?? []),
     envKeys: Object.keys(server.env ?? {}).sort(),
+    headerKeys: Object.keys(server.headers ?? {}).sort(),
     role: server.role ?? null,
     trustMode: server.trustMode ?? null,
     allowedPaths: server.allowedPaths ?? [],
@@ -129,7 +156,7 @@ function redactServer(server: McpServerConfig): Record<string, unknown> {
 }
 
 /**
- * The same server record with its `env` VALUES included.
+ * The same server record with its `env` and `headers` VALUES included.
  *
  * Admin-only, and deliberately a separate route rather than a flag on the
  * redacted one: a reader has to ask for the values by name, so a surface that
@@ -151,6 +178,7 @@ function revealServer(server: McpServerConfig): Record<string, unknown> {
     url: server.url ?? null,
     args: [...(server.args ?? [])],
     env: { ...(server.env ?? {}) },
+    headers: { ...(server.headers ?? {}) },
   };
 }
 

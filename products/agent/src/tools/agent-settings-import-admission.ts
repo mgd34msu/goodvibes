@@ -80,25 +80,24 @@ export function createAgentSettingsImportProjector(context: CommandContext, fall
       const platform = context.platform, workspace = context.workspace;
       const config = platform.configManager, secrets = platform.secretsManager, subscriptions = platform.subscriptionManager;
       const builtin = config.getSchema(), host = config.getHostSettingsSchema();
-      const schemaMethods = [config.getSchema, config.getHostSettingsSchema];
       const assertSchema = bindSettingSchemaDescriptors([builtin, host]);
       const incarnation = config.getConfigurationIncarnation();
       const client = agentDaemonConfigClient(), clientRevision = agentDaemonConfigClientRevision();
       const clientImport = client?.preparedImport, ownsKey = client?.ownsKey;
-      const importMethods = clientImport && [clientImport.capture, clientImport.inspect, clientImport.assertCurrent];
       const session = modelReadingServicePath(context, ['session', 'runtime']), sessionId = modelReadingServicePath(session, ['sessionId']);
       const readingOwner = agentResearchSourceOwner(registry);
       const source = captureAgentWorkspaceTuiSettingsImport(context);
+      // What can move while the import waits: the request, the source files,
+      // the settings schema and owners, and the daemon client. This tool call
+      // is the import's one admission (the daemon does not judge it again).
       const assertSource = () => {
         if (request.args !== args || request.signal !== signal || request.assertCurrent !== assertRequestCurrent) throw new ToolInputProjectionError('stale');
         signal?.throwIfAborted(); assertModelReadingInputCurrent(args, argsJson); assertSchema(); source.assertCurrent();
         if (context.platform !== platform || context.workspace !== workspace || platform.configManager !== config
           || platform.secretsManager !== secrets || platform.subscriptionManager !== subscriptions
-          || config.getSchema !== schemaMethods[0] || config.getHostSettingsSchema !== schemaMethods[1]
           || config.getSchema() !== builtin || config.getHostSettingsSchema() !== host
           || agentDaemonConfigClient() !== client || agentDaemonConfigClientRevision() !== clientRevision
           || client?.ownsKey !== ownsKey || client?.preparedImport !== clientImport
-          || clientImport && (clientImport.capture !== importMethods?.[0] || clientImport.inspect !== importMethods?.[1] || clientImport.assertCurrent !== importMethods?.[2])
           || modelReadingServicePath(context, ['session', 'runtime']) !== session || modelReadingServicePath(session, ['sessionId']) !== sessionId
           || agentResearchSourceOwner(registry) !== readingOwner) throw new ToolInputProjectionError('stale');
       };

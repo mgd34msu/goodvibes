@@ -5,7 +5,8 @@ import type { ServiceRegistry } from '../config/service-registry.js';
 import type { AgentManager } from '../tools/agent/index.js';
 import type { SharedSessionBroker } from '../control-plane/index.js';
 import type { ChannelPluginRegistry, ChannelReplyPipeline, RouteBindingManager } from '../channels/index.js';
-import type { ChannelSurface } from '../channels/index.js';
+import type { ChannelPolicyManager, ChannelSurface } from '../channels/index.js';
+import { daemonReceiptStoreAt, daemonReceiptsPath } from './receipts.js';
 import type { DeliveredChannelReply, UndeliveredChannelReply } from '../channels/reply-pipeline.js';
 import type { SharedSessionSurfaceReplyBinding } from '../control-plane/session-intents.js';
 import { logger } from '../utils/logger.js';
@@ -108,6 +109,8 @@ interface DaemonSurfaceDeliveryContext {
   readonly surfaceDeliveryEnabled: (surface: DeliverySurface) => boolean;
   /** Records surface reply attempts in the shared delivery ledger. */
   readonly recordDeliveryAttempt?: SurfaceDeliveryLedgerRecorder | undefined;
+  /** Names each surface's owner, so an owner alert goes only to the owner's own conversations. */
+  readonly channelPolicy?: Pick<ChannelPolicyManager, 'getPolicy'> | undefined;
 }
 
 /** One entry the delivery ledger should show for a surface reply. */
@@ -362,6 +365,20 @@ export class DaemonSurfaceDeliveryHelper {
       return this.deliverSurfaceNotice(binding, '');
     }
     return this.deliverSurfaceNotice(binding, renderNoticeForSurface(notice, binding.surfaceKind), announces);
+  }
+
+  /**
+   * The surface's owner: the first user its channel policy admits, the same
+   * user surface control commands accept. Undefined when the surface names
+   * no user.
+   */
+  channelOwner(surface: string): string | undefined {
+    return this.context.channelPolicy?.getPolicy(surface as ChannelSurface).allowlistUserIds[0];
+  }
+
+  /** Keeps an owner alert that reached no conversation, for the next attached terminal or web UI to show. */
+  recordOwnerReceipt(text: string): void {
+    daemonReceiptStoreAt(daemonReceiptsPath(this.context.configManager)).record(text);
   }
 
   /**

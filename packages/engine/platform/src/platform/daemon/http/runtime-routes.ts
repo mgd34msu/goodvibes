@@ -1,15 +1,7 @@
 import { createDaemonRuntimeRouteHandlers as createDaemonApiRuntimeRouteHandlers } from '@goodvibes-jev/engine/daemon-api';
 import type { DaemonRuntimeRouteContext as PlatformDaemonRuntimeRouteContext } from '@goodvibes-jev/engine/daemon-api';
-import type {
-  AutomationDeliveryPolicy,
-  AutomationExternalContentSource,
-  AutomationFailurePolicy,
-  AutomationScheduleDefinition,
-  AutomationSessionTarget,
-  CreateAutomationJobInput,
-  UpdateAutomationJobInput,
-} from '../../automation/index.js';
-import type { ProviderModelRoutingPolicy } from '../../automation/types.js';
+import type { CreateAutomationJobInput, UpdateAutomationJobInput } from '../../automation/index.js';
+import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import {
   EXECUTION_FILESYSTEM_POLICIES,
   EXECUTION_NETWORK_POLICIES,
@@ -107,156 +99,190 @@ function isOptionalStringFrom(value: unknown, allowed: ReadonlySet<string>): val
   return value === undefined || isStringFrom(value, allowed);
 }
 
-function isAutomationScheduleDefinition(value: unknown): value is AutomationScheduleDefinition {
-  if (!isRecord(value) || typeof value.kind !== 'string') return false;
-  if (value.kind === 'at') return isFiniteNumber(value.at);
-  if (value.kind === 'every') {
-    return isFiniteNumber(value.intervalMs) && isOptionalFiniteNumber(value.anchorAt);
+/** The first field of a request body that does not have its documented shape. */
+export interface InvalidField {
+  readonly field: string;
+  readonly expectation: string;
+}
+
+/** Checks one field of an object at `path`; null when it is acceptable. */
+type FieldCheck = (record: Record<string, unknown>, path: string) => InvalidField | null;
+
+const at = (path: string, field: string): string => (path ? `${path}.${field}` : field);
+const choices = (allowed: ReadonlySet<string>): string => `one of ${[...allowed].join(', ')}`;
+
+function field(name: string, ok: (value: unknown) => boolean, expectation: string): FieldCheck {
+  return (record, path) => (ok(record[name]) ? null : { field: at(path, name), expectation });
+}
+const optionalString = (name: string) => field(name, isOptionalString, 'a string');
+const optionalBoolean = (name: string) => field(name, isOptionalBoolean, 'true or false (a JSON boolean)');
+const optionalNumber = (name: string) => field(name, isOptionalFiniteNumber, 'a finite number');
+const optionalStrings = (name: string) => field(name, isOptionalStringArray, 'an array of strings');
+const optionalOneOf = (name: string, allowed: ReadonlySet<string>) => field(name, (value) => isOptionalStringFrom(value, allowed), choices(allowed));
+const requiredOneOf = (name: string, allowed: ReadonlySet<string>) => field(name, (value) => isStringFrom(value, allowed), choices(allowed));
+
+function objectProblem(value: unknown, checks: readonly FieldCheck[], path: string): InvalidField | null {
+  if (!isRecord(value)) return { field: path, expectation: 'an object' };
+  for (const check of checks) {
+    const problem = check(value, path);
+    if (problem) return problem;
   }
-  if (value.kind === 'cron') {
-    return typeof value.expression === 'string'
-      && isOptionalString(value.timezone)
-      && isOptionalFiniteNumber(value.staggerMs);
-  }
-  return false;
+  return null;
 }
 
-function isProviderModelRoutingPolicy(value: unknown): value is ProviderModelRoutingPolicy {
-  return isRecord(value)
-    && isOptionalStringFrom(value.providerSelection, providerSelections)
-    && isOptionalStringFrom(value.providerFailurePolicy, providerFailurePolicies)
-    && isOptionalStringArray(value.fallbackModels);
+function optionalObject(name: string, checks: readonly FieldCheck[]): FieldCheck {
+  return (record, path) => (record[name] === undefined ? null : objectProblem(record[name], checks, at(path, name)));
 }
 
-function isAutomationSessionTarget(value: unknown): value is AutomationSessionTarget {
-  return isRecord(value)
-    && isStringFrom(value.kind, executionTargetKinds)
-    && isOptionalString(value.sessionId)
-    && isOptionalString(value.routeId)
-    && isOptionalString(value.threadId)
-    && isOptionalString(value.channelId)
-    && isOptionalStringFrom(value.surfaceKind, surfaceKinds)
-    && isOptionalString(value.pinnedSessionId)
-    && isOptionalBoolean(value.preserveThread)
-    && isOptionalBoolean(value.createIfMissing);
+function optionalObjectList(name: string, checks: readonly FieldCheck[]): FieldCheck {
+  return (record, path) => {
+    const value = record[name];
+    if (value === undefined) return null;
+    if (!Array.isArray(value)) return { field: at(path, name), expectation: 'an array of objects' };
+    for (const [index, entry] of value.entries()) {
+      const problem = objectProblem(entry, checks, `${at(path, name)}[${index}]`);
+      if (problem) return problem;
+    }
+    return null;
+  };
 }
 
-function isAutomationExternalContentSource(value: unknown): value is AutomationExternalContentSource {
-  if (typeof value === 'string') return externalContentKinds.has(value);
-  return isRecord(value)
-    && typeof value.kind === 'string'
-    && isOptionalString(value.id)
-    && isOptionalString(value.url)
-    && isOptionalString(value.routeId)
-    && isOptionalStringFrom(value.surfaceKind, surfaceKinds)
-    && (value.metadata === undefined || isRecord(value.metadata));
+const scheduleCheck = (required: boolean): FieldCheck => (record, path) => {
+  const value = record['schedule'];
+  const where = at(path, 'schedule');
+  if (value === undefined && !required) return null;
+  if (!isRecord(value)) return { field: where, expectation: 'an object with kind "at", "every" or "cron"' };
+  if (value.kind === 'at') return objectProblem(value, [field('at', isFiniteNumber, 'a time in milliseconds')], where);
+  if (value.kind === 'every') return objectProblem(value, [field('intervalMs', isFiniteNumber, 'a finite number of milliseconds'), optionalNumber('anchorAt')], where);
+  if (value.kind === 'cron') return objectProblem(value, [field('expression', (entry) => typeof entry === 'string', 'a cron expression string'), optionalString('timezone'), optionalNumber('staggerMs')], where);
+  return { field: at(where, 'kind'), expectation: 'one of at, every, cron' };
+};
+
+const EXECUTION_INTENT_CHECKS: readonly FieldCheck[] = [
+  optionalOneOf('riskClass', executionRiskClasses),
+  optionalBoolean('requiresApproval'),
+  optionalOneOf('networkPolicy', executionNetworkPolicies),
+  optionalOneOf('filesystemPolicy', executionFilesystemPolicies),
+];
+
+const DELIVERY_TARGET_CHECKS: readonly FieldCheck[] = [
+  requiredOneOf('kind', deliveryModes),
+  optionalOneOf('surfaceKind', surfaceKinds),
+  optionalString('address'),
+  optionalString('routeId'),
+  optionalString('label'),
+];
+
+const externalContentSourceCheck: FieldCheck = (record, path) => {
+  const value = record['externalContentSource'];
+  if (value === undefined) return null;
+  const where = at(path, 'externalContentSource');
+  if (typeof value === 'string') return externalContentKinds.has(value) ? null : { field: where, expectation: choices(externalContentKinds) };
+  return objectProblem(value, [
+    field('kind', (entry) => typeof entry === 'string', 'a string'),
+    optionalString('id'),
+    optionalString('url'),
+    optionalString('routeId'),
+    optionalOneOf('surfaceKind', surfaceKinds),
+    field('metadata', (entry) => entry === undefined || isRecord(entry), 'an object'),
+  ], where);
+};
+
+const JOB_FIELD_CHECKS: readonly FieldCheck[] = [
+  optionalString('description'),
+  optionalString('model'),
+  optionalString('provider'),
+  optionalStrings('fallbackModels'),
+  optionalObject('routing', [
+    optionalOneOf('providerSelection', providerSelections),
+    optionalOneOf('providerFailurePolicy', providerFailurePolicies),
+    optionalStrings('fallbackModels'),
+  ]),
+  optionalObject('executionIntent', EXECUTION_INTENT_CHECKS),
+  optionalObject('target', [
+    requiredOneOf('kind', executionTargetKinds),
+    optionalString('sessionId'),
+    optionalString('routeId'),
+    optionalString('threadId'),
+    optionalString('channelId'),
+    optionalOneOf('surfaceKind', surfaceKinds),
+    optionalString('pinnedSessionId'),
+    optionalBoolean('preserveThread'),
+    optionalBoolean('createIfMissing'),
+  ]),
+  optionalString('template'),
+  optionalOneOf('reasoningEffort', reasoningEfforts),
+  optionalString('thinking'),
+  optionalOneOf('wakeMode', wakeModes),
+  optionalNumber('timeoutMs'),
+  optionalStrings('toolAllowlist'),
+  optionalBoolean('autoApprove'),
+  optionalBoolean('allowUnsafeExternalContent'),
+  externalContentSourceCheck,
+  optionalBoolean('lightContext'),
+  optionalObject('delivery', [
+    optionalOneOf('mode', deliveryModes),
+    optionalObjectList('targets', DELIVERY_TARGET_CHECKS),
+    optionalObjectList('fallbackTargets', DELIVERY_TARGET_CHECKS),
+    optionalBoolean('includeSummary'),
+    optionalBoolean('includeTranscript'),
+    optionalBoolean('includeLinks'),
+    optionalString('replyToRouteId'),
+  ]),
+  optionalObject('failure', [
+    optionalOneOf('action', failureActions),
+    optionalNumber('maxConsecutiveFailures'),
+    optionalNumber('cooldownMs'),
+    optionalObject('retryPolicy', [
+      field('maxAttempts', isFiniteNumber, 'a finite number'),
+      field('delayMs', isFiniteNumber, 'a finite number'),
+      requiredOneOf('strategy', retryStrategies),
+      optionalNumber('maxDelayMs'),
+      optionalNumber('jitterMs'),
+    ]),
+    optionalString('deadLetterRouteId'),
+    optionalBoolean('disableAfterFailures'),
+    optionalString('notifyRouteId'),
+  ]),
+  optionalBoolean('enabled'),
+  optionalBoolean('deleteAfterRun'),
+];
+
+const CREATE_JOB_CHECKS: readonly FieldCheck[] = [
+  field('name', (value) => typeof value === 'string', 'a string'),
+  field('prompt', (value) => typeof value === 'string', 'a string'),
+  scheduleCheck(true),
+  ...JOB_FIELD_CHECKS,
+];
+
+const UPDATE_JOB_CHECKS: readonly FieldCheck[] = [
+  optionalString('expectedMutationRevision'),
+  optionalString('name'),
+  optionalString('prompt'),
+  scheduleCheck(false),
+  ...JOB_FIELD_CHECKS,
+];
+
+function refuseInvalidJob(problem: InvalidField): never {
+  throw new GatewayVerbError(`${problem.field} must be ${problem.expectation}. Nothing was changed.`, 'INVALID_ARGUMENT', 400, problem.field);
 }
 
-function isAutomationDeliveryTarget(value: unknown): value is AutomationDeliveryPolicy['targets'][number] {
-  return isRecord(value)
-    && isStringFrom(value.kind, deliveryModes)
-    && isOptionalStringFrom(value.surfaceKind, surfaceKinds)
-    && isOptionalString(value.address)
-    && isOptionalString(value.routeId)
-    && isOptionalString(value.label);
-}
-
-function isAutomationDeliveryTargetArray(value: unknown): value is AutomationDeliveryPolicy['targets'] {
-  return Array.isArray(value) && value.every(isAutomationDeliveryTarget);
-}
-
-function isPartialAutomationDeliveryPolicy(value: unknown): value is Partial<AutomationDeliveryPolicy> {
-  return isRecord(value)
-    && isOptionalStringFrom(value.mode, deliveryModes)
-    && (value.targets === undefined || isAutomationDeliveryTargetArray(value.targets))
-    && (value.fallbackTargets === undefined || isAutomationDeliveryTargetArray(value.fallbackTargets))
-    && isOptionalBoolean(value.includeSummary)
-    && isOptionalBoolean(value.includeTranscript)
-    && isOptionalBoolean(value.includeLinks)
-    && isOptionalString(value.replyToRouteId);
-}
-
-function isAutomationRetryPolicy(value: unknown): value is AutomationFailurePolicy['retryPolicy'] {
-  return isRecord(value)
-    && isFiniteNumber(value.maxAttempts)
-    && isFiniteNumber(value.delayMs)
-    && isStringFrom(value.strategy, retryStrategies)
-    && isOptionalFiniteNumber(value.maxDelayMs)
-    && isOptionalFiniteNumber(value.jitterMs);
-}
-
-function isPartialAutomationFailurePolicy(value: unknown): value is Partial<AutomationFailurePolicy> {
-  return isRecord(value)
-    && isOptionalStringFrom(value.action, failureActions)
-    && isOptionalFiniteNumber(value.maxConsecutiveFailures)
-    && isOptionalFiniteNumber(value.cooldownMs)
-    && (value.retryPolicy === undefined || isAutomationRetryPolicy(value.retryPolicy))
-    && isOptionalString(value.deadLetterRouteId)
-    && isOptionalBoolean(value.disableAfterFailures)
-    && isOptionalString(value.notifyRouteId);
-}
-
-function hasValidAutomationJobFields(input: Record<string, unknown>): boolean {
-  return isOptionalString(input.description)
-    && isOptionalString(input.model)
-    && isOptionalString(input.provider)
-    && isOptionalStringArray(input.fallbackModels)
-    && (input.routing === undefined || isProviderModelRoutingPolicy(input.routing))
-    && (input.executionIntent === undefined || isExecutionIntent(input.executionIntent))
-    && (input.target === undefined || isAutomationSessionTarget(input.target))
-    && isOptionalString(input.template)
-    && isOptionalStringFrom(input.reasoningEffort, reasoningEfforts)
-    && isOptionalString(input.thinking)
-    && isOptionalStringFrom(input.wakeMode, wakeModes)
-    && isOptionalFiniteNumber(input.timeoutMs)
-    && isOptionalStringArray(input.toolAllowlist)
-    && isOptionalBoolean(input.autoApprove)
-    && isOptionalBoolean(input.allowUnsafeExternalContent)
-    && (input.externalContentSource === undefined || isAutomationExternalContentSource(input.externalContentSource))
-    && isOptionalBoolean(input.lightContext)
-    && (input.delivery === undefined || isPartialAutomationDeliveryPolicy(input.delivery))
-    && (input.failure === undefined || isPartialAutomationFailurePolicy(input.failure))
-    && isOptionalBoolean(input.enabled)
-    && isOptionalBoolean(input.deleteAfterRun);
-}
-
-function isCreateAutomationJobInput(input: unknown): input is CreateAutomationJobInput {
-  return isRecord(input)
-    && typeof input.name === 'string'
-    && typeof input.prompt === 'string'
-    && isAutomationScheduleDefinition(input.schedule)
-    && hasValidAutomationJobFields(input);
-}
-
-function isUpdateAutomationJobInput(input: unknown): input is UpdateAutomationJobInput {
-  return isRecord(input)
-    && isOptionalString(input.expectedMutationRevision)
-    && isOptionalString(input.name)
-    && isOptionalString(input.prompt)
-    && (input.schedule === undefined || isAutomationScheduleDefinition(input.schedule))
-    && hasValidAutomationJobFields(input);
-}
-
+/** A create body with every field in its documented shape; otherwise a 400 naming the first field that is not. */
 export function parseCreateAutomationJobInput(input: Record<string, unknown>): CreateAutomationJobInput {
-  if (!isCreateAutomationJobInput(input)) {
-    throw new Error('Invalid automation job create payload from runtime route parser.');
-  }
-  return input;
+  const problem = objectProblem(input, CREATE_JOB_CHECKS, '');
+  if (problem) refuseInvalidJob(problem);
+  return input as unknown as CreateAutomationJobInput;
 }
 
+/** An update body with every present field in its documented shape; otherwise a 400 naming the first field that is not. */
 export function parseUpdateAutomationJobInput(input: Record<string, unknown>): UpdateAutomationJobInput {
-  if (!isUpdateAutomationJobInput(input)) {
-    throw new Error('Invalid automation job update payload from runtime route parser.');
-  }
-  return input;
+  const problem = objectProblem(input, UPDATE_JOB_CHECKS, '');
+  if (problem) refuseInvalidJob(problem);
+  return input as unknown as UpdateAutomationJobInput;
 }
 
 function isExecutionIntent(value: unknown): value is ExecutionIntent {
-  return isRecord(value)
-    && isOptionalStringFrom(value.riskClass, executionRiskClasses)
-    && isOptionalBoolean(value.requiresApproval)
-    && isOptionalStringFrom(value.networkPolicy, executionNetworkPolicies)
-    && isOptionalStringFrom(value.filesystemPolicy, executionFilesystemPolicies);
+  return objectProblem(value, EXECUTION_INTENT_CHECKS, 'executionIntent') === null;
 }
 
 function isRuntimeRouteSpawnAgentInput(input: PlatformSpawnAgentInput): input is RuntimeRouteSpawnAgentInput {

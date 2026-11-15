@@ -1,7 +1,11 @@
-/** Native private import ingress and independently recorded publication admission. */
-import { randomUUID } from 'node:crypto';
-import { lstatSync, realpathSync, statSync } from 'node:fs';
-import { dirname, isAbsolute } from 'node:path';
+/**
+ * The daemon side of a settings import: the credential is stored before the
+ * setting that points at it, each owner (secret store, config manager) does
+ * its own compare-and-write under its own lock, and the receipt names what was
+ * written. The import is admitted once, by the caller's own gate when the
+ * caller is an agent; a paired admin's request is not judged a second time
+ * here. The paired authority is read once, immediately before the write.
+ */
 import { createSettingsImportPreconditionHandler, type SettingsImportPreconditionFacts, type SettingsImportPreconditionHandler } from '@goodvibes-jev/engine/daemon-api';
 import type { ConfigManager, PreparedConfigMutation, PreparedConfigMutationTransition, PreparedConfigMutationReceipt } from '../../config/manager.js';
 import type { SecretsManager, PreparedSecretImport, SecretImportEntry } from '../../config/secrets.js';
@@ -10,11 +14,12 @@ import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-key
 import { isSecretRefInput } from '../../config/secret-refs.js';
 import { daemonSecretKeyFor } from '../../config/daemon-secret-keys.js';
 import { captureOwnedJson, snapshotJudgmentInput } from '../../gate/judgment-input.js';
-import { admitExternalRequest, type ExternalPermissionHost } from '../../permissions/external-request.js';
+import type { ExternalPermissionHost } from '../../permissions/external-request.js';
 import { confirmFileDurable } from '../../utils/atomic-json-store.js';
 import type { NativeExecutionAuthority, NativePairedSnapshot } from '../../security/http-auth.js';
 import type { DaemonControlPlaneHelper, SettingsAdminAuthority } from '../control-plane.js';
 import type { ServingSettingsAuthority } from './settings-precondition.js';
+import { missingScopes } from './route-helpers.js';
 
 export interface ServingSettingsImportAuthority extends ServingSettingsAuthority {
   readonly captureNativeExecutionAuthority: (req: Request) => NativeExecutionAuthority | null;
@@ -26,8 +31,7 @@ interface Prepared {
   readonly config: PreparedConfigMutation;
   readonly facts: SettingsImportPreconditionFacts;
   readonly host: ExternalPermissionHost;
-  readonly assertWorkspace: () => void;
-  readonly secret?: { readonly owner: ServingSettingsImportSecrets; readonly handle: PreparedSecretImport; readonly methods: readonly unknown[] };
+  readonly secret?: { readonly owner: ServingSettingsImportSecrets; readonly handle: PreparedSecretImport };
   transition?: PreparedConfigMutationTransition;
   finishSecret?: (assertCurrent: () => void) => PreparedConfigMutationReceipt;
   secretCompleted?: true;
@@ -41,28 +45,11 @@ interface Authority {
 }
 const SCOPE = 'write:config';
 function allowed(snapshot: NativePairedSnapshot | null): snapshot is NativePairedSnapshot {
-  return snapshot !== null && snapshot.kind === 'pairing-token' && (snapshot.scopes.includes('*') || snapshot.scopes.includes(SCOPE));
+  return snapshot !== null && snapshot.kind === 'pairing-token' && missingScopes(snapshot.scopes, [SCOPE]).length === 0;
 }
-function assertPrivateValuesAbsent(value: unknown, values: readonly string[]): void {
-  if (typeof value === 'string' && values.some(secret => value.includes(secret))) throw new Error('Native import private value in public facts');
-  if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) {
-    assertPrivateValuesAbsent(key, values); assertPrivateValuesAbsent(child, values);
-  }
-}
-function retainWorkspace(path: string | undefined): () => void {
-  if (!path || !isAbsolute(path)) throw new Error('Native import workspace unavailable');
-  const identity = (path: string) => {
-    const link = lstatSync(path, { bigint: true }), target = statSync(path, { bigint: true });
-    if (!target.isDirectory()) throw new Error('Native import workspace unavailable');
-    return [realpathSync(path), link.dev, link.ino, target.dev, target.ino,
-      ...(link.isSymbolicLink() ? [link.mtimeNs, link.ctimeNs] : [])].join(':');
-  };
-  const parents: { path: string; identity: string }[] = [];
-  for (let current = path;;) {
-    parents.push({ path: current, identity: identity(current) });
-    const parent = dirname(current); if (parent === current) break; current = parent;
-  }
-  return () => { for (const parent of parents) if (identity(parent.path) !== parent.identity) throw new Error('Native import workspace changed'); };
+function samePairedAuthority(current: NativePairedSnapshot, expected: NativePairedSnapshot): boolean {
+  return current.principalId === expected.principalId && current.tokenId === expected.tokenId
+    && current.authorityId === expected.authorityId && current.authorityRevision === expected.authorityRevision;
 }
 export function createServingSettingsImportPrecondition(input: {
   readonly manager: ConfigManager;
@@ -72,79 +59,47 @@ export function createServingSettingsImportPrecondition(input: {
   readonly assertServingOwner: () => void;
 }): SettingsImportPreconditionHandler {
   const { manager, authority } = input;
-  const authorityMethods = [authority.settingsLifetime, authority.captureSettingsAdminAuthority, authority.withSettingsAdminAuthority,
-    authority.captureNativeExecutionAuthority, authority.extractAuthToken, authority.requireAdmin];
-  const configMethods = [manager.getSchema, manager.prepareSettingMutationPlan, manager.inspectPreparedMutation, manager.assertPreparedMutation,
-    manager.protectPreparedMutationTargets, manager.beginPreparedMutation, manager.assertPreparedMutationTransition, manager.finishPreparedMutation, manager.assertCompletedMutation];
-  const assertOwner = (prepared?: Prepared) => {
-    input.assertServingOwner();
-    if ([authority.settingsLifetime, authority.captureSettingsAdminAuthority, authority.withSettingsAdminAuthority,
-      authority.captureNativeExecutionAuthority, authority.extractAuthToken, authority.requireAdmin].some((method, index) => method !== authorityMethods[index])
-      || [manager.getSchema, manager.prepareSettingMutationPlan, manager.inspectPreparedMutation, manager.assertPreparedMutation,
-        manager.protectPreparedMutationTargets, manager.beginPreparedMutation, manager.assertPreparedMutationTransition, manager.finishPreparedMutation, manager.assertCompletedMutation].some((method, index) => method !== configMethods[index])
-      || prepared && input.host() !== prepared.host
-      || prepared?.secret && (input.secrets() !== prepared.secret.owner || [prepared.secret.owner.prepareImport, prepared.secret.owner.inspectPreparedImport,
-        prepared.secret.owner.assertPreparedImport, prepared.secret.owner.withPreparedImport, prepared.secret.owner.assertCompletedImport].some((method, index) => method !== prepared.secret!.methods[index]))) throw new Error('Native settings import owner changed');
-  };
+  // The owners' own state checks: each is an in-memory compare, no file is read.
   const assertPrepared = (prepared: Prepared) => {
     prepared.host.signal.throwIfAborted();
-    prepared.assertWorkspace();
-    assertOwner(prepared); manager.assertSettingsWritable();
+    manager.assertSettingsWritable();
     if (prepared.configCompleted) manager.assertCompletedMutation(prepared.config);
     else if (prepared.transition) manager.assertPreparedMutationTransition(prepared.config, prepared.transition);
     else manager.assertPreparedMutation(prepared.config);
     if (prepared.secretCompleted && prepared.secret) prepared.secret.owner.assertCompletedImport(prepared.secret.handle);
     else if (prepared.secret && !prepared.finishSecret) prepared.secret.owner.assertPreparedImport(prepared.secret.handle);
   };
+  // Revocation is checked here once, right before the write; the token and the
+  // paired record are what can change while a request waits.
   const assertAuthority = (req: Request, captured: Authority) => {
-    assertOwner(); req.signal.throwIfAborted();
+    input.assertServingOwner(); req.signal.throwIfAborted();
     const current = captured.native.current();
-    if (authority.extractAuthToken(req) !== captured.token || !allowed(current)
-      || JSON.stringify(current) !== JSON.stringify(captured.expected)) throw new Error('Native settings import authority changed');
+    if (authority.extractAuthToken(req) !== captured.token || !allowed(current) || !samePairedAuthority(current, captured.expected)) {
+      throw new Error('Native settings import authority changed');
+    }
   };
   return createSettingsImportPreconditionHandler({
     lifetime: authority.settingsLifetime,
     captureAuthority(req): Authority | null {
-      assertOwner();
       const admin = authority.captureSettingsAdminAuthority(req), native = authority.captureNativeExecutionAuthority(req), expected = native?.current();
       if (admin?.kind !== 'pairing-token' || !native || !expected || !allowed(expected) || authority.requireAdmin(req) !== null) return null;
       return Object.freeze({ admin, native, expected, token: authority.extractAuthToken(req) });
     },
     withAuthority(req, captured, operation) {
       assertAuthority(req, captured);
-      return authority.withSettingsAdminAuthority(req, captured.admin, check => operation(() => { check(); assertAuthority(req, captured); }));
+      return authority.withSettingsAdminAuthority(req, captured.admin, check => operation(check));
     },
-    async admit(req, captured, prepared, assertBound, apply) {
-      const host = input.host();
-      if (!host || host.workspaceTrust === undefined) throw new Error('Native settings import admission unavailable');
-      const signal = AbortSignal.any([host.signal, req.signal]);
-      const current = () => {
-        signal.throwIfAborted(); assertBound(); assertAuthority(req, captured); assertPrepared(prepared);
-        if (input.host() !== host) throw new Error('Native settings import admission owner changed');
-      };
-      const source = Object.freeze({ goal: 'Import the complete authenticated settings plan into its selected native daemon owners.', criteria: Object.freeze([
-        'Apply exactly every prepared setting and its derived daemon credential to the retained native destinations.',
-        'Keep private credential values in native storage and honor current paired admin, write scope, workspace, privacy and permission constraints.',
-        'This import does not authorize provider subscription storage, message delivery, purchases or additional settings.',
-      ]) });
-      current();
-      // This is the safe complete owner descriptor. Never snapshot the private ingress body.
-      const args = snapshotJudgmentInput({ method: 'settings.import', prepared: prepared.facts }, 'write') as Record<string, unknown>;
-      const admission = await admitExternalRequest(host, { connectionId: randomUUID(), destination: 'settings.import', signal, assertCurrent: current },
-        { sourceOf: () => source, signal, assertCurrent: current }, { tool: 'write', args,
-          serverPolicy: { principalKind: 'paired-token', admin: true, scopes: [SCOPE], effect: 'write', method: 'settings.import' } });
-      try {
-        current();
-        if (!admission.result.approved) throw new Error('Native settings import held');
-        return await apply(() => { current(); admission.claim(); current(); }, current);
-      } finally { admission.close(); }
+    // The caller's gate is the one admission; this lane only binds the request's lifetime.
+    async admit(req, _captured, prepared, assertBound, apply) {
+      const signal = AbortSignal.any([prepared.host.signal, req.signal]);
+      const current = () => { signal.throwIfAborted(); assertBound(); };
+      return apply(() => {}, current);
     },
     owner: {
       prepare(request): Prepared {
-        assertOwner();
+        input.assertServingOwner();
         const host = input.host();
-        if (!host || host.workspaceTrust === undefined) throw new Error('Native settings import admission unavailable');
-        const assertWorkspace = retainWorkspace(host.workspaceRoot);
+        if (!host) throw new Error('Native settings import owner unavailable');
         const schema = manager.getSchema(), entries: SecretImportEntry[] = [];
         if (request.settings.length > schema.length || new Set(request.settings.map(entry => entry.key)).size !== request.settings.length) throw new Error('Native settings import invalid');
         const changes = request.settings.map(entry => {
@@ -157,6 +112,7 @@ export function createServingSettingsImportPrecondition(input: {
             if (!normalized) { value = ''; entries.push({ key, scope: 'daemon', operation: 'delete' }); }
             else if (normalized.startsWith('goodvibes://secrets/') && isSecretRefInput(normalized)) value = normalized;
             else if (normalized.startsWith('goodvibes://')) throw new Error('Native credential reference invalid');
+            // The credential goes to the secret store; the setting and the facts carry only its reference.
             else { entries.push({ key, scope: 'daemon', value }); value = `goodvibes://secrets/goodvibes/${key}`; }
           }
           // Undeclared inline credential/card material cannot cross even this private-to-public boundary.
@@ -168,22 +124,27 @@ export function createServingSettingsImportPrecondition(input: {
         const configFacts = manager.inspectPreparedMutation(config);
         const secretOwner = input.secrets();
         if (entries.length && !secretOwner) throw new Error('Native credential owner unavailable');
-        const secret = entries.length && secretOwner ? { owner: secretOwner, handle: secretOwner.prepareImport(entries), methods: [secretOwner.prepareImport,
-          secretOwner.inspectPreparedImport, secretOwner.assertPreparedImport, secretOwner.withPreparedImport, secretOwner.assertCompletedImport] } : undefined;
+        const secret = entries.length && secretOwner ? { owner: secretOwner, handle: secretOwner.prepareImport(entries) } : undefined;
         const credential = secret?.owner.inspectPreparedImport(secret.handle);
         const effects = (configFacts.effects ?? [configFacts]).map(effect => {
           if (effect.operation !== 'set') throw new Error('Native settings import invalid');
           return Object.freeze({ operation: 'set' as const, key: effect.key, value: effect.value, destinations: effect.destinations });
         });
+        // A credential value goes to the secret store only; the same text as the
+        // value of an ordinary setting would put it in a config file and in the
+        // facts. An exact match, so a short secret that happens to occur inside a
+        // path or a key name is not mistaken for one.
+        const credentialValues = new Set(entries.flatMap(entry => entry.operation !== 'delete' && entry.value ? [entry.value] : []));
+        const duplicated = effects.find(effect => typeof effect.value === 'string' && credentialValues.has(effect.value));
+        if (duplicated) throw new Error(`Native settings import invalid: ${duplicated.key} repeats a credential being imported`);
+        // Credential values are references here, so the facts carry keys, references, other setting values and paths.
         const facts: SettingsImportPreconditionFacts = Object.freeze({ operation: 'import', effects: Object.freeze(effects), incarnation: configFacts.incarnation,
           destinations: Object.freeze([...(credential?.destinations ?? []), ...configFacts.destinations]),
           ...(credential ? { credential: Object.freeze({ items: Object.freeze(credential.items.map(item => {
             if (item.scope !== 'daemon') throw new Error('Native credential scope invalid');
             return Object.freeze({ key: item.key, scope: item.scope, configured: item.configured });
           })), destinations: credential.destinations }) } : {}) });
-        assertPrivateValuesAbsent(facts, entries.flatMap(entry => entry.operation !== 'delete' ? [entry.value] : []));
-        snapshotJudgmentInput(facts, 'goodvibes_settings');
-        const prepared = { config, facts, host, assertWorkspace, ...(secret ? { secret } : {}) }; assertPrepared(prepared); return prepared;
+        const prepared = { config, facts, host, ...(secret ? { secret } : {}) }; assertPrepared(prepared); return prepared;
       },
       inspect: prepared => prepared.facts,
       assert: assertPrepared,
@@ -196,22 +157,24 @@ export function createServingSettingsImportPrecondition(input: {
         }, current);
       },
       begin(prepared) { const transition = manager.beginPreparedMutation(prepared.config); prepared.transition = transition; return transition; },
-      assertTransition(prepared, transition) { assertOwner(prepared); manager.assertPreparedMutationTransition(prepared.config, transition); },
+      assertTransition(prepared, transition) { manager.assertPreparedMutationTransition(prepared.config, transition); },
       finish(prepared, transition, assertCurrent) {
         const completedPaths: string[] = [];
-        const current = () => { assertCurrent(); assertPrepared(prepared); };
+        const settingsPath = prepared.facts.effects[0]?.destinations[0]?.path;
+        const credentialPath = prepared.facts.credential?.destinations[0]?.path;
+        // Written files are confirmed durable; nothing is re-checked after a write.
         const confirm = (paths: readonly string[]): string | null => {
           for (const path of paths) {
-            try { current(); confirmFileDurable(path); current(); }
-            catch { return path; }
+            try { confirmFileDurable(path); } catch { return path; }
           }
           return null;
         };
         if (prepared.secret) {
           if (!prepared.finishSecret) throw new Error('Native credential publication unavailable');
-          const receipt = prepared.finishSecret(current); completedPaths.push(...receipt.completedPaths);
+          const receipt = prepared.finishSecret(assertCurrent); completedPaths.push(...receipt.completedPaths);
           if (receipt.status !== 'committed') {
-            const uncertainPath = receipt.uncertainPath ?? prepared.facts.effects[0]!.destinations[0]?.path;
+            // The credential step is the uncertain one, so the caller is pointed at the credential store.
+            const uncertainPath = receipt.uncertainPath ?? credentialPath;
             return Object.freeze({ ...receipt, ...(uncertainPath ? { uncertainPath } : {}) });
           }
           prepared.secretCompleted = true;
@@ -219,20 +182,17 @@ export function createServingSettingsImportPrecondition(input: {
           if (uncertainPath !== null) return Object.freeze({ status: 'partial', completedPaths: Object.freeze(completedPaths), uncertainPath });
         }
         let receipt: PreparedConfigMutationReceipt;
-        try { current(); receipt = manager.finishPreparedMutation(prepared.config, transition, current); }
+        try { receipt = manager.finishPreparedMutation(prepared.config, transition, assertCurrent); }
         catch {
-          const uncertainPath = prepared.facts.effects[0]!.destinations[0]?.path;
-          return Object.freeze({ status: completedPaths.length ? 'partial' : 'unknown', completedPaths: Object.freeze(completedPaths), ...(uncertainPath ? { uncertainPath } : {}) });
+          return Object.freeze({ status: completedPaths.length ? 'partial' : 'unknown', completedPaths: Object.freeze(completedPaths), ...(settingsPath ? { uncertainPath: settingsPath } : {}) });
         }
         completedPaths.push(...receipt.completedPaths);
         if (receipt.status !== 'committed') return Object.freeze({ ...receipt, status: completedPaths.length ? 'partial' : 'unknown', completedPaths: Object.freeze(completedPaths) });
         prepared.configCompleted = true;
-        // Restriction-only completion handles retain the exact native results;
-        // directory/file confirmation stays inside the original paired admin lease.
         const uncertainPath = confirm(receipt.completedPaths);
         if (uncertainPath !== null) return Object.freeze({ status: completedPaths.length ? 'partial' : 'unknown', completedPaths: Object.freeze(completedPaths), uncertainPath });
         let verifiedInOwningStore = false;
-        try { assertOwner(prepared); manager.assertCompletedMutation(prepared.config); if (prepared.secret) prepared.secret.owner.assertCompletedImport(prepared.secret.handle); verifiedInOwningStore = true; }
+        try { manager.assertCompletedMutation(prepared.config); if (prepared.secret) prepared.secret.owner.assertCompletedImport(prepared.secret.handle); verifiedInOwningStore = true; }
         catch { /* The completed durable receipt survives a reporting failure. */ }
         return Object.freeze({ status: 'committed', completedPaths: Object.freeze(completedPaths), verifiedInOwningStore });
       },

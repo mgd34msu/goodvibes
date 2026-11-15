@@ -6,8 +6,6 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { withTestTimeout } from './_helpers/test-timeout.ts';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
 import { DelegatedInboundReviewReceiver } from '../platform/src/platform/control-plane/delegated-inbound-receiver.js';
 import { join } from 'node:path';
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
@@ -514,26 +512,6 @@ test('owner scope changes during metadata listing cannot return a stale-owner re
     f.mutateOwnerScopes(); release(); await expect(listing).rejects.toThrow('paired owner changed');
   } finally { release(); held.mockRestore(); await listing.then(() => {}, () => {}); }
 });
-
-test('saved digest-only review receipts retain metadata access without restoring source authority', async () => {
-  const f = await fixture(); await f.configure(); const pending = await f.ingress(); await f.decide(pending); f.host.close();
-  const path = f.hostDeps.receiptPath;
-  const saved = JSON.parse(readFileSync(path, 'utf8')) as { records: Array<{ owner?: unknown; ownerRevision: string }> };
-  const owner = f.authority.current()!;
-  // Reproduce actual old saved bytes only; new production receipts never issue a digest.
-  for (const row of saved.records) { delete row.owner; row.ownerRevision = createHash('sha256').update(JSON.stringify([owner.principalId, owner.tokenId, [...owner.scopes].sort()])).digest('hex'); }
-  writeFileSync(path, JSON.stringify(saved));
-  const reopened = new DelegatedTelegramIntake(f.hostDeps); cleanups.push(() => reopened.close());
-  expect(await reopened.status(pending.ref, f.authority, true)).toMatchObject({ source: 'expired-or-lost', recovery: 'new-original-required' });
-  expect((await reopened.list(f.authority)).records).toHaveLength(1);
-  expect(await reopened.cancel(pending.ref, f.authority)).toMatchObject({ outcome: 'cancelled' });
-  // A cancelled review grants nothing, so its row leaves the saved queue.
-  const retained = JSON.parse(readFileSync(path, 'utf8')) as { records: unknown[] };
-  expect(retained.records).toHaveLength(0);
-  f.replaceOwner({ scopes: ['read:work-ledger'] });
-  expect(await reopened.status(pending.ref, f.authority, true)).toMatchObject({ outcome: 'held', reason: 'missing-source-proof' });
-});
-
 
 test('review cancellation while a source read settles cannot return the already-released original', async () => {
   const f = await fixture(); await f.configure(); const pending = await f.ingress(); await f.decide(pending);

@@ -7,14 +7,14 @@
  * rendering each as a one-line notice. Both sources clear on read, the
  * facade's receipt queue marks its entries delivered, and drainPending() clears
  * the announcement queue, so a second attach with nothing new shows nothing.
- * This mirrors the daemon's own /status?receipts=consume fold, done in-process
- * for the embedded daemon.
+ * The embedded daemon is read in-process, so the lines are rendered in the
+ * same tick that marks them delivered.
  */
 import { FeatureAnnouncementStore, featureAnnouncementsPath, createSandboxContainmentAnnouncer } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import { readClientCompatibilityFloor } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
-/** A daemon receipt line (already a human one-liner, e.g. "restarted after a crash at 14:32"). */
+/** A daemon receipt line (already a human one-liner, e.g. "restarted after a crash at 2026-11-15 14:32"). */
 export interface DaemonReceiptLike {
   readonly id: string;
   readonly text: string;
@@ -61,11 +61,9 @@ export interface ExternalDaemonAttachReadDeps {
   /** The shared bearer the adopted daemon authenticates (the companion-pairing token). */
   readonly authToken: string;
   /**
-   * Ask for the daemon's undelivered receipts on this read. Delivery at the
-   * daemon is destructive, served once, to the consuming reader, so only the
-   * read that RENDERS them asks. A reconnect read that just refreshes the two
-   * build floors leaves this off, and no receipt is eaten before a surface can
-   * show it.
+   * Ask for the daemon's undelivered receipts on this read (peek, then
+   * acknowledge what was parsed). Only the read that RENDERS them asks; a
+   * reconnect read that just refreshes the two build floors leaves this off.
    */
   readonly consumeReceipts?: boolean;
   /** Injectable fetch for tests; defaults to the global fetch. */
@@ -104,8 +102,7 @@ const RECEIPT_ACK_BATCH = 100;
  * bearer, plus `?receipts=peek` when the caller is going to render them, then
  * `?receipts=ack` for the ids it parsed. The daemon marks only acknowledged
  * receipts delivered, so a lost response is offered again and a second attach
- * with nothing new returns no notices. A daemon that predates peek is read
- * with `?receipts=consume`.
+ * with nothing new returns no notices.
  * Any transport, auth, or parse failure reads as unanswered rather than
  * throwing into the attach path.
  */
@@ -124,13 +121,7 @@ export async function readExternalDaemonAttach(
     const statusUrl = `${deps.baseUrl.replace(/\/+$/, '')}/status`;
     const response = await fetchImpl(deps.consumeReceipts ? `${statusUrl}?receipts=peek` : statusUrl, { headers, signal: controller.signal });
     if (!response.ok) return unanswered;
-    let body = (await response.json()) as { receipts?: unknown } | null;
-    if (deps.consumeReceipts && !Array.isArray(body?.receipts)) {
-      // A daemon that predates peek ignores it and sends no receipts key; its
-      // only delivery is the one-read consume.
-      const legacy = await fetchImpl(`${statusUrl}?receipts=consume`, { headers, signal: controller.signal });
-      if (legacy.ok) body = (await legacy.json()) as { receipts?: unknown } | null;
-    }
+    const body = (await response.json()) as { receipts?: unknown } | null;
     const receipts = Array.isArray(body?.receipts) ? body.receipts : [];
     const notices: string[] = [];
     for (const entry of receipts) {

@@ -2,7 +2,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { NativePairedSnapshot } from '../security/http-auth.js';
 import { delegatedReviewOwnerSchema, type DelegatedReviewOwner } from '../control-plane/delegated-inbound-wire.js';
-import { savedDelegatedOwnerMatcher } from './saved-delegated-owner-digest.js';
 
 export function captureDelegatedOwner(owner: NativePairedSnapshot): DelegatedReviewOwner {
   if (owner.authorityId !== owner.principalId || owner.authorityRevision !== owner.tokenId) throw new Error('Delegated review requires the original paired authority');
@@ -15,8 +14,7 @@ export function sameDelegatedOwner(current: NativePairedSnapshot | null, expecte
   if (current === null) return false;
   try { return isDeepStrictEqual(captureDelegatedOwner(current), expected); } catch { return false; }
 }
-export function delegatedReviewOwnership(current: DelegatedReviewOwner): (record: { readonly ownerRevision: string; readonly owner?: DelegatedReviewOwner }) => boolean {
-  const matchesSavedOwner = savedDelegatedOwnerMatcher(current);
-  // Old receipts lack an owner field. Only those actual saved rows use compatibility hashing.
-  return record => record.owner !== undefined ? isDeepStrictEqual(record.owner, current) : matchesSavedOwner(record.ownerRevision);
+/** A row saved before rows named their owner belongs to no one; it grants nothing and waits out its expiry. */
+export function delegatedReviewOwnership(current: DelegatedReviewOwner): (record: { readonly owner?: DelegatedReviewOwner }) => boolean {
+  return record => record.owner !== undefined && isDeepStrictEqual(record.owner, current);
 }

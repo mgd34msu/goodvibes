@@ -21,7 +21,7 @@ export interface McpServerConfig {
   args?: string[] | undefined;
   /** Optional environment variables to merge with process.env */
   env?: Record<string, string> | undefined;
-  /** Optional HTTP headers sent to a `url` server on every request, such as `Authorization`. Never shown on read routes. */
+  /** Optional HTTP headers sent to a `url` server on every request, such as `Authorization`. Read routes list the names only; the admin reveal route shows the values. */
   headers?: Record<string, string> | undefined;
   /** Optional role used by runtime coherence checks. */
   role?: 'general' | 'docs' | 'filesystem' | 'git' | 'database' | 'browser' | 'automation' | 'ops' | 'remote' | undefined;
@@ -394,17 +394,18 @@ export function loadWritableMcpConfig(roots: McpConfigRoots, scope: McpConfigSco
 /**
  * Write a server entry, creating or replacing it by name.
  *
- * `env` is the one field an omitted value PRESERVES rather than clears.
+ * `args`, `env` and `headers` are the fields an omitted value PRESERVES rather
+ * than clears.
  *
  * Every other field is a full replacement, which is right: the caller can see
- * what it is replacing. `env` it cannot, the read side reports `envKeys` and
- * never the values, so an admin editing an unrelated field (a URL, an
- * allowedHost) round-trips the server object with `env` missing and silently
- * destroys credentials nobody could have known to resend. That is a wipe
- * caused by the read redaction, not by anything the admin asked for.
+ * what it is replacing. These three it cannot: the read side redacts args and
+ * reports only the names of env variables and headers, so an admin editing an
+ * unrelated field (a URL, an allowedHost) round-trips the server object
+ * without them and would destroy credentials nobody could have known to
+ * resend.
  *
- * Supplying `env` still replaces it wholesale, so clearing or removing a
- * variable stays possible and stays explicit: send the map you want.
+ * Supplying one still replaces it wholesale, so clearing stays possible and
+ * explicit: send the list or map you want (an empty one clears it).
  */
 export function upsertMcpServerConfig(
   roots: McpConfigRoots,
@@ -416,10 +417,12 @@ export function upsertMcpServerConfig(
   const current = readMcpConfigAtPath(location.path);
   const existing = current.servers.find((entry) => entry.name === server.name);
   const nextServers = current.servers.filter((entry) => entry.name !== server.name);
+  const preservedArgs = server.args === undefined ? existing?.args : undefined;
   const preservedEnv = server.env === undefined ? existing?.env : undefined;
   const preservedHeaders = server.headers === undefined ? existing?.headers : undefined;
   nextServers.push({
     ...server,
+    ...(preservedArgs === undefined ? {} : { args: [...preservedArgs] }),
     ...(preservedEnv === undefined ? {} : { env: { ...preservedEnv } }),
     ...(preservedHeaders === undefined ? {} : { headers: { ...preservedHeaders } }),
   });

@@ -1,23 +1,24 @@
 /**
  * owner-alert.ts, reaching the owner when the thing that broke is a channel.
  *
- * The ordinary notice path takes a binding and sends on it. That is not enough
- * for an alert whose SUBJECT is a channel failing, because the obvious binding
- * to use is the one on the surface that just failed. Two facts from the
- * incident this exists for decide the ordering:
+ * An alert names internal failures, so it goes only to conversations that are
+ * the owner's own: a direct conversation with the surface's owner, or a
+ * surface that is private by nature (the owner's ntfy topic). A group, a
+ * shared channel or a webhook route is never a candidate, however recently it
+ * was used.
+ *
+ * Among the owner's conversations, two facts decide the order:
  *
  * 1. Inbound and outbound fail independently. Telegram's sends worked all day
  *    while its receives were being dropped. So the failing surface's own
  *    conversation is still the FIRST choice, it is where the owner is already
  *    looking, and it usually still works.
  * 2. But it might not. So a refusal is not the end: the alert falls back to the
- *    most recently used conversation on any OTHER surface, which is what "ntfy
- *    exists as a fallback" means in practice without naming ntfy specifically,
- *    whatever the owner actually has connected and has used most recently.
+ *    owner's most recently used conversation on any OTHER surface.
  *
- * Never silent: if nothing accepted it, that is logged at error with every
- * refusal reason, because an alert nobody received is the same failure one
- * level up.
+ * When no owner conversation exists or none accepted it, the alert is kept as
+ * a daemon receipt, which the next attached terminal or web UI shows, and is
+ * logged at error with every refusal reason.
  */
 
 import type { AutomationRouteBinding } from '../automation/routes.js';
@@ -37,13 +38,42 @@ import { logger } from '../utils/logger.js';
  * One instance, because "have I already told the owner Telegram is failing" is a
  * question about the SURFACE, not about which of those mechanisms noticed.
  */
+/** What an owner alert needs from the delivery helper. */
+export type OwnerAlertDelivery = Pick<DaemonSurfaceDeliveryHelper, 'deliverSurfaceNotice' | 'channelOwner' | 'recordOwnerReceipt'>;
+
 export function createChannelIngressAlarm(
   routeBindings: RouteBindingManager,
-  delivery: Pick<DaemonSurfaceDeliveryHelper, 'deliverSurfaceNotice'>,
+  delivery: OwnerAlertDelivery,
 ): ChannelIngressAlarm {
   return new ChannelIngressAlarm({
     notify: (surface, text) => { void deliverOwnerAlert(routeBindings, delivery, surface, text); },
   });
+}
+
+function metadataText(binding: AutomationRouteBinding, key: string): string | undefined {
+  // A binding saved by an older build can lack metadata altogether.
+  const value = (binding.metadata as Record<string, unknown> | undefined)?.[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * True when the binding is one of the owner's own conversations. `owner` is
+ * the surface's owner user id, or undefined when the surface names none.
+ * Anything the binding does not prove to be private and the owner's is left
+ * out, so an alert never reaches a shared place on a guess.
+ */
+export function isOwnerConversation(binding: AutomationRouteBinding, owner: string | undefined): boolean {
+  if (binding.surfaceKind === 'ntfy') return true;
+  if (owner === undefined) return false;
+  const sender = metadataText(binding, 'userId') ?? metadataText(binding, 'fromId')
+    ?? metadataText(binding, 'senderId') ?? metadataText(binding, 'from');
+  if (sender !== owner) return false;
+  const kind = metadataText(binding, 'conversationKind');
+  const chatType = metadataText(binding, 'chatType');
+  if (kind !== undefined || chatType !== undefined) return kind === 'direct' || chatType === 'private';
+  if (metadataText(binding, 'groupId') !== undefined) return false;
+  // A one-to-one chat on these surfaces is keyed by the person in it.
+  return binding.externalId === owner || binding.channelId === owner;
 }
 
 /** Newest-first by last use, which is the best available proxy for "works". */
@@ -79,21 +109,30 @@ export function orderOwnerAlertRoutes(
  */
 export async function deliverOwnerAlert(
   routeBindings: RouteBindingManager,
-  delivery: Pick<DaemonSurfaceDeliveryHelper, 'deliverSurfaceNotice'>,
+  delivery: OwnerAlertDelivery,
   preferred: ChannelSurface | null,
   text: string,
 ): Promise<AutomationRouteBinding | null> {
   let candidates: AutomationRouteBinding[];
   try {
-    candidates = orderOwnerAlertRoutes(routeBindings.listBindings(), preferred);
+    const owners = new Map<string, string | undefined>();
+    const ownerOf = (surface: string) => {
+      if (!owners.has(surface)) owners.set(surface, delivery.channelOwner(surface));
+      return owners.get(surface);
+    };
+    candidates = orderOwnerAlertRoutes(
+      routeBindings.listBindings().filter((binding) => isOwnerConversation(binding, ownerOf(binding.surfaceKind))),
+      preferred,
+    );
   } catch (error) {
     // Route binding can be switched off entirely, in which case listing throws
-    // rather than returning nothing. That is a real answer, there is no route
-    // to alert on, and it must not take down the caller reporting a failure.
+    // rather than returning nothing. There is no route to alert on, and it
+    // must not take down the caller reporting a failure.
     logger.error('An alert for the owner could not be routed: route bindings are unavailable', {
       preferred,
       error: error instanceof Error ? error.message : String(error),
     });
+    keepAsReceipt(delivery, text);
     return null;
   }
   const refusals: string[] = [];
@@ -114,5 +153,16 @@ export async function deliverOwnerAlert(
     triedRoutes: candidates.length,
     refusals,
   });
+  keepAsReceipt(delivery, text);
   return null;
+}
+
+function keepAsReceipt(delivery: OwnerAlertDelivery, text: string): void {
+  try {
+    delivery.recordOwnerReceipt(text);
+  } catch (error) {
+    logger.error('An alert for the owner could not be kept for the next surface', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }

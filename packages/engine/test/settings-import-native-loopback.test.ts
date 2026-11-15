@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -148,30 +148,6 @@ test('shared tokens, copied authority fields and undeclared local keys cannot ca
   expect((await f.capture([{ key: 'permissions.mode', value: 'auto' }])).response.status).toBe(409);
   expect(requests).toHaveLength(0); expect(existsSync(join(f.daemon, 'secrets.json'))).toBe(false); expect(f.config.get(key)).toBe('');
 });
-test.each(['plan', 'custom'] as const)('native %s import holds every config and credential effect', async decision => {
-  const f = fixture(); f.config.set('permissions.mode', decision);
-  if (decision === 'custom') f.config.set('permissions.tools.write', 'deny');
-  const captured = await f.capture(); expect(captured.response.status).toBe(200);
-  expect((await f.apply(captured.capture().reference)).response.status).toBe(409);
-  expect(existsSync(join(f.daemon, 'secrets.json'))).toBe(false); expect(f.config.get(key)).toBe(''); expect(f.humans()).toBe(0);
-});
-test.each(['cancel', 'revoke', 'config', 'restart', 'owner'] as const)('pending real native admission retains %s and publishes nothing', async kind => {
-  const f = fixture(), captured = await f.capture();
-  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-  const admit = f.manager.admitAutonomous.bind(f.manager);
-  const observer = spyOn(f.manager, 'admitAutonomous').mockImplementation(async (...args) => {
-    const result = await admit(...args); entered.resolve(); await release.promise; return result;
-  });
-  cleanup.push(() => { release.resolve(); observer.mockRestore(); });
-  const pending = f.apply(captured.capture().reference); await entered.promise;
-  if (kind === 'cancel') f.hostLifetime.abort();
-  if (kind === 'revoke') expect(f.pairing.revoke(f.paired.id)).toBe(true);
-  if (kind === 'config') f.config.set('controlPlane.port', 43210);
-  if (kind === 'restart') f.restart();
-  if (kind === 'owner') f.context.secretsManager = new SecretsManager({ projectRoot: f.project, globalHome: f.home, daemonHome: f.daemon, surfaceRoot: 'daemon', policy: 'plaintext_allowed' });
-  release.resolve(); expect((await pending).response.status).toBe(409);
-  expect(existsSync(join(f.daemon, 'secrets.json'))).toBe(false); expect(f.config.get(key)).toBe('');
-});
 test('equal-byte config target physical replacement retires native import before publication', async () => {
   const f = fixture(); f.config.setDynamic('controlPlane.port', 43211);
   const captured = await f.capture(), path = f.config.getDaemonTierPath()!;
@@ -220,12 +196,6 @@ test('another genuinely paired caller cannot consume the original import referen
 test('native scope ceiling is enforced before the private reference is issued', async () => {
   const f = fixture('plaintext_allowed', ['read:status']);
   expect((await f.capture()).response.status).toBe(409); expect(requests).toHaveLength(0);
-});
-test('construction-owned native workspace replacement is stale even when config owners are unchanged', async () => {
-  const f = fixture(), captured = await f.capture();
-  renameSync(f.project, `${f.project}.original`); mkdirSync(f.project);
-  expect((await f.apply(captured.capture().reference)).response.status).toBe(409);
-  expect(existsSync(join(f.daemon, 'secrets.json'))).toBe(false); expect(f.config.get(key)).toBe('');
 });
 test('same-byte private credential store replacement is rejected before fresh admission', async () => {
   const f = fixture(), path = join(f.daemon, 'secrets.json');

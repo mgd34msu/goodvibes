@@ -2,7 +2,7 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**
  * DaemonLifecycleRuntime, the daemon facade's lifecycle sidecar: the
  * clean-shutdown marker (crash detection), the persisted receipt store
- * ("updated from X to Y at HH:MM", "restarted after a crash at HH:MM"),
+ * ("updated from X to Y at 2026-11-15 03:12", "restarted after a crash at ..."),
  * and the hourly auto-updater (owner-directed default-on; update.auto
  * turns it off).
  *
@@ -22,7 +22,7 @@ import { DaemonAutoUpdater, type AutoUpdateServiceActions } from './auto-updater
 import { prepareHandoverBeforeStop, prepareServiceHandover, ServiceHandoverPreflightError, type PreparedServiceHandover } from './service-handover-preflight.js';
 import { reserveLaunchdHandover } from './launchd-handover.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
-import { DaemonReceiptStore, formatReceiptTime } from './receipts.js';
+import { daemonReceiptStoreAt, daemonReceiptsPath, formatReceiptTime, type DaemonReceiptStore } from './receipts.js';
 import { writeFatalLine } from './fatal-boot-report.js';
 import { FeatureAnnouncementStore, collectStartupAnnouncements, featureAnnouncementsPath } from '../runtime/feature-announcements.js';
 import {
@@ -41,26 +41,26 @@ import { inspectDaemonUpdateInstallation, resolveDaemonUpdateTargets } from '../
 import { configuredSuiteWebuiDirectory, rollbackSuiteUpdate, SuiteUpdatePreparationError, SuiteUpdateRecoveryError } from '../runtime/suite-update.js';
 import { rollbackKeptPrevious, realUpdateFileIo, captureUpdateFileIo, retainDaemonNativeFiles, UpdateTransactionError, UpdateTransactionContendedError, compareVersions, normalizeVersion, describeTransactionRecovery, type UpdateFileIo, type UpdateTransactionReceipt, type DaemonCurrentReader } from '../runtime/self-update.js';
 import { currentProcessSignals, isCompiledBinaryInvocation } from './daemon-exec-invocation.js';
-import { deliverOwnerAlert } from './owner-alert.js';
+import { deliverOwnerAlert, type OwnerAlertDelivery } from './owner-alert.js';
 import type { DaemonUpdateCheckStatus, DaemonUpdateStatus } from './update-status.js';
 export type { DaemonUpdateCheckOutcome, DaemonUpdateCheckStatus, DaemonUpdateStatus } from './update-status.js';
 import type { RouteBindingManager } from '../channels/route-manager.js';
-import type { DaemonSurfaceDeliveryHelper } from './surface-delivery.js';
 import { sweepStaleWebSocketOutboxes } from './websocket-outbox.js';
 
 /**
- * The daemon's owner-alert callback: put one line in front of the owner over a
- * channel that still works.
+ * The daemon's owner-alert callback: put one line in front of the owner in one
+ * of the owner's own conversations, or keep it as a receipt for the next
+ * attached surface.
  *
  * It reuses the SAME path a failing channel uses (owner-alert.ts) rather than
  * adding a second notification mechanism. `null` for the preferred surface
  * because the subject here is not a channel, the daemon cannot update itself,
  * or has just rolled itself back to an older build, so no surface earns the
- * first try and the order is simply the most recently used conversation.
+ * first try and the order is simply the owner's most recently used conversation.
  */
 export function createDaemonOwnerAlerter(
   routeBindings: RouteBindingManager,
-  delivery: Pick<DaemonSurfaceDeliveryHelper, 'deliverSurfaceNotice'>,
+  delivery: OwnerAlertDelivery,
 ): (text: string) => void {
   return (text: string) => {
     void deliverOwnerAlert(routeBindings, delivery, null, text);
@@ -300,11 +300,7 @@ export class DaemonLifecycleRuntime {
 
   /** Lazily-created persisted store for update/crash receipts. */
   receiptStore(): DaemonReceiptStore {
-    if (!this.store) {
-      this.store = new DaemonReceiptStore(
-        join(this.options.configManager.getControlPlaneConfigDir(), 'control-plane', 'daemon-receipts.json'),
-      );
-    }
+    this.store ??= daemonReceiptStoreAt(daemonReceiptsPath(this.options.configManager));
     return this.store;
   }
 
@@ -313,23 +309,15 @@ export class DaemonLifecycleRuntime {
   }
 
   /**
-   * Undelivered receipts for a consuming /status read (`?receipts=consume`);
-   * marked delivered once served. The route only calls this when the reader
-   * passed the explicit flag, plain status reads are receipt-neutral.
-   *
-   * Fired announce-once feature lines (web surface URL, first contained run)
-   * ride the same exactly-once feed: they are drained from the announcement
-   * store's pending queue here, so a surface reading receipts at attach
-   * renders them instead of them dead-ending in the daemon log.
+   * Undelivered receipts and announcements, marked delivered as they are
+   * returned. Only for a reader that renders them in the same process (the
+   * embedded daemon's terminal); a reader across the wire peeks and
+   * acknowledges instead ({@link peekReceipts}, {@link acknowledgeReceipts}).
    */
   collectReceipts(): readonly { id: string; text: string; at: number }[] {
-    const receipts = this.receiptStore().consumeUndelivered().map(({ id, text, at }) => ({ id, text, at }));
-    const announcements = this.announcementStore().drainPending().map(({ id, text, at }) => ({
-      id: `announcement-${id}`,
-      text,
-      at,
-    }));
-    return [...receipts, ...announcements];
+    const receipts = this.peekReceipts();
+    if (receipts.length > 0) this.acknowledgeReceipts(receipts.map((receipt) => receipt.id));
+    return receipts;
   }
 
   /**

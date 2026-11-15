@@ -540,7 +540,7 @@ export default function App() {
     {/* voice.wake.indicator: 'banner' is the prominent persistent listening marker.
         Renders nothing for 'statusline' (the header's WakeChip owns that) or 'off'. */}
     <WakeBanner />
-    {/* Undelivered daemon receipts, consumed once on connect (see DaemonReceipts). */}
+    {/* Undelivered daemon receipts, read on connect and acknowledged once shown (see DaemonReceipts). */}
     <DaemonReceipts connected={health.connection === 'connected'} signedIn={auth.isSuccess} />
     {daemonUnreachable && (
       <div className="daemon-gate-overlay">

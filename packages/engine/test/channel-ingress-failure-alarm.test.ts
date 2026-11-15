@@ -26,11 +26,10 @@ import { describe, expect, test } from 'bun:test';
 import { ChannelIngressAlarm } from '../platform/src/platform/channels/ingress-alarm.ts';
 import { observeTelegramRuntime } from '../platform/src/platform/channels/builtin/health.ts';
 import { resolveChannelHealthState } from '../platform/src/platform/channels/health.ts';
-import { orderOwnerAlertRoutes, deliverOwnerAlert } from '../platform/src/platform/daemon/owner-alert.ts';
+import { orderOwnerAlertRoutes, deliverOwnerAlert, type OwnerAlertDelivery } from '../platform/src/platform/daemon/owner-alert.ts';
 import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.ts';
 import type { ChannelSurface } from '../platform/src/platform/channels/types.ts';
 import type { RouteBindingManager } from '../platform/src/platform/channels/route-manager.ts';
-import type { DaemonSurfaceDeliveryHelper } from '../platform/src/platform/daemon/surface-delivery.ts';
 
 interface Sent { readonly surface: ChannelSurface; readonly text: string }
 
@@ -194,7 +193,8 @@ describe('a running poll loop that cannot process is degraded, not healthy', () 
 });
 
 describe('the alert reaches the owner on a channel that still works', () => {
-  const binding = (id: string, surfaceKind: string, lastSeenAt: number): AutomationRouteBinding => ({
+  // A Telegram private chat with the owner unless metadata says otherwise.
+  const binding = (id: string, surfaceKind: string, lastSeenAt: number, metadata: Record<string, unknown> = { fromId: 'owner', chatType: 'private' }): AutomationRouteBinding => ({
     id,
     kind: 'channel',
     surfaceKind: surfaceKind as AutomationRouteBinding['surfaceKind'],
@@ -203,7 +203,12 @@ describe('the alert reaches the owner on a channel that still works', () => {
     lastSeenAt,
     createdAt: 0,
     updatedAt: lastSeenAt,
-    metadata: {},
+    metadata,
+  });
+  const delivery = (deliverSurfaceNotice: OwnerAlertDelivery['deliverSurfaceNotice'], receipts: string[] = []): OwnerAlertDelivery => ({
+    deliverSurfaceNotice,
+    channelOwner: () => 'owner',
+    recordOwnerReceipt: (text) => { receipts.push(text); },
   });
 
   test('the failing surface is tried FIRST: inbound and outbound fail independently', () => {
@@ -219,14 +224,12 @@ describe('the alert reaches the owner on a channel that still works', () => {
     const attempts: string[] = [];
     const delivered = await deliverOwnerAlert(
       { listBindings: () => [binding('ntfy-1', 'ntfy', 900), binding('tg-1', 'telegram', 500)] } as unknown as RouteBindingManager,
-      {
-        deliverSurfaceNotice: async (target: AutomationRouteBinding | undefined) => {
-          attempts.push(target?.id ?? 'none');
-          return target?.surfaceKind === 'telegram'
-            ? { delivered: false, reason: 'delivery-failed' as const }
-            : { delivered: true };
-        },
-      } as unknown as Pick<DaemonSurfaceDeliveryHelper, 'deliverSurfaceNotice'>,
+      delivery(async (target) => {
+        attempts.push(target?.id ?? 'none');
+        return target?.surfaceKind === 'telegram'
+          ? { delivered: false, reason: 'delivery-failed' as const }
+          : { delivered: true };
+      }),
       'telegram',
       'telegram is skipping messages',
     );
@@ -234,24 +237,42 @@ describe('the alert reaches the owner on a channel that still works', () => {
     expect(delivered?.id).toBe('ntfy-1');
   });
 
-  test('nothing accepting it answers null rather than pretending it was sent', async () => {
+  test('nothing accepting it answers null and keeps the alert for the next attached surface', async () => {
+    const receipts: string[] = [];
     const delivered = await deliverOwnerAlert(
       { listBindings: () => [binding('tg-1', 'telegram', 500)] } as unknown as RouteBindingManager,
-      {
-        deliverSurfaceNotice: async () => ({ delivered: false, reason: 'no-deliverable-target' as const }),
-      } as unknown as Pick<DaemonSurfaceDeliveryHelper, 'deliverSurfaceNotice'>,
+      delivery(async () => ({ delivered: false, reason: 'no-deliverable-target' as const }), receipts),
       'telegram',
       'telegram is skipping messages',
     );
     expect(delivered).toBeNull();
+    expect(receipts).toEqual(['telegram is skipping messages']);
+  });
+
+  test('a shared conversation is never a candidate, however recently it was used', async () => {
+    const attempts: string[] = [];
+    const receipts: string[] = [];
+    const routes = [
+      binding('group', 'telegram', 900, { fromId: 'owner', chatType: 'supergroup' }),
+      binding('guest-dm', 'telegram', 800, { fromId: 'guest', chatType: 'private' }),
+      binding('slack-channel', 'slack', 700, { userId: 'owner' }),
+      binding('owner-dm', 'telegram', 100),
+    ];
+    const delivered = await deliverOwnerAlert(
+      { listBindings: () => routes } as unknown as RouteBindingManager,
+      delivery(async (target) => { attempts.push(target?.id ?? 'none'); return { delivered: true }; }, receipts),
+      null,
+      'the update failed',
+    );
+    expect(attempts).toEqual(['owner-dm']);
+    expect(delivered?.id).toBe('owner-dm');
+    expect(receipts).toEqual([]);
   });
 
   test('route binding being switched off is an answer, not a crash', async () => {
     const delivered = await deliverOwnerAlert(
       { listBindings: () => { throw new Error('route binding is turned off'); } } as unknown as RouteBindingManager,
-      {
-        deliverSurfaceNotice: async () => ({ delivered: true }),
-      } as unknown as Pick<DaemonSurfaceDeliveryHelper, 'deliverSurfaceNotice'>,
+      delivery(async () => ({ delivered: true })),
       'telegram',
       'telegram is skipping messages',
     );

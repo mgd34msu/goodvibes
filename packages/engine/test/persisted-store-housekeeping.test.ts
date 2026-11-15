@@ -381,8 +381,10 @@ describe('daemon receipts are bounded by age as well as count, and disclose a to
     const store = memoryIo(null);
     const receipts = new DaemonReceiptStore('/virtual/receipts.json', { io: store.io, now: () => now });
     receipts.record('updated from 1.0.0 to 1.0.1');
-    expect(receipts.consumeUndelivered()).toHaveLength(1);
-    expect(receipts.consumeUndelivered()).toHaveLength(0);
+    const offered = receipts.peekUndelivered();
+    expect(offered).toHaveLength(1);
+    receipts.markDelivered(new Set(offered.map((receipt) => receipt.id)));
+    expect(receipts.peekUndelivered()).toHaveLength(0);
   });
 });
 

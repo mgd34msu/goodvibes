@@ -66,9 +66,8 @@ describe('consumeDaemonAttachNotices', () => {
 
 /**
  * A stub external daemon. `?receipts=peek` serves the undelivered receipts
- * without marking them; `?receipts=ack&ids=` marks exactly those delivered;
- * `?receipts=consume` (the only delivery a `legacyConsumeOnly` daemon has)
- * serves and marks in one read. It requires the shared bearer, so a request
+ * without marking them; `?receipts=ack&ids=` marks exactly those delivered.
+ * It requires the shared bearer, so a request
  * with the wrong/missing token 401s.
  */
 function stubExternalDaemon(options: {
@@ -76,7 +75,6 @@ function stubExternalDaemon(options: {
   readonly receipts: DaemonReceiptLike[];
   readonly version?: string;
   readonly clientFloor?: string;
-  readonly legacyConsumeOnly?: boolean;
   readonly requests?: string[];
 }): typeof fetch {
   const delivered = new Set<string>();
@@ -92,14 +90,10 @@ function stubExternalDaemon(options: {
     const query = new URL(url).searchParams;
     const mode = query.get('receipts');
     const undelivered = options.receipts.filter((receipt) => !delivered.has(receipt.id));
-    if (mode === 'ack' && !options.legacyConsumeOnly) {
+    if (mode === 'ack') {
       for (const id of (query.get('ids') ?? '').split(',')) delivered.add(id);
     }
-    if (mode === 'peek' && !options.legacyConsumeOnly) {
-      return new Response(JSON.stringify({ status: 'running', version, receipts: undelivered }), { status: 200, ...(headers ? { headers } : {}) });
-    }
-    if (mode === 'consume') {
-      for (const receipt of undelivered) delivered.add(receipt.id);
+    if (mode === 'peek') {
       return new Response(JSON.stringify({ status: 'running', version, receipts: undelivered }), { status: 200, ...(headers ? { headers } : {}) });
     }
     return new Response(JSON.stringify({ status: 'running', version }), { status: 200, ...(headers ? { headers } : {}) });
@@ -226,17 +220,6 @@ describe('readExternalDaemonAttach', () => {
     const source = { baseUrl: 'http://127.0.0.1:3421', authToken: 'shared-bearer', consumeReceipts: true, fetchImpl: flaky };
     expect((await readExternalDaemonAttach(source)).answered).toBe(false);
     expect((await readExternalDaemonAttach(source)).notices).toEqual(['updated to 1.30.0']);
-  });
-
-  test('a daemon that predates peek is read with the consume flag', async () => {
-    const fetchImpl = stubExternalDaemon({
-      token: 'shared-bearer',
-      receipts: [{ id: 'r1', text: 'restarted', at: 1 }],
-      legacyConsumeOnly: true,
-    });
-    const source = { baseUrl: 'http://127.0.0.1:3421', authToken: 'shared-bearer', consumeReceipts: true, fetchImpl };
-    expect((await readExternalDaemonAttach(source)).notices).toEqual(['restarted']);
-    expect((await readExternalDaemonAttach(source)).notices).toEqual([]);
   });
 
   test('more receipts than one acknowledge accepts are acknowledged in batches, so none repeat', async () => {

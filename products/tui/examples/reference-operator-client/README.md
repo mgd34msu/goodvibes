@@ -1,14 +1,12 @@
-# Reference operator client
+# Reference operator client (no daemon)
 
-This is the smallest in-process reference consumer for the current GoodVibes foundation surface.
+The same client calls as the [reference HTTP client](../reference-http-client/README.md), answered by a fixture daemon instead of a running one. Use it to try the client API offline, or as the pattern for testing a client of your own without starting a daemon. Like the HTTP example it imports only published `@goodvibes-jev/engine/*` entry points, so `index.ts` can be copied out of this repository.
 
 It demonstrates:
 
-- building an explicit runtime service graph (`createRuntimeServices`) over an isolated runtime store, event bus, and config manager rooted in a throwaway temp directory
-- creating the direct in-process transport (`createDirectTransport`) over that service graph, instead of the HTTP transport a remote consumer would use
-- using the operator surface to create a session (`transport.operator.sessions.ensureSession`)
-- reading the operator surface's provider snapshot for the configured provider count
-- inspecting the combined transport snapshot (`transport.snapshot()`), which carries both the operator side's control-plane session list and the peer side's node-host contract in one call
+- `createFixtureDaemonFetch()`: a `fetch` that answers every operator route from the schema-valid sample responses the contracts package generates (`@goodvibes-jev/engine/contracts/generated/mock-daemon-fixtures`). Routes with path parameters match too; an unknown route answers 404. Pass an array to record each request's method, path, operator method id and `Authorization` header
+- handing that `fetch` to `createOperatorApiClient` and `createPeerApiClient`; the clients validate the fixture responses against the contract exactly as they validate a daemon's
+- creating a session (`sessions.create`), then reading providers, the control plane, the node-host contract and the distributed runtime snapshot
 
 Run it with:
 
@@ -16,7 +14,6 @@ Run it with:
 bun examples/reference-operator-client/index.ts
 ```
 
-It prints a JSON summary covering the transport kind, the created session's
-id, the provider count, the number of sessions the control plane reports,
-and the peer contract's base path. The temp directory it works in is
-removed when the example exits.
+It prints a JSON summary: `sessionId`, `providerCount`, `activeClients`, `peerContractBasePath` and `pairedPeers`. The values are the generated samples (`"sample"`, `0`, one-item lists), not real daemon state. Nothing is written to disk and no network request is made.
+
+`bun run test` in `products/tui` runs it once.

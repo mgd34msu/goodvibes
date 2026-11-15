@@ -339,7 +339,7 @@ Some decisions worth knowing before you read the source:
 - **Crash recovery.** Periodic snapshots plus an fsync-per-record append-only transcript journal, replayed at every resume seam.
 - **Render coalescing and a per-message line cache.** Same-tick render requests collapse into one composite frame, and transcript growth re-renders only the appended message instead of rebuilding the whole conversation.
 
-The TUI consumes `@goodvibes-jev/engine` and `@goodvibes-jev/daemon` through `workspace:*` dependencies for shared runtime behavior, contracts and transports, and keeps terminal rendering, input and product composition here. Reference consumers of those surfaces live under [`examples/`](examples/reference-operator-client/README.md).
+The TUI consumes `@goodvibes-jev/engine` and `@goodvibes-jev/daemon` through `workspace:*` dependencies for shared runtime behavior, contracts and transports, and keeps terminal rendering, input and product composition here. Reference clients written only against the published engine entry points live under `examples/`: [`reference-http-client`](examples/reference-http-client/README.md) talks to a running daemon, [`reference-operator-client`](examples/reference-operator-client/README.md) makes the same calls against the generated fixture daemon, and `bun run test` runs both.
 
 Source layout, in brief (the layer rules and the operator API bridge are in docs/architecture.md):
 

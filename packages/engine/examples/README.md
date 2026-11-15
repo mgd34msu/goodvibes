@@ -14,7 +14,7 @@ Most examples read environment variables at startup:
 | Variable | Description |
 | --- | --- |
 | `GOODVIBES_BASE_URL` | HTTP base URL of the running GoodVibes daemon (defaults to `http://127.0.0.1:3421`). |
-| `GOODVIBES_TOKEN` | Operator bearer token issued by the daemon. Copy from the TUI settings or daemon log on first boot. |
+| `GOODVIBES_TOKEN` | Operator bearer token issued by the daemon. Copy from the TUI settings or daemon log on first boot. Optional for `peer-http-quickstart.mjs`, which pairs without it. |
 | `GOODVIBES_USERNAME` | Operator account username. Required only by `auth-login-and-token-store.ts`. |
 | `GOODVIBES_PASSWORD` | Operator account password. Required only by `auth-login-and-token-store.ts`. |
 
@@ -30,12 +30,12 @@ that handle credentials, pairing tokens, or daemon URLs.
 | `auth-login-and-token-store.ts` | `bun examples/auth-login-and-token-store.ts` | Login and token-store lifecycle. Requires `GOODVIBES_USERNAME` + `GOODVIBES_PASSWORD` (in addition to `GOODVIBES_BASE_URL`). |
 | `browser-web-ui-quickstart.ts` | typecheck only | Browser/web UI client setup. |
 | `companion-approvals-feed.ts` | `bun examples/companion-approvals-feed.ts` | Approval feed via realtime events. |
-| `daemon-fetch-handler-quickstart.ts` | `bun examples/daemon-fetch-handler-quickstart.ts` | Daemon route handler composition skeleton. Demonstrates the wiring shape with a status route guarded by a bearer token (`GOODVIBES_DAEMON_TOKEN`; every request is refused while it is unset), the generated operator contract, and minimal host callbacks. The route handlers themselves treat every caller as admin, so replace the principal and admin callbacks before exposing a host built from it. To run a real daemon host, provide gateway-method invocations, principal resolution, login/session handling, and a real session manager. See [Daemon embedding](../docs/daemon-embedding.md). |
+| `daemon-fetch-handler-quickstart.ts` | `bun examples/daemon-fetch-handler-quickstart.ts` | Daemon route handler composition skeleton: a status route and a telemetry route, the generated operator contract, and minimal host callbacks. The handlers authenticate through the host's `resolveAuthenticatedPrincipal`, which here accepts one bearer token, `GOODVIBES_DAEMON_TOKEN`, as an admin (401 while it is unset). Replace it with real principal resolution before exposing a host built from it. To run a real daemon host, provide gateway-method invocations, login/session handling, and a real session manager. See [Daemon embedding](../docs/daemon-embedding.md). |
 | `direct-transport-quickstart.ts` | `bun examples/direct-transport-quickstart.ts` | In-process direct transport usage. |
 | `embed-session-quickstart.ts` | typecheck only | platform embedding API 1.0 shape: create an embedded session against a workspace, answer permission asks through the callback seam, subscribe to typed events, send input, shut down. Not executed because it would boot a real daemon. |
 | `expo-quickstart.tsx` | typecheck only | Expo client setup; run inside an Expo app. |
 | `operator-http-quickstart.mjs` | `bun examples/operator-http-quickstart.mjs` | Operator HTTP client calls. Requires `GOODVIBES_TOKEN`. |
-| `peer-http-quickstart.mjs` | `bun examples/peer-http-quickstart.mjs` | Operator snapshot over HTTP. Calls only `platform.operator.snapshot()`. Demonstrates no peer-specific endpoints (pairing, peer, work). Requires `GOODVIBES_TOKEN`. |
+| `peer-http-quickstart.mjs` | `bun examples/peer-http-quickstart.mjs` | A peer's first connection: `pair.request` (no token), operator approval (`remote.pair.requests.approve`, operator token with admin access), `pair.verify` polled until approved (no token; returns the peer token), one `peer.heartbeat` and one `work.pull` (peer token). Prints the approval step for the operator; with `GOODVIBES_TOKEN` set to an admin operator token it approves its own request, for a local test. For a long-running peer host, see `products/tui/examples/reference-node-host`. |
 | `react-native-quickstart.ts` | typecheck only | React Native client setup; run inside a React Native app. Requires `GOODVIBES_TOKEN` at runtime. |
 | `realtime-events-quickstart.mjs` | `bun examples/realtime-events-quickstart.mjs` | Runtime event streaming. Requires `GOODVIBES_TOKEN`. |
 | `retry-and-reconnect.mjs` | `bun examples/retry-and-reconnect.mjs` | Retry and reconnect policy configuration. Requires `GOODVIBES_TOKEN`. |

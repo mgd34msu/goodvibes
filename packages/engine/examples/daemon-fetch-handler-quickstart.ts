@@ -1,11 +1,11 @@
 /**
  * Compose a minimal fetch handler from daemon route-handler factories.
  *
- * The route handlers below are configured with no authentication of their own:
- * every request they see is treated as an admin. `handleRequest` therefore
- * checks a bearer token before delegating. Do not remove that check, and
- * replace `resolveAuthenticatedPrincipal` and `requireAdmin` with real
- * principal resolution before exposing a host built from this file.
+ * The route handlers authenticate every request through the host's
+ * `resolveAuthenticatedPrincipal`. Here it accepts one bearer token,
+ * `GOODVIBES_DAEMON_TOKEN`, and resolves it to an admin; while the variable is
+ * unset the status route answers 401. Replace it with real principal resolution
+ * (user sessions, scoped tokens) before exposing a host built from this file.
  */
 import { timingSafeEqual } from 'node:crypto';
 import {
@@ -13,8 +13,24 @@ import {
   createDaemonTelemetryRouteHandlers,
   jsonErrorResponse,
 } from '@goodvibes-jev/engine/platform/daemon';
+import type { AuthenticatedPrincipal } from '@goodvibes-jev/engine/daemon-api';
 import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import enginePackage from '@goodvibes-jev/engine/package.json' with { type: 'json' };
+
+/** The bearer token on the request, or '' when there is none. */
+function extractAuthToken(request: Request): string {
+  return /^Bearer (.+)$/.exec(request.headers.get('authorization') ?? '')?.[1] ?? '';
+}
+
+/** The quickstart's one principal, for a request that carries `GOODVIBES_DAEMON_TOKEN`; null otherwise. */
+function resolveAuthenticatedPrincipal(request: Request): AuthenticatedPrincipal | null {
+  const expected = process.env.GOODVIBES_DAEMON_TOKEN;
+  if (!expected) return null;
+  const supplied = Buffer.from(extractAuthToken(request));
+  const wanted = Buffer.from(expected);
+  if (supplied.length !== wanted.length || !timingSafeEqual(supplied, wanted)) return null;
+  return { principalId: 'quickstart-admin', principalKind: 'token', admin: true, scopes: ['*'] };
+}
 
 const controlHandlers = createDaemonControlRouteHandlers({
   authToken: null,
@@ -36,13 +52,8 @@ const controlHandlers = createDaemonControlRouteHandlers({
   login: async () => Response.json({
     error: 'This quickstart does not implement username/password login',
   }, { status: 404 }),
-  extractAuthToken: () => '',
-  resolveAuthenticatedPrincipal: () => ({
-    principalId: 'quickstart-admin',
-    principalKind: 'user',
-    admin: true,
-    scopes: ['*'],
-  }),
+  extractAuthToken,
+  resolveAuthenticatedPrincipal,
   gatewayMethods: {
     list: () => [],
     listEvents: () => [],
@@ -60,33 +71,22 @@ const controlHandlers = createDaemonControlRouteHandlers({
     const text = await request.text();
     return text.trim() ? JSON.parse(text) as Record<string, unknown> : null;
   },
-  requireAdmin: () => null,
+  requireAdmin: (request) => resolveAuthenticatedPrincipal(request)?.admin
+    ? null
+    : jsonErrorResponse('Admin access required; send GOODVIBES_DAEMON_TOKEN as Authorization: Bearer <token>', {
+      status: 403,
+      source: 'permission',
+    }),
   requireAuthenticatedSession: () => null,
 });
 
 const telemetryHandlers = createDaemonTelemetryRouteHandlers({
   telemetryApi: null,
   ingestSink: null,
-  resolveAuthenticatedPrincipal: () => null,
+  resolveAuthenticatedPrincipal,
 });
 
-/** True when the request carries `Authorization: Bearer <GOODVIBES_DAEMON_TOKEN>`; false when the variable is unset. */
-function isAuthorized(request: Request): boolean {
-  const expected = process.env.GOODVIBES_DAEMON_TOKEN;
-  if (!expected) return false;
-  const supplied = /^Bearer (.+)$/.exec(request.headers.get('authorization') ?? '')?.[1] ?? '';
-  const a = Buffer.from(supplied);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 export async function handleRequest(request: Request): Promise<Response> {
-  if (!isAuthorized(request)) {
-    return jsonErrorResponse('Missing or invalid bearer token; set GOODVIBES_DAEMON_TOKEN and send it as Authorization: Bearer <token>', {
-      status: 401,
-      source: 'runtime',
-    });
-  }
   const url = new URL(request.url);
   if (request.method === 'GET' && url.pathname === '/api/control-plane/status') {
     return await controlHandlers.getStatus(request);

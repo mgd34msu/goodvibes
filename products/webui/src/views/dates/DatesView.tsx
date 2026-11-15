@@ -1,6 +1,6 @@
 /**
  * Occasions, the Occasions tab of Personal: upcoming occasions, plans, and the
- * open items the daemon is holding, over its sixteen `occasions.*` verbs
+ * open items the daemon is holding, over its `occasions.*` verbs
  * (docs/occasions.md). This surface renders what the read verbs return and calls
  * the write verbs for the actions they support; nothing here computes a
  * proximity word, a lead-time adjustment, a nudge cadence, or a nudge date, every
@@ -12,7 +12,8 @@
  * selected row's detail in the right pane: an occasion shows its facts, your
  * answer and its gift history; a plan shows its dates; a gift interview shows
  * its next question. "Add occasion" is the tab's one primary action and "Add
- * plan" sits beside it; both open a dialog that previews before it confirms. The
+ * plan" sits beside it; both open a dialog that previews before it confirms, and
+ * Edit on an occasion or plan opens the same dialog to change it in place. The
  * daemon's own record counts and the sweep sit in a quiet disclosure at the end.
  *
  * PULL-ONLY, NOT A NUDGE CHANNEL: the daemon pushes occasion/plan nudges to
@@ -33,10 +34,10 @@
  */
 import { useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, Cake, Plane, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertCircle, Cake, Pencil, Plane, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { OperatorMethodInput, OperatorMethodOutput } from '../../lib/goodvibes';
-import { readProfileWriteOutcome, WEBUI_PROFILE_AUTHORITY, WEBUI_PROFILE_SURFACE } from '../../lib/owner-profile';
+import { WEBUI_PROFILE_AUTHORITY, WEBUI_PROFILE_SURFACE } from '../../lib/owner-profile';
 import { queryKeys } from '../../lib/queries';
 import { formatError, isMethodNotInvokableError, isMethodUnavailableError } from '../../lib/errors';
 import { formatRelative } from '../../lib/object';
@@ -67,7 +68,7 @@ import {
   type StatusTone,
 } from '../../components/ui';
 import { DateField } from '../../components/ui/DateField';
-import { formatDateOnly } from './format-date';
+import { formatDateOnly, recordedDateLabel } from './format-date';
 import { PersonalPage } from '../personal/PersonalPage';
 import { openSettingsSection } from '../personal/openSettings';
 import { DatesGiftHistoryBody } from './DatesGiftHistoryPeek';
@@ -93,7 +94,10 @@ type Recurrence = 'annual' | 'once';
 type Selection = { kind: 'occasion' | 'plan' | 'interview'; id: string } | null;
 type RemovalTarget =
   | { readonly kind: 'occasion'; readonly id: string; readonly title: string }
-  | { readonly kind: 'plan'; readonly title: string; readonly text: string };
+  | { readonly kind: 'plan'; readonly id: string; readonly from: string; readonly title: string };
+
+/** The plan being changed: its id, and its start date in case two share a name. */
+type PlanRef = { readonly id: string; readonly from: string };
 
 const KIND_OPTIONS = [
   { value: 'gift-giving', label: 'Gift-giving' },
@@ -230,6 +234,60 @@ interface PlanDraft {
 const EMPTY_OCCASION: OccasionDraft = { title: '', date: '', person: '', kind: '', recurrence: 'annual', leadDays: '' };
 const EMPTY_PLAN: PlanDraft = { title: '', from: '', to: '', away: false, destination: '' };
 
+type ProposalShape = OperatorMethodOutput<'occasions.propose'>;
+type EditOutcome = OperatorMethodOutput<'occasions.update'>;
+
+/** An edit's preview, in the shape the dialog already renders for a new one. */
+function proposalOfEdit(result: EditOutcome): ProposalShape {
+  return {
+    ok: result.proposal.ok,
+    reason: result.proposal.reason,
+    line: result.proposal.line,
+    confirmation: result.proposal.confirmation,
+    needsKind: false,
+    conflictsWith: [],
+  };
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+/** The recorded date as the date field shows it; a yearless date shows its next occurrence. */
+function occasionDateInput(entry: OccasionListEntry): string {
+  const date = entry.occasion.date as { kind?: string; year?: number; month?: number; day?: number } | undefined;
+  if (date?.kind === 'dated' && typeof date.year === 'number' && typeof date.month === 'number' && typeof date.day === 'number') {
+    return `${String(date.year).padStart(4, '0')}-${pad2(date.month)}-${pad2(date.day)}`;
+  }
+  return entry.nextOccurrence ?? '';
+}
+
+/** Only what the owner changed is sent, so an untouched field keeps its recorded form. */
+function occasionChanges(draft: OccasionDraft, base: OccasionDraft): {
+  title?: string; date?: string; kind?: OccasionKind; person?: string; recurrence?: Recurrence; leadDays?: number | null;
+} {
+  return {
+    ...(draft.title.trim() !== base.title ? { title: draft.title.trim() } : {}),
+    ...(draft.date !== base.date ? { date: draft.date } : {}),
+    ...(draft.kind && draft.kind !== base.kind ? { kind: draft.kind } : {}),
+    ...(draft.person.trim() !== base.person ? { person: draft.person.trim() } : {}),
+    ...(draft.recurrence !== base.recurrence ? { recurrence: draft.recurrence } : {}),
+    ...(draft.leadDays.trim() !== base.leadDays ? { leadDays: draft.leadDays.trim() ? Number(draft.leadDays) : null } : {}),
+  };
+}
+
+function planChanges(draft: PlanDraft, base: PlanDraft): {
+  title?: string; from?: string; to?: string; away?: boolean; destination?: string;
+} {
+  return {
+    ...(draft.title.trim() !== base.title ? { title: draft.title.trim() } : {}),
+    ...(draft.from !== base.from ? { from: draft.from } : {}),
+    ...(draft.to !== base.to ? { to: draft.to } : {}),
+    ...(draft.away !== base.away ? { away: draft.away } : {}),
+    ...(draft.destination.trim() !== base.destination ? { destination: draft.destination.trim() } : {}),
+  };
+}
+
 export interface DatesViewProps {
   /** The Personal tab switcher; shown first in the filter row. */
   tabs?: ReactNode;
@@ -241,6 +299,8 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   const confirm = useConfirm();
 
   const [selection, setSelection] = useState<Selection>(null);
+  // Recorded dates the daemon returned for a conflict that arrived without them.
+  const [conflictDates, setConflictDates] = useState<Record<string, readonly string[]>>({});
   const [sweepResult, setSweepResult] = useState<OperatorMethodOutput<'occasions.sweep'> | null>(null);
 
   const [occasionOpen, setOccasionOpen] = useState(false);
@@ -250,11 +310,17 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   // its result is dropped when the draft has moved on, so Confirm can never be enabled
   // for text the operator never previewed.
   const occasionDraftEpochRef = useRef(0);
+  // Set while the dialog changes a recorded occasion instead of adding one;
+  // the baseline is what it held, so only changed fields are sent.
+  const [editingOccasionId, setEditingOccasionId] = useState<string | null>(null);
+  const occasionBaselineRef = useRef<OccasionDraft>(EMPTY_OCCASION);
 
   const [planOpen, setPlanOpen] = useState(false);
   const [plan, setPlan] = useState<PlanDraft>(EMPTY_PLAN);
   const [planProposal, setPlanProposal] = useState<OperatorMethodOutput<'occasions.plans.propose'> | null>(null);
   const planDraftEpochRef = useRef(0);
+  const [editingPlan, setEditingPlan] = useState<PlanRef | null>(null);
+  const planBaselineRef = useRef<PlanDraft>(EMPTY_PLAN);
 
   const [interviewDrafts, setInterviewDrafts] = useState<Record<string, Record<string, string>>>({});
   const [landedOnDrafts, setLandedOnDrafts] = useState<Record<string, string>>({});
@@ -306,28 +372,44 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   });
 
   const removePlan = useMutation({
-    mutationFn: (text: string) =>
-      platformClient.operator.profile.forget({ section: 'Plans', text, authority: WEBUI_PROFILE_AUTHORITY }),
+    mutationFn: (target: PlanRef) =>
+      platformClient.operator.invoke('occasions.plans.remove', {
+        planId: target.id,
+        planFrom: target.from,
+        confirmed: true,
+        authority: WEBUI_PROFILE_AUTHORITY,
+      }),
     onSuccess: async (result) => {
-      const outcome = readProfileWriteOutcome(result);
       await invalidateAll();
-      if (outcome?.ok) setSelection(null);
+      if (result.ok) setSelection(null);
       toast({
-        title: outcome?.ok ? 'Removed' : 'Not removed',
-        description: outcome === null
-          ? 'The daemon did not say whether the plan was removed.'
-          : outcome.ok ? outcome.disclosure : (outcome.reason ?? undefined),
-        tone: outcome?.ok ? 'success' : 'danger',
+        title: result.ok ? 'Removed' : 'Not removed',
+        description: result.ok ? result.disclosure : (result.reason ?? undefined),
+        tone: result.ok ? 'success' : 'danger',
       });
     },
     onError: (error: unknown) => toast({ title: 'Removal failed', description: formatError(error), tone: 'danger' }),
   });
 
+  // The owner says which recorded date is right: the others leave the profile
+  // through its write gate, and the occasion keeps its answers and gift history.
+  // Without `keep` the daemon only lists what is recorded, so the choice can be shown.
   const resolveConflict = useMutation({
-    mutationFn: (occasionId: string) => platformClient.operator.occasions.conflict.resolve(occasionId),
-    onSuccess: async () => {
+    mutationFn: ({ occasionId, keep }: { occasionId: string; keep?: string }) =>
+      platformClient.operator.invoke('occasions.conflict.resolve', keep
+        ? { occasionId, keep, authority: WEBUI_PROFILE_AUTHORITY }
+        : { occasionId }),
+    onSuccess: async (result, { occasionId, keep }) => {
+      if (!keep && !result.resolved) {
+        setConflictDates((current) => ({ ...current, [occasionId]: result.dates }));
+        return;
+      }
       await invalidateAll();
-      toast({ title: 'Conflict resolved', tone: 'success' });
+      toast({
+        title: result.resolved ? `Kept ${keep ? recordedDateLabel(keep) : 'the recorded date'}` : 'Date not changed',
+        description: result.resolved ? result.disclosure : (result.reason ?? undefined),
+        tone: result.resolved ? 'success' : 'danger',
+      });
     },
     onError: (error: unknown) => toast({ title: 'Failed to resolve conflict', description: formatError(error), tone: 'danger' }),
   });
@@ -382,8 +464,16 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   });
 
   const proposeOccasion = useMutation({
-    mutationFn: (draft: OccasionDraft) =>
-      platformClient.operator.occasions.propose({
+    mutationFn: async (draft: OccasionDraft): Promise<ProposalShape> => editingOccasionId
+      ? proposalOfEdit(await platformClient.operator.invoke('occasions.update', {
+        occasionId: editingOccasionId,
+        ...occasionChanges(draft, occasionBaselineRef.current),
+        confirmed: false,
+        surface: WEBUI_PROFILE_SURFACE,
+        said: DATES_PANEL_UTTERANCE,
+        authority: WEBUI_PROFILE_AUTHORITY,
+      }))
+      : platformClient.operator.occasions.propose({
         title: draft.title.trim(),
         date: draft.date,
         ...(draft.kind ? { kind: draft.kind } : {}),
@@ -399,8 +489,16 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   });
 
   const confirmOccasion = useMutation({
-    mutationFn: () =>
-      platformClient.operator.occasions.confirm({
+    mutationFn: (editing: string | null) => editing
+      ? platformClient.operator.invoke('occasions.update', {
+        occasionId: editing,
+        ...occasionChanges(occasion, occasionBaselineRef.current),
+        confirmed: true,
+        surface: WEBUI_PROFILE_SURFACE,
+        said: DATES_PANEL_UTTERANCE,
+        authority: WEBUI_PROFILE_AUTHORITY,
+      })
+      : platformClient.operator.occasions.confirm({
         title: occasion.title.trim(),
         date: occasion.date,
         kind: occasion.kind as OccasionKind,
@@ -411,8 +509,8 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
         said: DATES_PANEL_UTTERANCE,
         authority: WEBUI_PROFILE_AUTHORITY,
       }),
-    onSuccess: async (result) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.occasionsList });
+    onSuccess: async (result, editing) => {
+      await (editing ? invalidateAll() : queryClient.invalidateQueries({ queryKey: queryKeys.occasionsList }));
       if (!result.ok) {
         toast({ title: 'Not saved', description: result.reason ?? undefined, tone: 'danger' });
         return;
@@ -421,14 +519,25 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
       setOccasion(EMPTY_OCCASION);
       setOccasionProposal(null);
       setOccasionOpen(false);
-      toast({ title: 'Occasion added', description: result.disclosure, tone: 'success' });
+      setEditingOccasionId(null);
+      const unchanged = 'written' in result && !result.written;
+      toast({ title: unchanged ? 'Nothing changed' : editing ? 'Occasion changed' : 'Occasion added', description: result.disclosure, tone: 'success' });
     },
     onError: (error: unknown) => toast({ title: 'Save failed', description: formatError(error), tone: 'danger' }),
   });
 
   const proposePlan = useMutation({
-    mutationFn: () =>
-      platformClient.operator.occasions.plans.propose({
+    mutationFn: async (): Promise<ProposalShape> => editingPlan
+      ? proposalOfEdit(await platformClient.operator.invoke('occasions.plans.update', {
+        planId: editingPlan.id,
+        planFrom: editingPlan.from,
+        ...planChanges(plan, planBaselineRef.current),
+        confirmed: false,
+        surface: WEBUI_PROFILE_SURFACE,
+        said: DATES_PANEL_UTTERANCE,
+        authority: WEBUI_PROFILE_AUTHORITY,
+      }))
+      : platformClient.operator.occasions.plans.propose({
         title: plan.title.trim(),
         from: plan.from,
         to: plan.to,
@@ -443,8 +552,17 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   });
 
   const confirmPlan = useMutation({
-    mutationFn: () =>
-      platformClient.operator.occasions.plans.confirm({
+    mutationFn: (editing: PlanRef | null) => editing
+      ? platformClient.operator.invoke('occasions.plans.update', {
+        planId: editing.id,
+        planFrom: editing.from,
+        ...planChanges(plan, planBaselineRef.current),
+        confirmed: true,
+        surface: WEBUI_PROFILE_SURFACE,
+        said: DATES_PANEL_UTTERANCE,
+        authority: WEBUI_PROFILE_AUTHORITY,
+      })
+      : platformClient.operator.occasions.plans.confirm({
         title: plan.title.trim(),
         from: plan.from,
         to: plan.to,
@@ -454,7 +572,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
         said: DATES_PANEL_UTTERANCE,
         authority: WEBUI_PROFILE_AUTHORITY,
       }),
-    onSuccess: async (result) => {
+    onSuccess: async (result, editing) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.occasionsPlansList });
       if (!result.ok) {
         toast({ title: 'Not saved', description: result.reason ?? undefined, tone: 'danger' });
@@ -464,7 +582,10 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
       setPlan(EMPTY_PLAN);
       setPlanProposal(null);
       setPlanOpen(false);
-      toast({ title: 'Plan added', description: result.disclosure, tone: 'success' });
+      setEditingPlan(null);
+      if (editing) setSelection(null);
+      const unchanged = 'written' in result && !result.written;
+      toast({ title: unchanged ? 'Nothing changed' : editing ? 'Plan changed' : 'Plan added', description: result.disclosure, tone: 'success' });
     },
     onError: (error: unknown) => toast({ title: 'Save failed', description: formatError(error), tone: 'danger' }),
   });
@@ -499,14 +620,53 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
     if (plan.title.trim() && plan.from && plan.to) proposePlan.mutate();
   }
 
-  /** A sweep sends due nudges through the delivery channels for real, so it asks first. */
-  async function askSweep(): Promise<void> {
-    const ok = await confirm.ask({
-      title: 'Run the sweep now?',
-      description: 'This housekeeps your profile and delivers any nudges that are due through their channels right away.',
-      confirmLabel: 'Run sweep',
-    });
-    if (ok) runSweep.mutate();
+  /** Open the occasion dialog on a new occasion, dropping an edit in progress. */
+  function openAddOccasion(): void {
+    if (editingOccasionId !== null) {
+      occasionDraftEpochRef.current += 1;
+      setOccasion(EMPTY_OCCASION);
+      setOccasionProposal(null);
+      setEditingOccasionId(null);
+    }
+    setOccasionOpen(true);
+  }
+
+  /** Open the occasion dialog on a recorded occasion, to change it in place. */
+  function openEditOccasion(entry: OccasionListEntry): void {
+    const draft: OccasionDraft = {
+      title: entry.occasion.title,
+      date: occasionDateInput(entry),
+      person: entry.occasion.person ?? '',
+      kind: entry.occasion.kind,
+      recurrence: entry.occasion.recurrence,
+      leadDays: entry.occasion.leadDays === null || entry.occasion.leadDays === undefined ? '' : String(entry.occasion.leadDays),
+    };
+    occasionBaselineRef.current = draft;
+    occasionDraftEpochRef.current += 1;
+    setOccasion(draft);
+    setOccasionProposal(null);
+    setEditingOccasionId(entry.occasion.id);
+    setOccasionOpen(true);
+  }
+
+  function openAddPlan(): void {
+    if (editingPlan !== null) {
+      planDraftEpochRef.current += 1;
+      setPlan(EMPTY_PLAN);
+      setPlanProposal(null);
+      setEditingPlan(null);
+    }
+    setPlanOpen(true);
+  }
+
+  function openEditPlan(item: PlanEntry): void {
+    const draft: PlanDraft = { title: item.title, from: item.from, to: item.to, away: item.away, destination: item.destination ?? '' };
+    planBaselineRef.current = draft;
+    planDraftEpochRef.current += 1;
+    setPlan(draft);
+    setPlanProposal(null);
+    setEditingPlan({ id: item.id, from: item.from });
+    setPlanOpen(true);
   }
 
   async function askRemove(target: RemovalTarget): Promise<void> {
@@ -521,7 +681,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
     });
     if (ok) {
       if (target.kind === 'occasion') removeOccasion.mutate(target.id);
-      else removePlan.mutate(target.text);
+      else removePlan.mutate({ id: target.id, from: target.from });
     }
   }
 
@@ -541,6 +701,18 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   const listConflicts = list.data?.conflicts ?? [];
   const interviews: readonly InterviewState[] = pending.data?.interviews ?? [];
   const conflictCount = listConflicts.length + pendingConflicts.length;
+  // One row per occasion: the list carries the recorded dates, a pending
+  // conflict only its message until the dates are asked for.
+  const conflictRows = [
+    ...listConflicts.map((conflict) => ({ occasionId: conflict.occasionId, title: conflict.title, dates: conflict.dates })),
+    ...pendingConflicts
+      .filter((conflict) => !listConflicts.some((listed) => listed.occasionId === conflict.occasionId))
+      .map((conflict) => ({
+        occasionId: conflict.occasionId,
+        title: conflict.message,
+        dates: conflictDates[conflict.occasionId] ?? [],
+      })),
+  ];
 
   const listUnavailable = list.error ? isNotAvailable(list.error) : false;
 
@@ -571,15 +743,20 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
           onClose={() => setSelection(null)}
           closeLabel="Close occasion"
           actions={(
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Trash2 />}
-              disabled={removeOccasion.isPending}
-              onClick={() => void askRemove({ kind: 'occasion', id: entry.occasion.id, title: entry.occasion.title })}
-            >
-              Remove
-            </Button>
+            <>
+              <Button variant="ghost" size="sm" icon={<Pencil />} onClick={() => openEditOccasion(entry)}>
+                Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Trash2 />}
+                disabled={removeOccasion.isPending}
+                onClick={() => void askRemove({ kind: 'occasion', id: entry.occasion.id, title: entry.occasion.title })}
+              >
+                Remove
+              </Button>
+            </>
           )}
         >
           <Facts
@@ -625,15 +802,20 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
           onClose={() => setSelection(null)}
           closeLabel="Close plan"
           actions={(
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Trash2 />}
-              disabled={removePlan.isPending}
-              onClick={() => void askRemove({ kind: 'plan', title: item.title, text: item.text })}
-            >
-              Remove
-            </Button>
+            <>
+              <Button variant="ghost" size="sm" icon={<Pencil />} onClick={() => openEditPlan(item)}>
+                Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Trash2 />}
+                disabled={removePlan.isPending}
+                onClick={() => void askRemove({ kind: 'plan', id: item.id, from: item.from, title: item.title })}
+              >
+                Remove
+              </Button>
+            </>
           )}
         >
           <Facts
@@ -770,26 +952,34 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
 
       {conflictCount > 0 ? (
         <div data-testid="dates-conflicts" role="alert">
-          <RowGroup label="Conflicting dates" count={conflictCount}>
-            {listConflicts.map((conflict) => (
+          <RowGroup label="Conflicting dates" count={conflictRows.length}>
+            {conflictRows.map((conflict) => (
               <Row
-                key={`list-${conflict.occasionId}`}
+                key={conflict.occasionId}
                 title={conflict.title}
-                meta={conflict.dates.join(' vs. ')}
-                trailing={(
-                  <Button variant="outline" size="sm" disabled={resolveConflict.isPending} onClick={() => resolveConflict.mutate(conflict.occasionId)}>
-                    Resolved
-                  </Button>
-                )}
-              />
-            ))}
-            {pendingConflicts.map((conflict) => (
-              <Row
-                key={`pending-${conflict.occasionId}`}
-                title={conflict.message}
-                trailing={(
-                  <Button variant="outline" size="sm" disabled={resolveConflict.isPending} onClick={() => resolveConflict.mutate(conflict.occasionId)}>
-                    Resolved
+                meta={conflict.dates.length ? `${conflict.dates.map(recordedDateLabel).join(' or ')}: which is right?` : undefined}
+                trailing={conflict.dates.length ? (
+                  <span className="dates-conflict__choices">
+                    {conflict.dates.map((date) => (
+                      <Button
+                        key={date}
+                        variant="outline"
+                        size="sm"
+                        disabled={resolveConflict.isPending}
+                        onClick={() => resolveConflict.mutate({ occasionId: conflict.occasionId, keep: date })}
+                      >
+                        {`Keep ${recordedDateLabel(date)}`}
+                      </Button>
+                    ))}
+                  </span>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={resolveConflict.isPending}
+                    onClick={() => resolveConflict.mutate({ occasionId: conflict.occasionId })}
+                  >
+                    Choose the date
                   </Button>
                 )}
               />
@@ -864,7 +1054,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
         <EmptyState
           icon={<Cake />}
           title="No occasions yet"
-          action={<Button variant="outline" onClick={() => setOccasionOpen(true)}>Add occasion</Button>}
+          action={<Button variant="outline" onClick={openAddOccasion}>Add occasion</Button>}
         >
           Add a birthday or anniversary, or tell the agent about one.
         </EmptyState>
@@ -902,8 +1092,14 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
                 <p className="dates-state__text">No sweep has run yet.</p>
               )}
               <div>
-                <Button variant="outline" size="sm" disabled={runSweep.isPending} onClick={() => void askSweep()}>
-                  {runSweep.isPending ? 'Sweeping…' : 'Run sweep now'}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={runSweep.isPending}
+                  onClick={() => runSweep.mutate()}
+                  title="Housekeeps your dates and delivers any nudges that are due through their channels right away"
+                >
+                  {runSweep.isPending ? 'Sweeping…' : 'Run sweep and deliver due nudges'}
                 </Button>
               </div>
               {sweepResult ? (
@@ -927,8 +1123,8 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
 
   const action = listUnavailable || list.isPending ? undefined : (
     <>
-      <Button variant="outline" onClick={() => setPlanOpen(true)}>Add plan</Button>
-      <Button variant="primary" icon={<Plus />} onClick={() => setOccasionOpen(true)}>Add occasion</Button>
+      <Button variant="outline" onClick={openAddPlan}>Add plan</Button>
+      <Button variant="primary" icon={<Plus />} onClick={openAddOccasion}>Add occasion</Button>
     </>
   );
 
@@ -989,8 +1185,10 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
       <Dialog
         open={occasionOpen}
         onClose={() => setOccasionOpen(false)}
-        title="Add occasion"
-        description="Preview shows what will be saved. Nothing is added until you confirm."
+        title={editingOccasionId ? 'Change occasion' : 'Add occasion'}
+        description={editingOccasionId
+          ? 'Preview shows the line that replaces the recorded one. Its answers and gift history stay with it. Nothing changes until you confirm.'
+          : 'Preview shows what will be saved. Nothing is added until you confirm.'}
         footer={(
           <>
             <Button variant="secondary" onClick={() => setOccasionOpen(false)}>Cancel</Button>
@@ -1005,7 +1203,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
             <Button
               variant="primary"
               disabled={confirmOccasion.isPending || !occasionPreviewReady || !occasion.kind}
-              onClick={() => confirmOccasion.mutate()}
+              onClick={() => confirmOccasion.mutate(editingOccasionId)}
             >
               {confirmOccasion.isPending ? 'Saving…' : 'Confirm'}
             </Button>
@@ -1066,8 +1264,10 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
       <Dialog
         open={planOpen}
         onClose={() => setPlanOpen(false)}
-        title="Add plan"
-        description="Preview shows what will be saved. Nothing is added until you confirm."
+        title={editingPlan ? 'Change plan' : 'Add plan'}
+        description={editingPlan
+          ? 'Preview shows the line that replaces the recorded one. Nothing changes until you confirm.'
+          : 'Preview shows what will be saved. Nothing is added until you confirm.'}
         footer={(
           <>
             <Button variant="secondary" onClick={() => setPlanOpen(false)}>Cancel</Button>
@@ -1082,7 +1282,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
             <Button
               variant="primary"
               disabled={confirmPlan.isPending || !planProposal?.ok}
-              onClick={() => confirmPlan.mutate()}
+              onClick={() => confirmPlan.mutate(editingPlan)}
             >
               {confirmPlan.isPending ? 'Saving…' : 'Confirm'}
             </Button>

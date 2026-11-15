@@ -315,6 +315,7 @@ carries the date.
 | `occasions.list` | `read:occasions` | Every occasion, its next occurrence, days away, window, recorded answer; unparsed lines with reasons; conflicts. |
 | `occasions.propose` | `write:occasions` | What would be written, plus the one-line confirmation. Writes nothing. |
 | `occasions.confirm` | `write:occasions` | Write the confirmed occasion. Refuses without a kind. `self: true` marks the owner's own date (`for me`). |
+| `occasions.update` | `write:occasions` | Change an occasion's date, kind, person, recurrence, lead or `self` in place. The id stays, so answers and gift history stay with it; a different name is refused. Without `confirmed` it returns the line and the sentence to put to the owner and writes nothing. |
 | `occasions.remove` | `write:occasions` | One confirmation; removes the line and every record against it. |
 | `occasions.answer` | `write:occasions` | yes / no / later / acknowledged. A yes opens the interview; acknowledged is the same as `occasions.acknowledge`. |
 | `occasions.acknowledge` | `write:occasions` | Record that the owner has one occurrence in hand, without ending the question: the open item stays open and stops being pushed. Distinct from `answer`, which resolves and removes the item. An occurrence already answered yes or no is left as it is and the reply says so (`changed: false`). |
@@ -328,9 +329,12 @@ carries the date.
 | `occasions.plans.list` | `read:occasions` | Plans, and whether one has the owner away today. |
 | `occasions.plans.propose` | `write:occasions` | Same two-step capture, for a plan. |
 | `occasions.plans.confirm` | `write:occasions` | Write the confirmed plan, with every entry of `details` (a confirmation number, flights and times), which `occasions.plans.list` returns. |
+| `occasions.plans.update` | `write:occasions` | Change a plan in place, by its id (and `planFrom` when two plans share a name). Same two steps as `occasions.update`. |
+| `occasions.plans.remove` | `write:occasions` | One confirmation; removes the plan's line. |
 | `occasions.state` | `read:occasions` | What the machine-owned store holds; counts and reasons only. |
 
-`occasions.confirm`, `occasions.plans.confirm` and `occasions.remove` write to
+`occasions.confirm`, `occasions.plans.confirm`, `occasions.update`,
+`occasions.plans.update`, `occasions.remove` and `occasions.plans.remove` write to
 the owner's profile and therefore take `authority` as a required parameter, go
 through the profile's own write gate, and refuse a caller that declares the call
 was not a user request.

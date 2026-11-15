@@ -405,7 +405,7 @@ test('regeneration stays active over cached historical assistant messages', asyn
 });
 
 
-test('a live running turn is not completed by an old assistant message when no send set the baseline', async () => {
+test('a live running turn is not completed by an old assistant message', async () => {
   const history = [{ id: 'question-1', role: 'user', content: 'question', createdAt: 1 }, { id: 'reply-1', role: 'assistant', content: 'old answer', createdAt: 2 }];
   client.setQueryDefaults(['companion-chat', 'session-a', 'messages'], { staleTime: Infinity });
   client.setQueryData(['companion-chat', 'session-a', 'messages'], { messages: history });
@@ -413,8 +413,7 @@ test('a live running turn is not completed by an old assistant message when no s
   await waitFor(() => container.textContent?.includes('old answer') === true);
   await waitFor(() => streamCalls.some((call) => call.sessionId === 'session-a'));
   const call = streamCalls.find((c) => c.sessionId === 'session-a')!;
-  // Another client (or a reload mid-turn) started a turn: no local send ran, so the
-  // response baseline was never established.
+  // Another client (or a reload mid-turn) started a turn: no local send anchors it.
   flushSync(() => {
     call.options.onEvent('companion-chat.turn.started', { sessionId: 'session-a', type: 'turn.started' });
   });

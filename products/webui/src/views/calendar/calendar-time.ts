@@ -8,14 +8,26 @@ import { toIsoDate } from '../../components/ui/DateField';
 
 const DAY_MS = 86_400_000;
 
+/** What an event says about its own day-only shape, when the daemon sends it. */
+export interface AllDayFlag {
+  readonly allDay?: boolean | undefined;
+}
+
+/** The daemon's `allDay` when the event carries one, otherwise undefined. */
+export function allDayFlagOf(event: unknown): boolean | undefined {
+  const flag = typeof event === 'object' && event !== null ? (event as AllDayFlag).allDay : undefined;
+  return typeof flag === 'boolean' ? flag : undefined;
+}
+
 /**
- * The event summary carries no all-day flag, so recognise the shape the engine
- * writes for one: a start at exactly 00:00:00.000Z and an end equal to the start
- * (a DATE event with no DTEND) or a whole number of days later. A timed event
- * that happens to fill whole days from midnight UTC reads as all-day too, which
- * is the same date either way for a UTC viewer.
+ * Whether an event is all-day. The event's own `allDay` decides when it is
+ * sent (the calendar knows a DATE from a DATE-TIME). Without it, the shape the
+ * engine writes for one is recognised: a start at exactly 00:00:00.000Z and an
+ * end equal to the start or a whole number of days later, which a timed event
+ * filling whole days from midnight UTC also matches.
  */
-export function isAllDayEvent(start: string, end?: string): boolean {
+export function isAllDayEvent(start: string, end?: string, allDay?: boolean): boolean {
+  if (allDay !== undefined) return allDay;
   const from = Date.parse(start);
   const to = end === undefined ? Number.NaN : Date.parse(end);
   if (Number.isNaN(from) || Number.isNaN(to)) return false;
@@ -23,15 +35,15 @@ export function isAllDayEvent(start: string, end?: string): boolean {
 }
 
 /** The date (YYYY-MM-DD) an event starts on in the viewer's calendar. */
-export function eventDayKey(start: string, end?: string): string {
+export function eventDayKey(start: string, end?: string, allDay?: boolean): string {
   const parsed = new Date(start);
   if (Number.isNaN(parsed.getTime())) return start.slice(0, 10);
-  return isAllDayEvent(start, end) ? parsed.toISOString().slice(0, 10) : toIsoDate(parsed);
+  return isAllDayEvent(start, end, allDay) ? parsed.toISOString().slice(0, 10) : toIsoDate(parsed);
 }
 
 /** The time shown beside an event: "All day", or its start time, or '' when unreadable. */
-export function eventTimeLabel(start: string, end?: string): string {
-  if (isAllDayEvent(start, end)) return 'All day';
+export function eventTimeLabel(start: string, end?: string, allDay?: boolean): string {
+  if (isAllDayEvent(start, end, allDay)) return 'All day';
   const parsed = new Date(start);
   return Number.isNaN(parsed.getTime()) ? '' : parsed.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }

@@ -159,7 +159,6 @@ export function companionEventType(eventName: string, payload: unknown): string 
 export const TURN_STATES = [
   'idle',
   'sending',
-  'sending while reconnecting',
   'submitted',
   'running',
   'streaming',
@@ -168,16 +167,21 @@ export const TURN_STATES = [
   'stopping',
   'stopped locally',
   'stopped',
-  'reconnecting',
   'completed',
   'error',
   'send failed',
   'session expired',
-  'stream paused',
-  'stream error',
 ] as const;
 
 export type TurnState = (typeof TURN_STATES)[number];
+
+/**
+ * The live stream's own health, kept apart from the turn: a dropped connection
+ * does not end or pause the daemon's reply, it only changes how this tab hears
+ * about it. `paused` means the built-in reconnect gave up (or the stream could
+ * not be opened) and only a Retry, or the slow message refresh, brings news.
+ */
+export type StreamHealth = 'connecting' | 'live' | 'reconnecting' | 'paused';
 
 /**
  * Statuses a turn has SETTLED in: nothing live is left to report on, so a late
@@ -192,7 +196,7 @@ const SETTLED_TURN_STATES: readonly string[] = ['completed', 'stopped', 'stopped
  * result from `current` when `proposed` arrives:
  *
  * - once the user pressed Stop (`stopping`), delta/tool frames (`streaming`,
- *   `tooling`) and a stream drop (`reconnecting`) do not un-stop the turn; only a terminal outcome resolves it;
+ *   `tooling`) do not un-stop the turn; only a terminal outcome resolves it;
  * - a settled turn (`completed`, `stopped`, `stopped locally`, `session expired`)
  *   is not overwritten by a late `error`.
  *
@@ -200,8 +204,8 @@ const SETTLED_TURN_STATES: readonly string[] = ['completed', 'stopped', 'stopped
  * report a terminal outcome from the stream itself are intentionally NOT
  * constrained here.
  */
-export function nextTurnStatus(current: string, proposed: TurnState): string {
-  if (current === 'stopping' && (proposed === 'streaming' || proposed === 'tooling' || proposed === 'reconnecting')) return current;
+export function nextTurnStatus(current: TurnState, proposed: TurnState): TurnState {
+  if (current === 'stopping' && (proposed === 'streaming' || proposed === 'tooling')) return current;
   if (proposed === 'error' && SETTLED_TURN_STATES.includes(current)) return current;
   return proposed;
 }
@@ -223,27 +227,52 @@ export interface TurnPhase {
 export const IDLE_TURN_PHASE: TurnPhase = { state: 'idle', error: '' };
 
 /**
- * States for which a turn is genuinely in flight (drives the streaming indicator, the
- * Stop control, and the 1s message-poll fallback). 'reconnecting' and 'sending while
- * reconnecting' are included deliberately: an SSE drop mid-turn (or a send that starts
- * while the stream is backing off) does not mean the turn stopped, it means the live
- * channel is temporarily down while the daemon keeps working. 'stream paused' and
- * 'session expired' are deliberately EXCLUDED, those mean the automatic reconnect gave
- * up (or the token died), so nothing is actively streaming any more; isStreaming must
- * go false rather than keep asserting a live turn that no longer has a path to resume.
+ * States for which a turn is genuinely in flight on the daemon: they drive the
+ * working line and the Stop control. The stream's health is not part of this:
+ * a reply keeps running while the connection is down, so Stop stays offered.
+ * 'syncing' is a turn whose end this tab may have missed while its stream was
+ * down; the refreshed message list settles it, and Stop resolves it if the
+ * daemon has nothing running.
  */
-export const ACTIVE_TURN_STATES: readonly string[] = [
+export const ACTIVE_TURN_STATES: readonly TurnState[] = [
   'sending',
   'submitted',
   'running',
   'streaming',
   'tooling',
-  'reconnecting',
-  'sending while reconnecting',
+  'syncing',
   // A server-side stop has been requested; the stream stays open awaiting the
   // terminal turn.cancelled event.
   'stopping',
 ];
+
+export function isActiveTurnState(state: TurnState): boolean {
+  return ACTIVE_TURN_STATES.includes(state);
+}
+
+/**
+ * Where a turn stands once the message list is read after the stream could
+ * not report it (a reconnect, or the slow refresh while paused): `completed`
+ * or `stopped` when a reply follows the message the turn answers, otherwise
+ * null (still running, or nothing to tell yet). `anchorId` is the user message
+ * this tab sent; without one the newest user message is the anchor.
+ */
+export function settledFromList(allMessages: readonly unknown[], anchorId: string): 'completed' | 'stopped' | null {
+  // History a regenerate or edit superseded is not this turn's reply.
+  const messages = allMessages.filter((message) => !asRecord(message).supersededAt);
+  let anchor = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (anchorId ? bestId(message) === anchorId : messageTone(message) === 'user' && deliveryState(message) !== 'queued') {
+      anchor = index;
+      break;
+    }
+  }
+  if (anchor < 0) return null;
+  const reply = messages.slice(anchor + 1).find((message) => messageTone(message) === 'assistant');
+  if (!reply) return null;
+  return deliveryState(reply) === 'cancelled' ? 'stopped' : 'completed';
+}
 
 /**
  * Derive a concise, human chat title from the first user message, the client-side
@@ -302,18 +331,21 @@ export interface CompletedToolCall {
   readonly finishedAt?: number;
 }
 
-/** Common tool names mapped to the short, human label used in the folded summary line. */
+/**
+ * The engine's tool names mapped to the short label the folded summary and the
+ * working line use. Keyed on the names the tool registry registers; any other
+ * tool (MCP servers, plugins) falls back to its own name.
+ */
 const TOOL_FRIENDLY_LABELS: Readonly<Record<string, string>> = {
   read: 'read',
   write: 'write',
   edit: 'edit',
-  bash: 'exec',
   exec: 'exec',
-  grep: 'search',
-  glob: 'search',
-  websearch: 'web search',
-  webfetch: 'web fetch',
-  task: 'agent',
+  find: 'search',
+  web_search: 'web search',
+  fetch: 'web fetch',
+  agent: 'agent',
+  task: 'tasks',
 };
 
 /** A short, human label for a tool name, falls back to the raw name when unrecognized. */
@@ -352,10 +384,11 @@ const TOOL_PHRASES: Readonly<Record<string, (count: number) => string>> = {
   write: (n) => `wrote ${n} file${n === 1 ? '' : 's'}`,
   edit: (n) => `edited ${n} file${n === 1 ? '' : 's'}`,
   exec: (n) => `ran ${n} command${n === 1 ? '' : 's'}`,
-  search: (n) => (n === 1 ? 'searched the code' : `searched the code ${n} times`),
+  search: (n) => (n === 1 ? 'searched the files' : `searched the files ${n} times`),
   'web search': (n) => (n === 1 ? 'searched the web' : `searched the web ${n} times`),
   'web fetch': (n) => `read ${n} web page${n === 1 ? '' : 's'}`,
   agent: (n) => `ran ${n} agent${n === 1 ? '' : 's'}`,
+  tasks: (n) => (n === 1 ? 'updated the task list' : `updated the task list ${n} times`),
 };
 
 /** Whole seconds between the first call starting and the last one finishing, or null. */
@@ -408,12 +441,13 @@ export function describeToolActivity(calls: readonly CompletedToolCall[]): strin
  * flight.
  */
 export function workingStatusLabel(
-  turnState: string,
+  turnState: TurnState,
   activeToolNames: readonly string[],
   hasLiveText: boolean,
+  streamHealth: StreamHealth = 'live',
 ): string {
   if (turnState === 'stopping') return 'Stopping…';
-  if (turnState === 'reconnecting' || turnState === 'sending while reconnecting') return 'Reconnecting to your daemon…';
+  if (isActiveTurnState(turnState) && streamHealth === 'reconnecting') return 'Reconnecting to your daemon…';
   if (activeToolNames.length > 0) {
     const counts = new Map<string, number>();
     for (const name of activeToolNames) {
@@ -426,10 +460,11 @@ export function workingStatusLabel(
         case 'write': return count > 1 ? `Writing ${count} files` : 'Writing a file';
         case 'edit': return count > 1 ? `Editing ${count} files` : 'Editing a file';
         case 'exec': return count > 1 ? `Running ${count} commands` : 'Running a command';
-        case 'search': return 'Searching the code';
+        case 'search': return 'Searching the files';
         case 'web search': return 'Searching the web';
         case 'web fetch': return 'Reading a web page';
         case 'agent': return count > 1 ? `Running ${count} agents` : 'Running an agent';
+        case 'tasks': return 'Updating the task list';
         default: return `Using ${label}`;
       }
     });
@@ -448,10 +483,8 @@ export function workingStatusLabel(
  * Plain words for a turn that ended somewhere other than a normal reply, shown
  * as a quiet line above the composer. '' for idle, in-flight and completed turns.
  */
-export function settledTurnLabel(turnState: string): string {
+export function settledTurnLabel(turnState: TurnState): string {
   switch (turnState) {
-    case 'stream paused': return 'Live updates are off. Replies still arrive by periodic refresh.';
-    case 'stream error': return 'The live stream failed.';
     case 'send failed': return 'The message was not sent.';
     case 'session expired': return 'Your sign-in expired.';
     case 'stopped': return 'Stopped.';
@@ -459,4 +492,14 @@ export function settledTurnLabel(turnState: string): string {
     case 'error': return 'The reply failed.';
     default: return '';
   }
+}
+
+/**
+ * Plain words for the live stream's health, shown with a Retry while it is
+ * paused. '' while connecting or live.
+ */
+export function streamHealthLabel(health: StreamHealth): string {
+  if (health === 'paused') return 'Live updates are off. Replies still arrive by periodic refresh.';
+  if (health === 'reconnecting') return 'Reconnecting to the live stream…';
+  return '';
 }

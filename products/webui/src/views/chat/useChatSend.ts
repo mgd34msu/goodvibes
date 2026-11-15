@@ -1,5 +1,5 @@
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef } from 'react';
-import { getClientLifetime, isClientLifetimeCurrent, type ClientLifetime } from '../../lib/client-lifetime';
+import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../../lib/client-lifetime';
 import type { ChatSelection, ChatSelectionTracker } from '../../lib/chat-selection';
 import { useMutation } from '@tanstack/react-query';
 import { client as platformClient } from '../../lib/goodvibes';
@@ -17,7 +17,7 @@ import {
   formatError,
   isMethodUnavailableError,
 } from '../../lib/errors';
-import { fileToBase64, uploadedArtifactId } from './message-utils';
+import { fileToBase64, uploadedArtifactId, type TurnState } from './message-utils';
 import type { ChatMessage } from './types';
 
 // ---------------------------------------------------------------------------
@@ -31,21 +31,19 @@ interface UseChatSendOptions {
   onDraftSessionRequestedChange: (requested: boolean) => void;
   onLocalSessionCreated: (session: unknown) => void;
   onSessionMissing: (sessionId: string) => void;
-  setTurnState: Dispatch<SetStateAction<string>>;
+  setTurnState: Dispatch<SetStateAction<TurnState>>;
   setTurnError: Dispatch<SetStateAction<string>>;
   setLiveText: Dispatch<SetStateAction<string>>;
   setLocalMessages: Dispatch<SetStateAction<LocalCompanionMessage[]>>;
   setPendingUserMessageId: Dispatch<SetStateAction<string>>;
   invalidateChatState: (sessionId: string) => Promise<void>;
   /**
-   * The caller's authoritative turn state, read fresh on every send. When a send
-   * starts while the live stream is 'reconnecting' or 'stream paused', the mutation
-   * says so honestly ('sending while reconnecting') instead of silently claiming the
-   * ordinary 'sending'/'submitted' path, the REST send still goes through (it does
-   * not depend on the SSE stream's health), but the reply may not visibly arrive
-   * until the stream resumes or the 1s message poll fallback catches it.
+   * A send was abandoned before the daemon accepted it (the chat selection or
+   * the sign-in changed, or the view went away): its text and files, so the
+   * caller can put them back in the composer. Not called once the daemon has
+   * the message; that send succeeded and the server list shows it.
    */
-  turnState: string;
+  onSendAbandoned?: (input: { body: string; files: File[] }) => void;
   /**
    * Same auth-expiry handoff useChatStream uses: on a 401 mid-send, re-probe
    * auth.current so a genuinely dead token flips the app to the signed-out gate,
@@ -67,7 +65,28 @@ interface SelectionLease {
   readonly owner: ChatSelectionTracker;
   readonly client: ClientLifetime;
 }
-interface OwnedSendInput extends SendInput { readonly lease: SelectionLease }
+interface OwnedSendInput extends SendInput { readonly lease: SelectionLease; readonly controller: AbortController }
+
+/** A send given up before the daemon had the message; nothing was posted. */
+export class SendAbandonedError extends Error {
+  constructor() {
+    super('The message was not sent: the chat or sign-in changed before it was sent.');
+    this.name = 'SendAbandonedError';
+  }
+}
+
+/** Settle with `promise`, or reject as soon as `signal` aborts. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => { signal.removeEventListener('abort', onAbort); resolve(value); },
+      (error: unknown) => { signal.removeEventListener('abort', onAbort); reject(error); },
+    );
+  });
+}
 
 export interface UseChatSendReturn {
   /**
@@ -161,8 +180,8 @@ export function useChatSend({
   setLocalMessages,
   setPendingUserMessageId,
   invalidateChatState,
-  turnState,
   onAuthExpired,
+  onSendAbandoned,
 }: UseChatSendOptions): UseChatSendReturn {
   const mounted = useRef(true);
   useEffect(() => {
@@ -194,32 +213,51 @@ export function useChatSend({
     && lease.owner === chatSelection && lease.owner.isCurrent(lease.selection)
     && lease.selection.sessionId === lease.sessionId && isClientLifetimeCurrent(lease.client);
 
+  // The send in flight, aborted the moment its chat selection or sign-in stops
+  // being current, or the view unmounts. One controller per send; every await
+  // before the daemon accepts the message ends with it.
+  const inFlightRef = useRef<{ lease: SelectionLease; controller: AbortController } | null>(null);
+  const abandonIfStale = () => {
+    const inFlight = inFlightRef.current;
+    if (inFlight && !inFlight.controller.signal.aborted && !isCurrent(inFlight.lease)) {
+      inFlight.controller.abort(new SendAbandonedError());
+    }
+  };
+  useEffect(abandonIfStale);
+  useEffect(() => {
+    const unsubscribe = subscribeClientLifetime(() => abandonIfStale());
+    return () => {
+      unsubscribe();
+      inFlightRef.current?.controller.abort(new SendAbandonedError());
+    };
+    // abandonIfStale reads refs only; one subscription per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // -------------------------------------------------------------------------
   // Core send mutation (unchanged API, still used by Composer)
   // -------------------------------------------------------------------------
   const ownedSendMutation = useMutation<undefined, Error, OwnedSendInput>({
-    mutationFn: async ({ body, files, steer, localMessageId: retriedMessageId, lease }) => {
-      if ((!body && !files.length) || !isCurrent(lease)) return;
-      // Read the live stream's health at the moment the send starts (not stale,
-      // react-query always calls the mutationFn captured on the latest render). A
-      // send during 'reconnecting'/'stream paused' still goes over REST and does not
-      // depend on the SSE connection, but the reply streams back over that SAME
-      // connection, say so honestly rather than silently claiming ordinary
-      // 'sending'/'submitted' while the live channel is actually down.
-      const sendingWhileReconnecting = turnState === 'reconnecting' || turnState === 'stream paused';
-      setTurnState(sendingWhileReconnecting ? 'sending while reconnecting' : 'sending');
-      setTurnError(
-        sendingWhileReconnecting
-          ? 'Sending: the live stream is reconnecting, so the reply may not appear until it resumes.'
-          : '',
-      );
+    mutationFn: async ({ body, files, steer, localMessageId: retriedMessageId, lease, controller }) => {
+      if (!body && !files.length) throw new Error('There is nothing to send: write a message or attach a file.');
+      const { signal } = controller;
+      inFlightRef.current = { lease, controller };
+      // Checked after every await before the message is posted: the effect above
+      // aborts on the next render, this catches a change within the same tick.
+      const ensureCurrent = () => {
+        if (!signal.aborted && !isCurrent(lease)) controller.abort(new SendAbandonedError());
+        signal.throwIfAborted();
+      };
+      ensureCurrent();
+      setTurnState('sending');
+      setTurnError('');
 
       let sessionId = lease.sessionId;
       if (!sessionId) {
         const createdAt = Date.now();
         const title = body.slice(0, 72) || files[0]?.name?.slice(0, 72) || 'Attachment chat';
-        const created = await platformClient.chat.sessions.create({ title });
-        if (!isCurrent(lease)) return;
+        const created = await untilAborted(platformClient.chat.sessions.create({ title }, signal), signal);
+        ensureCurrent();
         sessionId = extractSessionId(created);
         const createdSession = companionSessionFromDetail(created);
         onLocalSessionCreated(bestId(createdSession) ? createdSession : {
@@ -234,10 +272,15 @@ export function useChatSend({
         const previous = lease.selection;
         onActiveSessionChange(sessionId);
         const selected = chatSelection.capture();
+        // Only this send's own switch to the chat it created keeps the send going.
         if (selected.revision !== previous.revision + 1 || selected.sessionId !== sessionId
-          || selected.view !== 'chat' || !isClientLifetimeCurrent(lease.client)) return;
+          || selected.view !== 'chat') {
+          controller.abort(new SendAbandonedError());
+        }
+        signal.throwIfAborted();
         lease.selection = selected;
         lease.sessionId = sessionId;
+        ensureCurrent();
         onDraftSessionRequestedChange(false);
       }
 
@@ -264,20 +307,25 @@ export function useChatSend({
         : [...current, localMessage]));
       setPendingUserMessageId(localMessageId);
       setLiveText('');
-      setTurnState(sendingWhileReconnecting ? 'sending while reconnecting' : 'submitted');
+      setTurnState('submitted');
+      const markFailed = () => {
+        holdFiles(localMessageId, files);
+        setLocalMessages((current) => current.map((message) => (
+          message.id === localMessageId ? { ...message, deliveryState: 'failed' as const } : message
+        )));
+      };
+      const dropLocal = () => setLocalMessages((current) => current.filter((message) => message.id !== localMessageId));
 
-      let attachments: typeof localAttachments = [];
+      let attachments: typeof localAttachments;
       try {
         attachments = await Promise.all(files.map(async (file) => {
-          const dataBase64 = await fileToBase64(file);
-          if (!isCurrent(lease)) return undefined;
-          const uploaded = await platformClient.artifacts.create({
+          const dataBase64 = await untilAborted(fileToBase64(file), signal);
+          const uploaded = await untilAborted(platformClient.artifacts.create({
             filename: file.name,
             mimeType: file.type || 'application/octet-stream',
             dataBase64,
             metadata: { surface: 'webui' },
-          });
-          if (!isCurrent(lease)) return undefined;
+          }), signal);
           const artifactId = uploadedArtifactId(uploaded);
           if (!artifactId) throw new Error(`Artifact upload for ${file.name} did not return an artifact id.`);
           return {
@@ -287,17 +335,16 @@ export function useChatSend({
             mimeType: file.type || 'application/octet-stream',
             sizeBytes: file.size,
           };
-        })).then((items) => items.filter((item): item is typeof localAttachments[number] => item !== undefined));
+        }));
+        ensureCurrent();
       } catch (error) {
-        if (!isCurrent(lease)) throw error;
-        holdFiles(localMessageId, files);
-        setLocalMessages((current) => current.map((message) => (
-          message.id === localMessageId ? { ...message, deliveryState: 'failed' as const } : message
-        )));
+        if (signal.aborted) dropLocal();
+        else markFailed();
         throw error;
       }
 
-      if (!isCurrent(lease)) return;
+      // From here the message is posted: the request is not abandoned part way,
+      // its answer decides. The id makes a repeat of it safe.
       let result: unknown;
       try {
         const payload = {
@@ -315,25 +362,25 @@ export function useChatSend({
           try {
             result = await withReopen(sessionId, () => platformClient.chat.messages.steer(sessionId, payload));
           } catch (steerError) {
-            if (!isCurrent(lease) || !isMethodUnavailableError(steerError)) throw steerError;
+            if (!isMethodUnavailableError(steerError)) throw steerError;
             result = await withReopen(sessionId, () => platformClient.chat.messages.create(sessionId, payload));
-            if (!isCurrent(lease)) return;
-            setTurnError(
-              'Sent as a normal message: this daemon does not support steering '
-              + '(update the connected daemon), so the current reply was not interrupted.',
-            );
+            if (isCurrent(lease)) {
+              setTurnError(
+                'Sent as a normal message: this daemon does not support steering '
+                + '(update the connected daemon), so the current reply was not interrupted.',
+              );
+            }
           }
         } else {
           result = await withReopen(sessionId, () => platformClient.chat.messages.create(sessionId, payload));
         }
       } catch (error) {
-        if (!isCurrent(lease)) throw error;
-        holdFiles(localMessageId, files);
-        setLocalMessages((current) => current.map((message) => (
-          message.id === localMessageId ? { ...message, deliveryState: 'failed' as const } : message
-        )));
+        markFailed();
         throw error;
+      } finally {
+        if (inFlightRef.current?.controller === controller) inFlightRef.current = null;
       }
+      // Accepted. When the chat changed meanwhile, its own list shows the message.
       if (!isCurrent(lease)) return;
       const messageId = extractMessageId(result);
       setLocalMessages((current) => current.map((message) => (
@@ -349,7 +396,17 @@ export function useChatSend({
       setPendingUserMessageId(messageId || localMessageId);
       await invalidateChatState(sessionId);
     },
-    onError: (error, { lease }) => {
+    onError: (error, { lease, body, files, controller }) => {
+      if (inFlightRef.current?.controller === controller) inFlightRef.current = null;
+      if (error instanceof SendAbandonedError) {
+        if (mounted.current) onSendAbandoned?.({ body, files });
+        // Still on the same chat (only the sign-in changed): say what happened.
+        if (mounted.current && lease.owner.isCurrent(lease.selection)) {
+          setTurnState('send failed');
+          setTurnError(error.message);
+        }
+        return;
+      }
       if (!isCurrent(lease)) return;
       if (isSessionNotFoundError(error) && lease.sessionId) {
         onSessionMissing(lease.sessionId);
@@ -396,16 +453,24 @@ export function useChatSend({
     return callbacks;
   };
   const sendCurrent = ownedSendMutation.variables !== undefined && isCurrent(ownedSendMutation.variables.lease);
+  // A handler from an older render cannot send into a chat the view has left:
+  // the send is refused as abandoned and its text goes back to the composer.
   const sendMutation: SendMutation = {
     mutate(input, options) {
       const lease = captureLease();
-      if (!isCurrent(lease)) return;
-      ownedSendMutation.mutate({ ...input, lease }, callbackOptions(input, lease, options));
+      if (!isCurrent(lease)) {
+        if (mounted.current) onSendAbandoned?.({ body: input.body, files: input.files });
+        return;
+      }
+      ownedSendMutation.mutate({ ...input, lease, controller: new AbortController() }, callbackOptions(input, lease, options));
     },
     mutateAsync(input, options) {
       const lease = captureLease();
-      if (!isCurrent(lease)) return Promise.resolve(undefined);
-      return ownedSendMutation.mutateAsync({ ...input, lease }, callbackOptions(input, lease, options));
+      if (!isCurrent(lease)) {
+        if (mounted.current) onSendAbandoned?.({ body: input.body, files: input.files });
+        return Promise.reject(new SendAbandonedError());
+      }
+      return ownedSendMutation.mutateAsync({ ...input, lease, controller: new AbortController() }, callbackOptions(input, lease, options));
     },
     reset() {
       if (isCurrent(captureLease())) ownedSendMutation.reset();

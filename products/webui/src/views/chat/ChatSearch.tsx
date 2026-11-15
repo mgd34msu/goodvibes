@@ -2,9 +2,9 @@
  * ChatSearch, companion-history search panel.
  *
  * Two distinct result sections, never merged (see useChatSearch's module doc
- * for why): a SESSIONS section (backend sessions.search, id/title match,
- * full history, honors the includeClosed toggle) and a MESSAGES section
- * (client-side content match, within the caller's already-fetched sessions).
+ * for why): a SESSIONS section (sessions.search, id/title match, full
+ * history) and a MESSAGES section (the daemon's message-text search across
+ * every chat, newest first, paged). Both honor the includeClosed toggle.
  * Selecting a session-level result opens that session with no specific
  * message to scroll to (`messageId: ''`); selecting a message result opens
  * the session and scrolls to that message.
@@ -17,7 +17,7 @@
  *   ArrowDown / ArrowUp, move selection within the Messages list
  *   Enter              , activate selected result
  *   Escape             , clear query (caller can use to close the panel)
- * Session results and the "load more" control are reached by Tab, each
+ * Session results and the "load more" controls are reached by Tab, each
  * individually activatable via Enter/Space, a separate, secondary
  * navigation zone from the message combobox above.
  */
@@ -38,8 +38,6 @@ export interface ChatSearchSelectPayload {
 }
 
 export interface ChatSearchProps {
-  /** Pre-fetched sessions list (passed through to useChatSearch). */
-  sessions: unknown[];
   /** Called when the user activates a result. */
   onSelect: (payload: ChatSearchSelectPayload) => void;
   /** Optional CSS class on the root element. */
@@ -65,7 +63,7 @@ function relativeTime(ms?: number): string {
   return `${days}d ago`;
 }
 
-export function ChatSearch({ sessions, onSelect, className, onClose }: ChatSearchProps) {
+export function ChatSearch({ onSelect, className, onClose }: ChatSearchProps) {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -76,7 +74,10 @@ export function ChatSearch({ sessions, onSelect, className, onClose }: ChatSearc
   const {
     results,
     isSearching,
-    unreadableSessions,
+    messageSearchState,
+    hasMoreResults,
+    isLoadingMoreResults,
+    loadMoreResults,
     sessionResults,
     sessionSearchState,
     includeClosed,
@@ -84,7 +85,7 @@ export function ChatSearch({ sessions, onSelect, className, onClose }: ChatSearc
     hasMoreSessions,
     isLoadingMoreSessions,
     loadMoreSessions,
-  } = useChatSearch(query, sessions);
+  } = useChatSearch(query);
 
   // Reset active index when results change
   const prevResultsLen = useRef(results.length);
@@ -161,7 +162,7 @@ export function ChatSearch({ sessions, onSelect, className, onClose }: ChatSearc
 
   const hasQuery = query.trim().length > 0;
   const showSkeleton = isSearching && results.length === 0;
-  const showEmpty = !isSearching && hasQuery && results.length === 0;
+  const showEmpty = messageSearchState === 'ready' && hasQuery && results.length === 0;
   const showResults = results.length > 0;
 
   const showSessionSkeleton = sessionSearchState === 'searching' && sessionResults.length === 0;
@@ -219,7 +220,7 @@ export function ChatSearch({ sessions, onSelect, className, onClose }: ChatSearc
               className="chat-search__closed-toggle"
               checked={includeClosed}
               onChange={setIncludeClosed}
-              title="Also search closed and idle-reaped sessions: hidden by default"
+              title="Also search closed and idle-reaped chats, titles and messages: hidden by default"
             >
               Include closed
             </Toggle>
@@ -306,7 +307,7 @@ export function ChatSearch({ sessions, onSelect, className, onClose }: ChatSearc
       {hasQuery && (
         <div className="chat-search__section-heading chat-search__section-heading--messages">
           <h3 className="chat-search__section-title chat-search__section-title--messages">Messages</h3>
-          <p className="chat-search__section-caption">Text, in your loaded chats</p>
+          <p className="chat-search__section-caption">Text, across all chats</p>
         </div>
       )}
 
@@ -319,15 +320,29 @@ export function ChatSearch({ sessions, onSelect, className, onClose }: ChatSearc
       {showEmpty && (
         <EmptyState
           title="No text matches"
-          description={`No messages match "${query}" in the loaded sessions.`}
+          description={
+            includeClosed
+              ? `No messages match "${query}", including closed chats.`
+              : `No messages match "${query}". Closed chats are not searched unless included.`
+          }
           className="chat-search__empty"
         />
       )}
 
-      {hasQuery && !isSearching && unreadableSessions > 0 && (
-        <p className="chat-search__section-caption" role="status">
-          {unreadableSessions === 1 ? '1 chat' : `${String(unreadableSessions)} chats`} could not be searched, so these results may be incomplete.
-        </p>
+      {hasQuery && messageSearchState === 'unavailable' && (
+        <EmptyState
+          title="Message search unavailable"
+          description="This daemon does not serve message search; update it to search message text."
+          className="chat-search__empty"
+        />
+      )}
+
+      {hasQuery && messageSearchState === 'error' && (
+        <EmptyState
+          title="Message search failed"
+          description="The daemon did not answer the search: change the query or try again."
+          className="chat-search__empty"
+        />
       )}
 
       {showResults && (
@@ -375,6 +390,17 @@ export function ChatSearch({ sessions, onSelect, className, onClose }: ChatSearc
             );
           })}
         </ul>
+      )}
+
+      {hasQuery && hasMoreResults && (
+        <button
+          type="button"
+          className="chat-search__load-more"
+          onClick={loadMoreResults}
+          disabled={isLoadingMoreResults}
+        >
+          {isLoadingMoreResults ? 'Loading…' : 'Load more messages'}
+        </button>
       )}
     </div>
   );

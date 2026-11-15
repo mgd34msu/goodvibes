@@ -11,7 +11,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useChatSend } from './useChatSend';
+import { SendAbandonedError, useChatSend } from './useChatSend';
+import type { TurnState } from './message-utils';
 import type { UseChatSendReturn } from './useChatSend';
 import type { ChatMessage } from './types';
 import type { LocalCompanionMessage } from '../../lib/companion-chat';
@@ -73,14 +74,13 @@ function flushMicrotasks(): Promise<void> {
 interface HarnessOptions {
   localMessages?: LocalCompanionMessage[];
   activeSessionId?: string;
-  turnState?: string;
   onAuthExpired?: () => void;
 }
 
 interface HarnessResult {
   getReturn: () => UseChatSendReturn;
   getLocalMessages: () => LocalCompanionMessage[];
-  getTurnStates: () => string[];
+  getTurnStates: () => TurnState[];
   getTurnErrors: () => string[];
   getSelections: () => string[];
   getCreatedSessions: () => unknown[];
@@ -103,7 +103,7 @@ function renderHook(opts: HarnessOptions = {}): HarnessResult {
   const localMessages: LocalCompanionMessage[] = opts.localMessages
     ? [...opts.localMessages]
     : [];
-  const turnStates: string[] = [];
+  const turnStates: TurnState[] = [];
   const turnErrors: string[] = [];
 
   let returnValue!: UseChatSendReturn;
@@ -141,7 +141,6 @@ function renderHook(opts: HarnessOptions = {}): HarnessResult {
       },
       setPendingUserMessageId: (value) => { pendingMessages.push(typeof value === 'function' ? value(pendingMessages.at(-1) ?? '') : value); },
       invalidateChatState: async (id) => { invalidations.push(id); },
-      turnState: opts.turnState ?? 'idle',
       onAuthExpired: opts.onAuthExpired ?? (() => undefined),
     });
     React.useLayoutEffect(() => { returnValue = result; });
@@ -384,62 +383,6 @@ describe('regenerateFrom', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Send-while-reconnecting honesty
-// ---------------------------------------------------------------------------
-
-describe('send while the stream is degraded', () => {
-  test('sending while turnState is "reconnecting" is labeled honestly, not silently sent', async () => {
-    harness = renderHook({ turnState: 'reconnecting' });
-    const { sendMutation } = harness.getReturn();
-
-    await sendMutation.mutateAsync({ body: 'hello', files: [] });
-
-    const states = harness.getTurnStates();
-    // The very first state set must be the honest label, not the ordinary 'sending'.
-    expect(states[0]).toBe('sending while reconnecting');
-    expect(states).not.toContain('sending');
-    expect(states).toContain('sending while reconnecting');
-    const errors = harness.getTurnErrors();
-    expect(errors.some((e) => e.toLowerCase().includes('reconnecting'))).toBe(true);
-  });
-
-  test('sending while turnState is "stream paused" is also labeled honestly', async () => {
-    harness = renderHook({ turnState: 'stream paused' });
-    const { sendMutation } = harness.getReturn();
-
-    await sendMutation.mutateAsync({ body: 'hello', files: [] });
-
-    expect(harness.getTurnStates()[0]).toBe('sending while reconnecting');
-  });
-
-  test('sending while turnState is "idle" uses the ordinary sending/submitted labels (no regression)', async () => {
-    harness = renderHook({ turnState: 'idle' });
-    const { sendMutation } = harness.getReturn();
-
-    await sendMutation.mutateAsync({ body: 'hello', files: [] });
-
-    const states = harness.getTurnStates();
-    expect(states[0]).toBe('sending');
-    expect(states).not.toContain('sending while reconnecting');
-    // The turnError set alongside ordinary sending must be empty (no false notice).
-    expect(harness.getTurnErrors()[0]).toBe('');
-  });
-
-  test('the message actually sends during a reconnecting stream: it is not dropped', async () => {
-    harness = renderHook({ turnState: 'reconnecting', localMessages: [] });
-    const { sendMutation } = harness.getReturn();
-
-    await sendMutation.mutateAsync({ body: 'hello', files: [] });
-
-    // The local message must resolve to 'sent' (the REST call went through), never
-    // silently vanish because the SSE stream happened to be down at send time.
-    const local = harness.getLocalMessages();
-    expect(local.length).toBe(1);
-    expect(local[0].deliveryState).toBe('sent');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Auth-expiry handoff on send
 // ---------------------------------------------------------------------------
 
@@ -597,7 +540,7 @@ describe('chat mutations retain their originating selection', () => {
     harness.select('sess-2');
     expect(harness.getReturn().isPending).toBe(false);
     create.resolve({ sessionId: 'sess-created' });
-    await pending;
+    expect(await pending.then(() => null, (error: unknown) => error)).toBeInstanceOf(SendAbandonedError);
     expect(harness.getSelections()).toEqual([]);
     expect(harness.getCreatedSessions()).toEqual([]);
     expect(createMessageCalls).toEqual([]);
@@ -704,7 +647,7 @@ describe('chat mutations retain their originating selection', () => {
     await waitFor(() => createSessionCalls.length === 1);
     invalidateClientLifetime();
     response.resolve({ sessionId: 'sess-created' });
-    await pending;
+    expect(await pending.then(() => null, (error: unknown) => error)).toBeInstanceOf(SendAbandonedError);
     expect(harness.getSelections()).toEqual([]);
     expect(createMessageCalls).toEqual([]);
   });
@@ -719,7 +662,7 @@ describe('chat mutations retain their originating selection', () => {
     old.unmount();
     harness = null;
     response.resolve({ sessionId: 'sess-created' });
-    await pending;
+    expect(await pending.then(() => null, (error: unknown) => error)).toBeInstanceOf(SendAbandonedError);
     expect(old.getSelections()).toEqual([]);
     expect(createMessageCalls).toEqual([]);
   });
@@ -737,7 +680,8 @@ describe('chat mutations retain their originating selection', () => {
     const success = mock(() => undefined);
 
     stale.mutate({ body: 'stale prompt', files: [] }, { onSuccess: success });
-    await stale.sendMutation.mutateAsync({ body: 'stale awaited prompt', files: [] }, { onSuccess: success });
+    expect(await stale.sendMutation.mutateAsync({ body: 'stale awaited prompt', files: [] }, { onSuccess: success })
+      .then(() => null, (error: unknown) => error)).toBeInstanceOf(SendAbandonedError);
     stale.sendMutation.reset();
     stale.editAndResend('u1', 'stale edit');
     stale.editAndResend('local-u1', 'stale local edit');
@@ -786,7 +730,8 @@ describe('chat mutations retain their originating selection', () => {
     harness = renderHook();
     const stale = harness.getReturn();
     invalidateClientLifetime();
-    await stale.sendMutation.mutateAsync({ body: 'old account prompt', files: [] });
+    expect(await stale.sendMutation.mutateAsync({ body: 'old account prompt', files: [] })
+      .then(() => null, (error: unknown) => error)).toBeInstanceOf(SendAbandonedError);
     stale.editAndResend('u1', 'old account edit');
     stale.regenerateFrom('a1', [makeChatMessage('a1', 'assistant', 'old account answer')]);
     expect(harness.queryClient.isMutating()).toBe(0);

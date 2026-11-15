@@ -28,23 +28,24 @@ import { Composer } from './chat/Composer';
 import { ChatSearch } from './chat/ChatSearch';
 import { QueuedMessagesPanel } from './chat/QueuedMessagesPanel';
 import { useChatSend } from './chat/useChatSend';
-import { useSyncSettle } from './chat/useSyncSettle';
 import { parseSlashCommand, SLASH_COMMANDS } from './chat/slash-commands';
 import { useToast } from '../lib/toast';
 import { useWakeTranscriptSink } from '../lib/voice/useWake';
 import { useChatStream } from './chat/useChatStream';
 import '../styles/components/chat-view.css';
 import {
-  ACTIVE_TURN_STATES,
   deriveChatTitle,
-  messageCreatedAt,
+  isActiveTurnState,
   messageTone,
   messageText,
   messageAttachments,
   IDLE_TURN_PHASE,
+  settledFromList,
   settledTurnLabel,
+  streamHealthLabel,
   workingStatusLabel,
   type TurnPhase,
+  type TurnState,
 } from './chat/message-utils';
 import { buildLineage } from './chat/lineage';
 import { resolveScrollTarget, isScrollTargetReady, isScrollTargetStale, findMessageElement } from './chat/search-jump';
@@ -58,6 +59,9 @@ type SessionEffort = NonNullable<SessionRoutePatch['reasoningEffort']>;
 function isSessionEffort(value: string): value is SessionEffort {
   return REASONING_EFFORT_SEVERITY.includes(value);
 }
+
+/** How often the transcript is re-read while the live stream is paused. */
+const PAUSED_REFRESH_MS = 5000;
 
 const SUGGESTION_ICONS: Record<SuggestionIcon, typeof Mail> = {
   calendar: CalendarDays,
@@ -84,8 +88,6 @@ export function ChatView({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const liveTextRef = useRef('');
-  const assistantIdsRef = useRef<Set<string>>(new Set());
-  const responseBaselineRef = useRef<Set<string> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Auto-title bookkeeping: sessions we have already client-side auto-titled (fire once),
   // and sessions the operator renamed by hand (never overwrite a manual title).
@@ -94,13 +96,10 @@ export function ChatView({
   const [draft, setDraft] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [liveText, setLiveText] = useState('');
-  // turnState and turnError are ONE value (see TurnPhase in message-utils.ts),
-  // not two independently-mutated useState strings: every write, including the
-  // reset-on-session-switch effect below, sets both fields in a single setTurn
-  // call, so a terminal state (e.g. 'send failed') can never survive a reset
-  // that only clears the error text. setTurnState/setTurnError below are thin
-  // adapters kept so useChatStream/useChatSend, which only ever touch one field
-  // at a time, need no changes.
+  // turnState and turnError are ONE value (see TurnPhase in message-utils.ts):
+  // the reset on a session switch sets both in a single setTurn call, so a
+  // terminal state can never survive it. setTurnState/setTurnError are adapters
+  // for the hooks, which write one field at a time.
   const [turn, setTurn] = useState<TurnPhase>(IDLE_TURN_PHASE);
   // The session id a send just created (see the reset-on-switch effect below).
   const sendCreatedSessionRef = useRef<ReturnType<typeof chatSelection.capture> | null>(null);
@@ -110,22 +109,8 @@ export function ChatView({
     sendCreatedSessionRef.current = chatSelection.capture();
   }, [onActiveSessionChange, chatSelection]);
   const { state: turnState, error: turnError } = turn;
-  const setTurnState = useCallback<Dispatch<SetStateAction<string>>>((next) => {
-    if (next === 'sending' || next === 'submitted' || next === 'sending while reconnecting') {
-      responseBaselineRef.current = new Set(assistantIdsRef.current);
-    } else if (next === 'running' && !responseBaselineRef.current) {
-      // A turn this tab did not send (initial mount, after a session switch, another
-      // client): snapshot the replies that already exist so they never count as this turn's.
-      responseBaselineRef.current = new Set(assistantIdsRef.current);
-    } else if (next === 'completed' || next === 'stopped' || next === 'stopped locally') {
-      // The turn is over: its baseline must not be reused for a later turn started
-      // by another client, whose `running` then takes a fresh snapshot above.
-      responseBaselineRef.current = null;
-    }
-    setTurn((current) => ({
-      ...current,
-      state: (typeof next === 'function' ? (next as (prev: string) => string)(current.state) : next) as TurnPhase['state'],
-    }));
+  const setTurnState = useCallback<Dispatch<SetStateAction<TurnState>>>((next) => {
+    setTurn((current) => ({ ...current, state: typeof next === 'function' ? next(current.state) : next }));
   }, []);
   const setTurnError = useCallback<Dispatch<SetStateAction<string>>>((next) => {
     setTurn((current) => ({
@@ -182,7 +167,6 @@ export function ChatView({
   const selectedProvider = providerOptions.find((provider) => provider.id === selectedProviderId)?.value ?? providerOptions[0]?.value;
   const catalogProviders = useMemo(() => catalogProviderOptions.map(provider => provider.value), [catalogProviderOptions]);
   const providerModels = useProviderModelOptions(selectedProvider, catalogProviders,
-    `${activeSessionId}:${providers.dataUpdatedAt}:${modelCatalog.dataUpdatedAt}`,
     providers.isSuccess && modelCatalog.isSuccess && !providers.isFetching && !modelCatalog.isFetching);
   const providerModelOptions = providerModels.models;
   // Existing chats retain their own route. A default-model change elsewhere
@@ -237,7 +221,7 @@ export function ChatView({
   };
   const applySessionRoute = async (patch: SessionRoutePatch) => {
     const lifetime = getClientLifetime(); routeSelectionCurrent(selectedChat, lifetime);
-    if (ACTIVE_TURN_STATES.includes(turnState)) throw new Error('Wait for this chat’s current reply to finish before changing its model or effort.');
+    if (isActiveTurnState(turnState)) throw new Error('Wait for this chat’s current reply to finish before changing its model or effort.');
     const result = await platformClient.chat.sessions.update(activeSessionId, patch);
     routeSelectionCurrent(selectedChat, lifetime);
     const acknowledged = companionSessionFromDetail(result);
@@ -296,26 +280,6 @@ export function ChatView({
     ]);
   }, [queryClient]);
 
-  const messages = useQuery({
-    queryKey: ['companion-chat', activeSessionId, 'messages'],
-    enabled: Boolean(activeSessionId),
-    queryFn: () => platformClient.chat.messages.list(activeSessionId),
-    retry: (failureCount, error) => !isSessionNotFoundError(error) && failureCount < 2,
-    // 'stream paused' is deliberately NOT an ACTIVE_TURN_STATE (isStreaming must go
-    // false once the live channel gives up), but it still needs the periodic-refresh
-    // fallback, the honest promise a paused stream makes ("live updates are off,
-    // falling back to periodic refresh") only holds if something actually keeps
-    // polling for a reply that streamed back while nobody was listening.
-    refetchInterval: ACTIVE_TURN_STATES.includes(turnState) || turnState === 'syncing' || turnState === 'stream paused' ? 1000 : false,
-  });
-
-  // 'syncing' ends only when a new assistant message appears; a turn that
-  // persisted none must not poll forever, so it settles after a bounded wait.
-  useSyncSettle(turnState, messages.dataUpdatedAt, () => {
-    setPendingUserMessageId('');
-    setTurnState('completed');
-  });
-
   // Auth-expiry handoff shared by both chat hooks: re-probe auth.current so a
   // genuinely dead token (401 mid-stream or mid-send) flips the whole app to the
   // signed-out gate (App.tsx unmounts this view when auth.current confirms it),
@@ -323,11 +287,6 @@ export function ChatView({
   const onChatAuthExpired = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.auth });
   }, [queryClient]);
-
-  useEffect(() => {
-    if (!activeSessionId || !messages.isError || !isSessionNotFoundError(messages.error)) return;
-    onSessionMissing(activeSessionId);
-  }, [activeSessionId, messages.error, messages.isError, onSessionMissing]);
 
   useEffect(() => {
     const composer = composerRef.current;
@@ -342,7 +301,7 @@ export function ChatView({
 
   // Reset the turn lifecycle to idle on every session switch, in ONE setTurn
   // call. Without this, a terminal turnState left over from a prior session's
-  // failed/dropped turn (e.g. 'send failed', 'stream paused') rendered in the
+  // failed or stopped turn (e.g. 'send failed') rendered in the
   // turn notice until the next send or turn event in the NEWLY active
   // session, even though that session never did anything.
   //
@@ -358,12 +317,11 @@ export function ChatView({
       return;
     }
     setTurn(IDLE_TURN_PHASE);
-    responseBaselineRef.current = null;
     setPendingUserMessageId('');
   }, [activeSessionId, selectedChat]);
 
   const {
-    isStreaming, stop, retryStream, activeToolCalls, toolActivityByMessageId, cancelToolCall: cancelToolCallRaw,
+    isStreaming, streamHealth, stop, retryStream, activeToolCalls, toolActivityByMessageId, cancelToolCall: cancelToolCallRaw,
   } = useChatStream({
     activeSessionId,
     liveTextRef,
@@ -377,6 +335,22 @@ export function ChatView({
     onAuthExpired: onChatAuthExpired,
     turnState,
   });
+
+  // The live stream owns the turn while it is connected: its terminal event sets
+  // the state and refreshes this list once. The list is re-read on a timer only
+  // while the stream is paused, which is when nothing else would bring news.
+  const messages = useQuery({
+    queryKey: ['companion-chat', activeSessionId, 'messages'],
+    enabled: Boolean(activeSessionId),
+    queryFn: () => platformClient.chat.messages.list(activeSessionId),
+    retry: (failureCount, error) => !isSessionNotFoundError(error) && failureCount < 2,
+    refetchInterval: streamHealth === 'paused' ? PAUSED_REFRESH_MS : false,
+  });
+
+  useEffect(() => {
+    if (!activeSessionId || !messages.isError || !isSessionNotFoundError(messages.error)) return;
+    onSessionMissing(activeSessionId);
+  }, [activeSessionId, messages.error, messages.isError, onSessionMissing]);
 
   // Cancel ONE running tool call, the turn continues (unlike stop(), which ends the
   // whole turn). A refusal or transport failure surfaces through the same turnError
@@ -393,6 +367,18 @@ export function ChatView({
     [cancelToolCallRaw, setTurnError],
   );
 
+  // A send that was abandoned before the daemon accepted it (the chat or the
+  // sign-in changed under it) gives its text and files back to the composer.
+  const restoreAbandonedSend = useCallback(({ body, files }: { body: string; files: File[] }) => {
+    setDraft((current) => (current.trim() ? current : body));
+    if (files.length) setAttachedFiles((current) => (current.length ? current : files));
+    toast({
+      title: 'Message not sent',
+      description: 'The chat or sign-in changed before it was sent. It is back in the composer.',
+      tone: 'warning',
+    });
+  }, [toast]);
+
   const send = useChatSend({
     activeSessionId,
     chatSelection,
@@ -406,8 +392,8 @@ export function ChatView({
     setLocalMessages,
     setPendingUserMessageId,
     invalidateChatState,
-    turnState,
     onAuthExpired: onChatAuthExpired,
+    onSendAbandoned: restoreAbandonedSend,
   });
   const { editAndResend, regenerateFrom: sendRegenerateFrom } = send;
 
@@ -427,10 +413,6 @@ export function ChatView({
       return toolActivity ? { ...message, toolActivity } : message;
     });
   }, [activeSessionId, localMessages, messageItems, toolActivityByMessageId]);
-
-  useEffect(() => {
-    assistantIdsRef.current = new Set(renderedMessageItems.filter(message => messageTone(message) === 'assistant').map(bestId));
-  }, [renderedMessageItems]);
 
   // The honest-lineage render model: active messages as nodes, with any superseded
   // (retained) history attached to the node that heads its fork. Derived purely from
@@ -489,39 +471,28 @@ export function ChatView({
     return () => window.clearTimeout(timer);
   }, [highlightedMessageId]);
 
+  // A turn whose end the stream could not report (it was down, or is paused)
+  // is settled by the list read after the turn reached its current state: a
+  // reply after the message it answers. A list read earlier can still hold a
+  // reply a regenerate is replacing, so it is not used.
+  const listSettlesTurn = turnState === 'syncing'
+    || (streamHealth !== 'live' && isActiveTurnState(turnState) && turnState !== 'sending');
+  const listReadMarkRef = useRef<{ state: TurnState; readAt: number }>({ state: 'idle', readAt: 0 });
+  const listReadAt = messages.dataUpdatedAt;
   useEffect(() => {
-    if ((!ACTIVE_TURN_STATES.includes(turnState) && turnState !== 'syncing') || liveText) return;
-    if (!responseBaselineRef.current && turnState !== 'syncing') {
-      // No baseline yet while the turn is still live: any assistant message present now
-      // predates it. Establish it BEFORE comparing, so an old reply is never taken for
-      // the new one. ('syncing' is a turn already concluding, its reply is the last message.)
-      responseBaselineRef.current = new Set(assistantIdsRef.current);
+    if (listReadMarkRef.current.state !== turnState) {
+      listReadMarkRef.current = { state: turnState, readAt: listReadAt };
       return;
     }
-    const lastMessage = renderedMessageItems.at(-1);
-    if (lastMessage && messageTone(lastMessage) === 'assistant' && !responseBaselineRef.current?.has(bestId(lastMessage))) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- guarded by condition; resolves syncing state after DB messages load
-      setPendingUserMessageId('');
-
-      setTurnState('completed');
-    }
-  }, [liveText, renderedMessageItems, turnState, setTurnState]);
-
-  useEffect(() => {
-    if (!pendingUserMessageId || turnError) return;
-    const pendingUser = renderedMessageItems.find((message) => bestId(message) === pendingUserMessageId);
-    if (!pendingUser) return;
-    const pendingCreatedAt = messageCreatedAt(pendingUser);
-    const hasAssistantReply = renderedMessageItems.some((message) => (
-      messageTone(message) === 'assistant' && !responseBaselineRef.current?.has(bestId(message)) && messageCreatedAt(message) >= pendingCreatedAt
-    ));
-    if (hasAssistantReply) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- guarded by hasAssistantReply; resolves pending turn when message confirmed in DB
-      setPendingUserMessageId('');
-
-      setTurnState('completed');
-    }
-  }, [pendingUserMessageId, renderedMessageItems, turnError, setTurnState]);
+    if (!listSettlesTurn || listReadAt <= listReadMarkRef.current.readAt) return;
+    const settled = settledFromList(renderedMessageItems, pendingUserMessageId);
+    if (!settled) return;
+    liveTextRef.current = '';
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- settles the turn from the list the stream could not report
+    setLiveText('');
+    setPendingUserMessageId('');
+    setTurnState(settled);
+  }, [listSettlesTurn, listReadAt, pendingUserMessageId, renderedMessageItems, setTurnState, turnState]);
 
   // Client-side auto-title: once a fresh chat has its first user message AND a first
   // assistant reply, replace the crude create-time title (a raw slice of the first
@@ -743,10 +714,13 @@ export function ChatView({
     turnState,
     activeToolCalls.filter((call) => !call.cancelled).map((call) => call.toolName),
     Boolean(liveText),
+    streamHealth,
   );
   // turnError already renders its exact words above the composer; the notice
-  // only adds plain words when there is no error text to show.
-  const noticeLabel = turnError ? '' : settledTurnLabel(turnState);
+  // adds plain words for a settled turn only when there is no error text, and
+  // always says when the live stream is down.
+  const noticeLabel = [turnError ? '' : settledTurnLabel(turnState), streamHealthLabel(streamHealth)]
+    .filter(Boolean).join(' ');
   const name = greetingName(userName);
 
   function applySuggestion(prompt: string) {
@@ -790,7 +764,6 @@ export function ChatView({
       {showSearch && (
         <div className="chat-find glass" ref={findRef}>
           <ChatSearch
-            sessions={sessionItems}
             onClose={() => setShowSearch(false)}
             onSelect={(payload) => {
               onActiveSessionChange(payload.sessionId);
@@ -824,7 +797,7 @@ export function ChatView({
       />
       <div className="chat-dock">
         {activeSessionId && <QueuedMessagesPanel sessionId={activeSessionId} active={isStreaming} />}
-        <ChatTurnNotice label={noticeLabel} onRetryStream={turnState === 'stream paused' ? retryStream : undefined} />
+        <ChatTurnNotice label={noticeLabel} onRetryStream={streamHealth === 'paused' ? retryStream : undefined} />
         <Composer
           layout={isNewChat ? 'centered' : 'docked'}
           placeholder={isNewChat ? 'Ask GoodVibes anything' : 'Reply to GoodVibes'}

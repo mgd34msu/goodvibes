@@ -137,6 +137,14 @@ describe('imageFilesFromPaste', () => {
     expect(imageFilesFromPaste(event)).toEqual([]);
   });
 
+  test('a clipboard with text beside a picture of it attaches nothing, so the text is pasted', () => {
+    const event = makeClipboardEvent([
+      { kind: 'string', type: 'text/plain', file: null },
+      { kind: 'file', type: 'image/png', file: makeFile('cells.png', 'image/png') },
+    ]);
+    expect(imageFilesFromPaste(event)).toEqual([]);
+  });
+
   test('filters out null getAsFile results', () => {
     const event = makeClipboardEvent([
       { kind: 'file', type: 'image/png', file: null },

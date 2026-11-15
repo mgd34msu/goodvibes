@@ -14,3 +14,16 @@ export function formatDateOnly(iso: string | null): string {
   const parsed = new Date(iso);
   return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleDateString(undefined, options);
 }
+
+/**
+ * A date as an occasion records it: `MM-DD` for a date that recurs with no
+ * year, or `YYYY-MM-DD`. Anything else is shown as written.
+ */
+export function recordedDateLabel(recorded: string): string {
+  const monthDay = /^(\d{2})-(\d{2})$/.exec(recorded);
+  if (monthDay) {
+    const date = new Date(2000, Number(monthDay[1]) - 1, Number(monthDay[2]));
+    return Number.isNaN(date.getTime()) ? recorded : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+  return /^\d{4}-\d{2}-\d{2}$/.test(recorded) ? formatDateOnly(recorded) : recorded;
+}

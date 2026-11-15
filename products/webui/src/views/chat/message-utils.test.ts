@@ -24,11 +24,15 @@ import {
 } from './message-utils';
 
 describe('toolFriendlyLabel', () => {
-  test('maps known tool names case-insensitively, grouping tools of one kind under one label', () => {
-    expect(toolFriendlyLabel('BASH')).toBe(toolFriendlyLabel('bash'));
-    expect(toolFriendlyLabel('bash')).not.toBe('bash');
-    expect(toolFriendlyLabel('Grep')).toBe(toolFriendlyLabel('Glob'));
-    expect(toolFriendlyLabel('Grep')).not.toBe(toolFriendlyLabel('bash'));
+  test('maps the engine\'s tool names case-insensitively', () => {
+    expect(toolFriendlyLabel('EXEC')).toBe(toolFriendlyLabel('exec'));
+    expect(toolFriendlyLabel('web_search')).not.toBe('web_search');
+    expect(toolFriendlyLabel('find')).not.toBe(toolFriendlyLabel('exec'));
+  });
+
+  test('the task-list tool is not reported as an agent', () => {
+    expect(toolFriendlyLabel('task')).not.toBe(toolFriendlyLabel('agent'));
+    expect(describeToolActivity([{ toolCallId: '1', toolName: 'task', isError: false }])).not.toContain('agent');
   });
 
   test('falls back to the raw tool name for an unrecognized tool', () => {
@@ -131,7 +135,7 @@ describe('describeToolActivity: the collapsed tool line', () => {
     expect(describeToolActivity([
       { toolCallId: '1', toolName: 'Read', isError: false },
       { toolCallId: '2', toolName: 'read', isError: false },
-      { toolCallId: '3', toolName: 'WebSearch', isError: false },
+      { toolCallId: '3', toolName: 'web_search', isError: false },
     ])).toContain('2');
   });
 
@@ -146,10 +150,10 @@ describe('describeToolActivity: the collapsed tool line', () => {
   });
 
   test('failures are counted; the duration appears only when timed', () => {
-    const plain = describeToolActivity([{ toolCallId: '1', toolName: 'bash', isError: false }]);
-    expect(describeToolActivity([{ toolCallId: '1', toolName: 'bash', isError: true }])).not.toBe(plain);
+    const plain = describeToolActivity([{ toolCallId: '1', toolName: 'exec', isError: false }]);
+    expect(describeToolActivity([{ toolCallId: '1', toolName: 'exec', isError: true }])).not.toBe(plain);
     const timed = describeToolActivity([
-      { toolCallId: '1', toolName: 'bash', isError: false, startedAt: 10_000, finishedAt: 14_400 },
+      { toolCallId: '1', toolName: 'exec', isError: false, startedAt: 10_000, finishedAt: 14_400 },
     ]);
     expect(timed).not.toBe(plain);
     expect(timed).toContain(formatToolDuration(4_400));
@@ -172,13 +176,14 @@ describe('formatToolDuration', () => {
 describe('workingStatusLabel: the line under the last message', () => {
   test('running tools change the line and carry their count', () => {
     expect(workingStatusLabel('tooling', ['read', 'read'], false)).toContain('2');
-    expect(workingStatusLabel('tooling', ['bash'], false)).not.toBe(workingStatusLabel('tooling', ['read'], false));
+    expect(workingStatusLabel('tooling', ['exec'], false)).not.toBe(workingStatusLabel('tooling', ['read'], false));
   });
 
   test('every active turn state has a line; idle has none', () => {
-    for (const state of ['sending', 'submitted', 'running', 'reconnecting', 'stopping'] as const) {
+    for (const state of ['sending', 'submitted', 'running', 'syncing', 'stopping'] as const) {
       expect(workingStatusLabel(state, [], false).length).toBeGreaterThan(0);
     }
+    expect(workingStatusLabel('running', [], false, 'reconnecting')).not.toBe(workingStatusLabel('running', [], false));
     expect(workingStatusLabel('streaming', [], true).length).toBeGreaterThan(0);
     expect(workingStatusLabel('idle', [], false)).toBe('');
   });
@@ -186,7 +191,6 @@ describe('workingStatusLabel: the line under the last message', () => {
 
 describe('settledTurnLabel', () => {
   test('a line for a turn that ended badly, nothing for normal states', () => {
-    expect(settledTurnLabel('stream paused').length).toBeGreaterThan(0);
     expect(settledTurnLabel('send failed').length).toBeGreaterThan(0);
     expect(settledTurnLabel('completed')).toBe('');
     expect(settledTurnLabel('streaming')).toBe('');
@@ -198,11 +202,10 @@ describe('nextTurnStatus: guarded turn-status transitions for racing writers', (
   test('a late delta/tool frame does not un-stop a turn the user already stopped', () => {
     expect(nextTurnStatus('stopping', 'streaming')).toBe('stopping');
     expect(nextTurnStatus('stopping', 'tooling')).toBe('stopping');
-    expect(nextTurnStatus('stopping', 'reconnecting')).toBe('stopping');
   });
 
   test('frames still advance every non-stopping live status', () => {
-    for (const current of ['running', 'streaming', 'tooling', 'reconnecting', 'syncing', 'submitted'] as const) {
+    for (const current of ['running', 'streaming', 'tooling', 'syncing', 'submitted'] as const) {
       expect(nextTurnStatus(current, 'streaming')).toBe('streaming');
       expect(nextTurnStatus(current, 'tooling')).toBe('tooling');
     }
@@ -234,13 +237,12 @@ describe('nextTurnStatus: guarded turn-status transitions for racing writers', (
     }
   });
 
-  test('is total over TURN_STATES and passes unknown current values through the proposal', () => {
+  test('is total over TURN_STATES', () => {
     for (const current of TURN_STATES) {
       for (const proposed of TURN_STATES) {
         expect(TURN_STATES as readonly string[]).toContain(nextTurnStatus(current, proposed));
       }
     }
-    expect(nextTurnStatus('not-a-state', 'streaming')).toBe('streaming');
   });
 });
 

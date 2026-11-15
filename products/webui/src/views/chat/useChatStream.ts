@@ -11,6 +11,8 @@ import {
   companionEventType,
   nextTurnStatus,
   type CompletedToolCall,
+  type StreamHealth,
+  type TurnState,
 } from './message-utils';
 
 /**
@@ -41,7 +43,7 @@ interface UseChatStreamOptions {
   activeSessionId: string;
   liveTextRef: RefObject<string>;
   onSessionMissing: (sessionId: string) => void;
-  setTurnState: Dispatch<SetStateAction<string>>;
+  setTurnState: Dispatch<SetStateAction<TurnState>>;
   setTurnError: Dispatch<SetStateAction<string>>;
   setLiveText: Dispatch<SetStateAction<string>>;
   setLocalMessages: Dispatch<SetStateAction<LocalCompanionMessage[]>>;
@@ -55,16 +57,11 @@ interface UseChatStreamOptions {
    */
   onAuthExpired: () => void;
   /**
-   * The AUTHORITATIVE turn state managed by the caller (e.g. ChatView).
-   * When provided, `isStreaming` derives from this value instead of a
-   * private shadow copy. Pass the same state variable that is fed to
-   * `setTurnState` so the streaming indicator is correct during the
-   * sending/submitted window (before the first SSE token arrives).
-   *
-   * Integration note: ChatView must pass `turnState` here once it
-   * destructures the value from its own useState.
+   * The authoritative turn state managed by the caller (ChatView), the same
+   * value fed to `setTurnState`, so `isStreaming` is right during the
+   * sending/submitted window before the first stream frame arrives.
    */
-  turnState?: string;
+  turnState?: TurnState;
 }
 
 /**
@@ -83,8 +80,15 @@ export interface ActiveToolCall {
 }
 
 export interface UseChatStreamResult {
-  /** Whether a turn is actively in-flight (running, streaming, tooling, or reconnecting). */
+  /** Whether a turn is in flight on the daemon, whatever the stream's health. */
   isStreaming: boolean;
+  /**
+   * The live connection's own health, owned here and set by the stream's
+   * callbacks: `live` on every successful open (first connect, automatic
+   * reconnect or a Retry alike), `reconnecting` while the built-in reconnect
+   * retries, `paused` once it gave up or the stream could not be opened.
+   */
+  streamHealth: StreamHealth;
   /**
    * Stop the in-flight turn, a TRUE server-side stop: calls
    * companion.chat.turns.cancel and keeps the stream open awaiting the
@@ -94,7 +98,7 @@ export interface UseChatStreamResult {
    */
   stop: () => void;
   /**
-   * Force a fresh connection attempt after the stream gave up ('stream paused').
+   * Force a fresh connection attempt after the stream gave up (`paused`).
    * The built-in reconnect only retries up to DEFAULT_SSE_RECONNECT.maxAttempts with
    * backoff; once exhausted the platform stops entirely on its own, so recovery needs an
    * explicit re-open. Safe to call any time, it just re-runs the connect effect.
@@ -153,6 +157,12 @@ export function useChatStream({
   // Bumped by retryStream() to force a fresh connect after the platform's own
   // reconnect loop gives up (it never retries again on its own past onTerminate).
   const [retryNonce, setRetryNonce] = useState(0);
+  const [streamHealth, setStreamHealth] = useState<StreamHealth>('connecting');
+  // True while this session's stream has been down since its last successful
+  // open, so the next open refreshes the transcript (frames sent meanwhile were
+  // not replayed). A Retry keeps it; a different session starts clean.
+  const streamWasDownRef = useRef(false);
+  const streamSessionRef = useRef('');
   // Tool calls currently in flight for this turn, see ActiveToolCall's own doc comment.
   const [activeToolCalls, setActiveToolCalls] = useState<readonly ActiveToolCall[]>([]);
   // Completed tool calls, keyed by the assistant message id of the turn that produced
@@ -172,13 +182,13 @@ export function useChatStream({
   // Latest turn status this hook knows of (the prop each render, plus every plain
   // write made through syncedSetTurnState), so stop()'s late catch can tell a
   // turn that already settled from one still in flight.
-  const turnStateRef = useRef(turnState ?? 'idle');
+  const turnStateRef = useRef<TurnState>(turnState ?? 'idle');
   useEffect(() => {
     turnStateRef.current = turnState ?? 'idle';
   }, [turnState]);
 
   // Forward state updates to the caller's authoritative turnState.
-  const syncedSetTurnState: Dispatch<SetStateAction<string>> = useCallback(
+  const syncedSetTurnState: Dispatch<SetStateAction<TurnState>> = useCallback(
     (nextState) => {
       if (typeof nextState === 'string') turnStateRef.current = nextState;
       setTurnState(nextState);
@@ -241,7 +251,7 @@ export function useChatStream({
 
   useEffect(() => {
     if (!stoppedLocallyRef.current) return;
-    if (turnState === 'sending' || turnState === 'submitted' || turnState === 'sending while reconnecting') {
+    if (turnState === 'sending' || turnState === 'submitted') {
       stoppedLocallyRef.current = false;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- reopens the stream a local stop closed
       setRetryNonce((n) => n + 1);
@@ -249,7 +259,11 @@ export function useChatStream({
   }, [turnState]);
 
   useEffect(() => {
-    if (!activeSessionId) return undefined;
+    if (!activeSessionId) {
+      // A new chat has no stream yet; an older chat's paused stream says nothing here.
+      setStreamHealth('connecting');
+      return undefined;
+    }
     // Per-effect cancellation flag, the "epoch" of THIS connection instance. Set to
     // true by this effect's own cleanup and nothing else; a superseding effect (a
     // session switch, a retryStream(), or unmount) runs this cleanup FIRST, so the
@@ -274,14 +288,15 @@ export function useChatStream({
     setActiveToolCalls([]);
     turnToolActivityRef.current = [];
     pendingToolInputRef.current.clear();
+    if (streamSessionRef.current !== activeSessionId) {
+      streamSessionRef.current = activeSessionId;
+      streamWasDownRef.current = false;
+    }
+    setStreamHealth('connecting');
 
-    // True once a drop has been reported for THIS connection instance (an onReconnect
-    // fired). Lets onReady tell "the very first connect" (say nothing, turnState is
-    // already whatever the caller set) apart from "a reconnect after a drop succeeded"
-    // (clear the reconnecting message). Also lets onError tell apart a transient error
-    // it already saw via onReconnect (skip, avoid clobbering with a duplicate/contra-
-    // dictory 'stream error') from a standalone failure (none observed via this platform's
-    // current wiring, but kept as a defensive fallback).
+    // True once this connection instance reported a drop (onReconnect or
+    // onTerminate), so onError, which the platform pairs with each of those,
+    // does not report the same failure a second time.
     let hadDrop = false;
     // Guards the auth-expiry handoff to fire exactly once per connection instance,
     // idempotent either way, but avoids redundant invalidateQueries churn if the dead
@@ -304,20 +319,23 @@ export function useChatStream({
     void platformClient.chat.events.stream(activeSessionId, {
       onReady: () => {
         if (cancelled || stoppedRef.current) return;
-        if (hadDrop) {
-          hadDrop = false;
-          // The daemon may have restarted and reissued canonical message revisions.
-          // Refresh even when a concurrent turn error keeps the view out of polling.
+        hadDrop = false;
+        setStreamHealth('live');
+        if (streamWasDownRef.current) {
+          streamWasDownRef.current = false;
+          // Frames sent while the stream was down are not replayed: one refresh of
+          // the transcript shows what happened, and a turn this tab was following
+          // may have ended meanwhile, so it waits on that refresh ('syncing')
+          // unless the stream reports it first.
           void invalidateChatState(activeSessionId);
-          // Functional updater: only clear the reconnecting label if nothing else
-          // (a fresh send, a genuine turn error) has already moved turnState on.
-          // Routed through syncedSetTurnState (already an effect dependency) rather
-          // than the raw setter so this stays in the same forwarding path as every
-          // other turnState write below.
-          // 'stopping' too: a turn.cancelled sent while the stream was down is never
-          // replayed, so the refreshed history has to settle it.
-          syncedSetTurnState((current) => (current === 'reconnecting' || current === 'stopping' ? 'syncing' : current));
-          setTurnError((current) => (current.startsWith('Reconnecting to the live stream') ? '' : current));
+          // Text streamed before the drop has a gap now; the refreshed message or
+          // the frames still to come replace it.
+          liveTextRef.current = '';
+          setLiveText('');
+          syncedSetTurnState((current) => (
+            current === 'submitted' || current === 'running' || current === 'streaming'
+            || current === 'tooling' || current === 'stopping' ? 'syncing' : current
+          ));
         }
       },
       onEvent: (eventName, payload) => {
@@ -417,11 +435,11 @@ export function useChatStream({
                 deliveryState: 'sent' as const,
               },
             ]);
-            setPendingUserMessageId('');
-            syncedSetTurnState('completed');
-          } else {
-            syncedSetTurnState('syncing');
           }
+          // The terminal event ends the turn; the one refresh below brings the
+          // stored reply when the event carried none.
+          setPendingUserMessageId('');
+          syncedSetTurnState('completed');
           // Fold this turn's completed tool calls onto the message they produced,
           // matched by id whether the message renders from this optimistic local
           // copy or from the server-fetched history that invalidateChatState below
@@ -473,13 +491,8 @@ export function useChatStream({
           void invalidateChatState(activeSessionId);
         }
       },
-      // Fires on every transient failure the built-in reconnect loop is about to
-      // retry (paired with, and called right after, onReconnect below), and once
-      // more on the terminal failure (paired with, and called right after,
-      // onTerminate below). It never fires standalone against this platform's current
-      // wiring, so `hadDrop`, already true from the paired call, lets this handler
-      // stay a no-op rather than overwrite the more specific 'reconnecting' /
-      // 'stream paused' / 'session expired' state with a generic 'stream error'.
+      // Paired with each onReconnect and onTerminate below; standalone only for a
+      // failure neither of them reports, which leaves the stream paused.
       onError: (error) => {
         if (cancelled || stoppedRef.current) return;
         if (isSessionNotFoundError(error)) {
@@ -488,37 +501,26 @@ export function useChatStream({
         }
         if (handleAuthExpiry(error)) return;
         if (!hadDrop) {
-          syncedSetTurnState('stream error');
-          setTurnError(error instanceof Error ? error.message : String(error));
+          streamWasDownRef.current = true;
+          setStreamHealth('paused');
         }
       },
-      // A drop the built-in reconnect is about to retry (attempts remain and
-      // reconnect is enabled), the daemon-blip / SSE-drop case. Honest, distinct
-      // from a genuine unrecoverable 'stream error': the connection is expected back.
-      onReconnect: ({ attempt, delayMs }) => {
+      // A drop the built-in reconnect is about to retry. The turn is untouched:
+      // the daemon keeps working, only this tab's channel is down.
+      onReconnect: () => {
         if (cancelled || stoppedRef.current) return;
         hadDrop = true;
-        // Not over a pending Stop: the turn is still being stopped, the stream is
-        // only the channel that reports it.
-        syncedSetTurnState((current) => nextTurnStatus(current, 'reconnecting'));
-        setTurnError(
-          `Reconnecting to the live stream: attempt ${attempt} of ${DEFAULT_SSE_RECONNECT.maxAttempts} `
-          + `(next try in ${Math.max(1, Math.round(delayMs / 1000))}s)…`,
-        );
+        streamWasDownRef.current = true;
+        setStreamHealth('reconnecting');
       },
-      // The built-in reconnect exhausted DEFAULT_SSE_RECONNECT.maxAttempts and gave
-      // up for good, it will not try again on its own. Falls back to the composer's
-      // 1s message poll (ChatView keeps polling while turnState is a 'reconnecting'/
-      // 'sending while reconnecting' ACTIVE_TURN_STATE, and ChatView also polls
-      // explicitly while 'stream paused') until retryStream() re-opens the stream.
-      onTerminate: ({ error, reconnectAttempts }) => {
+      // The built-in reconnect gave up for good. ChatView then refreshes the
+      // transcript slowly until retryStream() re-opens the stream.
+      onTerminate: ({ error }) => {
         if (cancelled || stoppedRef.current) return;
         if (handleAuthExpiry(error)) return;
-        syncedSetTurnState('stream paused');
-        setTurnError(
-          `Stream paused after ${reconnectAttempts} reconnect attempt${reconnectAttempts === 1 ? '' : 's'}. `
-          + 'Live updates are off. Tap the status to retry, or send a message to try again.',
-        );
+        hadDrop = true;
+        streamWasDownRef.current = true;
+        setStreamHealth('paused');
       },
     }, { reconnect: DEFAULT_SSE_RECONNECT }).then((nextDisconnect) => {
       // The platform only yields the disconnect handle AFTER the handshake. If this effect
@@ -538,8 +540,8 @@ export function useChatStream({
           return;
         }
         if (handleAuthExpiry(err)) return;
-        syncedSetTurnState('stream error');
-        setTurnError(err instanceof Error ? err.message : String(err));
+        streamWasDownRef.current = true;
+        setStreamHealth('paused');
       }
     });
 
@@ -585,5 +587,5 @@ export function useChatStream({
     [activeSessionId],
   );
 
-  return { isStreaming, stop, retryStream, activeToolCalls, toolActivityByMessageId, cancelToolCall };
+  return { isStreaming, streamHealth, stop, retryStream, activeToolCalls, toolActivityByMessageId, cancelToolCall };
 }

@@ -42,17 +42,20 @@ import type {
   CalendarGatewayCalendarSummary,
   CalendarGatewayCreateInput,
   CalendarGatewayCreated,
+  CalendarGatewayDeleted,
   CalendarGatewayEventDetail,
   CalendarGatewayEventSummary,
   CalendarGatewayIcsExport,
   CalendarGatewayIcsImport,
   CalendarGatewayListInput,
   CalendarGatewayService,
+  CalendarGatewayUpdated,
+  CalendarGatewayUpdateInput,
 } from '../control-plane/routes/calendar.js';
 import { CalDavClient, type CalDavHttpPort } from '../google/caldav-client.js';
 import { isCalendarResourceType, parseMultistatus } from '../google/caldav-parse.js';
 import { parseICSDetailed, splitICalDocument, type ICalComponentBlock, type ParsedICalEvent } from './caldav-ics.js';
-import { buildCalendarObject, generateICS, ICalValueError, type GenerateICalInput } from './caldav-ics-generate.js';
+import { buildCalendarObject, eventToVEvent, foldLine, generateICS, ICalValueError, type GenerateICalInput } from './caldav-ics-generate.js';
 import { parseIcs } from './ics-parser.js';
 import { expandEvents } from './rrule.js';
 import { eventDateTimeEpochMs } from './event-time.js';
@@ -174,6 +177,7 @@ function toSummary(event: CalDavEvent): CalendarGatewayEventSummary {
     title: event.summary,
     start: event.start,
     end: event.end,
+    allDay: event.allDay,
     ...(event.location === undefined ? {} : { location: event.location }),
     ...(event.description === undefined ? {} : { description: event.description }),
     ...(attendees.length > 0 ? { attendees } : {}),
@@ -273,6 +277,46 @@ function eventAndZoneComponents(parts: readonly ICalComponentBlock[]): {
   return {
     events: parts.filter((component) => component.name === 'VEVENT'),
     zones: parts.filter((component) => component.name === 'VTIMEZONE'),
+  };
+}
+
+/** The properties an update writes afresh; every other line of the stored event is kept as it was. */
+const UPDATED_PROPERTIES = new Set([
+  'UID', 'DTSTAMP', 'DTSTART', 'DTEND', 'DURATION', 'SUMMARY', 'DESCRIPTION', 'LOCATION',
+  'STATUS', 'RRULE', 'ORGANIZER', 'ATTENDEE', 'SEQUENCE', 'LAST-MODIFIED',
+]);
+
+/**
+ * The stored VEVENT with the changed properties written afresh and everything
+ * else (alarms, categories, a server's own properties) kept line for line, so
+ * a change made here loses nothing another calendar application put there.
+ */
+function updatedEventBlock(stored: ICalComponentBlock, fresh: readonly string[]): ICalComponentBlock {
+  const kept: string[] = [];
+  let sequence = 0;
+  let depth = 0;
+  let keepingProperty = true;
+  for (const line of stored.lines.slice(1, -1)) {
+    const continuation = line.startsWith(' ') || line.startsWith('\t');
+    if (continuation) {
+      if (keepingProperty) kept.push(line);
+      continue;
+    }
+    const upper = line.toUpperCase();
+    if (upper.startsWith('BEGIN:')) depth += 1;
+    const name = upper.slice(0, upper.search(/[;:]|$/));
+    if (depth === 0 && name === 'SEQUENCE') {
+      const value = Number(line.slice(line.indexOf(':') + 1));
+      if (Number.isFinite(value)) sequence = value;
+    }
+    keepingProperty = depth > 0 || !UPDATED_PROPERTIES.has(name);
+    if (keepingProperty) kept.push(line);
+    if (upper.startsWith('END:')) depth -= 1;
+  }
+  const body = fresh.slice(1, -1).map(foldLine);
+  return {
+    ...stored,
+    lines: ['BEGIN:VEVENT', ...body, `SEQUENCE:${String(sequence + 1)}`, ...kept, 'END:VEVENT'],
   };
 }
 
@@ -415,7 +459,157 @@ export function createCalDavCalendarGatewayService(
       : toRelativeHref(joinUrl(collectionPathOrRoot(collectionUrl, config.baseUrl), resourcePath));
   }
 
+  /**
+   * The one stored calendar object an event id names, with the ETag it was
+   * read at so a write can refuse to overwrite a change made meanwhile. An
+   * href-like id is fetched directly; a UID is found by a UID query first.
+   */
+  async function readStoredEvent(
+    eventId: string,
+    calendarId: string | undefined,
+  ): Promise<{
+    readonly config: CalDavGatewayConfig;
+    readonly request: CalDavRequest;
+    readonly url: string;
+    readonly href: string;
+    readonly calendarId: string;
+    readonly body: string;
+    readonly etag?: string;
+  }> {
+    const { config, request } = await connect();
+    const id = calendarId && calendarId.length > 0 ? calendarId : config.defaultCalendarId;
+    const collectionUrl = collectionUrlFor(config, id);
+    let href = eventId;
+    if (!isHrefLike(eventId)) {
+      const response = await request(collectionUrl, 'REPORT', calendarQueryByUidBody(eventId), { Depth: '1' });
+      const resource = resourcesFromMultistatus(response.body)
+        .find((candidate) => eventsOfResource(candidate, id).some((event) => event.uid === eventId));
+      if (resource === undefined) throw notFound(eventId);
+      href = resource.href;
+    }
+    const url = resolveResourceUrl(collectionUrl, config.baseUrl, href);
+    let response: Awaited<ReturnType<CalDavRequest>>;
+    try {
+      response = await request(url, 'GET', undefined, { Depth: '0' });
+    } catch (error) {
+      if (error instanceof GatewayVerbError && error.code === 'CALENDAR_NOT_FOUND') throw notFound(eventId);
+      throw error;
+    }
+    const etag = readHeader(response.headers, 'ETag');
+    return {
+      config,
+      request,
+      url,
+      href: toRelativeHref(href),
+      calendarId: id,
+      body: response.body,
+      ...(etag === undefined || etag.length === 0 ? {} : { etag }),
+    };
+  }
+
+  /** A recurring event is changed in the calendar's own application: one id here names the whole series. */
+  function refuseSeries(eventId: string, action: string): GatewayVerbError {
+    return new GatewayVerbError(
+      `Event ${eventId} is a recurring event, so ${action} it here would change every occurrence. Change the series in the calendar's own application.`,
+      'CALENDAR_SERIES_NOT_SUPPORTED',
+      409,
+    );
+  }
+
+  /** A write the server refused because the event changed after it was read. */
+  function changedMeanwhile(eventId: string): GatewayVerbError {
+    return new GatewayVerbError(
+      `Event ${eventId} changed on the calendar after it was read, so nothing was written. Read it again and repeat the change.`,
+      'CALENDAR_EVENT_CHANGED',
+      409,
+    );
+  }
+
   return {
+    async updateEvent(
+      eventId: string,
+      changes: CalendarGatewayUpdateInput,
+      calendarId?: string | undefined,
+    ): Promise<CalendarGatewayUpdated> {
+      if (changes.start !== undefined) validateIsoDate(changes.start, 'start');
+      if (changes.end !== undefined) validateIsoDate(changes.end, 'end');
+      const stored = await readStoredEvent(eventId, calendarId);
+      const document = splitICalDocument(stored.body);
+      const { events: blocks } = eventAndZoneComponents(document.components);
+      const parsed = parseICSDetailed(stored.body).events;
+      const current = parsed[0];
+      if (current === undefined || blocks.length === 0) throw notFound(eventId);
+      if (blocks.length > 1 || current.recurrence !== undefined || current.recurrenceId !== undefined) {
+        throw refuseSeries(eventId, 'changing');
+      }
+      const start = changes.start ?? current.start;
+      const end = changes.end ?? current.end;
+      if (Date.parse(end) < Date.parse(start)) {
+        throw new GatewayVerbError("Field 'end' must not be before 'start'.", 'INVALID_ARGUMENT', 400);
+      }
+      const updatedAt = stampNow();
+      const description = changes.description ?? current.description;
+      const location = changes.location ?? current.location;
+      let fresh: string[];
+      try {
+        fresh = eventToVEvent({
+          uid: current.uid,
+          summary: changes.title ?? current.summary,
+          start,
+          end,
+          dtStamp: updatedAt,
+          // A day-only event stays day-only unless its times were changed.
+          allDay: current.allDay && changes.start === undefined && changes.end === undefined,
+          ...(description === undefined ? {} : { description }),
+          ...(location === undefined ? {} : { location }),
+          ...(current.status === undefined ? {} : { status: current.status }),
+          ...(current.organizerRaw === undefined ? {} : { organizer: current.organizerRaw }),
+          attendees: changes.attendees ?? current.attendees.map((attendee) => attendee.rawValue),
+        });
+      } catch (error) {
+        if (error instanceof ICalValueError) throw new GatewayVerbError(error.message, 'INVALID_ARGUMENT', 400);
+        throw error;
+      }
+      const components = document.components.map((component) => (
+        component === blocks[0] ? updatedEventBlock(component, fresh) : component
+      ));
+      try {
+        await stored.request(
+          stored.url,
+          'PUT',
+          buildCalendarObject(components, document.properties),
+          stored.etag === undefined ? undefined : { 'If-Match': stored.etag },
+        );
+      } catch (error) {
+        if (error instanceof GatewayVerbError && error.status === 412) throw changedMeanwhile(eventId);
+        throw error;
+      }
+      return { eventId: stored.href, updatedAt };
+    },
+
+    async deleteEvent(eventId: string, calendarId?: string | undefined): Promise<CalendarGatewayDeleted> {
+      let stored: Awaited<ReturnType<typeof readStoredEvent>>;
+      try {
+        stored = await readStoredEvent(eventId, calendarId);
+      } catch (error) {
+        if (error instanceof GatewayVerbError && error.code === 'CALENDAR_NOT_FOUND') return { eventId, deleted: false };
+        throw error;
+      }
+      const { events: blocks } = eventAndZoneComponents(splitICalDocument(stored.body).components);
+      const parsed = parseICSDetailed(stored.body).events;
+      if (blocks.length > 1 || parsed.some((event) => event.recurrence !== undefined || event.recurrenceId !== undefined)) {
+        throw refuseSeries(eventId, 'removing');
+      }
+      try {
+        await stored.request(stored.url, 'DELETE', undefined, stored.etag === undefined ? undefined : { 'If-Match': stored.etag });
+      } catch (error) {
+        if (error instanceof GatewayVerbError && error.code === 'CALENDAR_NOT_FOUND') return { eventId: stored.href, deleted: false };
+        if (error instanceof GatewayVerbError && error.status === 412) throw changedMeanwhile(eventId);
+        throw error;
+      }
+      return { eventId: stored.href, deleted: true };
+    },
+
     async listCalendars(): Promise<readonly CalDavCalendarSummary[]> {
       const { config, request } = await connect();
       const response = await request(

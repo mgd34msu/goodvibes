@@ -41,6 +41,8 @@ export interface CalendarGatewayEventSummary {
   readonly title: string;
   readonly start: string;
   readonly end: string;
+  /** True for a date-only event; `start`/`end` are then calendar dates, not instants. */
+  readonly allDay?: boolean;
   readonly location?: string;
   readonly description?: string;
   readonly attendees?: readonly string[];

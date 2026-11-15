@@ -1,21 +1,16 @@
 /**
- * useChatSearch, companion-history search hook (first consumer of
- * sessions.search).
+ * useChatSearch, companion-history search hook.
  *
- * TWO DISTINCT STAGES, kept separate rather than merged (a deliberate design
- * decision, not an oversight):
+ * TWO DISTINCT STAGES, kept separate rather than merged:
  *
- *   1. SESSION search (`sessionResults`), backend-side, via
+ *   1. SESSION search (`sessionResults`), via
  *      `platform.operator.sessions.search({ query, kind: 'companion-chat', ... })`.
- *      Matches session id/title/project only (not message bodies) but reaches
- *      FULL history, not just the ~100 most-recently-fetched sessions the
- *      caller passed in. This is the new capability sessions.search unlocks.
+ *      Matches session id/title/project across full history.
  *
- *   2. MESSAGE-content search (`results`), unchanged from before: client-side,
- *      substring-matches message bodies, but only within the `sessions` the
- *      caller already fetched (capped upstream at ~100, see App.tsx). Kept
- *      because sessions.search cannot see inside message bodies, dropping
- *      this stage would silently narrow what a user can find.
+ *   2. MESSAGE-text search (`results`), via `platform.chat.messages.search`:
+ *      the daemon matches message text across every chat in one scan and
+ *      answers newest first, paged. One request per settled query; nothing is
+ *      read chat by chat in the browser.
  *
  * THE includeClosed DIVERGENCE (load-bearing, name it wherever this is read):
  * sessions.search defaults `includeClosed` to FALSE, the OPPOSITE of
@@ -26,25 +21,20 @@
  * hides dead sessions by default; a full list surface shows them. Do not
  * "fix" this hook to match SessionsView's default, they are intentionally
  * different truths for different surfaces. `includeClosed` is exposed here
- * as an explicit, off-by-default toggle so the user can opt in.
+ * as an explicit, off-by-default toggle so the user can opt in, and it
+ * applies to both stages.
  *
- * Session-search failures degrade honestly: a route-absent/NOT_INVOKABLE
- * response (the daemon does not serve sessions.search) surfaces as the
- * `'unavailable'` state, never a silent empty list indistinguishable from a
- * genuine zero-result search.
+ * Failures degrade honestly: a route-absent/NOT_INVOKABLE response (the
+ * daemon does not serve the method) surfaces as the `'unavailable'` state,
+ * never a silent empty list indistinguishable from a genuine zero-result
+ * search.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { client as platformClient } from '../../lib/goodvibes';
-import {
-  companionMessagesFromListResponse,
-  extractMessageId,
-  extractSessionId,
-} from '../../lib/companion-chat';
+import type { CompanionMessageSearchHit } from '../../lib/goodvibes';
 import { errorCode } from '../../lib/errors';
-import { firstString } from '../../lib/object';
 import type { SessionsSearchSessionSummary } from '../../lib/contract-bridge-types';
-import type { ChatMessage } from './types';
 
 /** A single search result referencing a specific message. */
 export interface ChatSearchResult {
@@ -70,11 +60,11 @@ export interface ChatSessionSearchResult {
 }
 
 /**
- * Lifecycle of the backend session-search stage.
+ * Lifecycle of one search stage.
  *   'idle'       , no query typed yet.
  *   'searching'  , request in flight (debounced).
- *   'ready'      , a response landed (sessionResults reflects it, may be empty).
- *   'unavailable', the daemon does not serve sessions.search (NOT_INVOKABLE /
+ *   'ready'      , a response landed (the results reflect it, may be empty).
+ *   'unavailable', the daemon does not serve the method (NOT_INVOKABLE /
  *                   route-absent), distinct from a genuine empty result.
  *   'error'      , some other request failure (network, 5xx, etc).
  */
@@ -82,18 +72,24 @@ export type SessionSearchState = 'idle' | 'searching' | 'ready' | 'unavailable' 
 
 /** The value returned from useChatSearch. */
 export interface UseChatSearchReturn {
-  /** Filtered, ranked message-content results for the current query. */
+  /** Message-text matches for the current query, newest first. */
   results: ChatSearchResult[];
-  /** True while messages are being fetched for an active query. */
+  /** True while the first page of message matches is being fetched. */
   isSearching: boolean;
-  /** How many chats could not be read in the last message search, so a "no match" is not final. */
-  unreadableSessions: number;
+  /** Lifecycle of the message-text stage. */
+  messageSearchState: SessionSearchState;
+  /** True when the daemon holds further message matches (nextCursor present). */
+  hasMoreResults: boolean;
+  /** True while a further page of message matches is in flight. */
+  isLoadingMoreResults: boolean;
+  /** Fetch the next page of message matches and append them. */
+  loadMoreResults: () => void;
   /** Session-discovery results from sessions.search (title/id match, full history). */
   sessionResults: ChatSessionSearchResult[];
   /** Lifecycle of the session-search stage, see SessionSearchState. */
   sessionSearchState: SessionSearchState;
   /**
-   * Whether closed/reaped sessions are included in the session-search stage.
+   * Whether closed/reaped sessions are included in both stages.
    * Defaults to false, matching sessions.search's own default (NOT
    * sessions.list's), see the module doc comment above.
    */
@@ -107,56 +103,37 @@ export interface UseChatSearchReturn {
   loadMoreSessions: () => void;
 }
 
-/** What changes when a chat gets a new message, so its cached messages go stale. */
-function sessionActivityStamp(session: unknown): string {
-  if (typeof session !== 'object' || session === null) return '';
-  const record = session as Record<string, unknown>;
-  const stamp = record.lastActivityAt ?? record.updatedAt;
-  return typeof stamp === 'number' || typeof stamp === 'string' ? String(stamp) : '';
-}
-
-/** Messages keyed by sessionId and activity stamp. */
-type MessageCache = Map<string, ChatMessage[]>;
-
-const SNIPPET_CONTEXT = 80;
 const DEBOUNCE_MS = 300;
-const MAX_SNIPPET_LENGTH = 160;
+const MESSAGE_SEARCH_LIMIT = 25;
 
-/** Extract a short snippet centred on the first occurrence of `term`. */
-function buildSnippet(text: string, term: string): string {
-  const lower = text.toLowerCase();
-  const termLower = term.toLowerCase();
-  const idx = lower.indexOf(termLower);
-  if (idx === -1) return text.slice(0, MAX_SNIPPET_LENGTH);
-  const start = Math.max(0, idx - SNIPPET_CONTEXT);
-  const end = Math.min(text.length, idx + term.length + SNIPPET_CONTEXT);
-  const excerpt = text.slice(start, end);
-  return (start > 0 ? '…' : '') + excerpt + (end < text.length ? '…' : '');
+function toChatSearchResult(hit: CompanionMessageSearchHit): ChatSearchResult {
+  return {
+    sessionId: hit.sessionId,
+    messageId: hit.messageId,
+    snippet: hit.snippet,
+    sessionTitle: hit.sessionTitle || 'Untitled session',
+    createdAt: hit.createdAt,
+  };
 }
 
-/** Extract a displayable title from a raw session object. */
-function extractSessionTitle(session: unknown): string {
-  return firstString(session, ['title', 'name', 'label']) || 'Untitled session';
-}
-
-/** Extract the primary text content from a ChatMessage. */
-function messageText(msg: ChatMessage): string {
-  const direct = msg.content ?? msg.text ?? msg.body ?? msg.message ?? msg.delta ?? '';
-  if (direct) return direct;
-  if (Array.isArray(msg.parts)) {
-    return msg.parts
-      .map((p: { text?: string; content?: string; body?: string }) => p.text ?? p.content ?? p.body ?? '')
-      .filter(Boolean)
-      .join(' ');
-  }
-  return '';
-}
-
-/** Fetch messages for a single session, returning typed ChatMessage[]. */
-async function fetchMessages(sessionId: string): Promise<ChatMessage[]> {
-  const raw = await platformClient.operator.sessions.messages.list(sessionId);
-  const items = companionMessagesFromListResponse(raw);
-  return items.map((item) => item as ChatMessage);
+/** Fetch one page of message-text matches from the daemon. */
+async function fetchMessageSearchPage(
+  query: string,
+  includeClosed: boolean,
+  signal?: AbortSignal,
+  cursor?: string,
+): Promise<{ results: ChatSearchResult[]; nextCursor?: string; hasMore: boolean }> {
+  const page = await platformClient.chat.messages.search({
+    query,
+    includeClosed,
+    limit: MESSAGE_SEARCH_LIMIT,
+    ...(cursor ? { cursor } : {}),
+  }, signal);
+  return {
+    results: page.items.map(toChatSearchResult),
+    nextCursor: page.nextCursor,
+    hasMore: page.hasMore,
+  };
 }
 
 const SESSION_SEARCH_LIMIT = 20;
@@ -213,25 +190,28 @@ async function fetchSessionSearchPage(
 }
 
 /**
- * Hook that searches across all companion chat sessions/messages.
+ * Hook that searches across all companion chat sessions and messages.
  *
- * @param query   - The raw search string (hook debounces internally).
- * @param sessions - Pre-fetched session list from the caller's TanStack Query.
+ * @param query - The raw search string (hook debounces internally).
  */
-export function useChatSearch(
-  query: string,
-  sessions: unknown[],
-): UseChatSearchReturn {
+export function useChatSearch(query: string): UseChatSearchReturn {
+  const [includeClosed, setIncludeClosed] = useState(false);
+
+  // Message-text stage (chat.messages.search).
   const [results, setResults] = useState<ChatSearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [unreadableSessions, setUnreadableSessions] = useState(0);
+  const [messageSearchState, setMessageSearchState] = useState<SessionSearchState>('idle');
+  const [messageCursor, setMessageCursor] = useState<string | undefined>(undefined);
+  const [hasMoreResults, setHasMoreResults] = useState(false);
+  const [isLoadingMoreResults, setIsLoadingMoreResults] = useState(false);
+  // Bumped for every fresh message search, so a page requested for an earlier
+  // search is dropped instead of appended.
+  const messageGenerationRef = useRef(0);
+  const messageParamsRef = useRef({ query: '', includeClosed });
 
   // Session-search stage (sessions.search), a separate concern from the
-  // message-content stage above: different backend, different default
-  // (includeClosed=false), its own pagination and lifecycle state.
+  // message stage above: different backend, its own pagination and lifecycle.
   const [sessionResults, setSessionResults] = useState<ChatSessionSearchResult[]>([]);
   const [sessionSearchState, setSessionSearchState] = useState<SessionSearchState>('idle');
-  const [includeClosed, setIncludeClosed] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | undefined>(undefined);
   const [hasMoreSessions, setHasMoreSessions] = useState(false);
   const [isLoadingMoreSessions, setIsLoadingMoreSessions] = useState(false);
@@ -248,126 +228,68 @@ export function useChatSearch(
   // results. Comparing the generation captured at load-more time closes that hole.
   const searchGenerationRef = useRef(0);
 
-  // Persistent message cache, keyed by sessionId plus the session's last-activity
-  // stamp, so a chat that has a newer message is read again. Reset when the
-  // session list identity changes.
-  const cacheRef = useRef<MessageCache>(new Map());
-  // Abort controller to cancel stale searches.
-  const abortRef = useRef<AbortController | null>(null);
-
-  // Invalidate message cache when sessions list changes (different count or ids).
-  const sessionsKey = sessions
-    .map((s) => extractSessionId(s) ?? '')
-    .join(',');
-  const prevSessionsKeyRef = useRef(sessionsKey);
-  // eslint-disable-next-line react-hooks/refs -- documented derived-state-during-render guard, intentional
-  if (sessionsKey !== prevSessionsKeyRef.current) {
-    // eslint-disable-next-line react-hooks/refs -- documented derived-state-during-render guard, intentional
-    prevSessionsKeyRef.current = sessionsKey;
-    // eslint-disable-next-line react-hooks/refs -- documented derived-state-during-render guard, intentional
-    cacheRef.current = new Map();
-  }
-
-  const runSearch = useCallback(
-    async (term: string, signal: AbortSignal): Promise<void> => {
-      if (!term.trim()) {
-        setResults([]);
-        setUnreadableSessions(0);
-        setIsSearching(false);
-        return;
-      }
-
-      setIsSearching(true);
-      const termLower = term.toLowerCase();
-      const found: ChatSearchResult[] = [];
-      let unreadable = 0;
-
-      for (const session of sessions) {
-        if (signal.aborted) break;
-
-        const sessionId = extractSessionId(session);
-        if (!sessionId) continue;
-
-        const sessionTitle = extractSessionTitle(session);
-
-        // Fetch messages (cached)
-        const cacheKey = `${sessionId}:${sessionActivityStamp(session)}`;
-        let messages = cacheRef.current.get(cacheKey);
-        if (!messages) {
-          try {
-            messages = await fetchMessages(sessionId);
-            if (!signal.aborted) {
-              cacheRef.current.set(cacheKey, messages);
-            }
-          } catch {
-            // The chat cannot be searched; counted so the panel never presents
-            // the result as complete.
-            unreadable += 1;
-            continue;
-          }
-        }
-
-        if (signal.aborted) break;
-
-        for (const msg of messages) {
-          const text = messageText(msg);
-          if (!text) continue;
-          if (!text.toLowerCase().includes(termLower)) continue;
-
-          const messageId = extractMessageId(msg) || '';
-          const snippet = buildSnippet(text, term);
-          const createdAt = msg.createdAt ?? msg.timestamp ?? msg.time;
-
-          found.push({
-            sessionId,
-            messageId,
-            snippet,
-            sessionTitle,
-            createdAt: typeof createdAt === 'number' ? createdAt : undefined,
-          });
-        }
-      }
-
-      if (!signal.aborted) {
-        // Sort: most recent sessions first
-        found.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
-        setResults(found);
-        setUnreadableSessions(unreadable);
-        setIsSearching(false);
-      }
-    },
-    [sessions],
-  );
-
   useEffect(() => {
-    // Abort any pending search
-    abortRef.current?.abort();
-
+    messageGenerationRef.current += 1;
+    messageParamsRef.current = { query, includeClosed };
     if (!query.trim()) {
       setResults([]);
-      setIsSearching(false);
+      setMessageSearchState('idle');
+      setMessageCursor(undefined);
+      setHasMoreResults(false);
       return;
     }
 
     const controller = new AbortController();
-    abortRef.current = controller;
-
     const timer = window.setTimeout(() => {
-      void runSearch(query, controller.signal);
+      setMessageSearchState('searching');
+      void (async () => {
+        try {
+          const page = await fetchMessageSearchPage(query, includeClosed, controller.signal);
+          if (controller.signal.aborted) return;
+          setResults(page.results);
+          setMessageCursor(page.nextCursor);
+          setHasMoreResults(page.hasMore);
+          setMessageSearchState('ready');
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          setResults([]);
+          setMessageCursor(undefined);
+          setHasMoreResults(false);
+          setMessageSearchState(isNotInvokableError(error) ? 'unavailable' : 'error');
+        }
+      })();
     }, DEBOUNCE_MS);
 
     return () => {
       clearTimeout(timer);
       controller.abort();
-      abortRef.current = null;
     };
-  }, [query, runSearch]);
+  }, [query, includeClosed]);
 
-  // ── Session-search stage (sessions.search, first consumer) ────────
+  const loadMoreResults = useCallback(() => {
+    if (isLoadingMoreResults || !hasMoreResults || !messageCursor) return;
+    const requested = messageParamsRef.current;
+    const generation = messageGenerationRef.current;
+    setIsLoadingMoreResults(true);
+    void (async () => {
+      try {
+        const page = await fetchMessageSearchPage(requested.query, requested.includeClosed, undefined, messageCursor);
+        if (messageGenerationRef.current !== generation) return;
+        setResults((prev) => [...prev, ...page.results]);
+        setMessageCursor(page.nextCursor);
+        setHasMoreResults(page.hasMore);
+      } catch {
+        // A failed further page leaves the matches already shown in place;
+        // "Load more" stays offered so the user can try again.
+      } finally {
+        setIsLoadingMoreResults(false);
+      }
+    })();
+  }, [hasMoreResults, messageCursor, isLoadingMoreResults]);
+
+  // ── Session-search stage (sessions.search) ────────
   //
-  // Debounced independently of the message-content stage above: it has no
-  // dependency on the caller's `sessions` prop (it searches full history via
-  // the backend, not the client-provided corpus), and it re-runs on
+  // Debounced independently of the message stage above; it re-runs on
   // `includeClosed` toggling in addition to `query` changes.
   const runSessionSearch = useCallback(
     async (term: string, closed: boolean, signal: AbortSignal): Promise<void> => {
@@ -472,8 +394,11 @@ export function useChatSearch(
 
   return {
     results,
-    isSearching,
-    unreadableSessions,
+    isSearching: messageSearchState === 'searching',
+    messageSearchState,
+    hasMoreResults,
+    isLoadingMoreResults,
+    loadMoreResults,
     sessionResults,
     sessionSearchState,
     includeClosed,

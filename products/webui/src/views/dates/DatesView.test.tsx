@@ -29,7 +29,8 @@ let plansImpl: () => Promise<PlansResult> = () => Promise.resolve({ today: '2026
 let stateImpl: () => Promise<StateResultShape> = () => Promise.resolve({ path: '/tmp/state.json', acknowledgements: 0, giftRecords: 0, openItems: 0, interviews: 0, mirrors: 0, lastSweep: null, corruption: null });
 let giftsImpl: (occasionId: string) => Promise<OperatorMethodOutput<'occasions.gifts'>> = (occasionId) => Promise.resolve({ occasionId, gifts: [] });
 let sweepImpl: () => Promise<OperatorMethodOutput<'occasions.sweep'>> = () => Promise.reject(new Error('not used'));
-let forgetImpl: (input: OperatorMethodInput<'profile.forget'>) => Promise<unknown> = () => Promise.reject(new Error('not used'));
+/** Answers `occasions.plans.remove` through the generic invoke. */
+let planRemoveImpl: (input: Record<string, unknown>) => Promise<unknown> = () => Promise.reject(new Error('not used'));
 let interviewAnswerImpl: (input: OperatorMethodInput<'occasions.interview.answer'>) => Promise<OperatorMethodOutput<'occasions.interview.answer'>> = () => Promise.reject(new Error('not used'));
 let interviewRecordImpl: (input: OperatorMethodInput<'occasions.interview.record'>) => Promise<OperatorMethodOutput<'occasions.interview.record'>> = () => Promise.reject(new Error('not used'));
 
@@ -38,7 +39,7 @@ const proposeCalls: unknown[] = [];
 const answerCalls: unknown[] = [];
 const giftsCalls: string[] = [];
 const removeCalls: OperatorMethodInput<'occasions.remove'>[] = [];
-const forgetCalls: OperatorMethodInput<'profile.forget'>[] = [];
+const planRemoveCalls: Record<string, unknown>[] = [];
 const interviewAnswerCalls: OperatorMethodInput<'occasions.interview.answer'>[] = [];
 const interviewRecordCalls: OperatorMethodInput<'occasions.interview.record'>[] = [];
 
@@ -50,11 +51,10 @@ mock.module('../../lib/goodvibes', () => ({
   invokeMethod: () => Promise.resolve({}),
   client: {
     operator: {
-      profile: {
-        forget: (input: OperatorMethodInput<'profile.forget'>) => {
-          forgetCalls.push(input);
-          return forgetImpl(input);
-        },
+      invoke: (methodId: string, input: Record<string, unknown>) => {
+        if (methodId !== 'occasions.plans.remove') return Promise.reject(Object.assign(new Error('not used'), { status: 500 }));
+        planRemoveCalls.push(input);
+        return planRemoveImpl(input);
       },
       occasions: {
         list: () => listImpl(),
@@ -157,7 +157,7 @@ afterEach(() => {
   stateImpl = () => Promise.resolve({ path: '/tmp/state.json', acknowledgements: 0, giftRecords: 0, openItems: 0, interviews: 0, mirrors: 0, lastSweep: null, corruption: null });
   giftsImpl = (occasionId) => Promise.resolve({ occasionId, gifts: [] });
   sweepImpl = () => Promise.reject(new Error('not used'));
-  forgetImpl = () => Promise.reject(new Error('not used'));
+  planRemoveImpl = () => Promise.reject(new Error('not used'));
   interviewAnswerImpl = () => Promise.reject(new Error('not used'));
   interviewRecordImpl = () => Promise.reject(new Error('not used'));
   proposeImpl = () => Promise.reject(new Error('not used'));
@@ -165,7 +165,7 @@ afterEach(() => {
   answerCalls.length = 0;
   giftsCalls.length = 0;
   removeCalls.length = 0;
-  forgetCalls.length = 0;
+  planRemoveCalls.length = 0;
   interviewAnswerCalls.length = 0;
   interviewRecordCalls.length = 0;
 });
@@ -495,22 +495,15 @@ describe('DatesView: manual sweep outcomes', () => {
     };
     const { el, unmount } = render();
     try {
-      await waitFor(() => buttonNamed(el, 'Run sweep now') !== undefined);
+      await waitFor(() => buttonNamed(el, 'Run sweep and deliver due nudges') !== undefined);
       const disclosure = el.querySelector<HTMLDetailsElement>('details.dv-disclosure');
       const summary = disclosure?.querySelector('summary');
       if (!disclosure || !summary) throw new Error('Stored records disclosure is missing');
       flushSync(() => summary.click());
       expect(disclosure.open).toBe(true);
-      const run = buttonNamed(el, 'Run sweep now');
+      const run = buttonNamed(el, 'Run sweep and deliver due nudges');
       if (!run) throw new Error('Run sweep action is missing');
       flushSync(() => run.click());
-      // Delivery is real, so nothing runs until the confirmation is accepted.
-      await waitFor(() => Boolean(el.querySelector('.gv-confirm')));
-      expect(sweeps).toBe(0);
-      const confirmation = el.querySelector('.gv-confirm');
-      const accept = confirmation ? buttonNamed(confirmation, 'Run sweep') : undefined;
-      if (!accept) throw new Error('Run sweep confirmation is missing');
-      flushSync(() => accept.click());
       await waitFor(() => el.querySelector('[data-testid="dates-state"] [role="status"]') !== null);
       const status = el.querySelector('[data-testid="dates-state"] [role="status"]');
       expect(status?.textContent).toBe(message);
@@ -623,7 +616,7 @@ describe('DatesView: populated / empty ("no fourth reading")', () => {
   });
 });
 
-describe('DatesView: plan removal uses the exact native profile line', () => {
+describe('DatesView: plan removal names the plan by id', () => {
   const plan = {
     id: 'lisbon', title: 'Lisbon', from: '2026-09-12', to: '2026-09-19', away: true,
     destination: 'Lisbon', extras: [], lineIndex: 5,
@@ -652,22 +645,20 @@ describe('DatesView: plan removal uses the exact native profile line', () => {
     return confirmation;
   }
 
-  test('Cancel sends no mutation; one later confirmation forgets the exact plan and closes its detail', async () => {
+  const removal = { planId: plan.id, planFrom: plan.from, confirmed: true, authority: 'owner-direct' };
+
+  test('Cancel sends no mutation; one later confirmation removes the plan by id and closes its detail', async () => {
     plansImpl = () => Promise.resolve(original);
-    forgetImpl = () => {
+    planRemoveImpl = () => {
       plansImpl = () => Promise.resolve({ ...original, plans: [] });
-      return Promise.resolve({
-        ok: true, reason: null,
-        changes: [{ kind: 'forget', fieldId: null, section: 'Plans', label: 'note', superseded: false }],
-        disclosure: 'Removed note from Plans.',
-      });
+      return Promise.resolve({ ok: true, reason: null, occasionId: plan.id, disclosure: 'Removed note from Plans.', droppedRecords: 0 });
     };
     const { el, unmount } = render();
     try {
       await waitFor(() => Boolean(el.querySelector('[data-testid="dates-plan-list"]')));
       click(await askRemovePlan(el), 'Cancel');
       await waitFor(() => !el.querySelector('.gv-confirm'));
-      expect(forgetCalls).toEqual([]);
+      expect(planRemoveCalls).toEqual([]);
       expect(removeCalls).toEqual([]);
       expect(buttonNamed(el, 'Close plan')).toBeDefined();
 
@@ -677,7 +668,7 @@ describe('DatesView: plan removal uses the exact native profile line', () => {
       if (confirmation === null) throw new Error('Missing plan confirmation');
       click(confirmation, 'Remove');
       await waitFor(() => el.textContent?.includes('Removed note from Plans.') === true);
-      expect(forgetCalls).toEqual([{ section: 'Plans', text: plan.text, authority: 'owner-direct' }]);
+      expect(planRemoveCalls).toEqual([removal]);
       expect(removeCalls).toEqual([]);
       expect(buttonNamed(el, 'Close plan')).toBeUndefined();
       expect(el.querySelector('[data-testid="dates-plan-list"] .gv-row__main')).toBeNull();
@@ -686,26 +677,26 @@ describe('DatesView: plan removal uses the exact native profile line', () => {
   });
 
   for (const cause of ['refused', 'stale'] as const) {
-    test(`${cause} native forget retains plan detail and reports its actual reason`, async () => {
+    test(`${cause} removal retains plan detail and reports its actual reason`, async () => {
       plansImpl = () => Promise.resolve(original);
       const reason = cause === 'stale'
         ? 'That line is not in Plans any more, so nothing was removed.'
         : 'That source carries no command authority over the owner profile.';
-      forgetImpl = () => {
+      planRemoveImpl = () => {
         if (cause === 'stale') {
           plansImpl = () => Promise.resolve({
             ...original,
             plans: [{ ...plan, to: '2026-09-20', text: 'Lisbon · 2026-09-12..2026-09-20 · away · in Lisbon' }],
           });
         }
-        return Promise.resolve({ ok: false, reason, changes: [], disclosure: '' });
+        return Promise.resolve({ ok: false, reason, occasionId: plan.id, disclosure: '', droppedRecords: 0 });
       };
       const { el, unmount } = render();
       try {
         await waitFor(() => Boolean(el.querySelector('[data-testid="dates-plan-list"]')));
         click(await askRemovePlan(el), 'Remove');
         await waitFor(() => el.textContent?.includes(reason) === true);
-        expect(forgetCalls).toEqual([{ section: 'Plans', text: plan.text, authority: 'owner-direct' }]);
+        expect(planRemoveCalls).toEqual([removal]);
         expect(removeCalls).toEqual([]);
         expect(buttonNamed(el, 'Close plan')).toBeDefined();
         expect(el.querySelector('[data-testid="dates-plan-list"] .gv-row__main')?.textContent).toContain('Lisbon');
@@ -713,22 +704,6 @@ describe('DatesView: plan removal uses the exact native profile line', () => {
       } finally { unmount(); }
     });
   }
-
-  test('a malformed profile write outcome keeps the plan selected and never reports removal', async () => {
-    plansImpl = () => Promise.resolve(original);
-    forgetImpl = () => Promise.resolve({ ok: 'true' });
-    const { el, unmount } = render();
-    try {
-      await waitFor(() => Boolean(el.querySelector('[data-testid="dates-plan-list"]')));
-      click(await askRemovePlan(el), 'Remove');
-      await waitFor(() => el.textContent?.includes('The daemon did not say whether the plan was removed.') === true);
-      expect(forgetCalls).toEqual([{ section: 'Plans', text: plan.text, authority: 'owner-direct' }]);
-      expect(removeCalls).toEqual([]);
-      expect(buttonNamed(el, 'Close plan')).toBeDefined();
-      expect(el.querySelector('[data-testid="dates-plan-list"] .gv-row__main')?.textContent).toContain('Lisbon');
-      expect(el.textContent).toContain('Not removed');
-    } finally { unmount(); }
-  });
 
   test('occasion removal retains its native record-cleanup command', async () => {
     listImpl = () => Promise.resolve({
@@ -757,7 +732,7 @@ describe('DatesView: plan removal uses the exact native profile line', () => {
       click(confirmation, 'Remove');
       await waitFor(() => removeCalls.length === 1);
       expect(removeCalls).toEqual([{ occasionId: 'anniversary', confirmed: true, authority: 'owner-direct' }]);
-      expect(forgetCalls).toEqual([]);
+      expect(planRemoveCalls).toEqual([]);
     } finally { unmount(); }
   });
 });

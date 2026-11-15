@@ -12,7 +12,7 @@
  * candidates live on the Review tab.
  */
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Brain, FileText, Link, Search } from 'lucide-react';
 import { invokeMethod, client as platformClient } from '../lib/goodvibes';
 import { queryKeys } from '../lib/queries';
@@ -43,6 +43,34 @@ const SECTIONS: readonly { value: Section; label: string }[] = [
 ];
 
 const PAGE_SIZE = { source: 25, node: 25, issue: 10, projection: 25 } as const;
+/** Sources and nodes are read from the daemon this many at a time, by cursor. */
+const LIST_PAGE = 100;
+
+interface KnowledgeListPage {
+  readonly items: readonly unknown[];
+  readonly hasMore: boolean;
+  readonly nextCursor?: string;
+}
+
+/** One page of knowledge.sources.list / knowledge.nodes.list, asked for with a limit. */
+function readListPage(data: unknown, legacyKey: 'sources' | 'nodes'): KnowledgeListPage {
+  const record = (typeof data === 'object' && data !== null ? data : {}) as Record<string, unknown>;
+  if (Array.isArray(record.items)) {
+    return {
+      items: record.items,
+      hasMore: record.hasMore === true,
+      ...(typeof record.nextCursor === 'string' && record.nextCursor ? { nextCursor: record.nextCursor } : {}),
+    };
+  }
+  return { items: firstArray(data, [legacyKey]), hasMore: false };
+}
+
+/** Add the daemon's search matches the loaded pages do not hold yet. */
+function withMatches(items: readonly unknown[], matches: readonly unknown[]): unknown[] {
+  if (!matches.length) return [...items];
+  const known = new Set(items.map((item) => bestId(item)));
+  return [...items, ...matches.filter((match) => !known.has(bestId(match)))];
+}
 
 interface ProjectionSelection {
   key: string;
@@ -117,9 +145,15 @@ interface ItemGroupProps {
   pageSize: number;
   selectedKey: string | null;
   onSelect: (key: string) => void;
+  /** More of this list is on the daemon; Show more reads the next page. */
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
-function ItemGroup({ label, kindLabel, prefix, items, query, pageSize, selectedKey, onSelect }: ItemGroupProps) {
+function ItemGroup({
+  label, kindLabel, prefix, items, query, pageSize, selectedKey, onSelect, hasMore = false, loadingMore = false, onLoadMore,
+}: ItemGroupProps) {
   const [visible, setVisible] = useState(pageSize);
   const shown = useMemo(
     () => items.filter((item) => includesText([bestTitle(item, ''), bestId(item)], query)),
@@ -143,10 +177,21 @@ function ItemGroup({ label, kindLabel, prefix, items, query, pageSize, selectedK
           );
         })}
       </RowGroup>
-      {shown.length > visible && (
+      {(shown.length > visible || (hasMore && onLoadMore)) && (
         <div className="lib-more">
-          <Button variant="ghost" size="sm" aria-label={`Show more ${label.toLowerCase()}`} onClick={() => setVisible((v) => v + pageSize)}>
-            Show more ({shown.length - visible} left)
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`Show more ${label.toLowerCase()}`}
+            disabled={loadingMore}
+            onClick={() => {
+              if (shown.length <= visible + pageSize && hasMore) onLoadMore?.();
+              setVisible((v) => v + pageSize);
+            }}
+          >
+            {loadingMore
+              ? 'Loading…'
+              : shown.length > visible ? `Show more (${shown.length - visible}${hasMore ? '+' : ''} left)` : 'Show more'}
           </Button>
         </div>
       )}
@@ -210,8 +255,20 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
   const [mapFilter, setMapFilter] = useState('');
 
   const status = useQuery({ queryKey: queryKeys.knowledgeStatus, queryFn: () => platformClient.knowledge.status() });
-  const sources = useQuery({ queryKey: queryKeys.knowledgeSources, queryFn: () => invokeMethod('knowledge.sources.list', { limit: 100 }) });
-  const nodes = useQuery({ queryKey: queryKeys.knowledgeNodes, queryFn: () => invokeMethod('knowledge.nodes.list', { limit: 100 }) });
+  // Sources and nodes are paged by the daemon's cursor: Show more reads the next
+  // page, so nothing past the first hundred is out of reach.
+  const sources = useInfiniteQuery({
+    queryKey: queryKeys.knowledgeSources,
+    initialPageParam: '',
+    queryFn: ({ pageParam }) => invokeMethod('knowledge.sources.list', { limit: LIST_PAGE, ...(pageParam ? { cursor: pageParam } : {}) }),
+    getNextPageParam: (last) => readListPage(last, 'sources').nextCursor,
+  });
+  const nodes = useInfiniteQuery({
+    queryKey: queryKeys.knowledgeNodes,
+    initialPageParam: '',
+    queryFn: ({ pageParam }) => invokeMethod('knowledge.nodes.list', { limit: LIST_PAGE, ...(pageParam ? { cursor: pageParam } : {}) }),
+    getNextPageParam: (last) => readListPage(last, 'nodes').nextCursor,
+  });
   const issues = useQuery({ queryKey: queryKeys.knowledgeIssues, queryFn: () => invokeMethod('knowledge.issues.list', { limit: 100 }) });
   const projections = useQuery({ queryKey: queryKeys.knowledgeProjections, queryFn: () => invokeMethod('knowledge.projections.list', { limit: 100 }) });
   const knowledgeMap = useQuery({
@@ -233,8 +290,33 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
       : platformClient.knowledge.search({ query, limit: 25, includeSources: true, includeNodes: true }),
   });
 
-  const allSources = useMemo(() => firstArray(sources.data, ['sources', 'items', 'data']), [sources.data]);
-  const allNodes = useMemo(() => firstArray(nodes.data, ['nodes', 'items', 'data']), [nodes.data]);
+  const loadedSources = useMemo(
+    () => (sources.data?.pages ?? []).flatMap((page) => readListPage(page, 'sources').items),
+    [sources.data],
+  );
+  const loadedNodes = useMemo(
+    () => (nodes.data?.pages ?? []).flatMap((page) => readListPage(page, 'nodes').items),
+    [nodes.data],
+  );
+  // While a list is not fully loaded, the Library search text is also asked of
+  // the daemon, so a filter never reports nothing for an item on a later page.
+  const searchText = query.trim();
+  const listsIncomplete = Boolean(sources.hasNextPage || nodes.hasNextPage);
+  const daemonMatches = useQuery({
+    queryKey: ['knowledge', 'library-search', searchText],
+    enabled: Boolean(searchText) && listsIncomplete,
+    queryFn: () => platformClient.knowledge.search({ query: searchText, limit: 50, includeSources: true, includeNodes: true }),
+  });
+  const matchedSources = useMemo(
+    () => firstArray(daemonMatches.data, ['results']).map((result) => readPath(result, ['source'])).filter((item) => item != null),
+    [daemonMatches.data],
+  );
+  const matchedNodes = useMemo(
+    () => firstArray(daemonMatches.data, ['results']).map((result) => readPath(result, ['node'])).filter((item) => item != null),
+    [daemonMatches.data],
+  );
+  const allSources = useMemo(() => withMatches(loadedSources, searchText ? matchedSources : []), [loadedSources, matchedSources, searchText]);
+  const allNodes = useMemo(() => withMatches(loadedNodes, searchText ? matchedNodes : []), [loadedNodes, matchedNodes, searchText]);
   const allIssues = useMemo(() => firstArray(issues.data, ['issues', 'items', 'data']), [issues.data]);
   const projectionSelections = useMemo(
     () => firstArray(projections.data, ['targets', 'items', 'data'])
@@ -306,8 +388,16 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
           <Button variant="ghost" size="sm" onClick={() => setSection('activity')}>View jobs</Button>
         </div>
       )}
-      <ItemGroup label="Sources" kindLabel="Source" prefix="source" items={allSources} query={query} pageSize={PAGE_SIZE.source} selectedKey={selection} onSelect={setSelection} />
-      <ItemGroup label="Nodes" kindLabel="Node" prefix="node" items={allNodes} query={query} pageSize={PAGE_SIZE.node} selectedKey={selection} onSelect={setSelection} />
+      <ItemGroup
+        label="Sources" kindLabel="Source" prefix="source" items={allSources} query={query} pageSize={PAGE_SIZE.source}
+        selectedKey={selection} onSelect={setSelection}
+        hasMore={Boolean(sources.hasNextPage)} loadingMore={sources.isFetchingNextPage} onLoadMore={() => void sources.fetchNextPage()}
+      />
+      <ItemGroup
+        label="Nodes" kindLabel="Node" prefix="node" items={allNodes} query={query} pageSize={PAGE_SIZE.node}
+        selectedKey={selection} onSelect={setSelection}
+        hasMore={Boolean(nodes.hasNextPage)} loadingMore={nodes.isFetchingNextPage} onLoadMore={() => void nodes.fetchNextPage()}
+      />
       <ItemGroup label="Issues" kindLabel="Issue" prefix="issue" items={allIssues} query={query} pageSize={PAGE_SIZE.issue} selectedKey={selection} onSelect={setSelection} />
       <ProjectionGroup items={projectionSelections} query={query} selection={selection} onSelect={setSelection} />
       {browseEmpty && (

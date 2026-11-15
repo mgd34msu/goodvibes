@@ -15,6 +15,7 @@
  *   POST   /api/companion/chat/sessions/:sessionId/turns/cancel (stop the in-flight turn)
  *   POST   /api/companion/chat/sessions/:sessionId/messages/steer (interrupt + send now)
  *   GET    /api/companion/chat/sessions/:sessionId/events  (SSE)
+ *   GET    /api/companion/chat/messages/search  (?query=&limit=&cursor=&includeClosed=)
  *
  * All routes require the existing daemon bearer-token auth (enforced by the
  * caller, DaemonHttpRouter.handleRequest already validates auth before
@@ -78,6 +79,7 @@ export const COMPANION_CHAT_ROUTES: readonly { readonly method: string; readonly
   { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages/steer' },
   { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/turns/cancel' },
   { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}/events' },
+  { method: 'GET', path: '/api/companion/chat/messages/search' },
 ];
 
 export async function dispatchCompanionChatRoutes(
@@ -95,6 +97,11 @@ export async function dispatchCompanionChatRoutes(
   // GET /api/companion/chat/sessions
   if (pathname === '/api/companion/chat/sessions' && req.method === 'GET') {
     return handleListSessions(url, context);
+  }
+
+  // GET /api/companion/chat/messages/search
+  if (pathname === '/api/companion/chat/messages/search' && req.method === 'GET') {
+    return handleSearchMessages(url, context);
   }
 
   const sessionMatch = pathname.match(
@@ -247,6 +254,79 @@ function readLimitQuery(url: URL): number | undefined {
   if (value === null || value.trim() === '') return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/companion/chat/messages/search
+// ---------------------------------------------------------------------------
+
+const MESSAGE_SEARCH_DEFAULT_LIMIT = 25;
+const MESSAGE_SEARCH_MAX_LIMIT = 100;
+const MESSAGE_SEARCH_SNIPPET_CONTEXT = 80;
+
+/** Up to 160 characters of `text` around the first match of `needle` (lower case). */
+function searchSnippet(text: string, needle: string): string {
+  const index = text.toLowerCase().indexOf(needle);
+  if (index < 0) return text.slice(0, MESSAGE_SEARCH_SNIPPET_CONTEXT * 2);
+  const start = Math.max(0, index - MESSAGE_SEARCH_SNIPPET_CONTEXT);
+  const end = Math.min(text.length, index + needle.length + MESSAGE_SEARCH_SNIPPET_CONTEXT);
+  return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
+}
+
+/**
+ * Find chat messages whose text contains `query` (case-insensitive), across
+ * every chat the daemon holds, newest first: one scan here in place of a
+ * client reading every transcript. Each hit names the chat, the message, a
+ * snippet and the time. Retained history behind a regenerate or edit is not
+ * searched. Paged by an opaque cursor; closed chats only with includeClosed.
+ */
+function handleSearchMessages(url: URL, context: CompanionChatRouteContext): Response {
+  const query = (url.searchParams.get('query') ?? '').trim();
+  if (!query) {
+    return Response.json({ error: 'query is required', code: 'INVALID_ARGUMENT' }, { status: 400 });
+  }
+  const requested = readLimitQuery(url);
+  const limit = Math.min(MESSAGE_SEARCH_MAX_LIMIT, Math.max(1, Math.floor(requested ?? MESSAGE_SEARCH_DEFAULT_LIMIT)));
+  const rawCursor = url.searchParams.get('cursor');
+  const offset = rawCursor === null || rawCursor === '' ? 0 : Number(rawCursor);
+  if (!Number.isInteger(offset) || offset < 0) {
+    return Response.json({ error: 'cursor is not one this search returned', code: 'INVALID_CURSOR' }, { status: 400 });
+  }
+  const includeClosed = url.searchParams.get('includeClosed') === 'true';
+  const needle = query.toLowerCase();
+  const { sessions } = context.chatManager.listSessions({ includeClosed, limit: Number.MAX_SAFE_INTEGER });
+  const hits: {
+    readonly sessionId: string;
+    readonly sessionTitle: string;
+    readonly messageId: string;
+    readonly role: string;
+    readonly snippet: string;
+    readonly createdAt: number;
+  }[] = [];
+  for (const session of sessions) {
+    for (const message of context.chatManager.getMessages(session.id)) {
+      if (message.supersededAt !== undefined) continue;
+      if (!message.content.toLowerCase().includes(needle)) continue;
+      hits.push({
+        sessionId: session.id,
+        sessionTitle: session.title,
+        messageId: message.id,
+        role: message.role,
+        snippet: searchSnippet(message.content, needle),
+        createdAt: message.createdAt,
+      });
+    }
+  }
+  hits.sort((left, right) => right.createdAt - left.createdAt || left.messageId.localeCompare(right.messageId));
+  const items = hits.slice(offset, offset + limit);
+  const hasMore = offset + limit < hits.length;
+  return Response.json({
+    query,
+    items,
+    total: hits.length,
+    hasMore,
+    ...(hasMore ? { nextCursor: String(offset + limit) } : {}),
+  });
 }
 
 function handleListSessions(

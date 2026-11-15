@@ -16,10 +16,12 @@
  * ## The two writes that touch the owner's file
  *
  * `occasions.confirm` and `occasions.plans.confirm` append a line to the owner
- * profile, and `occasions.remove` deletes one. All three take `authority` as a
- * required body parameter and go through `OwnerProfileStore`, which runs the
- * profile's own write gate before a line lands. `refuseNonUserRequest` runs
- * first on all three, for the same reason it does on `profile.set`: "you told
+ * profile, `occasions.remove` and `occasions.plans.remove` delete one, and
+ * `occasions.update` and `occasions.plans.update` rewrite one. Each takes
+ * `authority` as a required body parameter and goes through `OwnerProfileStore`,
+ * which runs the profile's own write gate before a line lands.
+ * `refuseNonUserRequest` runs first on each, for the same reason it does on
+ * `profile.set`: "you told
  * me this was not a user request" deserves its own answer rather than being
  * folded into a trust refusal naming a surface the caller never claimed.
  */
@@ -53,6 +55,9 @@ export type OccasionsGatewayService = Pick<
   | 'proposePlan'
   | 'confirmPlan'
   | 'removeOccasion'
+  | 'updateOccasion'
+  | 'updatePlan'
+  | 'removePlan'
   | 'answer'
   | 'acknowledge'
   | 'interview'
@@ -194,7 +199,8 @@ export function registerOccasionsGatewayMethods(
   service: OccasionsGatewayService,
   native?: { readonly host?: NativeMutationHost | undefined; readonly target: NativeProfileTarget } | undefined,
 ): void {
-  const profileMethods = ['occasions.confirm', 'occasions.plans.confirm', 'occasions.remove', 'occasions.conflict.resolve'];
+  const profileMethods = ['occasions.confirm', 'occasions.plans.confirm', 'occasions.remove', 'occasions.conflict.resolve',
+    'occasions.update', 'occasions.plans.update', 'occasions.plans.remove'];
   const nativeMethods = [...profileMethods, 'occasions.answer', 'occasions.acknowledge', 'occasions.interview.answer',
     'occasions.interview.record', 'occasions.sweep'];
   const attach = (id: string, handler: GatewayMethodHandler): void => {
@@ -249,6 +255,25 @@ export function registerOccasionsGatewayMethods(
       confirmed: params.confirmed === true,
       authority: readAuthority(params.authority, invocation),
     }, readingOptions(invocation, catalog.get('occasions.remove')?.scopes));
+  });
+
+  attach('occasions.update', (invocation: GatewayMethodInvocation) => {
+    if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.update');
+    const params = readInvocationParams(invocation);
+    return service.updateOccasion({
+      occasionId: requireString(params.occasionId, 'occasionId'),
+      title: optionalString(params.title),
+      date: optionalString(params.date),
+      kind: optionalString(params.kind),
+      person: optionalString(params.person),
+      recurrence: optionalString(params.recurrence),
+      leadDays: params.leadDays === null ? null : optionalNumber(params.leadDays),
+      self: typeof params.self === 'boolean' ? params.self : undefined,
+      confirmed: params.confirmed === true,
+      surface: readSurface(params.surface),
+      said: readSaid(params.said, params.authority, invocation),
+      authority: readAuthority(params.authority, invocation),
+    }, readingOptions(invocation, catalog.get('occasions.update')?.scopes));
   });
 
   attach('occasions.answer', (invocation: GatewayMethodInvocation) => {
@@ -346,6 +371,36 @@ export function registerOccasionsGatewayMethods(
       said: readSaid(params.said, params.authority, invocation),
       authority: readAuthority(params.authority, invocation),
     }, readingOptions(invocation, catalog.get('occasions.plans.confirm')?.scopes));
+  });
+
+  attach('occasions.plans.update', (invocation: GatewayMethodInvocation) => {
+    if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.plans.update');
+    const params = readInvocationParams(invocation);
+    return service.updatePlan({
+      planId: requireString(params.planId, 'planId'),
+      planFrom: optionalString(params.planFrom),
+      title: optionalString(params.title),
+      from: optionalString(params.from),
+      to: optionalString(params.to),
+      away: typeof params.away === 'boolean' ? params.away : undefined,
+      destination: optionalString(params.destination),
+      ...readDetails(params.details),
+      confirmed: params.confirmed === true,
+      surface: readSurface(params.surface),
+      said: readSaid(params.said, params.authority, invocation),
+      authority: readAuthority(params.authority, invocation),
+    }, readingOptions(invocation, catalog.get('occasions.plans.update')?.scopes));
+  });
+
+  attach('occasions.plans.remove', (invocation: GatewayMethodInvocation) => {
+    if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.plans.remove');
+    const params = readInvocationParams(invocation);
+    return service.removePlan({
+      planId: requireString(params.planId, 'planId'),
+      planFrom: optionalString(params.planFrom),
+      confirmed: params.confirmed === true,
+      authority: readAuthority(params.authority, invocation),
+    }, readingOptions(invocation, catalog.get('occasions.plans.remove')?.scopes));
   });
 }
 

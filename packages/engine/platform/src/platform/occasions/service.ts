@@ -41,6 +41,7 @@ import {
 import { composeConflictMessage, composeInterviewResumeMessage, prepareNudge, subjectFor } from './nudge.js';
 import { pushNudge, type OccasionNudgeDeliverer } from './push.js';
 import { storedGiftEvidence } from './stored-reading-evidence.js';
+import { removePlan, updateOccasion, updatePlan, type OccasionEditOutcome, type UpdateOccasionInput, type UpdatePlanInput } from './edit.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { preparePending } from './pending.js';
@@ -373,6 +374,29 @@ export class OccasionsService {
       (id) => this.deps.state.dropOccasion(id, owned.assertCurrent),
       input, owned,
     );
+  }
+
+  /** Change an occasion in place; its id, answers and gift history stay. Proposes without `confirmed`. */
+  async updateOccasion(input: UpdateOccasionInput, options: OccasionMutationOptions = {}): Promise<OccasionEditOutcome> {
+    const owned = captureOccasionOperation(this.deps, options);
+    return updateOccasion(this.deps.profile, this.deps.writer, input, owned);
+  }
+
+  /** Change a plan in place. Proposes without `confirmed`. */
+  async updatePlan(input: UpdatePlanInput, options: OccasionMutationOptions = {}): Promise<OccasionEditOutcome> {
+    const owned = captureOccasionOperation(this.deps, options);
+    return updatePlan(this.deps.profile, this.deps.writer, input, owned);
+  }
+
+  /** Remove a plan by id, after one confirmation. */
+  async removePlan(input: {
+    readonly planId: string;
+    readonly planFrom?: string | undefined;
+    readonly confirmed: boolean;
+    readonly authority: AuthoritySurface | 'autonomous';
+  }, options: OccasionMutationOptions = {}): Promise<OccasionWriteOutcome> {
+    const owned = captureOccasionOperation(this.deps, options);
+    return removePlan(this.deps.profile, this.deps.writer, input, owned);
   }
 
   // -------------------------------------------------------------------------

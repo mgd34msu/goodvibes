@@ -197,5 +197,14 @@ export type {
   OccasionWriteOutcome,
 } from './capture.js';
 
+export type {
+  OccasionChanges,
+  OccasionEditOutcome,
+  OccasionEditPlan,
+  PlanChanges,
+  UpdateOccasionInput,
+  UpdatePlanInput,
+} from './edit.js';
+
 export { OccasionReadingWork, OccasionReadingHeldError } from './readings.js';
 export type { OccasionMutationOptions } from './operation.js';

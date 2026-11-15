@@ -34,6 +34,7 @@ import {
   renderPlanLine,
 } from './grammar.js';
 import { readOccasionDeclarations, type OccasionProfileSource } from './reader.js';
+import { planOccasionUpdate, planPlanUpdate, planRemovalText } from './edit.js';
 import {
   isOccasionKind,
   OCCASIONS_SECTION,
@@ -81,6 +82,11 @@ export function projectOccasionProfileMutation(source: OccasionProfileSource, me
     const only = plan.remove.length === 1 ? plan.remove[0] : undefined;
     return only ? { method: 'profile.forget', input: { section: OCCASIONS_SECTION, text: only.text, authority } } : undefined;
   }
+  if (method === 'occasions.plans.remove') {
+    if (typeof request.planId !== 'string' || request.confirmed !== true) return undefined;
+    const text = planRemovalText(source, { planId: request.planId, planFrom: typeof request.planFrom === 'string' ? request.planFrom : undefined });
+    return text === undefined ? undefined : { method: 'profile.forget', input: { section: PLANS_SECTION, text, authority } };
+  }
   const surface = request.surface;
   if (typeof surface !== 'string' || !isProfileSurface(surface) || typeof request.said !== 'string') return undefined;
   const identity: Pick<AppendProfileProseInput, 'surface' | 'said' | 'authority'> = { surface, said: authority === 'autonomous' ? '' : request.said, authority };
@@ -93,6 +99,25 @@ export function projectOccasionProfileMutation(source: OccasionProfileSource, me
     });
     return proposal.ok && !proposal.needsKind
       ? { method: 'profile.append', input: { section: OCCASIONS_SECTION, text: proposal.line, ...identity } } : undefined;
+  }
+  if (method === 'occasions.update' || method === 'occasions.plans.update') {
+    if (request.confirmed !== true) return undefined;
+    const text = (key: string): string | undefined => { const value = request[key]; return typeof value === 'string' ? value : undefined; };
+    // The admitted effect is the write that adds the rewritten line.
+    const plan = method === 'occasions.update'
+      ? typeof request.occasionId === 'string' ? planOccasionUpdate(source, request.occasionId, {
+        title: text('title'), date: text('date'), kind: text('kind'), person: text('person'), recurrence: text('recurrence'),
+        leadDays: typeof request.leadDays === 'number' || request.leadDays === null ? request.leadDays : undefined,
+        self: typeof request.self === 'boolean' ? request.self : undefined,
+      }) : undefined
+      : typeof request.planId === 'string' ? planPlanUpdate(source, { planId: request.planId, planFrom: text('planFrom') }, {
+        title: text('title'), from: text('from'), to: text('to'), destination: text('destination'),
+        away: typeof request.away === 'boolean' ? request.away : undefined,
+        details: Array.isArray(request.details) ? request.details.filter((detail): detail is string => typeof detail === 'string') : undefined,
+      }) : undefined;
+    return plan?.ok && !plan.unchanged
+      ? { method: 'profile.append', input: { section: method === 'occasions.update' ? OCCASIONS_SECTION : PLANS_SECTION, text: plan.line, ...identity } }
+      : undefined;
   }
   if (method === 'occasions.plans.confirm') {
     const { title, from, to, away, destination, details } = request;

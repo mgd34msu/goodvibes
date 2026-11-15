@@ -168,7 +168,6 @@ function ReceiptRow({ receipt }: { receipt: CheckinReceipt }) {
 export function CheckInSettings() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [runResult, setRunResult] = useState<CheckinRunResult | null>(null);
 
@@ -196,17 +195,9 @@ export function CheckInSettings() {
     },
   });
 
-  // A manual run delivers through the configured channel for real, so it asks first,
-  // the same as saving the settings that allow proactive contact.
-  async function askRun(): Promise<void> {
-    const channel = config.data?.config.deliveryChannel;
-    const ok = await confirm.ask({
-      title: 'Run a check-in now?',
-      description: `This sends a real check-in through ${channel || 'the configured channel'} right away.`,
-      confirmLabel: 'Send check-in',
-    });
-    if (ok) run.mutate();
-  }
+  // The click is the owner asking for a check-in on their own configured channel,
+  // so it runs at once; the button says where it goes.
+  const runChannel = config.data?.config.deliveryChannel || 'the configured channel';
 
   const configUnavailable = config.isError && isMethodUnavailableError(config.error);
   const receiptsUnavailable = receipts.isError && isMethodUnavailableError(receipts.error);
@@ -214,14 +205,18 @@ export function CheckInSettings() {
 
   return (
     <div className="checkin-view">
-      {confirm.element}
       <div className="checkin-sections">
         <DetailSection
           title="Settings"
           actions={
             <>
-              <Button size="sm" onClick={() => void askRun()} disabled={run.isPending}>
-                {run.isPending ? 'Running…' : 'Run check-in now'}
+              <Button
+                size="sm"
+                onClick={() => run.mutate()}
+                disabled={run.isPending}
+                title={`Sends a real check-in through ${runChannel} right away`}
+              >
+                {run.isPending ? 'Sending…' : 'Send a check-in now'}
               </Button>
               {config.isSuccess && !editing && (
                 <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>Edit</Button>

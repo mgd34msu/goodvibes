@@ -1,14 +1,13 @@
 /**
  * Tests for useChatSearch hook.
  *
- * Covers the message-content stage (unchanged from before session search):
- *   - debounce timing (300 ms)
- *   - abort on rapid retype (no stale results)
- *   - cache hit, second query with same sessions does NOT re-fetch
- *   - cache invalidation when sessions identity changes
- *   - recency ranking (most recent createdAt first)
+ * Message-text stage (chat.messages.search, answered by the daemon):
+ *   - one request per settled query, after the 300 ms debounce
+ *   - a response for a superseded query never replaces the newer results
+ *   - a NOT_INVOKABLE rejection is 'unavailable', not an empty result
+ *   - loadMoreResults appends the next page
  *
- * And the session-search stage (sessions.search):
+ * Session-search stage (sessions.search):
  *   - includeClosed defaults to false on every fresh query (the documented
  *     divergence from sessions.list's own default)
  *   - toggling includeClosed re-queries with includeClosed:true and renders a
@@ -19,12 +18,9 @@
  *     rather than replaces, and is a no-op with no cursor/while not hasMore
  *   - the kind filter scopes to 'companion-chat' (this hook's domain)
  *
- * Uses real timers via bun:test. DOM render via createRoot + flushSync
- * (happy-dom is installed by bunfig.toml preload).
- *
- * Module mocks must be declared before any dynamic import of the module
- * under test, because bun:test module mocking is synchronous and import-
- * scoped. All platform interactions are stubbed via mock.module.
+ * Fake timers via bun:test. DOM render via createRoot + flushSync
+ * (happy-dom is installed by bunfig.toml preload). Module mocks are declared
+ * before the dynamic import of the module under test.
  */
 import { afterEach, beforeEach, describe, expect, jest, mock, test } from 'bun:test';
 import React from 'react';
@@ -35,31 +31,40 @@ import { flushSync } from 'react-dom';
 // Module mocks
 // ---------------------------------------------------------------------------
 
-/**
- * Fake session objects used across tests. Each has `id` and `sessionId` so
- * extractSessionId() (which reads those fields) returns a stable value.
- */
-interface FakeSession { id: string; sessionId: string; title: string }
-
-/** Control surface for the platform list stub. */
-interface ListStub {
-  /** Messages returned per sessionId, keyed by id. */
-  responses: Map<string, Record<string, unknown>[]>;
-  /** Number of times list() was called, keyed by sessionId. */
-  callCounts: Map<string, number>;
-  /** Set to true to make all calls reject. */
-  shouldFail: boolean;
-  /** When set for a sessionId, its next list() call waits on this promise, so a test
-   *  can hold a fetch in flight past the debounce. Consumed by that one call. */
-  gates: Map<string, Promise<void>>;
+/** A single recorded chat.messages.search call's input. */
+interface MessageSearchCall {
+  query: string;
+  includeClosed?: boolean;
+  limit?: number;
+  cursor?: string;
 }
 
-const stub: ListStub = {
-  responses: new Map(),
-  callCounts: new Map(),
-  shouldFail: false,
-  gates: new Map(),
+interface MessageSearchPage {
+  query: string;
+  items: Record<string, unknown>[];
+  total: number;
+  hasMore: boolean;
+  nextCursor?: string;
+}
+
+/** Control surface for the chat.messages.search stub. */
+const messageSearchStub: {
+  calls: MessageSearchCall[];
+  /** The page answered for each query; unknown queries get an empty page. */
+  pages: Map<string, MessageSearchPage>;
+  /** Delay (ms) per query before it answers. */
+  delays: Map<string, number>;
+  notInvokable: boolean;
+} = {
+  calls: [],
+  pages: new Map(),
+  delays: new Map(),
+  notInvokable: false,
 };
+
+function hit(sessionId: string, messageId: string, snippet: string, createdAt: number): Record<string, unknown> {
+  return { sessionId, sessionTitle: `Chat ${sessionId}`, messageId, role: 'user', snippet, createdAt };
+}
 
 /** A single recorded sessions.search call's input. */
 interface SessionSearchCall {
@@ -95,22 +100,24 @@ const sessionSearchStub: SessionSearchStub = {
 // Mock the platform before any import of useChatSearch.
 mock.module('../../lib/goodvibes', () => ({
   client: {
+    chat: {
+      messages: {
+        search: async (input: MessageSearchCall): Promise<unknown> => {
+          messageSearchStub.calls.push(input);
+          if (messageSearchStub.notInvokable) {
+            throw Object.assign(new Error('Method companion.chat.messages.search is not invokable from this surface'), {
+              status: 400, category: 'service', body: { code: 'NOT_INVOKABLE' },
+            });
+          }
+          const key = input.cursor ? `${input.query}#${input.cursor}` : input.query;
+          const delay = messageSearchStub.delays.get(input.query) ?? 0;
+          if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+          return messageSearchStub.pages.get(key) ?? { query: input.query, items: [], total: 0, hasMore: false };
+        },
+      },
+    },
     operator: {
       sessions: {
-        messages: {
-          list: async (sessionId: string): Promise<unknown> => {
-            stub.callCounts.set(sessionId, (stub.callCounts.get(sessionId) ?? 0) + 1);
-            if (stub.shouldFail) throw new Error('network error');
-            const gate = stub.gates.get(sessionId);
-            if (gate) {
-              stub.gates.delete(sessionId);
-              await gate;
-            }
-            const msgs = stub.responses.get(sessionId) ?? [];
-            // companionMessagesFromListResponse reads .items on the response
-            return { items: msgs };
-          },
-        },
         search: async (input: SessionSearchCall): Promise<unknown> => {
           sessionSearchStub.calls.push(input);
           if (sessionSearchStub.failMode === 'not-invokable') {
@@ -174,7 +181,10 @@ type SearchState = ReturnType<typeof useChatSearch>;
 const EMPTY_STATE: SearchState = {
   results: [],
   isSearching: false,
-  unreadableSessions: 0,
+  messageSearchState: 'idle',
+  hasMoreResults: false,
+  isLoadingMoreResults: false,
+  loadMoreResults: () => {},
   sessionResults: [],
   sessionSearchState: 'idle',
   includeClosed: false,
@@ -185,20 +195,15 @@ const EMPTY_STATE: SearchState = {
 };
 
 /**
- * Mount useChatSearch in a component. Returns a handle for:
- *   - reading the latest state snapshot
- *   - updating query / sessions props by re-rendering
- *   - driving the returned setIncludeClosed/loadMoreSessions callbacks
- *   - unmounting
+ * Mount useChatSearch in a component. Returns a handle for reading the latest
+ * state, changing the query, driving the returned callbacks and unmounting.
  */
-function mountHook(initialQuery: string, initialSessions: unknown[]) {
+function mountHook(initialQuery: string) {
   let snapshot: SearchState = EMPTY_STATE;
-
   let currentQuery = initialQuery;
-  let currentSessions = initialSessions;
 
   function HookOwner(): null {
-    const state = useChatSearch(currentQuery, currentSessions);
+    const state = useChatSearch(currentQuery);
     React.useLayoutEffect(() => {
       snapshot = state;
     });
@@ -218,20 +223,14 @@ function mountHook(initialQuery: string, initialSessions: unknown[]) {
       currentQuery = q;
       flushSync(() => { root.render(React.createElement(HookOwner)); });
     },
-    setSessions(s: unknown[]) {
-      currentSessions = s;
-      flushSync(() => { root.render(React.createElement(HookOwner)); });
-    },
-    updateBoth(q: string, s: unknown[]) {
-      currentQuery = q;
-      currentSessions = s;
-      flushSync(() => { root.render(React.createElement(HookOwner)); });
-    },
     setIncludeClosed(value: boolean) {
       flushSync(() => { snapshot.setIncludeClosed(value); });
     },
     loadMoreSessions() {
       flushSync(() => { snapshot.loadMoreSessions(); });
+    },
+    loadMoreResults() {
+      flushSync(() => { snapshot.loadMoreResults(); });
     },
     unmount() {
       flushSync(() => { root.unmount(); });
@@ -240,21 +239,15 @@ function mountHook(initialQuery: string, initialSessions: unknown[]) {
   };
 }
 
-/** Build a fake session with at least one message that contains the term. */
-function makeSession(id: string, title: string, _messages: Record<string, unknown>[]): FakeSession {
-  return { id, sessionId: id, title };
-}
-
-/** Seed stub.responses for a session. */
-function seedMessages(sessionId: string, messages: Record<string, unknown>[]) {
-  stub.responses.set(sessionId, messages);
-}
-
 // ---------------------------------------------------------------------------
 // Setup / teardown
 // ---------------------------------------------------------------------------
 
-function resetSessionSearchStub() {
+function resetStubs() {
+  messageSearchStub.calls = [];
+  messageSearchStub.pages = new Map();
+  messageSearchStub.delays = new Map();
+  messageSearchStub.notInvokable = false;
   sessionSearchStub.calls = [];
   sessionSearchStub.response = { sessions: [], nextCursor: undefined, hasMore: false };
   sessionSearchStub.failMode = 'none';
@@ -264,18 +257,11 @@ function resetSessionSearchStub() {
 
 beforeEach(() => {
   jest.useFakeTimers();
-  stub.responses = new Map();
-  stub.callCounts = new Map();
-  stub.shouldFail = false;
-  stub.gates = new Map();
-  resetSessionSearchStub();
+  resetStubs();
 });
 
 afterEach(() => {
-  stub.responses = new Map();
-  stub.callCounts = new Map();
-  stub.shouldFail = false;
-  resetSessionSearchStub();
+  resetStubs();
   jest.useRealTimers();
 });
 
@@ -283,254 +269,74 @@ afterEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('useChatSearch: debounce timing (300 ms)', () => {
-  test('does not return results before debounce period elapses', async () => {
-    const session = makeSession('s1', 'Session 1', []);
-    seedMessages('s1', [{ id: 'm1', messageId: 'm1', content: 'hello world', createdAt: 1_000 }]);
+describe('useChatSearch: message search (chat.messages.search)', () => {
+  test('typing a query makes one request, after the debounce, and shows the daemon\'s matches in order', async () => {
+    messageSearchStub.pages.set('deploy', {
+      query: 'deploy',
+      items: [hit('s2', 'm9', 'deploy tonight', 2_000), hit('s1', 'm1', 'deploy plan', 1_000)],
+      total: 2,
+      hasMore: false,
+    });
+    const handle = mountHook('');
+    handle.setQuery('d');
+    handle.setQuery('de');
+    handle.setQuery('deploy');
+    await elapse(100);
+    expect(messageSearchStub.calls).toHaveLength(0);
+    await elapse(400);
 
-    const handle = mountHook('', [session]);
-
-    // Start a query, should not fire yet within 200ms
-    handle.setQuery('hello');
-    await elapse(200);
-    // No results yet (debounce 300ms has not elapsed)
-    expect(handle.state.results).toHaveLength(0);
-
-    // Wait past debounce
-    await elapse(200); // total ~400ms
-    expect(handle.state.results.length).toBeGreaterThan(0);
-    expect(handle.state.results[0]?.snippet).toContain('hello');
-
+    expect(messageSearchStub.calls).toHaveLength(1);
+    expect(messageSearchStub.calls[0]?.query).toBe('deploy');
+    expect(messageSearchStub.calls[0]?.includeClosed).toBe(false);
+    expect(handle.state.messageSearchState).toBe('ready');
+    expect(handle.state.results.map((result) => result.messageId)).toEqual(['m9', 'm1']);
     handle.unmount();
   });
 
-  test('results arrive after debounce + fetch (400ms total)', async () => {
-    const session = makeSession('s2', 'Session 2', []);
-    seedMessages('s2', [{ id: 'm2', messageId: 'm2', content: 'debounce test', createdAt: 2_000 }]);
-
-    const handle = mountHook('debounce', [session]);
-    await elapse(450);
-
-    expect(handle.state.results.length).toBeGreaterThan(0);
-    expect(handle.state.results[0]?.snippet).toContain('debounce');
-
-    handle.unmount();
-  });
-});
-
-describe('useChatSearch: abort on rapid retype (no stale results)', () => {
-  test('only last query produces results when query changes rapidly', async () => {
-    const session = makeSession('s3', 'Session 3', []);
-    seedMessages('s3', [
-      { id: 'm3a', messageId: 'm3a', content: 'alpha result', createdAt: 1_000 },
-      { id: 'm3b', messageId: 'm3b', content: 'beta result', createdAt: 2_000 },
-    ]);
-
-    const handle = mountHook('', [session]);
-
-    // Rapidly change query several times without waiting for debounce
-    handle.setQuery('alpha');
-    await elapse(50);
-    handle.setQuery('beta');
-    await elapse(50);
-    handle.setQuery('beta'); // final query
-
-    // Wait for debounce + fetch
-    await elapse(450);
-
-    // Only the last query ("beta") should have results
-    const snippets = handle.state.results.map((r) => r.snippet);
-    // Stale "alpha" should not appear
-    expect(snippets.some((s) => s.includes('alpha'))).toBe(false);
-    // "beta" should appear
-    expect(snippets.some((s) => s.includes('beta'))).toBe(true);
-
-    handle.unmount();
-  });
-
-  test('a response still in flight for the superseded query never overwrites the newer results', async () => {
-    const slow = makeSession('s3slow', 'Slow session', []);
-    const fast = makeSession('s3fast', 'Fast session', []);
-    seedMessages('s3slow', [{ id: 'm3s', messageId: 'm3s', content: 'alpha slow', createdAt: 1_000 }]);
-    seedMessages('s3fast', [{ id: 'm3f', messageId: 'm3f', content: 'beta fast', createdAt: 2_000 }]);
-
-    let release: () => void = () => {};
-    stub.gates.set('s3slow', new Promise<void>((resolve) => { release = resolve; }));
-
-    // 'alpha' starts its fetch after the debounce and stays open on the gate.
-    const handle = mountHook('alpha', [slow, fast]);
+  test('a response for a superseded query never replaces the newer results', async () => {
+    messageSearchStub.delays.set('old', 600);
+    messageSearchStub.pages.set('old', { query: 'old', items: [hit('s1', 'stale', 'old', 1)], total: 1, hasMore: false });
+    messageSearchStub.pages.set('new', { query: 'new', items: [hit('s1', 'fresh', 'new', 2)], total: 1, hasMore: false });
+    const handle = mountHook('old');
     await elapse(350);
-    expect(stub.callCounts.get('s3slow')).toBe(1);
-    expect(handle.state.isSearching).toBe(true);
+    handle.setQuery('new');
+    await elapse(1_000);
 
-    handle.setQuery('beta');
-    await elapse(350);
-    expect(handle.state.results.map((r) => r.snippet).some((t) => t.includes('beta'))).toBe(true);
-
-    // The old fetch finally lands; its (aborted) pass must not replace 'beta' results.
-    release();
-    await elapse(50);
-    const snippets = handle.state.results.map((r) => r.snippet);
-    expect(snippets.some((t) => t.includes('alpha'))).toBe(false);
-    expect(snippets.some((t) => t.includes('beta'))).toBe(true);
-    expect(handle.state.isSearching).toBe(false);
-
+    expect(handle.state.results.map((result) => result.messageId)).toEqual(['fresh']);
     handle.unmount();
   });
 
-  test('empty query after typing clears results immediately', async () => {
-    const session = makeSession('s4', 'Session 4', []);
-    seedMessages('s4', [{ id: 'm4', messageId: 'm4', content: 'clear me', createdAt: 1_000 }]);
-
-    const handle = mountHook('clear', [session]);
+  test('a daemon without message search is "unavailable", not an empty result', async () => {
+    messageSearchStub.notInvokable = true;
+    const handle = mountHook('anything');
     await elapse(450);
-    expect(handle.state.results.length).toBeGreaterThan(0);
 
-    // Clear the query
-    handle.setQuery('');
-    // Results should be cleared synchronously (no debounce for empty)
-    await elapse(10);
+    expect(handle.state.messageSearchState).toBe('unavailable');
     expect(handle.state.results).toHaveLength(0);
-    expect(handle.state.isSearching).toBe(false);
+    handle.unmount();
+  });
 
+  test('loadMoreResults appends the next page', async () => {
+    messageSearchStub.pages.set('note', { query: 'note', items: [hit('s1', 'm1', 'note', 2)], total: 2, hasMore: true, nextCursor: '1' });
+    messageSearchStub.pages.set('note#1', { query: 'note', items: [hit('s2', 'm2', 'note', 1)], total: 2, hasMore: false });
+    const handle = mountHook('note');
+    await elapse(450);
+    expect(handle.state.hasMoreResults).toBe(true);
+
+    handle.loadMoreResults();
+    await elapse(50);
+
+    expect(messageSearchStub.calls.at(-1)?.cursor).toBe('1');
+    expect(handle.state.results.map((result) => result.messageId)).toEqual(['m1', 'm2']);
+    expect(handle.state.hasMoreResults).toBe(false);
     handle.unmount();
   });
 });
-
-describe('useChatSearch: cache hit and cache invalidation', () => {
-  test('cache hit: same sessions: does not re-fetch messages on second query', async () => {
-    const session = makeSession('s5', 'Session 5', []);
-    seedMessages('s5', [{ id: 'm5', messageId: 'm5', content: 'cached content', createdAt: 1_000 }]);
-
-    const handle = mountHook('cached', [session]);
-    await elapse(450);
-
-    expect(stub.callCounts.get('s5')).toBe(1);
-    expect(handle.state.results.length).toBeGreaterThan(0);
-
-    // Second query with same sessions, should use cache, not re-fetch
-    handle.setQuery('content');
-    await elapse(450);
-    expect(stub.callCounts.get('s5')).toBe(1); // still 1, not 2
-    expect(handle.state.results.length).toBeGreaterThan(0);
-
-    handle.unmount();
-  });
-
-  test('cache invalidation: changing the session list drops cached messages and re-fetches them', async () => {
-    const s6 = makeSession('s6', 'Session 6', []);
-    seedMessages('s6', [{ id: 'm6', messageId: 'm6', content: 'stale content', createdAt: 1_000 }]);
-
-    const handle = mountHook('content', [s6]);
-    await elapse(450);
-
-    expect(stub.callCounts.get('s6')).toBe(1);
-    expect(handle.state.results.map((r) => r.snippet)).toEqual([expect.stringContaining('stale content')]);
-
-    // The same chat now holds different text, and the list gains a chat (new id set).
-    seedMessages('s6', [{ id: 'm6', messageId: 'm6', content: 'fresh content', createdAt: 2_000 }]);
-    handle.setSessions([s6, makeSession('s6b', 'Session 6b', [])]);
-    await elapse(450);
-
-    expect(stub.callCounts.get('s6')).toBe(2);
-    const snippets = handle.state.results.map((r) => r.snippet);
-    expect(snippets.some((t) => t.includes('fresh content'))).toBe(true);
-    expect(snippets.some((t) => t.includes('stale content'))).toBe(false);
-
-    handle.unmount();
-  });
-
-  test('cache is per-session: different sessions populate separate cache entries', async () => {
-    const session1 = makeSession('s7a', 'Session 7A', []);
-    const session2 = makeSession('s7b', 'Session 7B', []);
-    seedMessages('s7a', [{ id: 'm7a', messageId: 'm7a', content: 'shared term here', createdAt: 1_000 }]);
-    seedMessages('s7b', [{ id: 'm7b', messageId: 'm7b', content: 'shared term there', createdAt: 2_000 }]);
-
-    const handle = mountHook('shared', [session1, session2]);
-    await elapse(450);
-
-    expect(stub.callCounts.get('s7a')).toBe(1);
-    expect(stub.callCounts.get('s7b')).toBe(1);
-    // Both results should appear
-    expect(handle.state.results).toHaveLength(2);
-
-    // Second query, both served from cache
-    handle.setQuery('term');
-    await elapse(450);
-    expect(stub.callCounts.get('s7a')).toBe(1);
-    expect(stub.callCounts.get('s7b')).toBe(1);
-
-    handle.unmount();
-  });
-});
-
-describe('useChatSearch: recency ranking', () => {
-  test('results are ordered by createdAt descending (most recent first)', async () => {
-    const session = makeSession('s8', 'Session 8', []);
-    seedMessages('s8', [
-      { id: 'm8a', messageId: 'm8a', content: 'order test older', createdAt: 1_000 },
-      { id: 'm8b', messageId: 'm8b', content: 'order test middle', createdAt: 3_000 },
-      { id: 'm8c', messageId: 'm8c', content: 'order test newest', createdAt: 5_000 },
-    ]);
-
-    const handle = mountHook('order', [session]);
-    await elapse(450);
-
-    const results = handle.state.results;
-    expect(results).toHaveLength(3);
-    // Most recent first
-    expect(results[0]?.createdAt).toBe(5_000);
-    expect(results[1]?.createdAt).toBe(3_000);
-    expect(results[2]?.createdAt).toBe(1_000);
-
-    handle.unmount();
-  });
-
-  test('results without createdAt sort to end (treated as 0)', async () => {
-    const session = makeSession('s9', 'Session 9', []);
-    seedMessages('s9', [
-      { id: 'm9a', messageId: 'm9a', content: 'rank no-timestamp', createdAt: undefined },
-      { id: 'm9b', messageId: 'm9b', content: 'rank with-timestamp', createdAt: 4_000 },
-    ]);
-
-    const handle = mountHook('rank', [session]);
-    await elapse(450);
-
-    const results = handle.state.results;
-    expect(results).toHaveLength(2);
-    // The one with createdAt should come first
-    expect(results[0]?.createdAt).toBe(4_000);
-    expect(results[1]?.createdAt).toBeUndefined();
-
-    handle.unmount();
-  });
-
-  test('cross-session results ranked by createdAt across sessions', async () => {
-    const sessionA = makeSession('s10a', 'Session A', []);
-    const sessionB = makeSession('s10b', 'Session B', []);
-    seedMessages('s10a', [{ id: 'm10a', messageId: 'm10a', content: 'cross rank test old', createdAt: 1_000 }]);
-    seedMessages('s10b', [{ id: 'm10b', messageId: 'm10b', content: 'cross rank test new', createdAt: 9_000 }]);
-
-    const handle = mountHook('cross', [sessionA, sessionB]);
-    await elapse(450);
-
-    const results = handle.state.results;
-    expect(results.length).toBe(2);
-    expect(results[0]?.createdAt).toBe(9_000);
-    expect(results[1]?.createdAt).toBe(1_000);
-
-    handle.unmount();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Session-search stage (sessions.search, first consumer)
-// ---------------------------------------------------------------------------
 
 describe('useChatSearch: session search (sessions.search) includeClosed default', () => {
   test('defaults includeClosed to false on a fresh query: the documented divergence from sessions.list', async () => {
     sessionSearchStub.response = { sessions: [], nextCursor: undefined, hasMore: false };
-    const handle = mountHook('', []);
+    const handle = mountHook('');
 
     handle.setQuery('deploy');
     await elapse(450);
@@ -543,7 +349,7 @@ describe('useChatSearch: session search (sessions.search) includeClosed default'
   });
 
   test('scopes the search to kind: companion-chat (this hook\'s domain)', async () => {
-    const handle = mountHook('', []);
+    const handle = mountHook('');
     handle.setQuery('deploy');
     await elapse(450);
 
@@ -561,7 +367,7 @@ describe('useChatSearch: session search (sessions.search) includeClosed default'
       hasMore: false,
     };
 
-    const handle = mountHook('', []);
+    const handle = mountHook('');
     handle.setQuery('closed');
     await elapse(450);
 
@@ -586,7 +392,7 @@ describe('useChatSearch: session search (sessions.search) includeClosed default'
 describe('useChatSearch: session search honest degraded states', () => {
   test('a NOT_INVOKABLE rejection surfaces as sessionSearchState "unavailable", not a silent empty result', async () => {
     sessionSearchStub.failMode = 'not-invokable';
-    const handle = mountHook('', []);
+    const handle = mountHook('');
 
     handle.setQuery('deploy');
     await elapse(450);
@@ -599,7 +405,7 @@ describe('useChatSearch: session search honest degraded states', () => {
 
   test('a generic failure surfaces as sessionSearchState "error", distinct from "unavailable"', async () => {
     sessionSearchStub.failMode = 'generic';
-    const handle = mountHook('', []);
+    const handle = mountHook('');
 
     handle.setQuery('deploy');
     await elapse(450);
@@ -611,7 +417,7 @@ describe('useChatSearch: session search honest degraded states', () => {
 
   test('a genuine empty result is "ready" with zero sessionResults, distinct from "unavailable"/"error"', async () => {
     sessionSearchStub.response = { sessions: [], nextCursor: undefined, hasMore: false };
-    const handle = mountHook('', []);
+    const handle = mountHook('');
 
     handle.setQuery('nomatch');
     await elapse(450);
@@ -628,7 +434,7 @@ describe('useChatSearch: session search honest degraded states', () => {
       nextCursor: undefined,
       hasMore: false,
     };
-    const handle = mountHook('', []);
+    const handle = mountHook('');
     handle.setQuery('deploy');
     await elapse(450);
     expect(handle.state.sessionResults.length).toBeGreaterThan(0);
@@ -650,7 +456,7 @@ describe('useChatSearch: session search pagination', () => {
       hasMore: true,
     };
 
-    const handle = mountHook('', []);
+    const handle = mountHook('');
     handle.setQuery('page');
     await elapse(450);
 
@@ -676,7 +482,7 @@ describe('useChatSearch: session search pagination', () => {
 
   test('loadMoreSessions is a no-op when hasMoreSessions is false', async () => {
     sessionSearchStub.response = { sessions: [], nextCursor: undefined, hasMore: false };
-    const handle = mountHook('', []);
+    const handle = mountHook('');
     handle.setQuery('nomore');
     await elapse(450);
 
@@ -704,7 +510,7 @@ describe('useChatSearch: session search pagination', () => {
 
     // This is generation 1.
     sessionSearchStub.response = summary('p1', 'c1', true).response;
-    const handle = mountHook('', []);
+    const handle = mountHook('');
     handle.setQuery('paginate');
     await elapse(450);
     expect(handle.state.sessionResults.map((r) => r.sessionId)).toEqual(['p1']);
@@ -747,7 +553,7 @@ describe('useChatSearch: a stale load-more failure', () => {
       hasMore,
     });
     sessionSearchStub.response = page('p1', 'c1', true);
-    const handle = mountHook('', []);
+    const handle = mountHook('');
     handle.setQuery('paginate');
     await elapse(450);
     expect(handle.state.sessionSearchState).toBe('ready');
@@ -768,43 +574,6 @@ describe('useChatSearch: a stale load-more failure', () => {
     expect(handle.state.sessionSearchState).toBe('ready');
     expect(handle.state.sessionResults.map((r) => r.sessionId)).toEqual(['fresh-p1']);
 
-    handle.unmount();
-  });
-});
-
-describe('useChatSearch: chats that cannot be searched', () => {
-  test('a chat whose messages fail to load is counted, not silently skipped', async () => {
-    seedMessages('ok-1', [{ id: 'm1', messageId: 'm1', content: 'needle here', createdAt: 1_000 }]);
-    const handle = mountHook('needle', [makeSession('ok-1', 'Fine', []), makeSession('bad-1', 'Broken', [])]);
-    // Every read fails here, so both chats are unreadable.
-    stub.shouldFail = true;
-    await elapse(450);
-    stub.shouldFail = false;
-    expect(handle.state.unreadableSessions).toBe(2);
-    expect(handle.state.results).toEqual([]);
-
-    handle.setQuery('needle ');
-    await elapse(450);
-    expect(handle.state.unreadableSessions).toBe(0);
-    expect(handle.state.results.length).toBe(1);
-    handle.unmount();
-  });
-
-  test('a chat with newer activity is read again instead of served from the cache', async () => {
-    seedMessages('s-new', [{ id: 'm1', messageId: 'm1', content: 'first note', createdAt: 1_000 }]);
-    const handle = mountHook('note', [{ id: 's-new', sessionId: 's-new', title: 'Chat', updatedAt: 1 }]);
-    await elapse(450);
-    expect(stub.callCounts.get('s-new')).toBe(1);
-    expect(handle.state.results.length).toBe(1);
-
-    seedMessages('s-new', [
-      { id: 'm1', messageId: 'm1', content: 'first note', createdAt: 1_000 },
-      { id: 'm2', messageId: 'm2', content: 'second note', createdAt: 2_000 },
-    ]);
-    handle.setSessions([{ id: 's-new', sessionId: 's-new', title: 'Chat', updatedAt: 2 }]);
-    await elapse(450);
-    expect(stub.callCounts.get('s-new')).toBe(2);
-    expect(handle.state.results.length).toBe(2);
     handle.unmount();
   });
 });

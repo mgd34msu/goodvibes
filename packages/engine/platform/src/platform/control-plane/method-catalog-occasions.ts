@@ -354,6 +354,67 @@ export const OCCASIONS_PLANS_CONFIRM_INPUT_SCHEMA = objectSchema({
   authority: STRING_SCHEMA,
 }, ['title', 'from', 'to', 'surface', 'said', 'authority']);
 
+/** An edit: what would be written and what it replaces, and whether it was written. */
+const OCCASION_EDIT_OUTCOME_SCHEMA = objectSchema({
+  ok: BOOLEAN_SCHEMA,
+  reason: NULLABLE_STRING_SCHEMA,
+  occasionId: STRING_SCHEMA,
+  disclosure: STRING_SCHEMA,
+  droppedRecords: NUMBER_SCHEMA,
+  written: BOOLEAN_SCHEMA,
+  proposal: objectSchema({
+    ok: BOOLEAN_SCHEMA,
+    reason: NULLABLE_STRING_SCHEMA,
+    line: STRING_SCHEMA,
+    replaces: STRING_SCHEMA,
+    confirmation: STRING_SCHEMA,
+    unchanged: BOOLEAN_SCHEMA,
+  }, ['ok', 'reason', 'line', 'replaces', 'confirmation', 'unchanged']),
+}, ['ok', 'reason', 'occasionId', 'disclosure', 'droppedRecords', 'written', 'proposal']);
+
+const OCCASIONS_UPDATE_INPUT_SCHEMA = objectSchema({
+  admission: { type: 'string', enum: ['autonomous'] },
+  occasionId: STRING_SCHEMA,
+  title: STRING_SCHEMA,
+  date: STRING_SCHEMA,
+  kind: OCCASION_KIND_SCHEMA,
+  person: STRING_SCHEMA,
+  recurrence: RECURRENCE_SCHEMA,
+  leadDays: NULLABLE_NUMBER_SCHEMA,
+  self: SELF_SCHEMA,
+  confirmed: BOOLEAN_SCHEMA,
+  surface: STRING_SCHEMA,
+  said: STRING_SCHEMA,
+  authority: STRING_SCHEMA,
+}, ['occasionId', 'confirmed', 'surface', 'said', 'authority']);
+
+/** `planFrom` picks one plan when two share a name. */
+const PLAN_FROM_SCHEMA: Record<string, unknown> = { type: 'string', description: 'The start date (YYYY-MM-DD) of the plan meant, needed only when two plans share a name.' };
+
+const OCCASIONS_PLANS_UPDATE_INPUT_SCHEMA = objectSchema({
+  admission: { type: 'string', enum: ['autonomous'] },
+  planId: STRING_SCHEMA,
+  planFrom: PLAN_FROM_SCHEMA,
+  title: STRING_SCHEMA,
+  from: STRING_SCHEMA,
+  to: STRING_SCHEMA,
+  away: BOOLEAN_SCHEMA,
+  destination: STRING_SCHEMA,
+  details: PLAN_DETAILS_SCHEMA,
+  confirmed: BOOLEAN_SCHEMA,
+  surface: STRING_SCHEMA,
+  said: STRING_SCHEMA,
+  authority: STRING_SCHEMA,
+}, ['planId', 'confirmed', 'surface', 'said', 'authority']);
+
+const OCCASIONS_PLANS_REMOVE_INPUT_SCHEMA = objectSchema({
+  admission: { type: 'string', enum: ['autonomous'] },
+  planId: STRING_SCHEMA,
+  planFrom: PLAN_FROM_SCHEMA,
+  confirmed: BOOLEAN_SCHEMA,
+  authority: STRING_SCHEMA,
+}, ['planId', 'confirmed', 'authority']);
+
 export const OCCASIONS_GIFTS_INPUT_SCHEMA = objectSchema({ occasionId: STRING_SCHEMA }, ['occasionId']);
 export const OCCASIONS_GIFTS_OUTPUT_SCHEMA = objectSchema({
   occasionId: STRING_SCHEMA,
@@ -446,6 +507,17 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
     inputSchema: OCCASIONS_REMOVE_INPUT_SCHEMA,
     outputSchema: OCCASION_WRITE_OUTCOME_SCHEMA,
     dangerous: true,
+  }),
+  methodDescriptor({
+    id: 'occasions.update',
+    access: 'admin',
+    title: 'Change An Important Date',
+    description: 'Change one recorded occasion in place: any of date, kind, person, recurrence, leadDays (null returns to the default) and self; a field left out keeps its value. The occasion keeps its id, so its answers, gift history and calendar mirrors stay attached. A new title is accepted only when it names the same occasion (spelling or case); a different name is refused, add it as a new occasion and remove this one. With confirmed:false nothing is written and proposal carries the exact line and the sentence to put to the owner; with confirmed:true the new line is written and the old one removed, through the owner-profile write gate (authority, surface and said required). An occasion recorded with two dates is refused until occasions.conflict.resolve settles it.',
+    category: 'occasions',
+    scopes: ['write:occasions'],
+    http: { method: 'POST', path: '/api/occasions/update' },
+    inputSchema: OCCASIONS_UPDATE_INPUT_SCHEMA,
+    outputSchema: OCCASION_EDIT_OUTCOME_SCHEMA,
   }),
   methodDescriptor({
     id: 'occasions.answer',
@@ -573,6 +645,29 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
     http: { method: 'POST', path: '/api/occasions/plans/confirm' },
     inputSchema: OCCASIONS_PLANS_CONFIRM_INPUT_SCHEMA,
     outputSchema: OCCASION_WRITE_OUTCOME_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'occasions.plans.update',
+    access: 'admin',
+    title: 'Change A Plan',
+    description: 'Change one recorded plan in place, chosen by planId (its normalised title) and planFrom when two plans share a name: any of title, from, to, away, destination and details (details replaces the list); a field left out keeps its value. With confirmed:false nothing is written and proposal carries the exact line and the sentence to put to the owner; with confirmed:true the new line is written and the old one removed, through the owner-profile write gate (authority, surface and said required).',
+    category: 'occasions',
+    scopes: ['write:occasions'],
+    http: { method: 'POST', path: '/api/occasions/plans/update' },
+    inputSchema: OCCASIONS_PLANS_UPDATE_INPUT_SCHEMA,
+    outputSchema: OCCASION_EDIT_OUTCOME_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'occasions.plans.remove',
+    access: 'admin',
+    title: 'Remove A Plan',
+    description: 'Remove one plan from the owner profile, chosen by planId (its normalised title) and planFrom when two plans share a name. One confirmation: confirmed:false returns the sentence to put to the owner and removes nothing. Goes through the owner-profile write gate, so authority is required.',
+    category: 'occasions',
+    scopes: ['write:occasions'],
+    http: { method: 'POST', path: '/api/occasions/plans/remove' },
+    inputSchema: OCCASIONS_PLANS_REMOVE_INPUT_SCHEMA,
+    outputSchema: OCCASION_WRITE_OUTCOME_SCHEMA,
+    dangerous: true,
   }),
   methodDescriptor({
     id: 'occasions.state',

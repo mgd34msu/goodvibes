@@ -16,10 +16,17 @@ export function filesFromDrop(event: DragEvent): File[] {
   return Array.from(event.dataTransfer.files);
 }
 
-/** Extracts image File[] from a clipboard paste event. */
+/**
+ * Extracts image File[] from a clipboard paste event. A clipboard that also
+ * carries plain text (spreadsheet cells, a word-processor selection, both put a
+ * picture of the selection beside its text) is a text paste: nothing is
+ * attached and the default paste puts the text in the draft.
+ */
 export function imageFilesFromPaste(event: ClipboardEvent): File[] {
   if (!event.clipboardData) return [];
-  return Array.from(event.clipboardData.items)
+  const items = Array.from(event.clipboardData.items);
+  if (items.some((item) => item.kind === 'string' && item.type === 'text/plain')) return [];
+  return items
     .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
     .map((item) => item.getAsFile())
     .filter((file): file is File => file !== null);

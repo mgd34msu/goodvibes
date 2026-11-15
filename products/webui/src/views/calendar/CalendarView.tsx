@@ -51,15 +51,16 @@ import {
   Segmented,
   Sheet,
   Textarea,
+  useConfirm,
   useMediaQuery,
   PHONE_QUERY,
 } from '../../components/ui';
 import { DateField, parseIsoDate, toIsoDate, monthGrid } from '../../components/ui/DateField';
 import { PersonalNotice, PersonalPage } from '../personal/PersonalPage';
 import { openSettingsSection } from '../personal/openSettings';
-import { CalendarEventBody, useCalendarEventDetail } from './CalendarEventPeek';
+import { CalendarEventBody, useCalendarEventDetail, type CalendarEventDetailData } from './CalendarEventPeek';
 import { CalendarMonth } from './CalendarMonth';
-import { eventDayKey, eventTimeLabel, localDateOffset, localDayEndIso, localDayStartIso } from './calendar-time';
+import { allDayFlagOf, eventDayKey, eventTimeLabel, localDateOffset, localDayEndIso, localDayStartIso } from './calendar-time';
 import '../../styles/components/calendar.css';
 
 type CalendarLayout = 'agenda' | 'month';
@@ -88,6 +89,14 @@ interface CalendarNote {
 
 /** Classify a calendar-surface error into one of the three honest outcomes. Returns
  * null for a genuine error (the caller falls back to a plain retry state). */
+/** An ISO instant as the local `YYYY-MM-DDTHH:MM` a time DateField holds. */
+function localDateTimeValue(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${toIsoDate(date)}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function unconfiguredNote(error: unknown): CalendarNote | null {
   if (isCalendarUnconfiguredError(error)) {
     return {
@@ -165,10 +174,17 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
   const [from, setFrom] = useState(() => localDateOffset(0));
   const [to, setTo] = useState(() => localDateOffset(14));
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
+  // The typed calendar id is a draft; the calendar the view reads (one CalDAV
+  // REPORT per change) is committed on Enter or when the field loses focus.
+  const [calendarDraft, setCalendarDraft] = useState('');
   const [calendarId, setCalendarId] = useState('');
+  const commitCalendar = () => setCalendarId(calendarDraft.trim());
   const [selectedId, setSelectedId] = useState('');
 
   const [newOpen, setNewOpen] = useState(false);
+  // The event the form changes; '' while it creates a new one.
+  const [editingId, setEditingId] = useState('');
+  const confirm = useConfirm();
   const [title, setTitle] = useState('');
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
@@ -202,8 +218,44 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
 
   const detail = useCalendarEventDetail(selectedId, calendarFilter || undefined);
 
+  // The calendars the account can reach, offered as choices for the calendar
+  // field: one request per page open, in place of guessing an id.
+  const calendars = useQuery({
+    queryKey: ['calendar', 'calendars'],
+    retry: false,
+    staleTime: 5 * 60_000,
+    queryFn: () => platformClient.operator.invoke('calendar.calendars.list', {}),
+  });
+  const calendarChoices = useMemo(() => {
+    const list = (calendars.data as { calendars?: unknown } | undefined)?.calendars;
+    if (!Array.isArray(list)) return [];
+    return list.flatMap((entry: unknown) => {
+      const record = (typeof entry === 'object' && entry !== null ? entry : {}) as { calendarId?: unknown; displayName?: unknown };
+      return typeof record.calendarId === 'string' && record.calendarId
+        ? [{ calendarId: record.calendarId, displayName: typeof record.displayName === 'string' ? record.displayName : record.calendarId }]
+        : [];
+    });
+  }, [calendars.data]);
+  const calendarListId = 'calendar-choices';
+
   const create = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      if (editingId) {
+        // Attendees come back as display names, so the guest list is only sent
+        // when addresses were typed; otherwise the invited guests stay.
+        await platformClient.operator.invoke('calendar.events.update', {
+          eventId: editingId,
+          title: title.trim(),
+          start: new Date(start).toISOString(),
+          end: new Date(end).toISOString(),
+          location: location.trim(),
+          description: description.trim(),
+          ...(splitAttendees(attendees) ? { attendees: splitAttendees(attendees) } : {}),
+          ...(calendarFilter ? { calendarId: calendarFilter } : {}),
+          confirm: true,
+        });
+        return 'Event updated.';
+      }
       const input: CalendarEventCreateInput = {
         title: title.trim(),
         start: new Date(start).toISOString(),
@@ -214,20 +266,86 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
         ...(splitAttendees(attendees) ? { attendees: splitAttendees(attendees) } : {}),
         ...(calendarFilter ? { calendarId: calendarFilter } : {}),
       };
-      return platformClient.operator.calendar.events.create(input);
+      const result = await platformClient.operator.calendar.events.create(input);
+      return `Event created (id ${result.eventId}).`;
     },
-    onSuccess: async (result) => {
-      setTitle('');
-      setStart('');
-      setEnd('');
-      setLocation('');
-      setDescription('');
-      setAttendees('');
-      setNewOpen(false);
-      setNotice({ body: `Event created (id ${result.eventId}).` });
+    onSuccess: async (message) => {
+      closeEventForm();
+      setNotice({ body: message });
       await queryClient.invalidateQueries({ queryKey: ['calendar', 'events'] });
+      await queryClient.invalidateQueries({ queryKey: ['calendar', 'event'] });
     },
   });
+
+  const removeEvent = useMutation({
+    mutationFn: (eventId: string) => platformClient.operator.invoke('calendar.events.delete', {
+      eventId,
+      ...(calendarFilter ? { calendarId: calendarFilter } : {}),
+      confirm: true,
+    }),
+    onSuccess: async (result) => {
+      setSelectedId('');
+      const deleted = typeof result === 'object' && result !== null && (result as { deleted?: unknown }).deleted === true;
+      setNotice({ body: deleted ? 'Event deleted.' : 'The calendar no longer held that event.' });
+      await queryClient.invalidateQueries({ queryKey: ['calendar', 'events'] });
+    },
+    onError: (error) => setNotice({ tone: 'bad', body: `Delete failed: ${formatError(error)}` }),
+  });
+
+  function closeEventForm(): void {
+    setTitle('');
+    setStart('');
+    setEnd('');
+    setLocation('');
+    setDescription('');
+    setAttendees('');
+    setEditingId('');
+    setNewOpen(false);
+  }
+
+  function openNewEvent(): void {
+    closeEventForm();
+    create.reset();
+    setNewOpen(true);
+  }
+
+  function openEditEvent(event: CalendarEventDetailData): void {
+    create.reset();
+    setEditingId(event.id);
+    setTitle(event.title);
+    setStart(localDateTimeValue(event.start));
+    setEnd(localDateTimeValue(event.end));
+    setLocation(event.location ?? '');
+    setDescription(event.description ?? '');
+    setAttendees('');
+    setNewOpen(true);
+  }
+
+  // Removing an event from the owner's own calendar cannot be undone here, so it asks once.
+  async function askRemoveEvent(event: CalendarEventDetailData): Promise<void> {
+    const ok = await confirm.ask({
+      title: 'Delete this event?',
+      target: event.title,
+      description: 'It is removed from your calendar, and guests are told by the calendar.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (ok) removeEvent.mutate(event.id);
+  }
+
+  const eventActions = detail.data ? (
+    <div className="calendar-detail__actions">
+      <Button variant="outline" size="sm" onClick={() => detail.data && openEditEvent(detail.data)}>Edit</Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={removeEvent.isPending}
+        onClick={() => { if (detail.data) void askRemoveEvent(detail.data); }}
+      >
+        {removeEvent.isPending ? 'Deleting…' : 'Delete'}
+      </Button>
+    </div>
+  ) : null;
 
   const exportIcs = useMutation({
     mutationFn: () => platformClient.operator.calendar.ics.export({
@@ -278,7 +396,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
   const groups = useMemo(() => {
     const map = new Map<string, typeof sortedItems>();
     for (const item of sortedItems) {
-      const key = eventDayKey(item.start, item.end);
+      const key = eventDayKey(item.start, item.end, allDayFlagOf(item));
       const list = map.get(key);
       if (list) list.push(item);
       else map.set(key, [item]);
@@ -389,11 +507,21 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
       ) : monthNav}
       <Input
         className="calendar-filter-calendar"
-        value={calendarId}
-        onChange={(event) => setCalendarId(event.target.value)}
+        value={calendarDraft}
+        onChange={(event) => setCalendarDraft(event.target.value)}
+        onBlur={commitCalendar}
+        onKeyDown={(event) => { if (event.key === 'Enter') commitCalendar(); }}
         placeholder="Default calendar"
         aria-label="Logical calendar id"
+        list={calendarChoices.length ? calendarListId : undefined}
       />
+      {calendarChoices.length > 0 && (
+        <datalist id={calendarListId}>
+          {calendarChoices.map((choice) => (
+            <option key={choice.calendarId} value={choice.calendarId}>{choice.displayName}</option>
+          ))}
+        </datalist>
+      )}
       <div className="dv-filters__end">
         <IconButton label="Refresh events" icon={<RefreshCw />} onClick={() => void events.refetch()} />
         {moreMenu}
@@ -403,7 +531,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
 
   const action = honestNote
     ? undefined
-    : <Button variant="primary" icon={<Plus />} onClick={() => setNewOpen(true)}>New event</Button>;
+    : <Button variant="primary" icon={<Plus />} onClick={openNewEvent}>New event</Button>;
 
   const truncated = (events.data?.events.length ?? 0) >= eventLimit;
   const noticeNode = (
@@ -460,7 +588,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
         <EmptyState
           icon={<CalendarDays />}
           title="No events in this range"
-          action={<Button variant="outline" onClick={() => setNewOpen(true)}>New event</Button>}
+          action={<Button variant="outline" onClick={openNewEvent}>New event</Button>}
         >
           Try a wider date range, or add the first event.
         </EmptyState>
@@ -481,7 +609,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
                   meta={item.location}
                   selected={item.id === selectedId}
                   onSelect={() => setSelectedId(item.id)}
-                  trailing={<span className="dv-value">{eventTimeLabel(item.start, item.end)}</span>}
+                  trailing={<span className="dv-value">{eventTimeLabel(item.start, item.end, allDayFlagOf(item))}</span>}
                 />
               ))}
             </RowGroup>
@@ -501,6 +629,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
         detail={(
           <DetailPane title={detail.data?.title ?? 'Event'} onClose={() => setSelectedId('')} closeLabel="Close event">
             <CalendarEventBody detail={detail} />
+            {eventActions}
           </DetailPane>
         )}
       />
@@ -527,6 +656,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
       >
         <div className="calendar-drawer-body">
           <CalendarEventBody detail={detail} />
+          {eventActions}
         </div>
       </Drawer>
 
@@ -543,23 +673,27 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
           </div>
           <Field label="Calendar" help="Leave empty for the default calendar.">
             <Input
-              value={calendarId}
-              onChange={(event) => setCalendarId(event.target.value)}
+              value={calendarDraft}
+              onChange={(event) => setCalendarDraft(event.target.value)}
+              onBlur={commitCalendar}
+              onKeyDown={(event) => { if (event.key === 'Enter') commitCalendar(); }}
               placeholder="Default calendar"
               aria-label="Logical calendar id"
+              list={calendarChoices.length ? calendarListId : undefined}
             />
           </Field>
-          <Button variant="primary" className="calendar-range-sheet__done" onClick={() => setRangeOpen(false)}>Done</Button>
+          <Button variant="primary" className="calendar-range-sheet__done" onClick={() => { commitCalendar(); setRangeOpen(false); }}>Done</Button>
         </div>
       </Sheet>
 
+      {confirm.element}
       <Dialog
         open={newOpen}
-        onClose={() => setNewOpen(false)}
-        title="New event"
+        onClose={closeEventForm}
+        title={editingId ? 'Edit event' : 'New event'}
         footer={(
           <>
-            <Button variant="secondary" onClick={() => setNewOpen(false)}>Cancel</Button>
+            <Button variant="secondary" onClick={closeEventForm}>Cancel</Button>
             <Button
               variant="primary"
               type="submit"
@@ -567,7 +701,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
               disabled={create.isPending || !title.trim() || !start || !end}
               aria-busy={create.isPending}
             >
-              {create.isPending ? 'Creating…' : 'Create event'}
+              {create.isPending ? (editingId ? 'Saving…' : 'Creating…') : (editingId ? 'Save changes' : 'Create event')}
             </Button>
           </>
         )}
@@ -590,13 +724,18 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
           <Field label="Description">
             <Textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
           </Field>
-          <Field label="Attendees" help="Separate addresses with commas.">
+          <Field
+            label="Attendees"
+            help={editingId
+              ? 'Leave empty to keep the guests already invited; addresses typed here replace them.'
+              : 'Separate addresses with commas.'}
+          >
             <Input value={attendees} onChange={(event) => setAttendees(event.target.value)} />
           </Field>
           {createNote ? (
             <div className="dv-notice" role="status"><span>{createNote.title}. {createNote.description}</span></div>
           ) : create.error ? (
-            <div className="dv-notice dv-notice--bad" role="alert"><AlertCircle aria-hidden="true" /><span>Create failed: {formatError(create.error)}</span></div>
+            <div className="dv-notice dv-notice--bad" role="alert"><AlertCircle aria-hidden="true" /><span>{editingId ? 'Save failed' : 'Create failed'}: {formatError(create.error)}</span></div>
           ) : null}
         </form>
       </Dialog>
